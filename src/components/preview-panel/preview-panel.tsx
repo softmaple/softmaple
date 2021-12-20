@@ -1,7 +1,9 @@
+import "highlight.js/styles/github.css";
 import styled from "@emotion/styled";
 import { ContentState } from "draft-js";
-import { FC, useState } from "react";
+import { FC, useEffect, useState } from "react";
 import Button from "@mui/material/Button";
+import hljs from "highlight.js";
 import { scan } from "./utils";
 
 const StyledMenu = styled.div`
@@ -14,7 +16,7 @@ const StyledMenu = styled.div`
  * container vs wrapper
  * @see https://stackoverflow.com/a/33404137/8537000
  */
-const PrismContainer = styled.div`
+const SourceCodeContainer = styled.div`
   padding: 9px;
   box-shadow: -1px -1px 13px 3px black;
   // overflow-x: hidden;
@@ -33,6 +35,13 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
     setSourceCode(generated);
   };
 
+  useEffect(() => {
+    // IMPORTANT: when souce code is generated, highlight it
+    if (sourceCode) {
+      hljs.highlightAll();
+    }
+  }, [sourceCode]);
+
   return (
     <>
       <StyledMenu>
@@ -44,11 +53,11 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
           Preview
         </Button>
       </StyledMenu>
-      <PrismContainer>
+      <SourceCodeContainer>
         <pre>
           <code className="language-latex">{sourceCode || ""}</code>
         </pre>
-      </PrismContainer>
+      </SourceCodeContainer>
     </>
   );
 };

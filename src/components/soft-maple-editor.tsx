@@ -29,8 +29,28 @@ const Layout = styled.div`
   color: #444;
 `;
 
+/**
+ * trick for Next.js
+ * @see https://github.com/facebook/draft-js/issues/2332#issuecomment-761573306
+ */
+const emptyContentState = convertFromRaw({
+  entityMap: {},
+  blocks: [
+    {
+      text: "",
+      key: "foo",
+      type: "unstyled",
+      entityRanges: [],
+      inlineStyleRanges: [],
+      depth: 0,
+    },
+  ],
+});
+
 export const SoftMapleEditor = () => {
-  const [editorState, setEditorState] = useState(EditorState.createEmpty());
+  const [editorState, setEditorState] = useState(
+    EditorState.createWithContent(emptyContentState)
+  );
 
   useEffect(() => {
     const history = localStorage.getItem("rawContent");

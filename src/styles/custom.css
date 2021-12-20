@@ -1,0 +1,147 @@
+/* src/components/editor/rich-text-editor.tsx */
+.RichEditor-editor {
+  grid-area: 2 / 1 / 3 / 2;
+  box-shadow: -1px -1px 13px 3px black;
+  cursor: text;
+  font-size: 16px;
+  padding: 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.RichEditor-editor .public-DraftEditorPlaceholder-root,
+.RichEditor-editor .public-DraftEditor-content {
+  margin: 0 -15px -15px;
+  padding: 15px;
+}
+
+.RichEditor-editor .public-DraftEditor-content {
+  min-height: 100px;
+}
+
+.RichEditor-hidePlaceholder .public-DraftEditorPlaceholder-root {
+  display: none;
+}
+
+.RichEditor-editor .RichEditor-blockquote {
+  border-left: 5px solid #eee;
+  color: #666;
+  font-family: 'Hoefler Text', 'Georgia', serif;
+  font-style: italic;
+  margin: 16px 0;
+  padding: 10px 20px;
+}
+
+.RichEditor-editor .public-DraftStyleDefault-pre {
+  background-color: rgba(0, 0, 0, 0.05);
+  font-family: 'Inconsolata', 'Menlo', 'Consolas', monospace;
+  font-size: 16px;
+  padding: 20px;
+}
+
+.RichEditor-styleButton {
+  color: #5a6268;
+  cursor: pointer;
+  margin-right: 16px;
+  display: inline-block;
+}
+
+.RichEditor-activeButton {
+  color: #5890ff;
+}
+
+/* src/components/editor/blocks/math */
+.TeXEditor-root {
+  font-family: 'Century Schoolbook', serif;
+  -webkit-font-smoothing: antialiased;
+  margin: 40px auto;
+  width: 900px;
+}
+
+.TeXEditor-editor {
+  cursor: text;
+  font-size: 18px;
+  min-height: 40px;
+  padding: 30px;
+}
+
+.TeXEditor-button {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.TeXEditor-handle {
+  color: rgba(98, 177, 254, 1.0);
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+.TeXEditor-hashtag {
+  color: rgba(95, 184, 138, 1.0);
+}
+
+.TeXEditor-tex {
+  background-color: #fff;
+  cursor: pointer;
+  /*margin: 20px auto;*/
+  /*padding: 20px;*/
+  /*-webkit-transition: background-color 0.2s fade-in-out;*/
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.TeXEditor-activeTeX {
+  color: #888;
+}
+
+.TeXEditor-panel {
+  font-family: 'Helvetica', sans-serif;
+  font-weight: 200;
+  width: 100%;
+}
+
+.TeXEditor-panel .TeXEditor-texValue {
+  border: 1px solid #e1e1e1;
+  display: block;
+  font-family: 'Inconsolata', 'Menlo', monospace;
+  font-size: 14px;
+  height: 110px;
+  margin: 10px auto 10px;
+  outline: none;
+  padding: 14px;
+  resize: none;
+  -webkit-box-sizing: border-box;
+  width: 100%;
+}
+
+.TeXEditor-buttons {
+  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.TeXEditor-saveButton,
+.TeXEditor-removeButton {
+  background-color: #fff;
+  border: 1px solid #0a0;
+  cursor: pointer;
+  font-family: 'Helvetica', 'Arial', sans-serif;
+  font-size: 16px;
+  font-weight: 200;
+  margin: 10px auto;
+  padding: 6px;
+  -webkit-border-radius: 3px;
+  width: 99px;
+}
+
+.TeXEditor-removeButton {
+  border-color: #aaa;
+  color: #999;
+}
+
+.TeXEditor-invalidButton {
+  background-color: #eee;
+  border-color: #a00;
+  color: #666;
+}
+

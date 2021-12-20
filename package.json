@@ -1,4 +1,12 @@
 {
+  "name": "softmaple-editor",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Yadong Zhang",
+    "email": "zhyd007@gmail.com",
+    "url": "https://github.com/007tom"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

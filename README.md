@@ -26,7 +26,9 @@ Do not support [overlapping styles](https://draftjs.org/docs/advanced-topics-inl
 
 # Development
 
+We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation. 
+
 ```bash
-yarn install
-yarn start
+pnpm install
+pnpm dev
 ```

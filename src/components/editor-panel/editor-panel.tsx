@@ -20,6 +20,7 @@ import {
 } from "draft-js";
 import { Map } from "immutable";
 import classNames from "classnames";
+import Skeleton from "@mui/material/Skeleton";
 import { StyleControls } from "./style-controls";
 import { insertCustomBlock, removeCustomBlock } from "./blocks/modifiers";
 import { CustomBlock } from "./blocks/custom-block";
@@ -34,6 +35,11 @@ export const EditorPanel: FC<EditorPanelProps> = ({
   setEditorState,
 }) => {
   const [liveCustomBlockEdits, setLiveCustomBlockEdits] = useState(Map());
+  const [showEditor, setShowEditor] = useState(false);
+
+  useEffect(() => {
+    setShowEditor(true);
+  }, []);
 
   const editorRef = useRef<Editor | null>(null);
 
@@ -153,18 +159,23 @@ export const EditorPanel: FC<EditorPanelProps> = ({
         })}
         onClick={focusEditor}
       >
-        <Editor
-          ref={editorRef}
-          editorState={editorState}
-          onChange={onChange}
-          placeholder="Write something..."
-          blockRendererFn={blockRenderer}
-          keyBindingFn={mapKeyToEditorCommand}
-          // @ts-ignore incompatible types (boolean vs number)
-          readOnly={liveCustomBlockEdits.count()}
-          spellCheck
-          handleKeyCommand={handleKeyCommand}
-        />
+        {showEditor ? (
+          <Editor
+            ref={editorRef}
+            editorState={editorState}
+            onChange={onChange}
+            placeholder="Write something..."
+            blockRendererFn={blockRenderer}
+            keyBindingFn={mapKeyToEditorCommand}
+            // @ts-ignore incompatible types (boolean vs number)
+            readOnly={liveCustomBlockEdits.count()}
+            spellCheck
+            handleKeyCommand={handleKeyCommand}
+          />
+        ) : (
+          // TODO: Loading Button is better.
+          <Skeleton variant="rectangular" width="100%" height="100%" />
+        )}
       </div>
     </>
   );

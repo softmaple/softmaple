@@ -22,7 +22,7 @@
 
 # Limitations
 
-Do not support [overlapping styles](https://draftjs.org/docs/advanced-topics-inline-styles/#overlapping-styles).
+Not support [overlapping styles](https://draftjs.org/docs/advanced-topics-inline-styles/#overlapping-styles).
 
 # Development
 

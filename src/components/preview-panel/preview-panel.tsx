@@ -4,7 +4,7 @@ import { ContentState } from "draft-js";
 import { FC, useEffect, useState } from "react";
 import Button from "@mui/material/Button";
 import hljs from "highlight.js";
-import { scan } from "./utils";
+import { scan } from "@zhyd1997/draftjs-to-latex";
 
 const StyledMenu = styled.div`
   display: flex;

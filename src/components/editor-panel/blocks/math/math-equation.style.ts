@@ -1,15 +1,17 @@
 import styled from "@emotion/styled";
 
-type Props = {
+type TeXEditorContainerProps = {
   isEditMode: boolean;
 };
 
-export const TeXEditorContainer = styled.div(({ isEditMode }: Props) => ({
-  color: isEditMode && "#888888",
-  backgroundColor: "#ffffff",
-  cursor: "pointer",
-  userSelect: "none",
-}));
+export const TeXEditorContainer = styled.div(
+  ({ isEditMode }: TeXEditorContainerProps) => ({
+    color: isEditMode && "#888888",
+    backgroundColor: "#ffffff",
+    cursor: "pointer",
+    userSelect: "none",
+  })
+);
 
 export const TeXEditorPanel = styled.div`
   font-family: "Helvetica", sans-serif;
@@ -50,8 +52,10 @@ const TeXEditorButtonBase = styled.button`
   width: 99px;
 `;
 
+type SaveButtonProps = { isInvalidTeX: boolean };
+
 export const SaveButton = styled(TeXEditorButtonBase)(
-  ({ isInvalidTeX }: { isInvalidTeX: boolean }) => ({
+  ({ isInvalidTeX }: SaveButtonProps) => ({
     backgroundColor: isInvalidTeX && "#eee",
     borderColor: isInvalidTeX && "#a00",
     color: isInvalidTeX && "#666",

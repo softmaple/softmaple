@@ -1,4 +1,3 @@
-import "katex/dist/katex.min.css";
 import { ContentState } from "draft-js";
 import katex from "katex";
 import { FC, useRef, useState } from "react";

@@ -1,7 +1,9 @@
 import styled from "@emotion/styled";
 
+type HidePlaceHolderProps = { shouldHidePlaceholder: boolean };
+
 const HidePlaceHolder = styled.div(
-  ({ shouldHidePlaceholder }: { shouldHidePlaceholder: boolean }) => ({
+  ({ shouldHidePlaceholder }: HidePlaceHolderProps) => ({
     "& .public-DraftEditorPlaceholder-root": {
       display: shouldHidePlaceholder && "none",
     },

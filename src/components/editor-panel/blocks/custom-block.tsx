@@ -1,6 +1,6 @@
 import { FC } from "react";
 import { MathEquation } from "./math/math-equation";
-import type { CustomBlockType } from "./type";
+import type { CustomBlockType } from "./types";
 
 export const CustomBlock: FC<CustomBlockType> = ({
   block,

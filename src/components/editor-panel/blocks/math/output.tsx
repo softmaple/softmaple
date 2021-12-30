@@ -1,3 +1,4 @@
+import "katex/dist/katex.min.css";
 import { FC, useRef, useEffect } from "react";
 import katex from "katex";
 

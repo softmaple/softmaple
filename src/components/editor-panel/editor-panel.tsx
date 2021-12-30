@@ -19,11 +19,11 @@ import {
   RichUtils,
 } from "draft-js";
 import { Map } from "immutable";
-import classNames from "classnames";
 import Skeleton from "@mui/material/Skeleton";
 import { StyleControls } from "./style-controls";
 import { insertCustomBlock, removeCustomBlock } from "./blocks/modifiers";
 import { CustomBlock } from "./blocks/custom-block";
+import { EditorContainer } from "./editor-panel.style";
 
 type EditorPanelProps = {
   editorState: EditorState;
@@ -153,10 +153,8 @@ export const EditorPanel: FC<EditorPanelProps> = ({
         toggleBlockType={toggleBlockType}
       />
 
-      <div
-        className={classNames("RichEditor-editor", {
-          "RichEditor-hidePlaceholder": shouldHidePlaceholder,
-        })}
+      <EditorContainer
+        shouldHidePlaceholder={shouldHidePlaceholder}
         onClick={focusEditor}
       >
         {showEditor ? (
@@ -176,7 +174,7 @@ export const EditorPanel: FC<EditorPanelProps> = ({
           // TODO: Loading Button is better.
           <Skeleton variant="rectangular" width="100%" height="100%" />
         )}
-      </div>
+      </EditorContainer>
     </>
   );
 };

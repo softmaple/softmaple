@@ -2,9 +2,15 @@ import "katex/dist/katex.min.css";
 import { ContentState } from "draft-js";
 import katex from "katex";
 import { FC, useRef, useState } from "react";
-import classNames from "classnames";
-import type { CustomBlockType } from "@/components/editor-panel/blocks/type";
+import type { CustomBlockType } from "@/components/editor-panel/blocks/types";
 import { Output } from "./output";
+import {
+  RemoveButton,
+  SaveButton,
+  TeXEditorButtonGroup,
+  TeXEditorContainer,
+  TeXEditorPanel,
+} from "./math-equation.style";
 
 export const MathEquation: FC<CustomBlockType> = ({
   block,
@@ -43,7 +49,6 @@ export const MathEquation: FC<CustomBlockType> = ({
   };
 
   const finishEdit = (newContentState: ContentState) => {
-    console.log("removing block");
     blockProps?.onFinish(block.getKey(), newContentState);
   };
 
@@ -79,41 +84,26 @@ export const MathEquation: FC<CustomBlockType> = ({
   }
 
   return (
-    <div
-      className={classNames("TeXEditor-tex", {
-        "TeXEditor-activeTeX": isEditMode,
-      })}
-    >
+    <TeXEditorContainer isEditMode={isEditMode}>
       <Output content={content} onClick={onClick} />
       {isEditMode && ( // display edit panel
-        <div className="TeXEditor-panel">
-          <textarea
-            className="TeXEditor-texValue"
-            onChange={onChange}
-            ref={textareaRef}
-            value={value}
-          />
-          <div className="TeXEditor-buttons">
-            <button
-              className={classNames("TeXEditor-saveButton", {
-                "TeXEditor-invalidButton": isInvalidTeX,
-              })}
+        <TeXEditorPanel>
+          <textarea onChange={onChange} ref={textareaRef} value={value} />
+          <TeXEditorButtonGroup>
+            <SaveButton
+              isInvalidTeX={isInvalidTeX}
               disabled={isInvalidTeX}
               onClick={save}
               type="button"
             >
               {isInvalidTeX ? "Invalid TeX" : "Done"}
-            </button>
-            <button
-              className="TeXEditor-removeButton"
-              onClick={remove}
-              type="button"
-            >
+            </SaveButton>
+            <RemoveButton onClick={remove} type="button">
               Remove
-            </button>
-          </div>
-        </div>
+            </RemoveButton>
+          </TeXEditorButtonGroup>
+        </TeXEditorPanel>
       )}
-    </div>
+    </TeXEditorContainer>
   );
 };

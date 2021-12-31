@@ -20,7 +20,7 @@ import {
 } from "draft-js";
 import { Map } from "immutable";
 import Skeleton from "@mui/material/Skeleton";
-import { StyleControls } from "./style-controls";
+import { Toolbar } from "./toolbar";
 import { insertCustomBlock, removeCustomBlock } from "./blocks/modifiers";
 import { CustomBlock } from "./blocks/custom-block";
 import { EditorContainer } from "./editor-panel.style";
@@ -147,7 +147,7 @@ export const EditorPanel: FC<EditorPanelProps> = ({
 
   return (
     <>
-      <StyleControls
+      <Toolbar
         editorState={editorState}
         toggleInlineStyle={toggleInlineStyle}
         toggleBlockType={toggleBlockType}

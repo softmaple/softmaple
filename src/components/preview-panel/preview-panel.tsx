@@ -27,13 +27,20 @@ const SourceCodeContainer = styled.div`
 `;
 
 const StyledCopyButton = styled(ContentCopyIcon)`
+  color: rgba(0.68, 0.68, 0.68, 0.5);
   position: absolute;
   right: 1rem;
 
   &:hover {
     cursor: pointer;
-    background-color: #c9c8c8;
+    transform: scale(1.25);
   }
+`;
+
+const SourceCodeWrapper = styled.pre`
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 `;
 
 type PreviewPanelProps = {
@@ -79,9 +86,9 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
         <Tooltip title={clipboardTitle} placement="top">
           <StyledCopyButton onClick={copyToClipboard} />
         </Tooltip>
-        <pre>
+        <SourceCodeWrapper>
           <code className="language-latex">{sourceCode || ""}</code>
-        </pre>
+        </SourceCodeWrapper>
       </SourceCodeContainer>
     </>
   );

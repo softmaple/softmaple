@@ -27,7 +27,7 @@ const INLINE_STYLES: {
     inlineStyle: "UNDERLINE",
     icon: <FormatUnderlinedIcon />,
   },
-  { label: "InlineCode", inlineStyle: "CODE", icon: <CodeIcon /> },
+  { label: "mono", inlineStyle: "CODE", icon: <CodeIcon /> },
 ];
 
 const BLOCK_TYPES: {
@@ -60,7 +60,7 @@ const BLOCK_TYPES: {
 
 const CONTROLS = [...INLINE_STYLES, ...BLOCK_TYPES];
 
-export type StyleControlsProps = {
+export type ToobarProps = {
   editorState: EditorState;
   /** inline style controls */
   toggleInlineStyle?: (inlineStyle: string) => void;
@@ -68,7 +68,7 @@ export type StyleControlsProps = {
   toggleBlockType?: (blockType: string) => void;
 };
 
-export const StyleControls: FC<StyleControlsProps> = ({
+export const Toolbar: FC<ToobarProps> = ({
   editorState,
   toggleInlineStyle,
   toggleBlockType,

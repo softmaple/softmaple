@@ -3,6 +3,8 @@ import styled from "@emotion/styled";
 import { ContentState } from "draft-js";
 import { FC, useEffect, useState } from "react";
 import Button from "@mui/material/Button";
+import Tooltip from "@mui/material/Tooltip";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import hljs from "highlight.js";
 import { scan } from "@zhyd1997/draftjs-to-latex";
 
@@ -17,10 +19,21 @@ const StyledMenu = styled.div`
  * @see https://stackoverflow.com/a/33404137/8537000
  */
 const SourceCodeContainer = styled.div`
+  position: relative;
   padding: 9px;
   box-shadow: -1px -1px 13px 3px black;
   // overflow-x: hidden;
   overflow-y: auto;
+`;
+
+const StyledCopyButton = styled(ContentCopyIcon)`
+  position: absolute;
+  right: 1rem;
+
+  &:hover {
+    cursor: pointer;
+    background-color: #c9c8c8;
+  }
 `;
 
 type PreviewPanelProps = {
@@ -28,12 +41,8 @@ type PreviewPanelProps = {
 };
 
 export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
+  const [clipboardTitle, setClipboardTitle] = useState("Copy to clipboard");
   const [sourceCode, setSourceCode] = useState("");
-
-  const onClick = () => {
-    const generated = scan(contentState);
-    setSourceCode(generated);
-  };
 
   useEffect(() => {
     // IMPORTANT: when souce code is generated, highlight it
@@ -41,6 +50,19 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
       hljs.highlightAll();
     }
   }, [sourceCode]);
+
+  const onClick = () => {
+    const generated = scan(contentState);
+    setSourceCode(generated);
+  };
+
+  const copyToClipboard = async () => {
+    await navigator.clipboard.writeText(sourceCode);
+    setClipboardTitle("Copied!");
+    setTimeout(() => {
+      setClipboardTitle("Copy to clipboard");
+    }, 1000);
+  };
 
   return (
     <>
@@ -54,6 +76,9 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
         </Button>
       </StyledMenu>
       <SourceCodeContainer>
+        <Tooltip title={clipboardTitle} placement="top">
+          <StyledCopyButton onClick={copyToClipboard} />
+        </Tooltip>
         <pre>
           <code className="language-latex">{sourceCode || ""}</code>
         </pre>

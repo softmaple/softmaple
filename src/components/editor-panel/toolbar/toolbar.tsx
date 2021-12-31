@@ -6,6 +6,7 @@ import type {
 import { FC } from "react";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import ToggleButton from "@mui/material/ToggleButton";
+import Tooltip from "@mui/material/Tooltip";
 import FormatBoldIcon from "@mui/icons-material/FormatBold";
 import FormatItalicIcon from "@mui/icons-material/FormatItalic";
 import FormatUnderlinedIcon from "@mui/icons-material/FormatUnderlined";
@@ -100,15 +101,17 @@ export const Toolbar: FC<ToobarProps> = ({
             .getType() === control;
 
         return (
-          <ToggleButton
-            key={label}
-            value={label}
-            arial-label={label}
-            selected={selected}
-            onMouseDown={(e) => onMouseDown(e, isInlineStyle, control)}
-          >
-            {icon}
-          </ToggleButton>
+          <Tooltip title={label} key={label} placement="top">
+            <ToggleButton
+              key={label}
+              value={label}
+              arial-label={label}
+              selected={selected}
+              onMouseDown={(e) => onMouseDown(e, isInlineStyle, control)}
+            >
+              {icon}
+            </ToggleButton>
+          </Tooltip>
         );
       })}
     </ToggleButtonGroup>

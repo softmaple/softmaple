@@ -1,4 +1,8 @@
-import { EditorState } from "draft-js";
+import type {
+  DraftInlineStyleType,
+  DraftBlockType,
+  EditorState,
+} from "draft-js";
 import { FC } from "react";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import ToggleButton from "@mui/material/ToggleButton";
@@ -14,12 +18,14 @@ const H1: FC<any> = () => <b>H1</b>;
 const H2: FC<any> = () => <b>H2</b>;
 const H3: FC<any> = () => <b>H3</b>;
 
-const INLINE_STYLES: {
+type StylesType = {
   label: string;
-  inlineStyle?: string;
-  blockType?: string;
+  inlineStyle?: DraftInlineStyleType;
+  blockType?: DraftBlockType;
   icon: JSX.Element;
-}[] = [
+};
+
+const INLINE_STYLES: StylesType[] = [
   { label: "bold", inlineStyle: "BOLD", icon: <FormatBoldIcon /> },
   { label: "italic", inlineStyle: "ITALIC", icon: <FormatItalicIcon /> },
   {
@@ -30,12 +36,7 @@ const INLINE_STYLES: {
   { label: "mono", inlineStyle: "CODE", icon: <CodeIcon /> },
 ];
 
-const BLOCK_TYPES: {
-  label: string;
-  inlineStyle?: string;
-  blockType?: string;
-  icon: JSX.Element;
-}[] = [
+const BLOCK_TYPES: StylesType[] = [
   { label: "H1", blockType: "header-one", icon: <H1 /> },
   { label: "H2", blockType: "header-two", icon: <H2 /> },
   { label: "H3", blockType: "header-three", icon: <H3 /> },

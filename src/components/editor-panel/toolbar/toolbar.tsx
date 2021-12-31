@@ -26,14 +26,14 @@ type StylesType = {
 };
 
 const INLINE_STYLES: StylesType[] = [
-  { label: "bold", inlineStyle: "BOLD", icon: <FormatBoldIcon /> },
-  { label: "italic", inlineStyle: "ITALIC", icon: <FormatItalicIcon /> },
+  { label: "Bold", inlineStyle: "BOLD", icon: <FormatBoldIcon /> },
+  { label: "Italic", inlineStyle: "ITALIC", icon: <FormatItalicIcon /> },
   {
-    label: "underline",
+    label: "Underline",
     inlineStyle: "UNDERLINE",
     icon: <FormatUnderlinedIcon />,
   },
-  { label: "mono", inlineStyle: "CODE", icon: <CodeIcon /> },
+  { label: "Monospace", inlineStyle: "CODE", icon: <CodeIcon /> },
 ];
 
 const BLOCK_TYPES: StylesType[] = [

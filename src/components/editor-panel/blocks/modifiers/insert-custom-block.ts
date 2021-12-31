@@ -1,8 +1,8 @@
-import { AtomicBlockUtils, EditorState } from "draft-js";
+import { AtomicBlockUtils, EditorState, DraftEntityType } from "draft-js";
 
 export function insertCustomBlock(
   editorState: EditorState,
-  type: string,
+  type: DraftEntityType,
   data?: Record<string, unknown>
 ): EditorState {
   const contentState = editorState.getCurrentContent();

@@ -2,7 +2,11 @@ import { MobileView } from "@/components/mobile-view";
 import { SoftMapleEditor } from "@/components/soft-maple-editor";
 import type { GetServerSideProps } from "next";
 
-export default function Editor({ isMobile }) {
+type EditorPageProps = {
+  isMobile: boolean;
+};
+
+export default function Editor({ isMobile }: EditorPageProps) {
   return isMobile ? <MobileView /> : <SoftMapleEditor />;
 }
 

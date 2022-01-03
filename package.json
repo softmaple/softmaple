@@ -20,7 +20,7 @@
     "@emotion/styled": "^11.6.0",
     "@mui/icons-material": "^5.2.4",
     "@mui/material": "^5.2.4",
-    "@zhyd1997/draftjs-to-latex": "^0.2.0",
+    "@zhyd1997/draftjs-to-latex": "^0.3.2",
     "draft-js": "^0.11.7",
     "highlight.js": "^11.3.1",
     "immutable": "^4.0.0",

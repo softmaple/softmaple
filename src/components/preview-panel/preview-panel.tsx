@@ -1,5 +1,5 @@
 import "highlight.js/styles/github.css";
-import { ContentState } from "draft-js";
+import { ContentState, convertToRaw } from "draft-js";
 import { FC, useEffect, useState } from "react";
 import Button from "@mui/material/Button";
 import Tooltip from "@mui/material/Tooltip";
@@ -26,6 +26,18 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
       hljs.highlightAll();
     }
   }, [sourceCode]);
+
+  if (contentState.hasText()) {
+    const rawContent = convertToRaw(contentState);
+    /**
+     * Why use nested setTimeout instead of setInterval?
+     * @see https://javascript.info/settimeout-setinterval#nested-settimeout
+     */
+    setTimeout(function save() {
+      localStorage.setItem("rawContent", JSON.stringify(rawContent));
+      setTimeout(save, 5000);
+    }, 5000);
+  }
 
   const onClick = () => {
     const generated = scan(contentState);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { convertFromRaw, convertToRaw, EditorState } from "draft-js";
+import { convertFromRaw, EditorState } from "draft-js";
 import styled from "@emotion/styled";
 import { EditorPanel } from "./editor-panel";
 import { PreviewPanel } from "./preview-panel";
@@ -61,18 +61,6 @@ export const SoftMapleEditor = () => {
   }, []);
 
   const contentState = editorState.getCurrentContent();
-
-  if (contentState.hasText()) {
-    const rawContent = convertToRaw(contentState);
-    /**
-     * Why use nested setTimeout instead of setInterval?
-     * @see https://javascript.info/settimeout-setinterval#nested-settimeout
-     */
-    setTimeout(function save() {
-      localStorage.setItem("rawContent", JSON.stringify(rawContent));
-      setTimeout(save, 5000);
-    }, 100);
-  }
 
   return (
     <Layout>

@@ -17,6 +17,7 @@ type PreviewPanelProps = {
 };
 
 export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
+  const hasText = contentState.hasText();
   const [clipboardTitle, setClipboardTitle] = useState("Copy to clipboard");
   const [sourceCode, setSourceCode] = useState("");
 
@@ -27,21 +28,29 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
     }
   }, [sourceCode]);
 
-  if (contentState.hasText()) {
+  const handleSave = () => {
     const rawContent = convertToRaw(contentState);
+    localStorage.setItem("rawContent", JSON.stringify(rawContent));
+  };
+
+  /**
+   * TODO: seems like has some bugs
+   */
+  if (hasText) {
     /**
      * Why use nested setTimeout instead of setInterval?
      * @see https://javascript.info/settimeout-setinterval#nested-settimeout
      */
     setTimeout(function save() {
-      localStorage.setItem("rawContent", JSON.stringify(rawContent));
+      handleSave();
       setTimeout(save, 5000);
     }, 5000);
   }
 
-  const onClick = () => {
+  const handlePreview = () => {
     const generated = scan(contentState);
     setSourceCode(generated);
+    handleSave();
   };
 
   const copyToClipboard = async () => {
@@ -55,12 +64,16 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
   return (
     <>
       <StyledMenu>
+        <Button variant="contained" disabled={!hasText} onClick={handlePreview}>
+          Preview
+        </Button>
         <Button
           variant="contained"
-          disabled={!contentState.hasText()}
-          onClick={onClick}
+          color="success"
+          disabled={!hasText}
+          onClick={handleSave}
         >
-          Preview
+          Save
         </Button>
       </StyledMenu>
       <SourceCodeContainer>

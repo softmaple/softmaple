@@ -12,7 +12,7 @@ specifiers:
   '@types/node': ^17.0.0
   '@types/react': ^17.0.37
   '@types/react-dom': ^17.0.11
-  '@zhyd1997/draftjs-to-latex': ^0.3.2
+  '@zhyd1997/draftjs-to-latex': ^0.4.2
   draft-js: ^0.11.7
   eslint: 8.4.1
   eslint-config-next: 12.0.7
@@ -34,7 +34,7 @@ dependencies:
   '@emotion/styled': 11.6.0_b04bf4fecb958fae8d240bb72fbc7249
   '@mui/icons-material': 5.2.4_5ed4320ee0977ed00ecf6292e8ab906e
   '@mui/material': 5.2.4_fa2645acd9a035406d0184711710de51
-  '@zhyd1997/draftjs-to-latex': 0.3.2
+  '@zhyd1997/draftjs-to-latex': 0.4.2
   draft-js: 0.11.7_react-dom@17.0.2+react@17.0.2
   highlight.js: 11.3.1
   immutable: 4.0.0
@@ -937,8 +937,8 @@ packages:
       eslint-visitor-keys: 3.1.0
     dev: true
 
-  /@zhyd1997/draftjs-to-latex/0.3.2:
-    resolution: {integrity: sha512-UnMqmOFJlTLL/mS3ocxq7ZQ9fpx7FQGOEt5ETPRMgxAGJD9Qesvo93XTZ6DqkGZqJitzHCB7se9DS/ouMT6DiQ==}
+  /@zhyd1997/draftjs-to-latex/0.4.2:
+    resolution: {integrity: sha512-bfGiFr697C7hM+97NrBaI+np34CJTG6cuDACWATN6mu6BoydycS7JuEzpkYpQpakGUW3IWQqdK90DTZ7Xhu3xw==}
     dev: false
 
   /acorn-jsx/5.3.2_acorn@8.6.0:

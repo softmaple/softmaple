@@ -3,6 +3,7 @@ import { convertFromRaw, EditorState } from "draft-js";
 import styled from "@emotion/styled";
 import { EditorPanel } from "./editor-panel";
 import { PreviewPanel } from "./preview-panel";
+import { Header } from "./header";
 
 /**
  * Main Layout: (Grid)
@@ -63,9 +64,16 @@ export const SoftMapleEditor = () => {
   const contentState = editorState.getCurrentContent();
 
   return (
-    <Layout>
-      <EditorPanel editorState={editorState} setEditorState={setEditorState} />
-      <PreviewPanel contentState={contentState} />
-    </Layout>
+    <>
+      {/* the same as https://github.com/SoftMaple/github-insights-view/tree/main/src/components/header */}
+      <Header>{""}</Header>
+      <Layout>
+        <EditorPanel
+          editorState={editorState}
+          setEditorState={setEditorState}
+        />
+        <PreviewPanel contentState={contentState} />
+      </Layout>
+    </>
   );
 };

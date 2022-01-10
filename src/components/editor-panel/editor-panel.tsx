@@ -169,6 +169,7 @@ export const EditorPanel: FC<EditorPanelProps> = ({
             readOnly={liveCustomBlockEdits.count()}
             spellCheck
             handleKeyCommand={handleKeyCommand}
+            ariaLabel="Editor"
           />
         ) : (
           // TODO: Loading Button is better.

@@ -4,6 +4,7 @@ import { FC, useEffect, useState } from "react";
 import Button from "@mui/material/Button";
 import Tooltip from "@mui/material/Tooltip";
 import hljs from "highlight.js";
+import latex from "highlight.js/lib/languages/latex";
 import { scan } from "@zhyd1997/draftjs-to-latex";
 import {
   SourceCodeContainer,
@@ -11,6 +12,8 @@ import {
   StyledCopyButton,
   StyledMenu,
 } from "./preview-panel.style";
+
+hljs.registerLanguage("latex", latex);
 
 type PreviewPanelProps = {
   contentState: ContentState;

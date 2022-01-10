@@ -22,7 +22,8 @@ export const Header: FC<HeaderProps> = ({ children }) => {
         underline="none"
         target="_blank"
         rel="noreferrer"
-        style={{ marginLeft: "1rem", marginRight: "auto" }}
+        color="#220c07"
+        sx={{ marginLeft: "1rem", marginRight: "auto" }}
       >
         Homepage
       </Link>

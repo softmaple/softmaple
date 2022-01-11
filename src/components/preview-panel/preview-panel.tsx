@@ -1,35 +1,20 @@
 import "highlight.js/styles/github.css";
 import { ContentState, convertToRaw } from "draft-js";
-import { FC, useEffect, useState } from "react";
+import { FC, useState } from "react";
+import type { PaletteMode } from "@mui/material";
 import Button from "@mui/material/Button";
-import Tooltip from "@mui/material/Tooltip";
-import hljs from "highlight.js";
-import latex from "highlight.js/lib/languages/latex";
 import { scan } from "@zhyd1997/draftjs-to-latex";
-import {
-  SourceCodeContainer,
-  SourceCodeWrapper,
-  StyledCopyButton,
-  StyledMenu,
-} from "./preview-panel.style";
-
-hljs.registerLanguage("latex", latex);
+import { StyledMenu } from "./preview-panel.style";
+import { LaTeXContainer } from "./latex-containier";
 
 type PreviewPanelProps = {
+  mode: PaletteMode;
   contentState: ContentState;
 };
 
-export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
+export const PreviewPanel: FC<PreviewPanelProps> = ({ mode, contentState }) => {
   const hasText = contentState.hasText();
-  const [clipboardTitle, setClipboardTitle] = useState("Copy to clipboard");
   const [sourceCode, setSourceCode] = useState("");
-
-  useEffect(() => {
-    // IMPORTANT: when souce code is generated, highlight it
-    if (sourceCode) {
-      hljs.highlightAll();
-    }
-  }, [sourceCode]);
 
   const handleSave = () => {
     const rawContent = convertToRaw(contentState);
@@ -56,14 +41,6 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
     handleSave();
   };
 
-  const copyToClipboard = async () => {
-    await navigator.clipboard.writeText(sourceCode);
-    setClipboardTitle("Copied!");
-    setTimeout(() => {
-      setClipboardTitle("Copy to clipboard");
-    }, 1000);
-  };
-
   return (
     <>
       <StyledMenu>
@@ -79,16 +56,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ contentState }) => {
           Save
         </Button>
       </StyledMenu>
-      <SourceCodeContainer>
-        {sourceCode && (
-          <Tooltip title={clipboardTitle} placement="top">
-            <StyledCopyButton onClick={copyToClipboard} />
-          </Tooltip>
-        )}
-        <SourceCodeWrapper>
-          <code className="language-latex">{sourceCode}</code>
-        </SourceCodeWrapper>
-      </SourceCodeContainer>
+      <LaTeXContainer mode={mode} sourceCode={sourceCode} />
     </>
   );
 };

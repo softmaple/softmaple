@@ -1,18 +1,8 @@
 import styled from "@emotion/styled";
+import Paper from "@mui/material/Paper";
 
-type HidePlaceHolderProps = { shouldHidePlaceholder: boolean };
-
-const HidePlaceHolder = styled.div(
-  ({ shouldHidePlaceholder }: HidePlaceHolderProps) => ({
-    "& .public-DraftEditorPlaceholder-root": {
-      display: shouldHidePlaceholder && "none",
-    },
-  })
-);
-
-export const EditorContainer = styled(HidePlaceHolder)`
+export const EditorContainer = styled(Paper)`
   grid-area: 2 / 1 / 3 / 2;
-  box-shadow: -1px -1px 13px 3px black;
   cursor: text;
   font-size: 16px;
   padding: 9px;
@@ -22,7 +12,7 @@ export const EditorContainer = styled(HidePlaceHolder)`
   & .public-DraftEditorPlaceholder-root,
   & .public-DraftEditor-content {
     margin: 0 -15px -15px;
-    padding: 15px;
+    padding: 6px 15px 15px;
   }
 
   & .public-DraftEditor-content {

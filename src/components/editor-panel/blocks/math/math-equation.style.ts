@@ -1,17 +1,11 @@
 import styled from "@emotion/styled";
+import { styled as muiStyled } from "@mui/material";
 
-type TeXEditorContainerProps = {
-  isEditMode: boolean;
-};
-
-export const TeXEditorContainer = styled.div(
-  ({ isEditMode }: TeXEditorContainerProps) => ({
-    color: isEditMode && "#888888",
-    backgroundColor: "#ffffff",
-    cursor: "pointer",
-    userSelect: "none",
-  })
-);
+export const TeXEditorContainer = muiStyled("div")(({ theme }) => ({
+  color: theme.palette.text.secondary,
+  cursor: "pointer",
+  userSelect: "none",
+}));
 
 export const TeXEditorPanel = styled.div`
   font-family: "Helvetica", sans-serif;

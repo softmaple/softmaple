@@ -83,7 +83,7 @@ export const MathEquation: FC<CustomBlockType> = ({
   }
 
   return (
-    <TeXEditorContainer isEditMode={isEditMode}>
+    <TeXEditorContainer>
       <Output content={content} onClick={onClick} />
       {isEditMode && ( // display edit panel
         <TeXEditorPanel>

@@ -75,7 +75,7 @@ export const SoftMapleEditor = () => {
           editorState={editorState}
           setEditorState={setEditorState}
         />
-        <PreviewPanel contentState={contentState} />
+        <PreviewPanel mode={mode} contentState={contentState} />
       </MainLayout>
     </Layout>
   );

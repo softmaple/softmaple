@@ -154,7 +154,8 @@ export const EditorPanel: FC<EditorPanelProps> = ({
       />
 
       <EditorContainer
-        shouldHidePlaceholder={shouldHidePlaceholder}
+        elevation={24}
+        style={{ display: shouldHidePlaceholder && "none" }}
         onClick={focusEditor}
       >
         {showEditor ? (

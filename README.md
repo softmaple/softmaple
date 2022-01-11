@@ -13,7 +13,7 @@ https://github.com/SoftMaple/docs
 
 Using [draftjs-to-latex](https://github.com/zhyd1997/draftjs-to-latex) for generating LaTeX source code.
 
-![ScreenShot](https://ik.imagekit.io/1winv85cn8g/SoftMaple/Editor/screenshot_7DRtL-xXK.gif)
+![ScreenShot](https://user-images.githubusercontent.com/31362988/148916265-29e058fb-9220-4d9b-9294-5f8d5279827c.gif)
 
 # Issues and Pitfalls
 

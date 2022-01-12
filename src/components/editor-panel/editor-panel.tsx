@@ -173,7 +173,6 @@ export const EditorPanel: FC<EditorPanelProps> = ({
             ariaLabel="Editor"
           />
         ) : (
-          // TODO: Loading Button is better.
           <Skeleton variant="rectangular" width="100%" height="100%" />
         )}
       </EditorContainer>

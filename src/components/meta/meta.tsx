@@ -22,6 +22,8 @@ export const Meta = () => {
       />
       <link rel="manifest" href="/favicons/site.webmanifest" />
       <meta name="description" content="A Paper Typesetting Editor." />
+      <meta name="viewport" content="width=device-width" />
+      <meta charSet="utf-8" />
       <title>SoftMaple</title>
     </Head>
   );

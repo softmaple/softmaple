@@ -1,6 +1,10 @@
+import dynamic from "next/dynamic";
 import { FC } from "react";
-import { MathEquation } from "./math/math-equation";
 import type { CustomBlockType } from "./types";
+
+const MathEquation = dynamic(() =>
+  import("./math/math-equation").then((mod) => mod.MathEquation)
+);
 
 export const CustomBlock: FC<CustomBlockType> = ({
   block,

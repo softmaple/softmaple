@@ -2,7 +2,7 @@ import styled from "@emotion/styled";
 import { styled as muiStyled } from "@mui/material";
 
 export const TeXEditorContainer = muiStyled("div")(({ theme }) => ({
-  color: theme.palette.text.secondary,
+  color: theme.palette.text.primary,
   cursor: "pointer",
   userSelect: "none",
 }));

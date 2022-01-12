@@ -1,3 +1,4 @@
+import dynamic from "next/dynamic";
 import { styled } from "@mui/material";
 import type { PaletteMode } from "@mui/material";
 import { FC, useState } from "react";
@@ -5,7 +6,10 @@ import Paper from "@mui/material/Paper";
 import Tooltip from "@mui/material/Tooltip";
 import IconButton from "@mui/material/IconButton";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import { LaTeXWrapper } from "./latex-wrapper";
+
+const LaTeXWrapper = dynamic(() =>
+  import("./latex-wrapper").then((mod) => mod.LaTeXWrapper)
+);
 
 const SourceCodeContainer = styled(Paper)(({ theme }) => ({
   ...theme.typography.body2,

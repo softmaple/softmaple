@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import Skeleton from "@mui/material/Skeleton";
 import { styled } from "@mui/material";
 import type { PaletteMode } from "@mui/material";
 import { FC, useState } from "react";
@@ -7,8 +8,13 @@ import Tooltip from "@mui/material/Tooltip";
 import IconButton from "@mui/material/IconButton";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 
-const LaTeXWrapper = dynamic(() =>
-  import("./latex-wrapper").then((mod) => mod.LaTeXWrapper)
+const LaTeXWrapper = dynamic(
+  () => import("./latex-wrapper").then((mod) => mod.LaTeXWrapper),
+  {
+    loading: () => (
+      <Skeleton variant="rectangular" width="100%" height="100%" />
+    ),
+  }
 );
 
 const SourceCodeContainer = styled(Paper)(({ theme }) => ({
@@ -40,17 +46,19 @@ export const LaTeXContainer: FC<LaTeXContainerProps> = ({
   return (
     <SourceCodeContainer elevation={24}>
       {sourceCode && (
-        <Tooltip title={clipboardTitle} placement="top">
-          <IconButton
-            color="inherit"
-            onClick={copyToClipboard}
-            sx={{ position: "absolute", right: "0" }}
-          >
-            <ContentCopyIcon />
-          </IconButton>
-        </Tooltip>
+        <>
+          <Tooltip title={clipboardTitle} placement="top">
+            <IconButton
+              color="inherit"
+              onClick={copyToClipboard}
+              sx={{ position: "absolute", right: "0" }}
+            >
+              <ContentCopyIcon />
+            </IconButton>
+          </Tooltip>
+          <LaTeXWrapper mode={mode} sourceCode={sourceCode} />
+        </>
       )}
-      <LaTeXWrapper mode={mode} sourceCode={sourceCode} />
     </SourceCodeContainer>
   );
 };

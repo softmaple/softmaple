@@ -40,17 +40,19 @@ export const LaTeXContainer: FC<LaTeXContainerProps> = ({
   return (
     <SourceCodeContainer elevation={24}>
       {sourceCode && (
-        <Tooltip title={clipboardTitle} placement="top">
-          <IconButton
-            color="inherit"
-            onClick={copyToClipboard}
-            sx={{ position: "absolute", right: "0" }}
-          >
-            <ContentCopyIcon />
-          </IconButton>
-        </Tooltip>
+        <>
+          <Tooltip title={clipboardTitle} placement="top">
+            <IconButton
+              color="inherit"
+              onClick={copyToClipboard}
+              sx={{ position: "absolute", right: "0" }}
+            >
+              <ContentCopyIcon />
+            </IconButton>
+          </Tooltip>
+          <LaTeXWrapper mode={mode} sourceCode={sourceCode} />
+        </>
       )}
-      <LaTeXWrapper mode={mode} sourceCode={sourceCode} />
     </SourceCodeContainer>
   );
 };

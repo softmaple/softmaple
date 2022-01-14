@@ -25,6 +25,38 @@ export const Meta = () => {
       <meta name="viewport" content="width=device-width" />
       <meta charSet="utf-8" />
       <title>SoftMaple</title>
+      {/* KaTeX */}
+      <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/katex@0.15.2/dist/katex.min.css"
+        integrity="sha384-MlJdn/WNKDGXveldHDdyRP1R4CTHr3FeuDNfhsLPYrq2t0UBkUdK2jyTnXPEK1NQ"
+        crossOrigin="anonymous"
+      />
+      <script
+        defer
+        src="https://cdn.jsdelivr.net/npm/katex@0.15.2/dist/katex.min.js"
+        integrity="sha384-VQ8d8WVFw0yHhCk5E8I86oOhv48xLpnDZx5T9GogA/Y84DcCKWXDmSDfn13bzFZY"
+        crossOrigin="anonymous"
+      ></script>
+      <script
+        defer
+        src="https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.js"
+        integrity="sha256-4O4pS1SH31ZqrSO2A/2QJTVjTPqVe+jnYgOWUVr7EEc="
+        crossOrigin="anonymous"
+      ></script>
+      {/* Highlight.js */}
+      <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/styles/github.min.css"
+      />
+      <script
+        defer
+        src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/highlight.min.js"
+      ></script>
+      <script
+        defer
+        src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/languages/latex.min.js"
+      ></script>
     </Head>
   );
 };

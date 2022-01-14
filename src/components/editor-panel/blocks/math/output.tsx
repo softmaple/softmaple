@@ -1,6 +1,4 @@
-import "katex/dist/katex.min.css";
 import { FC, useRef, useEffect } from "react";
-import katex from "katex";
 
 type OutputProps = {
   content: string;
@@ -25,6 +23,7 @@ export const Output: FC<OutputProps> = ({ content, onClick }) => {
   useEffect(() => {
     if (prevContent !== content) {
       // update output rendering
+      // @ts-ignore use CDN instead.
       katex.render(content, containerRef.current, { displayMode: true });
     }
   }, [content, prevContent]);

@@ -1,4 +1,3 @@
-import "highlight.js/styles/github.css";
 import { ContentState, convertToRaw } from "draft-js";
 import { FC, useState } from "react";
 import type { PaletteMode } from "@mui/material";

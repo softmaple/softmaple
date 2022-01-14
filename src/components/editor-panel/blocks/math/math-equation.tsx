@@ -1,5 +1,4 @@
 import { ContentState } from "draft-js";
-import katex from "katex";
 import { FC, useRef, useState } from "react";
 import type { CustomBlockType } from "@/components/editor-panel/blocks/types";
 import { Output } from "./output";
@@ -30,6 +29,7 @@ export const MathEquation: FC<CustomBlockType> = ({
     let invalid = false;
 
     try {
+      // @ts-ignore use CDN instead.
       katex.renderToString(e.target.value);
     } catch (e) {
       invalid = true;

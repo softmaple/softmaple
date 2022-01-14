@@ -8,7 +8,6 @@ specifiers:
   '@mui/icons-material': ^5.2.4
   '@mui/material': ^5.2.4
   '@types/draft-js': ^0.11.7
-  '@types/katex': ^0.11.1
   '@types/node': ^17.0.0
   '@types/react': ^17.0.37
   '@types/react-dom': ^17.0.11
@@ -17,10 +16,8 @@ specifiers:
   eslint: 8.4.1
   eslint-config-next: 12.0.7
   eslint-config-prettier: ^8.3.0
-  highlight.js: ^11.3.1
   husky: ^7.0.4
   immutable: ^4.0.0
-  katex: ^0.15.1
   lint-staged: ^12.1.2
   next: ^12.0.7
   next-transpile-modules: ^9.0.0
@@ -36,9 +33,7 @@ dependencies:
   '@mui/material': 5.2.4_fa2645acd9a035406d0184711710de51
   '@zhyd1997/draftjs-to-latex': 0.4.2
   draft-js: 0.11.7_react-dom@17.0.2+react@17.0.2
-  highlight.js: 11.3.1
   immutable: 4.0.0
-  katex: 0.15.1
   next: 12.0.7_08e041ced5dbc85933fef7a25e63a057
   next-transpile-modules: 9.0.0
   react: 17.0.2
@@ -48,7 +43,6 @@ devDependencies:
   '@babel/core': 7.16.5
   '@emotion/babel-plugin': 11.7.1_@babel+core@7.16.5
   '@types/draft-js': 0.11.7
-  '@types/katex': 0.11.1
   '@types/node': 17.0.1
   '@types/react': 17.0.37
   '@types/react-dom': 17.0.11
@@ -834,10 +828,6 @@ packages:
     resolution: {integrity: sha1-7ihweulOEdK4J7y+UnC86n8+ce4=}
     dev: true
 
-  /@types/katex/0.11.1:
-    resolution: {integrity: sha512-DUlIj2nk0YnJdlWgsFuVKcX27MLW0KbKmGVoUHmFr+74FYYNUDAaj9ZqTADvsbE8rfxuVmSFc7KczYn5Y09ozg==}
-    dev: true
-
   /@types/node/17.0.1:
     resolution: {integrity: sha512-NXKvBVUzIbs6ylBwmOwHFkZS2EXCcjnqr8ZCRNaXBkHAf+3mn/rPcJxwrzuc6movh8fxQAsUUfYklJ/EG+hZqQ==}
 
@@ -1391,6 +1381,7 @@ packages:
   /commander/8.3.0:
     resolution: {integrity: sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww==}
     engines: {node: '>= 12'}
+    dev: true
 
   /commondir/1.0.1:
     resolution: {integrity: sha1-3dgA2gxmEnOTzKWVDqloo6rxJTs=}
@@ -2296,11 +2287,6 @@ packages:
     hasBin: true
     dev: false
 
-  /highlight.js/11.3.1:
-    resolution: {integrity: sha512-PUhCRnPjLtiLHZAQ5A/Dt5F8cWZeMyj9KRsACsWT+OD6OP0x6dp5OmT5jdx0JgEyPxPZZIPQpRN2TciUT7occw==}
-    engines: {node: '>=12.0.0'}
-    dev: false
-
   /hmac-drbg/1.0.1:
     resolution: {integrity: sha1-0nRXAQJabHdabFRXk+1QL8DGSaE=}
     dependencies:
@@ -2618,13 +2604,6 @@ packages:
       array-includes: 3.1.4
       object.assign: 4.1.2
     dev: true
-
-  /katex/0.15.1:
-    resolution: {integrity: sha512-KIk+gizli0gl1XaJlCYS8/donGMbzXYTka6BbH3AgvDJTOwyDY4hJ+YmzJ1F0y/3XzX5B9ED8AqB2Hmn2AZ0uA==}
-    hasBin: true
-    dependencies:
-      commander: 8.3.0
-    dev: false
 
   /language-subtag-registry/0.3.21:
     resolution: {integrity: sha512-L0IqwlIXjilBVVYKFT37X9Ih11Um5NEl9cbJIuU/SwP/zEEAbBPOnEeeuxVMf45ydWQRDQN3Nqc96OgbH1K+Pg==}

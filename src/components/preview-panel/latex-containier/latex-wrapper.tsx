@@ -1,11 +1,7 @@
 import { FC, useEffect, useMemo } from "react";
-import hljs from "highlight.js";
-import latex from "highlight.js/lib/languages/latex";
 import type { PaletteMode } from "@mui/material";
 import { DarkWrapper } from "./dark-wrapper";
 import { LightWrapper } from "./light-wrapper";
-
-hljs.registerLanguage("latex", latex);
 
 type LaTeXWrapperProps = {
   mode: PaletteMode;
@@ -15,6 +11,7 @@ type LaTeXWrapperProps = {
 export const LaTeXWrapper: FC<LaTeXWrapperProps> = ({ mode, sourceCode }) => {
   useEffect(() => {
     if (sourceCode || mode) {
+      // @ts-ignore use CDN instead.
       hljs.highlightAll();
     }
   }, [sourceCode, mode]);

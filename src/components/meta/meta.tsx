@@ -57,11 +57,10 @@ export const Meta = () => {
         defer
         src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/languages/latex.min.js"
       ></script>
-      {/* Cloudflare Web Analytics */}
+      {/* Splitbee Web Analytics */}
       <script
         defer
-        src="https://static.cloudflareinsights.com/beacon.min.js"
-        data-cf-beacon='{"token": "6738eb859ea94d1e9b53de6b3485a62f"}'
+        src="https://cdn.splitbee.io/sb.js"
       ></script>
     </Head>
   );

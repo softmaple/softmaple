@@ -1,5 +1,5 @@
 import { ContentState, convertToRaw } from "draft-js";
-import { FC, useState } from "react";
+import { Dispatch, FC, SetStateAction, useState } from "react";
 import type { PaletteMode } from "@mui/material";
 import Button from "@mui/material/Button";
 import { scan } from "@zhyd1997/draftjs-to-latex";
@@ -9,11 +9,17 @@ import { LaTeXContainer } from "./latex-containier";
 type PreviewPanelProps = {
   mode: PaletteMode;
   contentState: ContentState;
+  setShowAlert: Dispatch<SetStateAction<boolean>>;
 };
 
-export const PreviewPanel: FC<PreviewPanelProps> = ({ mode, contentState }) => {
+export const PreviewPanel: FC<PreviewPanelProps> = ({
+  mode,
+  contentState,
+  setShowAlert,
+}) => {
   const hasText = contentState.hasText();
-  const [sourceCode, setSourceCode] = useState("");
+  const [sourceCode, setSourceCode] = useState<string>("");
+  const [isManuallySaved, setIsManuallySaved] = useState<boolean>(false);
 
   const handleSave = () => {
     const rawContent = convertToRaw(contentState);
@@ -40,19 +46,32 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ mode, contentState }) => {
     handleSave();
   };
 
+  const onSave = () => {
+    handleSave();
+    // control alert and CTA buttons
+    setShowAlert(true);
+    setIsManuallySaved(true);
+    setTimeout(() => {
+      setShowAlert(false);
+      setIsManuallySaved(false);
+    }, 2000);
+  };
+
+  const disabled = !hasText || isManuallySaved;
+
   return (
     <>
       <StyledMenu>
-        <Button variant="contained" disabled={!hasText} onClick={handlePreview}>
+        <Button variant="contained" disabled={disabled} onClick={handlePreview}>
           Preview
         </Button>
         <Button
           variant="contained"
           color="success"
-          disabled={!hasText}
-          onClick={handleSave}
+          disabled={disabled}
+          onClick={onSave}
         >
-          Save
+          {isManuallySaved ? "Saved" : "Save"}
         </Button>
       </StyledMenu>
       <LaTeXContainer mode={mode} sourceCode={sourceCode} />

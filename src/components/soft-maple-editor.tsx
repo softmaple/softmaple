@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { convertFromRaw, EditorState } from "draft-js";
 import styled from "@emotion/styled";
 import type { PaletteMode } from "@mui/material";
+import Alert from "@mui/material/Alert";
 import { Layout } from "./layout";
 import { Header } from "./header";
 import { Palette } from "./palette";
@@ -24,7 +25,7 @@ import { PreviewPanel } from "./preview-panel";
  * ----------------|   |------------------
  */
 const MainLayout = styled.div`
-  margin: 3.125em;
+  margin: 0 3.125em 3.125em;
   display: grid;
   grid-gap: 1rem;
   grid-template-columns: repeat(2, [col] calc(50% - 10px));
@@ -51,6 +52,7 @@ const emptyContentState = convertFromRaw({
 
 export const SoftMapleEditor = () => {
   const [mode, setMode] = useState<PaletteMode>("light");
+  const [showAlert, setShowAlert] = useState<boolean>(false);
   const [editorState, setEditorState] = useState(
     EditorState.createWithContent(emptyContentState)
   );
@@ -63,6 +65,8 @@ export const SoftMapleEditor = () => {
     }
   }, []);
 
+  const onClose = () => setShowAlert(false);
+
   const contentState = editorState.getCurrentContent();
 
   return (
@@ -70,12 +74,17 @@ export const SoftMapleEditor = () => {
       <Header>
         <Palette mode={mode} setMode={setMode} />
       </Header>
+      {showAlert && <Alert onClose={onClose}>Saved successfully</Alert>}
       <MainLayout>
         <EditorPanel
           editorState={editorState}
           setEditorState={setEditorState}
         />
-        <PreviewPanel mode={mode} contentState={contentState} />
+        <PreviewPanel
+          mode={mode}
+          contentState={contentState}
+          setShowAlert={setShowAlert}
+        />
       </MainLayout>
     </Layout>
   );

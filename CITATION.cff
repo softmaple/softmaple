@@ -4,10 +4,10 @@ authors:
 cff-version: "1.1.0"
 date-released: 2022-01-17
 keywords: 
-  - "Draft.js"
+  - "rich-text-editor"
   - LaTeX
 license: "Apache-2.0"
 message: "If you use this software, please cite it using these metadata."
-version: "1.1.0"
+version: "1.1.1"
 repository-code: "https://github.com/SoftMaple/Editor"
 title: SoftMaple

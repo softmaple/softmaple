@@ -8,6 +8,7 @@ import { Header } from "./header";
 import { Palette } from "./palette";
 import { EditorPanel } from "./editor-panel";
 import { PreviewPanel } from "./preview-panel";
+import { Footer } from "./footer";
 
 /**
  * Main Layout: (Grid)
@@ -25,7 +26,7 @@ import { PreviewPanel } from "./preview-panel";
  * ----------------|   |------------------
  */
 const MainLayout = styled.div`
-  margin: 0 3.125em 3.125em;
+  margin: 0.5rem 3.125em;
   display: grid;
   grid-gap: 1rem;
   grid-template-columns: repeat(2, [col] calc(50% - 10px));
@@ -86,6 +87,7 @@ export const SoftMapleEditor = () => {
           setShowAlert={setShowAlert}
         />
       </MainLayout>
+      <Footer mode={mode} />
     </Layout>
   );
 };

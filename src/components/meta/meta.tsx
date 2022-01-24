@@ -58,9 +58,12 @@ export const Meta = () => {
         src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/languages/latex.min.js"
       ></script>
       {/* Splitbee Web Analytics */}
+      <script defer src="https://cdn.splitbee.io/sb.js"></script>
+      {/* Google AdSense */}
       <script
-        defer
-        src="https://cdn.splitbee.io/sb.js"
+        async
+        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4177648348168399"
+        crossOrigin="anonymous"
       ></script>
     </Head>
   );

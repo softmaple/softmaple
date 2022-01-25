@@ -6,7 +6,7 @@ import styled from "@emotion/styled";
  */
 export const SourceCodeWrapper = styled.pre`
   height: 100%;
-  margin: 0;
+  margin: 0 !important;
   white-space: pre-wrap;
   word-wrap: break-word;
 `;

@@ -44,24 +44,17 @@ export const Meta = () => {
         integrity="sha256-4O4pS1SH31ZqrSO2A/2QJTVjTPqVe+jnYgOWUVr7EEc="
         crossOrigin="anonymous"
       ></script>
-      {/* Highlight.js */}
-      <link
-        rel="stylesheet"
-        href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/styles/github.min.css"
-      />
+      {/* Prism.js */}
       <script
         defer
-        src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/highlight.min.js"
+        src="https://cdn.jsdelivr.net/npm/prismjs@1.26.0/components/prism-core.min.js"
       ></script>
       <script
         defer
-        src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.4.0/build/languages/latex.min.js"
+        src="https://cdn.jsdelivr.net/npm/prismjs@1.26.0/plugins/autoloader/prism-autoloader.min.js"
       ></script>
       {/* Splitbee Web Analytics */}
-      <script
-        defer
-        src="https://cdn.splitbee.io/sb.js"
-      ></script>
+      <script defer src="https://cdn.splitbee.io/sb.js"></script>
     </Head>
   );
 };

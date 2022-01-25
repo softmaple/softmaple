@@ -12,7 +12,7 @@ export const LaTeXWrapper: FC<LaTeXWrapperProps> = ({ mode, sourceCode }) => {
   useEffect(() => {
     if (sourceCode || mode) {
       // @ts-ignore use CDN instead.
-      hljs.highlightAll();
+      Prism.highlightAll();
     }
   }, [sourceCode, mode]);
 

@@ -2,6 +2,14 @@
 
 ![logo](https://ik.imagekit.io/1winv85cn8g/SoftMaple/logo.png)
 
+<p>
+  <a href=".github/CONTRIBUTING.md#pull-requests"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+  <a href="https://discord.gg/Xzje2VAcdf"><img src="https://img.shields.io/discord/922309919158456330.svg" alt="Discord Chat" /></a>
+  <a href= "https://github.com/prettier/prettier"><img alt="code style: prettier" src="https://img.shields.io/badge/code_style-prettier-ff69b4.svg"></a>
+  <a href="#license"><img src="https://img.shields.io/github/license/SoftMaple/Editor.svg"></a>
+  <a href="https://gitpod.io/#https://github.com/SoftMaple/Editor"><img src="https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod" alt="Gitpod Ready-to-Code"/></a>
+</p>
+
 <a href="https://www.producthunt.com/posts/softmaple-editor?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-softmaple-editor" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=325437&theme=light" alt="SoftMaple Editor - Write papers like MS Word and generate LaTeX for typesetting | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
 <a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">
@@ -13,7 +21,7 @@
 
 # Documentation
 
-https://github.com/SoftMaple/docs
+For details, check out our [documentation](https://docs.softmaple.xyz/).
 
 # Features
 
@@ -33,3 +41,18 @@ We use `pnpm` for package management, if you never used it, see [pnpm](https://p
 pnpm install
 pnpm dev
 ```
+
+# Community
+The SoftMaple community can be found on [GitHub Discussions](https://github.com/SoftMaple/Editor/discussions), where you can ask questions and voice ideas.
+
+To chat with other community members you can join the [SoftMaple Discord](https://discord.gg/Xzje2VAcdf).
+
+Our [Code of Conduct](.github/CODE_OF_CONDUCT.md) applies to all SoftMaple community channels.
+
+# Contributing
+
+See [Contributing Guidelines](.github/CONTRIBUTING.md).
+
+# License
+
+[Apache-2.0 License](LICENSE)

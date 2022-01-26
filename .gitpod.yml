@@ -1,0 +1,13 @@
+tasks:
+  - before: npm install -g pnpm
+    init: pnpm install
+    command: pnpm dev
+ports:
+  - port: 3000
+    onOpen: open-preview
+
+vscode:
+  extensions:
+    - esbenp.prettier-vscode
+    - eamodio.gitlens
+    - dbaeumer.vscode-eslint

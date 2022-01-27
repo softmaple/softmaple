@@ -56,3 +56,15 @@ See [Contributing Guidelines](.github/CONTRIBUTING.md).
 # License
 
 [Apache-2.0 License](LICENSE)
+
+# Special thanks
+
+<a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">
+  <img
+    alt="Vercel LogoType"
+    src="https://ik.imagekit.io/1winv85cn8g/SoftMaple/vercel-logotype-dark_ZltQxSHTE.png"
+    height="48"
+  />
+</a>
+
+<a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">Vercel</a> supports us with [**Pro plan** for open source](https://vercel.com/support/articles/can-vercel-sponsor-my-open-source-project).

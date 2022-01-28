@@ -1,0 +1,41 @@
+{
+  "name": "ui",
+  "version": "1.0.0",
+  "description": "components library for softmaple apps.",
+  "main": "index.tsx",
+  "types": "index.tsx",
+  "scripts": {
+    "lint": ""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/softmaple/packages/ui"
+  },
+  "keywords": [
+    "react-hooks",
+    "nextjs"
+  ],
+  "author": "Yadong Zhang",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@emotion/react": "^11.7.1",
+    "@emotion/styled": "^11.6.0",
+    "@mui/icons-material": "^5.2.4",
+    "@mui/material": "^5.2.4",
+    "next": "^12.0.7",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.16.8",
+    "@babel/core": "^7.16.5",
+    "@babel/preset-react": "^7.16.7",
+    "@babel/preset-typescript": "^7.16.7",
+    "@emotion/babel-plugin": "^11.7.1",
+    "@types/react": "^17.0.37",
+    "@types/react-dom": "^17.0.11",
+    "config": "workspace:*",
+    "tsconfig": "workspace:*",
+    "typescript": "^4.5.4"
+  }
+}

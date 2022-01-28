@@ -46,15 +46,7 @@ const TeXEditorButtonBase = styled.button`
   width: 99px;
 `;
 
-type SaveButtonProps = { isInvalidTeX: boolean };
-
-export const SaveButton = styled(TeXEditorButtonBase)(
-  ({ isInvalidTeX }: SaveButtonProps) => ({
-    backgroundColor: isInvalidTeX && "#eee",
-    borderColor: isInvalidTeX && "#a00",
-    color: isInvalidTeX && "#666",
-  })
-);
+export const SaveButton = styled(TeXEditorButtonBase)``;
 
 export const RemoveButton = styled(TeXEditorButtonBase)`
   border-color: #aaa;

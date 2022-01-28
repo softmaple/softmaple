@@ -7,7 +7,7 @@ export function removeCustomBlock(
   const content = editorState.getCurrentContent();
   const block = content.getBlockForKey(blockKey);
 
-  const targetRange = new SelectionState({
+  const targetRange = SelectionState.createEmpty("foo").merge({
     anchorKey: blockKey,
     anchorOffset: 0,
     focusKey: blockKey,

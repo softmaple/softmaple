@@ -90,7 +90,11 @@ export const MathEquation: FC<CustomBlockType> = ({
           <textarea onChange={onChange} ref={textareaRef} value={value} />
           <TeXEditorButtonGroup>
             <SaveButton
-              isInvalidTeX={isInvalidTeX}
+              style={{
+                backgroundColor: isInvalidTeX && "#eee",
+                borderColor: isInvalidTeX && "#a00",
+                color: isInvalidTeX && "#666",
+              }}
               disabled={isInvalidTeX}
               onClick={save}
               type="button"

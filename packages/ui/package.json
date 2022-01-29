@@ -7,7 +7,7 @@
   "scripts": {},
   "repository": {
     "type": "git",
-    "url": "https://github.com/softmaple/packages/ui"
+    "url": "https://github.com/softmaple/softmaple/packages/ui"
   },
   "keywords": [
     "react-hooks",

@@ -26,7 +26,7 @@ export const Header: FC<HeaderProps> = ({ children }) => {
         SoftMaple
       </Link>
       <Link
-        href="https://github.com/softmaple/"
+        href="https://github.com/softmaple/softmaple"
         underline="none"
         target="_blank"
         rel="noreferrer"

@@ -1,46 +1,47 @@
 // @ts-check
 // Note: type annotations allow type checking and IDEs autocompletion
 
-const lightCodeTheme = require('prism-react-renderer/themes/github');
-const darkCodeTheme = require('prism-react-renderer/themes/dracula');
+const lightCodeTheme = require("prism-react-renderer/themes/github");
+const darkCodeTheme = require("prism-react-renderer/themes/dracula");
 
 // vercel apps
-const mainSiteUrl = 'https://docs.softmaple.xyz/';
-const editorPageUrl = 'https://softmaple.xyz';
-const insightsPageUrl = 'https://insights.softmaple.xyz/';
+const mainSiteUrl = "https://docs.softmaple.xyz/";
+const editorPageUrl = "https://softmaple.xyz";
+const insightsPageUrl = "https://insights.softmaple.xyz/";
 // additional pages
-const blogPageUrl = 'https://blog.softmaple.xyz/';
+const blogPageUrl = "https://blog.softmaple.xyz/";
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'SoftMaple',
-  tagline: 'It\'s cool',
+  title: "SoftMaple",
+  tagline: "It's cool",
   url: mainSiteUrl,
-  baseUrl: '/',
-  onBrokenLinks: 'throw',
-  onBrokenMarkdownLinks: 'warn',
-  favicon: 'img/favicon.ico',
-  organizationName: 'SoftMaple', // Usually your GitHub org/user name.
-  projectName: 'docs', // Usually your repo name.
+  baseUrl: "/",
+  onBrokenLinks: "throw",
+  onBrokenMarkdownLinks: "warn",
+  favicon: "img/favicon.ico",
+  organizationName: "SoftMaple", // Usually your GitHub org/user name.
+  projectName: "docs", // Usually your repo name.
 
   presets: [
     [
-      'classic',
+      "classic",
       /** @type {import('@docusaurus/preset-classic').Options} */
       ({
         docs: {
-          sidebarPath: require.resolve('./sidebars.js'),
+          sidebarPath: require.resolve("./sidebars.js"),
           // Please change this to your repo.
-          editUrl: 'https://github.com/SoftMaple/docs/edit/main/',
+          editUrl:
+            "https://github.com/softmaple/softmaple/apps/docs/edit/main/",
         },
         blog: {
           showReadingTime: true,
           // Please change this to your repo.
           editUrl:
-            'https://github.com/SoftMaple/docs/edit/main/',
+            "https://github.com/softmaple/softmaple/apps/docs/edit/main/",
         },
         theme: {
-          customCss: require.resolve('./src/css/custom.css'),
+          customCss: require.resolve("./src/css/custom.css"),
         },
       }),
     ],
@@ -50,11 +51,11 @@ const config = {
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
       announcementBar: {
-        id: 'announcementBar-2', // Increment on change
-        content: `Try it <a target="_blank" rel="noopener noreferrer" href=${editorPageUrl}>now</a>!&nbsp;⭐️ If you like SoftMaple, give it a star on <a target="_blank" rel="noopener noreferrer" href="https://github.com/SoftMaple/Editor">GitHub</a>.`,
+        id: "announcementBar-2", // Increment on change
+        content: `Try it <a target="_blank" rel="noopener noreferrer" href=${editorPageUrl}>now</a>!&nbsp;⭐️ If you like SoftMaple, give it a star on <a target="_blank" rel="noopener noreferrer" href="https://github.com/softmaple/softmaple">GitHub</a>.`,
       },
       navbar: {
-        title: 'SoftMaple',
+        title: "SoftMaple",
         // logo: {
         //   alt: 'SoftMaple Logo',
         //   src: 'img/logo.svg',
@@ -66,66 +67,67 @@ const config = {
             label: "Docs",
             position: "left",
           },
-          {to: '/blog', label: 'Blog', position: 'left'},
+          { to: "/blog", label: "Blog", position: "left" },
           {
             href: insightsPageUrl,
-            label: 'Insights',
-            position: 'left',
+            label: "Insights",
+            position: "left",
           },
           {
-            href: 'https://github.com/SoftMaple/docs',
-            position: 'right',
-            className: 'header-github-link',
+            href: "https://github.com/softmaple/softmaple",
+            position: "right",
+            className: "header-github-link",
             "aria-label": "GitHub repository",
           },
         ],
       },
       footer: {
-        style: 'dark',
+        style: "dark",
         links: [
           {
-            title: 'Docs',
+            title: "Docs",
             items: [
               {
-                label: 'Get Started',
-                to: '/docs/get-started',
+                label: "Get Started",
+                to: "/docs/get-started",
               },
             ],
           },
           {
-            title: 'Community',
+            title: "Community",
             items: [
               {
-                label: 'Discord',
-                href: 'https://discord.gg/Vwsuqq7dQD',
+                label: "Discord",
+                href: "https://discord.gg/Vwsuqq7dQD",
               },
               {
-                label: 'Twitter',
-                href: 'https://twitter.com/Tom61319231',
+                label: "Twitter",
+                href: "https://twitter.com/Tom61319231",
               },
             ],
           },
           {
-            title: 'More',
+            title: "More",
             items: [
               {
-                label: 'Blog',
-                to: '/blog',
+                label: "Blog",
+                to: "/blog",
               },
               {
-                label: 'GitHub',
-                href: 'https://github.com/SoftMaple/docs',
+                label: "GitHub",
+                href: "https://github.com/softmaple/softmaple",
               },
               {
-                label: 'Hashnode',
+                label: "Hashnode",
                 href: blogPageUrl,
-              }
+              },
             ],
           },
           {
-            title: 'Acknowledgements',
+            title: "Acknowledgements",
             items: [
-              {html: `
+              {
+                html: `
               <a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">
                 <img
                   alt="Powered by Vercel"
@@ -133,10 +135,10 @@ const config = {
                   height="32"
                   src="https://ik.imagekit.io/1winv85cn8g/SoftMaple/powered-by-vercel_7qHjyIz41.svg"
                 />
-              </a>`
-             }
-            ]
-          }
+              </a>`,
+              },
+            ],
+          },
         ],
         copyright: `Copyright © ${new Date().getFullYear()} SoftMaple, Inc. Built with Docusaurus.`,
       },
@@ -148,7 +150,7 @@ const config = {
 
   customFields: {
     editorPageUrl,
-  }
+  },
 };
 
 module.exports = config;

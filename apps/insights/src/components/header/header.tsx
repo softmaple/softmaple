@@ -35,7 +35,7 @@ export const Header: FC<HeaderProps> = ({ children }) => {
         Splitbee
       </Link>
       <Link
-        href="https://github.com/SoftMaple/dashboard"
+        href="https://github.com/softmaple/softmaple"
         underline="none"
         target="_blank"
         rel="noreferrer"

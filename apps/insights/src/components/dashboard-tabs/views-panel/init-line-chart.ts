@@ -43,7 +43,7 @@ export const initLineChart = (
       left: "center",
       text: RepoType.EDITOR,
       backgroundColor: "rgb(223,157,131)",
-      link: "https://github.com/SoftMaple/Editor/",
+      link: "https://github.com/softmaple/softmaple/",
     },
     xAxis: {
       type: "category",

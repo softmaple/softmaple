@@ -42,7 +42,7 @@ See more details at here: https://draftjs.org/docs/advanced-topics-issues-and-pi
 - apps
   - [docs](apps/docs) - built with [Docusaurus 2](https://github.com/facebook/docusaurus)
   - [Editor](apps/editor) (**core**) - Next.js with [Draftjs](https://github.com/facebook/draft-js)
-  - [dashboard](apps/dashboard) - Next.js with [Echarts](https://github.com/apache/echarts)
+  - [insights](apps/insights) - Next.js with [Echarts](https://github.com/apache/echarts)
 
 - packages
   - [config](packages/config) - Shared configuration (ESLint)

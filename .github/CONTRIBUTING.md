@@ -2,7 +2,7 @@
 
 First off, thanks for taking the time to contribute!
 
-The following is a set of guidelines for contributing to SoftMaple and its repos, which are hosted in the [SoftMaple Organization](https://github.com/SoftMaple) on GitHub. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
+The following is a set of guidelines for contributing to SoftMaple and its repos, which are hosted in the [SoftMaple Organization](https://github.com/softMaple) on GitHub. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
 #### Table Of Contents
 
@@ -55,6 +55,10 @@ All JavaScript code is linted with [Prettier](https://prettier.io/).
 
 There are 2 ways to submit a PR, the normal is **Fork the repo** and another is **to be the collaborator**.
 
-If you forked the repo and submit a PR, there is no branch name limitaion, otherwise, please use this convention: <your-github-username>-editor-issue-<issue-number>, for example, `yadong-editor-issue-60`.
+If you forked the repo and submit a PR, there is no branch name limitaion, otherwise, please use this convention: 
+```bash
+<username>-<app>-issue-<issue-number>
+```
+for example, `yadong-editor-issue-60`.
 
 **Whatever you contributed, if the PR is merged, I will invite you as the repo collaborator.**

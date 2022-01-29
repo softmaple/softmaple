@@ -5,7 +5,7 @@
           "^build"
         ],
         "outputs": [
-          "dist/**",
+          "build/**",
           ".next/**"
         ]
       },

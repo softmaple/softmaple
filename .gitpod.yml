@@ -1,7 +1,7 @@
 tasks:
   - before: npm install -g pnpm
     init: pnpm install
-    command: pnpm dev
+    command: cd apps/editor && pnpm dev
 ports:
   - port: 3000
     onOpen: open-preview

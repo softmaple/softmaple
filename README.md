@@ -40,14 +40,14 @@ See more details at here: https://draftjs.org/docs/advanced-topics-issues-and-pi
 ![architecture](https://ik.imagekit.io/1winv85cn8g/SoftMaple/architecture_cGG0IZjLN.png)
 
 - apps
-  - [docs](https://github.com/softmaple/softmaple/apps/docs) - built with [Docusaurus 2](https://github.com/facebook/docusaurus)
-  - [Editor](https://github.com/softmaple/softmaple/apps/editor) (**core**) - Next.js with [Draftjs](https://github.com/facebook/draft-js)
-  - [dashboard](https://github.com/softmaple/softmaple/apps/dashboard) - Next.js with [Echarts](https://github.com/apache/echarts)
+  - [docs](apps/docs) - built with [Docusaurus 2](https://github.com/facebook/docusaurus)
+  - [Editor](apps/editor) (**core**) - Next.js with [Draftjs](https://github.com/facebook/draft-js)
+  - [dashboard](apps/dashboard) - Next.js with [Echarts](https://github.com/apache/echarts)
 
 - packages
-  - [config](https://github.com/softmaple/softmaple/packages/config) - Shared configuration (ESLint)
-  - [tsconfig](https://github.com/softmaple/softmaple/packages/tsconfig) - Shared TypeScript `tsconfig.json`
-  - [ui](https://github.com/softmaple/softmaple/packages/ui) - Shared React component library
+  - [config](packages/config) - Shared configuration (ESLint)
+  - [tsconfig](packages/tsconfig) - Shared TypeScript `tsconfig.json`
+  - [ui](packages/ui) - Shared React component library
 
 We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation. 
 

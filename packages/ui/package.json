@@ -4,9 +4,7 @@
   "description": "components library for softmaple apps.",
   "main": "index.tsx",
   "types": "index.tsx",
-  "scripts": {
-    "lint": ""
-  },
+  "scripts": {},
   "repository": {
     "type": "git",
     "url": "https://github.com/softmaple/packages/ui"

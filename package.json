@@ -29,6 +29,7 @@
   "author": "Yadong Zhang",
   "license": "Apache-2.0",
   "devDependencies": {
+    "eslint": "8.4.1",
     "husky": "^7.0.4",
     "lint-staged": "^12.1.2",
     "turbo": "^1.1.1"

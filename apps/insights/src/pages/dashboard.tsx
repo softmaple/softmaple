@@ -1,9 +1,8 @@
 import { useState } from "react";
 import type { GetServerSideProps } from "next";
+import type { PaletteMode } from "@mui/material";
 import type { Clone, View } from "@/types";
-import { Layout } from "@/components/layout";
-import { Header } from "@/components/header";
-import { SwitchUIButton } from "@/components/switch-ui-button";
+import { Layout, Header, Palette } from "ui";
 import { DashboardTabs } from "@/components/dashboard-tabs";
 import { Footer } from "@/components/footer";
 
@@ -18,7 +17,7 @@ type DashboardProps = {
 };
 
 export default function Dashboard({ data, error }: DashboardProps) {
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
+  const [mode, setMode] = useState<PaletteMode>("light");
 
   if (error) {
     return <div>Something wrong when fetching data...</div>;
@@ -27,12 +26,12 @@ export default function Dashboard({ data, error }: DashboardProps) {
   const { clones, views } = data;
 
   return (
-    <Layout isDarkMode={isDarkMode}>
-      <Header>
-        <SwitchUIButton isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
+    <Layout mode={mode}>
+      <Header showAnalytics={true}>
+        <Palette mode={mode} setMode={setMode} />
       </Header>
-      <DashboardTabs clones={clones} views={views} isDarkMode={isDarkMode} />
-      <Footer isDarkMode={isDarkMode} />
+      <DashboardTabs clones={clones} views={views} mode={mode} />
+      <Footer mode={mode} />
     </Layout>
   );
 }

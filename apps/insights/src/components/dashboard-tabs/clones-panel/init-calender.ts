@@ -40,9 +40,9 @@ type EChartsOption = echarts.ComposeOption<
  */
 export const initCalendar = (
   chartDom: HTMLDivElement,
-  { clones, isDarkMode }: ClonesPanelProps
+  { clones, mode }: ClonesPanelProps
 ) => {
-  const myChart = echarts.init(chartDom, isDarkMode ? "dark" : "light");
+  const myChart = echarts.init(chartDom, mode);
 
   const editorData = clones.filter((clone) => clone.name === RepoType.EDITOR);
 

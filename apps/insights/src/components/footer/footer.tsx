@@ -1,14 +1,20 @@
 import React, { FC } from "react";
+import type { PaletteMode } from "@mui/material";
 import Image from "next/image";
 import { FooterContainer, VercelBanner } from "./footer.style";
-import LightVercelBanner from "../../../public/assets/vercel/light/powered-by-vercel.svg";
-import DarkVercelBanner from "../../../public/assets/vercel/dark/powered-by-vercel.svg";
 
 type FooterProps = {
-  isDarkMode: boolean;
+  mode: PaletteMode;
 };
 
-export const Footer: FC<FooterProps> = ({ isDarkMode }) => {
+const banners = {
+  dark: "/assets/vercel/dark/powered-by-vercel.svg",
+  light: "/assets/vercel/light/powered-by-vercel.svg",
+};
+
+export const Footer: FC<FooterProps> = ({ mode }) => {
+  const bannerSrc = banners[mode];
+
   return (
     <FooterContainer>
       <VercelBanner>
@@ -19,8 +25,9 @@ export const Footer: FC<FooterProps> = ({ isDarkMode }) => {
           style={{ marginLeft: "1.125rem" }}
         >
           <Image
-            src={isDarkMode ? DarkVercelBanner : LightVercelBanner}
+            src={bannerSrc}
             alt="Powered by Vercel"
+            width="212"
             height="32"
           />
         </a>

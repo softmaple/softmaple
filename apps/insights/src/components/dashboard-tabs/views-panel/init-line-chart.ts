@@ -32,9 +32,9 @@ type EChartsOption = echarts.ComposeOption<
 
 export const initLineChart = (
   chartDom: HTMLDivElement,
-  { views, isDarkMode }: ViewsPanelProps
+  { views, mode }: ViewsPanelProps
 ) => {
-  const myChart = echarts.init(chartDom, isDarkMode ? "dark" : "light");
+  const myChart = echarts.init(chartDom, mode);
 
   const editorData = views.filter((view) => view.name === RepoType.EDITOR);
 

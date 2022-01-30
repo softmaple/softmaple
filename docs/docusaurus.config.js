@@ -31,15 +31,15 @@ const config = {
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
           // Please change this to your repo.
-          editUrl: ({ docPath }) => {
-            return `https://github.com/softmaple/softmaple/edit/main/docs/${docPath}`;
+          editUrl: ({ versionDocsDirPath, docPath }) => {
+            return `https://github.com/softmaple/softmaple/edit/main/docs/${versionDocsDirPath}/${docPath}`;
           },
         },
         blog: {
           showReadingTime: true,
           // Please change this to your repo.
-          editUrl: ({ blogPath }) => {
-            return `https://github.com/softmaple/softmaple/edit/main/blog/${blogPath}`;
+          editUrl: ({ blogDirPath, blogPath }) => {
+            return `https://github.com/softmaple/softmaple/edit/main/docs/${blogDirPath}/${blogPath}`;
           },
         },
         theme: {

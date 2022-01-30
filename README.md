@@ -37,7 +37,7 @@ See more details at here: https://draftjs.org/docs/advanced-topics-issues-and-pi
 
 [Turborepo](https://turborepo.org/) Architecture:
 
-![architecture](https://ik.imagekit.io/1winv85cn8g/SoftMaple/architecture_cGG0IZjLN.png)
+![architecture](https://ik.imagekit.io/1winv85cn8g/SoftMaple/turborepo-dev_Ck0RLxMI0.png)
 
 - apps
   - [docs](apps/docs) - built with [Docusaurus 2](https://github.com/facebook/docusaurus)
@@ -61,7 +61,7 @@ pnpm dev
 
   ```bash
   git clone --no-checkout https://github.com/softmaple/softmaple
-  cd softmaple-clone
+  cd softmaple
   git sparse-checkout init --cone --sparse-index
   git sparse-checkout set apps/editor packages
   git checkout main

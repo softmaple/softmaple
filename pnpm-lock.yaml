@@ -7,39 +7,14 @@ importers:
       eslint: 8.4.1
       husky: ^7.0.4
       lint-staged: ^12.1.2
+      prettier: 2.5.1
       turbo: ^1.1.1
     devDependencies:
       eslint: 8.4.1
       husky: 7.0.4
       lint-staged: 12.3.2
+      prettier: 2.5.1
       turbo: 1.1.1
-
-  apps/docs:
-    specifiers:
-      '@docusaurus/core': 2.0.0-beta.14
-      '@docusaurus/module-type-aliases': 2.0.0-beta.14
-      '@docusaurus/preset-classic': 2.0.0-beta.14
-      '@docusaurus/theme-classic': ^2.0.0-beta.14
-      '@mdx-js/react': ^1.6.21
-      '@tsconfig/docusaurus': ^1.0.4
-      clsx: ^1.1.1
-      prism-react-renderer: ^1.2.1
-      react: ^17.0.1
-      react-dom: ^17.0.1
-      typescript: ^4.5.2
-    dependencies:
-      '@docusaurus/core': 2.0.0-beta.14_7449e52f4ade92096bf67a0a21d09317
-      '@docusaurus/preset-classic': 2.0.0-beta.14_36c5ae272bdb0dab41c831b6e79a99bd
-      '@docusaurus/theme-classic': 2.0.0-beta.15_7449e52f4ade92096bf67a0a21d09317
-      '@mdx-js/react': 1.6.22_react@17.0.2
-      clsx: 1.1.1
-      prism-react-renderer: 1.2.1_react@17.0.2
-      react: 17.0.2
-      react-dom: 17.0.2_react@17.0.2
-    devDependencies:
-      '@docusaurus/module-type-aliases': 2.0.0-beta.14
-      '@tsconfig/docusaurus': 1.0.4
-      typescript: 4.5.5
 
   apps/editor:
     specifiers:
@@ -147,6 +122,33 @@ importers:
       eslint: 8.4.1
       prettier: 2.5.1
       tsconfig: link:../../packages/tsconfig
+      typescript: 4.5.5
+
+  docs:
+    specifiers:
+      '@docusaurus/core': 2.0.0-beta.14
+      '@docusaurus/module-type-aliases': 2.0.0-beta.14
+      '@docusaurus/preset-classic': 2.0.0-beta.14
+      '@docusaurus/theme-classic': ^2.0.0-beta.14
+      '@mdx-js/react': ^1.6.21
+      '@tsconfig/docusaurus': ^1.0.4
+      clsx: ^1.1.1
+      prism-react-renderer: ^1.2.1
+      react: ^17.0.1
+      react-dom: ^17.0.1
+      typescript: ^4.5.2
+    dependencies:
+      '@docusaurus/core': 2.0.0-beta.14_7449e52f4ade92096bf67a0a21d09317
+      '@docusaurus/preset-classic': 2.0.0-beta.14_36c5ae272bdb0dab41c831b6e79a99bd
+      '@docusaurus/theme-classic': 2.0.0-beta.15_7449e52f4ade92096bf67a0a21d09317
+      '@mdx-js/react': 1.6.22_react@17.0.2
+      clsx: 1.1.1
+      prism-react-renderer: 1.2.1_react@17.0.2
+      react: 17.0.2
+      react-dom: 17.0.2_react@17.0.2
+    devDependencies:
+      '@docusaurus/module-type-aliases': 2.0.0-beta.14
+      '@tsconfig/docusaurus': 1.0.4
       typescript: 4.5.5
 
   packages/config:
@@ -765,7 +767,7 @@ packages:
       '@babel/core': ^7.0.0-0
     dependencies:
       '@babel/core': 7.12.9
-      '@babel/helper-plugin-utils': 7.10.4
+      '@babel/helper-plugin-utils': 7.16.7
       '@babel/plugin-syntax-object-rest-spread': 7.8.3_@babel+core@7.12.9
       '@babel/plugin-transform-parameters': 7.16.7_@babel+core@7.12.9
     dev: false

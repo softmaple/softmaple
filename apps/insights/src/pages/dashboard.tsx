@@ -2,9 +2,8 @@ import { useState } from "react";
 import type { GetServerSideProps } from "next";
 import type { PaletteMode } from "@mui/material";
 import type { Clone, View } from "@/types";
-import { Layout, Header, Palette } from "ui";
+import { Layout, Header, Palette, Footer } from "ui";
 import { DashboardTabs } from "@/components/dashboard-tabs";
-import { Footer } from "@/components/footer";
 
 type Data = {
   clones: Clone[];
@@ -14,6 +13,11 @@ type Data = {
 type DashboardProps = {
   data: Data;
   error: null | {};
+};
+
+const banners = {
+  dark: "/assets/vercel/dark/powered-by-vercel.svg",
+  light: "/assets/vercel/light/powered-by-vercel.svg",
 };
 
 export default function Dashboard({ data, error }: DashboardProps) {
@@ -31,7 +35,7 @@ export default function Dashboard({ data, error }: DashboardProps) {
         <Palette mode={mode} setMode={setMode} />
       </Header>
       <DashboardTabs clones={clones} views={views} mode={mode} />
-      <Footer mode={mode} />
+      <Footer banners={banners} mode={mode} />
     </Layout>
   );
 }

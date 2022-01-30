@@ -11,9 +11,13 @@ const StyledHeader = styled.div`
 
 type HeaderProps = {
   children: React.ReactNode;
+  showAnalytics?: boolean;
 };
 
-export const Header: FC<HeaderProps> = ({ children }) => {
+export const Header: FC<HeaderProps> = ({
+  children,
+  showAnalytics = false,
+}) => {
   return (
     <StyledHeader>
       <Link
@@ -25,6 +29,17 @@ export const Header: FC<HeaderProps> = ({ children }) => {
       >
         SoftMaple
       </Link>
+      {showAnalytics && (
+        <Link
+          href="https://app.splitbee.io/public/softmaple.xyz"
+          underline="none"
+          target="_blank"
+          rel="noreferrer"
+          sx={{ marginRight: "1rem" }}
+        >
+          Splitbee
+        </Link>
+      )}
       <Link
         href="https://github.com/softmaple/softmaple"
         underline="none"

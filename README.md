@@ -38,9 +38,10 @@ See more details at here: https://draftjs.org/docs/advanced-topics-issues-and-pi
 [Turborepo](https://turborepo.org/) Architecture:
 
 ![architecture](https://ik.imagekit.io/1winv85cn8g/SoftMaple/turborepo-dev_Ck0RLxMI0.png)
+ 
+- [docs](apps/docs) - built with [Docusaurus 2](https://github.com/facebook/docusaurus)
 
 - apps
-  - [docs](apps/docs) - built with [Docusaurus 2](https://github.com/facebook/docusaurus)
   - [Editor](apps/editor) (**core**) - Next.js with [Draftjs](https://github.com/facebook/draft-js)
   - [insights](apps/insights) - Next.js with [Echarts](https://github.com/apache/echarts)
 

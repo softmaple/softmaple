@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { convertFromRaw, EditorState } from "draft-js";
 import styled from "@emotion/styled";
+import Image from "next/image";
 import type { PaletteMode } from "@mui/material";
 import Alert from "@mui/material/Alert";
 import { Header, Layout, Palette, Footer } from "ui";
@@ -11,6 +12,11 @@ const banners = {
   dark: "/assets/vercel/dark/powered-by-vercel.svg",
   light: "/assets/vercel/light/powered-by-vercel.svg",
 };
+
+const VercelBanner = styled.div`
+  display: flex;
+  justify-content: flex-start;
+`;
 
 /**
  * Main Layout: (Grid)
@@ -61,6 +67,8 @@ export const SoftMapleEditor = () => {
     EditorState.createWithContent(emptyContentState)
   );
 
+  const bannerSrc = banners[mode];
+
   useEffect(() => {
     const history = localStorage.getItem("rawContent");
     const rawContent = JSON.parse(history);
@@ -90,7 +98,24 @@ export const SoftMapleEditor = () => {
           setShowAlert={setShowAlert}
         />
       </MainLayout>
-      <Footer banners={banners} mode={mode} />
+
+      <Footer>
+        <VercelBanner>
+          <a
+            target="_blank"
+            rel="noopener noreferrer"
+            href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss"
+            style={{ marginLeft: "1.125rem" }}
+          >
+            <Image
+              src={bannerSrc}
+              alt="Powered by Vercel"
+              width="212"
+              height="32"
+            />
+          </a>
+        </VercelBanner>
+      </Footer>
     </Layout>
   );
 };

@@ -6,8 +6,3 @@ export const FooterContainer = styled.footer`
   position: absolute;
   bottom: 0;
 `;
-
-export const VercelBanner = styled.div`
-  display: flex;
-  justify-content: flex-start;
-`;

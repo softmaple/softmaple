@@ -3,10 +3,14 @@ import { convertFromRaw, EditorState } from "draft-js";
 import styled from "@emotion/styled";
 import type { PaletteMode } from "@mui/material";
 import Alert from "@mui/material/Alert";
-import { Header, Layout, Palette } from "ui";
+import { Header, Layout, Palette, Footer } from "ui";
 import { EditorPanel } from "./editor-panel";
 import { PreviewPanel } from "./preview-panel";
-import { Footer } from "./footer";
+
+const banners = {
+  dark: "/assets/vercel/dark/powered-by-vercel.svg",
+  light: "/assets/vercel/light/powered-by-vercel.svg",
+};
 
 /**
  * Main Layout: (Grid)
@@ -24,11 +28,12 @@ import { Footer } from "./footer";
  * ----------------|   |------------------
  */
 const MainLayout = styled.div`
-  margin: 0.5rem 3.125em;
+  position: absolute;
+  inset: 48px 20px;
   display: grid;
   grid-gap: 1rem;
   grid-template-columns: repeat(2, [col] calc(50% - 10px));
-  grid-template-rows: 40px 80vh;
+  grid-template-rows: 40px auto;
 `;
 
 /**
@@ -85,7 +90,7 @@ export const SoftMapleEditor = () => {
           setShowAlert={setShowAlert}
         />
       </MainLayout>
-      <Footer mode={mode} />
+      <Footer banners={banners} mode={mode} />
     </Layout>
   );
 };

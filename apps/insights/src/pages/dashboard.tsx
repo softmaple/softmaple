@@ -5,6 +5,11 @@ import type { Clone, View } from "@/types";
 import { Layout, Header, Palette, Footer } from "ui";
 import { DashboardTabs } from "@/components/dashboard-tabs";
 
+const banners = {
+  dark: "/assets/vercel/dark/powered-by-vercel.svg",
+  light: "/assets/vercel/light/powered-by-vercel.svg",
+};
+
 type Data = {
   clones: Clone[];
   views: View[];
@@ -13,11 +18,6 @@ type Data = {
 type DashboardProps = {
   data: Data;
   error: null | {};
-};
-
-const banners = {
-  dark: "/assets/vercel/dark/powered-by-vercel.svg",
-  light: "/assets/vercel/light/powered-by-vercel.svg",
 };
 
 export default function Dashboard({ data, error }: DashboardProps) {

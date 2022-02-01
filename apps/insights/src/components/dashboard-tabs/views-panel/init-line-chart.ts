@@ -36,8 +36,6 @@ export const initLineChart = (
 ) => {
   const myChart = echarts.init(chartDom, mode);
 
-  const editorData = views.filter((view) => view.name === RepoType.EDITOR);
-
   const option: EChartsOption = {
     title: {
       left: "center",
@@ -53,7 +51,7 @@ export const initLineChart = (
     },
     series: {
       type: "line",
-      data: getChartsData(editorData),
+      data: getChartsData(views),
     },
     tooltip: {},
   };

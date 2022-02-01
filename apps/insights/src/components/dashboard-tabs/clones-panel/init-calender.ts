@@ -44,9 +44,7 @@ export const initCalendar = (
 ) => {
   const myChart = echarts.init(chartDom, mode);
 
-  const editorData = clones.filter((clone) => clone.name === RepoType.EDITOR);
-
-  const max = Math.max(...editorData.map((clone) => clone.count));
+  const max = Math.max(...clones.map((clone) => clone.count));
 
   /**
    * the default color from echarts is good (maple leaf color)
@@ -78,7 +76,7 @@ export const initCalendar = (
       {
         type: "heatmap",
         coordinateSystem: "calendar",
-        data: getChartsData(editorData),
+        data: getChartsData(clones),
       },
     ],
   };

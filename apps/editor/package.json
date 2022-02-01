@@ -12,7 +12,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint --no-cache",
-    "prettier": "prettier --write src/**/*.{ts,tsx}"
+    "prettier": "prettier --write src/**/*.{ts,tsx}",
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "@emotion/react": "^11.7.1",

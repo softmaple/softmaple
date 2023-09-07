@@ -68,7 +68,7 @@ export const initCalendar = (
     },
     calendar: [
       {
-        range: ["2021-12-25", "2022-12-31"],
+        range: ["2021-12-25", "2023-12-31"],
         cellSize: ["auto", 10],
       },
     ],

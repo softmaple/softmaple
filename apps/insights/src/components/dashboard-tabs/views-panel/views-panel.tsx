@@ -9,7 +9,7 @@ export type ViewsPanelProps = {
   mode: PaletteMode;
 };
 
-export const ViewsPanel: FC<ViewsPanelProps> = ({ views, mode }) => {
+export const ViewsPanel: FC<ViewsPanelProps> = ({ views = [], mode }) => {
   const lightWrapperRef = useRef<HTMLDivElement | null>(null);
   const darkWrapperRef = useRef<HTMLDivElement | null>(null);
 

@@ -9,7 +9,7 @@ export type ClonesPanelProps = {
   mode: PaletteMode;
 };
 
-export const ClonesPanel: FC<ClonesPanelProps> = ({ clones, mode }) => {
+export const ClonesPanel: FC<ClonesPanelProps> = ({ clones = [], mode }) => {
   const lightWrapperRef = useRef<HTMLDivElement | null>(null);
   const darkWrapperRef = useRef<HTMLDivElement | null>(null);
 

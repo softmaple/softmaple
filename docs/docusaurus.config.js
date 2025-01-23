@@ -4,12 +4,12 @@
 const lightCodeTheme = require("prism-react-renderer/themes/github");
 const darkCodeTheme = require("prism-react-renderer/themes/dracula");
 
-// vercel apps
-const mainSiteUrl = "https://docs.softmaple.xyz/";
-const editorPageUrl = "https://softmaple.xyz";
-const insightsPageUrl = "https://insights.softmaple.xyz/";
+// Netlify apps
+const mainSiteUrl = "https://docs.softmaple.ink/";
+const editorPageUrl = "https://softmaple.ink";
+const insightsPageUrl = "https://insights.softmaple.ink/";
 // additional pages
-const blogPageUrl = "https://blog.softmaple.xyz/";
+const blogPageUrl = "https://blog.softmaple.ink/";
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -130,14 +130,7 @@ const config = {
             items: [
               {
                 html: `
-              <a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">
-                <img
-                  alt="Powered by Vercel"
-                  style="margin-top: 8px"
-                  height="32"
-                  src="https://ik.imagekit.io/1winv85cn8g/SoftMaple/powered-by-vercel_7qHjyIz41.svg"
-                />
-              </a>`,
+              <a href="https://www.netlify.com"> <img src="https://www.netlify.com/v3/img/components/netlify-color-accent.svg" alt="Deploys by Netlify" /> </a>`,
               },
             ],
           },

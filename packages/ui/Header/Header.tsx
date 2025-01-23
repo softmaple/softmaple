@@ -21,7 +21,7 @@ export const Header: FC<HeaderProps> = ({
   return (
     <StyledHeader>
       <Link
-        href="https://docs.softmaple.xyz/"
+        href="https://docs.softmaple.ink/"
         underline="none"
         target="_blank"
         rel="noreferrer"

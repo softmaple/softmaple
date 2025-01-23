@@ -16,7 +16,7 @@
 
 # Documentation
 
-For details, check out our [documentation](https://docs.softmaple.xyz/).
+For details, check out our [documentation](https://docs.softmaple.ink/).
 
 # Features
 

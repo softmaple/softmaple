@@ -12,8 +12,6 @@
 
 <a href="https://www.producthunt.com/posts/softmaple-editor?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-softmaple-editor" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=325437&theme=light" alt="SoftMaple Editor - Write papers like MS Word and generate LaTeX for typesetting | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
-<a href="https://www.netlify.com"> <img src="https://www.netlify.com/v3/img/components/netlify-color-accent.svg" alt="Deploys by Netlify" /> </a>
-
 # Documentation
 
 For details, check out our [documentation](https://docs.softmaple.ink/).
@@ -81,14 +79,14 @@ See [Contributing Guidelines](.github/CONTRIBUTING.md).
 
 [Apache-2.0 License](LICENSE)
 
-<!-- # Special thanks
+# Special thanks
 
-<a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">
-  <img
-    alt="Vercel LogoType"
-    src="https://ik.imagekit.io/1winv85cn8g/SoftMaple/vercel-logotype-dark_ZltQxSHTE.png"
-    height="48"
-  />
-</a> -->
+<div style="display: flex; gap: 2px; align-item: center">
+<a href="https://www.netlify.com?utm_source=SoftMaple&utm_campaign=oss"> <img src="https://www.netlify.com/v3/img/components/netlify-color-accent.svg" alt="Deploys by Netlify" /> </a>
 
-<!-- <a target="_blank" rel="noopener noreferrer" href="https://vercel.com?utm_source=SoftMaple&utm_campaign=oss">Vercel</a> supports us with [**Pro plan** for open source](https://vercel.com/support/articles/can-vercel-sponsor-my-open-source-project). -->
+<div style="padding: 8px">
+<a href="https://b">
+  <img src="https://d2ogrdw2mh0rsl.cloudfront.net/production/images/static/header/header-logo.svg" alt="BrowserStack" style="background: #142433" />
+</a>
+</div>
+</div>

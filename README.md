@@ -81,12 +81,6 @@ See [Contributing Guidelines](.github/CONTRIBUTING.md).
 
 # Special thanks
 
-<div style="display: flex; gap: 2px; align-item: center">
-<a href="https://www.netlify.com?utm_source=SoftMaple&utm_campaign=oss"> <img src="https://www.netlify.com/v3/img/components/netlify-color-accent.svg" alt="Deploys by Netlify" /> </a>
+[![Deploys by Netlify](https://www.netlify.com/v3/img/components/netlify-color-accent.svg)](https://www.netlify.com?utm_source=SoftMaple&utm_campaign=oss)
 
-<div style="padding: 8px">
-<a href="https://b">
-  <img src="https://d2ogrdw2mh0rsl.cloudfront.net/production/images/static/header/header-logo.svg" alt="BrowserStack" style="background: #142433" />
-</a>
-</div>
-</div>
+[![BrowserStack](https://d2ogrdw2mh0rsl.cloudfront.net/production/images/static/header/header-logo.svg)](https://www.browserstack.com/)

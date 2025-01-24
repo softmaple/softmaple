@@ -1,4 +1,4 @@
-> For old version, please check out the repo: [Eorg](https://github.com/zhyd1997/Eorg).
+> For the old version, please check out the repo: [Eorg](https://github.com/zhyd1997/Eorg).
 
 ![logo](https://ik.imagekit.io/1winv85cn8g/SoftMaple/logo.png)
 
@@ -12,6 +12,16 @@
 
 <a href="https://www.producthunt.com/posts/softmaple-editor?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-softmaple-editor" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=325437&theme=light" alt="SoftMaple Editor - Write papers like MS Word and generate LaTeX for typesetting | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
+## Star History
+
+<a href="https://star-history.com/#softmaple/softmaple&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=softmaple/softmaple&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=softmaple/softmaple&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=softmaple/softmaple&type=Date" />
+ </picture>
+</a>
+
 # Documentation
 
 For details, check out our [documentation](https://docs.softmaple.ink/).
@@ -24,7 +34,7 @@ Using [draftjs-to-latex](https://github.com/zhyd1997/draftjs-to-latex) for gener
 
 # Issues and Pitfalls
 
-See more details at here: https://draftjs.org/docs/advanced-topics-issues-and-pitfalls
+See more details here: https://draftjs.org/docs/advanced-topics-issues-and-pitfalls
 
 # Development
 

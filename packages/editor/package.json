@@ -1,6 +1,6 @@
 {
-  "name": "@softmaple/core",
-  "version": "0.0.0",
+  "name": "@softmaple/editor",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,12 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@lexical/react": "^0.31.1",
     "@radix-ui/react-slot": "^1.2.2",
     "@tailwindcss/vite": "^4.1.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^1.2.1",
+    "lexical": "^0.31.1",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

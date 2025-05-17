@@ -5,6 +5,7 @@ import { Page } from "./Page";
 
 const meta: Meta<typeof Page> = {
   title: "Example/Page",
+  // @ts-expect-error why?
   component: Page,
   parameters: {
     // More on Story layout: https://storybook.js.org/docs/configure/story-layout

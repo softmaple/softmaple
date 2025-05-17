@@ -33,6 +33,7 @@ export const Editor: FC<EditorProps> = () => {
       <Providers>
         <RichTextPlugin
           contentEditable={
+            // @ts-expect-error lexical type incompatible
             <ContentEditable
               aria-placeholder={"Enter some text..."}
               placeholder={<div>Enter some text...</div>}

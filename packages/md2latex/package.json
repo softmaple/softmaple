@@ -1,0 +1,21 @@
+{
+  "name": "@softmaple/md2latex",
+  "version": "0.1.0",
+  "description": "A Markdown Transformer for LaTeX",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest",
+    "coverage": "vitest run --coverage"
+  },
+  "keywords": ["markdown", "LaTeX", "transformer", "parser"],
+  "author": {
+    "name": "Yadong(Adam) Zhang",
+    "email": "zhyd007@gmail.com",
+    "url": "https://github.com/zhyd1997"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@10.10.0",
+  "devDependencies": {
+    "vitest": "^3.1.3"
+  }
+}

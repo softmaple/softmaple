@@ -1,47 +1,49 @@
+import { useState } from "react";
 import type { FC } from "react";
-import { LexicalComposer } from "@lexical/react/LexicalComposer";
-import type { InitialConfigType } from "@lexical/react/LexicalComposer";
-import { Providers } from "@/components/core/Providers.tsx";
-import type { EditorThemeClasses } from "lexical";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
+import { cn } from "@/lib/utils.ts";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin.tsx";
 
-const theme: EditorThemeClasses = {
-  // Theme styling goes here
-  //...
+type EditorProps = {
+  className?: string;
 };
 
-// Catch any errors that occur during Lexical updates and log them
-// or throw them as needed. If you don't throw them, Lexical will
-// try to recover gracefully without losing user data.
-const onError = (error: Error) => {
-  throw error;
-};
+export const Editor: FC<EditorProps> = (props) => {
+  const { className, ...rest } = props;
 
-type EditorProps = unknown;
+  const [editor] = useLexicalComposerContext();
+  const [activeEditor, setActiveEditor] = useState(editor);
 
-export const Editor: FC<EditorProps> = () => {
-  const initConfig: InitialConfigType = {
-    namespace: "Playground",
-    theme,
-    onError,
-  };
+  // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [isLinkEditMode, setIsLinkEditMode] = useState<boolean>(false);
 
   return (
-    <LexicalComposer initialConfig={initConfig}>
-      <Providers>
-        <RichTextPlugin
-          contentEditable={
-            // @ts-expect-error lexical type incompatible
-            <ContentEditable
-              aria-placeholder={"Enter some text..."}
-              placeholder={<div>Enter some text...</div>}
-            />
-          }
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-      </Providers>
-    </LexicalComposer>
+    <>
+      <ToolbarPlugin
+        editor={editor}
+        activeEditor={activeEditor}
+        setActiveEditor={setActiveEditor}
+        setIsLinkEditMode={setIsLinkEditMode}
+      />
+
+      <RichTextPlugin
+        contentEditable={
+          <div className={cn("border rounded-md", className)} {...rest}>
+            <div>
+              {/* @ts-expect-error lexical type incompatible */}
+              <ContentEditable
+                aria-placeholder={"Enter some rich text..."}
+                placeholder={<div>Enter some rich text...</div>}
+              />
+            </div>
+          </div>
+        }
+        ErrorBoundary={LexicalErrorBoundary}
+      />
+    </>
   );
 };

@@ -34,7 +34,6 @@ export const Editor: FC<EditorProps> = (props) => {
         contentEditable={
           <div className={cn("border rounded-md", className)} {...rest}>
             <div>
-              {/* @ts-expect-error lexical type incompatible */}
               <ContentEditable
                 aria-placeholder={"Enter some rich text..."}
                 placeholder={<div>Enter some rich text...</div>}

@@ -4,9 +4,17 @@ on:
   push:
     paths:
       - 'packages/md2latex/**/*.ts'
+      - 'packages/md2latex/**/*.test.ts'
+      - 'packages/md2latex/**/*.spec.ts'
+      - 'packages/md2latex/package.json'
+      - 'packages/md2latex/vitest.config.*'
   pull_request:
     paths:
       - 'packages/md2latex/**/*.ts'
+      - 'packages/md2latex/**/*.test.ts'
+      - 'packages/md2latex/**/*.spec.ts'
+      - 'packages/md2latex/package.json'
+      - 'packages/md2latex/vitest.config.*'
 
 jobs:
   cache-and-install:

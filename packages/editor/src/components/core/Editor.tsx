@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { FC } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
-import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { cn } from "@/lib/utils.ts";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin.tsx";
+import { LexicalContentEditable } from "@/components/core/LexicalContentEditable.tsx";
 
 type EditorProps = {
   className?: string;
@@ -32,12 +32,15 @@ export const Editor: FC<EditorProps> = (props) => {
 
       <RichTextPlugin
         contentEditable={
-          <div className={cn("border rounded-md", className)} {...rest}>
-            <div>
-              <ContentEditable
-                aria-placeholder={"Enter some rich text..."}
-                placeholder={<div>Enter some rich text...</div>}
-              />
+          <div
+            className={cn(
+              "min-h-38 max-w-full border-0 flex relative outline-0 z-0 resize-y",
+              className
+            )}
+            {...rest}
+          >
+            <div className="flex-auto max-w-full relative resize-y z-[-1]">
+              <LexicalContentEditable placeholder={"Enter some rich text..."} />
             </div>
           </div>
         }

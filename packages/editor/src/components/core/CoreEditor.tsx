@@ -28,7 +28,9 @@ export const CoreEditor: FC = () => {
   return (
     <LexicalComposer initialConfig={initConfig}>
       <Providers>
-        <Editor />
+        <div className="mx-12 my-auto max-w-6xl text-black relative leading-1.7 font-normal">
+          <Editor />
+        </div>
       </Providers>
     </LexicalComposer>
   );

@@ -30,22 +30,26 @@ export const Editor: FC<EditorProps> = (props) => {
         setIsLinkEditMode={setIsLinkEditMode}
       />
 
-      <RichTextPlugin
-        contentEditable={
-          <div
-            className={cn(
-              "min-h-38 max-w-full border-0 flex relative outline-0 z-0 resize-y",
-              className
-            )}
-            {...rest}
-          >
-            <div className="flex-auto max-w-full relative resize-y z-[-1]">
-              <LexicalContentEditable placeholder={"Enter some rich text..."} />
+      <div className="bg-white relative block rounded-b-[10px]">
+        <RichTextPlugin
+          contentEditable={
+            <div
+              className={cn(
+                "min-h-38 max-w-full border-0 flex relative outline-0 z-0 resize-y",
+                className
+              )}
+              {...rest}
+            >
+              <div className="flex-auto max-w-full relative resize-y z-[-1]">
+                <LexicalContentEditable
+                  placeholder={"Enter some rich text..."}
+                />
+              </div>
             </div>
-          </div>
-        }
-        ErrorBoundary={LexicalErrorBoundary}
-      />
+          }
+          ErrorBoundary={LexicalErrorBoundary}
+        />
+      </div>
     </>
   );
 };

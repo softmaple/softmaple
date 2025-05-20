@@ -1,5 +1,5 @@
 import type { FC, ReactNode } from "react";
-import { ToolbarContext } from "@/components/core/context/ToolbarContext.tsx";
+import { ToolbarContext } from "@/context/ToolbarContext.tsx";
 
 type ProvidersProps = {
   children: ReactNode;

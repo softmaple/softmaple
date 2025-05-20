@@ -5,7 +5,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select.tsx";
 import { Type } from "lucide-react";
 import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 

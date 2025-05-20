@@ -4,7 +4,7 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { cn } from "@/lib/utils.ts";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin.tsx";
+import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin/ToolbarPlugin.tsx";
 import { LexicalContentEditable } from "@/components/core/LexicalContentEditable.tsx";
 
 type EditorProps = {

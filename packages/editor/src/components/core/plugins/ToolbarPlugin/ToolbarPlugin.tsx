@@ -58,6 +58,7 @@ import { getSelectedNode } from "@/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
+import { cn } from "@/lib/utils.ts";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -67,11 +68,22 @@ type ToolbarPluginProps = {
 };
 
 export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
-  const { editor, activeEditor, setActiveEditor, setIsLinkEditMode } = props;
+  const {
+    editor,
+    activeEditor,
+    setActiveEditor,
+    // @ts-expect-error TODO: use it when `link` node available.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setIsLinkEditMode,
+  } = props;
 
+  // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedElementKey, setSelectedElementKey] = useState<NodeKey | null>(
     null
   );
+  // @ts-expect-error TODO: use it when `readonly` mode available.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isEditable, setIsEditable] = useState(() => editor.isEditable());
   const { toolbarState, updateToolbarState } = useToolbarState();
 
@@ -319,7 +331,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className={cn("h-8 w-8", toolbarState.isBold && "bg-gray-200")}
                 title={`Bold (${SHORTCUTS.BOLD})`}
                 onClick={() => formatText(activeEditor, "bold")}
               >
@@ -335,7 +347,10 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className={cn(
+                  "h-8 w-8",
+                  toolbarState.isItalic && "bg-gray-200"
+                )}
                 title={`Italic (${SHORTCUTS.ITALIC})`}
                 onClick={() => formatText(activeEditor, "italic")}
               >
@@ -351,7 +366,10 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className={cn(
+                  "h-8 w-8",
+                  toolbarState.isUnderline && "bg-gray-200"
+                )}
                 title={`Underline (${SHORTCUTS.UNDERLINE})`}
                 onClick={() => formatText(activeEditor, "underline")}
               >
@@ -367,7 +385,10 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className={cn(
+                  "h-8 w-8",
+                  toolbarState.isStrikethrough && "bg-gray-200"
+                )}
                 title={`Strikethrough (${SHORTCUTS.STRIKETHROUGH})`}
                 onClick={() => formatText(activeEditor, "strikethrough")}
               >

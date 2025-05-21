@@ -7,7 +7,13 @@ import { Editor } from "@/components/core/Editor.tsx";
 
 const theme: EditorThemeClasses = {
   // Theme styling goes here
-  //...
+  text: {
+    bold: "font-bold",
+    italic: "italic",
+    underline: "underline",
+    strikethrough: "line-through",
+    underlineStrikethrough: "line-through underline",
+  },
 };
 
 // Catch any errors that occur during Lexical updates and log them

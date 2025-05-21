@@ -1,11 +1,13 @@
 import "./App.css";
-import { Editor } from "@/components/core/Editor.tsx";
+import { CoreEditor } from "@/components/core/CoreEditor.tsx";
 
 function App() {
   return (
-    <>
-      <Editor />
-    </>
+    <main className="container mx-auto py-10 px-4">
+      <div className="max-w-4xl mx-auto">
+        <CoreEditor />
+      </div>
+    </main>
   );
 }
 

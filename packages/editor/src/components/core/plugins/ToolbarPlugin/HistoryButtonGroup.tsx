@@ -1,6 +1,6 @@
 import type { LexicalEditor } from "lexical";
 import type { ToolbarState } from "@/context/ToolbarContext.tsx";
-import type { FC, VoidFunction } from "react";
+import type { FC } from "react";
 import {
   Tooltip,
   TooltipProvider,
@@ -26,7 +26,7 @@ type HistoryButtonConfig = {
   label: string;
   shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
   isDisabled: boolean;
-  onClick: VoidFunction;
+  onClick: () => void;
 };
 
 export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {

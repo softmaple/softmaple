@@ -58,7 +58,7 @@ import { getSelectedNode } from "@/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
-import { cn } from "@/lib/utils.ts";
+// import { cn } from "@/lib/utils.ts";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -275,7 +275,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-wrap items-center gap-1 p-2 border-b">
-        <div className="flex items-center">
+        <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -325,13 +325,13 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           </>
         )}
 
-        <div className="flex items-center">
+        <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant={toolbarState.isBold ? "secondary" : "ghost"}
                 size="icon"
-                className={cn("h-8 w-8", toolbarState.isBold && "bg-gray-200")}
+                className={"h-8 w-8"}
                 title={`Bold (${SHORTCUTS.BOLD})`}
                 onClick={() => formatText(activeEditor, "bold")}
               >
@@ -345,12 +345,9 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant={toolbarState.isItalic ? "secondary" : "ghost"}
                 size="icon"
-                className={cn(
-                  "h-8 w-8",
-                  toolbarState.isItalic && "bg-gray-200"
-                )}
+                className={"h-8 w-8"}
                 title={`Italic (${SHORTCUTS.ITALIC})`}
                 onClick={() => formatText(activeEditor, "italic")}
               >
@@ -364,12 +361,9 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant={toolbarState.isUnderline ? "secondary" : "ghost"}
                 size="icon"
-                className={cn(
-                  "h-8 w-8",
-                  toolbarState.isUnderline && "bg-gray-200"
-                )}
+                className={"h-8 w-8"}
                 title={`Underline (${SHORTCUTS.UNDERLINE})`}
                 onClick={() => formatText(activeEditor, "underline")}
               >
@@ -383,12 +377,9 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant={toolbarState.isStrikethrough ? "secondary" : "ghost"}
                 size="icon"
-                className={cn(
-                  "h-8 w-8",
-                  toolbarState.isStrikethrough && "bg-gray-200"
-                )}
+                className={"h-8 w-8"}
                 title={`Strikethrough (${SHORTCUTS.STRIKETHROUGH})`}
                 onClick={() => formatText(activeEditor, "strikethrough")}
               >

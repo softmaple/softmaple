@@ -26,7 +26,7 @@ type HistoryButtonConfig = {
   key: string;
   icon: React.ComponentType;
   label: string;
-  shortcut: string;
+  shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
   isDisabled: boolean;
   onClick: () => void;
 };

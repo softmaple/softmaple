@@ -22,7 +22,7 @@ type FormatButtonConfig = {
   key: string;
   icon: React.ComponentType;
   label: string;
-  shortcut: string;
+  shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
   isActive: boolean;
 };
 

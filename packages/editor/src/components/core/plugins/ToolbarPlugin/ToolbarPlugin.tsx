@@ -24,7 +24,7 @@ import {
   Strikethrough,
   // Link,
   // ImageIcon,
-  // Code,
+  Code,
   Undo,
   Redo,
   // Palette,
@@ -194,7 +194,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
       // updateToolbarState("isSubscript", selection.hasFormat("subscript"));
       // updateToolbarState("isSuperscript", selection.hasFormat("superscript"));
       // updateToolbarState("isHighlight", selection.hasFormat("highlight"));
-      // updateToolbarState("isCode", selection.hasFormat("code"));
+      updateToolbarState("isCode", selection.hasFormat("code"));
       // updateToolbarState(
       //   "fontSize",
       //   $getSelectionStyleValueForProperty(selection, "font-size", "15px")
@@ -371,6 +371,22 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
               </Button>
             </TooltipTrigger>
             <TooltipContent>{`Strikethrough (${SHORTCUTS.STRIKETHROUGH})`}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={toolbarState.isCode ? "secondary" : "ghost"}
+                size="icon"
+                className={"h-8 w-8"}
+                title={`Inline code (${SHORTCUTS.INSERT_CODE_BLOCK})`}
+                onClick={() => formatText(activeEditor, "code")}
+              >
+                <Code className="h-4 w-4" />
+                <span className="sr-only">Inline Code</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{`Inline code  (${SHORTCUTS.INSERT_CODE_BLOCK})`}</TooltipContent>
           </Tooltip>
         </div>
 

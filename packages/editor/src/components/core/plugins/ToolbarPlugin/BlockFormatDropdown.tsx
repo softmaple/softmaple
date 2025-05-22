@@ -103,10 +103,8 @@ type BlockFormatDropdownProps = {
 
 export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
   const { editor, blockType } = props;
-  console.log("sdfjslkdjfskldjflk\n", blockType);
 
   const handleChange = (value: string) => {
-    console.log("value: ", value);
     switch (value) {
       case "paragraph":
         formatParagraph(editor);

@@ -11,50 +11,24 @@ import {
   CAN_REDO_COMMAND,
   SELECTION_CHANGE_COMMAND,
 } from "lexical";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip.tsx";
-import {
-  Bold,
-  Italic,
-  Underline,
-  Strikethrough,
-  // Link,
-  // ImageIcon,
-  Code,
-  Undo,
-  Redo,
-  // Palette,
-} from "lucide-react";
-import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import {
-  IS_APPLE,
   $findMatchingParent,
   mergeRegister,
-  // $isEditorIsNestedEditor,
   $getNearestNodeOfType,
 } from "@lexical/utils";
 import { BlockFormatDropdown } from "@/components/core/plugins/ToolbarPlugin/BlockFormatDropdown.tsx";
-import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 import {
   blockTypeToBlockName,
   useToolbarState,
 } from "@/context/ToolbarContext.tsx";
-import {
-  formatText,
-  handleRedo,
-  handleUndo,
-} from "@/components/core/plugins/ToolbarPlugin/utils.ts";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
 import { getSelectedNode } from "@/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
-// import { cn } from "@/lib/utils.ts";
+import { FormatButtonGroup } from "@/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
+import { HistoryButtonGroup } from "@/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -253,145 +227,23 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
   }, [$updateToolbar, activeEditor, editor, updateToolbarState]);
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="flex flex-wrap items-center gap-1 p-2 border-b">
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                disabled={!toolbarState.canUndo}
-                onClick={() => handleUndo(activeEditor)}
-                title={IS_APPLE ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}
-              >
-                <Undo className="h-4 w-4" />
-                <span className="sr-only">Undo</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {IS_APPLE ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}
-            </TooltipContent>
-          </Tooltip>
+    <div className="flex flex-wrap items-center gap-1 p-2 border-b">
+      <HistoryButtonGroup editor={activeEditor} toolbarState={toolbarState} />
+      <Separator orientation="vertical" className="h-6" />
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                disabled={!toolbarState.canRedo}
-                onClick={() => handleRedo(editor)}
-                title={IS_APPLE ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}
-              >
-                <Redo className="h-4 w-4" />
-                <span className="sr-only">Redo</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {IS_APPLE ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+      {toolbarState.blockType in blockTypeToBlockName &&
+        activeEditor === editor && (
+          <>
+            <BlockFormatDropdown
+              editor={activeEditor}
+              blockType={toolbarState.blockType}
+            />
+            <Separator orientation="vertical" className="h-6" />
+          </>
+        )}
 
-        <Separator orientation="vertical" className="h-6" />
-
-        {toolbarState.blockType in blockTypeToBlockName &&
-          activeEditor === editor && (
-            <>
-              <BlockFormatDropdown
-                editor={activeEditor}
-                blockType={toolbarState.blockType}
-              />
-              <Separator orientation="vertical" className="h-6" />
-            </>
-          )}
-
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={toolbarState.isBold ? "secondary" : "ghost"}
-                size="icon"
-                className={"h-8 w-8"}
-                title={`Bold (${SHORTCUTS.BOLD})`}
-                onClick={() => formatText(activeEditor, "bold")}
-              >
-                <Bold className="h-4 w-4" />
-                <span className="sr-only">Bold</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{`Bold (${SHORTCUTS.BOLD})`}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={toolbarState.isItalic ? "secondary" : "ghost"}
-                size="icon"
-                className={"h-8 w-8"}
-                title={`Italic (${SHORTCUTS.ITALIC})`}
-                onClick={() => formatText(activeEditor, "italic")}
-              >
-                <Italic className="h-4 w-4" />
-                <span className="sr-only">Italic</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{`Italic (${SHORTCUTS.ITALIC})`}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={toolbarState.isUnderline ? "secondary" : "ghost"}
-                size="icon"
-                className={"h-8 w-8"}
-                title={`Underline (${SHORTCUTS.UNDERLINE})`}
-                onClick={() => formatText(activeEditor, "underline")}
-              >
-                <Underline className="h-4 w-4" />
-                <span className="sr-only">Underline</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{`Underline (${SHORTCUTS.UNDERLINE})`}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={toolbarState.isStrikethrough ? "secondary" : "ghost"}
-                size="icon"
-                className={"h-8 w-8"}
-                title={`Strikethrough (${SHORTCUTS.STRIKETHROUGH})`}
-                onClick={() => formatText(activeEditor, "strikethrough")}
-              >
-                <Strikethrough className="h-4 w-4" />
-                <span className="sr-only">Strikethrough</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{`Strikethrough (${SHORTCUTS.STRIKETHROUGH})`}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={toolbarState.isCode ? "secondary" : "ghost"}
-                size="icon"
-                className={"h-8 w-8"}
-                title={`Inline code (${SHORTCUTS.INSERT_CODE_BLOCK})`}
-                onClick={() => formatText(activeEditor, "code")}
-              >
-                <Code className="h-4 w-4" />
-                <span className="sr-only">Inline Code</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{`Inline code  (${SHORTCUTS.INSERT_CODE_BLOCK})`}</TooltipContent>
-          </Tooltip>
-        </div>
-
-        <Separator orientation="vertical" className="h-6" />
-      </div>
-    </TooltipProvider>
+      <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
+      <Separator orientation="vertical" className="h-6" />
+    </div>
   );
 };

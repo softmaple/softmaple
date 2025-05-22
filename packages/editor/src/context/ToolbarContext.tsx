@@ -41,7 +41,7 @@ const INITIAL_TOOLBAR_STATE = {
   rootType: "root" as keyof typeof rootTypeToRootName,
 };
 
-type ToolbarState = typeof INITIAL_TOOLBAR_STATE;
+export type ToolbarState = typeof INITIAL_TOOLBAR_STATE;
 
 // Utility type to get keys and infer value types
 type ToolbarStateKey = keyof ToolbarState;

@@ -21,10 +21,19 @@ type HistoryButtonGroupProps = {
   toolbarState: ToolbarState;
 };
 
+type HistoryButtonConfig = {
+  type: string;
+  icon: React.ComponentType;
+  label: string;
+  shortcut: string;
+  isDisabled: boolean;
+  onClick: () => void;
+};
+
 export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
   const { editor, toolbarState } = props;
 
-  const historyButtons = [
+  const historyButtons: HistoryButtonConfig[] = [
     {
       type: "undo",
       icon: Undo,
@@ -43,45 +52,33 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
     },
   ];
 
-  const renderButton = (
-    type: string,
-    Icon: any,
-    label: string,
-    shortcut: string,
-    isDisabled: boolean,
-    onClick: () => void
-  ) => (
-    <Tooltip key={type}>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          disabled={isDisabled}
-          onClick={onClick}
-          title={`${label} (${shortcut})`}
-        >
-          <Icon className="h-4 w-4" />
-          <span className="sr-only">{label}</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
-    </Tooltip>
-  );
+  const renderButton = (button: HistoryButtonConfig) => {
+    const { type, icon: Icon, label, shortcut, isDisabled, onClick } = button;
+    
+    return (
+      <Tooltip key={type}>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            disabled={isDisabled}
+            onClick={onClick}
+            title={`${label} (${shortcut})`}
+          >
+            <Icon className="h-4 w-4" />
+            <span className="sr-only">{label}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
+      </Tooltip>
+    );
+  };
 
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex items-center gap-1">
-        {historyButtons.map((button) =>
-          renderButton(
-            button.type,
-            button.icon,
-            button.label,
-            button.shortcut,
-            button.isDisabled,
-            button.onClick
-          )
-        )}
+        {historyButtons.map((button) => renderButton(button))}
       </div>
     </TooltipProvider>
   );

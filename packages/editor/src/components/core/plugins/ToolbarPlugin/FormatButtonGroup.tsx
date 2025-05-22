@@ -17,10 +17,18 @@ type FormatButtonGroupProps = {
   toolbarState: ToolbarState;
 };
 
+type FormatButtonConfig = {
+  type: string;
+  icon: React.ComponentType;
+  label: string;
+  shortcut: string;
+  isActive: boolean;
+};
+
 export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
   const { editor, toolbarState } = props;
 
-  const formatButtons = [
+  const formatButtons: FormatButtonConfig[] = [
     {
       type: "bold",
       icon: Bold,
@@ -58,42 +66,32 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
     },
   ];
 
-  const renderButton = (
-    type: string,
-    Icon: any,
-    label: string,
-    shortcut: string,
-    isActive: boolean
-  ) => (
-    <Tooltip key={type}>
-      <TooltipTrigger asChild>
-        <Button
-          variant={isActive ? "secondary" : "ghost"}
-          size="icon"
-          className={"h-8 w-8"}
-          title={`${label} (${shortcut})`}
-          onClick={() => formatText(editor, type as TextFormatType)}
-        >
-          <Icon className="h-4 w-4" />
-          <span className="sr-only">{label}</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
-    </Tooltip>
-  );
+  const renderButton = (button: FormatButtonConfig) => {
+    const { type, icon: Icon, label, shortcut, isActive } = button;
+    
+    return (
+      <Tooltip key={type}>
+        <TooltipTrigger asChild>
+          <Button
+            variant={isActive ? "secondary" : "ghost"}
+            size="icon"
+            className={"h-8 w-8"}
+            title={`${label} (${shortcut})`}
+            onClick={() => formatText(editor, type as TextFormatType)}
+          >
+            <Icon className="h-4 w-4" />
+            <span className="sr-only">{label}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
+      </Tooltip>
+    );
+  };
 
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex items-center gap-1">
-        {formatButtons.map((button) =>
-          renderButton(
-            button.type,
-            button.icon,
-            button.label,
-            button.shortcut,
-            button.isActive
-          )
-        )}
+        {formatButtons.map((button) => renderButton(button))}
       </div>
     </TooltipProvider>
   );

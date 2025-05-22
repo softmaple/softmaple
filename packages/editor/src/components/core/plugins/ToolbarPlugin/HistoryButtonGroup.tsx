@@ -14,6 +14,7 @@ import {
 } from "@/components/core/plugins/ToolbarPlugin/utils.ts";
 import { IS_APPLE } from "@lexical/utils";
 import { Redo, Undo } from "lucide-react";
+import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 
 type HistoryButtonGroupProps = {
   editor: LexicalEditor;
@@ -23,46 +24,64 @@ type HistoryButtonGroupProps = {
 export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
   const { editor, toolbarState } = props;
 
+  const historyButtons = [
+    {
+      type: "undo",
+      icon: Undo,
+      label: "Undo",
+      shortcut: SHORTCUTS.UNDO,
+      isDisabled: !toolbarState.canUndo,
+      onClick: () => handleUndo(editor),
+    },
+    {
+      type: "redo",
+      icon: Redo,
+      label: "Redo",
+      shortcut: SHORTCUTS.REDO,
+      isDisabled: !toolbarState.canRedo,
+      onClick: () => handleRedo(editor),
+    },
+  ];
+
+  const renderButton = (
+    type: string,
+    Icon: any,
+    label: string,
+    shortcut: string,
+    isDisabled: boolean,
+    onClick: () => void
+  ) => (
+    <Tooltip key={type}>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          disabled={isDisabled}
+          onClick={onClick}
+          title={`${label} (${shortcut})`}
+        >
+          <Icon className="h-4 w-4" />
+          <span className="sr-only">{label}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
+    </Tooltip>
+  );
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              disabled={!toolbarState.canUndo}
-              onClick={() => handleUndo(editor)}
-              title={IS_APPLE ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}
-            >
-              <Undo className="h-4 w-4" />
-              <span className="sr-only">Undo</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {IS_APPLE ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}
-          </TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              disabled={!toolbarState.canRedo}
-              onClick={() => handleRedo(editor)}
-              title={IS_APPLE ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}
-            >
-              <Redo className="h-4 w-4" />
-              <span className="sr-only">Redo</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {IS_APPLE ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}
-          </TooltipContent>
-        </Tooltip>
+        {historyButtons.map((button) =>
+          renderButton(
+            button.type,
+            button.icon,
+            button.label,
+            button.shortcut,
+            button.isDisabled,
+            button.onClick
+          )
+        )}
       </div>
     </TooltipProvider>
   );

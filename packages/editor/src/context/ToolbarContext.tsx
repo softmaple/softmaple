@@ -10,7 +10,7 @@ import { createContext } from "react";
 export const blockTypeToBlockName = {
   bullet: "Bulleted List",
   check: "Check List",
-  code: "Code Block",
+  // code: "Code Block",
   h1: "Heading 1",
   h2: "Heading 2",
   h3: "Heading 3",
@@ -36,10 +36,12 @@ const INITIAL_TOOLBAR_STATE = {
   isItalic: false,
   isUnderline: false,
   isStrikethrough: false,
+  isCode: false,
+  isLink: false,
   rootType: "root" as keyof typeof rootTypeToRootName,
 };
 
-type ToolbarState = typeof INITIAL_TOOLBAR_STATE;
+export type ToolbarState = typeof INITIAL_TOOLBAR_STATE;
 
 // Utility type to get keys and infer value types
 type ToolbarStateKey = keyof ToolbarState;

@@ -26,7 +26,7 @@ type HistoryButtonConfig = {
   label: string;
   shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
   isDisabled: boolean;
-  onClick: () => void;
+  onClick: VoidFunction;
 };
 
 export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {

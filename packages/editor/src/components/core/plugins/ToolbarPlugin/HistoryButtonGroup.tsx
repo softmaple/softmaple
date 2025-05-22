@@ -12,7 +12,6 @@ import {
   handleRedo,
   handleUndo,
 } from "@/components/core/plugins/ToolbarPlugin/utils.ts";
-import { IS_APPLE } from "@lexical/utils";
 import { Redo, Undo } from "lucide-react";
 import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 
@@ -22,7 +21,6 @@ type HistoryButtonGroupProps = {
 };
 
 type HistoryButtonConfig = {
-  type: string;
   key: string;
   icon: React.ComponentType;
   label: string;
@@ -36,7 +34,6 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
 
   const historyButtons: HistoryButtonConfig[] = [
     {
-      type: "undo",
       key: "undo",
       icon: Undo,
       label: "Undo",
@@ -45,7 +42,6 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
       onClick: () => handleUndo(editor),
     },
     {
-      type: "redo",
       key: "redo",
       icon: Redo,
       label: "Redo",
@@ -56,7 +52,7 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
   ];
 
   const renderButton = (button: HistoryButtonConfig) => {
-    const { type, key, icon: Icon, label, shortcut, isDisabled, onClick } = button;
+    const { key, icon: Icon, label, shortcut, isDisabled, onClick } = button;
     
     return (
       <Tooltip key={key}>

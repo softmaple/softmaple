@@ -23,6 +23,7 @@ type HistoryButtonGroupProps = {
 
 type HistoryButtonConfig = {
   type: string;
+  key: string;
   icon: React.ComponentType;
   label: string;
   shortcut: string;
@@ -36,6 +37,7 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
   const historyButtons: HistoryButtonConfig[] = [
     {
       type: "undo",
+      key: "undo",
       icon: Undo,
       label: "Undo",
       shortcut: SHORTCUTS.UNDO,
@@ -44,6 +46,7 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
     },
     {
       type: "redo",
+      key: "redo",
       icon: Redo,
       label: "Redo",
       shortcut: SHORTCUTS.REDO,
@@ -53,10 +56,10 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
   ];
 
   const renderButton = (button: HistoryButtonConfig) => {
-    const { type, icon: Icon, label, shortcut, isDisabled, onClick } = button;
+    const { type, key, icon: Icon, label, shortcut, isDisabled, onClick } = button;
     
     return (
-      <Tooltip key={type}>
+      <Tooltip key={key}>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"

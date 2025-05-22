@@ -19,6 +19,7 @@ type FormatButtonGroupProps = {
 
 type FormatButtonConfig = {
   type: string;
+  key: string;
   icon: React.ComponentType;
   label: string;
   shortcut: string;
@@ -31,6 +32,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
   const formatButtons: FormatButtonConfig[] = [
     {
       type: "bold",
+      key: "bold",
       icon: Bold,
       label: "Bold",
       shortcut: SHORTCUTS.BOLD,
@@ -38,6 +40,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
     },
     {
       type: "italic",
+      key: "italic",
       icon: Italic,
       label: "Italic",
       shortcut: SHORTCUTS.ITALIC,
@@ -45,6 +48,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
     },
     {
       type: "underline",
+      key: "underline",
       icon: Underline,
       label: "Underline",
       shortcut: SHORTCUTS.UNDERLINE,
@@ -52,6 +56,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
     },
     {
       type: "strikethrough",
+      key: "strikethrough",
       icon: Strikethrough,
       label: "Strikethrough",
       shortcut: SHORTCUTS.STRIKETHROUGH,
@@ -59,6 +64,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
     },
     {
       type: "code",
+      key: "code",
       icon: Code,
       label: "Inline Code",
       shortcut: SHORTCUTS.INSERT_CODE_BLOCK,
@@ -67,10 +73,10 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
   ];
 
   const renderButton = (button: FormatButtonConfig) => {
-    const { type, icon: Icon, label, shortcut, isActive } = button;
+    const { type, key, icon: Icon, label, shortcut, isActive } = button;
     
     return (
-      <Tooltip key={type}>
+      <Tooltip key={key}>
         <TooltipTrigger asChild>
           <Button
             variant={isActive ? "secondary" : "ghost"}

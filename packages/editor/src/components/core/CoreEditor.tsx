@@ -4,6 +4,7 @@ import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { Providers } from "@/components/core/Providers.tsx";
 import type { EditorThemeClasses } from "lexical";
 import { Editor } from "@/components/core/Editor.tsx";
+import { PlaygroundNodes } from "@/nodes/PlaygroundNodes.ts";
 
 const theme: EditorThemeClasses = {
   // Theme styling goes here
@@ -13,7 +14,25 @@ const theme: EditorThemeClasses = {
     underline: "underline",
     strikethrough: "line-through",
     underlineStrikethrough: "line-through underline",
+    code: "",
   },
+  heading: {
+    h1: "text-4xl font-bold my-4",
+    h2: "text-3xl font-bold my-3.5",
+    h3: "text-2xl font-bold my-3",
+  },
+  paragraph: "",
+  list: {
+    ul: "list-disc list-inside ml-4 my-2",
+    ol: "list-decimal list-inside ml-4 my-2",
+    listitem: "my-1",
+    listitemChecked: "line-through",
+    nested: {
+      listitem: "ml-4",
+    },
+  },
+  quote: "border-l-4 border-gray-300 pl-4 my-4 italic",
+  link: "",
 };
 
 // Catch any errors that occur during Lexical updates and log them
@@ -28,7 +47,7 @@ export const CoreEditor: FC = () => {
     namespace: "Playground",
     theme,
     onError,
-    nodes: [],
+    nodes: [...PlaygroundNodes],
   };
 
   return (

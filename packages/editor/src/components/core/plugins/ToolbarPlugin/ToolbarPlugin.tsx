@@ -22,15 +22,11 @@ import {
   Italic,
   Underline,
   Strikethrough,
-  // List,
-  // ListOrdered,
   // Link,
   // ImageIcon,
   // Code,
-  // Quote,
   Undo,
   Redo,
-  // Type,
   // Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -167,22 +163,6 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
         }
       }
       // Handle buttons
-      // updateToolbarState(
-      //   "fontColor",
-      //   $getSelectionStyleValueForProperty(selection, "color", "#000")
-      // );
-      // updateToolbarState(
-      //   "bgColor",
-      //   $getSelectionStyleValueForProperty(
-      //     selection,
-      //     "background-color",
-      //     "#fff"
-      //   )
-      // );
-      // updateToolbarState(
-      //   "fontFamily",
-      //   $getSelectionStyleValueForProperty(selection, "font-family", "Arial")
-      // );
       // let matchingParent;
       // if ($isLinkNode(parent)) {
       //   // If node is a link, we need to fetch the parent paragraph node to set format
@@ -317,13 +297,16 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
 
         <Separator orientation="vertical" className="h-6" />
 
-        {activeEditor === editor && (
-          <>
-            <BlockFormatDropdown />
-
-            <Separator orientation="vertical" className="h-6" />
-          </>
-        )}
+        {toolbarState.blockType in blockTypeToBlockName &&
+          activeEditor === editor && (
+            <>
+              <BlockFormatDropdown
+                editor={activeEditor}
+                blockType={toolbarState.blockType}
+              />
+              <Separator orientation="vertical" className="h-6" />
+            </>
+          )}
 
         <div className="flex items-center gap-1">
           <Tooltip>

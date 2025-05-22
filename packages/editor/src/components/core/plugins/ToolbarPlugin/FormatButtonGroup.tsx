@@ -18,7 +18,7 @@ type FormatButtonGroupProps = {
 };
 
 type FormatButtonConfig = {
-  type: string;
+  type: TextFormatType;
   key: string;
   icon: React.ComponentType;
   label: string;
@@ -83,7 +83,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
             size="icon"
             className={"h-8 w-8"}
             title={`${label} (${shortcut})`}
-            onClick={() => formatText(editor, type as TextFormatType)}
+            onClick={() => formatText(editor, type)}
           >
             <Icon className="h-4 w-4" />
             <span className="sr-only">{label}</span>

@@ -30,6 +30,7 @@ export const Layout: FC<LayoutProps> = (props) => {
         </div>
       </footer>
 
+      {/* TODO: implement it */}
       {/*<GitHubCorner repoUrl="https://github.com/softmaple/softmaple" />*/}
     </div>
   );

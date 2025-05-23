@@ -29,6 +29,7 @@ import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
 import { FormatButtonGroup } from "@/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
 import { HistoryButtonGroup } from "@/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
+import { ExportFilesDropdownMenu } from "@/components/core/plugins/ToolbarPlugin/ExportFilesDropdownMenu.tsx";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -244,6 +245,8 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
 
       <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
       <Separator orientation="vertical" className="h-6" />
+
+      <ExportFilesDropdownMenu />
     </div>
   );
 };

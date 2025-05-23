@@ -1,0 +1,4 @@
+{
+  "extends": "@softmaple/typescript-config/base.json"
+}
+

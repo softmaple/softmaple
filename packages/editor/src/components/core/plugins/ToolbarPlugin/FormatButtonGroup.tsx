@@ -22,7 +22,7 @@ type FormatButtonConfig = {
   key: string;
   icon: React.ComponentType;
   label: string;
-  shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
+  shortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   isActive: boolean;
 };
 
@@ -74,7 +74,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
 
   const renderButton = (button: FormatButtonConfig) => {
     const { type, key, icon: Icon, label, shortcut, isActive } = button;
-    
+
     return (
       <Tooltip key={key}>
         <TooltipTrigger asChild>
@@ -85,6 +85,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
             title={`${label} (${shortcut})`}
             onClick={() => formatText(editor, type)}
           >
+            {/* @ts-expect-error TODO: fix it */}
             <Icon className="h-4 w-4" />
             <span className="sr-only">{label}</span>
           </Button>

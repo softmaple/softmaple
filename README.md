@@ -96,3 +96,36 @@ See [Contributing Guidelines](.github/CONTRIBUTING.md).
 [![Deploys by Netlify](https://www.netlify.com/v3/img/components/netlify-color-accent.svg)](https://www.netlify.com?utm_source=SoftMaple&utm_campaign=oss)
 
 [![BrowserStack](https://d2ogrdw2mh0rsl.cloudfront.net/production/images/static/header/header-logo.svg)](https://www.browserstack.com/)
+
+# shadcn/ui monorepo template
+
+This template is for creating a monorepo with shadcn/ui.
+
+## Usage
+
+```bash
+pnpm dlx shadcn@latest init
+```
+
+## Adding components
+
+To add components to your app, run the following command at the root of your `web` app:
+
+```bash
+pnpm dlx shadcn@latest add button -c apps/web
+```
+
+This will place the ui components in the `packages/ui/src/components` directory.
+
+## Tailwind
+
+Your `tailwind.config.ts` and `globals.css` are already set up to use the components from the `ui` package.
+
+## Using components
+
+To use the components in your app, import them from the `ui` package.
+
+```tsx
+import { Button } from "@softmaple/ui/components/button"
+```
+

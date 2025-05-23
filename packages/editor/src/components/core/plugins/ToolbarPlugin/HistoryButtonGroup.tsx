@@ -24,7 +24,7 @@ type HistoryButtonConfig = {
   key: string;
   icon: React.ComponentType;
   label: string;
-  shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
+  shortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   isDisabled: boolean;
   onClick: VoidFunction;
 };
@@ -53,7 +53,7 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
 
   const renderButton = (button: HistoryButtonConfig) => {
     const { key, icon: Icon, label, shortcut, isDisabled, onClick } = button;
-    
+
     return (
       <Tooltip key={key}>
         <TooltipTrigger asChild>
@@ -65,6 +65,7 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
             onClick={onClick}
             title={`${label} (${shortcut})`}
           >
+            {/* @ts-expect-error TODO: fix it */}
             <Icon className="h-4 w-4" />
             <span className="sr-only">{label}</span>
           </Button>

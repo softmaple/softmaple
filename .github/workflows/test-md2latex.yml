@@ -16,6 +16,9 @@ on:
       - 'packages/md2latex/package.json'
       - 'packages/md2latex/vitest.config.*'
 
+permissions:
+  contents: read
+
 jobs:
   cache-and-install:
     runs-on: ubuntu-latest

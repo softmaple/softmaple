@@ -51,7 +51,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
   // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedElementKey, setSelectedElementKey] = useState<NodeKey | null>(
-    null
+    null,
   );
   // @ts-expect-error TODO: use it when `readonly` mode available.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -109,7 +109,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
         if ($isListNode(element)) {
           const parentList = $getNearestNodeOfType<ListNode>(
             anchorNode,
-            ListNode
+            ListNode,
           );
           const type = parentList
             ? parentList.getListType()
@@ -123,7 +123,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           if (type in blockTypeToBlockName) {
             updateToolbarState(
               "blockType",
-              type as keyof typeof blockTypeToBlockName
+              type as keyof typeof blockTypeToBlockName,
             );
           }
           // if ($isCodeNode(element)) {
@@ -164,7 +164,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
       updateToolbarState("isUnderline", selection.hasFormat("underline"));
       updateToolbarState(
         "isStrikethrough",
-        selection.hasFormat("strikethrough")
+        selection.hasFormat("strikethrough"),
       );
       // updateToolbarState("isSubscript", selection.hasFormat("subscript"));
       // updateToolbarState("isSuperscript", selection.hasFormat("superscript"));
@@ -188,7 +188,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
         $updateToolbar();
         return false;
       },
-      COMMAND_PRIORITY_CRITICAL
+      COMMAND_PRIORITY_CRITICAL,
     );
   }, [editor, $updateToolbar, setActiveEditor]);
 
@@ -214,7 +214,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           updateToolbarState("canUndo", payload);
           return false;
         },
-        COMMAND_PRIORITY_CRITICAL
+        COMMAND_PRIORITY_CRITICAL,
       ),
       activeEditor.registerCommand<boolean>(
         CAN_REDO_COMMAND,
@@ -222,8 +222,8 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           updateToolbarState("canRedo", payload);
           return false;
         },
-        COMMAND_PRIORITY_CRITICAL
-      )
+        COMMAND_PRIORITY_CRITICAL,
+      ),
     );
   }, [$updateToolbar, activeEditor, editor, updateToolbarState]);
 
@@ -246,7 +246,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
       <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
       <Separator orientation="vertical" className="h-6" />
 
-      <ExportFilesDropdownMenu />
+      <ExportFilesDropdownMenu editor={activeEditor} />
     </div>
   );
 };

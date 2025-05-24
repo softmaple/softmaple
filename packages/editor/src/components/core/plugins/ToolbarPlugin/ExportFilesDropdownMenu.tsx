@@ -8,20 +8,44 @@ import {
 } from "@/components/ui/dropdown-menu.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Download, FileText, FolderArchive } from "lucide-react";
+import { $convertToMarkdownString } from "@lexical/markdown";
+import { PLAYGROUND_TRANSFORMERS } from "@/components/core/plugins/MarkdownTransformers/MarkdownTransformers.ts";
+import { markdownToLatex } from "@softmaple/md2latex/src/md2latex";
+import type { LexicalEditor } from "lexical";
 
-export const ExportFilesDropdownMenu: FC = () => {
+type ExportFilesDropdownMenuProps = {
+  editor: LexicalEditor;
+};
+
+export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
+  props,
+) => {
+  const { editor } = props;
+
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
   const handleExport = (format: "markdown" | "latex" | "zip") => {
     setIsDownloading(true);
+
     try {
+      const markdownContent = editor
+        .getEditorState()
+        .read(() =>
+          $convertToMarkdownString(PLAYGROUND_TRANSFORMERS, undefined, true),
+        );
+
+      let latexContent = "";
+
       switch (format) {
         case "markdown":
           // TODO: Implement markdown export
+          console.log(markdownContent);
           break;
 
         case "latex":
           // TODO: Implement LaTeX export
+          latexContent = markdownToLatex(markdownContent);
+          console.log(latexContent);
           break;
 
         case "zip":

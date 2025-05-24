@@ -28,7 +28,8 @@
     "paths": {
       "@/*": [
         "./src/*"
-      ]
+      ],
+      "@softmaple/md2latex/*": ["../md2latex/*"]
     }
   },
   "include": ["src"]

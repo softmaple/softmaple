@@ -14,6 +14,7 @@
   "dependencies": {
     "@lexical/link": "^0.31.1",
     "@lexical/list": "^0.31.1",
+    "@lexical/markdown": "^0.31.2",
     "@lexical/react": "^0.31.1",
     "@lexical/rich-text": "^0.31.1",
     "@lexical/selection": "^0.31.1",
@@ -24,6 +25,7 @@
     "@radix-ui/react-separator": "^1.1.6",
     "@radix-ui/react-slot": "^1.2.2",
     "@radix-ui/react-tooltip": "^1.2.6",
+    "@softmaple/md2latex": "workspace:*",
     "@tailwindcss/vite": "^4.1.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^1.2.1",

@@ -37,7 +37,7 @@ const theme: EditorThemeClasses = {
       listitem: "ml-4",
     },
   },
-  quote: "border-l-4 border-gray-300 pl-4 my-4 italic",
+  quote: "border-l-4 border-border pl-4 my-4 italic",
   link: "",
 };
 
@@ -59,7 +59,7 @@ export const CoreEditor: FC = () => {
   return (
     <LexicalComposer initialConfig={initConfig}>
       <Providers>
-        <div className="mx-12 my-auto max-w-6xl text-black relative leading-1.7 font-normal">
+        <div className="mx-12 my-auto max-w-6xl text-foreground relative leading-1.7 font-normal">
           <Editor />
         </div>
       </Providers>

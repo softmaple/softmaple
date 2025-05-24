@@ -14,6 +14,7 @@ const theme: EditorThemeClasses = {
     underline: "underline",
     strikethrough: "line-through",
     underlineStrikethrough: "line-through underline",
+    // TODO: fix the code styles
     code: "",
   },
   heading: {
@@ -25,7 +26,12 @@ const theme: EditorThemeClasses = {
   list: {
     ul: "list-disc list-inside ml-4 my-2",
     ol: "list-decimal list-inside ml-4 my-2",
+    // TODO: fix the checklist styles
+    checklist: "",
     listitem: "my-1",
+    // TODO: fix the checklist styles
+    listitemUnchecked: "",
+    // TODO: fix the checklist styles
     listitemChecked: "line-through",
     nested: {
       listitem: "ml-4",

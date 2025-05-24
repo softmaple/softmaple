@@ -18,10 +18,7 @@ import {
   $getNearestNodeOfType,
 } from "@lexical/utils";
 import { BlockFormatDropdown } from "@/components/core/plugins/ToolbarPlugin/BlockFormatDropdown.tsx";
-import {
-  blockTypeToBlockName,
-  useToolbarState,
-} from "@/context/ToolbarContext.tsx";
+import { useToolbarState } from "@/context/ToolbarContext.tsx";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
 import { getSelectedNode } from "@/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
@@ -30,6 +27,7 @@ import { $isHeadingNode } from "@lexical/rich-text";
 import { FormatButtonGroup } from "@/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
 import { HistoryButtonGroup } from "@/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
 import { ExportFilesDropdownMenu } from "@/components/core/plugins/ToolbarPlugin/ExportFilesDropdownMenu.tsx";
+import { blockTypeToBlockName } from "@/constants/toolbar.ts";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;

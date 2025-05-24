@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 import type { LexicalEditor } from "lexical";
-import { blockTypeToBlockName } from "@/context/ToolbarContext.tsx";
 import {
   formatParagraph,
   formatHeading,
@@ -28,13 +27,14 @@ import {
   formatCheckList,
   formatQuote,
 } from "@/components/core/plugins/ToolbarPlugin/utils.ts";
+import type { blockTypeToBlockName } from "@/constants/toolbar.ts";
 
 type BlockFormatType = {
   key: string;
   value: string;
   label: string;
   icon: ReactNode;
-  shortcut: typeof SHORTCUTS[keyof typeof SHORTCUTS];
+  shortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
 };
 
 const ITEMS: BlockFormatType[] = [

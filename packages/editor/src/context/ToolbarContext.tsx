@@ -1,45 +1,12 @@
 import {
-  type ReactNode,
   useCallback,
   useContext,
   useMemo,
   useState,
+  createContext,
 } from "react";
-import { createContext } from "react";
-
-export const blockTypeToBlockName = {
-  bullet: "Bulleted List",
-  check: "Check List",
-  // code: "Code Block",
-  h1: "Heading 1",
-  h2: "Heading 2",
-  h3: "Heading 3",
-  h4: "Heading 4",
-  h5: "Heading 5",
-  h6: "Heading 6",
-  number: "Numbered List",
-  paragraph: "Normal",
-  quote: "Quote",
-};
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const rootTypeToRootName = {
-  root: "Root",
-  table: "Table",
-};
-
-const INITIAL_TOOLBAR_STATE = {
-  canRedo: false,
-  canUndo: false,
-  blockType: "paragraph" as keyof typeof blockTypeToBlockName,
-  isBold: false,
-  isItalic: false,
-  isUnderline: false,
-  isStrikethrough: false,
-  isCode: false,
-  isLink: false,
-  rootType: "root" as keyof typeof rootTypeToRootName,
-};
+import type { ReactNode } from "react";
+import { INITIAL_TOOLBAR_STATE } from "@/constants/toolbar.ts";
 
 export type ToolbarState = typeof INITIAL_TOOLBAR_STATE;
 
@@ -51,7 +18,7 @@ type ContextShape = {
   toolbarState: ToolbarState;
   updateToolbarState<Key extends ToolbarStateKey>(
     key: Key,
-    value: ToolbarStateValue<Key>
+    value: ToolbarStateValue<Key>,
   ): void;
 };
 
@@ -59,7 +26,7 @@ const Context = createContext<ContextShape | undefined>(undefined);
 
 export const ToolbarContext = ({ children }: { children: ReactNode }) => {
   const [toolbarState, setToolbarState] = useState<ToolbarState>(
-    INITIAL_TOOLBAR_STATE
+    INITIAL_TOOLBAR_STATE,
   );
 
   const updateToolbarState = useCallback(
@@ -69,7 +36,7 @@ export const ToolbarContext = ({ children }: { children: ReactNode }) => {
         [key]: value,
       }));
     },
-    []
+    [],
   );
 
   const contextValue = useMemo(() => {

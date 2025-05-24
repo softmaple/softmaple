@@ -23,7 +23,7 @@ export const LexicalContentEditable: FC<LexicalContentEditableProps> = (
       placeholder={
         <div
           className={cn(
-            "text-[#999] overflow-hidden absolute overflow-ellipsis top-2 left-11.5 right-7 select-none whitespace-nowrap inline-block pointer-events-none lg:left-2",
+            "text-muted-foreground overflow-hidden absolute overflow-ellipsis top-2 left-11.5 right-7 select-none whitespace-nowrap inline-block pointer-events-none lg:left-2",
             placeholderClassName,
           )}
         >

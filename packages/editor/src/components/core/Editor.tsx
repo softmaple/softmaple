@@ -32,7 +32,7 @@ export const Editor: FC<EditorProps> = (props) => {
         setIsLinkEditMode={setIsLinkEditMode}
       />
 
-      <div className="bg-white relative block rounded-b-[10px]">
+      <div className="bg-background relative block rounded-b-[10px]">
         <RichTextPlugin
           contentEditable={
             <div

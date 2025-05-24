@@ -12,9 +12,9 @@ export const Layout: FC<LayoutProps> = (props) => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b sticky top-0 z-10 bg-white">
+      <header className="border-b sticky top-0 z-10 bg-background border-border">
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
-          <h1 className="text-xl font-bold">Softmaple</h1>
+          <h1 className="text-xl font-bold text-foreground">Softmaple</h1>
 
           <GitHubCorner repoUrl="https://github.com/softmaple/softmaple" />
         </div>
@@ -22,12 +22,12 @@ export const Layout: FC<LayoutProps> = (props) => {
 
       <main className="flex-1 container mx-auto px-4 py-6">{children}</main>
 
-      <footer className="border-t py-4">
+      <footer className="border-t border-border py-4">
         <div className="container mx-auto px-4 flex justify-between items-center">
           <div>
             <NetlifyBadge />
           </div>
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} Softmaple
           </div>
         </div>

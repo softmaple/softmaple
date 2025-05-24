@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils.ts";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin/ToolbarPlugin.tsx";
 import { LexicalContentEditable } from "@/components/core/LexicalContentEditable.tsx";
+import { ListPlugin } from "@lexical/react/LexicalListPlugin";
+import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
 
 type EditorProps = {
   className?: string;
@@ -36,7 +38,7 @@ export const Editor: FC<EditorProps> = (props) => {
             <div
               className={cn(
                 "min-h-38 max-w-full border-0 flex relative outline-0 z-0 resize-y",
-                className
+                className,
               )}
               {...rest}
             >
@@ -49,6 +51,9 @@ export const Editor: FC<EditorProps> = (props) => {
           }
           ErrorBoundary={LexicalErrorBoundary}
         />
+
+        <ListPlugin hasStrictIndent />
+        <CheckListPlugin />
       </div>
     </>
   );

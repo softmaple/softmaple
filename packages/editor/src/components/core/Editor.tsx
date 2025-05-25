@@ -8,6 +8,8 @@ import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin/ToolbarPl
 import { LexicalContentEditable } from "@/components/core/LexicalContentEditable.tsx";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
+import { useSharedHistoryContext } from "@/context/SharedHistoryContext.tsx";
+import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 
 type EditorProps = {
   className?: string;
@@ -17,6 +19,8 @@ export const Editor: FC<EditorProps> = (props) => {
   const { className, ...rest } = props;
 
   const [editor] = useLexicalComposerContext();
+  const { historyState } = useSharedHistoryContext();
+
   const [activeEditor, setActiveEditor] = useState(editor);
 
   // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
@@ -33,6 +37,8 @@ export const Editor: FC<EditorProps> = (props) => {
       />
 
       <div className="bg-background relative block rounded-b-[10px]">
+        <HistoryPlugin externalHistoryState={historyState} />
+
         <RichTextPlugin
           contentEditable={
             <div

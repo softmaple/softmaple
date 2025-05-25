@@ -75,6 +75,9 @@ importers:
 
   packages/editor:
     dependencies:
+      '@lexical/code':
+        specifier: ^0.31.2
+        version: 0.31.2
       '@lexical/link':
         specifier: ^0.31.2
         version: 0.31.2

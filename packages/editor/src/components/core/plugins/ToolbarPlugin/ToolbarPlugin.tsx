@@ -26,7 +26,7 @@ import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
 import { FormatButtonGroup } from "@/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
 import { HistoryButtonGroup } from "@/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
-import { ExportFilesDropdownMenu } from "@/components/core/plugins/ToolbarPlugin/ExportFilesDropdownMenu.tsx";
+import { ExportFilesDropdownMenu } from "@/components/core/plugins/ToolbarPlugin/ExportFiles/ExportFilesDropdownMenu";
 import { blockTypeToBlockName } from "@/constants/toolbar.ts";
 
 type ToolbarPluginProps = {

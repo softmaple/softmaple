@@ -24,7 +24,7 @@
     "reactjs",
     "react-hooks",
     "nextjs",
-    "draft-js",
+    "lexical",
     "rich-text-editor",
     "turborepo"
   ],

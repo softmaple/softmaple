@@ -1,18 +1,38 @@
 import { useState } from "react";
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { Button } from "@/components/ui/button.tsx";
-import { Download, FileText, FolderArchive } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { $convertToMarkdownString } from "@lexical/markdown";
 import { PLAYGROUND_TRANSFORMERS } from "@/components/core/plugins/MarkdownTransformers/MarkdownTransformers.ts";
 import { markdownToLatex } from "@softmaple/md2latex/src/md2latex";
 import type { LexicalEditor } from "lexical";
-// import JSZip from "jszip";
+import type { ExportFormat } from "./ExportFilesMenuItem";
+import { ExportFilesMenuItem } from "./ExportFilesMenuItem";
+
+const exportOptions: Array<{
+  key: string;
+  format: ExportFormat;
+  icon: ReactNode;
+  label: string;
+}> = [
+  {
+    key: "Markdown",
+    format: "markdown",
+    icon: <FileText className="mr-2 h-4 w-4" />,
+    label: "Markdown",
+  },
+  {
+    key: "LaTeX",
+    format: "latex",
+    icon: <FileText className="mr-2 h-4 w-4" />,
+    label: "LaTeX",
+  },
+];
 
 type ExportFilesDropdownMenuProps = {
   editor: LexicalEditor;
@@ -53,7 +73,7 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
     URL.revokeObjectURL(url);
   };
 
-  const handleExport = async (format: "markdown" | "latex" | "zip") => {
+  const handleExport = async (format: ExportFormat) => {
     setIsDownloading(true);
 
     try {
@@ -71,15 +91,6 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
         case "latex":
           const latexContent = markdownToLatex(markdownContent);
           downloadFile(latexContent, "document.tex", "text/x-latex");
-          break;
-
-        case "zip":
-          // const zip = new JSZip();
-          // zip.file("document.md", markdownContent);
-          // zip.file("document.tex", markdownToLatex(markdownContent));
-
-          // const zipBlob = await zip.generateAsync({ type: "blob" });
-          // downloadFile(zipBlob, "documents.zip");
           break;
 
         default:
@@ -102,24 +113,16 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            disabled={isDownloading}
-            onClick={() => handleExport("markdown")}
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Markdown
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={isDownloading}
-            onClick={() => handleExport("latex")}
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            LaTeX
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled onClick={() => handleExport("zip")}>
-            <FolderArchive className="mr-2 h-4 w-4" />
-            ZIP
-          </DropdownMenuItem>
+          {exportOptions.map(({ key, format, icon, label }) => (
+            <ExportFilesMenuItem
+              key={key}
+              format={format}
+              isDownloading={isDownloading}
+              onClick={() => handleExport(format)}
+              icon={icon}
+              label={label}
+            />
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

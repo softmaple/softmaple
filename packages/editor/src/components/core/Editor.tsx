@@ -10,6 +10,8 @@ import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
 import { useSharedHistoryContext } from "@/context/SharedHistoryContext.tsx";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
+import { ShortcutsPlugin } from "@/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin.tsx";
+import { MarkdownPlugin } from "@/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin.tsx";
 
 type EditorProps = {
   className?: string;
@@ -36,6 +38,11 @@ export const Editor: FC<EditorProps> = (props) => {
         setIsLinkEditMode={setIsLinkEditMode}
       />
 
+      <ShortcutsPlugin
+        editor={activeEditor}
+        setIsLinkEditMode={setIsLinkEditMode}
+      />
+
       <div className="bg-background relative block rounded-b-[10px]">
         <HistoryPlugin externalHistoryState={historyState} />
 
@@ -58,6 +65,7 @@ export const Editor: FC<EditorProps> = (props) => {
           ErrorBoundary={LexicalErrorBoundary}
         />
 
+        <MarkdownPlugin />
         <ListPlugin hasStrictIndent />
         <CheckListPlugin />
       </div>

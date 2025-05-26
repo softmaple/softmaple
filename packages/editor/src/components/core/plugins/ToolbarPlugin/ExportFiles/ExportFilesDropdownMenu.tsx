@@ -82,6 +82,7 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
         .read(() =>
           $convertToMarkdownString(PLAYGROUND_TRANSFORMERS, undefined, true),
         );
+      let latexContent: string;
 
       switch (format) {
         case "markdown":
@@ -89,7 +90,7 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
           break;
 
         case "latex":
-          const latexContent = markdownToLatex(markdownContent);
+          latexContent = markdownToLatex(markdownContent);
           downloadFile(latexContent, "document.tex", "text/x-latex");
           break;
 

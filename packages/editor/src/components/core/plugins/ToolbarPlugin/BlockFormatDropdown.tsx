@@ -42,56 +42,56 @@ const ITEMS: BlockFormatType[] = [
     key: "paragraph",
     value: "paragraph",
     label: "Paragraph",
-    icon: <Text className="size-4" />,
+    icon: <Text className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.NORMAL,
   },
   {
     key: "h1",
     value: "h1",
     label: "Heading 1",
-    icon: <Heading1 className="size-4" />,
+    icon: <Heading1 className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.HEADING1,
   },
   {
     key: "h2",
     value: "h2",
     label: "Heading 2",
-    icon: <Heading2 className="size-4" />,
+    icon: <Heading2 className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.HEADING2,
   },
   {
     key: "h3",
     value: "h3",
     label: "Heading 3",
-    icon: <Heading3 className="size-4" />,
+    icon: <Heading3 className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.HEADING3,
   },
   {
     key: "number",
     value: "number",
     label: "Numbered List",
-    icon: <ListOrdered className="size-4" />,
+    icon: <ListOrdered className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.NUMBERED_LIST,
   },
   {
     key: "bullet",
     value: "bullet",
     label: "Bulleted List",
-    icon: <List className="size-4" />,
+    icon: <List className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.BULLET_LIST,
   },
   {
     key: "check",
     value: "check",
     label: "Check List",
-    icon: <ListTodo className="size-4" />,
+    icon: <ListTodo className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.CHECK_LIST,
   },
   {
     key: "quote",
     value: "quote",
     label: "Quote",
-    icon: <Quote className="size-4" />,
+    icon: <Quote className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.QUOTE,
   },
 ];
@@ -138,18 +138,23 @@ export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
   return (
     <div className="flex items-center">
       <Select value={blockType} onValueChange={handleChange}>
-        <SelectTrigger className="h-8 w-[130px] gap-1">
-          <Type className="h-4 w-4" />
+        <SelectTrigger className="h-8 min-w-[130px] gap-1">
+          <Type className="size-4 md:size-4.5" />
           <SelectValue placeholder="Format" />
         </SelectTrigger>
         <SelectContent>
           {ITEMS.map(({ key, value, label, shortcut, icon }) => (
-            <div key={key} className="flex items-center justify-between">
+            <div
+              key={key}
+              className="flex gap-1 md:gap-2 items-center justify-between"
+            >
               <span className="text-muted-foreground">{icon}</span>
               <SelectItem key={key} value={value}>
                 <span>{label}</span>
               </SelectItem>
-              <span className="text-muted-foreground">{shortcut}</span>
+              <span className="text-sm text-muted-foreground hidden md:inline">
+                {shortcut}
+              </span>
             </div>
           ))}
         </SelectContent>

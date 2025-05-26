@@ -92,7 +92,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
         </TooltipTrigger>
         <TooltipContent>
           <span>{label}</span>
-          <span className="hidden sm:inline"> ({shortcut})</span>
+          <span className="hidden md:inline"> ({shortcut})</span>
         </TooltipContent>
       </Tooltip>
     );

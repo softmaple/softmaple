@@ -70,7 +70,10 @@ export const HistoryButtonGroup: FC<HistoryButtonGroupProps> = (props) => {
             <span className="sr-only">{label}</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
+        <TooltipContent>
+          <span>{label}</span>
+          <span className="hidden sm:inline"> ({shortcut})</span>
+        </TooltipContent>
       </Tooltip>
     );
   };

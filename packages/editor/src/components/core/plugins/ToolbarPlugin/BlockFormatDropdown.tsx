@@ -144,12 +144,17 @@ export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
         </SelectTrigger>
         <SelectContent>
           {ITEMS.map(({ key, value, label, shortcut, icon }) => (
-            <div key={key} className="flex items-center justify-between">
+            <div
+              key={key}
+              className="flex gap-1 md:gap-2 items-center justify-between"
+            >
               <span className="text-muted-foreground">{icon}</span>
               <SelectItem key={key} value={value}>
                 <span>{label}</span>
               </SelectItem>
-              <span className="text-sm text-muted-foreground">{shortcut}</span>
+              <span className="text-sm text-muted-foreground hidden md:inline">
+                {shortcut}
+              </span>
             </div>
           ))}
         </SelectContent>

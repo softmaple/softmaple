@@ -42,56 +42,56 @@ const ITEMS: BlockFormatType[] = [
     key: "paragraph",
     value: "paragraph",
     label: "Paragraph",
-    icon: <Text className="size-5" />,
+    icon: <Text className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.NORMAL,
   },
   {
     key: "h1",
     value: "h1",
     label: "Heading 1",
-    icon: <Heading1 className="size-5" />,
+    icon: <Heading1 className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.HEADING1,
   },
   {
     key: "h2",
     value: "h2",
     label: "Heading 2",
-    icon: <Heading2 className="size-5" />,
+    icon: <Heading2 className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.HEADING2,
   },
   {
     key: "h3",
     value: "h3",
     label: "Heading 3",
-    icon: <Heading3 className="size-5" />,
+    icon: <Heading3 className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.HEADING3,
   },
   {
     key: "number",
     value: "number",
     label: "Numbered List",
-    icon: <ListOrdered className="size-5" />,
+    icon: <ListOrdered className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.NUMBERED_LIST,
   },
   {
     key: "bullet",
     value: "bullet",
     label: "Bulleted List",
-    icon: <List className="size-5" />,
+    icon: <List className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.BULLET_LIST,
   },
   {
     key: "check",
     value: "check",
     label: "Check List",
-    icon: <ListTodo className="size-5" />,
+    icon: <ListTodo className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.CHECK_LIST,
   },
   {
     key: "quote",
     value: "quote",
     label: "Quote",
-    icon: <Quote className="size-5" />,
+    icon: <Quote className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.QUOTE,
   },
 ];
@@ -139,7 +139,7 @@ export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
     <div className="flex items-center">
       <Select value={blockType} onValueChange={handleChange}>
         <SelectTrigger className="h-8 min-w-[150px] gap-1">
-          <Type className="h-4 w-4" />
+          <Type className="size-4 md:size-4.5" />
           <SelectValue placeholder="Format" />
         </SelectTrigger>
         <SelectContent>

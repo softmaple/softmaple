@@ -1,5 +1,6 @@
 import type { FC } from "react";
 
+// https://www.netlify.com/about/#badges
 export const NetlifyBadge: FC = () => {
   return (
     <a
@@ -9,9 +10,8 @@ export const NetlifyBadge: FC = () => {
       className="inline-block"
     >
       <img
-        src="https://www.netlify.com/v3/img/components/netlify-color-accent.svg"
+        src="https://www.netlify.com/assets/badges/netlify-badge-color-accent.svg"
         alt="Deploys by Netlify"
-        className="h-8"
       />
     </a>
   );

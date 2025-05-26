@@ -20,6 +20,7 @@ export const LexicalContentEditable: FC<LexicalContentEditableProps> = (
         className,
       )}
       aria-placeholder={placeholder}
+      aria-label="Rich text editor"
       placeholder={
         <div
           className={cn(

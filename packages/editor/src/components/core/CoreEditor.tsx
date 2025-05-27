@@ -31,10 +31,10 @@ const theme: EditorThemeClasses = {
     listitem: "my-1",
     // TODO: fix the checklist styles
     listitemUnchecked:
-      "relative pl-6 before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-4 before:h-4 before:border-2 before:border-blue-500 before:rounded-sm before:bg-white",
+      "relative pl-10 cursor-pointer transition-all duration-200 before:absolute before:left-3 before:top-1/2 before:-translate-y-1/2 before:h-4 before:w-4 before:rounded-sm before:border before:border-primary before:bg-background before:shadow before:transition-all before:duration-200",
     // TODO: fix the checklist styles
     listitemChecked:
-      "relative pl-6 line-through text-gray-500 before:content-['✓'] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-4 before:h-4 before:border-2 before:border-blue-500 before:rounded-sm before:bg-blue-500 before:text-white before:flex before:items-center before:justify-center before:text-xs before:font-bold",
+      "relative pl-10 cursor-pointer transition-all duration-200 line-through text-muted-foreground opacity-75 before:absolute before:left-3 before:top-1/2 before:-translate-y-1/2 before:h-4 before:w-4 before:rounded-sm before:border before:border-primary before:bg-primary before:content-['✓'] before:text-primary-foreground before:text-xs before:flex before:items-center before:justify-center before:shadow before:transition-all before:duration-200",
     nested: {
       listitem: "ml-4",
     },

@@ -30,9 +30,9 @@ const theme: EditorThemeClasses = {
     checklist: "",
     listitem: "my-1",
     // TODO: fix the checklist styles
-    listitemUnchecked: "",
+    listitemUnchecked: "checklist-item-unchecked",
     // TODO: fix the checklist styles
-    listitemChecked: "line-through",
+    listitemChecked: "line-through text-gray-500 checklist-item-checked",
     nested: {
       listitem: "ml-4",
     },

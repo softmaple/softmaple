@@ -118,33 +118,3 @@
     @apply bg-background text-foreground;
   }
 }
-
-/* Custom checkbox styling for checklist items */
-.checklist-item-unchecked::before {
-  content: '';
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #3b82f6; /* Blue border */
-  border-radius: 2px;
-  background: white;
-  margin-right: 8px;
-  flex-shrink: 0;
-}
-
-.checklist-item-checked::before {
-  content: '✓';
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #3b82f6; /* Blue border */
-  border-radius: 2px;
-  background: #3b82f6; /* Blue background */
-  color: white;
-  margin-right: 8px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-}

@@ -30,9 +30,11 @@ const theme: EditorThemeClasses = {
     checklist: "",
     listitem: "my-1",
     // TODO: fix the checklist styles
-    listitemUnchecked: "checklist-item-unchecked",
+    listitemUnchecked:
+      "relative pl-6 before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-4 before:h-4 before:border-2 before:border-blue-500 before:rounded-sm before:bg-white",
     // TODO: fix the checklist styles
-    listitemChecked: "line-through text-gray-500 checklist-item-checked",
+    listitemChecked:
+      "relative pl-6 line-through text-gray-500 before:content-['✓'] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-4 before:h-4 before:border-2 before:border-blue-500 before:rounded-sm before:bg-blue-500 before:text-white before:flex before:items-center before:justify-center before:text-xs before:font-bold",
     nested: {
       listitem: "ml-4",
     },

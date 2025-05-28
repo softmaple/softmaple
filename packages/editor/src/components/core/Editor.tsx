@@ -2,16 +2,16 @@ import { useState } from "react";
 import type { FC } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
-import { cn } from "@softmaple/editor/lib/utils.ts";
+import { cn } from "@softmaple/editor/lib/utils";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { ToolbarPlugin } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ToolbarPlugin.tsx";
-import { LexicalContentEditable } from "@softmaple/editor/components/core/LexicalContentEditable.tsx";
+import { ToolbarPlugin } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ToolbarPlugin";
+import { LexicalContentEditable } from "@softmaple/editor/components/core/LexicalContentEditable";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
-import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistoryContext.tsx";
+import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistoryContext";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
-import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin.tsx";
-import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin.tsx";
+import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin";
+import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
 
 type EditorProps = {
   className?: string;
@@ -25,9 +25,8 @@ export const Editor: FC<EditorProps> = (props) => {
 
   const [activeEditor, setActiveEditor] = useState(editor);
 
-  // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isLinkEditMode, setIsLinkEditMode] = useState<boolean>(false);
+  const [_, setIsLinkEditMode] = useState<boolean>(false);
 
   return (
     <>

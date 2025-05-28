@@ -11,9 +11,9 @@ import { Button } from "@softmaple/ui/components/button";
 import {
   handleRedo,
   handleUndo,
-} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
+} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
 import { Redo, Undo } from "lucide-react";
-import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts";
 
 type HistoryButtonGroupProps = {
   editor: LexicalEditor;

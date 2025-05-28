@@ -47,7 +47,7 @@ import {
   isSuperscript,
   isUppercase,
 } from "./shortcuts";
-import { useToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
+import { useToolbarState } from "@softmaple/editor/context/ToolbarContext";
 
 export const ShortcutsPlugin = ({
   editor,

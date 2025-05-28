@@ -6,7 +6,7 @@ import {
   createContext,
 } from "react";
 import type { ReactNode } from "react";
-import { INITIAL_TOOLBAR_STATE } from "@softmaple/editor/constants/toolbar.ts";
+import { INITIAL_TOOLBAR_STATE } from "@softmaple/editor/constants/toolbar";
 
 export type ToolbarState = typeof INITIAL_TOOLBAR_STATE;
 

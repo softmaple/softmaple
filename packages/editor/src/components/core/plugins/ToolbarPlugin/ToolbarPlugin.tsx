@@ -17,17 +17,17 @@ import {
   mergeRegister,
   $getNearestNodeOfType,
 } from "@lexical/utils";
-import { BlockFormatDropdown } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/BlockFormatDropdown.tsx";
-import { useToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
+import { BlockFormatDropdown } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/BlockFormatDropdown";
+import { useToolbarState } from "@softmaple/editor/context/ToolbarContext";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
 import { getSelectedNode } from "@softmaple/editor/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
-import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
-import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
+import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup";
+import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup";
 import { ExportFilesDropdownMenu } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ExportFiles/ExportFilesDropdownMenu";
-import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar.ts";
+import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -37,23 +37,11 @@ type ToolbarPluginProps = {
 };
 
 export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
-  const {
-    editor,
-    activeEditor,
-    setActiveEditor,
-    // @ts-expect-error TODO: use it when `link` node available.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    setIsLinkEditMode,
-  } = props;
+  const { editor, activeEditor, setActiveEditor } = props;
 
-  // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
+  const [, setSelectedElementKey] = useState<NodeKey | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [selectedElementKey, setSelectedElementKey] = useState<NodeKey | null>(
-    null,
-  );
-  // @ts-expect-error TODO: use it when `readonly` mode available.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isEditable, setIsEditable] = useState(() => editor.isEditable());
+  const [, setIsEditable] = useState(() => editor.isEditable());
   const { toolbarState, updateToolbarState } = useToolbarState();
 
   const $updateToolbar = useCallback(() => {

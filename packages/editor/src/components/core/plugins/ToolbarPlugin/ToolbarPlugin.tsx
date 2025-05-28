@@ -11,23 +11,23 @@ import {
   CAN_REDO_COMMAND,
   SELECTION_CHANGE_COMMAND,
 } from "lexical";
-import { Separator } from "@/components/ui/separator.tsx";
+import { Separator } from "@softmaple/editor/components/ui/separator.tsx";
 import {
   $findMatchingParent,
   mergeRegister,
   $getNearestNodeOfType,
 } from "@lexical/utils";
-import { BlockFormatDropdown } from "@/components/core/plugins/ToolbarPlugin/BlockFormatDropdown.tsx";
-import { useToolbarState } from "@/context/ToolbarContext.tsx";
+import { BlockFormatDropdown } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/BlockFormatDropdown.tsx";
+import { useToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
-import { getSelectedNode } from "@/utils/getSelectedNode";
+import { getSelectedNode } from "@softmaple/editor/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
-import { FormatButtonGroup } from "@/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
-import { HistoryButtonGroup } from "@/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
-import { ExportFilesDropdownMenu } from "@/components/core/plugins/ToolbarPlugin/ExportFiles/ExportFilesDropdownMenu";
-import { blockTypeToBlockName } from "@/constants/toolbar.ts";
+import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
+import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
+import { ExportFilesDropdownMenu } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ExportFiles/ExportFilesDropdownMenu";
+import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar.ts";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;

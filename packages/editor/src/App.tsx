@@ -1,8 +1,8 @@
 import "./App.css";
-import { CoreEditor } from "@/components/core/CoreEditor.tsx";
-import { Layout } from "@/layout.tsx";
-import { ThemeProvider } from "@/context/theme-provider.tsx";
-import { THEME_STORAGE_KEY } from "@/constants/theme.ts";
+import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor.tsx";
+import { Layout } from "@softmaple/editor/layout.tsx";
+import { ThemeProvider } from "@softmaple/editor/context/theme-provider.tsx";
+import { THEME_STORAGE_KEY } from "@softmaple/editor/constants/theme.ts";
 
 function App() {
   return (

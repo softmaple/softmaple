@@ -1,10 +1,10 @@
 import type { FC } from "react";
 import type { InitialConfigType } from "@lexical/react/LexicalComposer";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
-import { Providers } from "@/components/core/Providers.tsx";
+import { Providers } from "@softmaple/editor/components/core/Providers.tsx";
 import type { EditorThemeClasses } from "lexical";
-import { Editor } from "@/components/core/Editor.tsx";
-import { PlaygroundNodes } from "@/nodes/PlaygroundNodes.ts";
+import { Editor } from "@softmaple/editor/components/core/Editor.tsx";
+import { PlaygroundNodes } from "@softmaple/editor/nodes/PlaygroundNodes.ts";
 
 const theme: EditorThemeClasses = {
   // Theme styling goes here

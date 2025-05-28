@@ -5,7 +5,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select.tsx";
+} from "@softmaple/editor/components/ui/select.tsx";
 import {
   Type,
   Text,
@@ -17,7 +17,7 @@ import {
   ListTodo,
   Quote,
 } from "lucide-react";
-import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 import type { LexicalEditor } from "lexical";
 import {
   formatParagraph,
@@ -26,8 +26,8 @@ import {
   formatBulletList,
   formatCheckList,
   formatQuote,
-} from "@/components/core/plugins/ToolbarPlugin/utils.ts";
-import type { blockTypeToBlockName } from "@/constants/toolbar.ts";
+} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
+import type { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar.ts";
 
 type BlockFormatType = {
   key: string;

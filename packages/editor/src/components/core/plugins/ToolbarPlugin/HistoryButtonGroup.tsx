@@ -1,19 +1,19 @@
 import type { LexicalEditor } from "lexical";
-import type { ToolbarState } from "@/context/ToolbarContext.tsx";
+import type { ToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
 import type { FC } from "react";
 import {
   Tooltip,
   TooltipProvider,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip.tsx";
-import { Button } from "@/components/ui/button.tsx";
+} from "@softmaple/editor/components/ui/tooltip.tsx";
+import { Button } from "@softmaple/editor/components/ui/button.tsx";
 import {
   handleRedo,
   handleUndo,
-} from "@/components/core/plugins/ToolbarPlugin/utils.ts";
+} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
 import { Redo, Undo } from "lucide-react";
-import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 
 type HistoryButtonGroupProps = {
   editor: LexicalEditor;

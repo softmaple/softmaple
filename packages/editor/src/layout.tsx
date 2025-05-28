@@ -1,7 +1,7 @@
 import type { FC, ReactNode } from "react";
 
-import { NetlifyBadge } from "@/layout/NetlifyBadge.tsx";
-import { ThemeModeToggle } from "@/components/ui/theme-mode-toggle.tsx";
+import { NetlifyBadge } from "@softmaple/editor/layout/NetlifyBadge.tsx";
+import { ThemeModeToggle } from "@softmaple/editor/components/ui/theme-mode-toggle.tsx";
 
 type LayoutProps = {
   children: ReactNode;

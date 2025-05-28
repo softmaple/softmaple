@@ -1,4 +1,4 @@
-export function markdownToLatex(markdown) {
+export function markdownToLatex(markdown: string) {
   const lines = markdown.split("\n");
   const latexLines = [];
 
@@ -41,9 +41,10 @@ export function markdownToLatex(markdown) {
 
     // Headings
     if (/^#{1,6} /.test(line)) {
+      // @ts-expect-error FIXME
       const level = line.match(/^#+/)[0].length;
       const content = line.replace(/^#{1,6} /, "");
-      const headingMap = {
+      const headingMap: Record<number, string> = {
         1: "section",
         2: "subsection",
         3: "subsubsection",
@@ -98,7 +99,7 @@ export function markdownToLatex(markdown) {
 }
 
 // Helper: nested bold/italic/code (recursive)
-const applyInlineStyles = (text) => {
+const applyInlineStyles = (text?: string): string => {
   if (!text) return "";
 
   // Handle inline code first (no nesting inside it)
@@ -107,19 +108,19 @@ const applyInlineStyles = (text) => {
   // Bold+Italic (***) or (___)
   text = text.replace(
     /(\*\*\*|___)(.+?)\1/g,
-    (_, __, content) => `\\textbf{\\textit{${applyInlineStyles(content)}}}`
+    (_, __, content) => `\\textbf{\\textit{${applyInlineStyles(content)}}}`,
   );
 
   // Bold (** or __)
   text = text.replace(
     /(\*\*|__)(.+?)\1/g,
-    (_, __, content) => `\\textbf{${applyInlineStyles(content)}}`
+    (_, __, content) => `\\textbf{${applyInlineStyles(content)}}`,
   );
 
   // Italic (* or _)
   text = text.replace(
     /(\*|_)(.+?)\1/g,
-    (_, __, content) => `\\textit{${applyInlineStyles(content)}}`
+    (_, __, content) => `\\textit{${applyInlineStyles(content)}}`,
   );
 
   return text;

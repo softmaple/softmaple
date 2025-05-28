@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@softmaple/ui": "workspace:*",
+    "@softmaple/editor": "workspace:*",
     "lucide-react": "^0.475.0",
     "next": "^15.3.2",
     "next-themes": "^0.4.4",

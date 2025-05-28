@@ -6,6 +6,44 @@ import { FileText } from "lucide-react";
 import { GitHubIcon } from "./icons/github";
 import { XIcon } from "./icons/x";
 
+const socialLinks = [
+  { key: "github", href: "https://github.com/softmaple", icon: GitHubIcon },
+  { key: "x", href: "https://x.com/zhyd007", icon: XIcon },
+];
+
+const footerSections = [
+  {
+    key: "product",
+    title: "Product",
+    links: [
+      { key: "features", href: "#", label: "Features" },
+      { key: "pricing", href: "#", label: "Pricing" },
+      { key: "changelog", href: "#", label: "Changelog" },
+      { key: "roadmap", href: "#", label: "Roadmap" },
+    ],
+  },
+  {
+    key: "resources",
+    title: "Resources",
+    links: [
+      { key: "documentation", href: "#", label: "Documentation" },
+      { key: "tutorials", href: "#", label: "Tutorials" },
+      { key: "examples", href: "#", label: "Examples" },
+      { key: "community", href: "#", label: "Community" },
+    ],
+  },
+  {
+    key: "company",
+    title: "Company",
+    links: [
+      { key: "about", href: "#", label: "About" },
+      { key: "blog", href: "#", label: "Blog" },
+      { key: "careers", href: "#", label: "Careers" },
+      { key: "contact", href: "#", label: "Contact" },
+    ],
+  },
+];
+
 export const Footer = () => {
   return (
     <footer className="border-t border-border/40 bg-muted/30">
@@ -22,132 +60,39 @@ export const Footer = () => {
               The modern writing tool for technical professionals.
             </p>
             <div className="flex space-x-4">
-              <Button variant="ghost" size="icon" className="w-8 h-8" asChild>
-                <Link href="https://github.com/softmaple">
-                  <GitHubIcon className="w-4 h-4" />
-                </Link>
-              </Button>
-              <Button variant="ghost" size="icon" className="w-8 h-8" asChild>
-                <Link href="https://x.com/zhyd007">
-                  <XIcon className="w-4 h-4" />
-                </Link>
-              </Button>
+              {socialLinks.map((social) => (
+                <Button
+                  key={social.key}
+                  variant="ghost"
+                  size="icon"
+                  className="w-8 h-8"
+                  asChild
+                >
+                  <Link href={social.href}>
+                    <social.icon className="w-4 h-4" />
+                  </Link>
+                </Button>
+              ))}
             </div>
           </div>
 
-          <div>
-            <h3 className="font-semibold mb-4">Product</h3>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Features
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Pricing
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Changelog
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Roadmap
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h3 className="font-semibold mb-4">Resources</h3>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Documentation
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Tutorials
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Examples
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Community
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h3 className="font-semibold mb-4">Company</h3>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  About
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Blog
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Careers
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#"
-                  className="hover:text-foreground transition-colors"
-                >
-                  Contact
-                </Link>
-              </li>
-            </ul>
-          </div>
+          {footerSections.map((section) => (
+            <div key={section.key}>
+              <h3 className="font-semibold mb-4">{section.title}</h3>
+              <ul className="space-y-2 text-sm text-muted-foreground">
+                {section.links.map((link) => (
+                  <li key={link.key}>
+                    <Link
+                      href={link.href}
+                      className="hover:text-foreground transition-colors"
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
         <div className="border-t border-border/40 mt-12 pt-8 text-center text-sm text-muted-foreground">

@@ -5,6 +5,12 @@ import Link from "next/link";
 import { Button } from "@softmaple/ui/components/button";
 import { ModeToggle } from "@/components/mode-toggle";
 
+const navItems = [
+  { key: "features", href: "#features", label: "Features" },
+  { key: "docs", href: "#docs", label: "Docs" },
+  { key: "pricing", href: "#pricing", label: "Pricing" },
+];
+
 export const Header = () => {
   return (
     <header className="border-b border-border/40 backdrop-blur-sm sticky top-0 z-50 bg-background/80">
@@ -17,24 +23,15 @@ export const Header = () => {
         </div>
 
         <nav className="hidden md:flex items-center space-x-8">
-          <Link
-            href="#features"
-            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Features
-          </Link>
-          <Link
-            href="#docs"
-            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Docs
-          </Link>
-          <Link
-            href="#pricing"
-            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Pricing
-          </Link>
+          {navItems.map((item) => (
+            <Link
+              key={item.key}
+              href={item.href}
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {item.label}
+            </Link>
+          ))}
         </nav>
 
         <div className="flex items-center space-x-4">

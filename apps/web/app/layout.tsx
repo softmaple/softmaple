@@ -1,5 +1,5 @@
 import { Geist, Geist_Mono } from "next/font/google";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 
 import "@softmaple/ui/globals.css";
 import { Providers } from "@/components/providers";

@@ -3,13 +3,13 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip.tsx";
-import { Button } from "@/components/ui/button.tsx";
-import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
-import { formatText } from "@/components/core/plugins/ToolbarPlugin/utils.ts";
+} from "@softmaple/editor/components/ui/tooltip.tsx";
+import { Button } from "@softmaple/editor/components/ui/button.tsx";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
+import { formatText } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
 import { Bold, Code, Italic, Strikethrough, Underline } from "lucide-react";
 import type { LexicalEditor, TextFormatType } from "lexical";
-import type { ToolbarState } from "@/context/ToolbarContext.tsx";
+import type { ToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
 import type { FC } from "react";
 
 type FormatButtonGroupProps = {

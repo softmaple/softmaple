@@ -2,16 +2,16 @@ import { useState } from "react";
 import type { FC } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
-import { cn } from "@/lib/utils.ts";
+import { cn } from "@softmaple/editor/lib/utils.ts";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { ToolbarPlugin } from "@/components/core/plugins/ToolbarPlugin/ToolbarPlugin.tsx";
-import { LexicalContentEditable } from "@/components/core/LexicalContentEditable.tsx";
+import { ToolbarPlugin } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ToolbarPlugin.tsx";
+import { LexicalContentEditable } from "@softmaple/editor/components/core/LexicalContentEditable.tsx";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
-import { useSharedHistoryContext } from "@/context/SharedHistoryContext.tsx";
+import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistoryContext.tsx";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
-import { ShortcutsPlugin } from "@/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin.tsx";
-import { MarkdownPlugin } from "@/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin.tsx";
+import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin.tsx";
+import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin.tsx";
 
 type EditorProps = {
   className?: string;

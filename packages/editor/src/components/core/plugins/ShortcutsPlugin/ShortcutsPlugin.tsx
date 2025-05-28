@@ -22,7 +22,7 @@ import {
   formatNumberedList,
   formatParagraph,
   formatQuote,
-} from "../ToolbarPlugin/utils";
+} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
 import {
   isCapitalize,
   isCenterAlign,
@@ -47,7 +47,7 @@ import {
   isSuperscript,
   isUppercase,
 } from "./shortcuts";
-import { useToolbarState } from "@/context/ToolbarContext.tsx";
+import { useToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
 
 export const ShortcutsPlugin = ({
   editor,

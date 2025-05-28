@@ -11,11 +11,11 @@
     "prefix": ""
   },
   "aliases": {
-    "components": "@/components",
-    "utils": "@/lib/utils",
-    "ui": "@/components/ui",
-    "lib": "@/lib",
-    "hooks": "@/hooks"
+    "components": "@softmaple/editor/components",
+    "utils": "@softmaple/editor/lib/utils",
+    "ui": "@softmaple/editor/components/ui",
+    "lib": "@softmaple/editor/lib",
+    "hooks": "@softmaple/editor/hooks"
   },
   "iconLibrary": "lucide"
 }

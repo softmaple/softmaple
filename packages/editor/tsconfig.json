@@ -7,7 +7,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
+      "@softmaple/editor/*": ["./src/*"],
       "@softmaple/md2latex/*": ["../md2latex/*"]
     }
   }

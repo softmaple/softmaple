@@ -1,0 +1,110 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":separatePatchReleases"
+  ],
+  "packageRules": [
+    {
+      "description": "Group React ecosystem updates",
+      "groupName": "React ecosystem",
+      "matchPackageNames": ["react", "react-dom"],
+      "matchPackagePatterns": ["^@types/react"],
+      "automerge": false,
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group Next.js updates",
+      "groupName": "Next.js",
+      "matchPackageNames": ["next"],
+      "matchPackagePatterns": ["^eslint-config-next"],
+      "automerge": false,
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group Lexical editor updates",
+      "groupName": "Lexical",
+      "matchPackageNames": ["lexical"],
+      "matchPackagePatterns": ["^@lexical/"],
+      "automerge": false,
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group Radix UI updates",
+      "groupName": "Radix UI",
+      "matchPackagePatterns": ["^@radix-ui/"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group TypeScript ecosystem",
+      "groupName": "TypeScript",
+      "matchPackageNames": ["typescript"],
+      "matchPackagePatterns": ["^@types/", "^typescript-eslint"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group ESLint ecosystem",
+      "groupName": "ESLint",
+      "matchPackageNames": ["eslint"],
+      "matchPackagePatterns": ["^eslint-", "^@eslint/"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group build tools",
+      "groupName": "Build tools",
+      "matchPackageNames": ["vite", "turbo", "prettier"],
+      "matchPackagePatterns": ["^@vitejs/", "^@tailwindcss/", "^tailwindcss"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group Storybook updates",
+      "groupName": "Storybook",
+      "matchPackageNames": ["storybook"],
+      "matchPackagePatterns": ["^@storybook/", "^@chromatic-com/"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group testing tools",
+      "groupName": "Testing tools",
+      "matchPackageNames": ["vitest", "playwright"],
+      "matchPackagePatterns": ["^@vitest/"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Auto-merge patch and minor updates for utility packages",
+      "matchPackageNames": ["clsx", "class-variance-authority", "tailwind-merge", "lucide-react"],
+      "automerge": true,
+      "automergeType": "pr",
+      "matchUpdateTypes": ["patch", "minor"]
+    }
+  ],
+  "schedule": ["before 10am on monday"],
+  "timezone": "UTC",
+  "labels": ["dependencies"],
+  "assignees": ["zhyd1997"],
+  "reviewers": ["zhyd1997"],
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 2,
+  "commitMessagePrefix": "chore(deps):",
+  "commitMessageAction": "update",
+  "commitMessageTopic": "{{depName}}",
+  "commitMessageExtra": "to {{newVersion}}",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 10am on monday"]
+  }
+}

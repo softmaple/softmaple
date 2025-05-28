@@ -1,12 +1,12 @@
 import { Moon, Sun } from "lucide-react";
 
-import { Button } from "@softmaple/editor/components/ui/button";
+import { Button } from "@softmaple/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@softmaple/editor/components/ui/dropdown-menu";
+} from "@softmaple/ui/components/dropdown-menu";
 import { useTheme } from "@softmaple/editor/context/theme-provider";
 
 export const ThemeModeToggle = () => {

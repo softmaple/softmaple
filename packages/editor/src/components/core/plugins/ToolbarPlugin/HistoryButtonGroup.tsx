@@ -6,8 +6,8 @@ import {
   TooltipProvider,
   TooltipContent,
   TooltipTrigger,
-} from "@softmaple/editor/components/ui/tooltip.tsx";
-import { Button } from "@softmaple/editor/components/ui/button.tsx";
+} from "@softmaple/ui/components/tooltip";
+import { Button } from "@softmaple/ui/components/button";
 import {
   handleRedo,
   handleUndo,

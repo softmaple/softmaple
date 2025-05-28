@@ -39,14 +39,6 @@ export default defineConfig({
             "@lexical/react/LexicalComposerContext",
             "@lexical/react/LexicalMarkdownShortcutPlugin",
           ],
-          // Split Radix UI components
-          radix: [
-            "@radix-ui/react-dropdown-menu",
-            "@radix-ui/react-select",
-            "@radix-ui/react-separator",
-            "@radix-ui/react-slot",
-            "@radix-ui/react-tooltip",
-          ],
           // Split utility libraries
           utils: [
             "clsx",

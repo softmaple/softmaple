@@ -11,7 +11,7 @@ import {
   CAN_REDO_COMMAND,
   SELECTION_CHANGE_COMMAND,
 } from "lexical";
-import { Separator } from "@softmaple/editor/components/ui/separator.tsx";
+import { Separator } from "@softmaple/ui/components/separator";
 import {
   $findMatchingParent,
   mergeRegister,

@@ -3,8 +3,8 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@softmaple/editor/components/ui/tooltip.tsx";
-import { Button } from "@softmaple/editor/components/ui/button.tsx";
+} from "@softmaple/ui/components/tooltip";
+import { Button } from "@softmaple/ui/components/button";
 import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
 import { formatText } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
 import { Bold, Code, Italic, Strikethrough, Underline } from "lucide-react";

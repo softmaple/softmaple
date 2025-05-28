@@ -8,7 +8,8 @@
     "baseUrl": ".",
     "paths": {
       "@softmaple/editor/*": ["./src/*"],
-      "@softmaple/md2latex/*": ["../md2latex/*"]
+      "@softmaple/md2latex/*": ["../md2latex/*"],
+      "@softmaple/ui/*": ["../../ui/src/*"],
     }
   }
 }

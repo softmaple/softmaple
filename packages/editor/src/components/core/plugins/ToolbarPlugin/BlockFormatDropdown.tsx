@@ -5,7 +5,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@softmaple/editor/components/ui/select.tsx";
+} from "@softmaple/ui/components/select";
 import {
   Type,
   Text,

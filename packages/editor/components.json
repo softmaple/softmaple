@@ -5,16 +5,16 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/styles.css",
+    "css": "../../packages/ui/src/styles/globals.css",
     "baseColor": "neutral",
     "cssVariables": true,
     "prefix": ""
   },
   "aliases": {
     "components": "@softmaple/editor/components",
-    "utils": "@softmaple/editor/lib/utils",
-    "ui": "@softmaple/editor/components/ui",
     "lib": "@softmaple/editor/lib",
+    "utils": "@softmaple/ui/lib/utils",
+    "ui": "@softmaple/ui/components",
     "hooks": "@softmaple/editor/hooks"
   },
   "iconLibrary": "lucide"

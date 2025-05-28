@@ -1,6 +1,6 @@
 import type { FC } from "react";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
-import { cn } from "@softmaple/editor/lib/utils.ts";
+import { cn } from "@softmaple/editor/lib/utils";
 
 type LexicalContentEditableProps = {
   className?: string;

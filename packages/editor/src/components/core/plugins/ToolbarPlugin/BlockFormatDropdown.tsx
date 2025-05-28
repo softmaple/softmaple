@@ -17,7 +17,7 @@ import {
   ListTodo,
   Quote,
 } from "lucide-react";
-import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts";
 import type { LexicalEditor } from "lexical";
 import {
   formatParagraph,
@@ -26,8 +26,8 @@ import {
   formatBulletList,
   formatCheckList,
   formatQuote,
-} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
-import type { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar.ts";
+} from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
+import type { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
 type BlockFormatType = {
   key: string;

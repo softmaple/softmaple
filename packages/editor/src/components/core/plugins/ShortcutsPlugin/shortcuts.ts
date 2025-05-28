@@ -60,6 +60,10 @@ export const isFormatHeading = (event: KeyboardEvent): boolean => {
 
   const keyNumber = code[code.length - 1];
 
+  if (!keyNumber) {
+    return false;
+  }
+
   return (
     ["1", "2", "3"].includes(keyNumber) &&
     isModifierMatch(event, { ...CONTROL_OR_META, altKey: true })

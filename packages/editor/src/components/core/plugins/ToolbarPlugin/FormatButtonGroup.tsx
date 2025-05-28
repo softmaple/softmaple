@@ -5,11 +5,11 @@ import {
   TooltipTrigger,
 } from "@softmaple/ui/components/tooltip";
 import { Button } from "@softmaple/ui/components/button";
-import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
-import { formatText } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils.ts";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts";
+import { formatText } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
 import { Bold, Code, Italic, Strikethrough, Underline } from "lucide-react";
 import type { LexicalEditor, TextFormatType } from "lexical";
-import type { ToolbarState } from "@softmaple/editor/context/ToolbarContext.tsx";
+import type { ToolbarState } from "@softmaple/editor/context/ToolbarContext";
 import type { FC } from "react";
 
 type FormatButtonGroupProps = {

@@ -35,6 +35,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@softmaple/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
       '@softmaple/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -2268,6 +2271,7 @@ packages:
 
   chromatic@11.28.3:
     resolution: {integrity: sha512-ZElcGK0jXLNCtF4UU63qOG97lrjvqiM+PeJrQ8++PtuQodzyzk7Kuw8AkDIZekIPIWSk2YJ5h0Zhqkp3vpYAtw==}
+    deprecated: Includes a breaking change
     hasBin: true
     peerDependencies:
       '@chromatic-com/cypress': ^0.*.* || ^1.0.0

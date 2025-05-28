@@ -70,5 +70,8 @@
     "extends": [
       "plugin:storybook/recommended"
     ]
+  },
+  "exports": {
+    "./lib/*": "./src/lib/*.ts"
   }
 }

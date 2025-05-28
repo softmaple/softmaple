@@ -44,7 +44,7 @@ export const Hero = () => {
             className="px-8 py-3 text-base font-medium"
             asChild
           >
-            <Link href="mailto:demo@softmaple.ink">Book a Demo</Link>
+            <Link href="mailto:hello@softmaple.ink">Book a Demo</Link>
           </Button>
         </div>
 

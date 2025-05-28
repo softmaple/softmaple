@@ -138,7 +138,10 @@ export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
   return (
     <div className="flex items-center">
       <Select value={blockType} onValueChange={handleChange}>
-        <SelectTrigger className="h-8 min-w-[130px] gap-1">
+        <SelectTrigger
+          aria-label="Text block format"
+          className="h-8 min-w-[130px] gap-1"
+        >
           <Type className="size-4 md:size-4.5" />
           <SelectValue placeholder="Format" />
         </SelectTrigger>

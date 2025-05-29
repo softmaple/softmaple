@@ -5,10 +5,11 @@ import Link from "next/link";
 import { FileText } from "lucide-react";
 import { GitHubIcon } from "./icons/github";
 import { XIcon } from "./icons/x";
+import { SITE_CONFIG } from "@softmaple/config";
 
 const socialLinks = [
-  { key: "github", href: "https://github.com/softmaple", icon: GitHubIcon },
-  { key: "x", href: "https://x.com/zhyd007", icon: XIcon },
+  { key: "github", href: SITE_CONFIG.GITHUB_REPO, icon: GitHubIcon },
+  { key: "x", href: SITE_CONFIG.TWITTER, icon: XIcon },
 ];
 
 const footerSections = [

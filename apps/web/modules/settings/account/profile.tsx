@@ -16,15 +16,24 @@ import {
 import { Bell, Settings, Shield, Trash2, Upload, User } from "lucide-react";
 import Link from "next/link";
 import type { FC } from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { Switch } from "@softmaple/ui/components/switch";
 import { Separator } from "@softmaple/ui/components/separator";
+import { createClient } from "@/utils/supabase/client";
 
-export type ProfileProps = {};
+import type { User as DbUSer } from "@softmaple/db";
+
+export type ProfileProps = {
+  userId: string;
+};
 
 export const Profile: FC<ProfileProps> = (props) => {
+  const { userId } = props;
+
+  const supbase = createClient();
+
   const [profile, setProfile] = useState({
     name: "John Doe",
     email: "john@example.com",
@@ -37,6 +46,36 @@ export const Profile: FC<ProfileProps> = (props) => {
     weeklyDigest: true,
     collaboratorUpdates: true,
   });
+
+  const getUserProfile = async () => {
+    try {
+      if (!userId) {
+        throw new Error("User ID is required to fetch profile");
+      }
+
+      // @ts-expect-error FIXME: TypeScript error, but this is correct usage
+      const { data, error } = await supbase
+        .from<"user", DbUSer>("user")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw error;
+
+      if (data) {
+        setProfile({
+          name: data?.full_name || "",
+          email: data?.email || "",
+          avatar: data?.avatar_url || "",
+        });
+      }
+    } catch (e) {
+      console.error("Failed to fetch user profile:", e);
+    }
+  };
+
+  useEffect(() => {
+    getUserProfile();
+  }, []);
 
   const handleSaveProfile = () => {
     // Simulate save

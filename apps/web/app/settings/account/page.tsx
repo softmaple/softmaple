@@ -11,5 +11,5 @@ export default async function AccountSettingsPage() {
     redirect("/login");
   }
 
-  return <Profile />;
+  return <Profile userId={data.user.id} />;
 }

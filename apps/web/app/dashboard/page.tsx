@@ -26,6 +26,7 @@ import { CreateWorkspaceDialog } from "@/modules/workspaces/create-workspace-dia
 interface Workspace {
   id: string;
   name: string;
+  slug: string;
   description: string;
   documentsCount: number;
   membersCount: number;
@@ -45,6 +46,7 @@ export default function DashboardPage() {
       {
         id: "1",
         name: "Research Papers",
+        slug: "research-papers",
         description: "Academic research and publications",
         documentsCount: 12,
         membersCount: 3,
@@ -54,6 +56,7 @@ export default function DashboardPage() {
       {
         id: "2",
         name: "Technical Documentation",
+        slug: "technical-documentation",
         description: "API docs and technical guides",
         documentsCount: 8,
         membersCount: 5,
@@ -77,6 +80,8 @@ export default function DashboardPage() {
     const newWorkspace: Workspace = {
       id: Date.now().toString(),
       name: workspace.name,
+      // TODO: Generate a slug from the name using lodash kebab-case or similar.
+      slug: "",
       description: workspace.description,
       documentsCount: 0,
       membersCount: 1,
@@ -189,7 +194,7 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredWorkspaces.map((workspace) => (
-            <Link key={workspace.id} href={`/workspace/${workspace.id}`}>
+            <Link key={workspace.id} href={`/workspace/${workspace.slug}`}>
               <Card className="hover:shadow-lg transition-all duration-200 cursor-pointer group">
                 <CardHeader>
                   <div className="flex items-start justify-between">

@@ -35,3 +35,4 @@ jobs:
         run: pnpm run db:migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}

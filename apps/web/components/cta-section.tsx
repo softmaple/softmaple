@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@softmaple/ui/components/button";
 
 export const CtaSection = () => {

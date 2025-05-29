@@ -37,8 +37,8 @@ export const Header = () => {
         <div className="flex items-center space-x-4">
           <ModeToggle />
 
-          <Button variant="ghost" size="sm" className="hidden md:flex">
-            Sign In
+          <Button variant="ghost" size="sm" className="flex">
+            <Link href="/login">Sign In</Link>
           </Button>
         </div>
       </div>

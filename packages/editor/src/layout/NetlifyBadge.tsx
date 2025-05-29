@@ -11,7 +11,7 @@ export const NetlifyBadge: FC = () => {
       <img
         src="https://www.netlify.com/v3/img/components/netlify-color-accent.svg"
         alt="Deploys by Netlify"
-        className="h-8"
+        className="h-8 w-auto max-w-[120px]"
       />
     </a>
   );

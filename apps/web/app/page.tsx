@@ -97,6 +97,38 @@ export default function Home() {
           />
           Go to nextjs.org →
         </a>
+        <a
+          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
+          href="https://github.com/softmaple/softmaple"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Image
+            aria-hidden
+            src="/github.svg"
+            alt="GitHub icon"
+            width={16}
+            height={16}
+            className="invert dark:invert-0"
+          />
+          GitHub
+        </a>
+        <a
+          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
+          href="https://x.com"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Image
+            aria-hidden
+            src="/x.svg"
+            alt="X icon"
+            width={16}
+            height={16}
+            className="invert dark:invert-0"
+          />
+          X
+        </a>
       </footer>
     </div>
   );

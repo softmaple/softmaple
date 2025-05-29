@@ -13,6 +13,7 @@ export const NetlifyBadge: FC = () => {
         loading="lazy"
         src="https://www.netlify.com/assets/badges/netlify-badge-color-accent.svg"
         alt="Deploys by Netlify"
+        className="h-8 w-auto max-w-[120px]"
       />
     </a>
   );

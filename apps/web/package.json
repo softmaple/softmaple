@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@softmaple/config": "workspace:*",
     "@softmaple/editor": "workspace:*",
     "@softmaple/ui": "workspace:*",
     "@supabase/ssr": "^0.6.1",

@@ -23,8 +23,6 @@ import { Switch } from "@softmaple/ui/components/switch";
 import { Separator } from "@softmaple/ui/components/separator";
 import { createClient } from "@/utils/supabase/client";
 
-import type { User as DbUSer } from "@softmaple/db";
-
 export type ProfileProps = {
   userId: string;
 };
@@ -53,9 +51,8 @@ export const Profile: FC<ProfileProps> = (props) => {
         throw new Error("User ID is required to fetch profile");
       }
 
-      // @ts-expect-error FIXME: TypeScript error, but this is correct usage
       const { data, error } = await supbase
-        .from<"user", DbUSer>("user")
+        .from("users")
         .select("*")
         .eq("id", userId)
         .maybeSingle();

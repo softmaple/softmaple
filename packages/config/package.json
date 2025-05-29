@@ -1,0 +1,17 @@
+{
+  "name": "@softmaple/config",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "main": "./site.ts",
+  "types": "./site.ts",
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint": "eslint . --max-warnings 0"
+  },
+  "devDependencies": {
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "typescript": "^5.7.3"
+  }
+}

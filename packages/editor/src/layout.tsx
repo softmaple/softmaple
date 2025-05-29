@@ -1,5 +1,6 @@
 import type { FC, ReactNode } from "react";
 import { Suspense, lazy } from "react";
+import { SITE_CONFIG } from "@softmaple/config";
 
 import { ThemeModeToggle } from "@softmaple/editor/components/ui/theme-mode-toggle";
 
@@ -45,7 +46,7 @@ export const Layout: FC<LayoutProps> = (props) => {
               </a>
               . The source code is available on&nbsp;
               <a
-                href={"https://github.com/softmaple/softmaple"}
+                href={SITE_CONFIG.GITHUB_REPO}
                 target="_blank"
                 className="font-medium underline underline-offset-4"
               >

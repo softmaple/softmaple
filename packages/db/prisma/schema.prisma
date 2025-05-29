@@ -14,3 +14,108 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
+model User {
+  id         String  @id @default(uuid())
+  email      String  @unique
+  first_name String?
+  last_name  String?
+  full_name  String? @default("")
+  avatar_url String?
+
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @updatedAt @db.Timestamptz(3)
+  created_by String?  @default("system") // system or user id
+  updated_by String?  @default("system") // system or user id
+
+  workspace_members WorkspaceMember[]
+
+  documents_created Document[]  @relation("DocumentAuthor")
+  owned_workspaces  Workspace[] @relation("WorkspaceOwner")
+
+  @@map("users")
+}
+
+model Workspace {
+  id          Int     @id @default(autoincrement())
+  title       String
+  description String?
+  slug        String  @unique
+  owner_id    String
+
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @updatedAt @db.Timestamptz(3)
+  created_by String?  @default("system") // system or user id
+  updated_by String?  @default("system") // system or user id
+
+  owner     User              @relation("WorkspaceOwner", fields: [owner_id], references: [id])
+  members   WorkspaceMember[]
+  documents Document[]
+
+  @@index([owner_id])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id           String        @id @default(uuid())
+  user_id      String
+  workspace_id Int
+  role         WorkspaceRole @default(EDITOR)
+
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @updatedAt @db.Timestamptz(3)
+  created_by String?  @default("system") // system or user id
+  updated_by String?  @default("system") // system or user id
+  invited_by String? // user id of the inviter
+
+  user      User      @relation(fields: [user_id], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id])
+
+  @@unique([user_id, workspace_id])
+  @@index([user_id])
+  @@index([workspace_id])
+  @@map("workspace_members")
+}
+
+enum WorkspaceRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model Document {
+  id               String   @id @default(uuid())
+  workspace_id     Int
+  author_id        String
+  title            String
+  markdown_content String? // Markdown content of the document
+  // content      Json // Yjs JSON snapshot
+  created_at       DateTime @default(now()) @db.Timestamptz(3)
+  updated_at       DateTime @updatedAt @db.Timestamptz(3)
+  created_by       String?  @default("system") // system or user id
+  updated_by       String?  @default("system") // system or user id
+
+  is_public Boolean @default(false)
+
+  workspace Workspace         @relation(fields: [workspace_id], references: [id])
+  author    User              @relation("DocumentAuthor", fields: [author_id], references: [id])
+  versions  DocumentVersion[]
+
+  @@index([workspace_id])
+  @@index([author_id])
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id         String   @id @default(uuid())
+  doc_id     String
+  // snapshot   String? // history snapshot of the raw document
+  // history snapshot of Yjs document
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @updatedAt @db.Timestamptz(3)
+
+  document Document @relation(fields: [doc_id], references: [id])
+
+  @@index([doc_id])
+  @@map("document_versions")
+}

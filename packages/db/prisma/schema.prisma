@@ -21,7 +21,7 @@ model User {
   first_name String?
   last_name  String?
   full_name  String? @default("")
-  avatar_url String?
+  avatar_src String?
   avatar_alt String? @default("")
 
   created_at DateTime @default(now()) @db.Timestamptz(3)
@@ -44,7 +44,7 @@ model Workspace {
   slug        String  @unique
   owner_id    String
 
-  avatar_url String?
+  avatar_src String?
   avatar_alt String? @default("")
 
   created_at DateTime @default(now()) @db.Timestamptz(3)

@@ -2,7 +2,7 @@ name: Migrate Prisma Schema Changes
 on:
   push:
     paths:
-      - packages/prisma/migrations/**
+      - packages/db/prisma/migrations/**
     branches:
       - next
 

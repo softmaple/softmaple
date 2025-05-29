@@ -24,10 +24,10 @@ model User {
   avatar_src String?
   avatar_alt String? @default("")
 
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  updated_at DateTime @updatedAt @db.Timestamptz(3)
-  created_by String?  @default("system") // system or user id
-  updated_by String?  @default("system") // system or user id
+  created_at DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at DateTime? @updatedAt @db.Timestamptz(3)
+  created_by String?   @default("system") // system or user id
+  updated_by String?   @default("system") // system or user id
 
   workspace_members WorkspaceMember[]
 
@@ -47,10 +47,10 @@ model Workspace {
   avatar_src String?
   avatar_alt String? @default("")
 
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  updated_at DateTime @updatedAt @db.Timestamptz(3)
-  created_by String?  @default("system") // system or user id
-  updated_by String?  @default("system") // system or user id
+  created_at DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at DateTime? @updatedAt @db.Timestamptz(3)
+  created_by String?   @default("system") // system or user id
+  updated_by String?   @default("system") // system or user id
 
   owner     User              @relation("WorkspaceOwner", fields: [owner_id], references: [id])
   members   WorkspaceMember[]
@@ -66,10 +66,10 @@ model WorkspaceMember {
   workspace_id Int
   role         WorkspaceRole @default(EDITOR)
 
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  updated_at DateTime @updatedAt @db.Timestamptz(3)
-  created_by String?  @default("system") // system or user id
-  updated_by String?  @default("system") // system or user id
+  created_at DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at DateTime? @updatedAt @db.Timestamptz(3)
+  created_by String?   @default("system") // system or user id
+  updated_by String?   @default("system") // system or user id
   invited_by String? // user id of the inviter
 
   user      User      @relation(fields: [user_id], references: [id])
@@ -88,16 +88,16 @@ enum WorkspaceRole {
 }
 
 model Document {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   workspace_id     Int
   author_id        String
   title            String
   markdown_content String? // Markdown content of the document
   // content      Json // Yjs JSON snapshot
-  created_at       DateTime @default(now()) @db.Timestamptz(3)
-  updated_at       DateTime @updatedAt @db.Timestamptz(3)
-  created_by       String?  @default("system") // system or user id
-  updated_by       String?  @default("system") // system or user id
+  created_at       DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at       DateTime? @updatedAt @db.Timestamptz(3)
+  created_by       String?   @default("system") // system or user id
+  updated_by       String?   @default("system") // system or user id
 
   is_public Boolean @default(false)
 
@@ -111,12 +111,12 @@ model Document {
 }
 
 model DocumentVersion {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   doc_id     String
   // snapshot   String? // history snapshot of the raw document
   // history snapshot of Yjs document
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  updated_at DateTime @updatedAt @db.Timestamptz(3)
+  created_at DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at DateTime? @updatedAt @db.Timestamptz(3)
 
   document Document @relation(fields: [doc_id], references: [id])
 

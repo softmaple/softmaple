@@ -99,7 +99,7 @@ model Document {
   created_by       String?   @default("system") // system or user id
   updated_by       String?   @default("system") // system or user id
 
-  is_public Boolean @default(false)
+  is_public Boolean? @default(false)
 
   workspace Workspace         @relation(fields: [workspace_id], references: [id])
   author    User              @relation("DocumentAuthor", fields: [author_id], references: [id])

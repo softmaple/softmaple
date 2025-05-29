@@ -35,6 +35,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@softmaple/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@softmaple/editor':
         specifier: workspace:*
         version: link:../../packages/editor
@@ -78,6 +81,18 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.5
         version: 19.1.5(@types/react@19.1.5)
+      typescript:
+        specifier: ^5.7.3
+        version: 5.8.3
+
+  packages/config:
+    devDependencies:
+      '@softmaple/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@softmaple/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
       typescript:
         specifier: ^5.7.3
         version: 5.8.3

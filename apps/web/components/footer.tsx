@@ -60,16 +60,16 @@ export const Footer = () => {
               The modern writing tool for technical professionals.
             </p>
             <div className="flex space-x-4">
-              {socialLinks.map((social) => (
+              {socialLinks.map(({ key, href, icon: Icon }) => (
                 <Button
-                  key={social.key}
+                  key={key}
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8"
                   asChild
                 >
-                  <Link href={social.href}>
-                    <social.icon className="w-4 h-4" />
+                  <Link href={href}>
+                    <Icon className="w-4 h-4 dark:invert" />
                   </Link>
                 </Button>
               ))}

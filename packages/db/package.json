@@ -1,0 +1,27 @@
+{
+  "name": "@softmaple/db",
+  "version": "0.1.0",
+  "description": "",
+  "keywords": [],
+  "author": {
+    "name": "zhyd1997",
+    "email": "zhyd007@gmail.com",
+    "url": "https://github.com/zhyd1997"
+  },
+  "license": "Apache-2.0",
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev --skip-generate",
+    "db:deploy": "prisma migrate deploy"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "packageManager": "pnpm@10.10.0",
+  "devDependencies": {
+    "prisma": "^6.8.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2"
+  }
+}

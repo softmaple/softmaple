@@ -1,5 +1,6 @@
 import type { FC, ReactNode } from "react";
 import { Suspense, lazy } from "react";
+import { SOFTMAPLE_URLS } from "@softmaple/config";
 
 import { ThemeModeToggle } from "@softmaple/editor/components/ui/theme-mode-toggle";
 
@@ -37,7 +38,7 @@ export const Layout: FC<LayoutProps> = (props) => {
             <p>
               Built by&nbsp;
               <a
-                href={"https://twitter.com/shadcn"}
+                href={SOFTMAPLE_URLS.TWITTER}
                 target="_blank"
                 className="font-medium underline underline-offset-4"
               >
@@ -45,7 +46,7 @@ export const Layout: FC<LayoutProps> = (props) => {
               </a>
               . The source code is available on&nbsp;
               <a
-                href={"https://github.com/softmaple/softmaple"}
+                href={SOFTMAPLE_URLS.GITHUB_REPO}
                 target="_blank"
                 className="font-medium underline underline-offset-4"
               >

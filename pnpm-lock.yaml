@@ -136,6 +136,9 @@ importers:
       '@lexical/utils':
         specifier: ^0.31.2
         version: 0.31.2
+      '@softmaple/config':
+        specifier: workspace:*
+        version: link:../config
       '@softmaple/md2latex':
         specifier: workspace:*
         version: link:../md2latex

@@ -20,6 +20,7 @@
     "@lexical/selection": "^0.31.2",
     "@lexical/table": "^0.31.2",
     "@lexical/utils": "^0.31.2",
+    "@softmaple/config": "workspace:*",
     "@softmaple/md2latex": "workspace:*",
     "@softmaple/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.7",

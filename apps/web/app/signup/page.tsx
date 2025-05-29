@@ -1,12 +1,5 @@
-"use client";
-
-import type React from "react";
-
-import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@softmaple/ui/components/button";
-import { Input } from "@softmaple/ui/components/input";
-import { Label } from "@softmaple/ui/components/label";
 import {
   Card,
   CardContent,
@@ -15,36 +8,9 @@ import {
   CardTitle,
 } from "@softmaple/ui/components/card";
 import { FileText, Github, Mail } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { SignupForm } from "@/modules/auth/signup-form";
 
 export default function SignupPage() {
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    // Simulate signup
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // Redirect to dashboard
-    router.push("/dashboard");
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
@@ -58,56 +24,7 @@ export default function SignupPage() {
           <CardDescription>Start writing with Softmaple today</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full name</Label>
-              <Input
-                id="name"
-                name="name"
-                placeholder="John Doe"
-                value={formData.name}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                placeholder="you@example.com"
-                value={formData.email}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm password</Label>
-              <Input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Creating account..." : "Create account"}
-            </Button>
-          </form>
+          <SignupForm />
 
           <div className="relative">
             <div className="absolute inset-0 flex items-center">

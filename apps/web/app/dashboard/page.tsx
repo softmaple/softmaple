@@ -88,7 +88,7 @@ export default function DashboardPage() {
     router.push(`/workspace/${newWorkspace.id}`);
   };
 
-  if (workspaces.length === 0) {
+  if (!workspaces.length) {
     return (
       <div className="min-h-screen bg-background">
         <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -155,7 +155,7 @@ export default function DashboardPage() {
               Settings
             </Button>
             <Button variant="ghost" size="sm">
-              Profile
+              <Link href="/settings/account">Profile</Link>
             </Button>
           </div>
         </div>

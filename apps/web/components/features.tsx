@@ -1,5 +1,3 @@
-"use client";
-
 import { Card, CardContent } from "@softmaple/ui/components/card";
 import { FileText, Users, Zap } from "lucide-react";
 

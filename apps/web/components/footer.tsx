@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@softmaple/ui/components/button";
 import Link from "next/link";
 import { FileText } from "lucide-react";

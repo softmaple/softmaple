@@ -3,9 +3,10 @@ import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 export const createClient = async (
-  cookieStore: ReturnType<typeof cookies>,
+  cookieStore?: ReturnType<typeof cookies>,
 ): Promise<ReturnType<typeof createServerClient>> => {
-  const { getAll, set } = await cookieStore;
+  const cookieStore_ = cookieStore ?? cookies();
+  const { getAll, set } = await cookieStore_;
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

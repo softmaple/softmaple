@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import "@softmaple/ui/globals.css";
 import { Providers } from "@/components/providers";
+import { OPENGRAPH_IMAGE_URL, SITE_CONFIG } from "@softmaple/config";
 
 const fontSans = Geist({
   subsets: ["latin"],
@@ -22,11 +23,11 @@ export const metadata: Metadata = {
     title: "Softmaple",
     description:
       "Write academic papers with LaTeX-quality output in a modern WYSIWYG editor.",
-    url: "https://playground.softmaple.ink",
+    url: SITE_CONFIG.DOMAIN,
     siteName: "Softmaple",
     images: [
       {
-        url: "https://opengraph.b-cdn.net/production/images/81042fbb-a0bb-4798-9182-3136b7577860.png?token=bZ-vFnt2m-OhFa-a0fowx1U6zcej1aVmJrA8shpnZts&height=800&width=1200&expires=33284239252",
+        url: OPENGRAPH_IMAGE_URL,
         width: 1200,
         height: 800,
       },
@@ -39,9 +40,7 @@ export const metadata: Metadata = {
     title: "Softmaple",
     description:
       "Write academic papers with LaTeX-quality output in a modern WYSIWYG editor.",
-    images: [
-      "https://opengraph.b-cdn.net/production/images/81042fbb-a0bb-4798-9182-3136b7577860.png?token=bZ-vFnt2m-OhFa-a0fowx1U6zcej1aVmJrA8shpnZts&height=800&width=1200&expires=33284239252",
-    ],
+    images: [OPENGRAPH_IMAGE_URL],
   },
 };
 

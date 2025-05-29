@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge } from "@softmaple/ui/components/badge";
 import { ArrowRight, Zap } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";

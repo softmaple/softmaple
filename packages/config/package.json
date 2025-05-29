@@ -3,8 +3,8 @@
   "version": "0.0.1",
   "type": "module",
   "private": true,
-  "main": "./common.ts",
-  "types": "./common.ts",
+  "main": "./site.ts",
+  "types": "./site.ts",
   "license": "Apache-2.0",
   "scripts": {
     "lint": "eslint . --max-warnings 0"

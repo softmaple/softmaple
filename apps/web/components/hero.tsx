@@ -4,7 +4,7 @@ import { Badge } from "@softmaple/ui/components/badge";
 import { ArrowRight, Zap } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import Link from "next/link";
-import { SOFTMAPLE_URLS } from "@softmaple/config";
+import { SITE } from "@softmaple/config";
 
 export const Hero = () => {
   return (
@@ -29,7 +29,7 @@ export const Hero = () => {
 
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
           <Link
-            href={SOFTMAPLE_URLS.PLAYGROUND}
+            href={SITE.PLAYGROUND}
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -44,7 +44,7 @@ export const Hero = () => {
             className="px-8 py-3 text-base font-medium"
             asChild
           >
-            <Link href={SOFTMAPLE_URLS.CONTACT_EMAIL}>Book a Demo</Link>
+            <Link href={`mailto:${SITE.CONTACT_EMAIL}`}>Book a Demo</Link>
           </Button>
         </div>
 

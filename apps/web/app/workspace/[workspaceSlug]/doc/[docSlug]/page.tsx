@@ -32,7 +32,7 @@ import {
 
 export default function DocumentPage() {
   const params = useParams();
-  const { workspaceId, docId } = params;
+  const { workspaceSlug, docSlug } = params;
 
   const [title, setTitle] = useState("Research Proposal");
   const [content, setContent] = useState(`# Research Proposal

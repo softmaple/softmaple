@@ -26,24 +26,28 @@ import Link from "next/link";
 
 export default function WorkspacePage() {
   const params = useParams();
-  const workspaceId = params.workspaceId as string;
+  const workspaceSlug = params.workspaceSlug as string;
 
   const recentDocuments = [
     {
       id: "1",
       title: "Research Proposal",
+      // TODO: how to generate unique doc slug.
+      slug: "research-proposal-timestamp-1",
       lastModified: "2 hours ago",
       author: "John Doe",
     },
     {
       id: "2",
       title: "Literature Review",
+      slug: "literature-review-timestamp-2",
       lastModified: "1 day ago",
       author: "Jane Smith",
     },
     {
       id: "3",
       title: "Methodology",
+      slug: "methodology-timestamp-3",
       lastModified: "3 days ago",
       author: "John Doe",
     },
@@ -176,7 +180,7 @@ export default function WorkspacePage() {
               {recentDocuments.map((doc) => (
                 <Link
                   key={doc.id}
-                  href={`/workspace/${workspaceId}/doc/${doc.id}`}
+                  href={`/workspace/${workspaceSlug}/doc/${doc.slug}`}
                 >
                   <div className="flex items-center space-x-4 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
                     <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">

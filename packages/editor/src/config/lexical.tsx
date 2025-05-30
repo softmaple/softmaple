@@ -1,6 +1,6 @@
 import type { EditorThemeClasses } from "lexical";
 import type { InitialConfigType } from "@lexical/react/LexicalComposer";
-import { PlaygroundNodes } from "@softmaple/editor/nodes/PlaygroundNodes.ts";
+import { PlaygroundNodes } from "@softmaple/editor/nodes/PlaygroundNodes";
 
 export const LEXICAL_PLAYGROUND_THEME: EditorThemeClasses = {
   // Theme styling goes here

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 
 export const createClient = async (
   cookieStore?: ReturnType<typeof cookies>,
-): Promise<ReturnType<typeof createServerClient>> => {
+) => {
   const cookieStore_ = cookieStore ?? cookies();
   const { getAll, set } = await cookieStore_;
 

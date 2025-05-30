@@ -3,6 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build", "^db:generate"],
+      "env": ["LIVEBLOCKS_SECRET_KEY"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**"]
     },

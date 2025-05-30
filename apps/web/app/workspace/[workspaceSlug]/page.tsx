@@ -73,7 +73,7 @@ export default function WorkspacePage() {
     {
       name: "Jane Smith",
       email: "jane@example.com",
-      role: "Editor",
+      role: "DocEditor",
       avatar: "/placeholder.svg?height=32&width=32",
     },
     {

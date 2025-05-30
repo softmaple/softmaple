@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { cn } from "@softmaple/editor/lib/utils";
@@ -15,10 +15,11 @@ import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/Markdo
 
 type EditorProps = {
   className?: string;
+  children?: ReactNode;
 };
 
 export const Editor: FC<EditorProps> = (props) => {
-  const { className, ...rest } = props;
+  const { className, children, ...rest } = props;
 
   const [editor] = useLexicalComposerContext();
   const { historyState } = useSharedHistoryContext();
@@ -63,6 +64,8 @@ export const Editor: FC<EditorProps> = (props) => {
           }
           ErrorBoundary={LexicalErrorBoundary}
         />
+
+        {children}
 
         <MarkdownPlugin />
         <ListPlugin hasStrictIndent />

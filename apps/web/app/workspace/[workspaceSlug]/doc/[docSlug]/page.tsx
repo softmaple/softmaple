@@ -29,6 +29,8 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
+import { DocEditor } from "@/modules/docs/doc-editor";
+import { Room } from "@/app/workspace/[workspaceSlug]/doc/[docSlug]/room";
 
 export default function DocumentPage() {
   const params = useParams();
@@ -208,14 +210,9 @@ We anticipate that this research will provide valuable insights into the future 
           </TabsList>
 
           <TabsContent value="editor" className="flex-1 m-0">
-            <div className="h-full p-6">
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="w-full h-full resize-none border-none outline-none bg-transparent font-mono text-sm leading-relaxed"
-                placeholder="Start writing your document..."
-              />
-            </div>
+            <Room>
+              <DocEditor />
+            </Room>
           </TabsContent>
 
           <TabsContent value="preview" className="flex-1 m-0">

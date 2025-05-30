@@ -90,6 +90,29 @@
       "automerge": true,
       "automergeType": "pr",
       "matchUpdateTypes": ["patch", "minor"]
+    },
+    {
+      "description": "Group Supabase updates",
+      "groupName": "Supabase",
+      "matchPackagePatterns": ["^@supabase/"],
+      "automerge": false,
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group Liveblocks updates",
+      "groupName": "Liveblocks",
+      "matchPackagePatterns": ["^@liveblocks/"],
+      "automerge": false,
+      "schedule": ["before 10am on monday"]
+    },
+    {
+      "description": "Group Prisma updates",
+      "groupName": "Prisma",
+      "matchPackageNames": ["prisma"],
+      "matchPackagePatterns": ["^@prisma/"],
+      "automerge": true,
+      "automergeType": "pr",
+      "schedule": ["before 10am on monday"]
     }
   ],
   "schedule": ["before 10am on monday"],

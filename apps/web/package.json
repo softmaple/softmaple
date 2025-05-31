@@ -19,7 +19,6 @@
     "@liveblocks/react-lexical": "^2.24.3",
     "@liveblocks/react-ui": "^2.24.3",
     "@softmaple/config": "workspace:*",
-    "@softmaple/db": "workspace:*",
     "@softmaple/editor": "workspace:*",
     "@softmaple/ui": "workspace:*",
     "@supabase/ssr": "^0.6.1",
@@ -33,6 +32,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@softmaple/db": "workspace:*",
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",
     "@types/lodash": "^4.17.17",

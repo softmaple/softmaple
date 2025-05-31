@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 import { Settings, User, Users } from "lucide-react";
 

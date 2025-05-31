@@ -1,9 +1,12 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
+import type { Database } from "@softmaple/db";
 
-export const getAll = async (
-  tableName: string,
+type TableName = keyof Database["public"]["Tables"];
+
+export const getAll = async <T extends TableName>(
+  tableName: T,
   filter?: Record<string, any>,
   limit?: number,
   foreignTableName?: string,

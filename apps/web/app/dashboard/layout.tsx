@@ -1,6 +1,6 @@
 import { FileText } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
-import { logout } from "@/app/actions";
+import { logout } from "@/app/actions/auth";
 import { SettingsDropdown } from "@/modules/settings/settings-dropdown";
 
 export default function DashboardLayout({
@@ -34,6 +34,7 @@ export default function DashboardLayout({
           </div>
         </div>
       </header>
+
       {children}
     </div>
   );

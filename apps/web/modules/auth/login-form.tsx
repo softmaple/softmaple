@@ -1,21 +1,8 @@
-"use client";
-
 import type { FC } from "react";
-import { login } from "@/app/actions";
+import { login } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
-import { Button } from "@softmaple/ui/components/button";
-import { useFormStatus } from "react-dom";
-
-const SubmitButton = () => {
-  const { pending: isLoading } = useFormStatus();
-
-  return (
-    <Button type="submit" className="w-full" disabled={isLoading}>
-      {isLoading ? "Signing in..." : "Sign in"}
-    </Button>
-  );
-};
+import { SubmitButton } from "@/modules/auth/submit-button";
 
 export type LoginFormProps = {};
 

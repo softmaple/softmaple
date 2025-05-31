@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@softmaple/ui/components/button";
 import {
   Card,
@@ -21,37 +19,62 @@ import {
   TrendingUp,
   MoreHorizontal,
 } from "lucide-react";
-import { useParams } from "next/navigation";
 import Link from "next/link";
 
-export default function WorkspacePage() {
-  const params = useParams();
-  const workspaceSlug = params.workspaceSlug as string;
+import type { Metadata, ResolvingMetadata } from "next";
+import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
+import { getAll } from "@/app/actions/getAll";
+import { redirect } from "next/navigation";
 
-  const recentDocuments = [
-    {
-      id: "1",
-      title: "Research Proposal",
-      // TODO: how to generate unique doc slug.
-      slug: "research-proposal-timestamp-1",
-      lastModified: "2 hours ago",
-      author: "John Doe",
-    },
-    {
-      id: "2",
-      title: "Literature Review",
-      slug: "literature-review-timestamp-2",
-      lastModified: "1 day ago",
-      author: "Jane Smith",
-    },
-    {
-      id: "3",
-      title: "Methodology",
-      slug: "methodology-timestamp-3",
-      lastModified: "3 days ago",
-      author: "John Doe",
-    },
-  ];
+type Props = {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+};
+
+export async function generateMetadata(
+  { params, searchParams }: Props,
+  parent: ResolvingMetadata,
+): Promise<Metadata> {
+  const { slug: workspaceSlug } = await params;
+
+  // fetch workspace information
+  const { data: workspace } = await cachedGetWorkspaceBySlug(workspaceSlug);
+
+  const { title, description } = workspace || {};
+
+  return {
+    title,
+    description,
+  };
+}
+
+export default async function WorkspacePage({ params, searchParams }: Props) {
+  const { slug: workspaceSlug } = await params;
+
+  // FIXME: only query data for the current workspace
+  const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
+    await Promise.all([
+      getAll("documents", undefined, 5),
+      getAll("workspace_members", undefined, undefined, "users"),
+    ]);
+
+  const recentDocuments = (documents || []).map((doc) => ({
+    ...doc,
+    key: doc.id,
+  }));
+  const allWorkspaceMembers = (members || []).map((member) => ({
+    ...member,
+    user: member?.users,
+    key: member.id,
+  }));
+
+  const error = err1 || err2;
+
+  if (error) {
+    console.error(error);
+
+    redirect(`/workspace/${workspaceSlug}/error`);
+  }
 
   const recentActivity = [
     { action: "John Doe edited Research Proposal", time: "2 hours ago" },
@@ -61,27 +84,6 @@ export default function WorkspacePage() {
     },
     { action: "John Doe created Methodology", time: "3 days ago" },
     { action: "Jane Smith joined the workspace", time: "1 week ago" },
-  ];
-
-  const members = [
-    {
-      name: "John Doe",
-      email: "john@example.com",
-      role: "Owner",
-      avatar: "/placeholder.svg?height=32&width=32",
-    },
-    {
-      name: "Jane Smith",
-      email: "jane@example.com",
-      role: "Editor",
-      avatar: "/placeholder.svg?height=32&width=32",
-    },
-    {
-      name: "Bob Johnson",
-      email: "bob@example.com",
-      role: "Viewer",
-      avatar: "/placeholder.svg?height=32&width=32",
-    },
   ];
 
   return (
@@ -122,7 +124,9 @@ export default function WorkspacePage() {
               <FileText className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">12</div>
+              <div className="text-2xl font-bold">
+                {recentDocuments?.length || 0}
+              </div>
               <p className="text-xs text-muted-foreground">+2 from last week</p>
             </CardContent>
           </Card>
@@ -135,7 +139,7 @@ export default function WorkspacePage() {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">3</div>
+              <div className="text-2xl font-bold">{members?.length || 0}</div>
               <p className="text-xs text-muted-foreground">All active</p>
             </CardContent>
           </Card>
@@ -171,13 +175,16 @@ export default function WorkspacePage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Recent Documents</CardTitle>
-                <Button variant="ghost" size="sm">
-                  View all
-                </Button>
+
+                {recentDocuments.length ? (
+                  <Button variant="ghost" size="sm">
+                    View all
+                  </Button>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {recentDocuments.map((doc) => (
+              {recentDocuments.map((doc: any) => (
                 <Link
                   key={doc.id}
                   href={`/workspace/${workspaceSlug}/doc/${doc.slug}`}
@@ -189,7 +196,7 @@ export default function WorkspacePage() {
                     <div className="flex-1">
                       <h4 className="font-medium">{doc.title}</h4>
                       <p className="text-sm text-muted-foreground">
-                        Edited by {doc.author} • {doc.lastModified}
+                        Edited by {doc.created_by} • {doc.updated_at}
                       </p>
                     </div>
                     <Button variant="ghost" size="icon">
@@ -235,22 +242,27 @@ export default function WorkspacePage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {members.map((member, index) => (
-                <div key={index} className="flex items-center justify-between">
+              {(allWorkspaceMembers || []).map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center justify-between"
+                >
                   <div className="flex items-center space-x-3">
                     <Avatar>
-                      <AvatarImage src={member.avatar || "/placeholder.svg"} />
+                      <AvatarImage
+                        src={member?.user?.avatar_src || "/placeholder.svg"}
+                      />
                       <AvatarFallback>
-                        {member.name
+                        {member?.user?.full_name
                           .split(" ")
-                          .map((n) => n[0])
+                          .map((n: string) => n[0])
                           .join("")}
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className="font-medium">{member.name}</p>
+                      <p className="font-medium">{member?.user?.full_name}</p>
                       <p className="text-sm text-muted-foreground">
-                        {member.email}
+                        {member?.user?.email}
                       </p>
                     </div>
                   </div>

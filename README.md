@@ -55,37 +55,6 @@ We use `pnpm` for package management, if you never used it, see [pnpm](https://p
 pnpm install
 pnpm dev
 ```
-## Supabase setup
-
-```postgresql
-DO $$
-    DECLARE
-        tables TEXT[] := ARRAY['users', 'workspace_members', 'documents', 'document_versions'];
-        tbl TEXT;
-    BEGIN
-        -- make sure `pgcrypto` extension is enabled
-        PERFORM 1 FROM pg_extension WHERE extname = 'pgcrypto';
-        IF NOT FOUND THEN
-            CREATE EXTENSION "pgcrypto";
-        END IF;
-
-        -- iterate over the specified tables
-        FOREACH tbl IN ARRAY tables
-            LOOP
-                -- check if the table exists and has an 'id' column of type 'text'
-                IF EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name = tbl
-                      AND column_name = 'id'
-                      AND data_type = 'text'
-                      AND table_schema = 'public'
-                ) THEN
-                    EXECUTE format('ALTER TABLE %I ALTER COLUMN id SET DEFAULT gen_random_uuid();', tbl);
-                END IF;
-            END LOOP;
-    END $$;
-```
 
 # Community
 The SoftMaple community can be found on [GitHub Discussions](https://github.com/softmaple/softmaple/discussions), where you can ask questions and voice ideas.

@@ -1,7 +1,7 @@
 import { FileText } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
-import Link from "next/link";
 import { logout } from "@/app/actions";
+import { SettingsDropdown } from "@/modules/settings/settings-dropdown";
 
 export default function DashboardLayout({
   children,
@@ -19,12 +19,8 @@ export default function DashboardLayout({
             <span className="font-semibold text-xl">Softmaple</span>
           </div>
           <div className="flex items-center space-x-4">
-            <Button variant="ghost" size="sm">
-              Settings
-            </Button>
-            <Button variant="ghost" size="sm">
-              <Link href="/settings/account">Profile</Link>
-            </Button>
+            <SettingsDropdown />
+
             <Button
               variant="ghost"
               size="sm"

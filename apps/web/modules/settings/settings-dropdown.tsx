@@ -40,6 +40,7 @@ export const SettingsDropdown = () => {
       <DropdownMenuContent align="end" className="w-24">
         <DropdownMenuLabel>Settings</DropdownMenuLabel>
         <DropdownMenuSeparator />
+
         {settingsItems.map(({ key, href, icon: Icon, label }) => (
           <DropdownMenuItem key={key} asChild>
             <Link

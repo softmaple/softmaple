@@ -4,71 +4,43 @@ import type {
   WorkspaceMember,
   Document,
   DocumentVersion,
-  WorkspaceRole,
-} from "./index";
+  Prisma,
+  $Enums,
+} from "../generated/prisma";
 
 export interface Database {
   public: {
     Tables: {
       users: {
         Row: User;
-        Insert: Omit<User, "id" | "created_at" | "updated_at"> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Omit<User, "id" | "created_at">> & {
-          updated_at?: string;
-        };
+        Insert: Prisma.UserUncheckedCreateInput;
+        Update: Prisma.UserUncheckedUpdateInput;
       };
       workspaces: {
         Row: Workspace;
-        Insert: Omit<Workspace, "id" | "created_at" | "updated_at"> & {
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Omit<Workspace, "id" | "created_at">> & {
-          updated_at?: string;
-        };
+        Insert: Prisma.WorkspaceUncheckedCreateInput;
+        Update: Prisma.WorkspaceUncheckedUpdateInput;
       };
       workspace_members: {
         Row: WorkspaceMember;
-        Insert: Omit<WorkspaceMember, "id" | "created_at" | "updated_at"> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Omit<WorkspaceMember, "id" | "created_at">> & {
-          updated_at?: string;
-        };
+        Insert: Prisma.WorkspaceMemberUncheckedCreateInput;
+        Update: Prisma.WorkspaceMemberUncheckedUpdateInput;
       };
       documents: {
         Row: Document;
-        Insert: Omit<Document, "id" | "created_at" | "updated_at"> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Omit<Document, "id" | "created_at">> & {
-          updated_at?: string;
-        };
+        Insert: Prisma.DocumentUncheckedCreateInput;
+        Update: Prisma.DocumentUncheckedUpdateInput;
       };
       document_versions: {
         Row: DocumentVersion;
-        Insert: Omit<DocumentVersion, "id" | "created_at" | "updated_at"> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Omit<DocumentVersion, "id" | "created_at">> & {
-          updated_at?: string;
-        };
+        Insert: Prisma.DocumentVersionUncheckedCreateInput;
+        Update: Prisma.DocumentVersionUncheckedUpdateInput;
       };
     };
     Views: {};
     Functions: {};
     Enums: {
-      WorkspaceRole: WorkspaceRole;
+      WorkspaceRole: $Enums.WorkspaceRole;
     };
   };
 }

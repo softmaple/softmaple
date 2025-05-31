@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import kebabCase from "lodash/kebabCase";
 import { createWorkspaceMember } from "@/app/actions/workspaceMembers";
 import { getUserBy } from "@/app/actions/users";
-import { WorkspaceRole } from "@softmaple/db";
+import { $Enums } from "@softmaple/db";
 
 export const getWorkspaces = async () => {
   const supabase = await createClient();
@@ -86,7 +86,7 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
   const newWorkspaceMember = {
     workspace_id: newWorkspace.id,
     user_id: userId,
-    role: WorkspaceRole.OWNER,
+    role: $Enums.WorkspaceRole.OWNER,
     created_by: userId,
     updated_by: userId,
     invited_by: null,

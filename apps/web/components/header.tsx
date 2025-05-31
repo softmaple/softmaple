@@ -1,9 +1,9 @@
-"use client";
-
 import { FileText } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@softmaple/ui/components/button";
 import { ModeToggle } from "@/components/mode-toggle";
+import { createClient } from "@/utils/supabase/server";
+import { cn } from "@softmaple/ui/lib/utils";
 
 const navItems = [
   { key: "features", href: "#features", label: "Features" },
@@ -11,7 +11,13 @@ const navItems = [
   { key: "pricing", href: "#pricing", label: "Pricing" },
 ];
 
-export const Header = () => {
+export const Header = async () => {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.auth.getUser();
+
+  const isAuthenticated = !error && data?.user;
+
   return (
     <header className="border-b border-border/40 backdrop-blur-sm sticky top-0 z-50 bg-background/80">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -37,8 +43,19 @@ export const Header = () => {
         <div className="flex items-center space-x-4">
           <ModeToggle />
 
-          <Button variant="ghost" size="sm" className="flex">
-            <Link href="/login">Sign In</Link>
+          <Button
+            variant={isAuthenticated ? "outline" : "ghost"}
+            size="sm"
+            className={cn(
+              "flex",
+              isAuthenticated && "bg-muted/20 hover:bg-muted/30",
+            )}
+          >
+            {isAuthenticated ? (
+              <Link href="/dashboard">Dashboard</Link>
+            ) : (
+              <Link href="/login">Sign In</Link>
+            )}
           </Button>
         </div>
       </div>

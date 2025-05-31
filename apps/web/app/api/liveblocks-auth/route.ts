@@ -2,7 +2,7 @@ import { Liveblocks } from "@liveblocks/node";
 import { createClient } from "@/utils/supabase/server";
 
 const liveblocks = new Liveblocks({
-  secret: process.env.LIVEBLOCKS_SECRET_KEY!,
+  secret: process.env.LIVEBLOCKS_SECRET_KEY || "sk_dev_placeholder",
 });
 
 export async function POST(request: Request) {

@@ -1,12 +1,11 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
-import type { Database } from "@softmaple/db";
+import type { Prisma } from "@softmaple/db";
 
-type WorkspaceMemberInsert =
-  Database["public"]["Tables"]["workspace_members"]["Insert"];
-
-export const createWorkspaceMember = async (data: WorkspaceMemberInsert) => {
+export const createWorkspaceMember = async (
+  data: Prisma.WorkspaceMemberUncheckedCreateInput,
+) => {
   const supabase = await createClient();
 
   return supabase.from("workspace_members").insert(data).select("*");

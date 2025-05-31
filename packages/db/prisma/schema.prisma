@@ -16,7 +16,7 @@ datasource db {
 }
 
 model User {
-  id         String  @id @default(uuid())
+  id         String  @id @default(uuid()) @db.Uuid
   email      String  @unique
   first_name String?
   last_name  String?
@@ -42,7 +42,7 @@ model Workspace {
   title       String
   description String?
   slug        String  @unique
-  owner_id    String
+  owner_id    String  @db.Uuid
 
   avatar_src String?
   avatar_alt String? @default("")
@@ -52,7 +52,7 @@ model Workspace {
   created_by String?   @default("system") // system or user id
   updated_by String?   @default("system") // system or user id
 
-  owner     User              @relation("WorkspaceOwner", fields: [owner_id], references: [id])
+  owner     User              @relation("WorkspaceOwner", fields: [owner_id], references: [id], onDelete: Cascade)
   members   WorkspaceMember[]
   documents Document[]
 
@@ -61,8 +61,8 @@ model Workspace {
 }
 
 model WorkspaceMember {
-  id           String        @id @default(uuid())
-  user_id      String
+  id           String        @id @default(uuid()) @db.Uuid
+  user_id      String        @db.Uuid
   workspace_id Int
   role         WorkspaceRole @default(EDITOR)
 
@@ -72,8 +72,8 @@ model WorkspaceMember {
   updated_by String?   @default("system") // system or user id
   invited_by String? // user id of the inviter
 
-  user      User      @relation(fields: [user_id], references: [id])
-  workspace Workspace @relation(fields: [workspace_id], references: [id])
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, workspace_id])
   @@index([user_id])
@@ -88,9 +88,9 @@ enum WorkspaceRole {
 }
 
 model Document {
-  id               String    @id @default(uuid())
+  id               String    @id @default(uuid()) @db.Uuid
   workspace_id     Int
-  author_id        String
+  author_id        String    @db.Uuid
   title            String
   markdown_content String? // Markdown content of the document
   // content      Json // Yjs JSON snapshot
@@ -101,8 +101,8 @@ model Document {
 
   is_public Boolean? @default(false)
 
-  workspace Workspace         @relation(fields: [workspace_id], references: [id])
-  author    User              @relation("DocumentAuthor", fields: [author_id], references: [id])
+  workspace Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  author    User              @relation("DocumentAuthor", fields: [author_id], references: [id], onDelete: Cascade)
   versions  DocumentVersion[]
 
   @@index([workspace_id])
@@ -111,14 +111,14 @@ model Document {
 }
 
 model DocumentVersion {
-  id         String    @id @default(uuid())
-  doc_id     String
+  id         String    @id @default(uuid()) @db.Uuid
+  doc_id     String    @db.Uuid
   // snapshot   String? // history snapshot of the raw document
   // history snapshot of Yjs document
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
 
-  document Document @relation(fields: [doc_id], references: [id])
+  document Document @relation(fields: [doc_id], references: [id], onDelete: Cascade)
 
   @@index([doc_id])
   @@map("document_versions")

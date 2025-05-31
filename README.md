@@ -45,7 +45,9 @@
     - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
     - [eslint-config](packages/eslint-config) - Shared ESLint configuration
     - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`
-    - [ui](packages/ui) - Shared React **shadcn/ui** component library
+    - [ui](packages/ui) - Shared React component library
+      - **shadcn/ui** for UI components
+      - **Tailwind CSS** v4 for styling
 
 We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation.
 

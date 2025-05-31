@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 
 export const getAll = async (
   tableName: string,
+  filter?: Record<string, any>,
   limit?: number,
   foreignTableName?: string,
 ) => {
@@ -12,6 +13,10 @@ export const getAll = async (
 
   if (limit) {
     query.limit(limit);
+  }
+
+  if (filter) {
+    query.match(filter);
   }
 
   if (foreignTableName) {

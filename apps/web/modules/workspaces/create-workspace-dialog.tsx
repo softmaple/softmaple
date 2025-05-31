@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import type { FC, Dispatch, SetStateAction } from "react";
 
 import {
   Dialog,
@@ -12,15 +12,16 @@ import {
 
 import { CreateWorkspaceForm } from "@/modules/workspaces/create-workspace-form";
 
-interface CreateWorkspaceDialogProps {
+type CreateWorkspaceDialogProps = {
   open: boolean;
   onOpenChange: Dispatch<SetStateAction<boolean>>;
-}
+};
 
-export function CreateWorkspaceDialog({
-  open,
-  onOpenChange,
-}: CreateWorkspaceDialogProps) {
+export const CreateWorkspaceDialog: FC<CreateWorkspaceDialogProps> = (
+  props,
+) => {
+  const { open, onOpenChange } = props;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
@@ -36,4 +37,4 @@ export function CreateWorkspaceDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};

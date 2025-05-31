@@ -153,7 +153,6 @@ export const Dashboard: FC<DashboardProps> = ({
       <CreateWorkspaceDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
-        // onCreateWorkspace={handleCreateWorkspace}
       />
     </>
   );

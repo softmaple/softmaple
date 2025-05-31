@@ -51,10 +51,11 @@ export async function generateMetadata(
 export default async function WorkspacePage({ params, searchParams }: Props) {
   const { slug: workspaceSlug } = await params;
 
+  // FIXME: only query data for the current workspace
   const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
     await Promise.all([
-      getAll("documents", 5),
-      getAll("workspace_members", undefined, "users"),
+      getAll("documents", undefined, 5),
+      getAll("workspace_members", undefined, undefined, "users"),
     ]);
 
   const recentDocuments = (documents || []).map((doc) => ({

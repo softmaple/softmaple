@@ -13,6 +13,21 @@ import {
   DropdownMenuItem,
 } from "@softmaple/ui/components/dropdown-menu";
 
+const settingsItems = [
+  {
+    key: "account",
+    href: "/settings/account",
+    icon: User,
+    label: "Account",
+  },
+  {
+    key: "team",
+    href: "/settings/team",
+    icon: Users,
+    label: "Team",
+  },
+];
+
 export const SettingsDropdown = () => {
   return (
     <DropdownMenu>
@@ -25,24 +40,17 @@ export const SettingsDropdown = () => {
       <DropdownMenuContent align="end" className="w-24">
         <DropdownMenuLabel>Settings</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link
-            href="/settings/account"
-            className="flex items-center gap-2 cursor-pointer"
-          >
-            <User className="h-4 w-4" />
-            Account
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link
-            href="/settings/team"
-            className="flex items-center gap-2 cursor-pointer"
-          >
-            <Users className="h-4 w-4" />
-            Team
-          </Link>
-        </DropdownMenuItem>
+        {settingsItems.map(({ key, href, icon: Icon, label }) => (
+          <DropdownMenuItem key={key} asChild>
+            <Link
+              href={href}
+              className="flex items-center gap-2 cursor-pointer"
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </Link>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

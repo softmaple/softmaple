@@ -24,37 +24,36 @@
  </picture>
 </a>
 
-# shadcn/ui monorepo template
+# Development
 
-This template is for creating a monorepo with shadcn/ui.
+## shadcn/ui [turborepo](https://turborepo.org/) architecture:
 
-## Usage
+- apps
+    - [web](apps/web) - Main web application
+      - **Next.js** v15 with `app` folder
+      - **Liveblocks** for real-time collaboration
+      - **Supabase** for database and authentication
+
+- packages
+    - [config](packages/config) - Site configuration
+    - [db](packages/db) - Database schema and migrations
+      - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
+    - [editor](packages/editor) - Rich text editor
+      - **Lexical** for rich text editing
+      - **React** 19
+      - **Vite**
+    - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
+    - [eslint-config](packages/eslint-config) - Shared ESLint configuration
+    - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`
+    - [ui](packages/ui) - Shared React **shadcn/ui** component library
+
+We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation.
 
 ```bash
-pnpm dlx shadcn@latest init
+pnpm install
+pnpm dev
 ```
 
-## Adding components
-
-To add components to your app, run the following command at the root of your `web` app:
-
-```bash
-pnpm dlx shadcn@latest add button -c apps/web
-```
-
-This will place the ui components in the `packages/ui/src/components` directory.
-
-## Tailwind
-
-Your `tailwind.config.ts` and `globals.css` are already set up to use the components from the `ui` package.
-
-## Using components
-
-To use the components in your app, import them from the `ui` package.
-
-```tsx
-import { Button } from "@softmaple/ui/components/button"
-```
 
 # Community
 The SoftMaple community can be found on [GitHub Discussions](https://github.com/softmaple/softmaple/discussions), where you can ask questions and voice ideas.

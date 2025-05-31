@@ -32,4 +32,6 @@ export async function AuthGuard({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  return children;
 }

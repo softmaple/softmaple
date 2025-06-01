@@ -52,9 +52,10 @@ model Workspace {
   created_by String?   @default("system") // system or user id
   updated_by String?   @default("system") // system or user id
 
-  owner     User              @relation("WorkspaceOwner", fields: [owner_id], references: [id], onDelete: Cascade)
-  members   WorkspaceMember[]
-  documents Document[]
+  owner             User              @relation("WorkspaceOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  members           WorkspaceMember[]
+  documents         Document[]
+  document_versions DocumentVersion[]
 
   @@index([owner_id])
   @@map("workspaces")
@@ -118,7 +119,9 @@ model DocumentVersion {
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
 
-  document Document @relation(fields: [doc_id], references: [id], onDelete: Cascade)
+  workspace_id Int
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  document     Document  @relation(fields: [doc_id], references: [id], onDelete: Cascade)
 
   @@index([doc_id])
   @@map("document_versions")

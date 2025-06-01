@@ -12,6 +12,7 @@ export default async function DashboardPage() {
   const { data: workspaces, error } = await cachedGetWorkspaces();
 
   if (error) {
+    console.error(error);
     redirect("/dashboard/error");
   }
 

@@ -50,7 +50,7 @@ export default function WorkspaceLayout({
 }) {
   const params = useParams();
   const pathname = usePathname();
-  const workspaceId = params.workspaceId as string;
+  const { workspaceSlug } = params;
 
   const [documents] = useState<Document[]>([
     {
@@ -182,12 +182,12 @@ export default function WorkspaceLayout({
               {/* Navigation */}
               <div className="p-4 space-y-2">
                 <Link
-                  href={`/workspace/${workspaceId}`}
+                  href={`/workspace/${workspaceSlug}`}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
                   <Button
                     variant={
-                      isActive(`/workspace/${workspaceId}`)
+                      isActive(`/workspace/${workspaceSlug}`)
                         ? "secondary"
                         : "ghost"
                     }
@@ -206,12 +206,12 @@ export default function WorkspaceLayout({
                   Members
                 </Button>
                 <Link
-                  href={`/workspace/${workspaceId}/settings`}
+                  href={`/workspace/${workspaceSlug}/settings`}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
                   <Button
                     variant={
-                      isActive(`/workspace/${workspaceId}/settings`)
+                      isActive(`/workspace/${workspaceSlug}/settings`)
                         ? "secondary"
                         : "ghost"
                     }
@@ -239,12 +239,14 @@ export default function WorkspaceLayout({
                     {documents.map((doc) => (
                       <Link
                         key={doc.id}
-                        href={`/workspace/${workspaceId}/doc/${doc.id}`}
+                        href={`/workspace/${workspaceSlug}/doc/${doc.id}`}
                         onClick={() => setIsMobileMenuOpen(false)}
                       >
                         <Button
                           variant={
-                            isActive(`/workspace/${workspaceId}/doc/${doc.id}`)
+                            isActive(
+                              `/workspace/${workspaceSlug}/doc/${doc.id}`,
+                            )
                               ? "secondary"
                               : "ghost"
                           }
@@ -355,10 +357,10 @@ export default function WorkspaceLayout({
 
         {/* Navigation */}
         <div className="p-4 space-y-2">
-          <Link href={`/workspace/${workspaceId}`}>
+          <Link href={`/workspace/${workspaceSlug}`}>
             <Button
               variant={
-                isActive(`/workspace/${workspaceId}`) ? "secondary" : "ghost"
+                isActive(`/workspace/${workspaceSlug}`) ? "secondary" : "ghost"
               }
               className="w-full justify-start"
             >
@@ -370,10 +372,10 @@ export default function WorkspaceLayout({
             <Users className="mr-2 h-4 w-4" />
             Members
           </Button>
-          <Link href={`/workspace/${workspaceId}/settings`}>
+          <Link href={`/workspace/${workspaceSlug}/settings`}>
             <Button
               variant={
-                isActive(`/workspace/${workspaceId}/settings`)
+                isActive(`/workspace/${workspaceSlug}/settings`)
                   ? "secondary"
                   : "ghost"
               }
@@ -401,11 +403,11 @@ export default function WorkspaceLayout({
               {documents.map((doc) => (
                 <Link
                   key={doc.id}
-                  href={`/workspace/${workspaceId}/doc/${doc.id}`}
+                  href={`/workspace/${workspaceSlug}/doc/${doc.id}`}
                 >
                   <Button
                     variant={
-                      isActive(`/workspace/${workspaceId}/doc/${doc.id}`)
+                      isActive(`/workspace/${workspaceSlug}/doc/${doc.id}`)
                         ? "secondary"
                         : "ghost"
                     }

@@ -7,6 +7,7 @@ import kebabCase from "lodash/kebabCase";
 import { createWorkspaceMember } from "@/app/actions/workspaceMembers";
 import { getUserBy } from "@/app/actions/users";
 import { WorkspaceRole } from "@softmaple/db";
+import type { Workspace } from "@softmaple/db";
 import { Table } from "@/types/model";
 
 export const getWorkspaces = async () => {
@@ -21,11 +22,15 @@ export const getWorkspaces = async () => {
 export const cachedGetWorkspaces = cache(async () => getWorkspaces());
 
 export const getWorkspaceBySlug = async (workspaceSlug: string) => {
+  if (!workspaceSlug || typeof workspaceSlug !== "string") {
+    throw new Error("Invalid workspace slug.");
+  }
+
   const supabase = await createClient();
 
   return supabase
     .from("workspaces")
-    .select("*")
+    .select<string, Workspace>("*")
     .eq("slug", workspaceSlug)
     .maybeSingle();
 };

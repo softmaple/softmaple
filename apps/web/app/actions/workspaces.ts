@@ -72,7 +72,7 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
 
   const nextWorkspace: Table<"workspaces">["Insert"] = {
     title,
-    description: formData.get("description") as string | null,
+    description: formData.get("description") as string,
     slug: kebabCase(title),
     owner_id: userId,
   };

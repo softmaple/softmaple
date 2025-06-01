@@ -70,7 +70,6 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
 
   const userId = user.id;
 
-  // @ts-expect-error FIXME: how to handle `null` type as optional.
   const nextWorkspace: Table<"workspaces">["Insert"] = {
     title,
     description: formData.get("description") as string,
@@ -85,7 +84,6 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
     throw new Error(`Failed to create workspace: ${workspaceError.message}`);
   }
 
-  // @ts-expect-error FIXME: how to handle `invited_by` column as optional because it maybe `null`.
   const newWorkspaceMember: Table<"workspace_members">["Insert"] = {
     workspace_id: newWorkspace.id,
     user_id: userId,

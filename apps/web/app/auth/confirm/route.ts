@@ -21,8 +21,13 @@ export async function GET(request: NextRequest) {
       // redirect user to specified redirect URL or root of app
       redirect(next);
     }
+
+    // redirect the user to an error page with some instructions
+    throw error;
   }
 
   // redirect the user to an error page with some instructions
-  redirect("/error");
+  throw new Error(
+    "Invalid request parameters. Please provide a valid token_hash and type.",
+  );
 }

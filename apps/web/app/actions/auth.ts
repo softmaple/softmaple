@@ -19,7 +19,7 @@ export async function login(formData: FormData) {
 
   if (error) {
     console.error(error);
-    redirect("/error");
+    throw error;
   }
 
   revalidatePath("/dashboard", "layout");
@@ -39,7 +39,8 @@ export async function signup(formData: FormData) {
   const { error } = await supabase.auth.signUp(data);
 
   if (error) {
-    redirect("/error");
+    console.error(error);
+    throw error;
   }
 
   revalidatePath("/", "layout");
@@ -53,7 +54,7 @@ export async function logout() {
 
   if (error) {
     console.error(error);
-    redirect("/error");
+    throw error;
   }
 
   revalidatePath("/", "layout");

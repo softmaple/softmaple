@@ -26,8 +26,8 @@ model User {
 
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
-  created_by String?   @default("system") // system or user id
-  updated_by String?   @default("system") // system or user id
+  created_by String?   @db.Uuid
+  updated_by String?   @db.Uuid
 
   workspace_members WorkspaceMember[]
 
@@ -49,8 +49,8 @@ model Workspace {
 
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
-  created_by String?   @default("system") // system or user id
-  updated_by String?   @default("system") // system or user id
+  created_by String?   @db.Uuid
+  updated_by String?   @db.Uuid
 
   owner             User              @relation("WorkspaceOwner", fields: [owner_id], references: [id], onDelete: Cascade)
   members           WorkspaceMember[]
@@ -69,9 +69,9 @@ model WorkspaceMember {
 
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
-  created_by String?   @default("system") // system or user id
-  updated_by String?   @default("system") // system or user id
-  invited_by String? // user id of the inviter
+  created_by String?   @db.Uuid
+  updated_by String?   @db.Uuid
+  invited_by String?   @db.Uuid // user id of the inviter
 
   user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
@@ -97,8 +97,8 @@ model Document {
   // content      Json // Yjs JSON snapshot
   created_at       DateTime  @default(now()) @db.Timestamptz(3)
   updated_at       DateTime? @updatedAt @db.Timestamptz(3)
-  created_by       String?   @default("system") // system or user id
-  updated_by       String?   @default("system") // system or user id
+  created_by       String?   @db.Uuid
+  updated_by       String?   @db.Uuid
 
   is_public Boolean? @default(false)
 
@@ -118,6 +118,8 @@ model DocumentVersion {
   // history snapshot of Yjs document
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
+  created_by String?   @db.Uuid
+  updated_by String?   @db.Uuid
 
   workspace_id Int
   workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)

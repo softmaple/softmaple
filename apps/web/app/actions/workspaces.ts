@@ -7,6 +7,7 @@ import kebabCase from "lodash/kebabCase";
 import { createWorkspaceMember } from "@/app/actions/workspaceMembers";
 import { getUserBy } from "@/app/actions/users";
 import { WorkspaceRole } from "@softmaple/db";
+import { Table } from "@/types/model";
 
 export const getWorkspaces = async () => {
   const supabase = await createClient();
@@ -33,11 +34,9 @@ export const cachedGetWorkspaceBySlug = cache(async (workspaceSlug: string) =>
   getWorkspaceBySlug(workspaceSlug),
 );
 
-export const createWorkspace = async (workspace: {
-  title: string;
-  description?: string;
-  slug: string;
-}) => {
+export const createWorkspace = async (
+  workspace: Table<"workspaces">["Insert"],
+) => {
   const supabase = await createClient();
 
   return supabase.from("workspaces").insert(workspace).select("*").single();
@@ -67,13 +66,12 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
 
   const userId = user.id;
 
-  const nextWorkspace = {
+  // @ts-expect-error FIXME: how to handle `null` type as optional.
+  const nextWorkspace: Table<"workspaces">["Insert"] = {
     title,
     description: formData.get("description") as string,
     slug: kebabCase(title),
     owner_id: userId,
-    created_by: userId,
-    updated_by: userId,
   };
 
   const { data: newWorkspace, error: workspaceError } =

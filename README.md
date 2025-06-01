@@ -38,10 +38,10 @@
     - [config](packages/config) - Site configuration
     - [db](packages/db) - Database schema and migrations
       - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
+      - **Supabase** self-hosted guide
     - [editor](packages/editor) - Rich text editor
       - **Lexical** for rich text editing
-      - **React** 19
-      - **Vite**
+      - **React** 19 and **Vite**
     - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
     - [eslint-config](packages/eslint-config) - Shared ESLint configuration
     - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`

@@ -10,11 +10,11 @@ import {
 import { FileText, Github, Mail } from "lucide-react";
 import { SignupForm } from "@/modules/auth/signup-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
-import NotReadyPage from "@/modules/auth/not-ready-page";
+import { redirect } from "next/navigation";
 
 export default async function SignupPage() {
   if (process.env.NEXT_PUBLIC_DISABLE_SIGNUP === "true") {
-    return <NotReadyPage />;
+    redirect("/coming-soon");
   }
 
   return (

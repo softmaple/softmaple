@@ -4,7 +4,7 @@ import { Card, CardContent } from "@softmaple/ui/components/card";
 import { Badge } from "@softmaple/ui/components/badge";
 import { CheckCircle, Clock, Mail, Zap, Shield, Users } from "lucide-react";
 
-export default function NotReadyPage() {
+export default function ComingSoonPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}

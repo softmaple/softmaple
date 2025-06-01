@@ -24,10 +24,9 @@ import Link from "next/link";
 import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getAll } from "@/app/actions/getAll";
-import { redirect } from "next/navigation";
 
 type Props = {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ workspaceSlug: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
@@ -35,7 +34,7 @@ export async function generateMetadata(
   { params, searchParams }: Props,
   parent: ResolvingMetadata,
 ): Promise<Metadata> {
-  const { slug: workspaceSlug } = await params;
+  const { workspaceSlug } = await params;
 
   // fetch workspace information
   const { data: workspace } = await cachedGetWorkspaceBySlug(workspaceSlug);
@@ -49,7 +48,7 @@ export async function generateMetadata(
 }
 
 export default async function WorkspacePage({ params, searchParams }: Props) {
-  const { slug: workspaceSlug } = await params;
+  const { workspaceSlug } = await params;
 
   // FIXME: only query data for the current workspace
   const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
@@ -73,7 +72,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
   if (error) {
     console.error(error);
 
-    redirect(`/workspace/${workspaceSlug}/error`);
+    throw error;
   }
 
   const recentActivity = [
@@ -101,7 +100,9 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
             <div className="flex items-center space-x-2">
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
-                New Document
+                <Link href={`/workspace/${workspaceSlug}/doc/new`}>
+                  New Document
+                </Link>
               </Button>
               <Button variant="outline">
                 <Users className="mr-2 h-4 w-4" />

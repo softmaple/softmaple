@@ -1,6 +1,5 @@
 import { Dashboard } from "@/modules/dashboard/dashboard";
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
-import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -13,7 +12,7 @@ export default async function DashboardPage() {
 
   if (error) {
     console.error(error);
-    redirect("/dashboard/error");
+    throw error;
   }
 
   return <Dashboard workspaces={workspaces} />;

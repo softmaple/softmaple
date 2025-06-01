@@ -162,7 +162,7 @@ export default function NotReadyPage() {
               Expected Launch: Q2 2025
             </Badge>
             <p className="text-sm text-muted-foreground">
-              We're targeting a launch in the second quarter of 2024. Join our
+              We're targeting a launch in the second quarter of 2025. Join our
               waitlist to get early access.
             </p>
           </div>

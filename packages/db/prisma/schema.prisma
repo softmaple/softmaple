@@ -93,6 +93,7 @@ model Document {
   workspace_id     Int
   author_id        String    @db.Uuid
   title            String
+  slug             String    @unique
   markdown_content String? // Markdown content of the document
   // content      Json // Yjs JSON snapshot
   created_at       DateTime  @default(now()) @db.Timestamptz(3)

@@ -39,7 +39,11 @@ export const createWorkspace = async (
 ) => {
   const supabase = await createClient();
 
-  return supabase.from("workspaces").insert(workspace).select("*").single();
+  return supabase
+    .from("workspaces")
+    .insert(workspace)
+    .select<string, Table<"workspaces">["Row"]>("*")
+    .single();
 };
 
 export const handleCreateWorkspaceFormData = async (formData: FormData) => {
@@ -81,12 +85,11 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
     throw new Error(`Failed to create workspace: ${workspaceError.message}`);
   }
 
-  const newWorkspaceMember = {
+  // @ts-expect-error FIXME: how to handle `invited_by` column as optional because it maybe `null`.
+  const newWorkspaceMember: Table<"workspace_members">["Insert"] = {
     workspace_id: newWorkspace.id,
     user_id: userId,
     role: WorkspaceRole.OWNER,
-    created_by: userId,
-    updated_by: userId,
   };
 
   const { data: memberData, error: memberError } =

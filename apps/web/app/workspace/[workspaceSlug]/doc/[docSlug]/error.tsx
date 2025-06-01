@@ -1,5 +1,5 @@
 "use client";
 
-export default function WorkspaceErrorPage() {
+export default function DocumentErrorPage() {
   return <p>Sorry, something went wrong</p>;
 }

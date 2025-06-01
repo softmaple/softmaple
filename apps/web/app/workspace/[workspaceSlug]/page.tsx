@@ -24,7 +24,6 @@ import Link from "next/link";
 import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getAll } from "@/app/actions/getAll";
-import { redirect } from "next/navigation";
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
@@ -73,7 +72,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
   if (error) {
     console.error(error);
 
-    redirect(`/workspace/${workspaceSlug}/error`);
+    throw error;
   }
 
   const recentActivity = [

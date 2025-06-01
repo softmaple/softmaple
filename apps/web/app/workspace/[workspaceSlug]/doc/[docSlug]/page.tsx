@@ -1,12 +1,12 @@
 import { DocumentEditor } from "@/modules/docs/document-editor";
 import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetDocumentBySlug } from "@/app/actions/documents";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 const DEFAULT_TITLE = "Untitled Document";
 
 type Props = {
-  params: Promise<{ docSlug: string }>;
+  params: Promise<{ docSlug: string; workspaceSlug: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
@@ -37,7 +37,7 @@ export async function generateMetadata(
 }
 
 export default async function DocumentPage({ params, searchParams }: Props) {
-  const { docSlug } = await params;
+  const { docSlug, workspaceSlug } = await params;
 
   const isNewDoc = docSlug === "new";
 
@@ -50,7 +50,11 @@ export default async function DocumentPage({ params, searchParams }: Props) {
 
   if (error) {
     console.error("Error fetching workspace doc:", error);
-    redirect("/workspace/[workspaceSlug]/error");
+    throw error;
+  }
+
+  if (!currentDoc) {
+    notFound();
   }
 
   const { title = DEFAULT_TITLE, markdown_content } = currentDoc || {};

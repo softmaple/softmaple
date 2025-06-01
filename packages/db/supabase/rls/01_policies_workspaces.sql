@@ -29,7 +29,8 @@ CREATE POLICY "Any authenticated user can insert workspace"
 CREATE POLICY "read workspaces joined" ON workspaces
     FOR SELECT
     USING (
-    is_workspace_member((SELECT auth.uid()), id)
+    is_workspace_member((SELECT auth.uid()), id) OR
+    owner_id = (SELECT auth.uid())
     );
 
 CREATE POLICY "owner can update workspace" ON workspaces

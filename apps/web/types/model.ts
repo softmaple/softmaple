@@ -9,9 +9,21 @@ type BaseFields =
   | "created_by"
   | "updated_by";
 
+type NullableFields<T> = {
+  [K in keyof T]: null extends T[K] ? K : never;
+}[keyof T];
+
+type RequiredFields<T> = {
+  [K in keyof T]: null extends T[K] ? never : K;
+}[keyof T];
+
 type CreateTableType<T> = {
   Row: T;
-  Insert: Partial<Omit<T, BaseFields>>;
+  Insert: {
+    [K in RequiredFields<Omit<T, BaseFields>>]: Omit<T, BaseFields>[K];
+  } & {
+    [K in NullableFields<Omit<T, BaseFields>>]?: Omit<T, BaseFields>[K];
+  };
   Update: Partial<T>;
 };
 

@@ -1,36 +1,34 @@
 "use client";
 
 import type { FC } from "react";
+
+import { memo } from "react";
+
 import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
-import {
-  FloatingToolbar,
-  liveblocksConfig,
-  LiveblocksPlugin,
-} from "@liveblocks/react-lexical";
-import { LEXIAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
-import { Threads } from "@/modules/docs/threads";
 
-import "@liveblocks/react-ui/styles.css";
-import "@liveblocks/react-lexical/styles.css";
+import { CollabDocEditor } from "@/modules/docs/collab-doc-editor";
+import type { CollabDocEditorProps } from "@/modules/docs/collab-doc-editor";
 
-export type DocEditorProps = {};
+export type DocEditorProps = {
+  isPublic?: boolean;
+};
 
-export const DocEditor: FC<DocEditorProps> = (props) => {
-  const lexicalConfig = liveblocksConfig({
-    ...LEXIAL_PLAYGROUND_CONFIG,
+const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
+  const { isPublic = false } = props;
+
+  const commonConfig: CollabDocEditorProps["commonEditorConfig"] = {
     namespace: "DocEditor",
     onError: (error: unknown) => {
       console.error(error);
       throw error;
     },
-  });
+  };
 
-  return (
-    <CoreEditor lexicalConfig={lexicalConfig}>
-      <LiveblocksPlugin>
-        <Threads />
-        <FloatingToolbar />
-      </LiveblocksPlugin>
-    </CoreEditor>
-  );
+  if (isPublic) {
+    return <CollabDocEditor commonEditorConfig={commonConfig} />;
+  }
+
+  return <CoreEditor lexicalConfig={commonConfig} />;
 };
+
+export const DocEditor = memo(UnMemoizedDocEditor);

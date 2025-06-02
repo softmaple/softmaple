@@ -1,14 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ReactNode, FC } from "react";
 import {
   LiveblocksProvider,
   RoomProvider,
   ClientSideSuspense,
 } from "@liveblocks/react/suspense";
 
-export function Room({ children }: { children: ReactNode }) {
-  const roomId = "my-room"; // FIXME: You can replace this with a dynamic room ID if needed
+export type RoomProps = {
+  roomId: string;
+  children: ReactNode;
+};
+
+export const Room: FC<RoomProps> = (props) => {
+  const { roomId, children } = props;
 
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
@@ -19,4 +24,4 @@ export function Room({ children }: { children: ReactNode }) {
       </RoomProvider>
     </LiveblocksProvider>
   );
-}
+};

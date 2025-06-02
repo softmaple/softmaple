@@ -47,3 +47,9 @@ export type Database = {
  */
 export type Table<T extends keyof Database[typeof DB_SCHEMA]["Tables"]> =
   Database[typeof DB_SCHEMA]["Tables"][T];
+
+export type DocsType = Table<"documents">;
+export type WorkspaceType = Table<"workspaces">;
+export type UserType = Table<"users">;
+export type WorkspaceMemberType = Table<"workspace_members">;
+export type DocumentVersionType = Table<"document_versions">;

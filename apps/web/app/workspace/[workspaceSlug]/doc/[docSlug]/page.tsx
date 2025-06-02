@@ -57,7 +57,18 @@ export default async function DocumentPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  const { title = DEFAULT_TITLE, markdown_content } = currentDoc || {};
+  const {
+    title = DEFAULT_TITLE,
+    markdown_content,
+    is_public = false,
+  } = currentDoc || {};
 
-  return <DocumentEditor title={title} content={markdown_content || ""} />;
+  return (
+    <DocumentEditor
+      title={title}
+      content={markdown_content || ""}
+      docSlug={docSlug}
+      isPublic={is_public || false}
+    />
+  );
 }

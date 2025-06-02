@@ -1,13 +1,25 @@
 import { Liveblocks } from "@liveblocks/node";
 import { getCurrentUser } from "@/app/actions/auth";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
+import type { NextRequest } from "next/server";
 
 const liveblocks = new Liveblocks({
   secret: process.env.LIVEBLOCKS_SECRET_KEY!,
 });
 
-export async function POST(request: Request) {
-  const { room, workspaceId } = await request.json();
+export async function POST(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const workspaceId = searchParams.get("workspaceId");
+
+  if (!workspaceId) {
+    return new Response("Workspace ID is required", { status: 400 });
+  }
+
+  const workspaceIdNumber = Number(workspaceId);
+
+  if (Number.isNaN(workspaceIdNumber) || workspaceIdNumber <= 0) {
+    return new Response("Invalid Workspace ID", { status: 400 });
+  }
 
   // Get the current user from your database
   const { data, error } = await getCurrentUser();
@@ -23,7 +35,7 @@ export async function POST(request: Request) {
   }
 
   const { data: workspaceMember, error: wmError } =
-    await getWorkspaceMemberByUserId(workspaceId);
+    await getWorkspaceMemberByUserId(workspaceIdNumber);
 
   if (wmError) {
     console.error("Error fetching workspace member:", wmError);

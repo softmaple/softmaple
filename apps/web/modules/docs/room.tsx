@@ -18,17 +18,7 @@ export const Room: FC<RoomProps> = (props) => {
 
   return (
     <LiveblocksProvider
-      authEndpoint={async (room) => {
-        const response = await fetch("/api/liveblocks-auth", {
-          method: "POST",
-          // headers: {
-          //   Authentication: "<your own headers here>",
-          //   "Content-Type": "application/json",
-          // },
-          body: JSON.stringify({ room, workspaceId }),
-        });
-        return await response.json();
-      }}
+      authEndpoint={`/api/liveblocks-auth?workspaceId=${workspaceId}`}
     >
       <RoomProvider id={roomId}>
         <ClientSideSuspense fallback={<div>Loading…</div>}>

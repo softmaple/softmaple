@@ -185,7 +185,7 @@ importers:
         specifier: ^0.7.1
         version: 0.7.1
       clsx:
-        specifier: ^2.0.1
+        specifier: ^2.1.1
         version: 2.1.1
       lexical:
         specifier: ^0.31.2
@@ -383,7 +383,7 @@ importers:
         specifier: ^19.1.0
         version: 19.1.0(react@19.1.0)
       tailwind-merge:
-        specifier: ^3.0.2
+        specifier: ^3.3.0
         version: 3.3.0
       tw-animate-css:
         specifier: ^1.2.4

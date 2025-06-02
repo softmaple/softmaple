@@ -26,6 +26,7 @@ import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getAll } from "@/app/actions/getAll";
 
 import dayjs from "@/utils/dayjs";
+import { getUserFullname } from "@/utils/getUserFullname";
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
@@ -60,12 +61,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
     ]);
 
   const recentDocuments = (documents || []).map((doc) => {
-    const { full_name, first_name, last_name } = doc.users;
-
-    const updatedBy =
-      full_name ||
-      [first_name, last_name].filter(Boolean).join(" ") ||
-      "Unknown User";
+    const updatedBy = getUserFullname(doc.users);
 
     return {
       ...doc,

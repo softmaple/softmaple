@@ -1,17 +1,30 @@
-import { useState } from "react";
+import { useState, Suspense, lazy } from "react";
 import type { FC, ReactNode } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { cn } from "@softmaple/editor/lib/utils";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { ToolbarPlugin } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ToolbarPlugin";
 import { LexicalContentEditable } from "@softmaple/editor/components/core/LexicalContentEditable";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
 import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistoryContext";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
-import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin";
-import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
+
+const ToolbarPlugin = lazy(() =>
+  import(
+    "@softmaple/editor/components/core/plugins/ToolbarPlugin/ToolbarPlugin"
+  ).then((module) => ({ default: module.ToolbarPlugin })),
+);
+const ShortcutsPlugin = lazy(() =>
+  import(
+    "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin"
+  ).then((module) => ({ default: module.ShortcutsPlugin })),
+);
+const MarkdownPlugin = lazy(() =>
+  import(
+    "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin"
+  ).then((module) => ({ default: module.MarkdownPlugin })),
+);
 
 type EditorProps = {
   className?: string;
@@ -31,17 +44,23 @@ export const Editor: FC<EditorProps> = (props) => {
 
   return (
     <>
-      <ToolbarPlugin
-        editor={editor}
-        activeEditor={activeEditor}
-        setActiveEditor={setActiveEditor}
-        setIsLinkEditMode={setIsLinkEditMode}
-      />
+      <Suspense
+        fallback={<div className="h-12 bg-background border-b animate-pulse" />}
+      >
+        <ToolbarPlugin
+          editor={editor}
+          activeEditor={activeEditor}
+          setActiveEditor={setActiveEditor}
+          setIsLinkEditMode={setIsLinkEditMode}
+        />
+      </Suspense>
 
-      <ShortcutsPlugin
-        editor={activeEditor}
-        setIsLinkEditMode={setIsLinkEditMode}
-      />
+      <Suspense fallback={null}>
+        <ShortcutsPlugin
+          editor={activeEditor}
+          setIsLinkEditMode={setIsLinkEditMode}
+        />
+      </Suspense>
 
       <div className="bg-background relative block rounded-b-[10px]">
         <HistoryPlugin externalHistoryState={historyState} />
@@ -67,7 +86,9 @@ export const Editor: FC<EditorProps> = (props) => {
 
         {children}
 
-        <MarkdownPlugin />
+        <Suspense fallback={null}>
+          <MarkdownPlugin />
+        </Suspense>
         <ListPlugin hasStrictIndent />
         <CheckListPlugin />
       </div>

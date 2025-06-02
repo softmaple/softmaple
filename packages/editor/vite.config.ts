@@ -39,6 +39,18 @@ export default defineConfig({
             "@lexical/react/LexicalComposerContext",
             "@lexical/react/LexicalMarkdownShortcutPlugin",
           ],
+          "editor-toolbar": [
+            "@softmaple/editor/components/core/plugins/ToolbarPlugin/ToolbarPlugin",
+            "@softmaple/editor/components/core/plugins/ToolbarPlugin/BlockFormatDropdown",
+            "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup",
+            "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup",
+            "@softmaple/editor/components/core/plugins/ToolbarPlugin/ExportFiles/ExportFilesDropdownMenu",
+          ],
+          "editor-plugins": [
+            "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin",
+            "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin",
+            "@softmaple/editor/components/core/plugins/MarkdownTransformers/MarkdownTransformers",
+          ],
           // Split utility libraries
           utils: [
             "clsx",

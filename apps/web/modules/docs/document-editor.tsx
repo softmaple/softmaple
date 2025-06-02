@@ -1,7 +1,7 @@
 "use client";
 
 import type { FC } from "react";
-import { useState } from "react";
+import { useState, Suspense, lazy } from "react";
 import { Code, Edit3, Eye, FileText } from "lucide-react";
 import {
   Tabs,
@@ -9,10 +9,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
-import { Room } from "@/modules/docs/room";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import type { DocHeaderProps } from "@/modules/docs/doc-header";
+
+const Room = lazy(() =>
+  import("@/modules/docs/room").then((module) => ({ default: module.Room })),
+);
 
 export type DocumentEditorProps = Omit<
   DocHeaderProps,
@@ -72,9 +75,17 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 
           <TabsContent value="editor" className="flex-1 m-0">
             {docSlug && isPublic ? (
-              <Room roomId={docSlug} workspaceId={workspaceId}>
-                <DocEditor isPublic />
-              </Room>
+              <Suspense
+                fallback={
+                  <div className="flex items-center justify-center h-full">
+                    Loading collaboration features...
+                  </div>
+                }
+              >
+                <Room roomId={docSlug} workspaceId={workspaceId}>
+                  <DocEditor isPublic />
+                </Room>
+              </Suspense>
             ) : (
               <DocEditor />
             )}

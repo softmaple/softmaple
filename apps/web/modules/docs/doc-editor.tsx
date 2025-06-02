@@ -2,7 +2,9 @@
 
 import type { FC } from "react";
 
-import { memo } from "react";
+import { memo, useState, useEffect } from "react";
+
+import { LEXIAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
 
 import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
 
@@ -16,7 +18,25 @@ export type DocEditorProps = {
 const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
   const { isPublic = false } = props;
 
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    // This effect runs only once when the component mounts
+    setIsMounted(true);
+
+    return () => {
+      // Cleanup if necessary when the component unmounts
+      setIsMounted(false);
+    };
+  }, []);
+
+  if (!isMounted) {
+    // If the component is not mounted yet, return null or a loading state
+    return null;
+  }
+
   const commonConfig: CollabDocEditorProps["commonEditorConfig"] = {
+    ...LEXIAL_PLAYGROUND_CONFIG,
     namespace: "DocEditor",
     onError: (error: unknown) => {
       console.error(error);

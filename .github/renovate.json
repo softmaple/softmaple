@@ -6,11 +6,12 @@
     ":semanticCommits",
     ":separatePatchReleases"
   ],
+  "rangeStrategy": "bump",
   "packageRules": [
     {
       "description": "Group React ecosystem updates",
       "groupName": "React ecosystem",
-      "matchPackageNames": ["react", "react-dom", "/^@types/react/"],
+      "matchPackageNames": ["react", "react-dom", "/^@types\\/react/"],
       "automerge": false,
       "schedule": ["before 10am on monday"]
     },
@@ -24,22 +25,26 @@
     {
       "description": "Group Lexical editor updates",
       "groupName": "Lexical",
-      "matchPackageNames": ["lexical", "/^@lexical//"],
+      "matchPackageNames": ["lexical", "/^@lexical\\//"],
       "automerge": false,
       "schedule": ["before 10am on monday"]
     },
     {
       "description": "Group Radix UI updates",
       "groupName": "Radix UI",
+      "matchPackageNames": ["/^@radix-ui\\//"],
       "automerge": true,
       "automergeType": "pr",
-      "schedule": ["before 10am on monday"],
-      "matchPackageNames": ["/^@radix-ui//"]
+      "schedule": ["before 10am on monday"]
     },
     {
       "description": "Group TypeScript ecosystem",
       "groupName": "TypeScript",
-      "matchPackageNames": ["typescript", "/^@types//", "/^typescript-eslint/"],
+      "matchPackageNames": [
+        "typescript",
+        "/^@types\\//",
+        "/^typescript-eslint/"
+      ],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]
@@ -47,7 +52,7 @@
     {
       "description": "Group ESLint ecosystem",
       "groupName": "ESLint",
-      "matchPackageNames": ["eslint", "/^eslint-/", "/^@eslint//"],
+      "matchPackageNames": ["eslint", "/^eslint-/", "/^@eslint\\//"],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]
@@ -59,8 +64,8 @@
         "vite",
         "turbo",
         "prettier",
-        "/^@vitejs//",
-        "/^@tailwindcss//",
+        "/^@vitejs\\//",
+        "/^@tailwindcss\\//",
         "/^tailwindcss/"
       ],
       "automerge": true,
@@ -72,8 +77,8 @@
       "groupName": "Storybook",
       "matchPackageNames": [
         "storybook",
-        "/^@storybook//",
-        "/^@chromatic-com//"
+        "/^@storybook\\//",
+        "/^@chromatic-com\\//"
       ],
       "automerge": true,
       "automergeType": "pr",
@@ -82,13 +87,14 @@
     {
       "description": "Group testing tools",
       "groupName": "Testing tools",
-      "matchPackageNames": ["vitest", "playwright", "/^@vitest//"],
+      "matchPackageNames": ["vitest", "playwright", "/^@vitest\\//"],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]
     },
     {
       "description": "Auto-merge patch and minor updates for utility packages",
+      "groupName": "Utilities",
       "matchPackageNames": [
         "clsx",
         "class-variance-authority",
@@ -102,21 +108,21 @@
     {
       "description": "Group Supabase updates",
       "groupName": "Supabase",
+      "matchPackageNames": ["/^@supabase\\//"],
       "automerge": false,
-      "schedule": ["before 10am on monday"],
-      "matchPackageNames": ["/^@supabase//"]
+      "schedule": ["before 10am on monday"]
     },
     {
       "description": "Group Liveblocks updates",
       "groupName": "Liveblocks",
+      "matchPackageNames": ["/^@liveblocks\\//"],
       "automerge": false,
-      "schedule": ["before 10am on monday"],
-      "matchPackageNames": ["/^@liveblocks//"]
+      "schedule": ["before 10am on monday"]
     },
     {
       "description": "Group Prisma updates",
       "groupName": "Prisma",
-      "matchPackageNames": ["prisma", "/^@prisma//"],
+      "matchPackageNames": ["prisma", "/^@prisma\\//"],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]

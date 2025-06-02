@@ -25,6 +25,9 @@ import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getAll } from "@/app/actions/getAll";
 
+import dayjs from "@/utils/dayjs";
+import { getUserFullname } from "@/utils/getUserFullname";
+
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -53,14 +56,19 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
   // FIXME: only query data for the current workspace
   const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
     await Promise.all([
-      getAll("documents", undefined, 5),
+      getAll("documents", undefined, 5, "users"),
       getAll("workspace_members", undefined, undefined, "users"),
     ]);
 
-  const recentDocuments = (documents || []).map((doc) => ({
-    ...doc,
-    key: doc.id,
-  }));
+  const recentDocuments = (documents || []).map((doc) => {
+    const updatedBy = getUserFullname(doc.users);
+
+    return {
+      ...doc,
+      key: doc.id,
+      updated_by: updatedBy,
+    };
+  });
   const allWorkspaceMembers = (members || []).map((member) => ({
     ...member,
     user: member?.users,
@@ -197,7 +205,8 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
                     <div className="flex-1">
                       <h4 className="font-medium">{doc.title}</h4>
                       <p className="text-sm text-muted-foreground">
-                        Edited by {doc.created_by} • {doc.updated_at}
+                        Edited by {doc.updated_by} •{" "}
+                        {dayjs(doc.updated_at).fromNow()}
                       </p>
                     </div>
                     <Button variant="ghost" size="icon">

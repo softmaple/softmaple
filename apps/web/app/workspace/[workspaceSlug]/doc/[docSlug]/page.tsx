@@ -3,6 +3,13 @@ import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetDocumentBySlug } from "@/app/actions/documents/documents";
 import { notFound } from "next/navigation";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
+import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
+import { getCurrentUser } from "@/app/actions/auth";
+import { WorkspaceMemberRole } from "@softmaple/db";
+import {
+  createLiveblocksRoom,
+  getOrCreateLiveblocksRoom,
+} from "@/app/actions/documents/liveblocks";
 
 const DEFAULT_TITLE = "Untitled Document";
 
@@ -42,9 +49,42 @@ export default async function DocumentPage({ params, searchParams }: Props) {
 
   const isNewDoc = docSlug === "new";
 
+  const { data: workspace, error: workspaceError } =
+    await cachedGetWorkspaceBySlug(workspaceSlug);
+
+  if (workspaceError) {
+    console.error("Error fetching workspace:", workspaceError);
+    throw workspaceError;
+  }
+
+  if (!workspace) {
+    notFound();
+  }
+
+  const { data: userData, error: userError } = await getCurrentUser();
+
+  const { user } = userData || {};
+
+  if (userError) {
+    console.error("Error fetching current user:", userError);
+    throw userError;
+  }
+
+  if (!user) {
+    notFound();
+  }
+
   if (isNewDoc) {
     // Redirect to create a new document
-    return <DocumentEditor title={DEFAULT_TITLE} content="" />;
+    return (
+      <DocumentEditor
+        isNewDoc
+        title={DEFAULT_TITLE}
+        content=""
+        workspaceId={workspace.id}
+        userId={user.id}
+      />
+    );
   }
 
   const { data: currentDoc, error } = await cachedGetDocumentBySlug(docSlug);
@@ -65,7 +105,7 @@ export default async function DocumentPage({ params, searchParams }: Props) {
   } = currentDoc || {};
 
   const { data: workspaceMember, error: workspaceMemberError } =
-    await getWorkspaceMemberByUserId();
+    await getWorkspaceMemberByUserId(workspace.id);
 
   if (workspaceMemberError) {
     throw workspaceMemberError;
@@ -78,12 +118,19 @@ export default async function DocumentPage({ params, searchParams }: Props) {
   // TODO: it would be readonly if the user is the `viewer` role.
   const { role: userRole } = workspaceMember;
 
+  if (userRole === WorkspaceMemberRole["OWNER"]) {
+    await getOrCreateLiveblocksRoom(docSlug);
+  }
+
   return (
     <DocumentEditor
       title={title}
       content={markdown_content || ""}
       docSlug={docSlug}
       isPublic={is_public || false}
+      isNewDoc={false}
+      workspaceId={workspace.id}
+      userId={user.id}
     />
   );
 }

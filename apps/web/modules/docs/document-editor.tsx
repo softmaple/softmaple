@@ -12,12 +12,12 @@ import {
 import { Room } from "@/modules/docs/room";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
+import type { DocHeaderProps } from "@/modules/docs/doc-header";
 
-export type DocumentEditorProps = {
-  title: string;
-  content: string;
-  // TODO: title kebab case slug + timestamp
-  docSlug?: string;
+export type DocumentEditorProps = Omit<
+  DocHeaderProps,
+  "setTitle" | "setContent"
+> & {
   isPublic?: boolean;
 };
 
@@ -26,6 +26,9 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     title: initialTitle,
     content: initialContent,
     docSlug,
+    workspaceId,
+    userId,
+    isNewDoc,
     isPublic = false,
   } = props;
 
@@ -40,6 +43,9 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         setTitle={setTitle}
         content={content}
         setContent={setContent}
+        isNewDoc={isNewDoc}
+        workspaceId={workspaceId}
+        userId={userId}
       />
 
       {/* Document Content */}
@@ -66,7 +72,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 
           <TabsContent value="editor" className="flex-1 m-0">
             {docSlug && isPublic ? (
-              <Room roomId={docSlug}>
+              <Room roomId={docSlug} workspaceId={workspaceId}>
                 <DocEditor isPublic />
               </Room>
             ) : (

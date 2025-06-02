@@ -1,11 +1,21 @@
 "use server";
 
 import { Liveblocks } from "@liveblocks/node";
+import type { CreateRoomOptions } from "@liveblocks/node";
 import { WorkspaceMemberRole } from "@softmaple/db";
 
 const liveblocks = new Liveblocks({
   secret: process.env.LIVEBLOCKS_SECRET_KEY!,
 });
+
+const DEFAULT_ROOM_PERMISSIONS: CreateRoomOptions = {
+  defaultAccesses: [],
+  groupsAccesses: {
+    [WorkspaceMemberRole["OWNER"]]: ["room:write"],
+    [WorkspaceMemberRole["EDITOR"]]: ["room:read", "room:presence:write"],
+    // NOTE: workspace members with VIEWER role can only read the doc instead of room
+  },
+};
 
 export const createLiveblocksRoom = async (roomId: string) => {
   try {
@@ -13,14 +23,7 @@ export const createLiveblocksRoom = async (roomId: string) => {
       throw new Error(`Invalid room ID: ${roomId}`);
     }
 
-    const room = await liveblocks.createRoom(roomId, {
-      defaultAccesses: [],
-      groupsAccesses: {
-        [WorkspaceMemberRole["OWNER"]]: ["room:write"],
-        [WorkspaceMemberRole["EDITOR"]]: ["room:read", "room:presence:write"],
-        // NOTE: workspace members with VIEWER role can only read the doc instead of room
-      },
-    });
+    const room = await liveblocks.createRoom(roomId, DEFAULT_ROOM_PERMISSIONS);
 
     return room;
   } catch (error) {
@@ -29,16 +32,19 @@ export const createLiveblocksRoom = async (roomId: string) => {
   }
 };
 
-export const getLiveblocksRoom = async (roomId: string) => {
+export const getOrCreateLiveblocksRoom = async (roomId: string) => {
   try {
     if (!roomId || typeof roomId !== "string") {
       throw new Error(`Invalid room ID: ${roomId}`);
     }
 
-    const room = await liveblocks.getRoom(roomId);
+    const room = await liveblocks.getOrCreateRoom(
+      roomId,
+      DEFAULT_ROOM_PERMISSIONS,
+    );
 
     if (!room) {
-      throw new Error(`Room with ID ${roomId} does not exist.`);
+      throw new Error(`Room not found or could not be created: ${roomId}`);
     }
 
     return room;

@@ -60,3 +60,14 @@ export async function logout() {
   revalidatePath("/", "layout");
   redirect("/");
 }
+
+export async function getCurrentUser() {
+  try {
+    const supabase = await createClient();
+
+    return supabase.auth.getUser();
+  } catch (error) {
+    console.error("Error fetching current user:", error);
+    throw error;
+  }
+}

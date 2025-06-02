@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { WorkspaceMembersType } from "@/types/model";
+import { getCurrentUser } from "@/app/actions/auth";
 
 export const createWorkspaceMember = async (
   data: WorkspaceMembersType["Insert"],
@@ -14,11 +15,11 @@ export const createWorkspaceMember = async (
     .select<string, WorkspaceMembersType["Row"]>("*");
 };
 
-export const getWorkspaceMemberByUserId = async () => {
+export const getWorkspaceMemberByUserId = async (workspaceId: number) => {
   try {
     const supabase = await createClient();
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: userData, error: userError } = await getCurrentUser();
 
     if (userError) {
       console.error("Error fetching user data:", userError);
@@ -38,6 +39,7 @@ export const getWorkspaceMemberByUserId = async () => {
         Pick<WorkspaceMembersType["Row"], "role">
       >("role")
       .eq("user_id", userId)
+      .eq("workspace_id", workspaceId)
       .maybeSingle();
 
     return queryBuilder;

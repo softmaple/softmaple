@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import kebabCase from "lodash/kebabCase";
 import { createWorkspaceMember } from "@/app/actions/workspaceMembers";
 import { getUserBy } from "@/app/actions/users";
-import { WorkspaceRole } from "@softmaple/db";
+import { WorkspaceMemberRole } from "@softmaple/db";
 import type { Workspace } from "@softmaple/db";
 import { Table } from "@/types/model";
 
@@ -92,7 +92,7 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
   const newWorkspaceMember: Table<"workspace_members">["Insert"] = {
     workspace_id: newWorkspace.id,
     user_id: userId,
-    role: WorkspaceRole.OWNER,
+    role: WorkspaceMemberRole["OWNER"],
   };
 
   const { data: memberData, error: memberError } =

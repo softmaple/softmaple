@@ -210,7 +210,7 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0(storybook@9.1.0-alpha.2(@testing-library/dom@10.4.0)(prettier@3.5.3))
       '@eslint/js':
-        specifier: ^9.25.1
+        specifier: ^9.28.0
         version: 9.28.0
       '@storybook/addon-docs':
         specifier: 9.1.0-alpha.2
@@ -243,7 +243,7 @@ importers:
         specifier: ^3.2.0
         version: 3.2.0(@vitest/browser@3.2.0)(vitest@3.2.0)
       eslint:
-        specifier: ^9.25.1
+        specifier: ^9.28.0
         version: 9.28.0(jiti@2.4.2)
       eslint-plugin-react-hooks:
         specifier: ^5.2.0
@@ -297,7 +297,7 @@ importers:
         specifier: ^9.28.0
         version: 9.28.0(jiti@2.4.2)
       eslint-config-prettier:
-        specifier: ^10.0.3
+        specifier: ^10.1.5
         version: 10.1.5(eslint@9.28.0(jiti@2.4.2))
       eslint-plugin-only-warn:
         specifier: ^1.1.0
@@ -309,7 +309,7 @@ importers:
         specifier: ^5.2.0
         version: 5.2.0(eslint@9.28.0(jiti@2.4.2))
       eslint-plugin-turbo:
-        specifier: ^2.4.4
+        specifier: ^2.5.4
         version: 2.5.4(eslint@9.28.0(jiti@2.4.2))(turbo@2.5.4)
       globals:
         specifier: ^16.0.0

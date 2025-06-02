@@ -78,7 +78,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
               <Suspense
                 fallback={
                   <div className="flex items-center justify-center h-full">
-                    Loading collaboration features...
+                    Loading...
                   </div>
                 }
               >

@@ -1,36 +1,54 @@
 "use client";
 
 import type { FC } from "react";
-import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
-import {
-  FloatingToolbar,
-  liveblocksConfig,
-  LiveblocksPlugin,
-} from "@liveblocks/react-lexical";
+
+import { memo, useState, useEffect } from "react";
+
 import { LEXIAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
-import { Threads } from "@/modules/docs/threads";
 
-import "@liveblocks/react-ui/styles.css";
-import "@liveblocks/react-lexical/styles.css";
+import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
 
-export type DocEditorProps = {};
+import { CollabDocEditor } from "@/modules/docs/collab-doc-editor";
+import type { CollabDocEditorProps } from "@/modules/docs/collab-doc-editor";
 
-export const DocEditor: FC<DocEditorProps> = (props) => {
-  const lexicalConfig = liveblocksConfig({
+export type DocEditorProps = {
+  isPublic?: boolean;
+};
+
+const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
+  const { isPublic = false } = props;
+
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    // This effect runs only once when the component mounts
+    setIsMounted(true);
+
+    return () => {
+      // Cleanup if necessary when the component unmounts
+      setIsMounted(false);
+    };
+  }, []);
+
+  if (!isMounted) {
+    // If the component is not mounted yet, return null or a loading state
+    return null;
+  }
+
+  const commonConfig: CollabDocEditorProps["commonEditorConfig"] = {
     ...LEXIAL_PLAYGROUND_CONFIG,
     namespace: "DocEditor",
     onError: (error: unknown) => {
       console.error(error);
       throw error;
     },
-  });
+  };
 
-  return (
-    <CoreEditor lexicalConfig={lexicalConfig}>
-      <LiveblocksPlugin>
-        <Threads />
-        <FloatingToolbar />
-      </LiveblocksPlugin>
-    </CoreEditor>
-  );
+  if (isPublic) {
+    return <CollabDocEditor commonEditorConfig={commonConfig} />;
+  }
+
+  return <CoreEditor lexicalConfig={commonConfig} />;
 };
+
+export const DocEditor = memo(UnMemoizedDocEditor);

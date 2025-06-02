@@ -1,7 +1,8 @@
 import { DocumentEditor } from "@/modules/docs/document-editor";
 import type { Metadata, ResolvingMetadata } from "next";
-import { cachedGetDocumentBySlug } from "@/app/actions/documents";
+import { cachedGetDocumentBySlug } from "@/app/actions/documents/documents";
 import { notFound } from "next/navigation";
+import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 
 const DEFAULT_TITLE = "Untitled Document";
 
@@ -57,7 +58,32 @@ export default async function DocumentPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  const { title = DEFAULT_TITLE, markdown_content } = currentDoc || {};
+  const {
+    title = DEFAULT_TITLE,
+    markdown_content,
+    is_public = false,
+  } = currentDoc || {};
 
-  return <DocumentEditor title={title} content={markdown_content || ""} />;
+  const { data: workspaceMember, error: workspaceMemberError } =
+    await getWorkspaceMemberByUserId();
+
+  if (workspaceMemberError) {
+    throw workspaceMemberError;
+  }
+
+  if (!workspaceMember) {
+    notFound();
+  }
+
+  // TODO: it would be readonly if the user is the `viewer` role.
+  const { role: userRole } = workspaceMember;
+
+  return (
+    <DocumentEditor
+      title={title}
+      content={markdown_content || ""}
+      docSlug={docSlug}
+      isPublic={is_public || false}
+    />
+  );
 }

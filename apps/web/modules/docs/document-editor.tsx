@@ -72,7 +72,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 
           <TabsContent value="editor" className="flex-1 m-0">
             {docSlug && isPublic ? (
-              <Room roomId={docSlug}>
+              <Room roomId={docSlug} workspaceId={workspaceId}>
                 <DocEditor isPublic />
               </Room>
             ) : (

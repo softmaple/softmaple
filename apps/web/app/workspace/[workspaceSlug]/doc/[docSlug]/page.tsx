@@ -5,6 +5,11 @@ import { notFound } from "next/navigation";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getCurrentUser } from "@/app/actions/auth";
+import { WorkspaceMemberRole } from "@softmaple/db";
+import {
+  createLiveblocksRoom,
+  getOrCreateLiveblocksRoom,
+} from "@/app/actions/documents/liveblocks";
 
 const DEFAULT_TITLE = "Untitled Document";
 
@@ -100,7 +105,7 @@ export default async function DocumentPage({ params, searchParams }: Props) {
   } = currentDoc || {};
 
   const { data: workspaceMember, error: workspaceMemberError } =
-    await getWorkspaceMemberByUserId();
+    await getWorkspaceMemberByUserId(workspace.id);
 
   if (workspaceMemberError) {
     throw workspaceMemberError;
@@ -112,6 +117,10 @@ export default async function DocumentPage({ params, searchParams }: Props) {
 
   // TODO: it would be readonly if the user is the `viewer` role.
   const { role: userRole } = workspaceMember;
+
+  if (userRole === WorkspaceMemberRole["OWNER"]) {
+    await getOrCreateLiveblocksRoom(docSlug);
+  }
 
   return (
     <DocumentEditor

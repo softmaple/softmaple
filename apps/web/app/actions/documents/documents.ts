@@ -24,11 +24,16 @@ export const cachedGetDocumentBySlug = cache(async (docSlug: string) =>
 );
 
 export const createDocument = async (document: DocsType["Insert"]) => {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  return supabase
-    .from("documents")
-    .insert(document)
-    .select<string, DocsType["Row"]>("*")
-    .single();
+    return supabase
+      .from("documents")
+      .insert(document)
+      .select<string, DocsType["Row"]>("*")
+      .single();
+  } catch (error) {
+    console.error("Error creating document:", error);
+    throw error;
+  }
 };

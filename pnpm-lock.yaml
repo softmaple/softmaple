@@ -389,7 +389,7 @@ importers:
         specifier: ^1.3.3
         version: 1.3.3
       zod:
-        specifier: ^3.24.2
+        specifier: ^3.25.48
         version: 3.25.48
     devDependencies:
       '@softmaple/eslint-config':

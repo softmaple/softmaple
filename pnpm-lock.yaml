@@ -103,8 +103,8 @@ importers:
         specifier: ^4.17.17
         version: 4.17.17
       '@types/node':
-        specifier: ^20
-        version: 20.17.57
+        specifier: ^22.0.0
+        version: 22.15.29
       '@types/react':
         specifier: ^19.1.5
         version: 19.1.6
@@ -409,10 +409,10 @@ importers:
         version: 4.1.8
       '@turbo/gen':
         specifier: ^2.4.2
-        version: 2.5.4(@types/node@20.17.57)(typescript@5.8.3)
+        version: 2.5.4(@types/node@22.15.29)(typescript@5.8.3)
       '@types/node':
-        specifier: ^20
-        version: 20.17.57
+        specifier: ^22.0.0
+        version: 22.15.29
       '@types/react':
         specifier: ^19
         version: 19.1.6
@@ -2096,9 +2096,6 @@ packages:
 
   '@types/minimatch@5.1.2':
     resolution: {integrity: sha512-K0VQKziLUWkVKiRVrx4a40iPaxTUefQmjtkQofBkYRcoaaL/8rhwDWww9qWbrgicNOgnpIsMxyNIUM4+n6dUIA==}
-
-  '@types/node@20.17.57':
-    resolution: {integrity: sha512-f3T4y6VU4fVQDKVqJV4Uppy8c1p/sVvS3peyqxyWnzkqXFJLRU7Y1Bl7rMS1Qe9z0v4M6McY0Fp9yBsgHJUsWQ==}
 
   '@types/node@22.15.29':
     resolution: {integrity: sha512-LNdjOkUDlU1RZb8e1kOIUpN1qQUlzGkEtbVNo53vbrwDg5om6oduhm4SiUaPW5ASTXhAiP0jInWG8Qx9fVlOeQ==}
@@ -4654,9 +4651,6 @@ packages:
     resolution: {integrity: sha512-nWJ91DjeOkej/TA8pXQ3myruKpKEYgqvpw9lz4OPHj/NWFNluYrjbz9j01CJ8yKQd2g4jFoOkINCTW2I5LEEyw==}
     engines: {node: '>= 0.4'}
 
-  undici-types@6.19.8:
-    resolution: {integrity: sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw==}
-
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
@@ -6563,7 +6557,7 @@ snapshots:
 
   '@tsconfig/node16@1.0.4': {}
 
-  '@turbo/gen@2.5.4(@types/node@20.17.57)(typescript@5.8.3)':
+  '@turbo/gen@2.5.4(@types/node@22.15.29)(typescript@5.8.3)':
     dependencies:
       '@turbo/workspaces': 2.5.4
       commander: 10.0.1
@@ -6573,7 +6567,7 @@ snapshots:
       node-plop: 0.26.3
       picocolors: 1.0.1
       proxy-agent: 6.5.0
-      ts-node: 10.9.2(@types/node@20.17.57)(typescript@5.8.3)
+      ts-node: 10.9.2(@types/node@22.15.29)(typescript@5.8.3)
       update-check: 1.5.4
       validate-npm-package-name: 5.0.1
     transitivePeerDependencies:
@@ -6629,7 +6623,7 @@ snapshots:
   '@types/glob@7.2.0':
     dependencies:
       '@types/minimatch': 5.1.2
-      '@types/node': 20.17.57
+      '@types/node': 22.15.29
 
   '@types/inquirer@6.5.0':
     dependencies:
@@ -6643,10 +6637,6 @@ snapshots:
   '@types/mdx@2.0.13': {}
 
   '@types/minimatch@5.1.2': {}
-
-  '@types/node@20.17.57':
-    dependencies:
-      undici-types: 6.19.8
 
   '@types/node@22.15.29':
     dependencies:
@@ -6666,7 +6656,7 @@ snapshots:
 
   '@types/through@0.0.33':
     dependencies:
-      '@types/node': 20.17.57
+      '@types/node': 22.15.29
 
   '@types/tinycolor2@1.4.6': {}
 
@@ -6674,7 +6664,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 20.17.57
+      '@types/node': 22.15.29
 
   '@typescript-eslint/eslint-plugin@8.33.0(@typescript-eslint/parser@8.33.0(eslint@9.28.0(jiti@2.4.2))(typescript@5.8.3))(eslint@9.28.0(jiti@2.4.2))(typescript@5.8.3)':
     dependencies:
@@ -9422,14 +9412,14 @@ snapshots:
 
   ts-dedent@2.2.0: {}
 
-  ts-node@10.9.2(@types/node@20.17.57)(typescript@5.8.3):
+  ts-node@10.9.2(@types/node@22.15.29)(typescript@5.8.3):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       '@tsconfig/node10': 1.0.11
       '@tsconfig/node12': 1.0.11
       '@tsconfig/node14': 1.0.3
       '@tsconfig/node16': 1.0.4
-      '@types/node': 20.17.57
+      '@types/node': 22.15.29
       acorn: 8.14.0
       acorn-walk: 8.3.4
       arg: 4.1.3
@@ -9543,8 +9533,6 @@ snapshots:
       has-bigints: 1.1.0
       has-symbols: 1.1.0
       which-boxed-primitive: 1.1.1
-
-  undici-types@6.19.8: {}
 
   undici-types@6.21.0: {}
 

@@ -62,10 +62,10 @@ model Workspace {
 }
 
 model WorkspaceMember {
-  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id      String        @db.Uuid
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String              @db.Uuid
   workspace_id Int
-  role         WorkspaceRole @default(EDITOR)
+  role         WorkspaceMemberRole @default(EDITOR)
 
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
@@ -82,7 +82,7 @@ model WorkspaceMember {
   @@map("workspace_members")
 }
 
-enum WorkspaceRole {
+enum WorkspaceMemberRole {
   OWNER
   EDITOR
   VIEWER

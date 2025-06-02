@@ -34,7 +34,7 @@
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "eslint": "^9.27.0",
-    "husky": "^7.0.4",
+    "husky": "^9.0.0",
     "lint-staged": "^12.1.2",
     "prettier": "^3.5.3",
     "turbo": "^2.5.3",

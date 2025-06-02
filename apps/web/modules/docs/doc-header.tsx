@@ -68,6 +68,7 @@ export const DocHeader: FC<DocHeaderProps> = (props) => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4 flex-1">
             <Input
+              name="title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="text-xl font-semibold border-none bg-transparent p-0 h-auto focus-visible:ring-0"
@@ -82,9 +83,7 @@ export const DocHeader: FC<DocHeaderProps> = (props) => {
                   key={index}
                   className="w-8 h-8 border-2 border-background"
                 >
-                  <AvatarImage
-                    src={collaborator.avatar || "/placeholder.svg"}
-                  />
+                  <AvatarImage src={collaborator.avatar} />
                   <AvatarFallback className="text-xs">
                     {collaborator.name
                       .split(" ")

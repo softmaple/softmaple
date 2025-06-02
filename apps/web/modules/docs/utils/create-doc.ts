@@ -4,14 +4,14 @@ import type { DocsType } from "@/types/model";
 import { createClient } from "@/utils/supabase/client";
 import { DOCUMENTS_TABLE } from "@/modules/docs/utils/constants/table";
 
-export const createDoc = async (newDoc: DocsType) => {
+export const createDoc = async (newDoc: DocsType["Insert"]) => {
   try {
     const supabase = createClient();
 
     const queryBuilder = supabase
       .from(DOCUMENTS_TABLE.name)
       .insert(newDoc)
-      .select("*")
+      .select<string, DocsType["Row"]>("*")
       .maybeSingle();
 
     return queryBuilder;
@@ -21,14 +21,16 @@ export const createDoc = async (newDoc: DocsType) => {
   }
 };
 
-export const upsertDoc = async (nextDoc: DocsType) => {
+export const upsertDoc = async (
+  nextDoc: DocsType["Insert"] | DocsType["Update"],
+) => {
   try {
     const supabase = createClient();
 
     const queryBuilder = supabase
       .from(DOCUMENTS_TABLE.name)
       .upsert(nextDoc)
-      .select("*")
+      .select<string, DocsType["Row"]>("*")
       .maybeSingle();
 
     return queryBuilder;

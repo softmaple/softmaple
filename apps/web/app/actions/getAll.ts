@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
+import { Table } from "@/types/model";
 
 export const getAll = async (
   tableName: string,
@@ -9,7 +10,10 @@ export const getAll = async (
   foreignTableName?: string,
 ) => {
   const supabase = await createClient();
-  const query = supabase.from(tableName).select("*");
+  const query = supabase
+    .from(tableName)
+    // @ts-expect-error FIXME: Type 'string' is not assignable to type 'Table<"documents"> | Table<"workspace_members">'.
+    .select<string, Table<typeof tableName>["Row"]>("*");
 
   if (limit) {
     query.limit(limit);

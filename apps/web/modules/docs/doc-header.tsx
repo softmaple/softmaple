@@ -21,16 +21,36 @@ import {
   Users,
 } from "lucide-react";
 import { Separator } from "@softmaple/ui/components/separator";
+import { createDoc } from "@/modules/docs/utils/create-doc";
+import kebabCase from "lodash/kebabCase";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 
 export type DocHeaderProps = {
   title: string;
   setTitle: Dispatch<SetStateAction<string>>;
   content: string;
   setContent: Dispatch<SetStateAction<string>>;
+  isNewDoc: boolean;
+  workspaceId: number;
+  userId: string;
+  docSlug?: string;
 };
 
 export const DocHeader: FC<DocHeaderProps> = (props) => {
-  const { title, setTitle, content, setContent } = props;
+  const {
+    title,
+    setTitle,
+    content,
+    setContent,
+    isNewDoc,
+    userId,
+    workspaceId,
+    docSlug,
+  } = props;
+
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [isEditing, setIsEditing] = useState(true);
   const [lastSaved, setLastSaved] = useState("2 minutes ago");
@@ -49,18 +69,55 @@ export const DocHeader: FC<DocHeaderProps> = (props) => {
   ];
 
   const handleSave = async () => {
-    // Simulate save
-    setLastSaved("Just now");
+    try {
+      if (!isNewDoc) return;
+
+      const newDoc = {
+        title,
+        slug: kebabCase(`${title}-${Date.now()}`),
+        workspace_id: workspaceId,
+        author_id: userId,
+        // FIXME: retrieve the content from the editor
+        markdown_content: "",
+      };
+      const { data: createdDoc, error } = await createDoc(newDoc);
+
+      if (error) {
+        console.error("Error creating document:", error);
+        throw error;
+      }
+
+      // update the page slug in the URL if it's a new document
+      if (createdDoc) {
+        const newSlug = createdDoc.slug;
+        // Update the URL to reflect the new document slug
+        const urlParams = new URLSearchParams(searchParams.toString());
+
+        // replace the "new" slug in the end with the new document slug
+        const pathnameParts = pathname.split("/");
+        pathnameParts[pathnameParts.length - 1] = newSlug;
+        const newPathname = pathnameParts.join("/");
+        // Update the URL with the new slug
+        router.push(`${newPathname}?${urlParams.toString()}`, { scroll: true });
+      }
+
+      setLastSaved("Just now");
+    } catch (error) {
+      console.error("Error saving document:", error);
+    } finally {
+      //
+    }
   };
 
   useEffect(() => {
-    // Auto-save simulation
+    if (isNewDoc) return;
+
     const interval = setInterval(() => {
       handleSave();
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [isNewDoc]);
 
   return (
     <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

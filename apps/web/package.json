@@ -37,7 +37,7 @@
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",
     "@types/lodash": "^4.17.17",
-    "@types/node": "^22.0.3",
+    "@types/node": "^22.15.29",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
     "typescript": "^5.8.3"

@@ -285,7 +285,7 @@ importers:
         specifier: ^9.27.0
         version: 9.28.0
       '@next/eslint-plugin-next':
-        specifier: ^15.1.7
+        specifier: ^15.1.8
         version: 15.3.3
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.24.1

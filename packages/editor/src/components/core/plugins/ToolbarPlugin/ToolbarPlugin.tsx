@@ -1,5 +1,5 @@
 import type { Dispatch, FC, SetStateAction } from "react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import type { LexicalEditor, NodeKey } from "lexical";
 import {
   $getSelection,
@@ -17,16 +17,19 @@ import {
   mergeRegister,
   $getNearestNodeOfType,
 } from "@lexical/utils";
-import { BlockFormatDropdown } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/BlockFormatDropdown";
 import { useToolbarState } from "@softmaple/editor/context/ToolbarContext";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
 import { getSelectedNode } from "@softmaple/editor/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
-import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup";
-import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup";
 import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
+
+import {
+  LazyFormatButtonGroup,
+  LazyHistoryButtonGroup,
+  LazyBlockFormatDropdown,
+} from "./LazyComponents";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -213,21 +216,45 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
 
   return (
     <div className="flex flex-wrap items-center gap-1 p-2 border-b">
-      <HistoryButtonGroup editor={activeEditor} toolbarState={toolbarState} />
+      <Suspense
+        fallback={
+          <div className="h-8 w-16 bg-gray-200 animate-pulse rounded" />
+        }
+      >
+        <LazyHistoryButtonGroup
+          editor={activeEditor}
+          toolbarState={toolbarState}
+        />
+      </Suspense>
       <Separator orientation="vertical" className="h-6" />
 
       {toolbarState.blockType in blockTypeToBlockName &&
         activeEditor === editor && (
           <>
-            <BlockFormatDropdown
-              editor={activeEditor}
-              blockType={toolbarState.blockType}
-            />
+            <Suspense
+              fallback={
+                <div className="h-8 w-32 bg-gray-200 animate-pulse rounded" />
+              }
+            >
+              <LazyBlockFormatDropdown
+                editor={activeEditor}
+                blockType={toolbarState.blockType}
+              />
+            </Suspense>
             <Separator orientation="vertical" className="h-6" />
           </>
         )}
 
-      <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
+      <Suspense
+        fallback={
+          <div className="h-8 w-24 bg-gray-200 animate-pulse rounded" />
+        }
+      >
+        <LazyFormatButtonGroup
+          editor={activeEditor}
+          toolbarState={toolbarState}
+        />
+      </Suspense>
       <Separator orientation="vertical" className="h-6" />
     </div>
   );

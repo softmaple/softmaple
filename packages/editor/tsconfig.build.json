@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "node"
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "src/stories/**/*",
+    "**/*.stories.*",
+    "**/*.test.*",
+    "node_modules",
+    "**/*.stories.ts"
+  ]
+}

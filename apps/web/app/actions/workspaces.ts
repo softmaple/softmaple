@@ -8,14 +8,14 @@ import { createWorkspaceMember } from "@/app/actions/workspaceMembers";
 import { getUserBy } from "@/app/actions/users";
 import { WorkspaceMemberRole } from "@softmaple/db";
 import type { Workspace } from "@softmaple/db";
-import { Table } from "@/types/model";
+import { WorkspaceMembersType, WorkspacesType } from "@/types/model";
 
 export const getWorkspaces = async () => {
   const supabase = await createClient();
 
   return supabase
     .from("workspaces")
-    .select("*")
+    .select<string, WorkspacesType["Row"]>("*")
     .order("created_at", { ascending: false });
 };
 
@@ -39,15 +39,13 @@ export const cachedGetWorkspaceBySlug = cache(async (workspaceSlug: string) =>
   getWorkspaceBySlug(workspaceSlug),
 );
 
-export const createWorkspace = async (
-  workspace: Table<"workspaces">["Insert"],
-) => {
+export const createWorkspace = async (workspace: WorkspacesType["Insert"]) => {
   const supabase = await createClient();
 
   return supabase
     .from("workspaces")
     .insert(workspace)
-    .select<string, Table<"workspaces">["Row"]>("*")
+    .select<string, WorkspacesType["Row"]>("*")
     .single();
 };
 
@@ -75,7 +73,7 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
 
   const userId = user.id;
 
-  const nextWorkspace: Table<"workspaces">["Insert"] = {
+  const nextWorkspace: WorkspacesType["Insert"] = {
     title,
     description: formData.get("description") as string,
     slug: kebabCase(title),
@@ -89,7 +87,7 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
     throw new Error(`Failed to create workspace: ${workspaceError.message}`);
   }
 
-  const newWorkspaceMember: Table<"workspace_members">["Insert"] = {
+  const newWorkspaceMember: WorkspaceMembersType["Insert"] = {
     workspace_id: newWorkspace.id,
     user_id: userId,
     role: WorkspaceMemberRole["OWNER"],

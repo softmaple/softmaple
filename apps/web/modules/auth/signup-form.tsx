@@ -53,6 +53,7 @@ export const SignupForm: FC<SignupFormProps> = () => {
       </div>
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
+        {/* TODO: must not end with app domain. */}
         <Input
           id="email"
           name="email"

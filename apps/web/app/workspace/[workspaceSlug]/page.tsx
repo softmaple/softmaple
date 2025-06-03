@@ -27,6 +27,7 @@ import { getAll } from "@/app/actions/getAll";
 
 import dayjs from "@/utils/dayjs";
 import { getUserFullname } from "@/utils/getUserFullname";
+import { notFound } from "next/navigation";
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
@@ -83,6 +84,20 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
     throw error;
   }
 
+  const { data: currentWorkspace, error: workspaceError } =
+    await cachedGetWorkspaceBySlug(workspaceSlug);
+
+  if (workspaceError) {
+    console.error(workspaceError);
+    throw workspaceError;
+  }
+
+  if (!currentWorkspace) {
+    notFound();
+  }
+
+  const { title, description } = currentWorkspace;
+
   const recentActivity = [
     { action: "John Doe edited Research Proposal", time: "2 hours ago" },
     {
@@ -100,10 +115,8 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold">Research Papers</h1>
-              <p className="text-muted-foreground">
-                Academic research and publications
-              </p>
+              <h1 className="text-2xl font-bold">{title}</h1>
+              <p className="text-muted-foreground">{description}</p>
             </div>
             <div className="flex items-center space-x-2">
               <Button>

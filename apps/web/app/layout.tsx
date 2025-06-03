@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     title: "Softmaple",
     description:
       "Write academic papers with LaTeX-quality output in a modern WYSIWYG editor.",
-    url: SITE_CONFIG.DOMAIN,
+    url: SITE_CONFIG.WEBSITE_URL,
     siteName: "Softmaple",
     images: [
       {

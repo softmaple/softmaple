@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import type { FC, ReactNode } from "react";
 import {
@@ -35,13 +37,14 @@ const exportOptions: Array<{
 ];
 
 type ExportFilesDropdownMenuProps = {
-  editor: LexicalEditor;
+  editor?: LexicalEditor;
+  dropdownMenuTrigger?: ReactNode;
 };
 
 export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
   props,
 ) => {
-  const { editor } = props;
+  const { editor, dropdownMenuTrigger } = props;
 
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
@@ -77,6 +80,10 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
     setIsDownloading(true);
 
     try {
+      if (!editor) {
+        throw new Error("Editor instance is not available.");
+      }
+
       const markdownContent = editor
         .getEditorState()
         .read(() =>
@@ -108,10 +115,12 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
     <div className="flex items-center gap-4 ml-auto">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline">
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
+          {dropdownMenuTrigger || (
+            <Button variant="outline">
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {exportOptions.map(({ key, format, icon, label }) => (

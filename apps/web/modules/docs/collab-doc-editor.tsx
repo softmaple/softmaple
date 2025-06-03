@@ -13,13 +13,17 @@ import type { InitialConfigType } from "@lexical/react/LexicalComposer";
 
 import "@liveblocks/react-ui/styles.css";
 import "@liveblocks/react-lexical/styles.css";
+import type { EditorProps } from "@softmaple/editor/components/core/Editor";
 
-export type CollabDocEditorProps = {
+export type CollabDocEditorProps = Pick<
+  EditorProps,
+  "activeEditor" | "setActiveEditor"
+> & {
   commonEditorConfig?: InitialConfigType;
 };
 
 export const CollabDocEditor: FC<CollabDocEditorProps> = (props) => {
-  const { commonEditorConfig } = props;
+  const { commonEditorConfig, activeEditor, setActiveEditor } = props;
 
   const lexicalConfig: InitialConfigType = liveblocksConfig({
     ...LEXIAL_PLAYGROUND_CONFIG,
@@ -27,7 +31,11 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = (props) => {
   });
 
   return (
-    <CoreEditor lexicalConfig={lexicalConfig}>
+    <CoreEditor
+      activeEditor={activeEditor}
+      setActiveEditor={setActiveEditor}
+      lexicalConfig={lexicalConfig}
+    >
       <LiveblocksPlugin>
         <Threads />
         <FloatingToolbar />

@@ -26,7 +26,6 @@ import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
 import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup";
 import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup";
-import { ExportFilesDropdownMenu } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/ExportFiles/ExportFilesDropdownMenu";
 import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
 type ToolbarPluginProps = {
@@ -40,7 +39,6 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
   const { editor, activeEditor, setActiveEditor } = props;
 
   const [, setSelectedElementKey] = useState<NodeKey | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [, setIsEditable] = useState(() => editor.isEditable());
   const { toolbarState, updateToolbarState } = useToolbarState();
 
@@ -231,8 +229,6 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
 
       <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
       <Separator orientation="vertical" className="h-6" />
-
-      <ExportFilesDropdownMenu editor={activeEditor} />
     </div>
   );
 };

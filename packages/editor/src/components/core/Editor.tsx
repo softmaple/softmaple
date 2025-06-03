@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { FC, ReactNode } from "react";
+import { useState, useEffect } from "react";
+import type { FC, ReactNode, Dispatch, SetStateAction } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { cn } from "@softmaple/editor/lib/utils";
@@ -12,29 +12,55 @@ import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistory
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin";
 import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
+import type { LexicalEditor } from "lexical";
 
-type EditorProps = {
+export type EditorProps = {
   className?: string;
   children?: ReactNode;
+  activeEditor: LexicalEditor | undefined;
+  setActiveEditor: Dispatch<SetStateAction<LexicalEditor | undefined>>;
 };
 
 export const Editor: FC<EditorProps> = (props) => {
-  const { className, children, ...rest } = props;
+  const { className, children, activeEditor, setActiveEditor, ...rest } = props;
 
   const [editor] = useLexicalComposerContext();
   const { historyState } = useSharedHistoryContext();
 
-  const [activeEditor, setActiveEditor] = useState(editor);
+  useEffect(() => {
+    // Set the editor instance in the parent component
+    setActiveEditor(editor);
+  }, [editor, setActiveEditor]);
+
+  const safeSetActiveEditor: Dispatch<SetStateAction<LexicalEditor>> = (
+    update,
+  ) => {
+    setActiveEditor((prev) => {
+      if (!prev) throw new Error("Editor is undefined");
+      // TypeScript will be happy now
+      return typeof update === "function"
+        ? (update as (prev: LexicalEditor) => LexicalEditor)(prev)
+        : update;
+    });
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setIsLinkEditMode] = useState<boolean>(false);
+
+  if (!activeEditor) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-gray-500">No active editor selected.</p>
+      </div>
+    );
+  }
 
   return (
     <>
       <ToolbarPlugin
         editor={editor}
         activeEditor={activeEditor}
-        setActiveEditor={setActiveEditor}
+        setActiveEditor={safeSetActiveEditor}
         setIsLinkEditMode={setIsLinkEditMode}
       />
 

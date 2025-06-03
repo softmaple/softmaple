@@ -1,18 +1,20 @@
+"use client";
+
 import { useState } from "react";
 import type { FC, ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from "@softmaple/ui/components/dropdown-menu";
-import { Button } from "@softmaple/ui/components/button";
+} from "@softmaple/ui/components/dropdown-menu.tsx";
+import { Button } from "@softmaple/ui/components/button.tsx";
 import { Download, FileText } from "lucide-react";
 import { $convertToMarkdownString } from "@lexical/markdown";
-import { PLAYGROUND_TRANSFORMERS } from "@softmaple/editor/components/core/plugins/MarkdownTransformers/MarkdownTransformers";
-import { markdownToLatex } from "@softmaple/md2latex/src/md2latex";
+import { PLAYGROUND_TRANSFORMERS } from "@softmaple/editor/components/core/plugins/MarkdownTransformers/MarkdownTransformers.ts";
+import { markdownToLatex } from "@softmaple/md2latex/src/md2latex.ts";
 import type { LexicalEditor } from "lexical";
-import type { ExportFormat } from "./ExportFilesMenuItem";
-import { ExportFilesMenuItem } from "./ExportFilesMenuItem";
+import type { ExportFormat } from "./ExportFilesMenuItem.tsx";
+import { ExportFilesMenuItem } from "./ExportFilesMenuItem.tsx";
 
 const exportOptions: Array<{
   key: string;
@@ -35,13 +37,14 @@ const exportOptions: Array<{
 ];
 
 type ExportFilesDropdownMenuProps = {
-  editor: LexicalEditor;
+  editor?: LexicalEditor;
+  dropdownMenuTrigger?: ReactNode;
 };
 
 export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
   props,
 ) => {
-  const { editor } = props;
+  const { editor, dropdownMenuTrigger } = props;
 
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
@@ -77,6 +80,10 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
     setIsDownloading(true);
 
     try {
+      if (!editor) {
+        throw new Error("Editor instance is not available.");
+      }
+
       const markdownContent = editor
         .getEditorState()
         .read(() =>
@@ -108,10 +115,12 @@ export const ExportFilesDropdownMenu: FC<ExportFilesDropdownMenuProps> = (
     <div className="flex items-center gap-4 ml-auto">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline">
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
+          {dropdownMenuTrigger || (
+            <Button variant="outline">
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {exportOptions.map(({ key, format, icon, label }) => (

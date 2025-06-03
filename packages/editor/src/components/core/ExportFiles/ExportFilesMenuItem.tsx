@@ -1,4 +1,4 @@
-import { DropdownMenuItem } from "@softmaple/ui/components/dropdown-menu.tsx";
+import { DropdownMenuItem } from "@softmaple/ui/components/dropdown-menu";
 import type { FC } from "react";
 
 export type ExportFormat = "markdown" | "latex";

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import type { FC, ReactNode, Dispatch, SetStateAction } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
@@ -10,8 +10,10 @@ import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
 import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistoryContext";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
-import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin";
-import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
+import {
+  LazyShortcutsPlugin,
+  LazyMarkdownPlugin,
+} from "@softmaple/editor/components/core/plugins/LazyPlugins";
 import type { LexicalEditor } from "lexical";
 
 export type EditorProps = {
@@ -64,10 +66,12 @@ export const Editor: FC<EditorProps> = (props) => {
         setIsLinkEditMode={setIsLinkEditMode}
       />
 
-      <ShortcutsPlugin
-        editor={activeEditor}
-        setIsLinkEditMode={setIsLinkEditMode}
-      />
+      <Suspense fallback={null}>
+        <LazyShortcutsPlugin
+          editor={activeEditor}
+          setIsLinkEditMode={setIsLinkEditMode}
+        />
+      </Suspense>
 
       <div className="bg-background relative block rounded-b-[10px]">
         <HistoryPlugin externalHistoryState={historyState} />
@@ -93,7 +97,9 @@ export const Editor: FC<EditorProps> = (props) => {
 
         {children}
 
-        <MarkdownPlugin />
+        <Suspense fallback={null}>
+          <LazyMarkdownPlugin />
+        </Suspense>
         <ListPlugin hasStrictIndent />
         <CheckListPlugin />
       </div>

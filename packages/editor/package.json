@@ -2,9 +2,10 @@
   "name": "@softmaple/editor",
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": false,
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",

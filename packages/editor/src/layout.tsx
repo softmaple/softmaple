@@ -1,6 +1,8 @@
 import type { FC, ReactNode } from "react";
 import { Suspense, lazy } from "react";
-import { SITE_CONFIG } from "@softmaple/config";
+const SITE_CONFIG = {
+  GITHUB_REPO: "https://github.com/softmaple/softmaple",
+};
 
 import { ThemeModeToggle } from "@softmaple/editor/components/ui/theme-mode-toggle";
 

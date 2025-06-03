@@ -11,18 +11,33 @@ export default defineConfig({
       "@softmaple/editor": path.resolve(__dirname, "./src"),
     },
   },
+  define: {
+    "process.env.NODE_ENV": JSON.stringify(
+      process.env.NODE_ENV || "development",
+    ),
+  },
   build: {
     rollupOptions: {
+      external: [
+        "@softmaple/ui/globals.css",
+        "@softmaple/ui/components/button",
+        "@softmaple/ui/components/dropdown-menu",
+        "@softmaple/ui/components/select",
+        "@softmaple/ui/components/separator",
+        "@softmaple/ui/components/tooltip",
+        "@softmaple/ui",
+        "@softmaple/md2latex",
+      ],
       output: {
         manualChunks: {
           // Split React and React DOM into a separate chunk
           "vendor-react": ["react", "react-dom"],
+
           // Split Lexical editor related packages (submodules only)
           lexical: [
             "lexical",
             "@lexical/rich-text",
             "@lexical/list",
-            "@lexical/code",
             "@lexical/link",
             "@lexical/markdown",
             "@lexical/selection",
@@ -39,12 +54,18 @@ export default defineConfig({
             "@lexical/react/LexicalComposerContext",
             "@lexical/react/LexicalMarkdownShortcutPlugin",
           ],
+
           // Split utility libraries
-          utils: [
-            "clsx",
-            "tailwind-merge",
-            "class-variance-authority",
-            "lucide-react",
+          utils: ["clsx", "tailwind-merge", "class-variance-authority"],
+
+          ui: ["lucide-react"],
+
+          "export-features": [],
+
+          "toolbar-components": [
+            "./src/components/core/plugins/ToolbarPlugin/FormatButtonGroup",
+            "./src/components/core/plugins/ToolbarPlugin/HistoryButtonGroup",
+            "./src/components/core/plugins/ToolbarPlugin/BlockFormatDropdown",
           ],
         },
       },

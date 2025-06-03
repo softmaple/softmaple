@@ -1,1 +1,3 @@
-export { default } from "@softmaple/ui/postcss.config";
+export default {
+  plugins: [],
+}

@@ -5,18 +5,11 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/utils/supabase/server";
 import { loginFormSchema } from "@/modules/auth/utils/auth-form-schema";
-import type { LoginFormSchema } from "@/modules/auth/utils/auth-form-schema";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
 
-  const rawEmail = formData.get("email");
-  const rawPassword = formData.get("password");
-
-  const rawData: LoginFormSchema = {
-    email: rawEmail as Extract<typeof rawEmail, string>,
-    password: rawPassword as Extract<typeof rawPassword, string>,
-  };
+  const rawData = Object.fromEntries(formData.entries());
 
   const {
     data,

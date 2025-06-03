@@ -13,7 +13,7 @@ import type { InitialConfigType } from "@lexical/react/LexicalComposer";
 
 import "@liveblocks/react-ui/styles.css";
 import "@liveblocks/react-lexical/styles.css";
-import { EditorProps } from "@softmaple/editor/components/core/Editor";
+import type { EditorProps } from "@softmaple/editor/components/core/Editor";
 
 export type CollabDocEditorProps = Pick<
   EditorProps,

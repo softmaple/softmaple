@@ -7,7 +7,8 @@ export const SITE_CONFIG = {
   CONTACT_EMAIL: "hello@softmaple.ink",
   GITHUB_REPO: "https://github.com/softmaple/softmaple",
   TWITTER: "https://x.com/zhyd007",
-  DOMAIN: "https://beta.softmaple.ink",
+  WEBSITE_URL: "https://beta.softmaple.ink",
+  DOMAIN: "softmaple.ink",
 } as const;
 
 export const OPENGRAPH_IMAGE_URL =

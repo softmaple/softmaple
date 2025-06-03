@@ -40,24 +40,11 @@ export default defineConfig({
             "@lexical/react/LexicalMarkdownShortcutPlugin",
           ],
           // Split utility libraries
-          utils: ["clsx", "tailwind-merge", "class-variance-authority"],
-
-          ui: ["lucide-react"],
-
-          "toolbar-components": [
-            "./src/components/core/plugins/ToolbarPlugin/FormatButtonGroup",
-            "./src/components/core/plugins/ToolbarPlugin/HistoryButtonGroup",
-            "./src/components/core/plugins/ToolbarPlugin/BlockFormatDropdown",
-          ],
-
-          "export-features": [
-            "./src/components/core/ExportFiles/ExportFilesDropdownMenu",
-          ],
-
-          "editor-plugins": [
-            "./src/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin",
-            "./src/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin",
-            "./src/components/core/plugins/MarkdownTransformers/MarkdownTransformers",
+          utils: [
+            "clsx",
+            "tailwind-merge",
+            "class-variance-authority",
+            "lucide-react",
           ],
         },
       },

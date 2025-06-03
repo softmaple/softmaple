@@ -5,8 +5,8 @@
     "declaration": true,
     "outDir": "dist",
     "jsx": "react-jsx",
-    "allowImportingTsExtensions": false,
-    "moduleResolution": "bundler"
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "node"
   },
   "include": [
     "src/**/*"
@@ -15,6 +15,7 @@
     "src/stories/**/*",
     "**/*.stories.*",
     "**/*.test.*",
-    "node_modules"
+    "node_modules",
+    "**/*.stories.ts"
   ]
 }

@@ -18,16 +18,6 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: [
-        "@softmaple/ui/globals.css",
-        "@softmaple/ui/components/button",
-        "@softmaple/ui/components/dropdown-menu",
-        "@softmaple/ui/components/select",
-        "@softmaple/ui/components/separator",
-        "@softmaple/ui/components/tooltip",
-        "@softmaple/ui",
-        "@softmaple/md2latex",
-      ],
       output: {
         manualChunks: {
           // Split React and React DOM into a separate chunk
@@ -38,6 +28,7 @@ export default defineConfig({
             "lexical",
             "@lexical/rich-text",
             "@lexical/list",
+            "@lexical/code",
             "@lexical/link",
             "@lexical/markdown",
             "@lexical/selection",

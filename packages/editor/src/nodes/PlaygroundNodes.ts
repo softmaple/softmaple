@@ -9,6 +9,6 @@ export const PlaygroundNodes: Array<Klass<LexicalNode>> = [
   ListNode,
   ListItemNode,
   QuoteNode,
-
+  // CodeNode,
   LinkNode,
 ];

@@ -4,16 +4,30 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/utils/supabase/server";
+import { loginFormSchema } from "@/modules/auth/utils/auth-form-schema";
+import type { LoginFormSchema } from "@/modules/auth/utils/auth-form-schema";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
 
-  // type-casting here for convenience
-  // in practice, you should validate your inputs
-  const data = {
-    email: formData.get("email") as string,
-    password: formData.get("password") as string,
+  const rawEmail = formData.get("email");
+  const rawPassword = formData.get("password");
+
+  const rawData: LoginFormSchema = {
+    email: rawEmail as Extract<typeof rawEmail, string>,
+    password: rawPassword as Extract<typeof rawPassword, string>,
   };
+
+  const {
+    data,
+    error: formError,
+    success,
+  } = loginFormSchema.safeParse(rawData);
+
+  if (!success) {
+    console.error("Form validation error:", formError);
+    throw formError;
+  }
 
   const { error } = await supabase.auth.signInWithPassword(data);
 

@@ -24,6 +24,8 @@ import { Separator } from "@softmaple/ui/components/separator";
 import { createDoc } from "@/modules/docs/utils/create-doc";
 import kebabCase from "lodash/kebabCase";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
+import { useEditorState } from "@/contexts/EditorStateContext";
+import { ExportFilesDropdownMenu } from "@softmaple/editor/components/core/ExportFiles/ExportFilesDropdownMenu";
 
 export type DocHeaderProps = {
   title: string;
@@ -51,6 +53,8 @@ export const DocHeader: FC<DocHeaderProps> = (props) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+
+  const { activeEditor } = useEditorState();
 
   const [isEditing, setIsEditing] = useState(true);
   const [lastSaved, setLastSaved] = useState("2 minutes ago");
@@ -160,10 +164,15 @@ export const DocHeader: FC<DocHeaderProps> = (props) => {
               <Share className="mr-2 h-4 w-4" />
               Share
             </Button>
-            <Button variant="ghost" size="sm">
-              <Download className="mr-2 h-4 w-4" />
-              Export
-            </Button>
+            <ExportFilesDropdownMenu
+              dropdownMenuTrigger={
+                <Button variant="ghost" size="sm">
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </Button>
+              }
+              editor={activeEditor}
+            />
             <Button size="sm" onClick={handleSave}>
               <Save className="mr-2 h-4 w-4" />
               Save

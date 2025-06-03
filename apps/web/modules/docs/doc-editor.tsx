@@ -5,6 +5,7 @@ import type { FC } from "react";
 import { memo, useState, useEffect } from "react";
 
 import { LEXIAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
+import { useEditorState } from "@/contexts/EditorStateContext";
 
 import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
 
@@ -19,6 +20,7 @@ const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
   const { isPublic = false } = props;
 
   const [isMounted, setIsMounted] = useState<boolean>(false);
+  const { activeEditor, setActiveEditor } = useEditorState();
 
   useEffect(() => {
     // This effect runs only once when the component mounts
@@ -45,10 +47,22 @@ const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
   };
 
   if (isPublic) {
-    return <CollabDocEditor commonEditorConfig={commonConfig} />;
+    return (
+      <CollabDocEditor
+        activeEditor={activeEditor}
+        setActiveEditor={setActiveEditor}
+        commonEditorConfig={commonConfig}
+      />
+    );
   }
 
-  return <CoreEditor lexicalConfig={commonConfig} />;
+  return (
+    <CoreEditor
+      activeEditor={activeEditor}
+      setActiveEditor={setActiveEditor}
+      lexicalConfig={commonConfig}
+    />
+  );
 };
 
 export const DocEditor = memo(UnMemoizedDocEditor);

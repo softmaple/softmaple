@@ -1,33 +1,21 @@
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
-import { Table } from "@/types/model";
+import { createServerCrud } from "@/utils/crud";
+import type { TableName, CrudOptions, CrudFilter } from "@/utils/crud";
 
-export const getAll = async (
-  tableName: string,
-  filter?: Record<string, any>,
+export const getAll = async <T extends TableName>(
+  tableName: T,
+  filter?: CrudFilter,
   limit?: number,
   foreignTableName?: string,
 ) => {
-  const supabase = await createClient();
-  const query = supabase
-    .from(tableName)
-    // @ts-expect-error FIXME: Type 'string' is not assignable to type 'Table<"documents"> | Table<"workspace_members">'.
-    .select<string, Table<typeof tableName>["Row"]>("*");
+  const crud = createServerCrud(tableName);
+  const options: CrudOptions = {
+    limit,
+    select: foreignTableName ? `*, ${foreignTableName} (*)` : "*",
+  };
 
-  if (limit) {
-    query.limit(limit);
-  }
-
-  if (filter) {
-    query.match(filter);
-  }
-
-  if (foreignTableName) {
-    query.select(`*, ${foreignTableName} (*)`);
-  }
-
-  return query;
+  return filter ? crud.getBy(filter, options) : crud.getAll(options);
 };
 
 export const getDetailsBy = async () => {};

@@ -61,8 +61,8 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
       getAll("workspace_members", undefined, undefined, "users"),
     ]);
 
-  const recentDocuments = (documents || []).map((doc: any) => {
-    const updatedBy = doc.author ? getUserFullname(doc.author) : "Unknown";
+  const recentDocuments = (documents || []).map((doc) => {
+    const updatedBy = getUserFullname(doc.users);
 
     return {
       ...doc,
@@ -70,9 +70,9 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
       updated_by: updatedBy,
     };
   });
-  const allWorkspaceMembers = (members || []).map((member: any) => ({
+  const allWorkspaceMembers = (members || []).map((member) => ({
     ...member,
-    user: member?.user,
+    user: member?.users,
     key: member.id,
   }));
 

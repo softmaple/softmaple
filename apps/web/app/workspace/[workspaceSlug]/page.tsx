@@ -57,8 +57,8 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
   // FIXME: only query data for the current workspace
   const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
     await Promise.all([
-      getAll("documents", undefined, 5, "author"),
-      getAll("workspace_members", undefined, undefined, "user"),
+      getAll("documents", undefined, 5, "users"),
+      getAll("workspace_members", undefined, undefined, "users"),
     ]);
 
   const recentDocuments = (documents || []).map((doc: any) => {

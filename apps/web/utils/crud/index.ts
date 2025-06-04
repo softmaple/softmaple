@@ -1,13 +1,6 @@
-import { ServerCrud } from "./server";
-import { ClientCrud } from "./client";
+import { createServerCrud } from "./server";
+import { createClientCrud } from "./client";
 import { TABLES } from "@/utils/constants/tables";
-import type { TableName } from "@/types/crud";
-
-export const createServerCrud = <T extends TableName>(tableName: T) =>
-  new ServerCrud(tableName);
-
-export const createClientCrud = <T extends TableName>(tableName: T) =>
-  new ClientCrud(tableName);
 
 export const serverCrud = {
   users: () => createServerCrud(TABLES.USERS.name),

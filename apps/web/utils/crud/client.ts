@@ -14,15 +14,15 @@ import type {
 } from "@/types/crud";
 import type { Table } from "@/types/model";
 
-export class ClientCrud<T extends TableName> implements BaseCrudOperations<T> {
-  constructor(private tableName: T) {}
-
-  async getAll(
+export const createClientCrud = <T extends TableName>(
+  tableName: T,
+): BaseCrudOperations<T> => ({
+  getAll: async (
     options: CrudOptions = {},
-  ): Promise<CrudListResult<Table<T>["Row"]>> {
+  ): Promise<CrudListResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
-      let query = supabase.from(this.tableName).select(options.select || "*");
+      let query = supabase.from(tableName).select(options.select || "*");
 
       if (options.limit) {
         query = query.limit(options.limit);
@@ -43,33 +43,35 @@ export class ClientCrud<T extends TableName> implements BaseCrudOperations<T> {
 
       return (await query) as any;
     } catch (error) {
-      console.error(`Error fetching all ${this.tableName}:`, error);
+      console.error(`Error fetching all ${tableName}:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async getById(id: string | number): Promise<CrudResult<Table<T>["Row"]>> {
+  getById: async (
+    id: string | number,
+  ): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       return await supabase
-        .from(this.tableName)
+        .from(tableName)
         .select("*")
         .eq("id", id)
         .maybeSingle();
     } catch (error) {
-      console.error(`Error fetching ${this.tableName} by id:`, error);
+      console.error(`Error fetching ${tableName} by id:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async getBy(
+  getBy: async (
     filter: CrudFilter,
     options: CrudOptions = {},
-  ): Promise<CrudListResult<Table<T>["Row"]>> {
+  ): Promise<CrudListResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       let query = supabase
-        .from(this.tableName)
+        .from(tableName)
         .select(options.select || "*")
         .match(filter);
 
@@ -85,33 +87,35 @@ export class ClientCrud<T extends TableName> implements BaseCrudOperations<T> {
 
       return (await query) as any;
     } catch (error) {
-      console.error(`Error fetching ${this.tableName} by filter:`, error);
+      console.error(`Error fetching ${tableName} by filter:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async getOneBy(filter: CrudFilter): Promise<CrudResult<Table<T>["Row"]>> {
+  getOneBy: async (
+    filter: CrudFilter,
+  ): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       return await supabase
-        .from(this.tableName)
+        .from(tableName)
         .select("*")
         .match(filter)
         .maybeSingle();
     } catch (error) {
-      console.error(`Error fetching one ${this.tableName} by filter:`, error);
+      console.error(`Error fetching one ${tableName} by filter:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async create(
+  create: async (
     data: Table<T>["Insert"],
     options: CreateOptions<T> = {},
-  ): Promise<CrudResult<Table<T>["Row"]>> {
+  ): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       let query = supabase
-        .from(this.tableName)
+        .from(tableName)
         .insert(data)
         .select(options.select || "*");
 
@@ -121,20 +125,20 @@ export class ClientCrud<T extends TableName> implements BaseCrudOperations<T> {
         return (await query.maybeSingle()) as any;
       }
     } catch (error) {
-      console.error(`Error creating ${this.tableName}:`, error);
+      console.error(`Error creating ${tableName}:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async update(
+  update: async (
     id: string | number,
     data: Table<T>["Update"],
     options: UpdateOptions<T> = {},
-  ): Promise<CrudResult<Table<T>["Row"]>> {
+  ): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       let query = supabase
-        .from(this.tableName)
+        .from(tableName)
         .update(data)
         .eq("id", id)
         .select(options.select || "*");
@@ -145,19 +149,19 @@ export class ClientCrud<T extends TableName> implements BaseCrudOperations<T> {
         return (await query.maybeSingle()) as any;
       }
     } catch (error) {
-      console.error(`Error updating ${this.tableName}:`, error);
+      console.error(`Error updating ${tableName}:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async upsert(
+  upsert: async (
     data: Table<T>["Insert"] | Table<T>["Update"],
     options: CreateOptions<T> = {},
-  ): Promise<CrudResult<Table<T>["Row"]>> {
+  ): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       let query = supabase
-        .from(this.tableName)
+        .from(tableName)
         .upsert(data)
         .select(options.select || "*");
 
@@ -167,26 +171,26 @@ export class ClientCrud<T extends TableName> implements BaseCrudOperations<T> {
         return (await query.maybeSingle()) as any;
       }
     } catch (error) {
-      console.error(`Error upserting ${this.tableName}:`, error);
+      console.error(`Error upserting ${tableName}:`, error);
       return { data: null, error };
     }
-  }
+  },
 
-  async delete(
+  delete: async (
     id: string | number,
     options: DeleteOptions = {},
-  ): Promise<CrudResult<Table<T>["Row"]>> {
+  ): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = createClient();
       return await supabase
-        .from(this.tableName)
+        .from(tableName)
         .delete()
         .eq("id", id)
         .select(options.select || "*")
         .maybeSingle();
     } catch (error) {
-      console.error(`Error deleting ${this.tableName}:`, error);
+      console.error(`Error deleting ${tableName}:`, error);
       return { data: null, error };
     }
-  }
-}
+  },
+});

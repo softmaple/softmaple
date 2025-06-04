@@ -57,12 +57,12 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
   // FIXME: only query data for the current workspace
   const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
     await Promise.all([
-      getAll("documents", undefined, 5, "users"),
-      getAll("workspace_members", undefined, undefined, "users"),
+      getAll("documents", undefined, 5, "author"),
+      getAll("workspace_members", undefined, undefined, "user"),
     ]);
 
-  const recentDocuments = (documents || []).map((doc) => {
-    const updatedBy = getUserFullname(doc.users);
+  const recentDocuments = (documents || []).map((doc: any) => {
+    const updatedBy = doc.author ? getUserFullname(doc.author) : "Unknown";
 
     return {
       ...doc,
@@ -70,9 +70,9 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
       updated_by: updatedBy,
     };
   });
-  const allWorkspaceMembers = (members || []).map((member) => ({
+  const allWorkspaceMembers = (members || []).map((member: any) => ({
     ...member,
-    user: member?.users,
+    user: member?.user,
     key: member.id,
   }));
 

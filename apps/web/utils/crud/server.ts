@@ -1,5 +1,3 @@
-"use server";
-
 import { createClient } from "@/utils/supabase/server";
 import type {
   TableName,
@@ -41,7 +39,7 @@ export class ServerCrud<T extends TableName> implements BaseCrudOperations<T> {
         });
       }
 
-      return await query;
+      return (await query) as any;
     } catch (error) {
       console.error(`Error fetching all ${this.tableName}:`, error);
       return { data: null, error };
@@ -83,7 +81,7 @@ export class ServerCrud<T extends TableName> implements BaseCrudOperations<T> {
         });
       }
 
-      return await query;
+      return (await query) as any;
     } catch (error) {
       console.error(`Error fetching ${this.tableName} by filter:`, error);
       return { data: null, error };
@@ -116,12 +114,10 @@ export class ServerCrud<T extends TableName> implements BaseCrudOperations<T> {
         .select(options.select || "*");
 
       if (options.single) {
-        query = query.single();
+        return await query.single();
       } else {
-        query = query.maybeSingle();
+        return await query.maybeSingle();
       }
-
-      return await query;
     } catch (error) {
       console.error(`Error creating ${this.tableName}:`, error);
       return { data: null, error };
@@ -142,12 +138,10 @@ export class ServerCrud<T extends TableName> implements BaseCrudOperations<T> {
         .select(options.select || "*");
 
       if (options.single) {
-        query = query.single();
+        return await query.single();
       } else {
-        query = query.maybeSingle();
+        return await query.maybeSingle();
       }
-
-      return await query;
     } catch (error) {
       console.error(`Error updating ${this.tableName}:`, error);
       return { data: null, error };
@@ -166,12 +160,10 @@ export class ServerCrud<T extends TableName> implements BaseCrudOperations<T> {
         .select(options.select || "*");
 
       if (options.single) {
-        query = query.single();
+        return await query.single();
       } else {
-        query = query.maybeSingle();
+        return await query.maybeSingle();
       }
-
-      return await query;
     } catch (error) {
       console.error(`Error upserting ${this.tableName}:`, error);
       return { data: null, error };

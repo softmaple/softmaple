@@ -2,7 +2,7 @@
 
 import type { DocsType } from "@/types/model";
 import { createClient } from "@/utils/supabase/client";
-import { DOCUMENTS_TABLE } from "@/modules/docs/utils/constants/table";
+import { DOCUMENTS_TABLE } from "@/utils/constants/tables";
 
 export const createDoc = async (newDoc: DocsType["Insert"]) => {
   try {

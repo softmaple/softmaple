@@ -14,10 +14,9 @@ import type {
 } from "@/types/crud";
 import type { Table } from "@/types/model";
 
-export const createServerCrud = <T extends TableName>(
-  tableName: T,
-): BaseCrudOperations<T> => ({
-  getAll: async (
+const createGetAllFunction =
+  <T extends TableName>(tableName: T) =>
+  async (
     options: CrudOptions = {},
   ): Promise<CrudListResult<Table<T>["Row"]>> => {
     try {
@@ -46,11 +45,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error fetching all ${tableName}:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  getById: async (
-    id: string | number,
-  ): Promise<CrudResult<Table<T>["Row"]>> => {
+const createGetByIdFunction =
+  <T extends TableName>(tableName: T) =>
+  async (id: string | number): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = await createClient();
       return await supabase
@@ -62,9 +61,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error fetching ${tableName} by id:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  getBy: async (
+const createGetByFunction =
+  <T extends TableName>(tableName: T) =>
+  async (
     filter: CrudFilter,
     options: CrudOptions = {},
   ): Promise<CrudListResult<Table<T>["Row"]>> => {
@@ -90,11 +91,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error fetching ${tableName} by filter:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  getOneBy: async (
-    filter: CrudFilter,
-  ): Promise<CrudResult<Table<T>["Row"]>> => {
+const createGetOneByFunction =
+  <T extends TableName>(tableName: T) =>
+  async (filter: CrudFilter): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = await createClient();
       return await supabase
@@ -106,9 +107,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error fetching one ${tableName} by filter:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  create: async (
+const createCreateFunction =
+  <T extends TableName>(tableName: T) =>
+  async (
     data: Table<T>["Insert"],
     options: CreateOptions<T> = {},
   ): Promise<CrudResult<Table<T>["Row"]>> => {
@@ -128,9 +131,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error creating ${tableName}:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  update: async (
+const createUpdateFunction =
+  <T extends TableName>(tableName: T) =>
+  async (
     id: string | number,
     data: Table<T>["Update"],
     options: UpdateOptions<T> = {},
@@ -152,9 +157,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error updating ${tableName}:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  upsert: async (
+const createUpsertFunction =
+  <T extends TableName>(tableName: T) =>
+  async (
     data: Table<T>["Insert"] | Table<T>["Update"],
     options: CreateOptions<T> = {},
   ): Promise<CrudResult<Table<T>["Row"]>> => {
@@ -174,9 +181,11 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error upserting ${tableName}:`, error);
       return { data: null, error };
     }
-  },
+  };
 
-  delete: async (
+const createDeleteFunction =
+  <T extends TableName>(tableName: T) =>
+  async (
     id: string | number,
     options: DeleteOptions = {},
   ): Promise<CrudResult<Table<T>["Row"]>> => {
@@ -192,5 +201,17 @@ export const createServerCrud = <T extends TableName>(
       console.error(`Error deleting ${tableName}:`, error);
       return { data: null, error };
     }
-  },
+  };
+
+export const createServerCrud = <T extends TableName>(
+  tableName: T,
+): BaseCrudOperations<T> => ({
+  getAll: createGetAllFunction(tableName),
+  getById: createGetByIdFunction(tableName),
+  getBy: createGetByFunction(tableName),
+  getOneBy: createGetOneByFunction(tableName),
+  create: createCreateFunction(tableName),
+  update: createUpdateFunction(tableName),
+  upsert: createUpsertFunction(tableName),
+  delete: createDeleteFunction(tableName),
 });

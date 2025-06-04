@@ -21,5 +21,8 @@ const config: StorybookConfig = {
     name: getAbsolutePath("@storybook/react-vite"),
     options: {},
   },
+  typescript: {
+    tsconfigPath: join(__dirname, "../tsconfig.storybook.json"),
+  },
 };
 export default config;

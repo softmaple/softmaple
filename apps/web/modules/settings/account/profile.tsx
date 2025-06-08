@@ -21,7 +21,7 @@ import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { Switch } from "@softmaple/ui/components/switch";
 import { Separator } from "@softmaple/ui/components/separator";
-import { clientCrud } from "@/utils/crud";
+import { clientCrud } from "@/utils/crud/client-only";
 
 export type ProfileProps = {
   userId: string;

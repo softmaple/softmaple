@@ -1,5 +1,4 @@
 import { createServerCrud } from "./server";
-import { createClientCrud } from "./client";
 import { TABLES } from "@/utils/constants/tables";
 
 export { createServerCrud } from "./server";
@@ -10,14 +9,6 @@ export const serverCrud = {
   workspaceMembers: () => createServerCrud(TABLES.WORKSPACE_MEMBERS.name),
   documents: () => createServerCrud(TABLES.DOCUMENTS.name),
   documentVersions: () => createServerCrud(TABLES.DOCUMENT_VERSIONS.name),
-};
-
-export const clientCrud = {
-  users: () => createClientCrud(TABLES.USERS.name),
-  workspaces: () => createClientCrud(TABLES.WORKSPACES.name),
-  workspaceMembers: () => createClientCrud(TABLES.WORKSPACE_MEMBERS.name),
-  documents: () => createClientCrud(TABLES.DOCUMENTS.name),
-  documentVersions: () => createClientCrud(TABLES.DOCUMENT_VERSIONS.name),
 };
 
 export type {

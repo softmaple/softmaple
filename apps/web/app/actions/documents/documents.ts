@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
 import { cache } from "react";
 import type { DocsType } from "@/types/model";

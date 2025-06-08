@@ -1,7 +1,7 @@
 "use client";
 
 import type { DocsType } from "@/types/model";
-import { clientCrud } from "@/utils/crud";
+import { clientCrud } from "@/utils/crud/client-only";
 
 export const createDoc = async (newDoc: DocsType["Insert"]) => {
   try {

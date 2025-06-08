@@ -2,6 +2,8 @@ import { createServerCrud } from "./server";
 import { createClientCrud } from "./client";
 import { TABLES } from "@/utils/constants/tables";
 
+export { createServerCrud } from "./server";
+
 export const serverCrud = {
   users: () => createServerCrud(TABLES.USERS.name),
   workspaces: () => createServerCrud(TABLES.WORKSPACES.name),

@@ -61,7 +61,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
       getAll("workspace_members", undefined, undefined, "users"),
     ]);
 
-  const recentDocuments = (documents || []).map((doc) => {
+  const recentDocuments = (documents || []).map((doc: any) => {
     const updatedBy = getUserFullname(doc.users);
 
     return {
@@ -70,7 +70,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
       updated_by: updatedBy,
     };
   });
-  const allWorkspaceMembers = (members || []).map((member) => ({
+  const allWorkspaceMembers = (members || []).map((member: any) => ({
     ...member,
     user: member?.users,
     key: member.id,
@@ -265,7 +265,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {(allWorkspaceMembers || []).map((member) => (
+              {(allWorkspaceMembers || []).map((member: any) => (
                 <div
                   key={member.id}
                   className="flex items-center justify-between"

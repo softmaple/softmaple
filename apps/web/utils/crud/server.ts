@@ -1,3 +1,4 @@
+import { cache } from "react";
 import "server-only";
 
 import { createClient } from "@/utils/supabase/server";
@@ -14,42 +15,42 @@ import type {
 } from "@/types/crud";
 import type { Table } from "@/types/model";
 
-const createGetAllFunction =
-  <T extends TableName>(tableName: T) =>
-  async (
-    options: CrudOptions = {},
-  ): Promise<CrudListResult<Table<T>["Row"]>> => {
-    try {
-      const supabase = await createClient();
-      let query = supabase.from(tableName).select(options.select || "*");
+const createGetAllFunction = <T extends TableName>(tableName: T) =>
+  cache(
+    async (
+      options: CrudOptions = {},
+    ): Promise<CrudListResult<Table<T>["Row"]>> => {
+      try {
+        const supabase = await createClient();
+        let query = supabase.from(tableName).select(options.select || "*");
 
-      if (options.limit) {
-        query = query.limit(options.limit);
+        if (options.limit) {
+          query = query.limit(options.limit);
+        }
+
+        if (options.offset) {
+          query = query.range(
+            options.offset,
+            options.offset + (options.limit || 10) - 1,
+          );
+        }
+
+        if (options.orderBy) {
+          query = query.order(options.orderBy.column, {
+            ascending: options.orderBy.ascending ?? true,
+          });
+        }
+
+        return (await query) as any;
+      } catch (error) {
+        console.error(`Error fetching all ${tableName}:`, error);
+        return { data: null, error };
       }
+    },
+  );
 
-      if (options.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 10) - 1,
-        );
-      }
-
-      if (options.orderBy) {
-        query = query.order(options.orderBy.column, {
-          ascending: options.orderBy.ascending ?? true,
-        });
-      }
-
-      return (await query) as any;
-    } catch (error) {
-      console.error(`Error fetching all ${tableName}:`, error);
-      return { data: null, error };
-    }
-  };
-
-const createGetByIdFunction =
-  <T extends TableName>(tableName: T) =>
-  async (id: string | number): Promise<CrudResult<Table<T>["Row"]>> => {
+const createGetByIdFunction = <T extends TableName>(tableName: T) =>
+  cache(async (id: string | number): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = await createClient();
       return await supabase
@@ -61,41 +62,41 @@ const createGetByIdFunction =
       console.error(`Error fetching ${tableName} by id:`, error);
       return { data: null, error };
     }
-  };
+  });
 
-const createGetByFunction =
-  <T extends TableName>(tableName: T) =>
-  async (
-    filter: CrudFilter,
-    options: CrudOptions = {},
-  ): Promise<CrudListResult<Table<T>["Row"]>> => {
-    try {
-      const supabase = await createClient();
-      let query = supabase
-        .from(tableName)
-        .select(options.select || "*")
-        .match(filter);
+const createGetByFunction = <T extends TableName>(tableName: T) =>
+  cache(
+    async (
+      filter: CrudFilter,
+      options: CrudOptions = {},
+    ): Promise<CrudListResult<Table<T>["Row"]>> => {
+      try {
+        const supabase = await createClient();
+        let query = supabase
+          .from(tableName)
+          .select(options.select || "*")
+          .match(filter);
 
-      if (options.limit) {
-        query = query.limit(options.limit);
+        if (options.limit) {
+          query = query.limit(options.limit);
+        }
+
+        if (options.orderBy) {
+          query = query.order(options.orderBy.column, {
+            ascending: options.orderBy.ascending ?? true,
+          });
+        }
+
+        return (await query) as any;
+      } catch (error) {
+        console.error(`Error fetching ${tableName} by filter:`, error);
+        return { data: null, error };
       }
+    },
+  );
 
-      if (options.orderBy) {
-        query = query.order(options.orderBy.column, {
-          ascending: options.orderBy.ascending ?? true,
-        });
-      }
-
-      return (await query) as any;
-    } catch (error) {
-      console.error(`Error fetching ${tableName} by filter:`, error);
-      return { data: null, error };
-    }
-  };
-
-const createGetOneByFunction =
-  <T extends TableName>(tableName: T) =>
-  async (filter: CrudFilter): Promise<CrudResult<Table<T>["Row"]>> => {
+const createGetOneByFunction = <T extends TableName>(tableName: T) =>
+  cache(async (filter: CrudFilter): Promise<CrudResult<Table<T>["Row"]>> => {
     try {
       const supabase = await createClient();
       return await supabase
@@ -107,7 +108,7 @@ const createGetOneByFunction =
       console.error(`Error fetching one ${tableName} by filter:`, error);
       return { data: null, error };
     }
-  };
+  });
 
 const createCreateFunction =
   <T extends TableName>(tableName: T) =>

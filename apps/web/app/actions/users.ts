@@ -1,14 +1,7 @@
 import { createClient } from "@/utils/supabase/server";
 import type { User } from "@softmaple/db";
+import { serverCrud } from "@/utils/crud";
 
 export const getUserBy = async (filter: Record<string, any>) => {
-  const supabase = await createClient();
-
-  const query = supabase
-    .from("users")
-    .select<string, User>("*")
-    .match(filter)
-    .maybeSingle();
-
-  return query;
+  return serverCrud.users().getOneBy(filter);
 };

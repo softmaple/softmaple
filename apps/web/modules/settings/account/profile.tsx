@@ -21,7 +21,7 @@ import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { Switch } from "@softmaple/ui/components/switch";
 import { Separator } from "@softmaple/ui/components/separator";
-import { createClient } from "@/utils/supabase/client";
+import { clientCrud } from "@/utils/crud";
 
 export type ProfileProps = {
   userId: string;
@@ -29,8 +29,6 @@ export type ProfileProps = {
 
 export const Profile: FC<ProfileProps> = (props) => {
   const { userId } = props;
-
-  const supbase = createClient();
 
   const [profile, setProfile] = useState({
     name: "John Doe",
@@ -51,18 +49,14 @@ export const Profile: FC<ProfileProps> = (props) => {
         throw new Error("User ID is required to fetch profile");
       }
 
-      const { data, error } = await supbase
-        .from("users")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
+      const { data, error } = await clientCrud.users().getById(userId);
       if (error) throw error;
 
       if (data) {
         setProfile({
           name: data?.full_name || "",
           email: data?.email || "",
-          avatar: data?.avatar_url || "",
+          avatar: data?.avatar_src || "",
         });
       }
     } catch (e) {

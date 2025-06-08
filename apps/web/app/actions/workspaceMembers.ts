@@ -3,6 +3,7 @@
 import { createClient } from "@/utils/supabase/server";
 import { WorkspaceMembersType } from "@/types/model";
 import { getCurrentUser } from "@/app/actions/auth";
+import { serverCrud } from "@/utils/crud";
 
 export const createWorkspaceMember = async (
   data: WorkspaceMembersType["Insert"],
@@ -17,8 +18,6 @@ export const createWorkspaceMember = async (
 
 export const getWorkspaceMemberByUserId = async (workspaceId: number) => {
   try {
-    const supabase = await createClient();
-
     const { data: userData, error: userError } = await getCurrentUser();
 
     if (userError) {
@@ -32,17 +31,10 @@ export const getWorkspaceMemberByUserId = async (workspaceId: number) => {
 
     const userId = userData.user.id;
 
-    const queryBuilder = supabase
-      .from("workspace_members")
-      .select<
-        keyof Pick<WorkspaceMembersType["Row"], "role">,
-        Pick<WorkspaceMembersType["Row"], "role">
-      >("role")
-      .eq("user_id", userId)
-      .eq("workspace_id", workspaceId)
-      .maybeSingle();
-
-    return queryBuilder;
+    return serverCrud.workspaceMembers().getOneBy({
+      user_id: userId,
+      workspace_id: workspaceId,
+    });
   } catch (error) {
     console.error("Error fetching workspace member by user ID:", error);
     throw error;

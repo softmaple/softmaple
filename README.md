@@ -4,7 +4,7 @@
 >
 > For `v1` of SoftMaple, please check out the `main` branch.
 
-![logo](https://ik.imagekit.io/1winv85cn8g/SoftMaple/logo.png)
+![landing hero section](https://ik.imagekit.io/1winv85cn8g/SoftMaple/landing@2x_OjkYtqPwZ.png?updatedAt=1749375184240)
 
 <p>
   <a href=".github/CONTRIBUTING.md#pull-requests"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>

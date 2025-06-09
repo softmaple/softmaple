@@ -23,7 +23,7 @@ jobs:
           node-version: 22.16.0
           cache: 'pnpm'
 
-      - name: Check for peer dependency warnings
+      - name: Install dependencies
         run:
           pnpm install --frozen-lockfile
 

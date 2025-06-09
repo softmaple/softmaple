@@ -22,7 +22,7 @@
     "@softmaple/editor": "workspace:*",
     "@softmaple/ui": "workspace:*",
     "@supabase/ssr": "^0.6.1",
-    "@supabase/supabase-js": "^2.49.9",
+    "@supabase/supabase-js": "^2.49.10",
     "dayjs": "^1.11.13",
     "lexical": "^0.31.2",
     "lodash": "^4.17.21",

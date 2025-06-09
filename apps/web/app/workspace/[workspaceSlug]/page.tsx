@@ -23,7 +23,7 @@ import Link from "next/link";
 
 import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
-import { getAll } from "@/app/actions/getAll";
+import { serverCrud } from "@/utils/crud";
 
 import dayjs from "@/utils/dayjs";
 import { getUserFullname } from "@/utils/getUserFullname";
@@ -57,11 +57,16 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
   // FIXME: only query data for the current workspace
   const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
     await Promise.all([
-      getAll("documents", undefined, 5, "users"),
-      getAll("workspace_members", undefined, undefined, "users"),
+      serverCrud.documents().getAll({
+        limit: 5,
+        select: "*, users (*)",
+      }),
+      serverCrud.workspaceMembers().getAll({
+        select: "*, users (*)",
+      }),
     ]);
 
-  const recentDocuments = (documents || []).map((doc) => {
+  const recentDocuments = (documents || []).map((doc: any) => {
     const updatedBy = getUserFullname(doc.users);
 
     return {
@@ -70,7 +75,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
       updated_by: updatedBy,
     };
   });
-  const allWorkspaceMembers = (members || []).map((member) => ({
+  const allWorkspaceMembers = (members || []).map((member: any) => ({
     ...member,
     user: member?.users,
     key: member.id,
@@ -265,7 +270,7 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {(allWorkspaceMembers || []).map((member) => (
+              {(allWorkspaceMembers || []).map((member: any) => (
                 <div
                   key={member.id}
                   className="flex items-center justify-between"

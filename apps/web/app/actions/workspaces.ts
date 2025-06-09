@@ -9,14 +9,12 @@ import { getUserBy } from "@/app/actions/users";
 import { WorkspaceMemberRole } from "@softmaple/db";
 import type { Workspace } from "@softmaple/db";
 import { WorkspaceMembersType, WorkspacesType } from "@/types/model";
+import { serverCrud } from "@/utils/crud";
 
 export const getWorkspaces = async () => {
-  const supabase = await createClient();
-
-  return supabase
-    .from("workspaces")
-    .select<string, WorkspacesType["Row"]>("*")
-    .order("created_at", { ascending: false });
+  return serverCrud.workspaces().getAll({
+    orderBy: { column: "created_at", ascending: false },
+  });
 };
 
 export const cachedGetWorkspaces = cache(async () => getWorkspaces());
@@ -26,13 +24,7 @@ export const getWorkspaceBySlug = async (workspaceSlug: string) => {
     throw new Error("Invalid workspace slug.");
   }
 
-  const supabase = await createClient();
-
-  return supabase
-    .from("workspaces")
-    .select<string, Workspace>("*")
-    .eq("slug", workspaceSlug)
-    .maybeSingle();
+  return serverCrud.workspaces().getOneBy({ slug: workspaceSlug });
 };
 
 export const cachedGetWorkspaceBySlug = cache(async (workspaceSlug: string) =>

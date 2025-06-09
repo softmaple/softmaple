@@ -245,6 +245,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.0
         version: 3.2.0(@vitest/browser@3.2.0)(vitest@3.2.0)
+      chromatic:
+        specifier: ^12.1.1
+        version: 12.1.1
       eslint:
         specifier: ^9.28.0
         version: 9.28.0(jiti@2.4.2)
@@ -2367,8 +2370,8 @@ packages:
     resolution: {integrity: sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==}
     engines: {node: '>=18'}
 
-  chromatic@12.0.0:
-    resolution: {integrity: sha512-X7v26BLfAzHCU92nxPsCuvt+MazmA7S6cN7pCRRhnDYChDxHES48YvXarOybLdlH9kNP/3lMyknu6iseTh0T9A==}
+  chromatic@12.1.1:
+    resolution: {integrity: sha512-vNe/PU4EvPN4V+d03Ym2mWBxqEkfbTCSfd0Z+PUMir0S/gKjbFK72FgTYz64j3k31UtrzMarB8EIzwFMxsDbjg==}
     hasBin: true
     peerDependencies:
       '@chromatic-com/cypress': ^0.*.* || ^1.0.0
@@ -4832,7 +4835,7 @@ snapshots:
   '@chromatic-com/storybook@4.0.0(storybook@9.1.0-alpha.2(@testing-library/dom@10.4.0)(prettier@3.5.3))':
     dependencies:
       '@neoconfetti/react': 1.0.0
-      chromatic: 12.0.0
+      chromatic: 12.1.1
       filesize: 10.1.6
       jsonfile: 6.1.0
       storybook: 9.1.0-alpha.2(@testing-library/dom@10.4.0)(prettier@3.5.3)
@@ -6790,7 +6793,7 @@ snapshots:
 
   chownr@3.0.0: {}
 
-  chromatic@12.0.0: {}
+  chromatic@12.1.1: {}
 
   class-variance-authority@0.7.1:
     dependencies:

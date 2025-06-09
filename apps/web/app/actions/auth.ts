@@ -80,7 +80,6 @@ export async function signup(state: AuthFormState, formData: FormData) {
   }
 
   const { error: creatingUserError } = await createUser({
-    id: registeredUser.user.id,
     email: data.email,
     first_name: "Hello",
     last_name: "World",

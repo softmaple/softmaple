@@ -78,7 +78,9 @@
       "matchPackageNames": [
         "storybook",
         "/^@storybook\\//",
-        "/^@chromatic-com\\//"
+        "/^@chromatic-com\\//",
+        "chromatic",
+        "eslint-plugin-storybook"
       ],
       "automerge": true,
       "automergeType": "pr",

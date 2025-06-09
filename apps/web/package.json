@@ -38,9 +38,9 @@
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",
     "@types/lodash": "^4.17.17",
-    "@types/node": "^22.15.29",
+    "@types/node": "^22.15.30",
     "@types/react": "^19.1.6",
-    "@types/react-dom": "^19.1.5",
+    "@types/react-dom": "^19.1.6",
     "typescript": "^5.8.3"
   }
 }

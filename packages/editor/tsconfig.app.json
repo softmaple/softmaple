@@ -31,5 +31,8 @@
       "@softmaple/ui/*": ["../../packages/ui/src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Keep Storybook sources out of the application build.
+  // They are compiled separately using tsconfig.storybook.json.
+  "exclude": ["src/**/*.stories.*", "src/stories/**"]
 }

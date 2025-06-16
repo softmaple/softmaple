@@ -31,12 +31,12 @@
   "devDependencies": {
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
-    "@tailwindcss/postcss": "^4.1.8",
+    "@tailwindcss/postcss": "^4.1.10",
     "@turbo/gen": "^2.5.4",
     "@types/node": "^22.15.30",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.6",
-    "tailwindcss": "^4.1.8",
+    "tailwindcss": "^4.1.10",
     "typescript": "^5.8.3"
   },
   "exports": {

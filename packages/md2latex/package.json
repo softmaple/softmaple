@@ -14,7 +14,7 @@
     "url": "https://github.com/zhyd1997"
   },
   "license": "MIT",
-  "packageManager": "pnpm@10.12.1",
+  "packageManager": "pnpm@10.12.2",
   "devDependencies": {
     "vitest": "^3.2.2"
   }

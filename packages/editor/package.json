@@ -23,7 +23,7 @@
     "@softmaple/config": "workspace:*",
     "@softmaple/md2latex": "workspace:*",
     "@softmaple/ui": "workspace:*",
-    "@tailwindcss/vite": "^4.1.10",
+    "@tailwindcss/vite": "^4.1.11",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lexical": "^0.31.2",
@@ -31,7 +31,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.3.0",
-    "tailwindcss": "^4.1.10"
+    "tailwindcss": "^4.1.11"
   },
   "devDependencies": {
     "@chromatic-com/storybook": "^4.0.1",

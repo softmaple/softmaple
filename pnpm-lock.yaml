@@ -246,8 +246,8 @@ importers:
         specifier: ^3.2.2
         version: 3.2.2(@vitest/browser@3.2.2)(vitest@3.2.2)
       chromatic:
-        specifier: ^12.1.1
-        version: 12.1.1
+        specifier: ^13.0.1
+        version: 13.0.1
       eslint:
         specifier: ^9.28.0
         version: 9.28.0(jiti@2.4.2)
@@ -2372,6 +2372,18 @@ packages:
 
   chromatic@12.1.1:
     resolution: {integrity: sha512-vNe/PU4EvPN4V+d03Ym2mWBxqEkfbTCSfd0Z+PUMir0S/gKjbFK72FgTYz64j3k31UtrzMarB8EIzwFMxsDbjg==}
+    hasBin: true
+    peerDependencies:
+      '@chromatic-com/cypress': ^0.*.* || ^1.0.0
+      '@chromatic-com/playwright': ^0.*.* || ^1.0.0
+    peerDependenciesMeta:
+      '@chromatic-com/cypress':
+        optional: true
+      '@chromatic-com/playwright':
+        optional: true
+
+  chromatic@13.0.1:
+    resolution: {integrity: sha512-vX0Rs/pAeFAnGuQiVrA4h0XD36MYbTUp9Mlm1jFqXo3Cejd2BdBY1CA+vd6CkeO5CRSc6TRWmCz0zQAsE1q3Hw==}
     hasBin: true
     peerDependencies:
       '@chromatic-com/cypress': ^0.*.* || ^1.0.0
@@ -6828,6 +6840,8 @@ snapshots:
   chownr@3.0.0: {}
 
   chromatic@12.1.1: {}
+
+  chromatic@13.0.1: {}
 
   class-variance-authority@0.7.1:
     dependencies:

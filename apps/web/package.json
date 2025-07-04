@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@lexical/react": "^0.31.2",
+    "@lexical/react": "^0.33.0",
     "@liveblocks/client": "^3.0.0",
     "@liveblocks/node": "^3.0.0",
     "@liveblocks/react": "^3.0.0",
@@ -24,7 +24,7 @@
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.50.2",
     "dayjs": "^1.11.13",
-    "lexical": "^0.31.2",
+    "lexical": "^0.33.0",
     "lodash": "^4.17.21",
     "lucide-react": "^0.525.0",
     "next": "^15.3.4",

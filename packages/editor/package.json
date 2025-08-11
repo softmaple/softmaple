@@ -40,7 +40,7 @@
     "@storybook/addon-onboarding": "^9.1.1",
     "@storybook/addon-vitest": "^9.1.1",
     "@storybook/react-vite": "^9.1.1",
-    "@types/node": "^22.17.0",
+    "@types/node": "^22.17.1",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^4.7.0",

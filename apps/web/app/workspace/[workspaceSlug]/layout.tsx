@@ -8,7 +8,6 @@ import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
   children: ReactNode;
 };
 

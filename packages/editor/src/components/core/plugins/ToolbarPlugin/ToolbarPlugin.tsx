@@ -11,23 +11,22 @@ import {
   CAN_REDO_COMMAND,
   SELECTION_CHANGE_COMMAND,
 } from "lexical";
-import { Separator } from "@/components/ui/separator.tsx";
+import { Separator } from "@softmaple/ui/components/separator";
 import {
   $findMatchingParent,
   mergeRegister,
   $getNearestNodeOfType,
 } from "@lexical/utils";
-import { BlockFormatDropdown } from "@/components/core/plugins/ToolbarPlugin/BlockFormatDropdown.tsx";
-import { useToolbarState } from "@/context/ToolbarContext.tsx";
+import { BlockFormatDropdown } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/BlockFormatDropdown";
+import { useToolbarState } from "@softmaple/editor/context/ToolbarContext";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
-import { getSelectedNode } from "@/utils/getSelectedNode";
+import { getSelectedNode } from "@softmaple/editor/utils/getSelectedNode";
 // import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
-import { FormatButtonGroup } from "@/components/core/plugins/ToolbarPlugin/FormatButtonGroup.tsx";
-import { HistoryButtonGroup } from "@/components/core/plugins/ToolbarPlugin/HistoryButtonGroup.tsx";
-import { ExportFilesDropdownMenu } from "@/components/core/plugins/ToolbarPlugin/ExportFilesDropdownMenu.tsx";
-import { blockTypeToBlockName } from "@/constants/toolbar.ts";
+import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup";
+import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup";
+import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
@@ -37,23 +36,10 @@ type ToolbarPluginProps = {
 };
 
 export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
-  const {
-    editor,
-    activeEditor,
-    setActiveEditor,
-    // @ts-expect-error TODO: use it when `link` node available.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    setIsLinkEditMode,
-  } = props;
+  const { editor, activeEditor, setActiveEditor } = props;
 
-  // @ts-expect-error TODO: use it when `floatingAnchorElem` available.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [selectedElementKey, setSelectedElementKey] = useState<NodeKey | null>(
-    null,
-  );
-  // @ts-expect-error TODO: use it when `readonly` mode available.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isEditable, setIsEditable] = useState(() => editor.isEditable());
+  const [, setSelectedElementKey] = useState<NodeKey | null>(null);
+  const [, setIsEditable] = useState(() => editor.isEditable());
   const { toolbarState, updateToolbarState } = useToolbarState();
 
   const $updateToolbar = useCallback(() => {
@@ -243,8 +229,6 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
 
       <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
       <Separator orientation="vertical" className="h-6" />
-
-      <ExportFilesDropdownMenu editor={activeEditor} />
     </div>
   );
 };

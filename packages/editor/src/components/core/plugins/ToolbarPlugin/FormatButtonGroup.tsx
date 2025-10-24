@@ -3,13 +3,13 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip.tsx";
-import { Button } from "@/components/ui/button.tsx";
-import { SHORTCUTS } from "@/components/core/plugins/ShortcutsPlugin/shortcuts.ts";
-import { formatText } from "@/components/core/plugins/ToolbarPlugin/utils.ts";
+} from "@softmaple/ui/components/tooltip";
+import { Button } from "@softmaple/ui/components/button";
+import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts";
+import { formatText } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
 import { Bold, Code, Italic, Strikethrough, Underline } from "lucide-react";
 import type { LexicalEditor, TextFormatType } from "lexical";
-import type { ToolbarState } from "@/context/ToolbarContext.tsx";
+import type { ToolbarState } from "@softmaple/editor/context/ToolbarContext";
 import type { FC } from "react";
 
 type FormatButtonGroupProps = {
@@ -90,7 +90,10 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
             <span className="sr-only">{label}</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{`${label} (${shortcut})`}</TooltipContent>
+        <TooltipContent>
+          <span>{label}</span>
+          <span className="hidden md:inline"> ({shortcut})</span>
+        </TooltipContent>
       </Tooltip>
     );
   };

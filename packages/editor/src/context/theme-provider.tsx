@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { THEME_STORAGE_KEY } from "@/constants/theme.ts";
+import { THEME_STORAGE_KEY } from "@softmaple/editor/constants/theme.ts";
 
 type Theme = "dark" | "light" | "system";
 
@@ -59,9 +59,9 @@ export const ThemeProvider = ({
   };
 
   return (
-    <ThemeProviderContext.Provider {...props} value={value}>
+    <ThemeProviderContext {...props} value={value}>
       {children}
-    </ThemeProviderContext.Provider>
+    </ThemeProviderContext>
   );
 };
 

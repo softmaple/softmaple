@@ -1,7 +1,14 @@
 import type { FC, ReactNode } from "react";
+import { Suspense, lazy } from "react";
+import { SITE_CONFIG } from "@softmaple/config";
 
-import { NetlifyBadge } from "@/layout/NetlifyBadge.tsx";
-import { ThemeModeToggle } from "@/components/ui/theme-mode-toggle.tsx";
+import { ThemeModeToggle } from "@softmaple/editor/components/ui/theme-mode-toggle";
+
+const NetlifyBadge = lazy(() =>
+  import("@softmaple/editor/layout/NetlifyBadge").then((module) => ({
+    default: module.NetlifyBadge,
+  })),
+);
 
 type LayoutProps = {
   children: ReactNode;
@@ -12,7 +19,7 @@ export const Layout: FC<LayoutProps> = (props) => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b sticky top-0 z-10 bg-white dark:bg-black shadow-sm">
+      <header className="border-b sticky top-0 z-10 bg-background shadow-sm">
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-xl font-bold">Softmaple</h1>
 
@@ -23,10 +30,11 @@ export const Layout: FC<LayoutProps> = (props) => {
       <main className="flex-1 container mx-auto px-4 py-6">{children}</main>
 
       <footer className="border-t py-4">
-        <div className="container mx-auto px-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2 text-sm text-gray-500">
-            <NetlifyBadge />
-            {/* shadcn footer */}
+        <div className="container mx-auto px-4 flex justify-between items-center flex-col md:flex-row">
+          <div className="flex flex-col md:flex-row items-center space-x-2 text-sm text-gray-500">
+            <Suspense fallback={null}>
+              <NetlifyBadge />
+            </Suspense>
             <p>
               Built by&nbsp;
               <a
@@ -38,7 +46,7 @@ export const Layout: FC<LayoutProps> = (props) => {
               </a>
               . The source code is available on&nbsp;
               <a
-                href={"https://github.com/softmaple/softmaple"}
+                href={SITE_CONFIG.GITHUB_REPO}
                 target="_blank"
                 className="font-medium underline underline-offset-4"
               >

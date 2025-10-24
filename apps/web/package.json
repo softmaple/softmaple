@@ -12,22 +12,38 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lexical/react": "^0.31.2",
+    "@liveblocks/client": "^3.0.0",
+    "@liveblocks/node": "^3.0.0",
+    "@liveblocks/react": "^3.0.0",
+    "@liveblocks/react-lexical": "^3.0.0",
+    "@liveblocks/react-ui": "^3.0.0",
+    "@softmaple/config": "workspace:*",
+    "@softmaple/editor": "workspace:*",
     "@softmaple/ui": "workspace:*",
-    "lucide-react": "^0.475.0",
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.54.0",
+    "dayjs": "^1.11.13",
+    "lexical": "^0.31.2",
+    "lodash": "^4.17.21",
+    "lucide-react": "^0.539.0",
     "next": "16.0.0",
-    "next-themes": "^0.4.4",
+    "next-themes": "^0.4.6",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "zod": "^4.0.17"
   },
   "devDependencies": {
+    "@softmaple/db": "workspace:*",
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",
-    "@types/node": "^20",
+    "@types/lodash": "^4.17.20",
+    "@types/node": "^22.17.1",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "eslint": "^9.27.0",
     "eslint-config-next": "16.0.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.9.2"
   },
   "pnpm": {
     "overrides": {

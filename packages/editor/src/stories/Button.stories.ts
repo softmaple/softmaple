@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react";
-import { fn } from "@storybook/test";
+import type { Meta, StoryObj } from "@storybook/react-vite";
+import { fn } from "storybook/test";
 
 import { Button } from "./Button";
 
@@ -48,13 +48,6 @@ export const Large: Story = {
 export const Small: Story = {
   args: {
     size: "small",
-    label: "Button",
-  },
-};
-
-export const Test: Story = {
-  args: {
-    primary: false,
     label: "Button",
   },
 };

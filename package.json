@@ -13,7 +13,7 @@
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "prepare": "husky install"
+    "prepare": "husky"
   },
   "repository": {
     "type": "git",
@@ -24,7 +24,7 @@
     "reactjs",
     "react-hooks",
     "nextjs",
-    "draft-js",
+    "lexical",
     "rich-text-editor",
     "turborepo"
   ],
@@ -33,15 +33,15 @@
   "devDependencies": {
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
-    "eslint": "^9.27.0",
-    "husky": "^7.0.4",
-    "lint-staged": "^12.1.2",
-    "prettier": "^3.5.3",
-    "turbo": "^2.5.3",
-    "typescript": "5.7.3"
+    "eslint": "^9.33.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.5",
+    "prettier": "^3.6.2",
+    "turbo": "^2.5.5",
+    "typescript": "5.9.2"
   },
-  "packageManager": "pnpm@10.10.0",
+  "packageManager": "pnpm@10.14.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18.0"
   }
 }

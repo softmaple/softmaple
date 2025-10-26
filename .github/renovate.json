@@ -18,7 +18,7 @@
     {
       "description": "Group Next.js updates",
       "groupName": "Next.js",
-      "matchPackageNames": ["next", "/^eslint-config-next/"],
+      "matchPackageNames": ["next", "/^eslint-config-next/", "/^@next/"],
       "automerge": false,
       "schedule": ["before 10am on monday"]
     },

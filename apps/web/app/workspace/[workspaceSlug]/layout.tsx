@@ -1,14 +1,13 @@
 import type { ReactNode } from "react";
-
 import { Suspense } from "react";
-import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
-import { WorkspaceMobileSidebar } from "@/modules/workspaces/workspace-mobile-sidebar";
+
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
 import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-sidebar";
+import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
+import { WorkspaceMobileSidebar } from "@/modules/workspaces/workspace-mobile-sidebar";
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
   children: ReactNode;
 };
 

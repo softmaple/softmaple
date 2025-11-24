@@ -40,7 +40,7 @@ export const nextJsConfig = [
     plugins: {
       "react-hooks": pluginReactHooks,
     },
-    settings: { react: { version: "detect" } },
+    settings: { react: { version: "detect" }, next: { rootDir: "apps/web" } },
     rules: {
       ...pluginReactHooks.configs.recommended.rules,
       // React scope no longer necessary with new JSX transform.

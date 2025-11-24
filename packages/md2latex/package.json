@@ -16,6 +16,6 @@
   "license": "MIT",
   "packageManager": "pnpm@10.22.0",
   "devDependencies": {
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.13"
   }
 }

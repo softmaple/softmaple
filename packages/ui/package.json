@@ -33,9 +33,9 @@
     "@softmaple/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.11",
     "@turbo/gen": "^2.5.5",
-    "@types/node": "^22.17.2",
-    "@types/react": "^19.1.17",
-    "@types/react-dom": "^19.1.11",
+    "@types/node": "^22.19.1",
+    "@types/react": "^19.2.6",
+    "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.1.11",
     "typescript": "^5.9.3"
   },

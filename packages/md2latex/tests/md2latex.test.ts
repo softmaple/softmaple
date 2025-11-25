@@ -67,6 +67,31 @@ code line
 \\end{verbatim}`;
     expect(markdownToLatex(md)).toBe(expected);
   });
+
+  test("unclosed blockquote at end", () => {
+    const md = "> quote line 1\n> quote line 2";
+    const expected = `\\begin{quote}\nquote line 1\\\\\nquote line 2\\\\\n\\end{quote}`;
+    expect(markdownToLatex(md)).toBe(expected);
+  });
+
+  test("unclosed list at end", () => {
+    const md = "- Item 1\n- Item 2";
+    const expected = `\\begin{itemize}\n  \\item Item 1\n  \\item Item 2\n\\end{itemize}`;
+    expect(markdownToLatex(md)).toBe(expected);
+  });
+
+  test("unclosed code block at end", () => {
+    const md = "```\ncode line 1\ncode line 2";
+    const expected = `\\begin{verbatim}\ncode line 1\ncode line 2\n\\end{verbatim}`;
+    expect(markdownToLatex(md)).toBe(expected);
+  });
+
+  test("switching from ordered to unordered list", () => {
+    const md = `1. Ordered item\n- Unordered item`;
+    const expected = `\\begin{enumerate}\n  \\item Ordered item\n\\end{enumerate}\n\\begin{itemize}\n  \\item Unordered item\n\\end{itemize}`;
+    expect(markdownToLatex(md)).toBe(expected);
+  });
+
 });
 
 describe("complex scenarios", () => {
@@ -91,5 +116,23 @@ describe("complex scenarios", () => {
   \\item Item 2
 \\end{itemize}`;
     expect(markdownToLatex(md).trim()).toBe(expected);
+  });
+
+  test("blockquote ending with non-blockquote line", () => {
+    const md = `> quoted line\nregular line`;
+    const expected = `\\begin{quote}\nquoted line\\\\\n\\end{quote}\nregular line\\\\`;
+    expect(markdownToLatex(md)).toBe(expected);
+  });
+
+  test("switching between list types", () => {
+    const md = `- Unordered item\n1. Ordered item`;
+    const expected = `\\begin{itemize}\n  \\item Unordered item\n\\end{itemize}\n\\begin{enumerate}\n  \\item Ordered item\n\\end{enumerate}`;
+    expect(markdownToLatex(md)).toBe(expected);
+  });
+
+  test("list ending with non-list line", () => {
+    const md = `- List item\nregular text`;
+    const expected = `\\begin{itemize}\n  \\item List item\n\\end{itemize}\nregular text\\\\`;
+    expect(markdownToLatex(md)).toBe(expected);
   });
 });

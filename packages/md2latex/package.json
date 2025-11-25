@@ -7,7 +7,12 @@
     "test": "vitest",
     "coverage": "vitest run --coverage"
   },
-  "keywords": ["markdown", "LaTeX", "transformer", "parser"],
+  "keywords": [
+    "markdown",
+    "LaTeX",
+    "transformer",
+    "parser"
+  ],
   "author": {
     "name": "Yadong(Adam) Zhang",
     "email": "zhyd007@gmail.com",
@@ -16,6 +21,7 @@
   "license": "MIT",
   "packageManager": "pnpm@10.22.0",
   "devDependencies": {
-    "vitest": "^3.2.4"
+    "@vitest/coverage-v8": "^4.0.13",
+    "vitest": "^4.0.13"
   }
 }

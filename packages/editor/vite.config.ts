@@ -14,6 +14,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        compact: true,
         manualChunks: {
           // Split React and React DOM into a separate chunk
           "vendor-react": ["react", "react-dom"],

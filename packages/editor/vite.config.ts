@@ -11,6 +11,28 @@ export default defineConfig({
       "@softmaple/editor": path.resolve(__dirname, "./src"),
     },
   },
+  test: {
+    // Limit test directory for better performance
+    dir: "./src",
+    // Updated exclude defaults for Vitest 4
+    exclude: [
+      "**/node_modules/**",
+      "**/.git/**",
+      "**/dist/**",
+      "**/.storybook/**",
+    ],
+    coverage: {
+      provider: "v8",
+      // Include covered and uncovered files matching this pattern
+      include: ["src/**/*.{ts,tsx}"],
+      // Exclusion is applied for files that match include pattern
+      exclude: [
+        "src/stories/**",
+        "**/*.stories.{ts,tsx}",
+        "**/*.d.ts",
+      ],
+    },
+  },
   build: {
     rollupOptions: {
       output: {

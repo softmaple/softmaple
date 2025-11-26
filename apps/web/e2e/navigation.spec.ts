@@ -4,16 +4,17 @@ test.describe("Navigation", () => {
   test("should navigate between main pages", async ({ page }) => {
     await page.goto("/");
 
-    // Navigate to login
-    await page.getByRole("link", { name: "Login" }).click();
+    // Navigate to login via Sign In button
+    await page.getByRole("button", { name: /Sign In/i }).click();
     await expect(page).toHaveURL("/login");
 
-    // Navigate back home
-    await page.getByRole("link", { name: /SoftMaple/i }).click();
+    // Navigate back home via Softmaple text/logo
+    await page.locator("header").getByText("Softmaple").click();
     await expect(page).toHaveURL("/");
 
-    // Navigate to signup
-    await page.getByRole("link", { name: "Sign up" }).click();
+    // Navigate to signup via login page
+    await page.goto("/login");
+    await page.getByRole("link", { name: /Sign up/i }).click();
     await expect(page).toHaveURL("/signup");
   });
 

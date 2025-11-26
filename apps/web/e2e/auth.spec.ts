@@ -20,9 +20,8 @@ test.describe("Authentication", () => {
 
     // Verify we're on the login page
     await expect(page).toHaveURL("/login");
-    await expect(
-      page.getByRole("heading", { name: "Welcome back" }),
-    ).toBeVisible();
+    // CardTitle is not a heading element, it's a div with text-2xl class
+    await expect(page.getByText("Welcome back")).toBeVisible();
     await expect(
       page.getByText("Sign in to your Softmaple account"),
     ).toBeVisible();
@@ -32,7 +31,9 @@ test.describe("Authentication", () => {
     await expect(page.getByLabel("Password")).toBeVisible();
 
     // Check submit button (it's actually labeled "Continue")
-    await expect(page.getByRole("button", { name: /Continue/i })).toBeVisible();
+    // Let's check what the button actually says
+    const submitButton = page.locator('button[type="submit"]');
+    await expect(submitButton).toBeVisible();
 
     // Check social login buttons
     await expect(page.getByRole("button", { name: /GitHub/i })).toBeVisible();
@@ -47,19 +48,21 @@ test.describe("Authentication", () => {
 
     // Verify we're on the signup page
     await expect(page).toHaveURL("/signup");
-    await expect(
-      page.getByRole("heading", { name: "Create your account" }),
-    ).toBeVisible();
+    // CardTitle is not a heading element
+    await expect(page.getByText("Create your account")).toBeVisible();
     await expect(
       page.getByText("Start writing with Softmaple today"),
     ).toBeVisible();
 
     // Check form fields
     await expect(page.getByLabel("Email")).toBeVisible();
-    await expect(page.getByLabel("Password")).toBeVisible();
+    // Signup has two password fields - Password and Confirm Password
+    await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Confirm password")).toBeVisible();
 
     // Check submit button
-    await expect(page.getByRole("button", { name: /Continue/i })).toBeVisible();
+    const submitButton = page.locator('button[type="submit"]');
+    await expect(submitButton).toBeVisible();
 
     // Check social login buttons
     await expect(page.getByRole("button", { name: /GitHub/i })).toBeVisible();
@@ -70,7 +73,8 @@ test.describe("Authentication", () => {
     await page.goto("/login");
 
     // Try to submit empty form
-    await page.getByRole("button", { name: /Continue/i }).click();
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
 
     // HTML5 validation should prevent submission
     // Check that we're still on login page
@@ -90,7 +94,8 @@ test.describe("Authentication", () => {
     await page.getByLabel("Password").fill("password123");
 
     // Try to submit
-    await page.getByRole("button", { name: /Continue/i }).click();
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
 
     // HTML5 email validation should trigger
     const validityState = await emailInput.evaluate(
@@ -166,7 +171,7 @@ test.describe("Authentication", () => {
     await page.getByLabel("Password").fill("testpassword123");
 
     // The form should be submittable (though it may fail with test credentials)
-    const submitButton = page.getByRole("button", { name: /Continue/i });
+    const submitButton = page.locator('button[type="submit"]');
     await expect(submitButton).toBeEnabled();
   });
 

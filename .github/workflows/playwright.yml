@@ -7,8 +7,10 @@ on:
     branches: [ main, next ]
     paths:
       - 'apps/web/**'
+      - 'packages/**'
       - '.github/workflows/playwright.yml'
       - 'pnpm-lock.yaml'
+      - 'turbo.json'
 
 permissions:
   contents: read
@@ -20,6 +22,8 @@ jobs:
     timeout-minutes: 60
     env:
       CI: true
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -40,6 +44,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build Turborepo
+        run: pnpm build
+        env:
+          CI: true
+          # Skip Next.js telemetry during build
+          NEXT_TELEMETRY_DISABLED: 1
+
       - name: Install Playwright Browsers
         working-directory: apps/web
         run: pnpm exec playwright install --with-deps
@@ -49,6 +60,9 @@ jobs:
         run: pnpm exec playwright test
         env:
           CI: true
+          # Add any required environment variables for the app
+          # NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          # NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -57,3 +71,11 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 30
+
+      - name: Upload test artifacts on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          retention-days: 7

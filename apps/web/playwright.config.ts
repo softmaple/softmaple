@@ -72,7 +72,9 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: process.env.CI ? "pnpm build && pnpm start" : "pnpm dev:e2e",
+    // In CI, the app is already built, just start the server
+    // Locally, use the dev server
+    command: process.env.CI ? "pnpm start" : "pnpm dev:e2e",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

@@ -5,7 +5,8 @@ test.describe("Authentication", () => {
     await page.goto("/");
 
     // Check for Softmaple branding
-    await expect(page.getByText("Softmaple")).toBeVisible();
+    // Be more specific - check header branding
+    await expect(page.locator("header").getByText("Softmaple")).toBeVisible();
 
     // Check for Sign In button in header
     await expect(page.getByRole("button", { name: /Sign In/i })).toBeVisible();

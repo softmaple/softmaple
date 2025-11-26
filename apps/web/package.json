@@ -9,7 +9,13 @@
     "start": "next start",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:codegen": "playwright codegen",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@lexical/react": "^0.31.2",
@@ -34,6 +40,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@softmaple/db": "workspace:*",
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",

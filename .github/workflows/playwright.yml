@@ -1,0 +1,55 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [ main, next ]
+  pull_request:
+    branches: [ main, next ]
+    paths:
+      - 'apps/web/**'
+      - '.github/workflows/playwright.yml'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Run Playwright Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.11.1
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Browsers
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run Playwright tests
+        working-directory: apps/web
+        run: pnpm exec playwright test
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 30

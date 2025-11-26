@@ -10,7 +10,7 @@ on:
       - 'packages/**'
       - '.github/workflows/playwright.yml'
       - 'pnpm-lock.yaml'
-      - 'turbo.json'
+      # - 'turbo.json'
 
 permissions:
   contents: read
@@ -22,8 +22,8 @@ jobs:
     timeout-minutes: 60
     env:
       CI: true
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      # TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      # TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

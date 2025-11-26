@@ -18,6 +18,8 @@ jobs:
     name: Run Playwright Tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      CI: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -45,6 +47,8 @@ jobs:
       - name: Run Playwright tests
         working-directory: apps/web
         run: pnpm exec playwright test
+        env:
+          CI: true
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

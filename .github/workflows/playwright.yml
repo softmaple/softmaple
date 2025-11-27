@@ -23,10 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Increase shards to 10 for better parallelization
-        # With 50 active tests, this gives ~5 tests per shard
-        # This should reduce per-shard runtime from 30 to ~15 minutes
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        # Use 6 shards for balanced parallelization
+        # With ~50 active tests, this gives ~8-9 tests per shard
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       CI: true
       # TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}

@@ -1,4 +1,5 @@
 import { Page } from "@playwright/test";
+import { testConfig } from "./config";
 
 interface MockUser {
   userId?: string;
@@ -13,17 +14,20 @@ interface MockUser {
 export async function mockAuthentication(page: Page, user: MockUser = {}) {
   const { userId = "test-user-id", email = "test@example.com" } = user;
 
+  // Use the centralized config to get the storage key
+  const storageKey = testConfig.getSupabaseStorageKey();
+
   await page.addInitScript(
-    (data) => {
+    ({ userId, email, storageKey }) => {
       localStorage.setItem(
-        "supabase.auth.token",
+        storageKey,
         JSON.stringify({
-          access_token: `mock-token-${data.userId}`,
-          refresh_token: `mock-refresh-${data.userId}`,
+          access_token: `mock-token-${userId}`,
+          refresh_token: `mock-refresh-${userId}`,
           expires_at: Date.now() + 3600000,
           user: {
-            id: data.userId,
-            email: data.email,
+            id: userId,
+            email: email,
             app_metadata: {},
             user_metadata: {},
             created_at: new Date().toISOString(),
@@ -31,6 +35,6 @@ export async function mockAuthentication(page: Page, user: MockUser = {}) {
         }),
       );
     },
-    { userId, email },
+    { userId, email, storageKey },
   );
 }

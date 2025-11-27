@@ -40,17 +40,23 @@ test.describe("Navigation", () => {
 
   test("should have working breadcrumbs", async ({ page }) => {
     // Mock auth to access workspace
-    await page.addInitScript(() => {
-      localStorage.setItem(
-        "supabase.auth.token",
-        JSON.stringify({
-          access_token: "mock-token",
-          refresh_token: "mock-refresh",
-          expires_at: Date.now() + 3600000,
-          user: { id: "test-user-id", email: "test@example.com" },
-        }),
-      );
-    });
+    await page.addInitScript(
+      (storageKey) => {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            access_token: "mock-token",
+            refresh_token: "mock-refresh",
+            expires_at: Date.now() + 3600000,
+            user: { id: "test-user-id", email: "test@example.com" },
+          }),
+        );
+      },
+      // Pass storage key dynamically based on environment
+      process.env.NEXT_PUBLIC_SUPABASE_URL
+        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
+        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+    );
 
     await page.goto("/workspace/test-workspace/doc/test-doc");
 
@@ -99,17 +105,23 @@ test.describe("Navigation", () => {
 
   test("should handle deep links", async ({ page }) => {
     // Mock auth
-    await page.addInitScript(() => {
-      localStorage.setItem(
-        "supabase.auth.token",
-        JSON.stringify({
-          access_token: "mock-token",
-          refresh_token: "mock-refresh",
-          expires_at: Date.now() + 3600000,
-          user: { id: "test-user-id", email: "test@example.com" },
-        }),
-      );
-    });
+    await page.addInitScript(
+      (storageKey) => {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            access_token: "mock-token",
+            refresh_token: "mock-refresh",
+            expires_at: Date.now() + 3600000,
+            user: { id: "test-user-id", email: "test@example.com" },
+          }),
+        );
+      },
+      // Pass storage key dynamically based on environment
+      process.env.NEXT_PUBLIC_SUPABASE_URL
+        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
+        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+    );
 
     // Direct deep link to document
     await page.goto("/workspace/test-workspace/doc/test-doc#section-2");
@@ -195,17 +207,23 @@ test.describe("Keyboard Navigation", () => {
 
   test("should handle escape key for modals", async ({ page }) => {
     // Mock auth
-    await page.addInitScript(() => {
-      localStorage.setItem(
-        "supabase.auth.token",
-        JSON.stringify({
-          access_token: "mock-token",
-          refresh_token: "mock-refresh",
-          expires_at: Date.now() + 3600000,
-          user: { id: "test-user-id", email: "test@example.com" },
-        }),
-      );
-    });
+    await page.addInitScript(
+      (storageKey) => {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            access_token: "mock-token",
+            refresh_token: "mock-refresh",
+            expires_at: Date.now() + 3600000,
+            user: { id: "test-user-id", email: "test@example.com" },
+          }),
+        );
+      },
+      // Pass storage key dynamically based on environment
+      process.env.NEXT_PUBLIC_SUPABASE_URL
+        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
+        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+    );
 
     await page.goto("/workspace/test-workspace");
 
@@ -222,17 +240,23 @@ test.describe("Keyboard Navigation", () => {
 
   test("should support keyboard shortcuts", async ({ page }) => {
     // Mock auth
-    await page.addInitScript(() => {
-      localStorage.setItem(
-        "supabase.auth.token",
-        JSON.stringify({
-          access_token: "mock-token",
-          refresh_token: "mock-refresh",
-          expires_at: Date.now() + 3600000,
-          user: { id: "test-user-id", email: "test@example.com" },
-        }),
-      );
-    });
+    await page.addInitScript(
+      (storageKey) => {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            access_token: "mock-token",
+            refresh_token: "mock-refresh",
+            expires_at: Date.now() + 3600000,
+            user: { id: "test-user-id", email: "test@example.com" },
+          }),
+        );
+      },
+      // Pass storage key dynamically based on environment
+      process.env.NEXT_PUBLIC_SUPABASE_URL
+        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
+        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+    );
 
     await page.goto("/workspace/test-workspace/doc/test-doc");
 

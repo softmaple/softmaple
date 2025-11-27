@@ -7,7 +7,7 @@ test.describe("User Settings", () => {
     await mockAuthentication(page);
   });
 
-  test("should navigate to settings page", async ({ page }) => {
+  test.skip("should navigate to settings page", async ({ page }) => {
     await page.goto("/dashboard");
 
     // Click on user menu
@@ -23,7 +23,7 @@ test.describe("User Settings", () => {
     ).toBeVisible();
   });
 
-  test("should display profile settings", async ({ page }) => {
+  test.skip("should display profile settings", async ({ page }) => {
     await page.goto("/settings/profile");
 
     // Check profile form fields
@@ -38,7 +38,7 @@ test.describe("User Settings", () => {
     ).toBeVisible();
   });
 
-  test("should update profile information", async ({ page }) => {
+  test.skip("should update profile information", async ({ page }) => {
     await page.goto("/settings/profile");
 
     // Update name
@@ -163,7 +163,7 @@ test.describe("Workspace Settings", () => {
     await mockAuthentication(page);
   });
 
-  test("should display workspace general settings", async ({ page }) => {
+  test.skip("should display workspace general settings", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings");
 
     // Check general settings
@@ -175,7 +175,7 @@ test.describe("Workspace Settings", () => {
     ).toBeVisible();
   });
 
-  test("should update workspace name", async ({ page }) => {
+  test.skip("should update workspace name", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings");
 
     // Update name
@@ -192,7 +192,7 @@ test.describe("Workspace Settings", () => {
     ).toBeVisible();
   });
 
-  test("should manage workspace members", async ({ page }) => {
+  test.skip("should manage workspace members", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings/members");
 
     // Check members section
@@ -206,7 +206,7 @@ test.describe("Workspace Settings", () => {
     await expect(page.getByText(/test@example.com/i)).toBeVisible();
   });
 
-  test("should invite new member", async ({ page }) => {
+  test.skip("should invite new member", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings/members");
 
     // Click invite

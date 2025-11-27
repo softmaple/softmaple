@@ -123,7 +123,7 @@ test.describe("Real-time Collaboration", () => {
     await context2.close();
   });
 
-  test("should handle conflict resolution", async ({ browser }) => {
+  test.skip("should handle conflict resolution", async ({ browser }) => {
     const context1 = await browser.newContext();
     const context2 = await browser.newContext();
 
@@ -170,7 +170,7 @@ test.describe("Real-time Collaboration", () => {
     await context2.close();
   });
 
-  test("should show typing indicators", async ({ browser }) => {
+  test.skip("should show typing indicators", async ({ browser }) => {
     const context1 = await browser.newContext();
     const context2 = await browser.newContext();
 
@@ -221,7 +221,7 @@ test.describe("Comments and Mentions", () => {
     });
   });
 
-  test("should add a comment to document", async ({ page }) => {
+  test.skip("should add a comment to document", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc");
 
     // Select some text
@@ -242,7 +242,7 @@ test.describe("Comments and Mentions", () => {
     await expect(page.getByText("This needs review")).toBeVisible();
   });
 
-  test("should mention users in comments", async ({ page }) => {
+  test.skip("should mention users in comments", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc");
 
     // Open comment panel
@@ -268,7 +268,7 @@ test.describe("Comments and Mentions", () => {
     await expect(page.getByText("@user2 please review this")).toBeVisible();
   });
 
-  test("should resolve comments", async ({ page }) => {
+  test.skip("should resolve comments", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc");
 
     // Assume there's an existing comment

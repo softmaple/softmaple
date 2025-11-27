@@ -1,28 +1,5 @@
 import { test, expect, Page, Browser } from "@playwright/test";
-
-// Helper to mock authentication for different users
-async function mockAuthentication(page: Page, userId: string, email: string) {
-  await page.addInitScript(
-    (data) => {
-      localStorage.setItem(
-        "supabase.auth.token",
-        JSON.stringify({
-          access_token: `mock-token-${data.userId}`,
-          refresh_token: `mock-refresh-${data.userId}`,
-          expires_at: Date.now() + 3600000,
-          user: {
-            id: data.userId,
-            email: data.email,
-            app_metadata: {},
-            user_metadata: {},
-            created_at: new Date().toISOString(),
-          },
-        }),
-      );
-    },
-    { userId, email },
-  );
-}
+import { mockAuthentication } from "./helpers/auth";
 
 test.describe("Real-time Collaboration", () => {
   test("should show active users in document", async ({ browser }) => {
@@ -34,8 +11,14 @@ test.describe("Real-time Collaboration", () => {
     const page2 = await context2.newPage();
 
     // Mock authentication for both users
-    await mockAuthentication(page1, "user1", "user1@example.com");
-    await mockAuthentication(page2, "user2", "user2@example.com");
+    await mockAuthentication(page1, {
+      userId: "user1",
+      email: "user1@example.com",
+    });
+    await mockAuthentication(page2, {
+      userId: "user2",
+      email: "user2@example.com",
+    });
 
     // Both users open the same document
     const docUrl = "/workspace/test-workspace/doc/shared-doc";
@@ -62,8 +45,14 @@ test.describe("Real-time Collaboration", () => {
     const page1 = await context1.newPage();
     const page2 = await context2.newPage();
 
-    await mockAuthentication(page1, "user1", "user1@example.com");
-    await mockAuthentication(page2, "user2", "user2@example.com");
+    await mockAuthentication(page1, {
+      userId: "user1",
+      email: "user1@example.com",
+    });
+    await mockAuthentication(page2, {
+      userId: "user2",
+      email: "user2@example.com",
+    });
 
     const docUrl = "/workspace/test-workspace/doc/shared-doc";
     await page1.goto(docUrl);
@@ -99,8 +88,14 @@ test.describe("Real-time Collaboration", () => {
     const page1 = await context1.newPage();
     const page2 = await context2.newPage();
 
-    await mockAuthentication(page1, "user1", "user1@example.com");
-    await mockAuthentication(page2, "user2", "user2@example.com");
+    await mockAuthentication(page1, {
+      userId: "user1",
+      email: "user1@example.com",
+    });
+    await mockAuthentication(page2, {
+      userId: "user2",
+      email: "user2@example.com",
+    });
 
     const docUrl = "/workspace/test-workspace/doc/shared-doc";
     await page1.goto(docUrl);
@@ -135,8 +130,14 @@ test.describe("Real-time Collaboration", () => {
     const page1 = await context1.newPage();
     const page2 = await context2.newPage();
 
-    await mockAuthentication(page1, "user1", "user1@example.com");
-    await mockAuthentication(page2, "user2", "user2@example.com");
+    await mockAuthentication(page1, {
+      userId: "user1",
+      email: "user1@example.com",
+    });
+    await mockAuthentication(page2, {
+      userId: "user2",
+      email: "user2@example.com",
+    });
 
     // Go offline for User 2
     await page2.context().setOffline(true);
@@ -176,8 +177,14 @@ test.describe("Real-time Collaboration", () => {
     const page1 = await context1.newPage();
     const page2 = await context2.newPage();
 
-    await mockAuthentication(page1, "user1", "user1@example.com");
-    await mockAuthentication(page2, "user2", "user2@example.com");
+    await mockAuthentication(page1, {
+      userId: "user1",
+      email: "user1@example.com",
+    });
+    await mockAuthentication(page2, {
+      userId: "user2",
+      email: "user2@example.com",
+    });
 
     const docUrl = "/workspace/test-workspace/doc/shared-doc";
     await page1.goto(docUrl);
@@ -208,7 +215,10 @@ test.describe("Real-time Collaboration", () => {
 
 test.describe("Comments and Mentions", () => {
   test.beforeEach(async ({ page }) => {
-    await mockAuthentication(page, "user1", "user1@example.com");
+    await mockAuthentication(page, {
+      userId: "user1",
+      email: "user1@example.com",
+    });
   });
 
   test("should add a comment to document", async ({ page }) => {

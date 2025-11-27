@@ -1,27 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
-
-// Helper function to mock authentication
-async function mockAuthentication(page: Page) {
-  // Set auth cookie or localStorage
-  await page.addInitScript(() => {
-    // Mock authenticated user
-    localStorage.setItem(
-      "supabase.auth.token",
-      JSON.stringify({
-        access_token: "mock-token",
-        refresh_token: "mock-refresh",
-        expires_at: Date.now() + 3600000,
-        user: {
-          id: "test-user-id",
-          email: "test@example.com",
-          app_metadata: {},
-          user_metadata: {},
-          created_at: new Date().toISOString(),
-        },
-      }),
-    );
-  });
-}
+import { mockAuthentication } from "./helpers/auth";
 
 test.describe("Workspace", () => {
   test.describe("Authenticated User Flow", () => {

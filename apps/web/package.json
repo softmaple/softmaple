@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:e2e": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

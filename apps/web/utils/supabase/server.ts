@@ -3,10 +3,11 @@ import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import type { Database } from "@/types/model";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const createClient = async (
   cookieStore?: ReturnType<typeof cookies>,
-) => {
+): Promise<SupabaseClient<Database>> => {
   // E2E Test Mode: Return a mock client when in test mode
   if (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true") {
     const headersList = await headers();
@@ -39,7 +40,7 @@ export const createClient = async (
             }),
           },
           from: () => ({
-            select: () => {
+            select: <T = any>() => {
               const chainObj: any = {
                 eq: (column: string, value: any) => chainObj,
                 order: (column: string, options: any) => chainObj,
@@ -71,7 +72,7 @@ export const createClient = async (
               return chainObj;
             },
             insert: () => ({
-              select: () => ({
+              select: <T = any>() => ({
                 single: async () => ({ data: {}, error: null }),
               }),
             }),

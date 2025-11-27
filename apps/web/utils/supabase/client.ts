@@ -2,8 +2,9 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/types/model";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const createClient = () => {
+export const createClient = (): SupabaseClient<Database> => {
   // E2E Test Mode: Return a mock client when in test mode
   if (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true") {
     // Check if we have test user data in localStorage
@@ -51,18 +52,32 @@ export const createClient = () => {
               signOut: async () => ({ error: null }),
             },
             from: (table: string) => ({
-              select: () => ({
+              select: <T = any>() => ({
+                maybeSingle: async () => ({ data: {}, error: null }),
                 single: async () => ({ data: {}, error: null }),
                 then: async () => [],
               }),
-              insert: () => ({
-                select: () => ({
+              insert: (data: any) => ({
+                select: <T = any>() => ({
+                  maybeSingle: async () => ({
+                    data: { id: "mock-id", ...data },
+                    error: null,
+                  }),
+                  single: async () => ({ data: {}, error: null }),
+                }),
+              }),
+              upsert: (data: any) => ({
+                select: <T = any>() => ({
+                  maybeSingle: async () => ({
+                    data: { id: "mock-id", ...data },
+                    error: null,
+                  }),
                   single: async () => ({ data: {}, error: null }),
                 }),
               }),
               update: () => ({
                 eq: () => ({
-                  select: () => ({
+                  select: <T = any>() => ({
                     single: async () => ({ data: {}, error: null }),
                   }),
                 }),
@@ -79,8 +94,7 @@ export const createClient = () => {
     }
   }
 
-  return;
-  createBrowserClient<Database>(
+  return createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   );

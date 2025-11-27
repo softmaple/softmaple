@@ -20,6 +20,10 @@ export const testConfig = {
     return match[1];
   },
 
+  getProjectRef(): string {
+    return testConfig.getSupabaseProjectRef();
+  },
+
   getSupabaseStorageKey(): string {
     return `sb-${testConfig.getSupabaseProjectRef()}-auth-token`;
   },

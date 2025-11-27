@@ -48,7 +48,9 @@ jobs:
         run: pnpm build
         env:
           CI: true
-          LIVEBLOCKS_SECRET_KEY: sk_dev_secret
+          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           # Skip Next.js telemetry during build
           NEXT_TELEMETRY_DISABLED: 1
 
@@ -61,10 +63,9 @@ jobs:
         run: pnpm exec playwright test
         env:
           CI: true
-          LIVEBLOCKS_SECRET_KEY: sk_dev_secret
-          # Add any required environment variables for the app
-          # NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          # NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

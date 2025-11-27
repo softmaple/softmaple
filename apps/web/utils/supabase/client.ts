@@ -16,7 +16,7 @@ export const createClient = (): SupabaseClient<Database> => {
       if (testUserCookie) {
         try {
           const userData = JSON.parse(
-            decodeURIComponent(testUserCookie.split("=")[1]),
+            decodeURIComponent(testUserCookie.split("=")[1] || ""),
           );
 
           // Return a mock Supabase client

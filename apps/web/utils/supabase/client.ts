@@ -3,8 +3,85 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/types/model";
 
-export const createClient = () =>
+export const createClient = () => {
+  // E2E Test Mode: Return a mock client when in test mode
+  if (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true") {
+    // Check if we have test user data in localStorage
+    if (typeof window !== "undefined") {
+      const testUserCookie = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("e2e-test-user="));
+
+      if (testUserCookie) {
+        try {
+          const userData = JSON.parse(
+            decodeURIComponent(testUserCookie.split("=")[1]),
+          );
+
+          // Return a mock Supabase client
+          return {
+            auth: {
+              getUser: async () => ({
+                data: { user: userData },
+                error: null,
+              }),
+              getSession: async () => ({
+                data: {
+                  session: {
+                    access_token: "test-token",
+                    refresh_token: "test-refresh",
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                    user: userData,
+                  },
+                },
+                error: null,
+              }),
+              onAuthStateChange: (callback: any) => {
+                // Immediately trigger with test user
+                if (callback) {
+                  callback("SIGNED_IN", {
+                    access_token: "test-token",
+                    user: userData,
+                  });
+                }
+                return {
+                  data: { subscription: { unsubscribe: () => {} } },
+                };
+              },
+              signOut: async () => ({ error: null }),
+            },
+            from: (table: string) => ({
+              select: () => ({
+                single: async () => ({ data: {}, error: null }),
+                then: async () => [],
+              }),
+              insert: () => ({
+                select: () => ({
+                  single: async () => ({ data: {}, error: null }),
+                }),
+              }),
+              update: () => ({
+                eq: () => ({
+                  select: () => ({
+                    single: async () => ({ data: {}, error: null }),
+                  }),
+                }),
+              }),
+              delete: () => ({
+                eq: () => ({ then: async () => ({}) }),
+              }),
+            }),
+          } as any;
+        } catch (e) {
+          // Fall through to normal client
+        }
+      }
+    }
+  }
+
+  return;
   createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   );
+};

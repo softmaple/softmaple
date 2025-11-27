@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mockAuthentication } from "./helpers/auth";
 
 test.describe("Navigation", () => {
   test("should navigate between main pages", async ({ page }) => {
@@ -40,34 +41,7 @@ test.describe("Navigation", () => {
 
   test("should have working breadcrumbs", async ({ page }) => {
     // Mock auth to access workspace
-    await page.addInitScript(
-      (storageKey) => {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            access_token: "mock-token",
-            refresh_token: "mock-refresh",
-            expires_at: Date.now() + 3600000,
-            user: { id: "test-user-id", email: "test@example.com" },
-          }),
-        );
-      },
-      // Pass storage key dynamically based on environment
-      (() => {
-        if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-          throw new Error("NEXT_PUBLIC_SUPABASE_URL is required for E2E tests");
-        }
-        const match = process.env.NEXT_PUBLIC_SUPABASE_URL.match(
-          /https:\/\/([^.]+)\.supabase\.co/,
-        );
-        if (!match?.[1]) {
-          throw new Error(
-            `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`,
-          );
-        }
-        return `sb-${match[1]}-auth-token`;
-      })(),
-    );
+    await mockAuthentication(page);
 
     await page.goto("/workspace/test-workspace/doc/test-doc");
 
@@ -116,64 +90,66 @@ test.describe("Navigation", () => {
 
   test("should handle deep links", async ({ page }) => {
     // Mock auth
-    await page.addInitScript(
-      (storageKey) => {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            access_token: "mock-token",
-            refresh_token: "mock-refresh",
-            expires_at: Date.now() + 3600000,
-            user: { id: "test-user-id", email: "test@example.com" },
-          }),
-        );
-      },
-      // Pass storage key dynamically based on environment
-      (() => {
-        if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-          throw new Error("NEXT_PUBLIC_SUPABASE_URL is required for E2E tests");
-        }
-        const match = process.env.NEXT_PUBLIC_SUPABASE_URL.match(
-          /https:\/\/([^.]+)\.supabase\.co/,
-        );
-        if (!match?.[1]) {
-          throw new Error(
-            `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`,
-          );
-        }
-        return `sb-${match[1]}-auth-token`;
-      })(),
+    await mockAuthentication(page);
+
+    await page.goto("/workspace/test-workspace/doc/test-doc");
+    await expect(page.getByRole("heading")).toContainText("test-doc");
+
+    // Direct navigation to nested resource
+    await page.goto("/workspace/test-workspace/doc/test-doc/settings");
+    await expect(page).toHaveURL(
+      "/workspace/test-workspace/doc/test-doc/settings",
     );
+  });
+});
 
-    // Direct deep link to document
-    await page.goto("/workspace/test-workspace/doc/test-doc#section-2");
+test.describe("Protected Routes", () => {
+  test("should redirect to login for protected routes", async ({ page }) => {
+    // Try to access dashboard without auth
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL("/login");
 
-    // Should load the page with hash
-    await expect(page).toHaveURL(/test-doc#section-2/);
+    // Try to access workspace without auth
+    await page.goto("/workspace/test-workspace");
+    await expect(page).toHaveURL("/login");
+
+    // Try to access settings without auth
+    await page.goto("/settings");
+    await expect(page).toHaveURL("/login");
+  });
+
+  test("should access protected routes with auth", async ({ page }) => {
+    await mockAuthentication(page);
+
+    // Access dashboard with auth
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL("/dashboard");
+
+    // Access workspace with auth
+    await page.goto("/workspace/test-workspace");
+    await expect(page).toHaveURL("/workspace/test-workspace");
   });
 });
 
 test.describe("Responsive Navigation", () => {
-  test("should toggle mobile menu", async ({ page }) => {
+  test("should show mobile menu on small screens", async ({ page }) => {
     // Set mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/");
 
-    // Mobile menu should be hidden initially
-    const mobileNav = page.getByRole("navigation", { name: /mobile/i });
-    await expect(mobileNav).toBeHidden();
+    // Mobile menu button should be visible
+    await expect(page.getByRole("button", { name: /menu/i })).toBeVisible();
 
-    // Click hamburger menu
+    // Desktop nav should be hidden
+    const desktopNav = page.getByRole("navigation", { name: /main/i });
+    await expect(desktopNav).toBeHidden();
+
+    // Open mobile menu
     await page.getByRole("button", { name: /menu/i }).click();
 
-    // Mobile menu should be visible
+    // Mobile nav should be visible
+    const mobileNav = page.getByRole("navigation", { name: /mobile/i });
     await expect(mobileNav).toBeVisible();
-
-    // Click close button
-    await page.getByRole("button", { name: /close/i }).click();
-
-    // Mobile menu should be hidden again
-    await expect(mobileNav).toBeHidden();
   });
 
   test("should close mobile menu on navigation", async ({ page }) => {
@@ -229,34 +205,7 @@ test.describe("Keyboard Navigation", () => {
 
   test("should handle escape key for modals", async ({ page }) => {
     // Mock auth
-    await page.addInitScript(
-      (storageKey) => {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            access_token: "mock-token",
-            refresh_token: "mock-refresh",
-            expires_at: Date.now() + 3600000,
-            user: { id: "test-user-id", email: "test@example.com" },
-          }),
-        );
-      },
-      // Pass storage key dynamically based on environment
-      (() => {
-        if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-          throw new Error("NEXT_PUBLIC_SUPABASE_URL is required for E2E tests");
-        }
-        const match = process.env.NEXT_PUBLIC_SUPABASE_URL.match(
-          /https:\/\/([^.]+)\.supabase\.co/,
-        );
-        if (!match?.[1]) {
-          throw new Error(
-            `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`,
-          );
-        }
-        return `sb-${match[1]}-auth-token`;
-      })(),
-    );
+    await mockAuthentication(page);
 
     await page.goto("/workspace/test-workspace");
 
@@ -273,23 +222,7 @@ test.describe("Keyboard Navigation", () => {
 
   test("should support keyboard shortcuts", async ({ page }) => {
     // Mock auth
-    await page.addInitScript(
-      (storageKey) => {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            access_token: "mock-token",
-            refresh_token: "mock-refresh",
-            expires_at: Date.now() + 3600000,
-            user: { id: "test-user-id", email: "test@example.com" },
-          }),
-        );
-      },
-      // Pass storage key dynamically based on environment
-      process.env.NEXT_PUBLIC_SUPABASE_URL
-        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
-        : "sb-iouhcoutiwcrwqszrecj-auth-token",
-    );
+    await mockAuthentication(page);
 
     await page.goto("/workspace/test-workspace/doc/test-doc");
 

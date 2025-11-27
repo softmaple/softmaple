@@ -1,5 +1,6 @@
 import { test, expect, Page, Browser } from "@playwright/test";
 import { mockAuthentication } from "./helpers/auth";
+import { mockAllServices, mockFastNetwork } from "./helpers/mock-services";
 
 test.describe("Real-time Collaboration", () => {
   test("should show active users in document", async ({ browser }) => {
@@ -9,6 +10,12 @@ test.describe("Real-time Collaboration", () => {
 
     const page1 = await context1.newPage();
     const page2 = await context2.newPage();
+
+    // Set up mocks for both pages
+    await mockAllServices(page1);
+    await mockFastNetwork(page1);
+    await mockAllServices(page2);
+    await mockFastNetwork(page2);
 
     // Mock authentication for both users
     await mockAuthentication(page1, {

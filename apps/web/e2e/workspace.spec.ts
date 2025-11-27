@@ -1,15 +1,17 @@
 import { test, expect, Page } from "@playwright/test";
 import { mockAuthentication } from "./helpers/auth";
+import { mockAllServices, mockFastNetwork } from "./helpers/mock-services";
 
 test.describe("Workspace", () => {
   test.describe("Authenticated User Flow", () => {
     test.beforeEach(async ({ page }) => {
+      // Set up all mocks before authentication
+      await mockAllServices(page);
+      await mockFastNetwork(page);
       await mockAuthentication(page);
     });
 
-    test.skip("should display dashboard after authentication", async ({
-      page,
-    }) => {
+    test("should display dashboard after authentication", async ({ page }) => {
       await page.goto("/dashboard");
 
       // Check dashboard elements
@@ -22,7 +24,7 @@ test.describe("Workspace", () => {
       ).toBeVisible();
     });
 
-    test.skip("should navigate to workspace", async ({ page }) => {
+    test("should navigate to workspace", async ({ page }) => {
       await page.goto("/workspace/test-workspace");
 
       // Check workspace page elements
@@ -34,7 +36,7 @@ test.describe("Workspace", () => {
       ).toBeVisible();
     });
 
-    test.skip("should display workspace settings", async ({ page }) => {
+    test("should display workspace settings", async ({ page }) => {
       await page.goto("/workspace/test-workspace/settings");
 
       // Check settings page

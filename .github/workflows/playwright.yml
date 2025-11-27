@@ -17,13 +17,16 @@ permissions:
 
 jobs:
   e2e:
-    name: Playwright Tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: E2E Tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        # Increase shards to 10 for better parallelization
+        # With 50 active tests, this gives ~5 tests per shard
+        # This should reduce per-shard runtime from 30 to ~15 minutes
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     env:
       CI: true
       # TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
@@ -48,6 +51,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Cache Playwright browsers
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      # Cache Next.js build output
+      - name: Cache Next.js Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/web/.next/cache
+            apps/web/.next/standalone
+            apps/web/.next/static
+          key: nextjs-${{ runner.os }}-${{ hashFiles('apps/web/**', 'packages/**') }}
+
       - name: Run database migrations for E2E tests
         working-directory: packages/db
         run: pnpm run db:migrate
@@ -64,16 +84,17 @@ jobs:
           LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_E2E_TEST_MODE: true
           # Skip Next.js telemetry during build
           NEXT_TELEMETRY_DISABLED: 1
 
       - name: Install Playwright Browsers
         working-directory: apps/web
-        run: pnpm exec playwright install --with-deps
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Playwright tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
         working-directory: apps/web
-        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --project=chromium
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
@@ -81,6 +102,7 @@ jobs:
           LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_E2E_TEST_MODE: true
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

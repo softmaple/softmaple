@@ -17,9 +17,13 @@ permissions:
 
 jobs:
   e2e:
-    name: Run Playwright Tests
+    name: Playwright Tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       CI: true
       # TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
@@ -67,9 +71,9 @@ jobs:
         working-directory: apps/web
         run: pnpm exec playwright install --with-deps
 
-      - name: Run Playwright tests
+      - name: Run Playwright tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
         working-directory: apps/web
-        run: pnpm exec playwright test
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
@@ -82,7 +86,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report
+          name: playwright-report-shard-${{ matrix.shard }}
           path: apps/web/playwright-report/
           retention-days: 30
 
@@ -90,6 +94,27 @@ jobs:
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-traces
+          name: playwright-traces-shard-${{ matrix.shard }}
           path: apps/web/test-results/
           retention-days: 7
+
+  # Merge reports from all shards
+  merge-reports:
+    name: Merge Test Reports
+    if: ${{ !cancelled() }}
+    needs: [e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all test reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-report-shard-*
+          merge-multiple: true
+          path: all-reports/
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-merged
+          path: all-reports/
+          retention-days: 30

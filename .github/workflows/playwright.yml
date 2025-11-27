@@ -44,10 +44,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run database migrations for E2E tests
+        run: pnpm run db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
+
       - name: Build Turborepo
         run: pnpm build
         env:
           CI: true
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
           LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
@@ -63,6 +71,8 @@ jobs:
         run: pnpm exec playwright test
         env:
           CI: true
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
           LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}

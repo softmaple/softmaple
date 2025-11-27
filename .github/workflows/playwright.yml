@@ -45,6 +45,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run database migrations for E2E tests
+        working-directory: packages/db
         run: pnpm run db:migrate
         env:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}

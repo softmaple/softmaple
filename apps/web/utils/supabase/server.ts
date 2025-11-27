@@ -39,10 +39,37 @@ export const createClient = async (
             }),
           },
           from: () => ({
-            select: () => ({
-              single: async () => ({ data: {}, error: null }),
-              then: async () => [],
-            }),
+            select: () => {
+              const chainObj: any = {
+                eq: (column: string, value: any) => chainObj,
+                order: (column: string, options: any) => chainObj,
+                limit: (count: number) => chainObj,
+                maybeSingle: async () => ({
+                  data: {
+                    id: "mock-id",
+                    slug: "test-workspace",
+                    name: "Test Workspace",
+                  },
+                  error: null,
+                }),
+                single: async () => ({
+                  data: {
+                    id: "mock-id",
+                    slug: "test-workspace",
+                    name: "Test Workspace",
+                  },
+                  error: null,
+                }),
+                then: async () => [
+                  {
+                    id: "mock-id",
+                    slug: "test-workspace",
+                    name: "Test Workspace",
+                  },
+                ],
+              };
+              return chainObj;
+            },
             insert: () => ({
               select: () => ({
                 single: async () => ({ data: {}, error: null }),

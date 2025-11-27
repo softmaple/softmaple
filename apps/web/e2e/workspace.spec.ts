@@ -47,7 +47,7 @@ test.describe("Workspace", () => {
       await expect(page.getByText(/Members/i)).toBeVisible();
     });
 
-    test.skip("should show create document modal", async ({ page }) => {
+    test("should show create document modal", async ({ page }) => {
       await page.goto("/workspace/test-workspace");
 
       // Click create document button
@@ -60,7 +60,7 @@ test.describe("Workspace", () => {
       await expect(page.getByRole("button", { name: /Cancel/i })).toBeVisible();
     });
 
-    test.skip("should filter documents by search", async ({ page }) => {
+    test("should filter documents by search", async ({ page }) => {
       await page.goto("/workspace/test-workspace");
 
       // Find search input
@@ -76,7 +76,7 @@ test.describe("Workspace", () => {
       ).toBeVisible();
     });
 
-    test.skip("should sort documents", async ({ page }) => {
+    test("should sort documents", async ({ page }) => {
       await page.goto("/workspace/test-workspace");
 
       // Find sort dropdown

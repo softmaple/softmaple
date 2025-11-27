@@ -53,9 +53,20 @@ test.describe("Navigation", () => {
         );
       },
       // Pass storage key dynamically based on environment
-      process.env.NEXT_PUBLIC_SUPABASE_URL
-        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
-        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+      (() => {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+          throw new Error("NEXT_PUBLIC_SUPABASE_URL is required for E2E tests");
+        }
+        const match = process.env.NEXT_PUBLIC_SUPABASE_URL.match(
+          /https:\/\/([^.]+)\.supabase\.co/,
+        );
+        if (!match?.[1]) {
+          throw new Error(
+            `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`,
+          );
+        }
+        return `sb-${match[1]}-auth-token`;
+      })(),
     );
 
     await page.goto("/workspace/test-workspace/doc/test-doc");
@@ -118,9 +129,20 @@ test.describe("Navigation", () => {
         );
       },
       // Pass storage key dynamically based on environment
-      process.env.NEXT_PUBLIC_SUPABASE_URL
-        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
-        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+      (() => {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+          throw new Error("NEXT_PUBLIC_SUPABASE_URL is required for E2E tests");
+        }
+        const match = process.env.NEXT_PUBLIC_SUPABASE_URL.match(
+          /https:\/\/([^.]+)\.supabase\.co/,
+        );
+        if (!match?.[1]) {
+          throw new Error(
+            `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`,
+          );
+        }
+        return `sb-${match[1]}-auth-token`;
+      })(),
     );
 
     // Direct deep link to document
@@ -220,9 +242,20 @@ test.describe("Keyboard Navigation", () => {
         );
       },
       // Pass storage key dynamically based on environment
-      process.env.NEXT_PUBLIC_SUPABASE_URL
-        ? `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || "localhost"}-auth-token`
-        : "sb-iouhcoutiwcrwqszrecj-auth-token",
+      (() => {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+          throw new Error("NEXT_PUBLIC_SUPABASE_URL is required for E2E tests");
+        }
+        const match = process.env.NEXT_PUBLIC_SUPABASE_URL.match(
+          /https:\/\/([^.]+)\.supabase\.co/,
+        );
+        if (!match?.[1]) {
+          throw new Error(
+            `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`,
+          );
+        }
+        return `sb-${match[1]}-auth-token`;
+      })(),
     );
 
     await page.goto("/workspace/test-workspace");

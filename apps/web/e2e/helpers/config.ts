@@ -5,11 +5,19 @@ export const testConfig = {
   // Extract project reference from Supabase URL
   // In CI, this comes from secrets; locally from .env file
   getSupabaseProjectRef(): string {
-    const url =
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      "https://iouhcoutiwcrwqszrecj.supabase.co";
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!url) {
+      throw new Error(
+        "NEXT_PUBLIC_SUPABASE_URL is not set. Please configure environment variables for E2E tests.",
+      );
+    }
     const match = url.match(/https:\/\/([^.]+)\.supabase\.co/);
-    return match?.[1] || "localhost";
+    if (!match?.[1]) {
+      throw new Error(
+        `Invalid NEXT_PUBLIC_SUPABASE_URL format: ${url}. Expected format: https://<project-ref>.supabase.co`,
+      );
+    }
+    return match[1];
   },
 
   getSupabaseStorageKey(): string {

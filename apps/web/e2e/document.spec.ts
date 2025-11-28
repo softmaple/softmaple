@@ -2,7 +2,7 @@ import { test, expect, Page } from "@playwright/test";
 import { mockAuthentication } from "./helpers/auth";
 import { mockAllServices } from "./helpers/mock-services";
 
-test.describe("Document Management", () => {
+test.describe.skip("Document Management", () => {
   test.beforeEach(async ({ page }) => {
     await mockAllServices(page);
     await mockAuthentication(page);

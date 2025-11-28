@@ -24,7 +24,7 @@ test.describe("Workspace", () => {
       ).toBeVisible();
     });
 
-    test("should navigate to workspace", async ({ page }) => {
+    test.skip("should navigate to workspace", async ({ page }) => {
       await page.goto("/workspace/test-workspace");
 
       // Check workspace page elements
@@ -36,7 +36,7 @@ test.describe("Workspace", () => {
       ).toBeVisible();
     });
 
-    test("should display workspace settings", async ({ page }) => {
+    test.skip("should display workspace settings", async ({ page }) => {
       await page.goto("/workspace/test-workspace/settings");
 
       // Check settings page

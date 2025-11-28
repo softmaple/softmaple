@@ -9,6 +9,7 @@ on:
       - 'apps/web/**'
       - 'packages/**'
       - '.github/workflows/playwright-smoke.yml'
+      - 'pnpm-lock.yaml'
 
 permissions:
   contents: read
@@ -23,6 +24,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         name: Install pnpm
@@ -38,27 +41,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Cache Playwright browsers
       - name: Cache Playwright Browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-smoke-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
 
-      - name: Install Playwright Chromium
-        working-directory: apps/web
-        run: pnpm exec playwright install --with-deps chromium
+      # Cache Next.js build output
+      - name: Cache Next.js Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/web/.next/cache
+            apps/web/.next/standalone
+            apps/web/.next/static
+          key: nextjs-smoke-${{ runner.os }}-${{ hashFiles('apps/web/**', 'packages/**') }}
 
-      - name: Build Next.js (production)
-        working-directory: apps/web
+      - name: Run database migrations for E2E tests
+        working-directory: packages/db
+        run: pnpm run db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
+
+      - name: Build Turborepo
         run: pnpm build
         env:
+          CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
           LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_E2E_TEST_MODE: true
+          # Skip Next.js telemetry during build
           NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Install Playwright Browsers
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Smoke Tests
         working-directory: apps/web
@@ -78,4 +100,12 @@ jobs:
         with:
           name: playwright-smoke-report
           path: apps/web/playwright-report/
+          retention-days: 7
+
+      - name: Upload test artifacts on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-smoke-traces
+          path: apps/web/test-results/
           retention-days: 7

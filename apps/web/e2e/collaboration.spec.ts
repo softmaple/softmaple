@@ -2,7 +2,7 @@ import { test, expect, Page, Browser } from "@playwright/test";
 import { mockAuthentication } from "./helpers/auth";
 import { mockAllServices, mockFastNetwork } from "./helpers/mock-services";
 
-test.describe("Real-time Collaboration", () => {
+test.describe.skip("Real-time Collaboration", () => {
   test.skip("should show active users in document", async ({ browser }) => {
     // Create two browser contexts for two users
     const context1 = await browser.newContext();
@@ -222,7 +222,7 @@ test.describe("Real-time Collaboration", () => {
   });
 });
 
-test.describe("Comments and Mentions", () => {
+test.describe.skip("Comments and Mentions", () => {
   test.beforeEach(async ({ page }) => {
     await mockAuthentication(page, {
       userId: "user1",

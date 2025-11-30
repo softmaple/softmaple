@@ -25,6 +25,7 @@
     "@liveblocks/react": "^3.0.0",
     "@liveblocks/react-lexical": "^3.0.0",
     "@liveblocks/react-ui": "^3.0.0",
+    "@prisma/client": "^7.0.1",
     "@softmaple/config": "workspace:*",
     "@softmaple/editor": "workspace:*",
     "@softmaple/ui": "workspace:*",

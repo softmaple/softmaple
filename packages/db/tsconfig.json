@@ -1,18 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
     "module": "ESNext",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "target": "ES2023",
     "strict": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "allowJs": true,
-    "noEmit": true,
-    "lib": ["ESNext"]
-  },
-  "include": ["src", "generated"],
-  "exclude": ["node_modules"]
+    "esModuleInterop": true
+  }
 }

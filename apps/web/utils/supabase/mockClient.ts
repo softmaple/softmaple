@@ -30,7 +30,7 @@ export function createMockSupabaseClient(
     },
   ];
 
-  const mockClient: SupabaseClient<Database> = {
+  const mockClient = {
     auth: {
       getUser: async () => ({
         data: { user: userData },
@@ -296,7 +296,7 @@ export function createMockSupabaseClient(
     } as any,
 
     rpc: async () => ({ data: {}, error: null }),
-  } as SupabaseClient<Database>;
+  } as unknown as SupabaseClient<Database>;
 
   return mockClient;
 }

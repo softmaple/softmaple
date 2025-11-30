@@ -12,7 +12,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev --config=./prisma.config.ts",
+    "db:migrate": "prisma migrate dev --config=./prisma/prisma.config.ts",
     "db:deploy": "prisma migrate deploy"
   },
   "exports": {

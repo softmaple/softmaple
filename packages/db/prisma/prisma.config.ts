@@ -6,12 +6,12 @@ import { defineConfig, env } from "prisma/config";
 
 export default defineConfig({
   // the main entry for your schema
-  schema: "prisma/schema.prisma",
+  schema: "schema.prisma",
   // where migrations should be generated
   // what script to run for "prisma db seed"
   migrations: {
-    path: "prisma/migrations",
-    seed: "tsx prisma/seed.ts",
+    path: "migrations",
+    // seed: "tsx prisma/seed.ts",
   },
   // The database URL
   datasource: {

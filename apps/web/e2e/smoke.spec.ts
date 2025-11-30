@@ -4,6 +4,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { mockAuthentication } from "./helpers/auth";
+import { mockAllServices, mockFastNetwork } from "./helpers/mock-services";
 
 test.describe("Smoke Tests", () => {
   test("landing page loads", async ({ page }) => {
@@ -18,13 +19,21 @@ test.describe("Smoke Tests", () => {
   });
 
   test("authenticated user can access dashboard", async ({ page }) => {
+    // Set up mocks before authentication and navigation
+    await mockAllServices(page);
+    await mockFastNetwork(page);
     await mockAuthentication(page);
+
     await page.goto("/dashboard");
     await expect(page).toHaveURL("/dashboard");
   });
 
   test("authenticated user can access workspace", async ({ page }) => {
+    // Set up mocks before authentication and navigation
+    await mockAllServices(page);
+    await mockFastNetwork(page);
     await mockAuthentication(page);
+
     await page.goto("/workspace/test-workspace");
     await expect(page).toHaveURL("/workspace/test-workspace");
   });

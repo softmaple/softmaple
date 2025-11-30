@@ -41,33 +41,31 @@ export const createClient = async (
           },
           from: () => ({
             select: <T = any>() => {
+              const mockData = [
+                {
+                  id: "mock-id",
+                  slug: "test-workspace",
+                  name: "Test Workspace",
+                  title: "Test Workspace",
+                  description: "Mock workspace for testing",
+                  owner_id: userData.id,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                },
+              ];
               const chainObj: any = {
+                select: <T = any>(query?: string) => chainObj,
                 eq: (column: string, value: any) => chainObj,
-                order: (column: string, options: any) => chainObj,
+                match: (filter: any) => chainObj,
+                order: (column: string, options?: any) => chainObj,
                 limit: (count: number) => chainObj,
-                maybeSingle: async () => ({
-                  data: {
-                    id: "mock-id",
-                    slug: "test-workspace",
-                    name: "Test Workspace",
-                  },
-                  error: null,
-                }),
-                single: async () => ({
-                  data: {
-                    id: "mock-id",
-                    slug: "test-workspace",
-                    name: "Test Workspace",
-                  },
-                  error: null,
-                }),
-                then: async () => [
-                  {
-                    id: "mock-id",
-                    slug: "test-workspace",
-                    name: "Test Workspace",
-                  },
-                ],
+                maybeSingle: async () => ({ data: mockData[0], error: null }),
+                single: async () => ({ data: mockData[0], error: null }),
+                // Support both direct access and async access patterns
+                data: mockData,
+                error: null,
+                then: async (resolve: any) =>
+                  resolve({ data: mockData, error: null }),
               };
               return chainObj;
             },

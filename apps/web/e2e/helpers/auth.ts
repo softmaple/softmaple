@@ -26,9 +26,6 @@ export async function mockAuthentication(page: Page, user: MockUser = {}) {
     updated_at: new Date().toISOString(),
   };
 
-  // Navigate to the app first to set cookies for the correct domain
-  await page.goto("/");
-
   // Set test user cookie that the middleware will recognize
   await page.context().addCookies([
     {
@@ -42,10 +39,4 @@ export async function mockAuthentication(page: Page, user: MockUser = {}) {
       sameSite: "Lax",
     },
   ]);
-
-  // Wait a bit for the auth state to propagate
-  await page.waitForTimeout(100);
-
-  // Reload to ensure the test mode auth is picked up
-  await page.reload();
 }

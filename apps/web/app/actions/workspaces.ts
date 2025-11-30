@@ -44,7 +44,7 @@ export const createWorkspace = async (workspace: WorkspacesType["Insert"]) => {
 
   return supabase
     .from("workspaces")
-    .insert(workspace)
+    .insert(workspace as any)
     .select<string, WorkspacesType["Row"]>("*")
     .single();
 };

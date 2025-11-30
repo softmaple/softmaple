@@ -29,7 +29,7 @@ export const createDocument = async (document: DocsType["Insert"]) => {
 
     return supabase
       .from("documents")
-      .insert(document)
+      .insert(document as any)
       .select<string, DocsType["Row"]>("*")
       .single();
   } catch (error) {

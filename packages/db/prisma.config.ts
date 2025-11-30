@@ -2,11 +2,12 @@
 // https://pris.ly/d/config-datasource
 
 import "dotenv/config";
+import path from "node:path";
 import { defineConfig, env } from "prisma/config";
 
 export default defineConfig({
   // the main entry for your schema
-  schema: "prisma/schema.prisma",
+  schema: path.join("prisma", "schema.prisma"),
   // where migrations should be generated
   // what script to run for "prisma db seed"
   migrations: {

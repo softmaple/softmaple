@@ -15,9 +15,30 @@ export const createClient = (): SupabaseClient<Database> => {
 
       if (testUserCookie) {
         try {
-          const userData = JSON.parse(
-            decodeURIComponent(testUserCookie.split("=")[1] || ""),
-          );
+          // Find the first "=" and take everything after it
+          const equalIndex = testUserCookie.indexOf("=");
+          let cookieValue = "";
+
+          if (equalIndex !== -1) {
+            // Take substring after the first "="
+            cookieValue = testUserCookie.substring(equalIndex + 1);
+          }
+
+          // Decode and parse with error handling
+          let userData = null;
+          if (cookieValue) {
+            try {
+              userData = JSON.parse(decodeURIComponent(cookieValue));
+            } catch (parseError) {
+              console.warn("Failed to parse e2e-test-user cookie:", parseError);
+              // Fall through to normal client if cookie data is invalid
+            }
+          }
+
+          if (!userData) {
+            // Fall through to normal client if no valid user data
+            throw new Error("No valid user data in cookie");
+          }
 
           // Return a mock Supabase client
           return {

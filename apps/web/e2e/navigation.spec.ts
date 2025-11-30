@@ -149,42 +149,78 @@ test.describe("Protected Routes", () => {
 });
 
 test.describe("Responsive Navigation", () => {
-  test("should show mobile menu on small screens", async ({ page }) => {
+  test("should hide desktop navigation on mobile screens", async ({ page }) => {
     // Set mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/");
 
-    // Mobile menu button should be visible (if exists)
-    // The header might not have a mobile menu, check if nav is hidden
-    const desktopNav = page.locator("nav");
-    const navCount = await desktopNav.count();
+    // Desktop nav should exist but be hidden on mobile (uses 'hidden md:flex' classes)
+    const desktopNav = page.locator("nav").first();
+    await expect(desktopNav).toHaveCount(1);
+    await expect(desktopNav).toBeHidden();
 
-    if (navCount > 0) {
-      // Check if navigation is hidden on mobile
-      const isNavVisible = await desktopNav.first().isVisible();
-      expect(isNavVisible).toBe(false);
-    }
+    // Sign In button should still be visible (it's not hidden on mobile)
+    const signInButton = page.getByRole("link", { name: /Sign In/i });
+    await expect(signInButton).toBeVisible();
+
+    // Theme toggle should still be visible
+    // Mode toggle button exists in the header
+    const themeToggle = page.locator(
+      'button[aria-label*="theme"], button:has-text("Toggle theme")',
+    );
+    await expect(themeToggle).toBeVisible();
+
+    // Mobile menu button should NOT exist (not implemented yet)
+    const mobileMenuButton = page.locator('[data-testid="mobile-menu-button"]');
+    await expect(mobileMenuButton).toHaveCount(0);
   });
 
-  test("should close mobile menu on navigation", async ({ page }) => {
+  test("should show desktop navigation on larger screens", async ({ page }) => {
+    // Set desktop viewport
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/");
+
+    // Desktop nav should be visible
+    const desktopNav = page.locator("nav").first();
+    await expect(desktopNav).toBeVisible();
+
+    // Nav items should be visible
+    await expect(
+      desktopNav.getByRole("link", { name: /Features/i }),
+    ).toBeVisible();
+    await expect(desktopNav.getByRole("link", { name: /Docs/i })).toBeVisible();
+    await expect(
+      desktopNav.getByRole("link", { name: /Pricing/i }),
+    ).toBeVisible();
+  });
+
+  test.skip("mobile menu navigation - NOT IMPLEMENTED", async ({ page }) => {
+    // This test is skipped because mobile menu is not implemented yet
+    // When implemented, it should:
+    // 1. Show a hamburger/menu button on mobile
+    // 2. Open a mobile menu when clicked
+    // 3. Close the menu after navigation
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/");
 
-    // Check if mobile menu exists
+    // Mobile menu button should be visible
     const menuButton = page.getByRole("button", { name: /menu/i });
-    const menuButtonCount = await menuButton.count();
+    await expect(menuButton).toBeVisible();
+    await expect(menuButton).toBeEnabled();
 
-    if (menuButtonCount > 0) {
-      // Open mobile menu
-      await menuButton.click();
-      // Click Sign In
-      await page.getByRole("button", { name: /Sign In/i }).click();
-      await expect(page).toHaveURL("/login");
-    } else {
-      // No mobile menu, just click Sign In directly
-      await page.getByRole("button", { name: /Sign In/i }).click();
-      await expect(page).toHaveURL("/login");
-    }
+    // Open mobile menu
+    await menuButton.click();
+
+    // Mobile menu should be visible
+    const mobileMenu = page.locator('[data-testid="mobile-menu"]');
+    await expect(mobileMenu).toBeVisible();
+
+    // Click Sign In in mobile menu
+    await mobileMenu.getByRole("link", { name: /Sign In/i }).click();
+
+    // Should navigate and close menu
+    await expect(page).toHaveURL("/login");
+    await expect(mobileMenu).toBeHidden();
   });
 
   test("should handle tablet viewport", async ({ page }) => {

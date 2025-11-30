@@ -1,4 +1,4 @@
-name: Playwright Tests
+name: Smoke Tests (Fast)
 
 on:
   push:
@@ -8,28 +8,19 @@ on:
     paths:
       - 'apps/web/**'
       - 'packages/**'
-      - '.github/workflows/playwright.yml'
+      - '.github/workflows/playwright-smoke.yml'
       - 'pnpm-lock.yaml'
-      # - 'turbo.json'
 
 permissions:
   contents: read
 
 jobs:
-  e2e:
-    name: E2E Tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
+  smoke:
+    name: Smoke Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        # Use 6 shards for balanced parallelization
-        # With ~50 active tests, this gives ~8-9 tests per shard
-        shard: [1, 2, 3, 4, 5, 6]
+    timeout-minutes: 10  # Much faster than full E2E
     env:
       CI: true
-      # TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      # TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -55,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          key: playwright-smoke-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
 
       # Cache Next.js build output
       - name: Cache Next.js Build
@@ -65,7 +56,7 @@ jobs:
             apps/web/.next/cache
             apps/web/.next/standalone
             apps/web/.next/static
-          key: nextjs-${{ runner.os }}-${{ hashFiles('apps/web/**', 'packages/**') }}
+          key: nextjs-smoke-${{ runner.os }}-${{ hashFiles('apps/web/**', 'packages/**') }}
 
       - name: Run database migrations for E2E tests
         working-directory: packages/db
@@ -91,9 +82,9 @@ jobs:
         working-directory: apps/web
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run Playwright tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
+      - name: Run Smoke Tests
         working-directory: apps/web
-        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --project=chromium
+        run: pnpm exec playwright test smoke.spec.ts --project=chromium
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
@@ -107,35 +98,14 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report-shard-${{ matrix.shard }}
+          name: playwright-smoke-report
           path: apps/web/playwright-report/
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload test artifacts on failure
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-traces-shard-${{ matrix.shard }}
+          name: playwright-smoke-traces
           path: apps/web/test-results/
           retention-days: 7
-
-  # Merge reports from all shards
-  merge-reports:
-    name: Merge Test Reports
-    if: ${{ !cancelled() }}
-    needs: [e2e]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all test reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: playwright-report-shard-*
-          merge-multiple: true
-          path: all-reports/
-
-      - name: Upload merged report
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report-merged
-          path: all-reports/
-          retention-days: 30

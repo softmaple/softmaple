@@ -2,6 +2,24 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  // E2E Test Mode: Bypass auth when running Playwright tests
+  if (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true") {
+    const testUser = request.cookies.get("e2e-test-user");
+    if (testUser) {
+      // Parse test user data and allow the request to proceed
+      try {
+        const userData = JSON.parse(testUser.value);
+        // Create a mock response that includes the test user in headers
+        // This allows pages to access user data for testing
+        const response = NextResponse.next({ request });
+        response.headers.set("x-e2e-test-user", JSON.stringify(userData));
+        return response;
+      } catch (e) {
+        // If parsing fails, continue with normal flow
+      }
+    }
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });

@@ -1,13 +1,15 @@
 import { test, expect, Page } from "@playwright/test";
 
 import { mockAuthentication } from "./helpers/auth";
+import { mockAllServices } from "./helpers/mock-services";
 
-test.describe("User Settings", () => {
+test.describe.skip("User Settings", () => {
   test.beforeEach(async ({ page }) => {
+    await mockAllServices(page);
     await mockAuthentication(page);
   });
 
-  test.skip("should navigate to settings page", async ({ page }) => {
+  test("should navigate to settings page", async ({ page }) => {
     await page.goto("/dashboard");
 
     // Click on user menu
@@ -23,7 +25,7 @@ test.describe("User Settings", () => {
     ).toBeVisible();
   });
 
-  test.skip("should display profile settings", async ({ page }) => {
+  test("should display profile settings", async ({ page }) => {
     await page.goto("/settings/profile");
 
     // Check profile form fields
@@ -38,7 +40,7 @@ test.describe("User Settings", () => {
     ).toBeVisible();
   });
 
-  test.skip("should update profile information", async ({ page }) => {
+  test("should update profile information", async ({ page }) => {
     await page.goto("/settings/profile");
 
     // Update name
@@ -158,12 +160,12 @@ test.describe("User Settings", () => {
   });
 });
 
-test.describe("Workspace Settings", () => {
+test.describe.skip("Workspace Settings", () => {
   test.beforeEach(async ({ page }) => {
     await mockAuthentication(page);
   });
 
-  test.skip("should display workspace general settings", async ({ page }) => {
+  test("should display workspace general settings", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings");
 
     // Check general settings
@@ -175,7 +177,7 @@ test.describe("Workspace Settings", () => {
     ).toBeVisible();
   });
 
-  test.skip("should update workspace name", async ({ page }) => {
+  test("should update workspace name", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings");
 
     // Update name
@@ -192,7 +194,7 @@ test.describe("Workspace Settings", () => {
     ).toBeVisible();
   });
 
-  test.skip("should manage workspace members", async ({ page }) => {
+  test("should manage workspace members", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings/members");
 
     // Check members section
@@ -206,7 +208,7 @@ test.describe("Workspace Settings", () => {
     await expect(page.getByText(/test@example.com/i)).toBeVisible();
   });
 
-  test.skip("should invite new member", async ({ page }) => {
+  test("should invite new member", async ({ page }) => {
     await page.goto("/workspace/test-workspace/settings/members");
 
     // Click invite

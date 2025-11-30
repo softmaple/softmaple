@@ -1,24 +1,28 @@
 import { test, expect, Page } from "@playwright/test";
 import { mockAuthentication } from "./helpers/auth";
+import { mockAllServices, mockFastNetwork } from "./helpers/mock-services";
 
 test.describe("Workspace", () => {
   test.describe("Authenticated User Flow", () => {
     test.beforeEach(async ({ page }) => {
+      // Set up all mocks before authentication
+      await mockAllServices(page);
+      await mockFastNetwork(page);
       await mockAuthentication(page);
     });
 
-    test.skip("should display dashboard after authentication", async ({
-      page,
-    }) => {
+    test("should display dashboard after authentication", async ({ page }) => {
       await page.goto("/dashboard");
 
       // Check dashboard elements
       await expect(
-        page.getByRole("heading", { name: /Dashboard/i }),
+        page.getByRole("heading", { name: /Your Workspaces/i }),
       ).toBeVisible();
-      await expect(page.getByText(/Recent Documents/i)).toBeVisible();
       await expect(
-        page.getByRole("button", { name: /New Document/i }),
+        page.getByText(/Manage your documents and collaborate/i),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: /New Workspace/i }),
       ).toBeVisible();
     });
 
@@ -113,13 +117,13 @@ test.describe("Workspace", () => {
     }) => {
       await page.goto("/coming-soon");
 
+      await expect(page.getByText("We're building something")).toBeVisible();
       await expect(
-        page.getByRole("heading", { name: /Coming Soon/i }),
+        page.getByText(/Our SaaS platform is currently in development/i),
       ).toBeVisible();
       await expect(
-        page.getByText(/This feature is under development/i),
+        page.getByRole("button", { name: /Notify Me/i }),
       ).toBeVisible();
-      await expect(page.getByRole("link", { name: /Go Back/i })).toBeVisible();
     });
   });
 });

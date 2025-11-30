@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@prisma/client": "^7.0.0",
-    "@prisma/client-runtime-utils": "^7.0.1"
+    "@prisma/client-runtime-utils": "^7.0.1",
+    "dotenv": "^17.2.3"
   }
 }

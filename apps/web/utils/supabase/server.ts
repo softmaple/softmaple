@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import type { Database } from "@/types/model";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createMockSupabaseClient } from "./mockClient";
 
 export const createClient = async (
   cookieStore?: ReturnType<typeof cookies>,
@@ -15,77 +16,8 @@ export const createClient = async (
     if (testUser) {
       try {
         const userData = JSON.parse(testUser);
-        // Return a mock Supabase client that returns test data
-        return {
-          auth: {
-            getUser: async () => ({
-              data: { user: userData },
-              error: null,
-            }),
-            getSession: async () => ({
-              data: {
-                session: {
-                  access_token: "test-token",
-                  refresh_token: "test-refresh",
-                  expires_at: Math.floor(Date.now() / 1000) + 3600,
-                  user: userData,
-                },
-              },
-              error: null,
-            }),
-            signOut: async () => ({ error: null }),
-            signInWithPassword: async () => ({
-              data: { user: userData, session: {} },
-              error: null,
-            }),
-          },
-          from: () => ({
-            select: <T = any>() => {
-              const mockData = [
-                {
-                  id: "mock-id",
-                  slug: "test-workspace",
-                  name: "Test Workspace",
-                  title: "Test Workspace",
-                  description: "Mock workspace for testing",
-                  owner_id: userData.id,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                },
-              ];
-              const chainObj: any = {
-                select: <T = any>(query?: string) => chainObj,
-                eq: (column: string, value: any) => chainObj,
-                match: (filter: any) => chainObj,
-                order: (column: string, options?: any) => chainObj,
-                limit: (count: number) => chainObj,
-                maybeSingle: async () => ({ data: mockData[0], error: null }),
-                single: async () => ({ data: mockData[0], error: null }),
-                // Support both direct access and async access patterns
-                data: mockData,
-                error: null,
-                then: async (resolve: any) =>
-                  resolve({ data: mockData, error: null }),
-              };
-              return chainObj;
-            },
-            insert: () => ({
-              select: <T = any>() => ({
-                single: async () => ({ data: {}, error: null }),
-              }),
-            }),
-            update: () => ({
-              eq: () => ({
-                select: () => ({
-                  single: async () => ({ data: {}, error: null }),
-                }),
-              }),
-            }),
-            delete: () => ({
-              eq: () => ({ then: async () => ({}) }),
-            }),
-          }),
-        } as any;
+        // Return a properly typed mock Supabase client
+        return createMockSupabaseClient(userData);
       } catch (e) {
         // Fall through to normal client creation
       }

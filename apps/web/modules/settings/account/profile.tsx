@@ -60,9 +60,9 @@ export const Profile: FC<ProfileProps> = (props) => {
 
       if (data) {
         setProfile({
-          name: data?.full_name || "",
-          email: data?.email || "",
-          avatar: data?.avatar_url || "",
+          name: (data as any)?.full_name || "",
+          email: (data as any)?.email || "",
+          avatar: (data as any)?.avatar_url || "",
         });
       }
     } catch (e) {

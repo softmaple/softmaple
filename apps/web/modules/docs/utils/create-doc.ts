@@ -10,7 +10,7 @@ export const createDoc = async (newDoc: DocsType["Insert"]) => {
 
     const queryBuilder = supabase
       .from(DOCUMENTS_TABLE.name)
-      .insert(newDoc)
+      .insert(newDoc as any)
       .select<string, DocsType["Row"]>("*")
       .maybeSingle();
 
@@ -29,7 +29,7 @@ export const upsertDoc = async (
 
     const queryBuilder = supabase
       .from(DOCUMENTS_TABLE.name)
-      .upsert(nextDoc)
+      .upsert(nextDoc as any)
       .select<string, DocsType["Row"]>("*")
       .maybeSingle();
 

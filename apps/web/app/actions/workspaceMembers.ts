@@ -11,7 +11,7 @@ export const createWorkspaceMember = async (
 
   return supabase
     .from("workspace_members")
-    .insert(data)
+    .insert(data as any)
     .select<string, WorkspaceMembersType["Row"]>("*");
 };
 

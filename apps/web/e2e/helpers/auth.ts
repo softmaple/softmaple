@@ -26,12 +26,17 @@ export async function mockAuthentication(page: Page, user: MockUser = {}) {
     updated_at: new Date().toISOString(),
   };
 
+  // Get the domain from the current page URL or default to localhost
+  const domain = page.url().startsWith("http")
+    ? new URL(page.url()).hostname
+    : "localhost";
+
   // Set test user cookie that the middleware will recognize
   await page.context().addCookies([
     {
       name: "e2e-test-user",
       value: JSON.stringify(userData),
-      domain: "localhost",
+      domain: domain,
       path: "/",
       expires: Math.floor(Date.now() / 1000) + 3600,
       httpOnly: false,

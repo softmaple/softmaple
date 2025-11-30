@@ -8,7 +8,7 @@ test.describe.skip("Document Management", () => {
     await mockAuthentication(page);
   });
 
-  test("should create a new document", async ({ page }) => {
+  test.skip("should create a new document", async ({ page }) => {
     await page.goto("/workspace/test-workspace");
 
     // Click create document
@@ -28,7 +28,7 @@ test.describe.skip("Document Management", () => {
     ).toBeVisible();
   });
 
-  test("should open document editor", async ({ page }) => {
+  test.skip("should open document editor", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     // Check editor is loaded
@@ -36,7 +36,7 @@ test.describe.skip("Document Management", () => {
     await expect(page.getByRole("toolbar")).toBeVisible();
   });
 
-  test("should save document changes", async ({ page }) => {
+  test.skip("should save document changes", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     // Wait for editor
@@ -53,7 +53,7 @@ test.describe.skip("Document Management", () => {
     ).toBeVisible({ timeout: 5000 });
   });
 
-  test("should format text in editor", async ({ page }) => {
+  test.skip("should format text in editor", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     const editor = page.getByRole("textbox", { name: /editor/i });
@@ -70,7 +70,7 @@ test.describe.skip("Document Management", () => {
     await expect(editor.locator("strong")).toContainText("Bold text");
   });
 
-  test("should insert lists", async ({ page }) => {
+  test.skip("should insert lists", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     const editor = page.getByRole("textbox", { name: /editor/i });
@@ -90,7 +90,7 @@ test.describe.skip("Document Management", () => {
     await expect(editor.locator("ul li")).toHaveCount(3);
   });
 
-  test("should insert headings", async ({ page }) => {
+  test.skip("should insert headings", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     const editor = page.getByRole("textbox", { name: /editor/i });
@@ -104,7 +104,7 @@ test.describe.skip("Document Management", () => {
     await expect(editor.locator("h1, h2, h3")).toContainText("Main Heading");
   });
 
-  test("should delete a document", async ({ page }) => {
+  test.skip("should delete a document", async ({ page }) => {
     await page.goto("/workspace/test-workspace");
 
     // Find a document card
@@ -124,7 +124,7 @@ test.describe.skip("Document Management", () => {
     await expect(page.getByText(/Document deleted/i)).toBeVisible();
   });
 
-  test("should rename a document", async ({ page }) => {
+  test.skip("should rename a document", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     // Click on document title to edit
@@ -142,7 +142,7 @@ test.describe.skip("Document Management", () => {
     ).toBeVisible();
   });
 
-  test("should export document", async ({ page }) => {
+  test.skip("should export document", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     // Open export menu
@@ -156,7 +156,7 @@ test.describe.skip("Document Management", () => {
     await expect(page.getByRole("menuitem", { name: /HTML/i })).toBeVisible();
   });
 
-  test("should show document history", async ({ page }) => {
+  test.skip("should show document history", async ({ page }) => {
     await page.goto("/workspace/test-workspace/doc/test-doc-id");
 
     // Open history panel

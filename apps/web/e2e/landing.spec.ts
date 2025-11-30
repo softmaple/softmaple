@@ -95,8 +95,14 @@ test.describe("Landing Page", () => {
       // Some buttons might just be decorative or not yet implemented
       await startWritingButton.click();
 
-      // Wait a bit to see if navigation happens
-      await page.waitForTimeout(1000);
+      // Wait for navigation or no-op indication
+      // Try to wait for URL change with timeout, if no change then button is decorative
+      await Promise.race([
+        page.waitForURL(/\/(login|dashboard|signup)/, { timeout: 2000 }),
+        page.waitForTimeout(2000), // Fallback if URL doesn't change
+      ]).catch(() => {
+        // URL didn't change, button might be decorative
+      });
 
       // Check if we navigated away from the home page
       const currentUrl = page.url();

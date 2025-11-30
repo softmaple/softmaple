@@ -19,9 +19,10 @@
   },
   "packageManager": "pnpm@10.23.0",
   "devDependencies": {
-    "prisma": "^6.13.0"
+    "prisma": "^7.0.0"
   },
   "dependencies": {
-    "@prisma/client": "^6.13.0"
+    "@prisma/client": "^7.0.0",
+    "@prisma/client-runtime-utils": "^7.0.1"
   }
 }

@@ -7,10 +7,6 @@
     "light": "#EA580C",
     "dark": "#9A3412"
   },
-  "metadata": {
-    "og:site_name": "Softmaple Documentation",
-    "og:description": "Modern collaborative document editor with real-time collaboration, Markdown support, and LaTeX conversion"
-  },
   "tabs": [
     {
       "name": "API Reference",

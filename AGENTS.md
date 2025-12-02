@@ -1,16 +1,39 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The monorepo uses Turborepo with workspaces for `apps/*` and `packages/*`. `apps/web/` hosts the Next.js 16 client, using `app/` for routes and `components/`, `modules/`, and `utils/` for shared UI and logic. Reusable tooling lives under `packages/`, including `ui/` for design system primitives, `db/` for Prisma client access, `editor/` for Lexical extensions, and `md2latex/` for Markdown conversion tests. Shared configuration (`eslint-config/`, `typescript-config/`, `config/`) and assets such as Prisma schema reside alongside these packages.
+Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and `docs/` (Mintlify). The web app uses `app/` for routing, `components/` for UI, `modules/` for features. Key packages: `ui/` (design system), `db/` (Prisma), `editor/` (Lexical), `md2latex/` (converter), plus shared configs.
 
 ## Build, Test, and Development Commands
-Use pnpm from the repo root. Run `pnpm dev` to start all watchable apps (Next.js uses Turbopack; requires `LIVEBLOCKS_SECRET_KEY`). Build with `pnpm build` to execute all workspace build tasks. Lint with `pnpm lint` across all packages, or scope to the web app via `pnpm --filter @softmaple/web lint`. Type checking is available through `pnpm --filter @softmaple/web typecheck`. Database utilities live in `@softmaple/db`; regenerate Prisma typings with `pnpm --filter @softmaple/db db:generate`. Run package-specific tests via `pnpm --filter <package-name> test`.
+- `pnpm dev` - Start development servers (Turbopack)
+- `pnpm build` - Build all workspaces
+- `pnpm lint` - Run ESLint
+- `pnpm format` - Prettier formatting
+- `pnpm --filter @softmaple/web typecheck` - TypeScript checks
+- `pnpm --filter @softmaple/web test:e2e` - Playwright tests
+- `pnpm --filter @softmaple/db db:generate` - Regenerate Prisma client
 
 ## Coding Style & Naming Conventions
-Follow the shared ESLint presets in `packages/eslint-config/` and Prettier settings from `.prettierrc.json` (2-space indent, double quotes, semicolons). React components use PascalCase file names, while utility modules prefer camelCase. Keep Next.js route segments lowercase and hyphenated. Format code with `pnpm format` to run Prettier across all TypeScript and Markdown files. Use `pnpm --filter @softmaple/web lint:fix` for automatic ESLint fixes. Husky pre-commit hooks automatically format staged files.
+- **Formatting:** 2-space indent, double quotes, semicolons (Prettier)
+- **Components:** PascalCase filenames
+- **Utilities:** camelCase filenames  
+- **Routes:** lowercase-hyphenated
+- **Linting:** ESLint configs in `packages/eslint-config/`
+- Husky pre-commit hooks auto-format staged files
 
 ## Testing Guidelines
-Vitest powers the unit suite in `packages/md2latex/tests/`. Execute `pnpm --filter @softmaple/md2latex test` locally; add new specs near the code under test using the `*.test.ts` naming pattern. The Next.js app relies on type safety and build verification—run `pnpm --filter @softmaple/web typecheck` and `pnpm --filter @softmaple/web build` before shipping significant UI changes. Regenerate Prisma artifacts after schema edits and include resulting diffs.
+- **Unit tests:** Vitest in `packages/md2latex/tests/` (*.test.ts)
+- **E2E tests:** Playwright in `apps/web/e2e/` (*.spec.ts)  
+- Run tests before merging
+- Regenerate Prisma after schema changes
 
 ## Commit & Pull Request Guidelines
-Keep commits scoped and conventional: `type(scope): summary`. Use one of these types: `fix`, `feat`, `build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`. For scope, use empty if changing root files, `apps/web` for web app changes, or `packages/<name>` for package changes (e.g., `fix(apps/web): adjust theme provider`, `chore(packages/editor): update config`, `docs: update README`). Create feature branches with timestamp suffix using `branch-name-$(date +%s)` format for uniqueness. Reference linked issues in commit bodies when relevant. **Always request user approval before commits and pushes to remote.** For pull requests, include a concise summary, testing notes (commands run), and screenshots or screen recordings for UI updates. Ensure lint, build, and Prisma commands succeed in CI before requesting review.
+**Commits:** `type(scope): summary`
+- Types: `fix`, `feat`, `build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`
+- Scopes: `apps/web`, `packages/<name>`, or empty for root
+- Branch naming: `feature-name-$(date +%s)`
+- **Always request user approval before commits/pushes**
+
+**PRs:** Include summary, test commands, screenshots for UI changes
+
+## Documentation
+Refer to the [docs.json schema](https://mintlify.com/docs.json) when building the docs.json file and site navigation.

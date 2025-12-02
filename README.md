@@ -49,6 +49,9 @@
       - **shadcn/ui** for UI components
       - **Tailwind CSS** v4 for styling
 
+- docs
+    - [docs](docs) - **Mintlify Documentation** - Project documentation
+
 We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation.
 
 ```bash

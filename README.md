@@ -24,107 +24,57 @@
  </picture>
 </a>
 
-# 📝 SoftMaple - A Paper Typesetting Editor
+# Development
 
-SoftMaple is a collaborative paper typesetting editor built with modern web technologies. Experience it at [softmaple.ink](https://softmaple.ink).
-
-## 🚀 Features
-
-- **Real-time Collaboration** - Powered by Liveblocks for seamless multi-user editing
-- **Rich Text Editing** - Built with Lexical for a powerful editing experience
-- **LaTeX Support** - Convert Markdown to LaTeX with built-in converter
-- **Modern Stack** - Next.js 16, React 19, TypeScript, and Tailwind CSS v4
-- **Database & Auth** - Supabase for authentication and data persistence
-
-## 📚 Documentation
-
-Visit our documentation sites:
-- [Main Documentation](https://softmaple.ink)
-- [Blog](https://blog.softmaple.ink)
-- [Developer Insights](https://insights.softmaple.ink)
-
-## 🏗️ Architecture
-
-Built with [Turborepo](https://turborepo.org/) monorepo structure:
+## shadcn/ui [turborepo](https://turborepo.org/) architecture:
 
 - apps
-  - **[web](apps/web)** - Main Next.js 16 application with App Router
+    - [web](apps/web) - Main web application
+      - **Next.js** v16 with `app` folder
+      - **Liveblocks** for real-time collaboration
+      - **Supabase** for database and authentication
 
 - packages
-  - **[config](packages/config)** - Shared configuration
-  - **[db](packages/db)** - Prisma ORM and database schema
-  - **[editor](packages/editor)** - Lexical-based rich text editor
-  - **[md2latex](packages/md2latex)** - Markdown to LaTeX converter
-  - **[ui](packages/ui)** - Shared component library (shadcn/ui)
-  - **[eslint-config](packages/eslint-config)** - ESLint presets
-  - **[typescript-config](packages/typescript-config)** - TypeScript configs
+    - [config](packages/config) - Site configuration
+    - [db](packages/db) - Database schema and migrations
+      - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
+      - **Supabase** self-hosted guide
+    - [editor](packages/editor) - Rich text editor
+      - **Lexical** for rich text editing
+      - **React** 19 and **Vite**
+    - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
+    - [eslint-config](packages/eslint-config) - Shared ESLint configuration
+    - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`
+    - [ui](packages/ui) - Shared React component library
+      - **shadcn/ui** for UI components
+      - **Tailwind CSS** v4 for styling
 
-- docs
-  - **[Mintlify Documentation](docs)** - Project documentation
-
-## 🛠️ Development
-
-### Prerequisites
-
-- Node.js >= 24
-- pnpm 10.23.0 ([installation guide](https://pnpm.io/installation))
-
-### Quick Start
+We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation.
 
 ```bash
-# Clone the repository
-git clone https://github.com/softmaple/softmaple.git
-cd softmaple
-
-# Install dependencies
 pnpm install
-
-# Set up environment variables
-cp apps/web/.env.example apps/web/.env
-# Add your LIVEBLOCKS_SECRET_KEY and other required vars
-
-# Start development server
 pnpm dev
 ```
 
-### Key Commands
+# Community
+The SoftMaple community can be found on [GitHub Discussions](https://github.com/softmaple/softmaple/discussions), where you can ask questions and voice ideas.
 
-- `pnpm dev` - Start development servers (Turbopack)
-- `pnpm build` - Build all workspaces
-- `pnpm lint` - Run ESLint across all packages
-- `pnpm format` - Format code with Prettier
-- `pnpm --filter @softmaple/web test:e2e` - Run E2E tests
-
-For more detailed commands, see [AGENTS.md](AGENTS.md).
-
-## 👥 Community
-
-Join our community:
-- [GitHub Discussions](https://github.com/softmaple/softmaple/discussions) - Ask questions and share ideas
-- [Discord Server](https://discord.gg/Vwsuqq7dQD) - Chat with other community members
+To chat with other community members you can join the [SoftMaple Discord](https://discord.gg/Vwsuqq7dQD).
 
 Our [Code of Conduct](.github/CODE_OF_CONDUCT.md) applies to all SoftMaple community channels.
 
-## 🤝 Contributing
+# Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](.github/CONTRIBUTING.md) and [Repository Guidelines](AGENTS.md) for development practices.
+See [Contributing Guidelines](.github/CONTRIBUTING.md).
 
-### Commit Convention
-
-We use conventional commits: `type(scope): summary`
-- Example: `fix(apps/web): resolve auth token issue`
-- Example: `feat(packages/editor): add table support`
-
-## 📄 License
+# License
 
 [Apache-2.0 License](LICENSE)
 
-## 🙏 Special Thanks
+# Special thanks
 
 [![Deploys by Netlify](https://www.netlify.com/v3/img/components/netlify-color-accent.svg)](https://www.netlify.com?utm_source=SoftMaple&utm_campaign=oss)
 
 [![BrowserStack](https://d2ogrdw2mh0rsl.cloudfront.net/production/images/static/header/header-logo.svg)](https://www.browserstack.com/)
 
 [Devin AI](https://devin.ai/) _$500 grants_
-
-[![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)

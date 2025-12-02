@@ -1,12 +1,42 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
-  "name": "Maple Starter Kit",
+  "name": "Softmaple",
   "colors": {
     "primary": "#9A3412",
     "light": "#EA580C",
     "dark": "#9A3412"
   },
+  "metadata": {
+    "og:site_name": "Softmaple Documentation",
+    "og:description": "Modern collaborative document editor with real-time collaboration, Markdown support, and LaTeX conversion"
+  },
+  "tabs": [
+    {
+      "name": "API Reference",
+      "url": "api-reference"
+    },
+    {
+      "name": "Blog",
+      "url": "https://blog.softmaple.ink"
+    },
+    {
+      "name": "Live Demo",
+      "url": "https://softmaple.ink"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "Discord",
+      "icon": "discord",
+      "url": "https://discord.gg/Vwsuqq7dQD"
+    },
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/softmaple/softmaple"
+    }
+  ],
   "favicon": "/favicon.svg",
   "contextual": {
    "options": [
@@ -45,6 +75,14 @@
             ]
           },
           {
+            "group": "AI Tools",
+            "pages": [
+              "ai-tools/cursor",
+              "ai-tools/claude-code",
+              "ai-tools/windsurf"
+            ]
+          },
+          {
             "group": "API Documentation",
             "pages": [
               "api-reference/introduction"
@@ -67,10 +105,24 @@
     "dark": "/logo/dark.svg"
   },
   "footer": {
+    "links": [
+      {
+        "text": "Live Demo",
+        "url": "https://softmaple.ink"
+      },
+      {
+        "text": "Insights",
+        "url": "https://insights.softmaple.ink"
+      },
+      {
+        "text": "Blog",
+        "url": "https://blog.softmaple.ink"
+      }
+    ],
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://www.linkedin.com/company/mintsearch"
+      "github": "https://github.com/softmaple/softmaple",
+      "discord": "https://discord.gg/Vwsuqq7dQD",
+      "x": "https://twitter.com/Tom61319231"
     }
   }
 }

@@ -1,96 +1,237 @@
 ---
 title: 'Development'
-description: 'Learn how to preview changes locally'
+description: 'Set up the Softmaple development environment'
 ---
 
 <Info>
-  **Prerequisite** You should have installed Node.js (version 18.10.0 or
-  higher).
+  **Prerequisites** Node.js 20+, pnpm 9.0+, PostgreSQL, and Git
 </Info>
 
-Step 1. Install Mintlify on your OS:
+## Monorepo Structure
+
+Softmaple is organized as a Turborepo monorepo with the following structure:
+
+```
+softmaple/
+├── apps/
+│   └── web/           # Next.js 16 application
+├── packages/
+│   ├── db/            # Prisma database client
+│   ├── ui/            # Shared UI components
+│   ├── editor/        # Lexical editor extensions
+│   ├── md2latex/      # Markdown to LaTeX converter
+│   ├── eslint-config/ # Shared ESLint configuration
+│   ├── typescript-config/ # Shared TypeScript configuration
+│   └── config/        # Shared configuration utilities
+├── docs/              # Documentation (this site)
+├── turbo.json         # Turborepo configuration
+└── package.json       # Root workspace configuration
+```
+
+## Getting Started
+
+### 1. Clone and Install
+
+```bash
+# Clone the repository
+git clone https://github.com/softmaple/softmaple.git
+cd softmaple
+
+# Install dependencies
+pnpm install
+```
+
+### 2. Environment Configuration
+
+Create your `.env` file from the example:
+
+```bash
+cp apps/web/.env.example apps/web/.env
+```
+
+Required environment variables:
+
+```env
+# Database URLs
+DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
+DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
+
+# Supabase Authentication
+NEXT_PUBLIC_SUPABASE_URL="your-supabase-project-url"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-supabase-anon-key"
+
+# Liveblocks (Real-time collaboration)
+NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY="your-liveblocks-public-key"
+LIVEBLOCKS_SECRET_KEY="your-liveblocks-secret-key"
+```
+
+### 3. Database Setup
+
+Initialize the database with Prisma:
+
+```bash
+# Generate Prisma client
+pnpm --filter @softmaple/db db:generate
+
+# Run migrations
+pnpm --filter @softmaple/db db:migrate
+
+# (Optional) Seed the database
+pnpm --filter @softmaple/db db:seed
+```
+
+## Development Commands
+
+All commands should be run from the repository root:
+
+### Core Commands
+
+```bash
+# Start development server (all apps)
+pnpm dev
+
+# Build all packages and apps
+pnpm build
+
+# Run linting
+pnpm lint
+
+# Format code with Prettier
+pnpm format
+```
+
+### Package-Specific Commands
+
+Use the `--filter` flag to run commands for specific packages:
 
 <CodeGroup>
 
-```bash npm
-npm i -g mintlify
+```bash Web App
+# Type checking
+pnpm --filter @softmaple/web typecheck
+
+# Run E2E tests
+pnpm --filter @softmaple/web test:e2e
+
+# Build production
+pnpm --filter @softmaple/web build
 ```
 
-```bash yarn
-yarn global add mintlify
+```bash Database
+# Generate Prisma client
+pnpm --filter @softmaple/db db:generate
+
+# Run migrations
+pnpm --filter @softmaple/db db:migrate
+
+# Open Prisma Studio
+pnpm --filter @softmaple/db db:studio
+```
+
+```bash Tests
+# Run md2latex tests
+pnpm --filter @softmaple/md2latex test
+
+# Run with coverage
+pnpm --filter @softmaple/md2latex test:coverage
 ```
 
 </CodeGroup>
 
-Step 2. Go to the docs are located (where you can find `docs.json`) and run the following command:
+## Git Workflow
+
+### Branch Naming
+
+Create branches with timestamp suffix:
 
 ```bash
-mintlify dev
+git checkout -b feature/my-feature-$(date +%s)
 ```
 
-The documentation website is now available at `http://localhost:3000`.
+### Commit Convention
 
-### Custom Ports
+Use conventional commits:
 
-Mintlify uses port 3000 by default. You can use the `--port` flag to customize the port Mintlify runs on. For example, use this command to run in port 3333:
+```
+type(scope): summary
+
+Types: fix, feat, build, chore, ci, docs, style, refactor, perf, test
+Scope: apps/web, packages/<name>, or empty for root changes
+```
+
+Examples:
+- `feat(apps/web): add document sharing`
+- `fix(packages/db): resolve migration issue`
+- `chore: update dependencies`
+
+## Testing
+
+### Unit Tests
+
+Unit tests use Vitest and are located in `packages/md2latex/tests/`:
 
 ```bash
-mintlify dev --port 3333
+pnpm --filter @softmaple/md2latex test
 ```
 
-You will see an error like this if you try to run Mintlify in a port that's already taken:
+### E2E Tests
 
-```md
-Error: listen EADDRINUSE: address already in use :::3000
+End-to-end tests use Playwright and test the full application:
+
+```bash
+# Run E2E tests
+NEXT_PUBLIC_E2E_TEST_MODE=true pnpm --filter @softmaple/web test:e2e
+
+# Run smoke tests only
+pnpm --filter @softmaple/web test:e2e:smoke
 ```
-
-## Mintlify Versions
-
-Each CLI is linked to a specific version of Mintlify. Please update the CLI if your local website looks different than production.
-
-<CodeGroup>
-
-```bash npm
-npm i -g mintlify@latest
-```
-
-```bash yarn
-yarn global upgrade mintlify
-```
-
-</CodeGroup>
-
-## Deployment
-
-<Tip>
-  Unlimited editors available under the [Startup
-  Plan](https://mintlify.com/pricing)
-</Tip>
-
-You should see the following if the deploy successfully went through:
-
-<Frame>
-  <img src="/images/checks-passed.png" style={{ borderRadius: '0.5rem' }} />
-</Frame>
 
 ## Troubleshooting
 
-Here's how to solve some common problems when working with the CLI.
+Common issues and solutions:
 
 <AccordionGroup>
-  <Accordion title="Mintlify is not loading">
-    Update to Node v18. Run `mintlify install` and try again.
+  <Accordion title="pnpm: command not found">
+    Install pnpm globally:
+    
+    ```bash
+    npm install -g pnpm
+    ```
   </Accordion>
-  <Accordion title="No such file or directory on Windows">
-Go to the `C:/Users/Username/.mintlify/` directory and remove the `mint`
-folder. Then Open the Git Bash in this location and run `git clone
-https://github.com/mintlify/mint.git`.
-
-Repeat step 3.
-
+  <Accordion title="Database connection failed">
+    Ensure PostgreSQL is running and the DATABASE_URL is correct:
+    
+    ```bash
+    # Check PostgreSQL status
+    psql -U postgres -c "\l"
+    ```
   </Accordion>
-  <Accordion title="Getting an unknown error">
-    Try navigating to the root of your device and delete the ~/.mintlify folder.
-    Then run `mintlify dev` again.
+  <Accordion title="Husky hooks failing">
+    If pre-commit hooks fail, you can bypass them temporarily:
+    
+    ```bash
+    HUSKY=0 git commit -m "your message"
+    ```
+    
+    But make sure to fix any issues before pushing.
+  </Accordion>
+  <Accordion title="Module not found errors">
+    Regenerate Prisma client after schema changes:
+    
+    ```bash
+    pnpm --filter @softmaple/db db:generate
+    ```
   </Accordion>
 </AccordionGroup>
+
+## Resources
+
+- [GitHub Repository](https://github.com/softmaple/softmaple)
+- [Live Demo](https://softmaple.ink)
+- [Discord Community](https://discord.gg/Vwsuqq7dQD)
+- [Blog](https://blog.softmaple.ink)
+- [Insights Dashboard](https://insights.softmaple.ink)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Turborepo Documentation](https://turbo.build/repo/docs)
+- [Prisma Documentation](https://www.prisma.io/docs)
+- [Liveblocks Documentation](https://liveblocks.io/docs)

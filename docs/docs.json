@@ -9,28 +9,28 @@
   },
   "tabs": [
     {
-      "name": "API Reference",
+      "tab": "API Reference",
       "url": "api-reference"
     },
     {
-      "name": "Blog",
+      "tab": "Blog",
       "url": "https://blog.softmaple.ink"
     },
     {
-      "name": "Live Demo",
+      "tab": "Live Demo",
       "url": "https://softmaple.ink"
     }
   ],
   "anchors": [
     {
-      "name": "Discord",
+      "anchor": "Discord",
       "icon": "discord",
-      "url": "https://discord.gg/Vwsuqq7dQD"
+      "href": "https://discord.gg/Vwsuqq7dQD"
     },
     {
-      "name": "GitHub",
+      "anchor": "GitHub",
       "icon": "github",
-      "url": "https://github.com/softmaple/softmaple"
+      "href": "https://github.com/softmaple/softmaple"
     }
   ],
   "favicon": "/favicon.svg",

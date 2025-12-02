@@ -11,7 +11,14 @@ import { FileText, Github, Mail } from "lucide-react";
 import { LoginForm } from "@/modules/auth/login-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
 
-export default async function LoginPage() {
+interface LoginPageProps {
+  searchParams: Promise<{ message?: string }>;
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams;
+  const message = params?.message;
+
   return (
     <AuthGuard>
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -26,6 +33,11 @@ export default async function LoginPage() {
             <CardDescription>Sign in to your Softmaple account</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {message && (
+              <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
+                {message}
+              </div>
+            )}
             <LoginForm />
 
             <div className="relative">

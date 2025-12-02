@@ -43,20 +43,39 @@ export async function login(formData: FormData) {
 export async function signup(formData: FormData) {
   const supabase = await createClient();
 
-  // type-casting here for convenience
-  // in practice, you should validate your inputs
-  const data = {
-    email: formData.get("email") as string,
-    password: formData.get("password") as string,
-  };
+  // Extract and validate data
+  const email = formData.get("email") as string;
+  const password = formData.get("password") as string;
 
-  const { error } = await supabase.auth.signUp(data);
+  if (!email || !password) {
+    throw new Error("Email and password are required");
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/confirm`,
+    },
+  });
 
   if (error) {
-    console.error(error);
+    console.error("Signup error:", error);
     throw error;
   }
 
+  // Check if email confirmation is required
+  if (data?.user && !data.session) {
+    // User created but needs email confirmation
+    revalidatePath("/login", "layout");
+    redirect("/login?message=Check your email to confirm your account");
+  } else if (data?.session) {
+    // User created and auto-confirmed (for dev environments)
+    revalidatePath("/dashboard", "layout");
+    redirect("/dashboard");
+  }
+
+  // Fallback redirect
   revalidatePath("/", "layout");
   redirect("/");
 }

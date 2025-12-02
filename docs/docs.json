@@ -7,32 +7,6 @@
     "light": "#EA580C",
     "dark": "#9A3412"
   },
-  "tabs": [
-    {
-      "name": "API Reference",
-      "url": "api-reference"
-    },
-    {
-      "name": "Blog",
-      "url": "https://blog.softmaple.ink"
-    },
-    {
-      "name": "Live Demo",
-      "url": "https://softmaple.ink"
-    }
-  ],
-  "anchors": [
-    {
-      "name": "Discord",
-      "icon": "discord",
-      "url": "https://discord.gg/Vwsuqq7dQD"
-    },
-    {
-      "name": "GitHub",
-      "icon": "github",
-      "url": "https://github.com/softmaple/softmaple"
-    }
-  ],
   "favicon": "/favicon.svg",
   "contextual": {
    "options": [

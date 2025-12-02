@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
-  "name": "Maple Starter Kit",
+  "name": "Softmaple",
   "colors": {
     "primary": "#9A3412",
     "light": "#EA580C",
@@ -21,56 +21,108 @@
    ]
  },
   "navigation": {
-    "languages": [
+    "groups": [
       {
-        "language": "en",
-        "groups": [
-          {
-            "group": "Get Started",
-            "pages": [
-              "welcome",
-              "quickstart",
-              "development"
-            ]
-          },
-          {
-            "group": "Essentials",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/settings",
-              "essentials/navigation",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "API Documentation",
-            "pages": [
-              "api-reference/introduction"
-            ]
-          },
-          {
-            "group": "Endpoint Examples",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete"
-            ]
-          }
+        "group": "Get Started",
+        "pages": [
+          "welcome",
+          "quickstart",
+          "development"
+        ]
+      },
+      {
+        "group": "Essentials",
+        "pages": [
+          "essentials/markdown",
+          "essentials/code",
+          "essentials/images",
+          "essentials/settings",
+          "essentials/navigation",
+          "essentials/reusable-snippets"
+        ]
+      },
+      {
+        "group": "AI Tools",
+        "pages": [
+          "ai-tools/cursor",
+          "ai-tools/claude-code",
+          "ai-tools/windsurf"
+        ]
+      },
+      {
+        "group": "API Documentation",
+        "pages": [
+          "api-reference/introduction"
+        ]
+      },
+      {
+        "group": "Endpoint Examples",
+        "pages": [
+          "api-reference/endpoint/get",
+          "api-reference/endpoint/create",
+          "api-reference/endpoint/delete"
         ]
       }
     ]
   },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+ "logo": {
+   "light": "/logo/light.svg",
+   "dark": "/logo/dark.svg"
   },
   "footer": {
+    "links": [
+      {
+        "header": "Products",
+        "items": [
+          {
+            "label": "Live Demo",
+            "href": "https://softmaple.ink"
+          },
+          {
+            "label": "Insights",
+            "href": "https://insights.softmaple.ink"
+          }
+        ]
+      },
+      {
+        "header": "Resources",
+        "items": [
+          {
+            "label": "Documentation",
+            "href": "https://docs.softmaple.ink/welcome"
+          },
+          {
+            "label": "API Reference",
+            "href": "https://docs.softmaple.ink/api-reference/introduction"
+          },
+          {
+            "label": "Blog",
+            "href": "https://blog.softmaple.ink"
+          }
+        ]
+      },
+      {
+        "header": "Community",
+        "items": [
+          {
+            "label": "Discord",
+            "href": "https://discord.gg/Vwsuqq7dQD"
+          },
+          {
+            "label": "GitHub",
+            "href": "https://github.com/softmaple/softmaple"
+          },
+          {
+            "label": "Twitter",
+            "href": "https://twitter.com/Tom61319231"
+          }
+        ]
+      }
+    ],
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://www.linkedin.com/company/mintsearch"
+      "github": "https://github.com/softmaple/softmaple",
+      "discord": "https://discord.gg/Vwsuqq7dQD",
+      "x": "https://twitter.com/Tom61319231"
     }
   }
 }

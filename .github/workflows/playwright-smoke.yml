@@ -11,6 +11,12 @@ on:
       - '.github/workflows/playwright-smoke.yml'
       - 'pnpm-lock.yaml'
 
+# Concurrency control - only one Playwright test suite (smoke or E2E) runs at a time globally
+# New runs will wait in queue behind the currently running one
+concurrency:
+  group: playwright-global  # Shared group with E2E tests
+  cancel-in-progress: false  # Queue new runs, don't cancel
+
 permissions:
   contents: read
 

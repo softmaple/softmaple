@@ -110,12 +110,12 @@
         "name": "Products",
         "items": [
           {
-            "text": "Live Demo",
-            "url": "https://softmaple.ink"
+            "label": "Live Demo",
+            "href": "https://softmaple.ink"
           },
           {
-            "text": "Insights",
-            "url": "https://insights.softmaple.ink"
+            "label": "Insights",
+            "href": "https://insights.softmaple.ink"
           }
         ]
       },
@@ -123,16 +123,16 @@
         "name": "Resources",
         "items": [
           {
-            "text": "Documentation",
-            "url": "/welcome"
+            "label": "Documentation",
+            "href": "/welcome"
           },
           {
-            "text": "API Reference",
-            "url": "/api-reference/introduction"
+            "label": "API Reference",
+            "href": "/api-reference/introduction"
           },
           {
-            "text": "Blog",
-            "url": "https://blog.softmaple.ink"
+            "label": "Blog",
+            "href": "https://blog.softmaple.ink"
           }
         ]
       },
@@ -140,16 +140,16 @@
         "name": "Community",
         "items": [
           {
-            "text": "Discord",
-            "url": "https://discord.gg/Vwsuqq7dQD"
+            "label": "Discord",
+            "href": "https://discord.gg/Vwsuqq7dQD"
           },
           {
-            "text": "GitHub",
-            "url": "https://github.com/softmaple/softmaple"
+            "label": "GitHub",
+            "href": "https://github.com/softmaple/softmaple"
           },
           {
-            "text": "Twitter",
-            "url": "https://twitter.com/Tom61319231"
+            "label": "Twitter",
+            "href": "https://twitter.com/Tom61319231"
           }
         ]
       }

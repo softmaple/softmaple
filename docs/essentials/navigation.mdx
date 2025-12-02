@@ -15,41 +15,27 @@ Our navigation syntax is recursive which means you can make nested navigation gr
 <CodeGroup>
 
 ```json Regular Navigation
-"navigation": {
-  "tabs": [
+"navigation": [
     {
-      "tab": "Docs",
-      "groups": [
-        {
-          "group": "Getting Started",
-          "pages": ["quickstart"]
-        }
-      ]
+        "group": "Getting Started",
+        "pages": ["quickstart"]
     }
-  ]
-}
+]
 ```
 
 ```json Nested Navigation
-"navigation": {
-  "tabs": [
+"navigation": [
     {
-      "tab": "Docs",
-      "groups": [
-        {
-          "group": "Getting Started",
-          "pages": [
+        "group": "Getting Started",
+        "pages": [
             "quickstart",
             {
-              "group": "Nested Reference Pages",
-              "pages": ["nested-reference-page"]
+                "group": "Nested Reference Pages",
+                "pages": ["nested-reference-page"]
             }
-          ]
-        }
-      ]
+        ]
     }
-  ]
-}
+]
 ```
 
 </CodeGroup>
@@ -67,21 +53,14 @@ You cannot use `api` for the name of a folder unless you nest it inside another 
 </Warning>
 
 ```json Navigation With Folder
-"navigation": {
-  "tabs": [
+"navigation": [
     {
-      "tab": "Docs",
-      "groups": [
-        {
-          "group": "Group Name",
-          "pages": ["your-folder/your-page"]
-        }
-      ]
+        "group": "Group Name",
+        "pages": ["your-folder/your-page"]
     }
-  ]
-}
+]
 ```
 
-## Hidden pages
+## Hidden Pages
 
 MDX files not included in `docs.json` will not show up in the sidebar but are accessible through the search bar and by linking directly to them.

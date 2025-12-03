@@ -9,25 +9,25 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("type") as any;
   const next = searchParams.get("next") ?? "/";
 
-  if (token_hash && type) {
-    const supabase = await createClient();
+  // Throw error early if required parameters are missing
+  if (!token_hash || !type) {
+    throw new Error(
+      "Invalid request parameters. Please provide a valid token and type.",
+    );
+  }
 
-    const { error } = await supabase.auth.verifyOtp({
-      type,
-      token_hash,
-    });
-    
-    if (!error) {
-      // redirect user to specified redirect URL or root of app
-      redirect(next);
-    }
+  const supabase = await createClient();
 
+  const { error } = await supabase.auth.verifyOtp({
+    type,
+    token_hash,
+  });
+  
+  if (error) {
     // redirect the user to an error page with some instructions
     throw error;
   }
 
-  // redirect the user to an error page with some instructions
-  throw new Error(
-    "Invalid request parameters. Please provide a valid token and type.",
-  );
+  // redirect user to specified redirect URL or root of app
+  redirect(next);
 }

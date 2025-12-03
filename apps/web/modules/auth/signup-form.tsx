@@ -12,6 +12,8 @@ export type SignupFormProps = {};
 
 export const SignupForm: FC<SignupFormProps> = () => {
   const [formData, setFormData] = useState({
+    firstName: "",
+    lastName: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -36,6 +38,8 @@ export const SignupForm: FC<SignupFormProps> = () => {
 
     // Create FormData for server action
     const formDataObj = new FormData();
+    formDataObj.append("firstName", formData.firstName);
+    formDataObj.append("lastName", formData.lastName);
     formDataObj.append("email", formData.email);
     formDataObj.append("password", formData.password);
 
@@ -67,6 +71,34 @@ export const SignupForm: FC<SignupFormProps> = () => {
           {error}
         </div>
       )}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="firstName">First name</Label>
+          <Input
+            id="firstName"
+            name="firstName"
+            type="text"
+            placeholder="John"
+            value={formData.firstName}
+            onChange={handleChange}
+            required
+            disabled={isPending}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="lastName">Last name</Label>
+          <Input
+            id="lastName"
+            name="lastName"
+            type="text"
+            placeholder="Doe"
+            value={formData.lastName}
+            onChange={handleChange}
+            required
+            disabled={isPending}
+          />
+        </div>
+      </div>
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input

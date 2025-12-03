@@ -44,11 +44,13 @@ export async function signup(formData: FormData) {
   const supabase = await createClient();
 
   // Extract and validate data
+  const firstName = formData.get("firstName") as string;
+  const lastName = formData.get("lastName") as string;
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
 
-  if (!email || !password) {
-    return { error: "Email and password are required" };
+  if (!firstName || !lastName || !email || !password) {
+    return { error: "All fields are required" };
   }
 
   const { data, error } = await supabase.auth.signUp({
@@ -56,6 +58,11 @@ export async function signup(formData: FormData) {
     password,
     options: {
       emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/confirm`,
+      data: {
+        first_name: firstName,
+        last_name: lastName,
+        full_name: `${firstName} ${lastName}`,
+      },
     },
   });
 
@@ -63,6 +70,10 @@ export async function signup(formData: FormData) {
     console.error("Signup error:", error);
     return { error: error.message };
   }
+
+  // Note: The user metadata (first_name, last_name, full_name) is stored in Supabase Auth
+  // The users table in the database should be populated via a trigger or separate process
+  // that syncs the auth metadata with the database
 
   // Check if email confirmation is required
   if (data?.user && !data.session) {

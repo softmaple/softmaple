@@ -55,6 +55,8 @@ test.describe("Authentication", () => {
     ).toBeVisible();
 
     // Check form fields
+    await expect(page.getByLabel("First name")).toBeVisible();
+    await expect(page.getByLabel("Last name")).toBeVisible();
     await expect(page.getByLabel("Email")).toBeVisible();
     // Signup has two password fields - Password and Confirm Password
     await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
@@ -67,6 +69,159 @@ test.describe("Authentication", () => {
     // Check social login buttons
     await expect(page.getByRole("button", { name: /GitHub/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Google/i })).toBeVisible();
+  });
+
+  test("should display first and last name fields on signup page", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Check that first and last name fields are present
+    const firstNameInput = page.getByLabel("First name");
+    const lastNameInput = page.getByLabel("Last name");
+    
+    await expect(firstNameInput).toBeVisible();
+    await expect(lastNameInput).toBeVisible();
+    
+    // Check placeholders
+    await expect(firstNameInput).toHaveAttribute("placeholder", "John");
+    await expect(lastNameInput).toHaveAttribute("placeholder", "Doe");
+    
+    // Check that they are required fields
+    await expect(firstNameInput).toHaveAttribute("required", "");
+    await expect(lastNameInput).toHaveAttribute("required", "");
+  });
+
+  test("should validate required name fields on signup form", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Try to submit with empty first and last name
+    await page.getByLabel("Email").fill("test@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("password123");
+    await page.getByLabel("Confirm password").fill("password123");
+    
+    // Leave first and last name empty and try to submit
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
+
+    // HTML5 validation should prevent submission
+    // Check that first name field shows validation error
+    const firstNameInput = page.getByLabel("First name");
+    const firstNameValidity = await firstNameInput.evaluate(
+      (el: HTMLInputElement) => el.validity.valid,
+    );
+    expect(firstNameValidity).toBe(false);
+  });
+
+  test("should fill all signup form fields correctly", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Fill in all fields
+    await page.getByLabel("First name").fill("John");
+    await page.getByLabel("Last name").fill("Doe");
+    await page.getByLabel("Email").fill("john.doe@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("securePassword123");
+    await page.getByLabel("Confirm password").fill("securePassword123");
+
+    // Verify all fields have the correct values
+    await expect(page.getByLabel("First name")).toHaveValue("John");
+    await expect(page.getByLabel("Last name")).toHaveValue("Doe");
+    await expect(page.getByLabel("Email")).toHaveValue("john.doe@example.com");
+    await expect(page.getByLabel("Password", { exact: true })).toHaveValue("securePassword123");
+    await expect(page.getByLabel("Confirm password")).toHaveValue("securePassword123");
+
+    // Submit button should be enabled
+    const submitButton = page.locator('button[type="submit"]');
+    await expect(submitButton).toBeEnabled();
+  });
+
+  test("should show error when passwords do not match", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Fill in the form with mismatched passwords
+    await page.getByLabel("First name").fill("John");
+    await page.getByLabel("Last name").fill("Doe");
+    await page.getByLabel("Email").fill("john.doe@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("password123");
+    await page.getByLabel("Confirm password").fill("different456");
+
+    // Submit the form
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
+
+    // Check for error message
+    await expect(page.getByText("Passwords do not match")).toBeVisible();
+  });
+
+  test("should show error when password is too short", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Fill in the form with short password
+    await page.getByLabel("First name").fill("John");
+    await page.getByLabel("Last name").fill("Doe");
+    await page.getByLabel("Email").fill("john.doe@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("12345");
+    await page.getByLabel("Confirm password").fill("12345");
+
+    // Submit the form
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
+
+    // Check for error message
+    await expect(page.getByText("Password must be at least 6 characters")).toBeVisible();
+  });
+
+  test("should clear error message when user starts typing", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Trigger password mismatch error
+    await page.getByLabel("First name").fill("John");
+    await page.getByLabel("Last name").fill("Doe");
+    await page.getByLabel("Email").fill("john.doe@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("password123");
+    await page.getByLabel("Confirm password").fill("different456");
+    
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
+    
+    // Verify error is shown
+    await expect(page.getByText("Passwords do not match")).toBeVisible();
+    
+    // Start typing in any field
+    await page.getByLabel("Confirm password").fill("password123");
+    
+    // Error should be cleared
+    await expect(page.getByText("Passwords do not match")).not.toBeVisible();
+  });
+
+  test("should disable form fields and show loading state during submission", async ({ page }) => {
+    await page.goto("/signup");
+
+    // Fill in the form
+    await page.getByLabel("First name").fill("John");
+    await page.getByLabel("Last name").fill("Doe");
+    await page.getByLabel("Email").fill("john.doe@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("password123");
+    await page.getByLabel("Confirm password").fill("password123");
+
+    // Intercept the signup request to delay it
+    await page.route("**/auth/v1/signup", async (route) => {
+      // Delay for 1 second to observe loading state
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await route.continue();
+    });
+
+    // Submit the form
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click();
+
+    // Check that button shows loading state
+    await expect(submitButton).toHaveText("Creating account...");
+    
+    // Check that fields are disabled
+    await expect(page.getByLabel("First name")).toBeDisabled();
+    await expect(page.getByLabel("Last name")).toBeDisabled();
+    await expect(page.getByLabel("Email")).toBeDisabled();
+    await expect(page.getByLabel("Password", { exact: true })).toBeDisabled();
+    await expect(page.getByLabel("Confirm password")).toBeDisabled();
   });
 
   test("should validate required fields on login form", async ({ page }) => {

@@ -1,4 +1,4 @@
-import { type NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 import { createClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
@@ -47,6 +47,15 @@ function sanitizeRedirectUrl(url: string | null): string {
   return "/";
 }
 
+const VALID_EMAIL_OTP_TYPES = [
+  "signup",
+  "invite",
+  "magiclink",
+  "recovery",
+  "email_change",
+  "email",
+] as const;
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get("token_hash");
@@ -54,10 +63,19 @@ export async function GET(request: NextRequest) {
   const nextParam = searchParams.get("next");
   const safeNext = sanitizeRedirectUrl(nextParam);
 
-  // Throw error early if required parameters are missing
+  // Return 400 error for missing parameters
   if (!token_hash || !type) {
-    throw new Error(
-      "Invalid request parameters. Please provide a valid token_hash and type.",
+    return NextResponse.json(
+      { error: "Invalid request parameters. Please provide a valid token_hash and type." },
+      { status: 400 }
+    );
+  }
+
+  // Validate that type is a valid EmailOtpType
+  if (!VALID_EMAIL_OTP_TYPES.includes(type as any)) {
+    return NextResponse.json(
+      { error: "Invalid type parameter. Must be a valid EmailOtpType." },
+      { status: 400 }
     );
   }
 
@@ -69,8 +87,11 @@ export async function GET(request: NextRequest) {
   });
   
   if (error) {
-    // redirect the user to an error page with some instructions
-    throw error;
+    // Return error response instead of throwing
+    return NextResponse.json(
+      { error: error.message },
+      { status: error.status || 400 }
+    );
   }
 
   // redirect user to specified redirect URL or root of app

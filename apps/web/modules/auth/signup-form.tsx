@@ -5,30 +5,52 @@ import type { FC } from "react";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { Button } from "@softmaple/ui/components/button";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { signup } from "@/app/actions/auth";
 
 export type SignupFormProps = {};
 
 export const SignupForm: FC<SignupFormProps> = () => {
   const [formData, setFormData] = useState({
-    name: "",
+    firstName: "",
+    lastName: "",
     email: "",
     password: "",
     confirmPassword: "",
   });
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+  const [error, setError] = useState<string>("");
+  const [isPending, startTransition] = useTransition();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setError("");
 
-    // Simulate signup
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Basic validation
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
 
-    // Redirect to dashboard
-    router.push("/dashboard");
+    if (formData.password.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+
+    // Create FormData for server action
+    const formDataObj = new FormData();
+    formDataObj.append("firstName", formData.firstName);
+    formDataObj.append("lastName", formData.lastName);
+    formDataObj.append("email", formData.email);
+    formDataObj.append("password", formData.password);
+
+    startTransition(async () => {
+      const result = await signup(formDataObj);
+      // Check if the server action returned an error
+      if (result?.error) {
+        setError(result.error);
+      }
+      // If no error, the server action will handle the redirect
+    });
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -36,24 +58,49 @@ export const SignupForm: FC<SignupFormProps> = () => {
       ...prev,
       [e.target.name]: e.target.value,
     }));
+    // Clear error when user starts typing
+    if (error) {
+      setError("");
+    }
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="name">Full name</Label>
-        <Input
-          id="name"
-          name="name"
-          placeholder="John Doe"
-          value={formData.name}
-          onChange={handleChange}
-          required
-        />
+      {error && (
+        <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
+          {error}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="firstName">First name</Label>
+          <Input
+            id="firstName"
+            name="firstName"
+            type="text"
+            placeholder="John"
+            value={formData.firstName}
+            onChange={handleChange}
+            required
+            disabled={isPending}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="lastName">Last name</Label>
+          <Input
+            id="lastName"
+            name="lastName"
+            type="text"
+            placeholder="Doe"
+            value={formData.lastName}
+            onChange={handleChange}
+            required
+            disabled={isPending}
+          />
+        </div>
       </div>
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
-        {/* TODO: must not end with app domain. */}
         <Input
           id="email"
           name="email"
@@ -62,6 +109,7 @@ export const SignupForm: FC<SignupFormProps> = () => {
           value={formData.email}
           onChange={handleChange}
           required
+          disabled={isPending}
         />
       </div>
       <div className="space-y-2">
@@ -73,6 +121,9 @@ export const SignupForm: FC<SignupFormProps> = () => {
           value={formData.password}
           onChange={handleChange}
           required
+          disabled={isPending}
+          minLength={6}
+          placeholder="At least 6 characters"
         />
       </div>
       <div className="space-y-2">
@@ -84,10 +135,12 @@ export const SignupForm: FC<SignupFormProps> = () => {
           value={formData.confirmPassword}
           onChange={handleChange}
           required
+          disabled={isPending}
+          minLength={6}
         />
       </div>
-      <Button type="submit" className="w-full" disabled={isLoading}>
-        {isLoading ? "Creating account..." : "Create account"}
+      <Button type="submit" className="w-full" disabled={isPending}>
+        {isPending ? "Creating account..." : "Create account"}
       </Button>
     </form>
   );

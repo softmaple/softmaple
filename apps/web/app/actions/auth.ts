@@ -48,7 +48,7 @@ export async function signup(formData: FormData) {
   const password = formData.get("password") as string;
 
   if (!email || !password) {
-    throw new Error("Email and password are required");
+    return { error: "Email and password are required" };
   }
 
   const { data, error } = await supabase.auth.signUp({
@@ -61,7 +61,7 @@ export async function signup(formData: FormData) {
 
   if (error) {
     console.error("Signup error:", error);
-    throw error;
+    return { error: error.message };
   }
 
   // Check if email confirmation is required

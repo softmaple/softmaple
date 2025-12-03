@@ -6,7 +6,6 @@ import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { Button } from "@softmaple/ui/components/button";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { signup } from "@/app/actions/auth";
 
 export type SignupFormProps = {};
@@ -19,7 +18,6 @@ export const SignupForm: FC<SignupFormProps> = () => {
   });
   const [error, setError] = useState<string>("");
   const [isPending, startTransition] = useTransition();
-  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,14 +40,12 @@ export const SignupForm: FC<SignupFormProps> = () => {
     formDataObj.append("password", formData.password);
 
     startTransition(async () => {
-      try {
-        await signup(formDataObj);
-        // Redirect to login page after successful signup
-        router.push("/login?message=Account created successfully! Please check your email to verify your account.");
-      } catch (error) {
-        console.error("Signup error:", error);
-        setError(error instanceof Error ? error.message : "Failed to create account. Please try again.");
+      const result = await signup(formDataObj);
+      // Check if the server action returned an error
+      if (result?.error) {
+        setError(result.error);
       }
+      // If no error, the server action will handle the redirect
     });
   };
 

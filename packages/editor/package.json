@@ -60,7 +60,7 @@
     "storybook": "^10.0.8",
     "tw-animate-css": "^1.3.6",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.47.0",
+    "typescript-eslint": "^8.48.1",
     "vite": "^7.2.4",
     "vitest": "^4.0.13"
   },

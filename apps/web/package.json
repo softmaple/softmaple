@@ -50,7 +50,7 @@
     "@types/react": "19.2.6",
     "@types/react-dom": "19.2.3",
     "eslint": "^9.39.1",
-    "eslint-config-next": "16.0.6",
+    "eslint-config-next": "16.0.7",
     "typescript": "^5.9.3"
   }
 }

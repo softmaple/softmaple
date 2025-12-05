@@ -18,17 +18,11 @@ test.describe("Settings Change Password Link", () => {
   });
   
   test("should render Change Password button in security section", async ({ page }) => {
-    // This test can work without auth by checking if the component renders
-    // In reality, the page redirects to login without auth, but we can still verify
-    // the button exists in the component
-    await page.goto("/settings/account");
-    
-    // The page will redirect to login, but we're testing that the button exists in the component
-    // This is more of a smoke test to ensure the component doesn't break
+    // Without auth, the page redirects to login, so this is a smoke test
+    // to ensure the settings page doesn't throw errors during SSR
     const response = await page.goto("/settings/account", { waitUntil: 'domcontentloaded' });
     
-    // If redirected to login (expected without auth), that's OK
-    // The important thing is that the code compiles and doesn't throw errors
+    // Verify the page loads or redirects without errors
     expect(response?.status() || 200).toBeLessThanOrEqual(308); // Allow redirects
   });
 });

@@ -4,9 +4,9 @@ import type { FC } from "react";
 
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
-import { Button } from "@softmaple/ui/components/button";
 import { useState, useTransition } from "react";
 import { signup } from "@/app/actions/auth";
+import { SubmitButton } from "./submit-button";
 
 export type SignupFormProps = {};
 
@@ -65,12 +65,13 @@ export const SignupForm: FC<SignupFormProps> = () => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="space-y-4">
       {error && (
         <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
           {error}
         </div>
       )}
+      <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="firstName">First name</Label>
@@ -139,9 +140,8 @@ export const SignupForm: FC<SignupFormProps> = () => {
           minLength={6}
         />
       </div>
-      <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Creating account..." : "Create account"}
-      </Button>
+        <SubmitButton text="Create account" loadingText="Creating account..." />
     </form>
+    </div>
   );
 };

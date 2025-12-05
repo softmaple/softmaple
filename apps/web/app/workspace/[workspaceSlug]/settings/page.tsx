@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@softmaple/ui/components/button";
 import { Input } from "@softmaple/ui/components/input";
 import { Label } from "@softmaple/ui/components/label";
@@ -36,18 +36,49 @@ import {
   UserX,
 } from "lucide-react";
 import { useParams } from "next/navigation";
+import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 
 export default function WorkspaceSettingsPage() {
   const params = useParams();
-  const workspaceId = params.workspaceId as string;
+  const workspaceSlug = params.workspaceSlug as string;
 
-  const [workspaceName, setWorkspaceName] = useState("Research Papers");
-  const [workspaceDescription, setWorkspaceDescription] = useState(
-    "Academic research and publications",
-  );
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceDescription, setWorkspaceDescription] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(false);
   const [allowComments, setAllowComments] = useState(true);
   const [autoSave, setAutoSave] = useState(true);
+
+  useEffect(() => {
+    const fetchWorkspace = async () => {
+      if (!workspaceSlug) return;
+      
+      try {
+        setLoading(true);
+        setError(null);
+        const { data, error } = await cachedGetWorkspaceBySlug(workspaceSlug);
+        
+        if (error) {
+          setError("Failed to load workspace settings");
+          console.error("Error fetching workspace:", error);
+          return;
+        }
+        
+        if (data) {
+          setWorkspaceName(data.title || "");
+          setWorkspaceDescription(data.description || "");
+        }
+      } catch (err) {
+        setError("An unexpected error occurred");
+        console.error("Error in fetchWorkspace:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchWorkspace();
+  }, [workspaceSlug]);
 
   const members = [
     {
@@ -78,7 +109,13 @@ export default function WorkspaceSettingsPage() {
 
   const handleSaveSettings = () => {
     // Simulate save
-    console.log("Settings saved");
+    console.log("Settings saved:", {
+      name: workspaceName,
+      description: workspaceDescription,
+      isPublic,
+      allowComments,
+      autoSave
+    });
   };
 
   const handleInviteMember = () => {
@@ -113,6 +150,15 @@ export default function WorkspaceSettingsPage() {
 
       {/* Main Content */}
       <main className="p-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="text-muted-foreground">Loading workspace settings...</div>
+          </div>
+        ) : error ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="text-destructive">{error}</div>
+          </div>
+        ) : (
         <Tabs defaultValue="general" className="space-y-6">
           <TabsList>
             <TabsTrigger value="general">
@@ -349,6 +395,7 @@ export default function WorkspaceSettingsPage() {
             </Card>
           </TabsContent>
         </Tabs>
+        )}
       </main>
     </div>
   );

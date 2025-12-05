@@ -100,43 +100,63 @@ test.describe("Password Reset Flow", () => {
     await expect(errorText.first()).toBeVisible();
   });
 
-  test("should handle password reset flow for unauthenticated users", async ({ page }) => {
-    // This test simulates the full flow when a user is NOT logged in:
-    // 1. User goes to login page
-    // 2. Clicks "Forgot password?"
-    // 3. Enters email and receives reset link
-    // 4. Clicks link (which contains type=recovery param)
-    // 5. Gets redirected to /reset-password/update with a recovery session
-    // 6. Can update password without being fully authenticated
+  test("should navigate to reset password form from login page", async ({ page }) => {
+    // This test verifies the navigation flow from login to password reset
+    // Note: Full email-based password reset testing requires email interception infrastructure
+    // (e.g., MailSlurp, test SMTP server) which is not currently implemented.
+    // TODO: Implement full E2E password reset flow when email testing is available.
     
-    // Start from login page as an unauthenticated user
+    // Start from login page
     await page.goto("/login");
     
-    // Click forgot password link
+    // Verify forgot password link exists
     const forgotPasswordLink = page.locator('a[href="/reset-password"]');
+    await expect(forgotPasswordLink).toBeVisible();
+    await expect(forgotPasswordLink).toContainText("Forgot password?");
+    
+    // Navigate to reset password page
     await forgotPasswordLink.click();
     await expect(page).toHaveURL("/reset-password");
     
-    // Enter email for password reset
+    // Verify reset password form is displayed
+    await expect(page.locator(".text-2xl")).toContainText("Reset your password");
     const emailInput = page.locator('input[name="email"]');
+    await expect(emailInput).toBeVisible();
+    const submitButton = page.locator('button[type="submit"]');
+    await expect(submitButton).toContainText("Send reset link");
+    
+    // Test that the form can be filled
     await emailInput.fill("test@example.com");
+    await expect(emailInput).toHaveValue("test@example.com");
+  });
+
+  test.skip("should complete full password reset flow with email verification", async ({ page }) => {
+    // SKIPPED: This test requires email interception infrastructure
+    // When implemented, this test should:
+    // 1. Request password reset for a test user
+    // 2. Intercept the reset email (using MailSlurp, test SMTP, etc.)
+    // 3. Extract the reset link from the email
+    // 4. Navigate to the reset link (/auth/callback?code=xxx&type=recovery)
+    // 5. Verify redirect to /reset-password/update
+    // 6. Enter new password
+    // 7. Verify password was updated (attempt login with new password)
     
-    // Note: In a real test, we would need to:
-    // - Submit the form
-    // - Intercept the email or use a test email service
-    // - Extract the reset link
-    // - Navigate to it
-    // For now, we'll test that the callback route handles the recovery type correctly
+    // Implementation example:
+    // const testEmail = await mailSlurp.createInbox();
+    // await page.goto("/reset-password");
+    // await page.fill('input[name="email"]', testEmail.emailAddress);
+    // await page.click('button[type="submit"]');
+    // const email = await mailSlurp.waitForLatestEmail(testEmail.id);
+    // const resetLink = extractResetLink(email.body);
+    // await page.goto(resetLink);
+    // await expect(page).toHaveURL("/reset-password/update");
+    // await page.fill('input[name="password"]', "newPassword123");
+    // await page.fill('input[name="confirmPassword"]', "newPassword123");
+    // await page.click('button[type="submit"]');
+    // await expect(page).toHaveURL("/login");
     
-    // Simulate clicking the password reset link from email
-    // The link would look like: /auth/callback?code=xxx&type=recovery
-    // After exchanging the code, it should redirect to /reset-password/update
-    
-    // This is what happens when user clicks the reset link:
-    // 1. Goes to /auth/callback?code=xxx&type=recovery
-    // 2. Callback exchanges code for recovery session
-    // 3. Redirects to /reset-password/update
-    // 4. User can now update password with the recovery session
+    // Placeholder assertion to make the test valid when skipped
+    expect(true).toBe(true);
   });
 
   test("should enable submit button with valid passwords", async ({ page }) => {

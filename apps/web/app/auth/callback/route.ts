@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { sanitizeRedirectUrl } from "@/utils/auth/sanitize-redirect";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
   const type = requestUrl.searchParams.get("type");
-  const next = requestUrl.searchParams.get("next") || "/";
+  const rawNext = requestUrl.searchParams.get("next");
+  const next = sanitizeRedirectUrl(rawNext);
 
   if (code) {
     const supabase = await createClient();
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Normal auth flow - user is authenticated successfully
+    // Use sanitized next URL to prevent open redirect attacks
     return NextResponse.redirect(new URL(next, requestUrl.origin));
   }
 

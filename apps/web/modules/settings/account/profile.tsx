@@ -22,6 +22,7 @@ import { Input } from "@softmaple/ui/components/input";
 import { Switch } from "@softmaple/ui/components/switch";
 import { Separator } from "@softmaple/ui/components/separator";
 import { createClient } from "@/utils/supabase/client";
+import { useRouter } from "next/navigation";
 
 export type ProfileProps = {
   userId: string;
@@ -29,6 +30,7 @@ export type ProfileProps = {
 
 export const Profile: FC<ProfileProps> = (props) => {
   const { userId } = props;
+  const router = useRouter();
 
   const supbase = createClient();
 
@@ -82,6 +84,12 @@ export const Profile: FC<ProfileProps> = (props) => {
   const handleSaveNotifications = () => {
     // Simulate save
     console.log("Notifications saved");
+  };
+
+  const handleChangePassword = () => {
+    // For authenticated users, we redirect to the update password page directly
+    // since they're already logged in
+    router.push("/reset-password/update");
   };
 
   return (
@@ -277,7 +285,9 @@ export const Profile: FC<ProfileProps> = (props) => {
                     Update your password to keep your account secure
                   </p>
                 </div>
-                <Button variant="outline">Change Password</Button>
+                <Button variant="outline" onClick={handleChangePassword}>
+                  Change Password
+                </Button>
               </div>
 
               <Separator />

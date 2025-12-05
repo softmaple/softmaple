@@ -91,19 +91,13 @@ test.describe("Password Reset Flow", () => {
     await passwordInput.fill("12345");
     await confirmPasswordInput.fill("12345");
     
-    // Check for error message
-    // The validation happens in onChange, wait for it to trigger
-    await page.waitForTimeout(100);
-    
     // Check button is disabled when passwords are too short
     await expect(page.locator('button[type="submit"]')).toBeDisabled();
     
     // Additionally check if error message appears
     const errorText = page.locator(".text-red-600");
-    const errorCount = await errorText.count();
-    if (errorCount > 0) {
-      await expect(errorText.first()).toBeVisible();
-    }
+    // Wait for the error message to appear and be visible
+    await expect(errorText.first()).toBeVisible();
   });
 
   test("should enable submit button with valid passwords", async ({ page }) => {
@@ -120,14 +114,11 @@ test.describe("Password Reset Flow", () => {
     await passwordInput.fill("validPassword123");
     await confirmPasswordInput.fill("validPassword123");
     
-    // Wait for validation to trigger
-    await page.waitForTimeout(100);
+    // Wait for button to become enabled after validation completes
+    await expect(submitButton).toBeEnabled();
     
-    // Button should be enabled
-    // Note: In the current implementation, the button might not be enabled
-    // if there's no active validation happening. Let's check for no errors instead.
+    // Also verify no error messages are present
     const errorText = page.locator(".text-red-600");
-    const errorCount = await errorText.count();
-    expect(errorCount).toBe(0);
+    await expect(errorText).toHaveCount(0);
   });
 });

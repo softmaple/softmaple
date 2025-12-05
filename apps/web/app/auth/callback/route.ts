@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
+  const type = requestUrl.searchParams.get("type");
   const next = requestUrl.searchParams.get("next") || "/";
 
   if (code) {
@@ -11,24 +12,20 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     
     if (!error) {
-      // Check if this is a password reset flow
-      const { data, error: getUserError } = await supabase.auth.getUser();
+      // Check if this is a password recovery flow
+      // Supabase sends type=recovery for password reset links
+      if (type === "recovery") {
+        // User clicked on password reset link - redirect to update password page
+        return NextResponse.redirect(new URL("/reset-password/update", requestUrl.origin));
+      }
       
-      // Handle error or missing user
+      // For normal auth flow, verify user exists
+      const { data, error: getUserError } = await supabase.auth.getUser();
       if (getUserError || !data?.user) {
         console.error("Error fetching user after code exchange:", getUserError);
         return NextResponse.redirect(
           new URL("/login?error=Authentication failed", requestUrl.origin)
         );
-      }
-      
-      // Now we can safely access the user
-      const user = data.user;
-      
-      if (user.app_metadata?.provider === 'email' && 
-          user.user_metadata?.email_change_token_current) {
-        // This is a password reset flow
-        return NextResponse.redirect(new URL("/reset-password/update", requestUrl.origin));
       }
       
       // Normal auth flow - user is authenticated successfully

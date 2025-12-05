@@ -101,7 +101,7 @@ export async function resetPassword(formData: FormData) {
   }
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/reset-password/update`,
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback?type=recovery`,
   });
 
   if (error) {
@@ -130,6 +130,9 @@ export async function updatePassword(formData: FormData) {
     redirect("/reset-password/update?error=Password must be at least 6 characters");
   }
 
+  // This works for both:
+  // 1. Authenticated users changing their password from settings
+  // 2. Users who clicked a password reset link (they have a recovery session)
   const { error } = await supabase.auth.updateUser({
     password: password,
   });

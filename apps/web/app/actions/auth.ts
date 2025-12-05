@@ -91,6 +91,63 @@ export async function signup(formData: FormData) {
   redirect("/");
 }
 
+export async function resetPassword(formData: FormData) {
+  const supabase = await createClient();
+
+  const email = formData.get("email") as string;
+
+  if (!email) {
+    redirect("/reset-password?error=Email is required");
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback?type=recovery`,
+  });
+
+  if (error) {
+    console.error("Password reset error:", error);
+    redirect(`/reset-password?error=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect("/reset-password?message=Check your email for the password reset link");
+}
+
+export async function updatePassword(formData: FormData) {
+  const supabase = await createClient();
+
+  const password = formData.get("password") as string;
+  const confirmPassword = formData.get("confirmPassword") as string;
+
+  if (!password || !confirmPassword) {
+    redirect("/reset-password/update?error=All fields are required");
+  }
+
+  if (password !== confirmPassword) {
+    redirect("/reset-password/update?error=Passwords do not match");
+  }
+
+  if (password.length < 6) {
+    redirect("/reset-password/update?error=Password must be at least 6 characters");
+  }
+
+  // This works for both:
+  // 1. Authenticated users changing their password from settings
+  // 2. Users who clicked a password reset link (they have a recovery session)
+  const { error } = await supabase.auth.updateUser({
+    password: password,
+  });
+
+  if (error) {
+    console.error("Password update error:", error);
+    redirect(`/reset-password/update?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // Sign out the user after successful password reset to ensure they login with new password
+  await supabase.auth.signOut();
+  
+  redirect("/login?message=Password updated successfully. Please sign in with your new password.");
+}
+
 export async function logout() {
   const supabase = await createClient();
 

@@ -39,7 +39,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "zod": "^4.1.12"
- },
+  },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@softmaple/db": "workspace:*",
@@ -52,5 +52,5 @@
     "eslint": "^9.39.1",
     "eslint-config-next": "16.0.7",
     "typescript": "^5.9.3"
- }
+  }
 }

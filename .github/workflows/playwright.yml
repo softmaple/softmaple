@@ -18,11 +18,10 @@ on:
       - 'pnpm-lock.yaml'
       - 'turbo.json'
 
-# Concurrency control - only one Playwright test suite (smoke or E2E) runs at a time globally
-# New runs will wait in queue behind the currently running one
+# Concurrency control - cancel in-progress runs when a new push arrives on the same branch
 concurrency:
-  group: playwright-global  # Shared group with smoke tests
-  cancel-in-progress: false  # Queue new runs, don't cancel
+  group: playwright-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

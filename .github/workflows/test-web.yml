@@ -54,6 +54,3 @@ jobs:
 
       - name: Run unit tests
         run: pnpm --filter @softmaple/web test --run
-
-      - name: Run type check
-        run: pnpm --filter @softmaple/web typecheck

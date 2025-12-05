@@ -12,15 +12,26 @@ export async function GET(request: NextRequest) {
     
     if (!error) {
       // Check if this is a password reset flow
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error: getUserError } = await supabase.auth.getUser();
       
-      if (user?.app_metadata?.provider === 'email' && 
-          user?.user_metadata?.email_change_token_current) {
+      // Handle error or missing user
+      if (getUserError || !data?.user) {
+        console.error("Error fetching user after code exchange:", getUserError);
+        return NextResponse.redirect(
+          new URL("/login?error=Authentication failed", requestUrl.origin)
+        );
+      }
+      
+      // Now we can safely access the user
+      const user = data.user;
+      
+      if (user.app_metadata?.provider === 'email' && 
+          user.user_metadata?.email_change_token_current) {
         // This is a password reset flow
         return NextResponse.redirect(new URL("/reset-password/update", requestUrl.origin));
       }
       
-      // Normal auth flow
+      // Normal auth flow - user is authenticated successfully
       return NextResponse.redirect(new URL(next, requestUrl.origin));
     }
   }

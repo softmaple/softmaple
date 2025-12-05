@@ -63,7 +63,7 @@ describe("sanitizeRedirectUrl", () => {
     });
 
     it("should handle invalid URL encoding gracefully", () => {
-      expect(sanitizeRedirectUrl("/path%G%invalid")).toBe("/path%G%invalid");
+      expect(sanitizeRedirectUrl("/path%G%invalid")).toBe("/");
       expect(sanitizeRedirectUrl("/%E0%A4%A")).toBe("/");
     });
   });

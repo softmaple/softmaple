@@ -1,13 +1,27 @@
 /**
  * @softmaple/eg-walker - Eg-walker algorithm for collaborative editing
  * 
- * TODO: Implementation pending
+ * Implementation of the Eg-walker algorithm for collaborative text editing
  */
 
-export const EgWalker = {
-  // Placeholder for the Eg-walker algorithm implementation
-  // The actual implementation will be added once the algorithm details are provided
-  version: "0.1.0",
-};
+// Core exports
+export { EgWalker } from './eg-walker';
+export { EventStorage } from './event-storage';
+export { CausalGraph } from './causal-graph';
+export { CRDT, START_ID, END_ID } from './crdt';
 
-export default EgWalker;
+// Type exports
+export {
+  type Event,
+  type EventId,
+  type EventType,
+  type Position,
+  type Version,
+  type PrepareState,
+  type AugmentedCRDTItem,
+  type spaceInPrepareState,
+  type spaceInEffectState,
+} from './types';
+
+// Default export
+export { EgWalker as default } from './eg-walker';

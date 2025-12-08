@@ -11,6 +11,8 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -25,7 +27,8 @@
     "@softmaple/typescript-config": "workspace:*",
     "@types/node": "^22.16.3",
     "tsup": "^8.3.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
   },
   "publishConfig": {
     "access": "public"

@@ -1,6 +1,8 @@
 {
   "name": "@softmaple/eg-walker",
   "version": "0.1.0",
+  "private": true,
+  "draft": true,
   "description": "Eg-walker algorithm for collaborative editing",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

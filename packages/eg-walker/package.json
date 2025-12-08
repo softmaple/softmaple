@@ -28,7 +28,7 @@
   "license": "MIT",
   "devDependencies": {
     "@softmaple/typescript-config": "workspace:*",
-    "@types/node": "^22.16.3",
+    "@types/node": "^22.16.5",
     "tsup": "^8.3.5",
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"

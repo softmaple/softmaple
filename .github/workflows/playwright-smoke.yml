@@ -78,18 +78,25 @@ jobs:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
-      - name: Build Turborepo
-        run: pnpm turbo run build --filter='!@softmaple/eg-walker'
+      - name: Generate Prisma Client
+        working-directory: packages/db
+        run: pnpm run build
         env:
-          CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_E2E_TEST_MODE: true
-          # Skip Next.js telemetry during build
-          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Build apps/web
+        run: pnpm --filter @softmaple/web build
+        env:
+            CI: true
+            DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+            DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
+            LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
+            NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+            NEXT_PUBLIC_E2E_TEST_MODE: true
+            # Skip Next.js telemetry during build
+            NEXT_TELEMETRY_DISABLED: 1
 
       - name: Install Playwright Browsers
         working-directory: apps/web

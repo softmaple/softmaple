@@ -78,8 +78,8 @@ jobs:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
-      - name: Build Turborepo
-        run: pnpm build
+      - name: Build apps/web
+        run: pnpm --filter @softmaple/web build
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}

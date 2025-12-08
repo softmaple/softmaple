@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:e2e": "next dev",
+    "prebuild": "pnpm --filter @softmaple/db build",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

@@ -79,12 +79,12 @@ jobs:
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
       - name: Build Turborepo
-       run: pnpm turbo run build --filter='!@softmaple/eg-walker'
-        env:
-          CI: true
-         DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-         DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
+        run: pnpm turbo run build --filter='!@softmaple/eg-walker'
+       env:
+         CI: true
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
+         LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_E2E_TEST_MODE: true

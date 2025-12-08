@@ -86,13 +86,6 @@ jobs:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
-      - name: Generate Prisma Client
-        working-directory: packages/db
-        run: pnpm run build
-        env:
-          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-
       - name: Build apps/web
         run: pnpm --filter @softmaple/web build
         env:

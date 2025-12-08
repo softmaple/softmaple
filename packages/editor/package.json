@@ -50,7 +50,7 @@
     "@vitest/browser": "^4.0.13",
     "@vitest/browser-playwright": "^4.0.13",
     "@vitest/coverage-v8": "^4.0.13",
-    "chromatic": "^13.1.3",
+    "chromatic": "^13.1.5",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",

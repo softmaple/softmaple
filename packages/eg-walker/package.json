@@ -1,0 +1,33 @@
+{
+  "name": "@softmaple/eg-walker",
+  "version": "0.1.0",
+  "description": "Eg-walker algorithm for collaborative editing",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "collaborative-editing",
+    "eg-walker",
+    "crdt",
+    "real-time",
+    "synchronization"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^22.16.3",
+    "tsup": "^8.3.5",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

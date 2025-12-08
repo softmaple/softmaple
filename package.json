@@ -9,10 +9,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "turbo run build --filter='!@softmaple/eg-walker'",
+   "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+   "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "prepare": "husky"
   },
   "repository": {

@@ -95,7 +95,7 @@ jobs:
          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_E2E_TEST_MODE: true
+         NEXT_PUBLIC_E2E_TEST_MODE: true
           # Skip Next.js telemetry during build
           NEXT_TELEMETRY_DISABLED: 1
 

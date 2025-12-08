@@ -1,4 +1,4 @@
-name: Test "@softmaple/web" package
+name: Test "@softmaple/web" app
 
 on:
   push:

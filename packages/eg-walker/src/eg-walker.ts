@@ -29,10 +29,11 @@ export class EgWalker {
   }
   
   /**
-   * Add an event to the system
+   * Apply an event to the system
    */
-  addEvent(event: Event): void {
+  applyEvent(event: Event): void {
     this.eventStorage.addEvent(event);
+    this.processEvent(event);
   }
   
   /**
@@ -60,54 +61,68 @@ export class EgWalker {
     this.prepareForEvent(event);
     
     // Step 2: Apply phase
-    this.applyEvent(event);
+    this.executeEvent(event);
     
     // Update current version
     this.currentVersion = new Set([event.id]);
   }
   
-  /**
-   * Prepare phase: retreat and advance to align with event's parent version
-   */
-  private prepareForEvent(event: Event): void {
-    const causalGraph = this.eventStorage.getCausalGraph();
-    const [onlyInCurrent, onlyInTarget] = causalGraph.diff(
-      this.currentVersion,
-      event.parentVersion
-    );
-    
-    // Retreat: decrement prepare state for events only in current version
-    for (const eventId of onlyInCurrent) {
-      const item = this.crdt.findItemById(eventId);
-      if (item) {
-        item.prepareState--;
-      }
-    }
-    
-    // Advance: increment prepare state for events only in target version
-    for (const eventId of onlyInTarget) {
-      const item = this.crdt.findItemById(eventId);
-      if (item) {
-        item.prepareState++;
-      }
-    }
-  }
+ /**
+  * Prepare phase: retreat and advance to align with event's parent version
+  */
+ private prepareForEvent(event: Event): void {
+   const causalGraph = this.eventStorage.getCausalGraph();
+   const [onlyInCurrent, onlyInTarget] = causalGraph.diff(
+     this.currentVersion,
+     event.parentVersion
+   );
+   
+   // Retreat: decrement prepare state for events only in current version
+   for (const eventId of onlyInCurrent) {
+     // Handle both items created by this event and deletion markers
+     const items = this.crdt.getItems();
+     for (const item of items) {
+       if (item) {
+         // Match items created by this event (e.g., "init_0", "init_1", etc.)
+         if (item.id === eventId || item.id.startsWith(eventId + '_')) {
+           if (item.prepareState > 0) {
+             item.prepareState--;
+           }
+         }
+       }
+     }
+   }
+   
+   // Advance: increment prepare state for events only in target version
+   for (const eventId of onlyInTarget) {
+     // Handle both items created by this event and deletion markers
+     const items = this.crdt.getItems();
+     for (const item of items) {
+       if (item) {
+         // Match items created by this event
+         if (item.id === eventId || item.id.startsWith(eventId + '_')) {
+           item.prepareState++;
+         }
+       }
+     }
+   }
+ }
   
   /**
    * Apply phase: execute the event operation
    */
-  private applyEvent(event: Event): void {
+  private executeEvent(event: Event): void {
     if (event.type === EventType.INSERT) {
-      this.applyInsert(event);
+      this.executeInsert(event);
     } else if (event.type === EventType.DELETE) {
-      this.applyDelete(event);
+      this.executeDelete(event);
     }
   }
   
  /**
   * Apply an insert operation
   */
- private applyInsert(event: Event): void {
+ private executeInsert(event: Event): void {
     const content = event.content || '';
     
     // Handle multi-character content by splitting into individual characters
@@ -147,42 +162,84 @@ export class EgWalker {
    }
  }
   
-  /**
-   * Apply a delete operation
-   */
-  private applyDelete(event: Event): void {
-   // Find the item at the position (in prepare state)
-   let index = this.crdt.indexOfPosition(event.position, true);
-   const items = this.crdt.getItems();
+/**
+ * Apply a delete operation
+ */
+private executeDelete(event: Event): void {
+ // Find items to delete based on current document state
+ const items = this.crdt.getItems();
+ let visualPosition = 0;
+ let foundItem: AugmentedCRDTItem | null = null;
+ 
+  // When searching for the delete position, we need to consider the prepare state
+  // to get the view of the document as it was at the event's parent version
+  let searchPosition = 0;
+  
+ for (const item of items) {
+    // Skip sentinels
+   if (!item || item.content === undefined) {
+     continue;
+   }
    
-  // Skip items that aren't in the inserted state
-    while (index < items.length) {
-     const currentItem = items[index];
-     if (!currentItem || currentItem.prepareState === PrepareState.INSERTED) {
+    // Check if this item is visible in prepare state
+    // An item is visible if it has prepareState >= 1 and isn't deleted
+    if (item.prepareState >= PrepareState.INSERTED) {
+      // Count position in the prepare-state view
+      if (searchPosition === event.position && !item.everDeleted) {
+       foundItem = item;
        break;
      }
-    index++;
-  }
-  
-    const item = items[index];
-    if (!item) {
-    console.warn(`Cannot delete at position ${event.position}: no item found`);
-    return;
-  }
-   
-   // Mark as deleted
-   item.everDeleted = true;
-    item.prepareState++; // Increment to mark as deleted in prepare state
-    
-   // Update document at effect position
-   const effectPosition = this.crdt.calculateEffectPosition(index);
-   
-    // Remove from document array at the calculated effect position
-    if (effectPosition >= 0 && effectPosition < this.document.length) {
-      this.document.splice(effectPosition, 1);
-    }
+      if (!item.everDeleted) {
+        searchPosition++;
+      }
+   }
  }
+ 
+ if (!foundItem) {
+   console.warn(`Cannot delete at position ${event.position}: no item found`);
+   return;
+ }
+ 
+ // Check if already deleted
+ if (foundItem.everDeleted) {
+   return; // Already deleted, nothing to do
+ }
+ 
+ // Mark as deleted
+ foundItem.everDeleted = true;
+  // Do not increment prepare state for deletion
+  // foundItem.prepareState++;
   
+  // Track this deletion event for the item
+  const deletionItem: AugmentedCRDTItem = {
+    id: event.id,
+    originLeft: foundItem.id,
+    originRight: foundItem.id,
+    content: undefined,
+    everDeleted: true,
+    prepareState: PrepareState.DELETED,
+  };
+  this.crdt.integrate(deletionItem);
+   
+  // Regenerate document from CRDT state
+  this.regenerateDocument();
+ }
+
+  /**
+   * Regenerate document from CRDT items
+   */
+  private regenerateDocument(): void {
+    this.document = [];
+    const items = this.crdt.getItems();
+    
+    for (const item of items) {
+      // Skip deleted items and sentinels
+      if (item && !item.everDeleted && item.content !== undefined) {
+        this.document.push(item.content);
+      }
+    }
+  }
+ 
   /**
    * Get the current document state
    */

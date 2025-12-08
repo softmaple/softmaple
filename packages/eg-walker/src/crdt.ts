@@ -17,6 +17,30 @@ export class CRDT {
   constructor() {
     this.items = [];
     this.itemsById = new Map();
+    
+    // Initialize with start and end sentinels
+    const startSentinel: AugmentedCRDTItem = {
+      id: START_ID,
+      originLeft: null,
+      originRight: null,
+      content: undefined,
+      everDeleted: false,
+      prepareState: 1
+    };
+    
+    const endSentinel: AugmentedCRDTItem = {
+      id: END_ID,
+      originLeft: START_ID,
+      originRight: null,
+      content: undefined,
+      everDeleted: false,
+      prepareState: 1
+    };
+    
+    this.items.push(startSentinel);
+    this.items.push(endSentinel);
+    this.itemsById.set(START_ID, startSentinel);
+    this.itemsById.set(END_ID, endSentinel);
   }
   
   /**
@@ -51,6 +75,11 @@ export class CRDT {
    * Integrate a new item into the CRDT using RGA rules
    */
   integrate(item: AugmentedCRDTItem): void {
+    // Prevent duplicate IDs
+    if (this.itemsById.has(item.id)) {
+      return;
+    }
+    
     this.itemsById.set(item.id, item);
     
     // Find the correct insertion position using RGA rules
@@ -146,13 +175,45 @@ export class CRDT {
   * Calculate the effect position for an item at the given index
   */
  calculateEffectPosition(index: number): number {
-   let position = 0;
+  let position = 0;
+  
+  for (let i = 0; i < index && i < this.items.length; i++) {
+     const item = this.items[i];
+     if (item && !item.everDeleted) {
+      position++;
+    }
+   }
    
-   for (let i = 0; i < index && i < this.items.length; i++) {
+   return position;
+ }
+
+  /**
+   * Get position of an item at prepare state
+   */
+  getPositionAtPrepareState(index: number): number {
+    let position = 0;
+    
+    for (let i = 0; i < index && i < this.items.length; i++) {
+      const item = this.items[i];
+      if (item && item.prepareState === 1) {
+        position++;
+      }
+    }
+    
+    return position;
+  }
+
+  /**
+   * Get position of an item at effect state
+   */
+  getPositionAtEffectState(index: number): number {
+    let position = 0;
+    
+    for (let i = 0; i < index && i < this.items.length; i++) {
       const item = this.items[i];
       if (item && !item.everDeleted) {
-       position++;
-     }
+        position++;
+      }
     }
     
     return position;

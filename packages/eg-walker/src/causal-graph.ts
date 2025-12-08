@@ -41,6 +41,79 @@ export class CausalGraph {
   }
   
   /**
+   * Check if an event exists in the graph
+   */
+  hasEvent(id: EventId): boolean {
+    return this.events.has(id);
+  }
+
+  /**
+   * Get children of an event
+   */
+  getChildren(id: EventId): EventId[] {
+    return Array.from(this.children.get(id) || new Set());
+  }
+
+  /**
+   * Check if event1 happens-before event2
+   */
+  happensBefore(id1: EventId, id2: EventId): boolean {
+    if (id1 === id2) return false;
+    
+    const visited = new Set<EventId>();
+    const stack = [id1];
+    
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      
+      const children = this.children.get(current);
+      if (children) {
+        if (children.has(id2)) return true;
+        stack.push(...children);
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Get events in topological order
+   */
+  getTopologicalOrder(): EventId[] {
+    const result: EventId[] = [];
+    const visited = new Set<EventId>();
+    const visiting = new Set<EventId>();
+    
+    const visit = (id: EventId) => {
+      if (visited.has(id)) return;
+      if (visiting.has(id)) return; // Cycle detected
+      
+      visiting.add(id);
+      
+      const parents = this.parents.get(id);
+      if (parents) {
+        for (const parentId of parents) {
+          if (this.events.has(parentId)) {
+            visit(parentId);
+          }
+        }
+      }
+      
+      visiting.delete(id);
+      visited.add(id);
+      result.push(id);
+    };
+    
+    for (const id of this.events.keys()) {
+      visit(id);
+    }
+    
+    return result;
+  }
+
+  /**
    * Get the transitive expansion of a version (all events that happened-before)
    */
   getTransitiveExpansion(version: Version): Set<EventId> {

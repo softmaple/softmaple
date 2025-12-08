@@ -40,7 +40,7 @@ export interface AugmentedCRDTItem {
   id: EventId;
   originLeft: EventId | null;
   originRight: EventId | null;
-  content: string;
+  content?: string;
   
   // State at effect version (what user sees)
   everDeleted: boolean;

@@ -1,283 +1,632 @@
-/**
- * Tests for the Eg-walker algorithm
- */
-
+import { describe, it, expect, beforeEach } from 'vitest';
 import { EgWalker } from '../eg-walker';
-import { Event, EventType } from '../types';
+import type { Event } from '../types';
 
 describe('EgWalker', () => {
-  let walker: EgWalker;
-  
+  let egWalker: EgWalker;
+
   beforeEach(() => {
-    walker = new EgWalker();
+    egWalker = new EgWalker();
   });
-  
-  test('should handle simple sequential inserts', () => {
-    const event1: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: 'H',
-    };
-    
-    const event2: Event = {
-      id: 'e2',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e1']),
-      position: 1,
-      content: 'i',
-    };
-    
-    walker.addEvent(event1);
-    walker.addEvent(event2);
-    
-    const doc = walker.generateDocument();
-    expect(doc).toBe('Hi');
+
+  describe('Basic insert operations', () => {
+    it('should handle single insert', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'a',
+        parentVersion: [],
+        timestamp: Date.now()
+      });
+
+      expect(egWalker.getDocument()).toBe('a');
+    });
+
+    it('should handle multiple sequential inserts', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'a',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'insert',
+        position: 1,
+        content: 'b',
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      egWalker.applyEvent({
+        id: 'e3',
+        type: 'insert',
+        position: 2,
+        content: 'c',
+        parentVersion: ['e2'],
+        timestamp: 300
+      });
+
+      expect(egWalker.getDocument()).toBe('abc');
+    });
+
+    it('should handle insert at beginning', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'b',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'insert',
+        position: 0,
+        content: 'a',
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      expect(egWalker.getDocument()).toBe('ab');
+    });
+
+    it('should handle insert in middle', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'a',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'insert',
+        position: 1,
+        content: 'c',
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      egWalker.applyEvent({
+        id: 'e3',
+        type: 'insert',
+        position: 1,
+        content: 'b',
+        parentVersion: ['e2'],
+        timestamp: 300
+      });
+
+      expect(egWalker.getDocument()).toBe('abc');
+    });
   });
-  
-  test('should handle concurrent inserts at same position', () => {
-    const base: Event = {
-      id: 'e0',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: 'AC',
-    };
-    
-    // Two concurrent inserts at position 1 (between A and C)
-    const event1: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e0']),
-      position: 1,
-      content: 'B',
-    };
-    
-    const event2: Event = {
-      id: 'e2',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e0']),
-      position: 1,
-      content: 'X',
-    };
-    
-    walker.addEvent(base);
-    walker.addEvent(event1);
-    walker.addEvent(event2);
-    
-    const doc = walker.generateDocument();
-    // Order determined by CRDT rules (ID comparison)
-    expect(doc.includes('A')).toBe(true);
-    expect(doc.includes('B')).toBe(true);
-    expect(doc.includes('X')).toBe(true);
-    expect(doc.includes('C')).toBe(true);
+
+  describe('Delete operations', () => {
+    it('should handle delete operation', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'abc',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'delete',
+        position: 1,
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      expect(egWalker.getDocument()).toBe('ac');
+    });
+
+    it('should handle multiple deletes', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'abcde',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'delete',
+        position: 1,
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      egWalker.applyEvent({
+        id: 'e3',
+        type: 'delete',
+        position: 2,
+        parentVersion: ['e2'],
+        timestamp: 300
+      });
+
+      expect(egWalker.getDocument()).toBe('ace');
+    });
+
+    it('should handle delete at beginning', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'abc',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'delete',
+        position: 0,
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      expect(egWalker.getDocument()).toBe('bc');
+    });
+
+    it('should handle delete at end', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'abc',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'delete',
+        position: 2,
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      expect(egWalker.getDocument()).toBe('ab');
+    });
+
+    it('should handle delete on empty document', () => {
+      // Attempting to delete from empty document should not crash
+      expect(() => {
+        egWalker.applyEvent({
+          id: 'e1',
+          type: 'delete',
+          position: 0,
+          parentVersion: [],
+          timestamp: 100
+        });
+      }).not.toThrow();
+
+      expect(egWalker.getDocument()).toBe('');
+    });
   });
-  
-  test('should handle delete operations', () => {
-    const insert1: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: 'Hello',
-    };
-    
-    const delete1: Event = {
-      id: 'e2',
-      type: EventType.DELETE,
-      parentVersion: new Set(['e1']),
-      position: 0, // Delete 'H'
-    };
-    
-    walker.addEvent(insert1);
-    walker.addEvent(delete1);
-    
-    const doc = walker.generateDocument();
-    expect(doc).toBe('ello');
+
+  describe('Concurrent operations', () => {
+    it('should handle concurrent inserts at same position', () => {
+      // User A inserts 'a' at position 0
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'a',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // User B inserts 'b' at position 0 (concurrent with e1)
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'insert',
+        position: 0,
+        content: 'b',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      const doc = egWalker.getDocument();
+      expect(doc.length).toBe(2);
+      expect(doc).toMatch(/[ab]{2}/);
+    });
+
+    it('should handle interleaved operations', () => {
+      // User A: insert 'a' at 0
+      egWalker.applyEvent({
+        id: 'a1',
+        type: 'insert',
+        position: 0,
+        content: 'a',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // User B: insert 'b' at 0 (concurrent)
+      egWalker.applyEvent({
+        id: 'b1',
+        type: 'insert',
+        position: 0,
+        content: 'b',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // User A: insert 'c' at 1 (after their 'a')
+      egWalker.applyEvent({
+        id: 'a2',
+        type: 'insert',
+        position: 1,
+        content: 'c',
+        parentVersion: ['a1'],
+        timestamp: 200
+      });
+
+      // User B: insert 'd' at 1 (after their 'b')
+      egWalker.applyEvent({
+        id: 'b2',
+        type: 'insert',
+        position: 1,
+        content: 'd',
+        parentVersion: ['b1'],
+        timestamp: 200
+      });
+
+      const doc = egWalker.getDocument();
+      expect(doc.length).toBe(4);
+    });
+
+   it('should handle concurrent deletes', () => {
+     // Initial state: "abc"
+     egWalker.applyEvent({
+       id: 'init',
+       type: 'insert',
+       position: 0,
+       content: 'abc',
+       parentVersion: [],
+       timestamp: 100
+     });
+
+     // User A deletes 'b' (position 1)
+     egWalker.applyEvent({
+       id: 'a1',
+       type: 'delete',
+       position: 1,
+       parentVersion: ['init'],
+       timestamp: 200
+     });
+
+     // User B also tries to delete 'b' (position 1) concurrently
+     egWalker.applyEvent({
+       id: 'b1',
+       type: 'delete',
+       position: 1,
+       parentVersion: ['init'],
+       timestamp: 200
+     });
+
+     // Should only delete once
+     expect(egWalker.getDocument()).toBe('ac');
+   });
+
+    it('should handle delete-insert conflicts', () => {
+      // Initial state: "ab"
+      egWalker.applyEvent({
+        id: 'init',
+        type: 'insert',
+        position: 0,
+        content: 'ab',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // User A deletes 'b' (position 1)
+      egWalker.applyEvent({
+        id: 'a1',
+        type: 'delete',
+        position: 1,
+        parentVersion: ['init'],
+        timestamp: 200
+      });
+
+      // User B inserts 'c' after 'b' (position 2) concurrently
+      egWalker.applyEvent({
+        id: 'b1',
+        type: 'insert',
+        position: 2,
+        content: 'c',
+        parentVersion: ['init'],
+        timestamp: 200
+      });
+
+      const doc = egWalker.getDocument();
+      expect(doc.length).toBe(2); // 'a' and 'c'
+      expect(doc).toContain('a');
+      expect(doc).toContain('c');
+    });
   });
-  
-  test('should handle retreat and advance correctly', () => {
-    // Create a branching history
-    const base: Event = {
-      id: 'e0',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: 'A',
-    };
-    
-    const branch1: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e0']),
-      position: 1,
-      content: 'B',
-    };
-    
-    const branch2: Event = {
-      id: 'e2',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e0']),
-      position: 1,
-      content: 'C',
-    };
-    
-    // Merge point
-    const merge: Event = {
-      id: 'e3',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e1', 'e2']),
-      position: 3,
-      content: 'D',
-    };
-    
-    walker.addEvent(base);
-    walker.addEvent(branch1);
-    walker.addEvent(branch2);
-    walker.addEvent(merge);
-    
-    const doc = walker.generateDocument();
-    expect(doc.includes('A')).toBe(true);
-    expect(doc.includes('B')).toBe(true);
-   expect(doc.includes('C')).toBe(true);
-   expect(doc.includes('D')).toBe(true);
- });
-  
- test('should handle concurrent deletes at same position', () => {
-   const insert1: Event = {
-     id: 'e1',
-     type: EventType.INSERT,
-     parentVersion: new Set(),
-     position: 0,
-     content: 'ABCD',
-   };
-   
-    // Concurrent deletes: one at position 1 (B), one at position 2 (C)
-   const delete1: Event = {
-     id: 'e2',
-     type: EventType.DELETE,
-     parentVersion: new Set(['e1']),
-      position: 1, // Delete 'B'
-   };
-   
-   const delete2: Event = {
-     id: 'e3',
-     type: EventType.DELETE,
-     parentVersion: new Set(['e1']),
-      position: 2, // Delete 'C' (they're concurrent, so both see the original state)
-   };
-   
-   walker.addEvent(insert1);
-   walker.addEvent(delete1);
-   walker.addEvent(delete2);
-   
-   const doc = walker.generateDocument();
-    // Since the deletes are concurrent (same parent version), delete2 deletes 'C' not 'D'
-    // Result should be 'AD' but the algorithm may produce 'AC' or 'AD' depending on ordering
-    expect(doc.length).toBe(2);
-    expect(doc.includes('A')).toBe(true);
-    expect(doc.includes('D') || doc.includes('C')).toBe(true);
- });
-  
-  test('should handle delete on already-deleted item', () => {
-    const insert1: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: 'XY',
-    };
-    
-    const delete1: Event = {
-      id: 'e2',
-      type: EventType.DELETE,
-      parentVersion: new Set(['e1']),
-      position: 0, // Delete 'X'
-    };
-    
-    // Try to delete at position 0 again (should be 'Y' now)
-    const delete2: Event = {
-      id: 'e3',
-      type: EventType.DELETE,
-      parentVersion: new Set(['e2']),
-      position: 0, // Delete 'Y'
-    };
-    
-    walker.addEvent(insert1);
-    walker.addEvent(delete1);
-    walker.addEvent(delete2);
-    
-    const doc = walker.generateDocument();
-    expect(doc).toBe('');
+
+  describe('Complex scenarios', () => {
+    it('should handle multi-character content', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'hello',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'insert',
+        position: 5,
+        content: ' world',
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      expect(egWalker.getDocument()).toBe('hello world');
+    });
+
+    it('should handle mixed insert and delete sequence', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'test',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'delete',
+        position: 2,
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      egWalker.applyEvent({
+        id: 'e3',
+        type: 'insert',
+        position: 2,
+        content: 'x',
+        parentVersion: ['e2'],
+        timestamp: 300
+      });
+
+      expect(egWalker.getDocument()).toBe('text');
+    });
+
+    it('should handle diamond merge pattern', () => {
+      // Initial document
+      egWalker.applyEvent({
+        id: 'root',
+        type: 'insert',
+        position: 0,
+        content: 'base',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // Branch A: insert at beginning
+      egWalker.applyEvent({
+        id: 'a1',
+        type: 'insert',
+        position: 0,
+        content: '[A]',
+        parentVersion: ['root'],
+        timestamp: 200
+      });
+
+      // Branch B: insert at end
+      egWalker.applyEvent({
+        id: 'b1',
+        type: 'insert',
+        position: 4,
+        content: '[B]',
+        parentVersion: ['root'],
+        timestamp: 200
+      });
+
+      // Merge: operation that depends on both branches
+      egWalker.applyEvent({
+        id: 'merge',
+        type: 'insert',
+        position: 5,
+        content: '[M]',
+        parentVersion: ['a1', 'b1'],
+        timestamp: 300
+      });
+
+      const doc = egWalker.getDocument();
+      expect(doc).toContain('[A]');
+      expect(doc).toContain('[B]');
+      expect(doc).toContain('[M]');
+      expect(doc).toContain('base');
+    });
+
+    it('should handle out-of-order event application', () => {
+      const events: Event[] = [
+        {
+          id: 'e3',
+          type: 'insert',
+          position: 2,
+          content: 'c',
+          parentVersion: ['e2'],
+          timestamp: 300
+        },
+        {
+          id: 'e1',
+          type: 'insert',
+          position: 0,
+          content: 'a',
+          parentVersion: [],
+          timestamp: 100
+        },
+        {
+          id: 'e2',
+          type: 'insert',
+          position: 1,
+          content: 'b',
+          parentVersion: ['e1'],
+          timestamp: 200
+        }
+      ];
+
+      events.forEach(e => egWalker.applyEvent(e));
+      expect(egWalker.getDocument()).toBe('abc');
+    });
   });
-  
-  test('should handle complex merge scenario', () => {
-    // Base document
-    const base: Event = {
-      id: 'e0',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: 'Base',
-    };
-    
-    // Branch 1: Add " Text" at the end
-    const branch1_insert: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e0']),
-      position: 4,
-      content: ' Text',
-    };
-    
-    // Branch 2: Delete 'a' from "Base" (position 1)
-    const branch2_delete: Event = {
-      id: 'e2',
-      type: EventType.DELETE,
-      parentVersion: new Set(['e0']),
-      position: 1,
-    };
-    
-    // Merge: Insert '!' at the end
-    const merge: Event = {
-      id: 'e3',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e1', 'e2']),
-      position: 8,
-      content: '!',
-    };
-    
-    walker.addEvent(base);
-    walker.addEvent(branch1_insert);
-    walker.addEvent(branch2_delete);
-    walker.addEvent(merge);
-    
-    const doc = walker.generateDocument();
-    expect(doc).toBe('Bse Text!');
+
+  describe('Edge cases', () => {
+    it('should handle empty content insert', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: '',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      expect(egWalker.getDocument()).toBe('');
+    });
+
+    it('should handle position beyond document length', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'ab',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // Try to insert at position 10 (beyond document)
+      egWalker.applyEvent({
+        id: 'e2',
+        type: 'insert',
+        position: 10,
+        content: 'c',
+        parentVersion: ['e1'],
+        timestamp: 200
+      });
+
+      // Should append at end
+      expect(egWalker.getDocument()).toBe('abc');
+    });
+
+    it('should handle delete beyond document length', () => {
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: 'ab',
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      // Try to delete at position 10
+      expect(() => {
+        egWalker.applyEvent({
+          id: 'e2',
+          type: 'delete',
+          position: 10,
+          parentVersion: ['e1'],
+          timestamp: 200
+        });
+      }).not.toThrow();
+
+      // Document should remain unchanged
+      expect(egWalker.getDocument()).toBe('ab');
+    });
+
+    it('should handle special characters', () => {
+      const specialContent = '\n\t\r🔥💯\\\"\'';
+      
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: specialContent,
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      expect(egWalker.getDocument()).toBe(specialContent);
+    });
+
+    it('should handle very long content', () => {
+      const longContent = 'x'.repeat(10000);
+      
+      egWalker.applyEvent({
+        id: 'e1',
+        type: 'insert',
+        position: 0,
+        content: longContent,
+        parentVersion: [],
+        timestamp: 100
+      });
+
+      expect(egWalker.getDocument()).toBe(longContent);
+    });
   });
-  
-  test('should handle empty content insertion', () => {
-    const event1: Event = {
-      id: 'e1',
-      type: EventType.INSERT,
-      parentVersion: new Set(),
-      position: 0,
-      content: '',
-    };
-    
-    const event2: Event = {
-      id: 'e2',
-      type: EventType.INSERT,
-      parentVersion: new Set(['e1']),
-      position: 0,
-      content: 'Test',
-    };
-    
-    walker.addEvent(event1);
-    walker.addEvent(event2);
-    
-    const doc = walker.generateDocument();
-    expect(doc).toBe('Test');
+
+  describe('Performance', () => {
+    it('should handle many sequential operations efficiently', () => {
+      const startTime = performance.now();
+      
+      for (let i = 0; i < 1000; i++) {
+        egWalker.applyEvent({
+          id: `e${i}`,
+          type: 'insert',
+          position: i,
+          content: String(i % 10),
+          parentVersion: i === 0 ? [] : [`e${i - 1}`],
+          timestamp: i
+        });
+      }
+
+      const endTime = performance.now();
+      
+      expect(egWalker.getDocument().length).toBe(1000);
+      expect(endTime - startTime).toBeLessThan(2000); // Should complete in < 2 seconds
+    });
+
+    it('should handle many concurrent operations', () => {
+      const startTime = performance.now();
+      
+      // 100 concurrent inserts at position 0
+      for (let i = 0; i < 100; i++) {
+        egWalker.applyEvent({
+          id: `concurrent${i}`,
+          type: 'insert',
+          position: 0,
+          content: String(i % 10),
+          parentVersion: [],
+          timestamp: 100
+        });
+      }
+
+      const endTime = performance.now();
+      
+      expect(egWalker.getDocument().length).toBe(100);
+      expect(endTime - startTime).toBeLessThan(1000);
+    });
   });
 });

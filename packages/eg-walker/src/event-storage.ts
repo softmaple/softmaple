@@ -21,7 +21,7 @@ export class EventStorage {
    */
   addEvent(event: Event): void {
     if (this.events.has(event.id)) {
-      throw new Error(`Event ${event.id} already exists`);
+      return;
     }
     
     this.events.set(event.id, event);
@@ -37,10 +37,25 @@ export class EventStorage {
   }
   
   /**
+   * Check if an event exists
+   */
+  hasEvent(id: EventId): boolean {
+    return this.events.has(id);
+  }
+  
+  /**
    * Get all events
    */
   getAllEvents(): Event[] {
     return Array.from(this.events.values());
+  }
+  
+  /**
+   * Get events in causal order
+   */
+  getEventsInCausalOrder(): Event[] {
+    const orderedIds = this.causalGraph.getTopologicalOrder();
+    return orderedIds.map(id => this.events.get(id)!).filter(e => e !== undefined);
   }
   
   /**
@@ -55,13 +70,6 @@ export class EventStorage {
    */
   getCausalGraph(): CausalGraph {
     return this.causalGraph;
-  }
-  
-  /**
-   * Check if an event exists
-   */
-  hasEvent(id: EventId): boolean {
-    return this.events.has(id);
   }
   
   /**

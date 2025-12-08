@@ -63,12 +63,16 @@ export class EgWalker {
     // Step 1: Prepare phase
     this.prepareForEvent(event);
 
-    // Step 2: Apply phase
-    this.executeEvent(event);
+   // Step 2: Apply phase
+   this.executeEvent(event);
 
-    // Update current version
-    this.currentVersion = new Set([event.id]);
-  }
+   // Update current version
+    // Update current version to include all parent events plus this event
+    for (const parentId of event.parentVersion) {
+      this.currentVersion.add(parentId);
+    }
+    this.currentVersion.add(event.id);
+ }
 
   /**
    * Prepare phase: retreat and advance to align with event's parent version

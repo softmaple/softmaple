@@ -1,0 +1,51 @@
+name: Eg-walker Package Tests
+
+on:
+  push:
+    branches: [ main, next ]
+    paths:
+      - 'packages/eg-walker/**'
+      - '.github/workflows/eg-walker-tests.yml'
+      - 'pnpm-lock.yaml'
+  pull_request:
+    branches: [ main, next ]
+    paths:
+      - 'packages/eg-walker/**'
+      - '.github/workflows/eg-walker-tests.yml'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eg-walker package
+        run: pnpm --filter @softmaple/eg-walker build
+
+      - name: Run unit tests
+        run: pnpm --filter @softmaple/eg-walker test
+        env:
+          CI: true

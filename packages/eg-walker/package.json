@@ -15,6 +15,7 @@
     "dev": "tsup --watch",
     "test": "vitest",
     "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:e2e": "next dev",
-   "prebuild": "pnpm --filter @softmaple/db build",
+    "prebuild": "pnpm --filter @softmaple/db build",
     "build": "next build",
     "start": "next start",
-   "lint": "eslint .",
+    "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",

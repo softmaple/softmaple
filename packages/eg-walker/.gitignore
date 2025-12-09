@@ -1,0 +1,19 @@
+# Spec files (kept locally but not in git)
+spec/*.ts
+spec/*.ts.ts
+
+# Build output
+dist/
+
+# Node modules
+node_modules/
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.bak
+
+# Debug logs
+*.log

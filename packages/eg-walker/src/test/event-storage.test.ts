@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EventStorage } from '../event-storage';
+import { EventType } from '../types';
 import type { Event } from '../types';
 
 describe('EventStorage', () => {
@@ -13,10 +14,10 @@ describe('EventStorage', () => {
     it('should add a single event', () => {
       const event: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: Date.now()
       };
 
@@ -30,19 +31,19 @@ describe('EventStorage', () => {
     it('should prevent duplicate events', () => {
       const event: Event = {
         id: 'duplicate',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'first',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const duplicate: Event = {
         id: 'duplicate',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'second',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 200
       };
 
@@ -57,7 +58,7 @@ describe('EventStorage', () => {
       for (let i = 0; i < 10; i++) {
         storage.addEvent({
           id: `event${i}`,
-          type: 'insert',
+          type: EventType.INSERT,
           position: i,
           content: String(i),
           parentVersion: i === 0 ? [] : [`event${i - 1}`],
@@ -73,9 +74,9 @@ describe('EventStorage', () => {
     it('should retrieve existing events', () => {
       const event: Event = {
         id: 'test',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 5,
-        parentVersion: ['parent'],
+        parentVersion: new Set(['parent']),
         timestamp: 1000
       };
 
@@ -102,25 +103,25 @@ describe('EventStorage', () => {
       const events: Event[] = [
         {
           id: 'e1',
-          type: 'insert',
+          type: EventType.INSERT,
           position: 0,
           content: 'a',
-          parentVersion: [],
+          parentVersion: new Set([]),
           timestamp: 100
         },
         {
           id: 'e2',
-          type: 'insert',
+          type: EventType.INSERT,
           position: 1,
           content: 'b',
-          parentVersion: ['e1'],
+          parentVersion: new Set(['e1']),
           timestamp: 200
         },
         {
           id: 'e3',
-          type: 'delete',
+          type: EventType.DELETE,
           position: 0,
-          parentVersion: ['e2'],
+          parentVersion: new Set(['e2']),
           timestamp: 300
         }
       ];
@@ -140,28 +141,28 @@ describe('EventStorage', () => {
       // Create a simple chain: e1 -> e2 -> e3
       const e1: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const e2: Event = {
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       };
 
       const e3: Event = {
         id: 'e3',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'c',
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       };
 
@@ -181,28 +182,28 @@ describe('EventStorage', () => {
       // Create concurrent branches
       const root: Event = {
         id: 'root',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'r',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const branch1: Event = {
         id: 'branch1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b1',
-        parentVersion: ['root'],
+        parentVersion: new Set(['root']),
         timestamp: 200
       };
 
       const branch2: Event = {
         id: 'branch2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b2',
-        parentVersion: ['root'],
+        parentVersion: new Set(['root']),
         timestamp: 200
       };
 
@@ -226,37 +227,37 @@ describe('EventStorage', () => {
       // Diamond: root -> (a, b) -> merge
       const root: Event = {
         id: 'root',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'root',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const a: Event = {
         id: 'a',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'a',
-        parentVersion: ['root'],
+        parentVersion: new Set(['root']),
         timestamp: 200
       };
 
       const b: Event = {
         id: 'b',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['root'],
+        parentVersion: new Set(['root']),
         timestamp: 300
       };
 
       const merge: Event = {
         id: 'merge',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'merge',
-        parentVersion: ['a', 'b'],
+        parentVersion: new Set(['a', 'b']),
         timestamp: 400
       };
 
@@ -290,10 +291,10 @@ describe('EventStorage', () => {
     it('should return true for existing events', () => {
       storage.addEvent({
         id: 'exists',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'x',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
@@ -309,10 +310,10 @@ describe('EventStorage', () => {
     it('should handle events with empty parent version', () => {
       const orphan: Event = {
         id: 'orphan',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'o',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
@@ -323,10 +324,10 @@ describe('EventStorage', () => {
     it('should handle events with non-existent parents', () => {
       const orphan: Event = {
         id: 'orphan',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'o',
-        parentVersion: ['non-existent-1', 'non-existent-2'],
+        parentVersion: new Set(['non-existent-1', 'non-existent-2']),
         timestamp: 100
       };
 
@@ -338,19 +339,19 @@ describe('EventStorage', () => {
       // Note: In practice, this shouldn't happen, but we should handle it
       const e1: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: ['e2'], // Circular!
+        parentVersion: new Set(['e2']), // Circular!
         timestamp: 100
       };
 
       const e2: Event = {
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['e1'], // Circular!
+        parentVersion: new Set(['e1']), // Circular!
         timestamp: 200
       };
 
@@ -363,10 +364,10 @@ describe('EventStorage', () => {
     it('should handle large timestamps', () => {
       const event: Event = {
         id: 'large-timestamp',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'x',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: Number.MAX_SAFE_INTEGER
       };
 
@@ -402,7 +403,7 @@ describe('EventStorage', () => {
       for (let i = 999; i >= 0; i--) {
         storage.addEvent({
           id: `event${i}`,
-          type: 'insert',
+          type: EventType.INSERT,
           position: i,
           content: String(i),
           parentVersion: i === 0 ? [] : [`event${i - 1}`],

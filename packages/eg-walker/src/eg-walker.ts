@@ -62,39 +62,51 @@ class VersionDiffCache {
 }
 
 export class EgWalker {
-  private eventStorage: EventStorage;
-  private crdt: CRDT;
-  private currentVersion: Version;
-  private document: string[];
-  private diffCache: VersionDiffCache;
-  private deletionMarkerSet: Set<EventId>; // Track items that have deletion markers
-  private traversal: OptimizedTraversal;
-  private batchProcessor: BatchProcessor;
-  private enableOptimizations: boolean;
+ private eventStorage: EventStorage;
+ private crdt: CRDT;
+ private currentVersion: Version;
+ private document: string[];
+ private diffCache: VersionDiffCache;
+ private deletionMarkerSet: Set<EventId>; // Track items that have deletion markers
+ private traversal: OptimizedTraversal;
+ private batchProcessor: BatchProcessor;
+ private enableOptimizations: boolean;
 
-  constructor() {
-    this.eventStorage = new EventStorage();
-    this.crdt = new CRDT();
-    this.currentVersion = new Set();
-    this.document = [];
-    this.diffCache = new VersionDiffCache();
-    this.deletionMarkerSet = new Set();
-    this.traversal = new OptimizedTraversal();
-    this.batchProcessor = new BatchProcessor();
-    this.enableOptimizations = true;
-  }
+ constructor() {
+   this.eventStorage = new EventStorage();
+   this.crdt = new CRDT();
+   this.currentVersion = new Set();
+   this.document = [];
+   this.diffCache = new VersionDiffCache();
+   this.deletionMarkerSet = new Set();
+   this.traversal = new OptimizedTraversal();
+   this.batchProcessor = new BatchProcessor();
+   this.enableOptimizations = true;
+ }
+
+ /**
+  * Enable or disable performance optimizations
+  */
+ setOptimizationsEnabled(enabled: boolean): void {
+   this.enableOptimizations = enabled;
+ }
 
   /**
-   * Enable or disable performance optimizations
+   * Helper to ensure parentVersion is a Set
    */
-  setOptimizationsEnabled(enabled: boolean): void {
-    this.enableOptimizations = enabled;
+  private ensureVersionIsSet(version: any): Version {
+    if (version instanceof Set) return version;
+    if (Array.isArray(version)) return new Set(version);
+    return new Set();
   }
 
   /**
    * Apply an event to the system
    */
   applyEvent(event: Event): void {
+   // Ensure parentVersion is a Set (handle legacy array format)
+    event.parentVersion = this.ensureVersionIsSet(event.parentVersion);
+    
     this.eventStorage.addEvent(event);
     
     // Optimization: Skip CRDT for fully ordered operations
@@ -109,16 +121,18 @@ export class EgWalker {
    * Check if we can skip CRDT integration (optimization)
    */
   private shouldSkipCRDT(event: Event): boolean {
-    if (!this.enableOptimizations) return false;
-    
-    const parentEvents: Event[] = [];
-    for (const id of event.parentVersion) {
-      const parentEvent = this.eventStorage.getEvent(id);
-      if (parentEvent) parentEvents.push(parentEvent);
-    }
-    
-    return isFullyOrdered(event, parentEvents, this.currentVersion);
-  }
+   if (!this.enableOptimizations) return false;
+   
+    const parentVersion = event.parentVersion as Version;
+   
+   const parentEvents: Event[] = [];
+   for (const id of parentVersion) {
+     const parentEvent = this.eventStorage.getEvent(id);
+     if (parentEvent) parentEvents.push(parentEvent);
+   }
+   
+   return isFullyOrdered(event, parentEvents, this.currentVersion);
+ }
 
   /**
    * Apply event directly without CRDT (optimization for fully ordered ops)

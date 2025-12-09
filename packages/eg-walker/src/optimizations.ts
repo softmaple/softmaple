@@ -75,10 +75,15 @@ export function isFullyOrdered(
   parentEvents: Event[],
   currentVersion: Version
 ): boolean {
+  // Ensure parentVersion is a Set
+  const parentVersion = event.parentVersion instanceof Set 
+    ? event.parentVersion 
+    : new Set(Array.isArray(event.parentVersion) ? event.parentVersion : []);
+  
   // If there are events in current version not in parent version,
   // we have concurrent operations
   for (const id of currentVersion) {
-    if (!event.parentVersion.has(id)) {
+    if (!parentVersion.has(id)) {
       return false;
     }
   }

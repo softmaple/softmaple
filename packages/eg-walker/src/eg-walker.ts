@@ -21,6 +21,13 @@ import {
 import { CausalGraph } from "./causal-graph";
 import { CRDT, START_ID, END_ID } from "./crdt";
 import { EventStorage } from "./event-storage";
+import {
+  encodeOperations,
+  isFullyOrdered,
+  OptimizedTraversal,
+  BatchProcessor,
+  RunLengthOperation
+} from "./optimizations";
 
 // PrepareState value for deleted items (first deletion = 2, as per PrepareState enum: >= 2 means deleted)
 const DELETION_MARKER_PREPARE_STATE = 2;
@@ -61,6 +68,9 @@ export class EgWalker {
   private document: string[];
   private diffCache: VersionDiffCache;
   private deletionMarkerSet: Set<EventId>; // Track items that have deletion markers
+  private traversal: OptimizedTraversal;
+  private batchProcessor: BatchProcessor;
+  private enableOptimizations: boolean;
 
   constructor() {
     this.eventStorage = new EventStorage();
@@ -69,6 +79,16 @@ export class EgWalker {
     this.document = [];
     this.diffCache = new VersionDiffCache();
     this.deletionMarkerSet = new Set();
+    this.traversal = new OptimizedTraversal();
+    this.batchProcessor = new BatchProcessor();
+    this.enableOptimizations = true;
+  }
+
+  /**
+   * Enable or disable performance optimizations
+   */
+  setOptimizationsEnabled(enabled: boolean): void {
+    this.enableOptimizations = enabled;
   }
 
   /**
@@ -76,7 +96,68 @@ export class EgWalker {
    */
   applyEvent(event: Event): void {
     this.eventStorage.addEvent(event);
-    this.processEvent(event);
+    
+    // Optimization: Skip CRDT for fully ordered operations
+    if (this.enableOptimizations && this.shouldSkipCRDT(event)) {
+      this.applyDirectly(event);
+    } else {
+      this.processEvent(event);
+    }
+  }
+
+  /**
+   * Check if we can skip CRDT integration (optimization)
+   */
+  private shouldSkipCRDT(event: Event): boolean {
+    if (!this.enableOptimizations) return false;
+    
+    const parentEvents: Event[] = [];
+    for (const id of event.parentVersion) {
+      const parentEvent = this.eventStorage.getEvent(id);
+      if (parentEvent) parentEvents.push(parentEvent);
+    }
+    
+    return isFullyOrdered(event, parentEvents, this.currentVersion);
+  }
+
+  /**
+   * Apply event directly without CRDT (optimization for fully ordered ops)
+   */
+  private applyDirectly(event: Event): void {
+    if (event.type === EventType.INSERT && event.content) {
+      this.document.splice(event.position, 0, event.content);
+    } else if (event.type === EventType.DELETE && event.position < this.document.length) {
+      this.document.splice(event.position, 1);
+    }
+    this.currentVersion.add(event.id);
+  }
+
+  /**
+   * Apply multiple events in batch (optimization)
+   */
+  applyEventBatch(events: Event[]): void {
+    if (!this.enableOptimizations || events.length < 2) {
+      events.forEach(e => this.applyEvent(e));
+      return;
+    }
+    
+    // Use run-length encoding
+    const encoded = encodeOperations(events);
+    this.batchProcessor.addOperations(encoded);
+    this.batchProcessor.processBatches(ops => {
+      this.processBatchedOps(ops);
+      return true;
+    });
+  }
+
+  private processBatchedOps(ops: RunLengthOperation[]): void {
+    for (const op of ops) {
+      if (op.type === 'insert' && op.content) {
+        this.document.splice(op.startPos, 0, ...op.content);
+      } else if (op.type === 'delete') {
+        this.document.splice(op.startPos, op.length);
+      }
+    }
   }
 
   /**

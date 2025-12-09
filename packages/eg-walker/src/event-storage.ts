@@ -9,11 +9,13 @@ export class EventStorage {
   private events: Map<EventId, Event>;
   private causalGraph: CausalGraph;
   private eventOrder: Event[];
+  private eventsByTimestamp: Event[];
   
   constructor() {
     this.events = new Map();
     this.causalGraph = new CausalGraph();
     this.eventOrder = [];
+    this.eventsByTimestamp = [];
   }
   
   /**
@@ -27,6 +29,24 @@ export class EventStorage {
     this.events.set(event.id, event);
     this.causalGraph.addEvent(event);
     this.eventOrder.push(event);
+    
+    // Maintain sorted array for optimizations
+    const idx = this.findInsertIdx(event.timestamp || Date.now());
+    this.eventsByTimestamp.splice(idx, 0, event);
+  }
+
+  private findInsertIdx(time: number): number {
+    let l = 0, r = this.eventsByTimestamp.length;
+    while (l < r) {
+      const m = Math.floor((l + r) / 2);
+      const event = this.eventsByTimestamp[m];
+      if (event && (event.timestamp || 0) < time) {
+        l = m + 1;
+      } else {
+        r = m;
+      }
+    }
+    return l;
   }
   
   /**
@@ -34,6 +54,20 @@ export class EventStorage {
    */
   getEvent(id: EventId): Event | undefined {
     return this.events.get(id);
+  }
+  
+  /**
+   * Get all events as map (for traversal optimization)
+   */
+  getAllEventsMap(): Map<EventId, Event> {
+    return new Map(this.events);
+  }
+  
+  /**
+   * Get events by timestamp (optimization)
+   */
+  getEventsByTimestamp(): Event[] {
+    return [...this.eventsByTimestamp];
   }
   
   /**

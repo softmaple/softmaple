@@ -35,6 +35,3 @@ npm-debug.log*
 # Misc
 .DS_Store
 *.pem
-
-# Eg-walker spec files (kept locally but not in git)
-packages/eg-walker/spec/*.ts

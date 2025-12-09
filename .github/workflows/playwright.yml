@@ -1,22 +1,23 @@
 name: Playwright Tests
 
 on:
-  push:
-    branches: [ main, next ]
-    paths:
-      - 'apps/web/**'
-      - 'packages/**'
-      - '.github/workflows/playwright.yml'
-      - 'pnpm-lock.yaml'
-      - 'turbo.json'
-  pull_request:
-    branches: [ main, next ]
-    paths:
-      - 'apps/web/**'
-      - 'packages/**'
-      - '.github/workflows/playwright.yml'
-      - 'pnpm-lock.yaml'
-      - 'turbo.json'
+  workflow_dispatch: # Temporarily disabled - manual trigger only
+  # push:
+  #   branches: [ main, next ]
+  #   paths:
+  #     - 'apps/web/**'
+  #     - 'packages/**'
+  #     - '.github/workflows/playwright.yml'
+  #     - 'pnpm-lock.yaml'
+  #     - 'turbo.json'
+  # pull_request:
+  #   branches: [ main, next ]
+  #   paths:
+  #     - 'apps/web/**'
+  #     - 'packages/**'
+  #     - '.github/workflows/playwright.yml'
+  #     - 'pnpm-lock.yaml'
+  #     - 'turbo.json'
 
 # Concurrency control - only one Playwright test suite (smoke or E2E) runs at a time globally
 # New runs will wait in queue behind the currently running one

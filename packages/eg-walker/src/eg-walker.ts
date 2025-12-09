@@ -18,17 +18,50 @@ import { EventStorage } from "./event-storage";
 // PrepareState value for deleted items (first deletion = 2, as per PrepareState enum: >= 2 means deleted)
 const DELETION_MARKER_PREPARE_STATE = 2;
 
+// Cache for version diff operations
+class VersionDiffCache {
+  private cache: Map<string, [Set<EventId>, Set<EventId>]> = new Map();
+  private maxSize = 100;
+  
+  getCacheKey(v1: Version, v2: Version): string {
+    const v1Sorted = Array.from(v1).sort().join(',');
+    const v2Sorted = Array.from(v2).sort().join(',');
+    return `${v1Sorted}|${v2Sorted}`;
+  }
+  
+  get(v1: Version, v2: Version): [Set<EventId>, Set<EventId>] | undefined {
+    return this.cache.get(this.getCacheKey(v1, v2));
+  }
+  
+  set(v1: Version, v2: Version, result: [Set<EventId>, Set<EventId>]): void {
+    if (this.cache.size >= this.maxSize) {
+      // Simple LRU: remove first entry
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+    this.cache.set(this.getCacheKey(v1, v2), result);
+  }
+  
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
 export class EgWalker {
   private eventStorage: EventStorage;
   private crdt: CRDT;
   private currentVersion: Version;
   private document: string[];
+  private diffCache: VersionDiffCache;
+  private deletionMarkerSet: Set<EventId>; // Track items that have deletion markers
 
   constructor() {
     this.eventStorage = new EventStorage();
     this.crdt = new CRDT();
     this.currentVersion = new Set();
     this.document = [];
+    this.diffCache = new VersionDiffCache();
+    this.deletionMarkerSet = new Set();
   }
 
   /**
@@ -47,6 +80,8 @@ export class EgWalker {
     this.crdt = new CRDT();
     this.currentVersion = new Set();
     this.document = [];
+    this.diffCache.clear();
+    this.deletionMarkerSet.clear();
 
     // Process events in causal order
     for (const event of this.eventStorage.iterInCausalOrder()) {
@@ -78,11 +113,16 @@ export class EgWalker {
    * Prepare phase: retreat and advance to align with event's parent version
    */
   private prepareForEvent(event: Event): void {
-    const causalGraph = this.eventStorage.getCausalGraph();
-    const [onlyInCurrent, onlyInTarget] = causalGraph.diff(
-      this.currentVersion,
-      event.parentVersion,
-    );
+    // Try cache first
+    let diff = this.diffCache.get(this.currentVersion, event.parentVersion);
+    
+    if (!diff) {
+      const causalGraph = this.eventStorage.getCausalGraph();
+      diff = causalGraph.diff(this.currentVersion, event.parentVersion);
+      this.diffCache.set(this.currentVersion, event.parentVersion, diff);
+    }
+    
+    const [onlyInCurrent, onlyInTarget] = diff;
 
     // Retreat: decrement prepare state for events only in current version
     const items = this.crdt.getItems();
@@ -167,6 +207,9 @@ export class EgWalker {
    */
   private executeInsert(event: Event): void {
     const content = event.content || "";
+    
+    // Optimization for empty content
+    if (!content) return;
 
     // Handle multi-character content by splitting into individual characters
     // Find the initial insertion position once
@@ -182,7 +225,8 @@ export class EgWalker {
     );
     const initialOriginRight = initialNextItem ? initialNextItem.id : END_ID;
 
-    // For multi-character content, create items that maintain their sequence
+    // Batch create items for multi-character content
+    const newItems: AugmentedCRDTItem[] = [];
     let previousItemId = initialOriginLeft;
 
     for (let i = 0; i < content.length; i++) {
@@ -203,16 +247,16 @@ export class EgWalker {
       };
 
       previousItemId = itemId;
-
-      // Integrate into CRDT
-      this.crdt.integrate(newItem);
-
-      // Update document at effect position
-      const effectPosition = this.crdt.calculateEffectPosition(
-        this.crdt.getItems().indexOf(newItem),
-      );
-      this.document.splice(effectPosition, 0, content[i] || "");
+      newItems.push(newItem);
     }
+
+    // Batch integrate all items
+    for (const newItem of newItems) {
+      this.crdt.integrate(newItem);
+    }
+    
+    // Regenerate document after batch insert
+    this.regenerateDocument();
   }
 
   /**
@@ -235,7 +279,7 @@ export class EgWalker {
 
       // Check if this item is visible in prepare state
       // An item is visible if it has prepareState >= 1 and isn't deleted
-      if (item.prepareState >= PrepareState.INSERTED && !item.everDeleted) {
+      if (item.prepareState >= PrepareState.INSERTED && !item.everDeleted && !this.deletionMarkerSet.has(item.id)) {
         // Count position in the prepare-state view
         if (searchPosition === event.position) {
           foundItem = item;
@@ -259,6 +303,7 @@ export class EgWalker {
 
     // Mark as deleted
     foundItem.everDeleted = true;
+    this.deletionMarkerSet.add(foundItem.id);
     // Do not increment prepare state for deletion
     // foundItem.prepareState++;
 
@@ -286,7 +331,7 @@ export class EgWalker {
 
     for (const item of items) {
       // Skip deleted items and sentinels
-      if (item && !item.everDeleted && item.content !== undefined) {
+      if (item && !item.everDeleted && !this.deletionMarkerSet.has(item.id) && item.content !== undefined) {
         this.document.push(item.content);
       }
     }

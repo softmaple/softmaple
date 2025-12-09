@@ -1,5 +1,12 @@
 /**
  * Main Eg-walker algorithm implementation
+ * 
+ * Based on paper: https://arxiv.org/abs/2409.14252
+ * 
+ * The algorithm maintains three parts:
+ * 1. Event graph: Persistent storage of all events
+ * 2. Document state: Current text content (plain text file)
+ * 3. Internal state: Temporary CRDT for merging (not persisted)
  */
 
 import {

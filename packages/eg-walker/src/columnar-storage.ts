@@ -335,19 +335,33 @@ export class ColumnarStorage {
    const decompressedContent = SimpleCompressor.decompress(contentBytes);
     
     // Parse length-prefixed format
-    const contentPieces: string[] = [];
-    if (decompressedContent) {
-      let index = 0;
-      while (index < decompressedContent.length) {
-        const colonPos = decompressedContent.indexOf(':', index);
-        if (colonPos === -1) break;
+   const contentPieces: string[] = [];
+   if (decompressedContent) {
+     let index = 0;
+     while (index < decompressedContent.length) {
+       const colonPos = decompressedContent.indexOf(':', index);
+       if (colonPos === -1) break;
+       
+       const length = parseInt(decompressedContent.substring(index, colonPos), 10);
+        if (isNaN(length)) {
+          console.error('Invalid length prefix in columnar storage content');
+          break;
+        }
         
-        const length = parseInt(decompressedContent.substring(index, colonPos), 10);
-        if (isNaN(length)) break;
+        // Validate length is non-negative and fits within bounds
+        if (length < 0) {
+          console.error('Negative length in columnar storage content');
+          break;
+        }
         
-        const content = decompressedContent.substring(colonPos + 1, colonPos + 1 + length);
-        contentPieces.push(content);
-        index = colonPos + 1 + length;
+        if (colonPos + 1 + length > decompressedContent.length) {
+          console.error('Length exceeds content bounds in columnar storage');
+          break;
+        }
+       
+       const content = decompressedContent.substring(colonPos + 1, colonPos + 1 + length);
+       contentPieces.push(content);
+       index = colonPos + 1 + length;
       }
     }
 

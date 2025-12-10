@@ -110,13 +110,13 @@ export class CRDT {
   }
   
   /**
-   * Integrate a new item into the CRDT using RGA rules - Optimized version
-   */
-  integrate(item: AugmentedCRDTItem, deferPositionUpdate: boolean = false): void {
-    // Prevent duplicate IDs
-    if (this.itemsById.has(item.id)) {
-      return;
-    }
+  * Integrate a new item into the CRDT using RGA rules - Optimized version
+  */
+  integrate(item: AugmentedCRDTItem, deferPositionUpdate: boolean = false): number {
+   // Prevent duplicate IDs
+   if (this.itemsById.has(item.id)) {
+      return this.items.length;
+   }
     
     this.itemsById.set(item.id, item);
     
@@ -153,10 +153,12 @@ export class CRDT {
     this.items.splice(insertPos, 0, item);
     
     // Update position cache incrementally (skip if deferred for batch)
-    if (!deferPositionUpdate) {
-      this.updatePositionCache(insertPos);
-    }
-  }
+   if (!deferPositionUpdate) {
+     this.updatePositionCache(insertPos);
+   }
+    
+    return insertPos;
+ }
   
   /**
    * Batch integrate multiple items - reduces overhead
@@ -174,14 +176,16 @@ export class CRDT {
     });
     
     let minInsertPos = this.items.length;
-    
-    for (const item of sortedItems) {
-      // Defer position cache updates during batch
-      this.integrate(item, true);
-    }
-    
-    // Update position cache once after all items are integrated
-    this.updatePositionCache(0);
+   
+   for (const item of sortedItems) {
+     // Defer position cache updates during batch
+      const insertPos = this.integrate(item, true);
+      minInsertPos = Math.min(minInsertPos, insertPos);
+   }
+   
+   // Update position cache once after all items are integrated
+    // Only update from the minimum insertion position for efficiency
+    this.updatePositionCache(minInsertPos);
   }
   
   /**

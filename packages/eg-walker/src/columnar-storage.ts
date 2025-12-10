@@ -36,10 +36,17 @@ class SimpleCompressor {
 // Variable-length integer encoding (similar to protobuf varints)
 export class VarInt {
   static encode(value: number): Uint8Array {
+    // Validate input
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(
+        `VarInt.encode: value must be a non-negative integer, got ${value}`,
+      );
+    }
+
     const bytes: number[] = [];
     while (value >= 0x80) {
       bytes.push((value & 0x7f) | 0x80);
-      value >>= 7;
+      value >>>= 7; // Use unsigned right shift
     }
     bytes.push(value & 0x7f);
     return new Uint8Array(bytes);
@@ -55,8 +62,13 @@ export class VarInt {
       if (idx >= buffer.length) {
         throw new Error("VarInt: buffer underflow");
       }
+      if (shift >= 53) {
+        throw new Error("VarInt: decoded value exceeds safe integer range");
+      }
+
       byte = buffer[idx++];
-      value |= (byte & 0x7f) << shift;
+      // Use multiplication to avoid 32-bit overflow
+      value += (byte & 0x7f) * Math.pow(2, shift);
       shift += 7;
     } while (byte & 0x80);
 

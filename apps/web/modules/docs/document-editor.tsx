@@ -1,7 +1,7 @@
 "use client";
 
 import type { FC } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Code, Edit3, Eye, FileText } from "lucide-react";
 import {
   Tabs,
@@ -9,10 +9,30 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
+import DOMPurify, { type Config as DomPurifyConfig } from "dompurify";
 import { Room } from "@/modules/docs/room";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import type { DocHeaderProps } from "@/modules/docs/doc-header";
+
+const DOMPURIFY_CONFIG: DomPurifyConfig = {
+  FORBID_TAGS: [
+    "form",
+    "input",
+    "textarea",
+    "button",
+    "select",
+    "option",
+    "style",
+    "iframe",
+    "object",
+    "embed",
+    "svg",
+    "math",
+  ],
+  FORBID_ATTR: ["style"],
+  SAFE_FOR_TEMPLATES: true,
+};
 
 export type DocumentEditorProps = Omit<
   DocHeaderProps,
@@ -34,6 +54,10 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 
   const [title, setTitle] = useState<string>(initialTitle);
   const [content, setContent] = useState<string>(initialContent);
+  const sanitizedPreview = useMemo(
+    () => DOMPurify.sanitize(content.replace(/\n/g, "<br>"), DOMPURIFY_CONFIG),
+    [content],
+  );
 
   return (
     <div className="flex-1 flex flex-col">
@@ -85,7 +109,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
               <div className="max-w-4xl mx-auto prose prose-slate dark:prose-invert">
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: content.replace(/\n/g, "<br>"),
+                    __html: sanitizedPreview,
                   }}
                 />
               </div>

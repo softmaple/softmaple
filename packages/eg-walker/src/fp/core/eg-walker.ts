@@ -137,20 +137,48 @@ const createCRDTItem = (
   prepareState: number,
   crdt: CRDT,
   position: number,
-): AugmentedCRDTItem => ({
-  id: event.id,
-  originLeft:
-    position > 0 && crdt.getItems()[position - 1]
-      ? crdt.getItems()[position - 1]!.id
-      : START_ID,
-  originRight:
-    position < crdt.getItems().length && crdt.getItems()[position]
-      ? crdt.getItems()[position]!.id
-      : END_ID,
-  content: getEventContent(event),
-  everDeleted: false,
-  prepareState,
-});
+): AugmentedCRDTItem => {
+  const items = crdt.getItems();
+
+  // Early return for edge cases
+  if (!items || items.length === 0) {
+    return {
+      id: event.id,
+      originLeft: START_ID,
+      originRight: END_ID,
+      content: getEventContent(event),
+      everDeleted: false,
+      prepareState,
+    };
+  }
+
+  // Determine originLeft
+  let originLeft = START_ID;
+  if (position > 0 && position <= items.length) {
+    const leftItem = items[position - 1];
+    if (leftItem) {
+      originLeft = leftItem.id;
+    }
+  }
+
+  // Determine originRight
+  let originRight = END_ID;
+  if (position >= 0 && position < items.length) {
+    const rightItem = items[position];
+    if (rightItem) {
+      originRight = rightItem.id;
+    }
+  }
+
+  return {
+    id: event.id,
+    originLeft,
+    originRight,
+    content: getEventContent(event),
+    everDeleted: false,
+    prepareState,
+  };
+};
 
 const integrateCRDTItem = (crdt: CRDT, item: AugmentedCRDTItem): void => {
   crdt.integrate(item);
@@ -321,28 +349,35 @@ export class FunctionalEgWalker {
   }
 
   applyEvent(event: Event): void {
+    // Early return if event is null/undefined
+    if (!event) return;
+
     this.state.eventStorage.addEvent(event);
 
     if (canApplyDirectly(event, this.state.currentVersion)) {
       this.state = processDirectEvent(this.state, event);
       // processDirectEvent already adds the event ID to the version
-    } else {
-      // Need to use CRDT for complex merging
-      const position = isInsertionEvent(event) ? event.position : 0;
-      const item = createCRDTItem(event, 1, this.state.crdt, position);
-      integrateCRDTItem(this.state.crdt, item);
-      const newDocument = regenerateFromCRDT(this.state.crdt);
-      this.state = updateDocument(this.state, newDocument);
-
-      // Update version only for the CRDT path
-      this.state = updateVersion(
-        this.state,
-        addToVersion(this.state.currentVersion, event.id),
-      );
+      return;
     }
+
+    // Need to use CRDT for complex merging
+    const position = isInsertionEvent(event) ? event.position : 0;
+    const item = createCRDTItem(event, 1, this.state.crdt, position);
+    integrateCRDTItem(this.state.crdt, item);
+    const newDocument = regenerateFromCRDT(this.state.crdt);
+    this.state = updateDocument(this.state, newDocument);
+
+    // Update version only for the CRDT path
+    this.state = updateVersion(
+      this.state,
+      addToVersion(this.state.currentVersion, event.id),
+    );
   }
 
   applyBatch(events: Event[]): void {
+    // Early return for empty batch
+    if (!events || events.length === 0) return;
+
     // Split events into those that can apply directly and those that need CRDT
     const canApply = events.filter((e) =>
       canApplyDirectly(e, this.state.currentVersion),
@@ -358,6 +393,9 @@ export class FunctionalEgWalker {
     if (canApply.length > 0) {
       this.state = processBatch(this.state, canApply);
     }
+
+    // Early return if no events need CRDT
+    if (needCRDT.length === 0) return;
 
     // Process remaining events through CRDT path one by one
     needCRDT.forEach((event) => {

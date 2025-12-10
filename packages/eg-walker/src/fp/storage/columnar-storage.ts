@@ -149,23 +149,23 @@ const sortEventsByTopology = (events: readonly Event[]): Event[] => {
   const visiting = new Set<EventId>();
 
   const visit = (id: EventId): void => {
+    // Early returns for edge cases
     if (visited.has(id)) return;
-    if (visiting.has(id)) {
-      // Cycle detected, skip this event
-      return;
-    }
+    if (visiting.has(id)) return; // Cycle detected
+
+    const event = eventMap.get(id);
+    if (!event) return; // Event not found
 
     visiting.add(id);
-    const event = eventMap.get(id);
-    if (event) {
-      // Visit all parents first
-      for (const parentId of event.parentVersion) {
-        if (eventMap.has(parentId)) {
-          visit(parentId);
-        }
+
+    // Visit all parents first
+    for (const parentId of event.parentVersion) {
+      if (eventMap.has(parentId)) {
+        visit(parentId);
       }
-      sorted.push(event);
     }
+
+    sorted.push(event);
     visiting.delete(id);
     visited.add(id);
   };
@@ -238,19 +238,22 @@ const extractParentExceptions = (
   const exceptions: ParentException[] = [];
 
   events.forEach((event, index) => {
+    // Early return for first event with no parents
+    if (index === 0 && event.parentVersion.size === 0) return;
+
     const expectedParent = index > 0 ? events[index - 1]?.id : null;
     const actualParents = Array.from(event.parentVersion);
 
-    const isException =
-      actualParents.length !== 1 ||
-      (actualParents.length === 1 && actualParents[0] !== expectedParent);
-
-    if (isException) {
-      exceptions.push({
-        eventIndex: index,
-        parents: actualParents,
-      });
+    // Early return if it matches the expected pattern
+    if (actualParents.length === 1 && actualParents[0] === expectedParent) {
+      return;
     }
+
+    // This is an exception, add it
+    exceptions.push({
+      eventIndex: index,
+      parents: actualParents,
+    });
   });
 
   return exceptions;
@@ -353,6 +356,11 @@ const serializeColumnarData = (data: ColumnarData): Uint8Array => {
 export const deserializeEvents = (
   buffer: Uint8Array,
 ): { events: Event[]; finalDocument?: string } => {
+  // Early validation checks
+  if (!buffer || buffer.length < 3) {
+    throw new Error("Buffer too small for columnar storage format");
+  }
+
   // Validate header
   if (buffer[0] !== 0x45 || buffer[1] !== 0x47) {
     throw new Error("Invalid columnar storage format");
@@ -364,6 +372,12 @@ export const deserializeEvents = (
   }
 
   const [compressedSize, dataOffset] = decodeVarInt(buffer, 3);
+
+  // Early return for empty data
+  if (compressedSize === 0) {
+    return { events: [], finalDocument: undefined };
+  }
+
   const compressed = buffer.slice(dataOffset, dataOffset + compressedSize);
   const json = simpleDecompress(compressed);
   const data: ColumnarData = JSON.parse(json);
@@ -375,6 +389,9 @@ export const deserializeEvents = (
 };
 
 const reconstructEvents = (data: ColumnarData): Event[] => {
+  // Early return for empty data
+  if (!data.segments || data.segments.length === 0) return [];
+
   const events: Event[] = [];
   let contentOffset = 0;
   let currentRunIndex = 0;
@@ -385,9 +402,19 @@ const reconstructEvents = (data: ColumnarData): Event[] => {
 
   data.segments.forEach((segment, segmentIndex) => {
     for (let i = 0; i < segment.count; i++) {
+      // Validate run exists
+      if (currentRunIndex >= data.eventIdRuns.length) {
+        throw new Error(`Event ID run index ${currentRunIndex} out of bounds`);
+      }
+
       const run = data.eventIdRuns[currentRunIndex];
       if (!run) {
         throw new Error(`Missing event ID run at index ${currentRunIndex}`);
+      }
+
+      // Validate run properties
+      if (!run.replicaId || run.startSeq === undefined || run.count <= 0) {
+        throw new Error(`Invalid event ID run at index ${currentRunIndex}`);
       }
 
       const eventId = `${run.replicaId}-${run.startSeq + currentRunOffset}`;

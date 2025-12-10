@@ -136,16 +136,19 @@ export class ColumnarStorage {
 
   /**
    * Extract content from insertion events
+   * Uses null byte (\x00) as delimiter between content pieces to preserve
+   * multi-character content without data loss
    */
   private extractContent(events: Event[]): string {
-    const chars: string[] = [];
+    const contentPieces: string[] = [];
     for (const event of events) {
       if (event.type === EventType.INSERT && event.content) {
-        // Store only first character for single-character events
-        chars.push(event.content[0] || "");
+        // Store full content for INSERT events
+        contentPieces.push(event.content || "");
       }
     }
-    return chars.join("");
+    // Use a delimiter that's unlikely to appear in normal text
+    return contentPieces.join("\x00");
   }
 
   /**
@@ -320,7 +323,10 @@ export class ColumnarStorage {
       ? new Uint8Array(data.content)
       : new Uint8Array([0]);
     const decompressedContent = SimpleCompressor.decompress(contentBytes);
-    const contentChars = decompressedContent.split("");
+    // Split by delimiter to get individual content pieces
+    const contentPieces = decompressedContent
+      ? decompressedContent.split("\x00")
+      : [];
 
     // Extract timestamps array (for backwards compatibility, fall back to Date.now())
     const timestamps = data.timestamps || [];
@@ -385,12 +391,12 @@ export class ColumnarStorage {
 
         // Defensive check for content access
         if (segment.type === EventType.INSERT) {
-          if (contentIndex >= contentChars.length) {
+          if (contentIndex >= contentPieces.length) {
             throw new Error(
-              `Content exhausted: expected character at index ${contentIndex} but only ${contentChars.length} characters available`,
+              `Content exhausted: expected content at index ${contentIndex} but only ${contentPieces.length} pieces available`,
             );
           }
-          event.content = contentChars[contentIndex++];
+          event.content = contentPieces[contentIndex++];
         }
 
         events.push(event);

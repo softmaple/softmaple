@@ -309,12 +309,24 @@ export class ColumnarStorage {
     offset += 3;
 
     // Read JSON data
-    const [jsonLength, newOffset] = VarInt.decode(buffer, offset);
-    offset = newOffset;
+   const [jsonLength, newOffset] = VarInt.decode(buffer, offset);
+   offset = newOffset;
+    
+    // Validate JSON length
+    if (jsonLength < 0) {
+      throw new Error(`Invalid JSON length: ${jsonLength} (must be non-negative)`);
+    }
+    
+    const remainingBytes = buffer.length - offset;
+    if (jsonLength > remainingBytes) {
+      throw new Error(
+        `Truncated JSON: expected ${jsonLength} bytes but only ${remainingBytes} available`
+      );
+    }
 
-    const jsonBytes = buffer.slice(offset, offset + jsonLength);
-    const jsonStr = new TextDecoder().decode(jsonBytes);
-    const data = JSON.parse(jsonStr);
+   const jsonBytes = buffer.slice(offset, offset + jsonLength);
+   const jsonStr = new TextDecoder().decode(jsonBytes);
+   const data = JSON.parse(jsonStr);
 
     // Validate data structure
     if (!data.segments || !Array.isArray(data.segments)) {

@@ -2,7 +2,7 @@
  * Helper functions for tests
  */
 
-import { Event, EventType } from '../types';
+import { Event, EventType } from './types';
 
 /**
  * Create an event with normalized parentVersion as Set

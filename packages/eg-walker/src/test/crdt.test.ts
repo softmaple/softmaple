@@ -15,14 +15,14 @@ describe('CRDT', () => {
     it('should initialize with start and end sentinels', () => {
       const items = crdt.getItems();
       expect(items).toHaveLength(2);
-      expect(items[0].id).toBe(START_ID);
-      expect(items[1].id).toBe(END_ID);
+      expect(items[0]!.id).toBe(START_ID);
+      expect(items[1]!.id).toBe(END_ID);
     });
 
     it('should have sentinels in correct prepare state', () => {
       const items = crdt.getItems();
-      expect(items[0].prepareState).toBe(1); // START is inserted
-      expect(items[1].prepareState).toBe(1); // END is inserted
+      expect(items[0]!.prepareState).toBe(1); // START is inserted
+      expect(items[1]!.prepareState).toBe(1); // END is inserted
     });
   });
 
@@ -37,13 +37,13 @@ describe('CRDT', () => {
         prepareState: 1
       };
 
-      crdt.integrate(item);
-      const items = crdt.getItems();
-      
-      expect(items).toHaveLength(3);
-      expect(items[1].id).toBe('item1');
-      expect(items[1].content).toBe('a');
-    });
+     crdt.integrate(item);
+     const items = crdt.getItems();
+     
+     expect(items).toHaveLength(3);
+      expect(items[1]!.id).toBe('item1');
+     expect(items[1]!.content).toBe('a');
+   });
 
     it('should handle concurrent insertions at same position', () => {
       const item1: CRDTItem = {
@@ -71,7 +71,7 @@ describe('CRDT', () => {
       expect(items).toHaveLength(4);
       
       // Items should be ordered deterministically by ID
-      const ids = items.map(i => i.id);
+      const ids = items.map(i => i!.id);
       expect(ids).toContain('item1');
       expect(ids).toContain('item2');
     });
@@ -99,8 +99,8 @@ describe('CRDT', () => {
       crdt.integrate(item2);
 
       const items = crdt.getItems();
-      const item1Index = items.findIndex(i => i.id === 'item1');
-      const item2Index = items.findIndex(i => i.id === 'item2');
+      const item1Index = items.findIndex(i => i!.id === 'item1');
+      const item2Index = items.findIndex(i => i!.id === 'item2');
       
       expect(item2Index).toBe(item1Index + 1);
     });
@@ -150,7 +150,7 @@ describe('CRDT', () => {
       crdt.integrate(itemD);
 
       const items = crdt.getItems();
-      const contents = items.filter(i => i.content).map(i => i.content);
+      const contents = items.filter(i => i!.content).map(i => i!.content);
       
       // 'd' should be between 'a' and 'c'
       const aIndex = contents.indexOf('a');
@@ -332,7 +332,7 @@ describe('CRDT', () => {
 
       // Should only have one item with that ID
       const items = crdt.getItems();
-      const duplicates = items.filter(i => i.id === 'duplicate');
+      const duplicates = items.filter(i => i!.id === 'duplicate');
       expect(duplicates.length).toBeLessThanOrEqual(1);
     });
 

@@ -229,7 +229,7 @@ describe('CausalGraph', () => {
     });
 
     it('should find differences between versions', () => {
-      const [onlyInA, onlyInB] = graph.diff(['a'], ['b']);
+      const [onlyInA, onlyInB] = graph.diff(new Set(['a']), new Set(['b']));
       
       expect(onlyInA).toContain('a');
       expect(onlyInA).not.toContain('b');
@@ -242,7 +242,7 @@ describe('CausalGraph', () => {
     });
 
     it('should handle empty versions', () => {
-      const [onlyInEmpty, onlyInA] = graph.diff([], ['a']);
+      const [onlyInEmpty, onlyInA] = graph.diff(new Set(), new Set(['a']));
       
       expect(onlyInEmpty).toHaveLength(0);
       expect(onlyInA).toContain('a');
@@ -250,14 +250,14 @@ describe('CausalGraph', () => {
     });
 
     it('should handle identical versions', () => {
-      const [diff1, diff2] = graph.diff(['a'], ['a']);
+      const [diff1, diff2] = graph.diff(new Set(['a']), new Set(['a']));
       
       expect(diff1).toHaveLength(0);
       expect(diff2).toHaveLength(0);
     });
 
     it('should handle merged versions', () => {
-      const [onlyInMerge, onlyInA] = graph.diff(['merge'], ['a']);
+      const [onlyInMerge, onlyInA] = graph.diff(new Set(['merge']), new Set(['a']));
       
       expect(onlyInMerge).toContain('merge');
       expect(onlyInMerge).toContain('b');

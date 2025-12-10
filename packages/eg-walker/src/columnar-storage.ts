@@ -66,7 +66,7 @@ export class VarInt {
         throw new Error("VarInt: decoded value exceeds safe integer range");
       }
 
-      byte = buffer[idx++];
+      byte = buffer[idx++]!;
       // Use multiplication to avoid 32-bit overflow
       value += (byte & 0x7f) * Math.pow(2, shift);
       shift += 7;
@@ -115,14 +115,14 @@ export class ColumnarStorage {
     if (events.length === 0) return segments;
 
     let currentSegment: RunLengthSegment = {
-      type: events[0].type,
-      startPosition: events[0].position,
+      type: events[0]!.type,
+      startPosition: events[0]!.position,
       length: 1,
     };
 
     for (let i = 1; i < events.length; i++) {
-      const event = events[i];
-      const prevEvent = events[i - 1];
+      const event = events[i]!;
+      const prevEvent = events[i - 1]!;
 
       // Check if this event continues the current run
       const isConsecutive =
@@ -175,11 +175,11 @@ export class ColumnarStorage {
     const exceptions = new Map<number, EventId[]>();
 
     for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-      const expectedParent = i > 0 ? new Set([events[i - 1].id]) : new Set();
+      const event = events[i]!;
+      const expectedParent = i > 0 ? new Set([events[i - 1]!.id]) : new Set();
 
       // Check if actual parents differ from expected
-      const actualParents = Array.from(event.parentVersion);
+      const actualParents = Array.from(event!.parentVersion);
       const expectedParentsArray = Array.from(expectedParent);
 
       if (
@@ -204,13 +204,13 @@ export class ColumnarStorage {
     const parseEventId = (id: EventId): [string, number] => {
       const match = id.match(/^(.+?)_(\d+)$/);
       if (match) {
-        return [match[1], parseInt(match[2])];
+        return [match[1]!, parseInt(match[2]!)];
       }
       // Non-standard IDs must follow {replica}_{seq} format
       throw new Error(`Invalid event ID format: "${id}". Expected format: "replica_sequence"`);
     };
 
-    let [currentReplica, currentSeq] = parseEventId(events[0].id);
+    let [currentReplica, currentSeq] = parseEventId(events[0]!.id);
     let currentRun = {
       replicaId: currentReplica,
       startSeq: currentSeq,
@@ -218,7 +218,7 @@ export class ColumnarStorage {
     };
 
     for (let i = 1; i < events.length; i++) {
-      const [replica, seq] = parseEventId(events[i].id);
+      const [replica, seq] = parseEventId(events[i]!.id);
 
       if (replica === currentReplica && seq === currentSeq + 1) {
         currentRun.count++;
@@ -377,9 +377,9 @@ export class ColumnarStorage {
         // Get parent version
         let parentVersion: Set<EventId>;
         if (parentExceptions.has(eventIndex)) {
-          parentVersion = new Set(parentExceptions.get(eventIndex));
+          parentVersion = new Set(parentExceptions.get(eventIndex) as EventId[]);
         } else if (eventIndex > 0) {
-          parentVersion = new Set([events[eventIndex - 1].id]);
+          parentVersion = new Set([events[eventIndex - 1]!.id]);
         } else {
           parentVersion = new Set();
         }

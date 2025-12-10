@@ -61,7 +61,7 @@ describe('EventStorage', () => {
           type: EventType.INSERT,
           position: i,
           content: String(i),
-          parentVersion: i === 0 ? [] : [`event${i - 1}`],
+          parentVersion: i === 0 ? new Set() : new Set([`event${i - 1}`]),
           timestamp: i * 100
         });
       }
@@ -173,9 +173,9 @@ describe('EventStorage', () => {
 
       const ordered = storage.getEventsInCausalOrder();
       
-      expect(ordered[0].id).toBe('e1');
-      expect(ordered[1].id).toBe('e2');
-      expect(ordered[2].id).toBe('e3');
+      expect(ordered[0]!.id).toBe('e1');
+      expect(ordered[1]!.id).toBe('e2');
+      expect(ordered[2]!.id).toBe('e3');
     });
 
     it('should handle concurrent events', () => {
@@ -214,7 +214,7 @@ describe('EventStorage', () => {
       const ordered = storage.getEventsInCausalOrder();
       
       // Root should come first
-      expect(ordered[0].id).toBe('root');
+      expect(ordered[0]!.id).toBe('root');
       
       // Both branches should come after root
       const branch1Index = ordered.findIndex(e => e.id === 'branch1');
@@ -270,10 +270,10 @@ describe('EventStorage', () => {
       const ordered = storage.getEventsInCausalOrder();
       
       // Root must come first
-      expect(ordered[0].id).toBe('root');
+      expect(ordered[0]!.id).toBe('root');
       
       // Merge must come last
-      expect(ordered[ordered.length - 1].id).toBe('merge');
+      expect(ordered[ordered.length - 1]!.id).toBe('merge');
       
       // a and b must come between root and merge
       const aIndex = ordered.findIndex(e => e.id === 'a');
@@ -382,15 +382,15 @@ describe('EventStorage', () => {
       const startTime = performance.now();
       
       for (let i = 0; i < 1000; i++) {
-        storage.addEvent({
-          id: `event${i}`,
-          type: i % 3 === 0 ? 'delete' : 'insert',
-          position: i % 10,
-          content: i % 3 !== 0 ? String(i) : undefined,
-          parentVersion: i === 0 ? [] : [`event${Math.max(0, i - 1)}`],
-          timestamp: i
-        });
-      }
+       storage.addEvent({
+         id: `event${i}`,
+         type: i % 3 === 0 ? EventType.DELETE : EventType.INSERT,
+         position: i % 10,
+         content: i % 3 !== 0 ? String(i) : undefined,
+          parentVersion: i === 0 ? new Set() : new Set([`event${Math.max(0, i - 1)}`]),
+         timestamp: i
+       });
+     }
 
       const endTime = performance.now();
       
@@ -406,7 +406,7 @@ describe('EventStorage', () => {
           type: EventType.INSERT,
           position: i,
           content: String(i),
-          parentVersion: i === 0 ? [] : [`event${i - 1}`],
+          parentVersion: i === 0 ? new Set() : new Set([`event${i - 1}`]),
           timestamp: i
         });
       }
@@ -416,8 +416,8 @@ describe('EventStorage', () => {
       const endTime = performance.now();
       
       expect(ordered).toHaveLength(1000);
-      expect(ordered[0].id).toBe('event0');
-      expect(ordered[999].id).toBe('event999');
+      expect(ordered[0]!.id).toBe('event0');
+      expect(ordered[999]!.id).toBe('event999');
       expect(endTime - startTime).toBeLessThan(500);
     });
   });

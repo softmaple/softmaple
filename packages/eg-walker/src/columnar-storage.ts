@@ -242,12 +242,10 @@ export class ColumnarStorage {
     // Header: magic number + version
     buffers.push(new Uint8Array([0xe7, 0x57, 0x01])); // "EW" v1
 
-    // Store data as JSON for now (can optimize to binary later)
+    // Create data object with all column data
     const data = {
       segments: runLengthSegments,
-      content: Array.from(
-        SimpleCompressor.compress(this.extractContent(sortedEvents)),
-      ),
+      content: Array.from(content),
       parentExceptions: Array.from(parentExceptions.entries()),
       eventIdRuns,
       finalDocument,

@@ -4,13 +4,31 @@ Implementation of the Eg-Walker algorithm for collaborative editing, based on th
 
 ## Overview
 
-Eg-Walker is a novel algorithm for collaborative text editing that combines the benefits of Operational Transformation (OT) and Conflict-free Replicated Data Types (CRDTs). It provides:
+Eg-Walker is a novel algorithm for collaborative text editing based on event graph replay. The algorithm builds on a replication layer that ensures all non-crashed replicas eventually receive every event.
+
+### Architecture
+
+Each replica's state consists of three parts:
+
+1. **Event Graph (Persistent)**: Stores a complete copy of all events on disk. Events include operations (insert/delete), IDs, and parent versions.
+
+2. **Document State (Persistent)**: The current sequence of characters with no metadata. Stored as plain text on disk; in memory represented as an array or rope for efficient operations.
+
+3. **Internal State (Temporary)**: A CRDT structure used to merge concurrent edits. Not persisted or replicated between replicas. Discarded after processing and rebuilt when needed.
+
+### Key Benefits
 
 - **Better**: Produces more intuitive merge results than traditional CRDTs
 - **Faster**: Efficient implementation with minimal overhead
 - **Smaller**: Compact representation of document state and operations
 
-The algorithm works by maintaining both an "effect state" (what the user sees) and a "prepare state" (used for positioning new operations), allowing it to handle complex concurrent editing scenarios gracefully.
+### How It Works
+
+The algorithm uses a two-phase approach:
+1. **Prepare Phase**: Retreat/advance the internal CRDT state to align with an event's parent version
+2. **Apply Phase**: Execute the operation (insert or delete) in the prepared context
+
+This allows it to handle complex concurrent editing scenarios by maintaining both an "effect state" (what the user sees) and a "prepare state" (used for positioning new operations).
 
 ## Installation
 

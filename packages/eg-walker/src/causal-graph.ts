@@ -1,8 +1,8 @@
 /**
- * Causal graph for tracking event dependencies and version management
- */
+* Causal graph for tracking event dependencies and version management
+*/
 
-import { EventId, Version, Event } from './types';
+import type { EventId, Version, Event } from './types';
 
 export class CausalGraph {
   private events: Map<EventId, Event>;

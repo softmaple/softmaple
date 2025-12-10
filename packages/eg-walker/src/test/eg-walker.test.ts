@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EgWalker } from '../eg-walker';
+import { EventType } from '../types';
 import type { Event } from '../types';
 
 describe('EgWalker', () => {
@@ -13,10 +14,10 @@ describe('EgWalker', () => {
     it('should handle single insert', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: Date.now()
       });
 
@@ -26,28 +27,28 @@ describe('EgWalker', () => {
     it('should handle multiple sequential inserts', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
       egWalker.applyEvent({
         id: 'e3',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'c',
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       });
 
@@ -57,19 +58,19 @@ describe('EgWalker', () => {
     it('should handle insert at beginning', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'b',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
@@ -79,28 +80,28 @@ describe('EgWalker', () => {
     it('should handle insert in middle', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'c',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
       egWalker.applyEvent({
         id: 'e3',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       });
 
@@ -112,18 +113,18 @@ describe('EgWalker', () => {
     it('should handle delete operation', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'abc',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 1,
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
@@ -133,26 +134,26 @@ describe('EgWalker', () => {
     it('should handle multiple deletes', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'abcde',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 1,
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
       egWalker.applyEvent({
         id: 'e3',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 2,
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       });
 
@@ -162,18 +163,18 @@ describe('EgWalker', () => {
     it('should handle delete at beginning', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'abc',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 0,
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
@@ -183,18 +184,18 @@ describe('EgWalker', () => {
     it('should handle delete at end', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'abc',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 2,
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
@@ -206,9 +207,9 @@ describe('EgWalker', () => {
       expect(() => {
         egWalker.applyEvent({
           id: 'e1',
-          type: 'delete',
+          type: EventType.DELETE,
           position: 0,
-          parentVersion: [],
+          parentVersion: new Set([]),
           timestamp: 100
         });
       }).not.toThrow();
@@ -222,20 +223,20 @@ describe('EgWalker', () => {
       // User A inserts 'a' at position 0
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       // User B inserts 'b' at position 0 (concurrent with e1)
       egWalker.applyEvent({
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'b',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
@@ -248,40 +249,40 @@ describe('EgWalker', () => {
       // User A: insert 'a' at 0
       egWalker.applyEvent({
         id: 'a1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       // User B: insert 'b' at 0 (concurrent)
       egWalker.applyEvent({
         id: 'b1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'b',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       // User A: insert 'c' at 1 (after their 'a')
       egWalker.applyEvent({
         id: 'a2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'c',
-        parentVersion: ['a1'],
+        parentVersion: new Set(['a1']),
         timestamp: 200
       });
 
       // User B: insert 'd' at 1 (after their 'b')
       egWalker.applyEvent({
         id: 'b2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'd',
-        parentVersion: ['b1'],
+        parentVersion: new Set(['b1']),
         timestamp: 200
       });
 
@@ -293,28 +294,28 @@ describe('EgWalker', () => {
      // Initial state: "abc"
      egWalker.applyEvent({
        id: 'init',
-       type: 'insert',
+       type: EventType.INSERT,
        position: 0,
        content: 'abc',
-       parentVersion: [],
+       parentVersion: new Set([]),
        timestamp: 100
      });
 
      // User A deletes 'b' (position 1)
      egWalker.applyEvent({
        id: 'a1',
-       type: 'delete',
+       type: EventType.DELETE,
        position: 1,
-       parentVersion: ['init'],
+       parentVersion: new Set(['init']),
        timestamp: 200
      });
 
      // User B also tries to delete 'b' (position 1) concurrently
      egWalker.applyEvent({
        id: 'b1',
-       type: 'delete',
+       type: EventType.DELETE,
        position: 1,
-       parentVersion: ['init'],
+       parentVersion: new Set(['init']),
        timestamp: 200
      });
 
@@ -326,29 +327,29 @@ describe('EgWalker', () => {
       // Initial state: "ab"
       egWalker.applyEvent({
         id: 'init',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'ab',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       // User A deletes 'b' (position 1)
       egWalker.applyEvent({
         id: 'a1',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 1,
-        parentVersion: ['init'],
+        parentVersion: new Set(['init']),
         timestamp: 200
       });
 
       // User B inserts 'c' after 'b' (position 2) concurrently
       egWalker.applyEvent({
         id: 'b1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'c',
-        parentVersion: ['init'],
+        parentVersion: new Set(['init']),
         timestamp: 200
       });
 
@@ -363,19 +364,19 @@ describe('EgWalker', () => {
     it('should handle multi-character content', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'hello',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 5,
         content: ' world',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
@@ -385,27 +386,27 @@ describe('EgWalker', () => {
     it('should handle mixed insert and delete sequence', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'test',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       egWalker.applyEvent({
         id: 'e2',
-        type: 'delete',
+        type: EventType.DELETE,
         position: 2,
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
       egWalker.applyEvent({
         id: 'e3',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'x',
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       });
 
@@ -419,40 +420,40 @@ describe('EgWalker', () => {
      // Initial document
      debugWalker.applyEvent({
        id: 'root',
-       type: 'insert',
+       type: EventType.INSERT,
        position: 0,
        content: 'base',
-       parentVersion: [],
+       parentVersion: new Set([]),
        timestamp: 100
      });
 
      // Branch A: insert at beginning
      debugWalker.applyEvent({
        id: 'a1',
-       type: 'insert',
+       type: EventType.INSERT,
        position: 0,
        content: '[A]',
-       parentVersion: ['root'],
+       parentVersion: new Set(['root']),
        timestamp: 200
      });
 
      // Branch B: insert at end
      debugWalker.applyEvent({
        id: 'b1',
-       type: 'insert',
+       type: EventType.INSERT,
        position: 4,
        content: '[B]',
-       parentVersion: ['root'],
+       parentVersion: new Set(['root']),
        timestamp: 200
      });
 
      // Merge: operation that depends on both branches
      debugWalker.applyEvent({
        id: 'merge',
-       type: 'insert',
+       type: EventType.INSERT,
        position: 5,
        content: '[M]',
-       parentVersion: ['a1', 'b1'],
+       parentVersion: new Set(['a1', 'b1']),
        timestamp: 300
      });
 
@@ -479,26 +480,26 @@ describe('EgWalker', () => {
       const events: Event[] = [
         {
           id: 'e3',
-          type: 'insert',
+          type: EventType.INSERT,
           position: 2,
           content: 'c',
-          parentVersion: ['e2'],
+          parentVersion: new Set(['e2']),
           timestamp: 300
         },
         {
           id: 'e1',
-          type: 'insert',
+          type: EventType.INSERT,
           position: 0,
           content: 'a',
-          parentVersion: [],
+          parentVersion: new Set([]),
           timestamp: 100
         },
         {
           id: 'e2',
-          type: 'insert',
+          type: EventType.INSERT,
           position: 1,
           content: 'b',
-          parentVersion: ['e1'],
+          parentVersion: new Set(['e1']),
           timestamp: 200
         }
       ];
@@ -512,10 +513,10 @@ describe('EgWalker', () => {
     it('should handle empty content insert', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: '',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
@@ -525,20 +526,20 @@ describe('EgWalker', () => {
     it('should handle position beyond document length', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'ab',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
       // Try to insert at position 10 (beyond document)
       egWalker.applyEvent({
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 10,
         content: 'c',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       });
 
@@ -549,10 +550,10 @@ describe('EgWalker', () => {
     it('should handle delete beyond document length', () => {
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'ab',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
@@ -560,9 +561,9 @@ describe('EgWalker', () => {
       expect(() => {
         egWalker.applyEvent({
           id: 'e2',
-          type: 'delete',
+          type: EventType.DELETE,
           position: 10,
-          parentVersion: ['e1'],
+          parentVersion: new Set(['e1']),
           timestamp: 200
         });
       }).not.toThrow();
@@ -576,10 +577,10 @@ describe('EgWalker', () => {
       
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: specialContent,
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
@@ -591,10 +592,10 @@ describe('EgWalker', () => {
       
       egWalker.applyEvent({
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: longContent,
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       });
 
@@ -609,10 +610,10 @@ describe('EgWalker', () => {
       for (let i = 0; i < 1000; i++) {
         egWalker.applyEvent({
           id: `e${i}`,
-          type: 'insert',
+          type: EventType.INSERT,
           position: i,
           content: String(i % 10),
-          parentVersion: i === 0 ? [] : [`e${i - 1}`],
+          parentVersion: new Set(i === 0 ? [] : [`e${i - 1}`]),
           timestamp: i
         });
       }
@@ -630,10 +631,10 @@ describe('EgWalker', () => {
       for (let i = 0; i < 100; i++) {
         egWalker.applyEvent({
           id: `concurrent${i}`,
-          type: 'insert',
+          type: EventType.INSERT,
           position: 0,
           content: String(i % 10),
-          parentVersion: [],
+          parentVersion: new Set([]),
           timestamp: 100
         });
       }

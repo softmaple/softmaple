@@ -1,22 +1,29 @@
 /**
- * CRDT integration layer - RGA implementation
- */
+* CRDT integration layer - RGA implementation with performance optimizations
+*/
 
-import { EventId, AugmentedCRDTItem } from './types';
+import type { EventId, AugmentedCRDTItem } from './types';
 
 export const START_ID = 'START';
 export const END_ID = 'END';
 
 /**
- * RGA-based CRDT for managing document items
+ * RGA-based CRDT for managing document items with optimizations:
+ * - Position caching for O(1) ID lookups
+ * - Batch operations support
+ * - Incremental updates
  */
 export class CRDT {
   private items: AugmentedCRDTItem[];
   private itemsById: Map<EventId, AugmentedCRDTItem>;
+  private positionCache: Map<EventId, number>;
+  private cacheValid: boolean;
   
   constructor() {
     this.items = [];
     this.itemsById = new Map();
+    this.positionCache = new Map();
+    this.cacheValid = true;
     
     // Initialize with start and end sentinels
     const startSentinel: AugmentedCRDTItem = {
@@ -41,13 +48,44 @@ export class CRDT {
     this.items.push(endSentinel);
     this.itemsById.set(START_ID, startSentinel);
     this.itemsById.set(END_ID, endSentinel);
+    this.updatePositionCache(0);
   }
   
   /**
-   * Find an item by its ID
+   * Update position cache from a specific index
+   */
+  private updatePositionCache(fromIndex: number = 0): void {
+    for (let i = fromIndex; i < this.items.length; i++) {
+      const item = this.items[i];
+      if (item) {
+        this.positionCache.set(item.id, i);
+      }
+    }
+    this.cacheValid = true;
+  }
+  
+  /**
+   * Invalidate cache
+   */
+  private invalidateCache(): void {
+    this.cacheValid = false;
+  }
+  
+  /**
+   * Find an item by its ID - O(1)
    */
   findItemById(id: EventId): AugmentedCRDTItem | undefined {
     return this.itemsById.get(id);
+  }
+  
+  /**
+   * Find position of item by ID - O(1) with cache
+   */
+  findPositionById(id: EventId): number | undefined {
+    if (!this.cacheValid) {
+      this.updatePositionCache();
+    }
+    return this.positionCache.get(id);
   }
   
   /**
@@ -59,163 +97,264 @@ export class CRDT {
   }
   
   /**
-  * Find the next item that matches a condition
-  */
- getNextItem(startPos: number, predicate: (item: AugmentedCRDTItem) => boolean): AugmentedCRDTItem | null {
-   for (let i = startPos; i < this.items.length; i++) {
+   * Find the next item that matches a condition
+   */
+  getNextItem(startPos: number, predicate: (item: AugmentedCRDTItem) => boolean): AugmentedCRDTItem | null {
+    for (let i = startPos; i < this.items.length; i++) {
       const item = this.items[i];
       if (item && predicate(item)) {
         return item;
-     }
-   }
-   return null;
- }
+      }
+    }
+    return null;
+  }
   
   /**
-   * Integrate a new item into the CRDT using RGA rules
-   */
-  integrate(item: AugmentedCRDTItem): void {
-    // Prevent duplicate IDs
-    if (this.itemsById.has(item.id)) {
-      return;
-    }
+  * Integrate a new item into the CRDT using RGA rules - Optimized version
+  */
+  integrate(item: AugmentedCRDTItem, deferPositionUpdate: boolean = false): number {
+   // Prevent duplicate IDs
+   if (this.itemsById.has(item.id)) {
+      return this.items.length;
+   }
     
     this.itemsById.set(item.id, item);
     
-    // Find the correct insertion position using RGA rules
+    // Use cached position for O(1) lookup of originLeft
     let insertPos = 0;
+    if (item.originLeft) {
+      const leftPos = this.findPositionById(item.originLeft);
+      if (leftPos !== undefined) {
+        insertPos = leftPos + 1;
+      }
+    }
     
-   // Start from the position after originLeft
-  if (item.originLeft && item.originLeft !== START_ID) {
-    for (let i = 0; i < this.items.length; i++) {
-        const currentItem = this.items[i];
-        if (currentItem && currentItem.id === item.originLeft) {
-        insertPos = i + 1;
+    // Scan forward until we find the correct position
+    while (insertPos < this.items.length) {
+      const currentItem = this.items[insertPos];
+      if (!currentItem) break;
+      
+      // Stop at originRight
+      if (currentItem.id === item.originRight) {
         break;
       }
-     }
+      
+      // RGA ordering: compare items at same position
+      if (currentItem.originLeft === item.originLeft) {
+        if (!this.shouldComeAfter(item, currentItem)) {
+          break;
+        }
+      }
+      
+      insertPos++;
+    }
+    
+    // Insert the item
+    this.items.splice(insertPos, 0, item);
+    
+    // Update position cache incrementally (skip if deferred for batch)
+   if (!deferPositionUpdate) {
+     this.updatePositionCache(insertPos);
+   }
+    
+    return insertPos;
+ }
+  
+  /**
+   * Batch integrate multiple items - reduces overhead
+   */
+  integrateBatch(items: AugmentedCRDTItem[]): void {
+    if (items.length === 0) return;
+    
+    // Sort items by their expected positions to minimize cache rebuilds
+    const sortedItems = [...items].sort((a, b) => {
+      // Simple heuristic: items with same originLeft are likely adjacent
+      if (a.originLeft === b.originLeft) {
+        return this.shouldComeAfter(a, b) ? 1 : -1;
+      }
+      return 0;
+    });
+    
+    let minInsertPos = this.items.length;
+   
+   for (const item of sortedItems) {
+     // Defer position cache updates during batch
+      const insertPos = this.integrate(item, true);
+      minInsertPos = Math.min(minInsertPos, insertPos);
    }
    
-   // Scan forward until we find the correct position
-   while (insertPos < this.items.length) {
-     const current = this.items[insertPos];
-      if (!current) {
-        break;
-      }
-     
-     // Stop if we've reached originRight
-      if (item.originRight && current && current.id === item.originRight) {
-       break;
-     }
-     
-     // RGA ordering: compare items that were concurrently inserted
-      if (this.shouldComeAfter(item, current!)) {
-       insertPos++;
-      } else {
-        break;
-      }
-    }
-    
-    // Insert the item at the determined position
-    this.items.splice(insertPos, 0, item);
+   // Update position cache once after all items are integrated
+    // Only update from the minimum insertion position for efficiency
+    this.updatePositionCache(minInsertPos);
   }
   
   /**
-   * RGA comparison for concurrent insertions
-   * Returns true if 'item' should come after 'other'
+   * Determine if item1 should come after item2 in RGA ordering
    */
-  private shouldComeAfter(item: AugmentedCRDTItem, other: AugmentedCRDTItem): boolean {
-    // Items with the same origin should be ordered by ID (tie-breaker)
-    if (item.originLeft === other.originLeft && item.originRight === other.originRight) {
-      return item.id > other.id;
-    }
-    
-    // Check if other was inserted between item's origins
-    if (other.originLeft === item.originLeft || other.originRight === item.originRight) {
-      return false;
-    }
-    
-    // Default: maintain current order
-    return true;
+  private shouldComeAfter(item1: AugmentedCRDTItem, item2: AugmentedCRDTItem): boolean {
+    // Lexicographic comparison of IDs for deterministic ordering
+    return item1.id > item2.id;
   }
   
   /**
-   * Get all items in order
+   * Find index position based on visible item count - Optimized with early exit
    */
-  getItems(): AugmentedCRDTItem[] {
-    return this.items;
-  }
-  
- /**
-  * Find the index of a position considering prepare state
-  */
- indexOfPosition(position: number, usePrepareState: boolean): number {
-   let currentPos = 0;
-   
-   for (let i = 0; i < this.items.length; i++) {
-     const item = this.items[i];
-      if (!item) {
+  indexOfPosition(position: number, useEffectState: boolean = false): number {
+    let visibleCount = 0;
+    
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
+      if (!item || item.id === START_ID || item.id === END_ID) {
         continue;
       }
-     const space = usePrepareState 
-       ? (item.prepareState === 1 ? 1 : 0)
-       : (!item.everDeleted ? 1 : 0);
-     
-     if (currentPos === position) {
-       return i;
-     }
-     
-     currentPos += space;
-   }
-   
-   return this.items.length;
- }
- 
- /**
-  * Calculate the effect position for an item at the given index
-  */
- calculateEffectPosition(index: number): number {
-  let position = 0;
-  
-  for (let i = 0; i < index && i < this.items.length; i++) {
-     const item = this.items[i];
-     if (item && !item.everDeleted) {
-      position++;
+      
+      // Skip deletion markers
+      if (item.content === undefined) {
+        continue;
+      }
+      
+      const isVisible = useEffectState 
+        ? !item.everDeleted 
+        : item.prepareState >= 1;
+      
+      if (isVisible) {
+        if (visibleCount === position) {
+          return i;
+        }
+        visibleCount++;
+      }
     }
-   }
-   
-   return position;
- }
-
+    
+    return this.items.length - 1;
+  }
+  
   /**
-   * Get position of an item at prepare state
+   * Calculate position in effect state - Optimized version
    */
-  getPositionAtPrepareState(index: number): number {
+  calculateEffectPosition(crdtIndex: number): number {
     let position = 0;
     
-    for (let i = 0; i < index && i < this.items.length; i++) {
+    for (let i = 0; i < crdtIndex && i < this.items.length; i++) {
       const item = this.items[i];
-      if (item && item.prepareState === 1) {
+      if (item && item.content !== undefined && !item.everDeleted) {
         position++;
       }
     }
     
     return position;
   }
+  
+  /**
+  * Get all items
+  */
+  getItems(): AugmentedCRDTItem[] {
+    return [...this.items];
+  }
+  
+  /**
+   * Get item at specific index
+   */
+  getItemAt(index: number): AugmentedCRDTItem | null {
+    return this.items[index] || null;
+  }
+  
+  /**
+   * Get total number of items
+   */
+  getLength(): number {
+    return this.items.length;
+  }
+  
+  /**
+  * Clear the CRDT (for testing)
+  */
+ clear(): void {
+   this.items = [];
+   this.itemsById.clear();
+   this.positionCache.clear();
+    this.cacheValid = false;
+    
+    // Reinitialize with start and end sentinels
+    const startSentinel: AugmentedCRDTItem = {
+      id: START_ID,
+      originLeft: null,
+      originRight: null,
+      content: undefined,
+      everDeleted: false,
+      prepareState: 1
+    };
+    
+    const endSentinel: AugmentedCRDTItem = {
+      id: END_ID,
+      originLeft: START_ID,
+      originRight: null,
+      content: undefined,
+      everDeleted: false,
+      prepareState: 1
+    };
+    
+    this.items.push(startSentinel);
+    this.items.push(endSentinel);
+    this.itemsById.set(START_ID, startSentinel);
+    this.itemsById.set(END_ID, endSentinel);
+    this.updatePositionCache(0);
+ }
 
   /**
-   * Get position of an item at effect state
+   * Get position at prepare state (visible position counting only items with prepareState >= 1)
    */
-  getPositionAtEffectState(index: number): number {
-    let position = 0;
+  getPositionAtPrepareState(position: number): number {
+    let visibleCount = 0;
     
-    for (let i = 0; i < index && i < this.items.length; i++) {
+    // Count visible items up to the requested position
+    for (let i = 0; i < this.items.length; i++) {
       const item = this.items[i];
-      if (item && !item.everDeleted) {
-        position++;
+      
+      // Skip sentinels and non-content items
+      if (!item || item.id === START_ID || item.id === END_ID || item.content === undefined) {
+        continue;
+      }
+      
+      // Count items that are visible at prepare state
+      if (item.prepareState >= 1) {
+        if (visibleCount === position) {
+          // Return the visible position, not the CRDT index
+          return visibleCount;
+        }
+        visibleCount++;
       }
     }
     
-    return position;
+    // If position is beyond available items, return the count of visible items
+    return visibleCount;
+  }
+
+  /**
+   * Get position at effect state (visible position counting only non-deleted items)
+   */
+  getPositionAtEffectState(position: number): number {
+    let visibleCount = 0;
+    
+    // Count visible items up to the requested position
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
+      
+      // Skip sentinels and non-content items
+      if (!item || item.id === START_ID || item.id === END_ID || item.content === undefined) {
+        continue;
+      }
+      
+      // Count items that are visible at effect state (not deleted)
+      if (!item.everDeleted) {
+        if (visibleCount === position) {
+          // Return the visible position
+          return visibleCount;
+        }
+        visibleCount++;
+      }
+    }
+    
+    // If position is beyond available items, return the count of visible items
+    return visibleCount;
   }
 }

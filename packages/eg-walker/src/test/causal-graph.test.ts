@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { CausalGraph } from '../causal-graph';
+import { EventType } from '../types';
 import type { Event } from '../types';
 
 describe('CausalGraph', () => {
@@ -13,10 +14,10 @@ describe('CausalGraph', () => {
     it('should add a single event', () => {
       const event: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: Date.now()
       };
 
@@ -27,19 +28,19 @@ describe('CausalGraph', () => {
     it('should track parent-child relationships', () => {
       const parent: Event = {
         id: 'parent',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'p',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: Date.now()
       };
 
       const child: Event = {
         id: 'child',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'c',
-        parentVersion: ['parent'],
+        parentVersion: new Set(['parent']),
         timestamp: Date.now() + 1
       };
 
@@ -53,28 +54,28 @@ describe('CausalGraph', () => {
     it('should handle multiple parents (merge)', () => {
       const parent1: Event = {
         id: 'p1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const parent2: Event = {
         id: 'p2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'b',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 200
       };
 
       const merge: Event = {
         id: 'merge',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'm',
-        parentVersion: ['p1', 'p2'],
+        parentVersion: new Set(['p1', 'p2']),
         timestamp: 300
       };
 
@@ -91,19 +92,19 @@ describe('CausalGraph', () => {
     it('should return true for parent-child relationship', () => {
       const parent: Event = {
         id: 'parent',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'p',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const child: Event = {
         id: 'child',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'c',
-        parentVersion: ['parent'],
+        parentVersion: new Set(['parent']),
         timestamp: 200
       };
 
@@ -117,28 +118,28 @@ describe('CausalGraph', () => {
     it('should handle transitive relationships', () => {
       const e1: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const e2: Event = {
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       };
 
       const e3: Event = {
         id: 'e3',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'c',
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       };
 
@@ -153,19 +154,19 @@ describe('CausalGraph', () => {
     it('should return false for concurrent events', () => {
       const e1: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const e2: Event = {
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'b',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 200
       };
 
@@ -187,37 +188,37 @@ describe('CausalGraph', () => {
       //     merge
       const root: Event = {
         id: 'root',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'r',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const a: Event = {
         id: 'a',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'a',
-        parentVersion: ['root'],
+        parentVersion: new Set(['root']),
         timestamp: 200
       };
 
       const b: Event = {
         id: 'b',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['root'],
+        parentVersion: new Set(['root']),
         timestamp: 300
       };
 
       const merge: Event = {
         id: 'merge',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'm',
-        parentVersion: ['a', 'b'],
+        parentVersion: new Set(['a', 'b']),
         timestamp: 400
       };
 
@@ -228,7 +229,7 @@ describe('CausalGraph', () => {
     });
 
     it('should find differences between versions', () => {
-      const [onlyInA, onlyInB] = graph.diff(['a'], ['b']);
+      const [onlyInA, onlyInB] = graph.diff(new Set(['a']), new Set(['b']));
       
       expect(onlyInA).toContain('a');
       expect(onlyInA).not.toContain('b');
@@ -241,7 +242,7 @@ describe('CausalGraph', () => {
     });
 
     it('should handle empty versions', () => {
-      const [onlyInEmpty, onlyInA] = graph.diff([], ['a']);
+      const [onlyInEmpty, onlyInA] = graph.diff(new Set(), new Set(['a']));
       
       expect(onlyInEmpty).toHaveLength(0);
       expect(onlyInA).toContain('a');
@@ -249,14 +250,14 @@ describe('CausalGraph', () => {
     });
 
     it('should handle identical versions', () => {
-      const [diff1, diff2] = graph.diff(['a'], ['a']);
+      const [diff1, diff2] = graph.diff(new Set(['a']), new Set(['a']));
       
       expect(diff1).toHaveLength(0);
       expect(diff2).toHaveLength(0);
     });
 
     it('should handle merged versions', () => {
-      const [onlyInMerge, onlyInA] = graph.diff(['merge'], ['a']);
+      const [onlyInMerge, onlyInA] = graph.diff(new Set(['merge']), new Set(['a']));
       
       expect(onlyInMerge).toContain('merge');
       expect(onlyInMerge).toContain('b');
@@ -274,28 +275,28 @@ describe('CausalGraph', () => {
     it('should order events respecting dependencies', () => {
       const e1: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const e2: Event = {
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 1,
         content: 'b',
-        parentVersion: ['e1'],
+        parentVersion: new Set(['e1']),
         timestamp: 200
       };
 
       const e3: Event = {
         id: 'e3',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 2,
         content: 'c',
-        parentVersion: ['e2'],
+        parentVersion: new Set(['e2']),
         timestamp: 300
       };
 
@@ -313,19 +314,19 @@ describe('CausalGraph', () => {
     it('should handle concurrent events deterministically', () => {
       const e1: Event = {
         id: 'e1',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'a',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
       const e2: Event = {
         id: 'e2',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'b',
-        parentVersion: [],
+        parentVersion: new Set([]),
         timestamp: 100
       };
 
@@ -344,10 +345,10 @@ describe('CausalGraph', () => {
     it('should handle self-referential events gracefully', () => {
       const selfRef: Event = {
         id: 'self',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'x',
-        parentVersion: ['self'], // Invalid but should handle
+        parentVersion: new Set(['self']), // Invalid but should handle
         timestamp: 100
       };
 
@@ -357,10 +358,10 @@ describe('CausalGraph', () => {
     it('should handle missing parent references', () => {
       const orphan: Event = {
         id: 'orphan',
-        type: 'insert',
+        type: EventType.INSERT,
         position: 0,
         content: 'o',
-        parentVersion: ['non-existent'],
+        parentVersion: new Set(['non-existent']),
         timestamp: 100
       };
 

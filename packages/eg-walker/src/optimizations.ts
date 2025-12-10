@@ -26,22 +26,23 @@ export function encodeOperations(events: Event[]): RunLengthOperation[] {
   
   for (const event of events) {
     if (event.type === 'insert') {
-      const chars = event.content ? [event.content] : [];
-      
-      if (currentRun?.type === 'insert' && 
-          currentRun.startPos + currentRun.length === event.position) {
-        // Extend current insert run
-        currentRun.content!.push(...chars);
-        currentRun.length++;
-      } else {
-        // Start new insert run
-        if (currentRun) encoded.push(currentRun);
-        currentRun = {
-          type: 'insert',
-          startPos: event.position,
-          content: chars,
-          length: 1
-        };
+      // Handle multi-character content as array of characters
+      const chars = event.content ? Array.from(event.content) : [];
+     
+     if (currentRun?.type === 'insert' && 
+         currentRun.startPos + currentRun.length === event.position) {
+       // Extend current insert run
+       currentRun.content!.push(...chars);
+        currentRun.length += chars.length;
+     } else {
+       // Start new insert run
+       if (currentRun) encoded.push(currentRun);
+       currentRun = {
+         type: 'insert',
+         startPos: event.position,
+         content: chars,
+          length: chars.length
+       };
       }
     } else if (event.type === 'delete') {
       if (currentRun?.type === 'delete' && 
@@ -89,12 +90,9 @@ export function isFullyOrdered(
   }
   
   // Check if all parent events have earlier timestamps
-  // (assuming timestamp represents logical time)
-  const eventTime = event.timestamp || Date.now();
-  return parentEvents.every(parent => {
-    const parentTime = parent.timestamp || 0;
-    return parentTime < eventTime;
-  });
+  // Determine "fully ordered" solely from causal relationship
+  // without using physical timestamps
+  return true;
 }
 
 /**

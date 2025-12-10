@@ -329,14 +329,27 @@ export class ColumnarStorage {
     }
 
     // Decompress content if needed
-    const contentBytes = Array.isArray(data.content)
-      ? new Uint8Array(data.content)
-      : new Uint8Array([0]);
-    const decompressedContent = SimpleCompressor.decompress(contentBytes);
-    // Split by delimiter to get individual content pieces
-    const contentPieces = decompressedContent
-      ? decompressedContent.split("\x00")
-      : [];
+   const contentBytes = Array.isArray(data.content)
+     ? new Uint8Array(data.content)
+     : new Uint8Array([0]);
+   const decompressedContent = SimpleCompressor.decompress(contentBytes);
+    
+    // Parse length-prefixed format
+    const contentPieces: string[] = [];
+    if (decompressedContent) {
+      let index = 0;
+      while (index < decompressedContent.length) {
+        const colonPos = decompressedContent.indexOf(':', index);
+        if (colonPos === -1) break;
+        
+        const length = parseInt(decompressedContent.substring(index, colonPos), 10);
+        if (isNaN(length)) break;
+        
+        const content = decompressedContent.substring(colonPos + 1, colonPos + 1 + length);
+        contentPieces.push(content);
+        index = colonPos + 1 + length;
+      }
+    }
 
     // Extract timestamps array (for backwards compatibility, fall back to Date.now())
     const timestamps = data.timestamps || [];

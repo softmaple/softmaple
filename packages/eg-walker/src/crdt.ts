@@ -1,8 +1,8 @@
 /**
- * CRDT integration layer - RGA implementation with performance optimizations
- */
+* CRDT integration layer - RGA implementation with performance optimizations
+*/
 
-import { EventId, AugmentedCRDTItem } from './types';
+import type { EventId, AugmentedCRDTItem } from './types';
 
 export const START_ID = 'START';
 export const END_ID = 'END';
@@ -112,7 +112,7 @@ export class CRDT {
   /**
    * Integrate a new item into the CRDT using RGA rules - Optimized version
    */
-  integrate(item: AugmentedCRDTItem): void {
+  integrate(item: AugmentedCRDTItem, deferPositionUpdate: boolean = false): void {
     // Prevent duplicate IDs
     if (this.itemsById.has(item.id)) {
       return;
@@ -152,14 +152,18 @@ export class CRDT {
     // Insert the item
     this.items.splice(insertPos, 0, item);
     
-    // Update position cache incrementally
-    this.updatePositionCache(insertPos);
+    // Update position cache incrementally (skip if deferred for batch)
+    if (!deferPositionUpdate) {
+      this.updatePositionCache(insertPos);
+    }
   }
   
   /**
    * Batch integrate multiple items - reduces overhead
    */
   integrateBatch(items: AugmentedCRDTItem[]): void {
+    if (items.length === 0) return;
+    
     // Sort items by their expected positions to minimize cache rebuilds
     const sortedItems = [...items].sort((a, b) => {
       // Simple heuristic: items with same originLeft are likely adjacent
@@ -169,9 +173,15 @@ export class CRDT {
       return 0;
     });
     
+    let minInsertPos = this.items.length;
+    
     for (const item of sortedItems) {
-      this.integrate(item);
+      // Defer position cache updates during batch
+      this.integrate(item, true);
     }
+    
+    // Update position cache once after all items are integrated
+    this.updatePositionCache(0);
   }
   
   /**
@@ -231,10 +241,10 @@ export class CRDT {
   }
   
   /**
-   * Get all items
-   */
-  getItems(): (AugmentedCRDTItem | null)[] {
-    return this.items;
+  * Get all items
+  */
+  getItems(): AugmentedCRDTItem[] {
+    return [...this.items];
   }
   
   /**
@@ -252,14 +262,39 @@ export class CRDT {
   }
   
   /**
-   * Clear the CRDT (for testing)
-   */
-  clear(): void {
-    this.items = [];
-    this.itemsById.clear();
-    this.positionCache.clear();
-    this.cacheValid = true;
-  }
+  * Clear the CRDT (for testing)
+  */
+ clear(): void {
+   this.items = [];
+   this.itemsById.clear();
+   this.positionCache.clear();
+    this.cacheValid = false;
+    
+    // Reinitialize with start and end sentinels
+    const startSentinel: AugmentedCRDTItem = {
+      id: START_ID,
+      originLeft: null,
+      originRight: null,
+      content: undefined,
+      everDeleted: false,
+      prepareState: 1
+    };
+    
+    const endSentinel: AugmentedCRDTItem = {
+      id: END_ID,
+      originLeft: START_ID,
+      originRight: null,
+      content: undefined,
+      everDeleted: false,
+      prepareState: 1
+    };
+    
+    this.items.push(startSentinel);
+    this.items.push(endSentinel);
+    this.itemsById.set(START_ID, startSentinel);
+    this.itemsById.set(END_ID, endSentinel);
+    this.updatePositionCache(0);
+ }
 
   /**
    * Get position at prepare state (visible position counting only items with prepareState >= 1)

@@ -3,7 +3,7 @@
  * Pure functions for version operations
  */
 
-import { EventId, Version } from "../../types";
+import type { EventId, Version } from "../../types";
 
 /**
  * Create a new version from an immutable set

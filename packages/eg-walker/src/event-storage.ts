@@ -2,7 +2,7 @@
  * Event storage for managing document operations
  */
 
-import { Event, EventId } from "./types";
+import type { Event, EventId } from "./types";
 import { CausalGraph } from "./causal-graph";
 import { ColumnarStorage } from "./columnar-storage";
 

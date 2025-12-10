@@ -148,19 +148,17 @@ export class ColumnarStorage {
 
   /**
    * Extract content from insertion events
-   * Uses null byte (\x00) as delimiter between content pieces to preserve
-   * multi-character content without data loss
+   * Uses length-prefixed encoding to preserve multi-character content without data loss
    */
   private extractContent(events: Event[]): string {
-    const contentPieces: string[] = [];
-    for (const event of events) {
-      if (event.type === EventType.INSERT && event.content) {
-        // Store full content for INSERT events
-        contentPieces.push(event.content || "");
-      }
-    }
-    // Use a delimiter that's unlikely to appear in normal text
-    return contentPieces.join("\x00");
+    // Length-prefix each piece to avoid delimiter collision
+    return events
+      .filter((e) => e.type === EventType.INSERT && e.content)
+      .map((e) => {
+        const content = e.content || "";
+        return `${content.length}:${content}`;
+      })
+      .join("");
   }
 
   /**

@@ -104,22 +104,37 @@ export class EgWalker {
    * Apply an event to the system
    */
   applyEvent(event: Event): void {
-   // Ensure parentVersion is a Set (handle legacy array format)
+    // Ensure parentVersion is a Set (handle legacy array format)
     event.parentVersion = this.ensureVersionIsSet(event.parentVersion);
     
+    // Add event to storage
     this.eventStorage.addEvent(event);
     
-    // Optimization: Skip CRDT for fully ordered operations
-    if (this.enableOptimizations && this.shouldSkipCRDT(event)) {
-      this.applyDirectly(event);
-    } else {
-      this.processEvent(event);
-    }
+    // Always regenerate from all events to ensure causal ordering
+    // This ensures events are always processed in the correct order
+    this.regenerateFromEvents();
   }
 
   /**
    * Check if we can skip CRDT integration (optimization)
    */
+  /**
+   * Regenerate document from all events in causal order
+   */
+  private regenerateFromEvents(): void {
+    // Reset state
+    this.crdt = new CRDT();
+    this.currentVersion = new Set();
+    this.document = [];
+    this.diffCache.clear();
+    this.deletionMarkerSet.clear();
+    
+    // Process events in causal order
+    for (const event of this.eventStorage.iterInCausalOrder()) {
+      this.processEvent(event);
+    }
+  }
+
   private shouldSkipCRDT(event: Event): boolean {
    if (!this.enableOptimizations) return false;
    
@@ -139,7 +154,10 @@ export class EgWalker {
    */
   private applyDirectly(event: Event): void {
     if (event.type === EventType.INSERT && event.content) {
-      this.document.splice(event.position, 0, event.content);
+      // Split content into individual characters
+      for (let i = 0; i < event.content.length; i++) {
+        this.document.splice(event.position + i, 0, event.content[i] || '');
+      }
     } else if (event.type === EventType.DELETE && event.position < this.document.length) {
       this.document.splice(event.position, 1);
     }
@@ -230,25 +248,7 @@ export class EgWalker {
     const items = this.crdt.getItems();
 
     for (const eventId of onlyInCurrent) {
-      // First, handle deletions - restore deleted items
-      const retreatEvent = this.eventStorage.getEvent(eventId);
-      if (retreatEvent && retreatEvent.type === EventType.DELETE) {
-        // Find the deletion marker and restore the deleted item
-        for (const item of items) {
-          if (item && item.id === eventId) {
-            // Find the item that was deleted (stored in originLeft)
-            for (const targetItem of items) {
-              if (targetItem && targetItem.id === item.originLeft) {
-                // Temporarily restore the item for prepare phase
-                targetItem.everDeleted = false;
-              }
-            }
-            break;
-          }
-        }
-      }
-
-      // Then handle prepare state changes
+      // Handle prepare state changes - simple approach
       for (const item of items) {
         if (item) {
           // Match items created by this event (e.g., "init_0", "init_1", etc.)
@@ -259,11 +259,29 @@ export class EgWalker {
           }
         }
       }
+      
+      // Handle deletion markers - remove them from the set when retreating
+      const retreatEvent = this.eventStorage.getEvent(eventId);
+      if (retreatEvent && retreatEvent.type === EventType.DELETE) {
+        // Find item that was deleted and temporarily restore for prepare view
+        for (const item of items) {
+          if (item && item.id === eventId && item.originLeft) {
+            // Remove from deletion marker set to make it visible
+            this.deletionMarkerSet.delete(item.originLeft);
+            // Find the actual item and restore it temporarily
+            for (const targetItem of items) {
+              if (targetItem && targetItem.id === item.originLeft) {
+                targetItem.everDeleted = false;
+              }
+            }
+          }
+        }
+      }
     }
 
     // Advance: increment prepare state for events only in target version
     for (const eventId of onlyInTarget) {
-      // First handle prepare state changes
+      // Handle prepare state changes
       for (const item of items) {
         if (item) {
           // Match items created by this event
@@ -272,21 +290,21 @@ export class EgWalker {
           }
         }
       }
-
-      // Then apply deletions
+      
+      // Handle deletion markers - add them to the set when advancing
       const advanceEvent = this.eventStorage.getEvent(eventId);
       if (advanceEvent && advanceEvent.type === EventType.DELETE) {
         // Find the deletion marker and apply the deletion
         for (const item of items) {
-          if (item && item.id === eventId) {
-            // Find the item that was deleted (stored in originLeft)
+          if (item && item.id === eventId && item.originLeft) {
+            // Add to deletion marker set
+            this.deletionMarkerSet.add(item.originLeft);
+            // Find the actual item and mark as deleted
             for (const targetItem of items) {
               if (targetItem && targetItem.id === item.originLeft) {
-                // Apply the deletion
                 targetItem.everDeleted = true;
               }
             }
-            break;
           }
         }
       }
@@ -315,7 +333,18 @@ export class EgWalker {
 
     // Handle multi-character content by splitting into individual characters
     // Find the initial insertion position once
-    const initialInsertIndex = this.crdt.indexOfPosition(event.position, true);
+    // Count visible items to handle out-of-bounds positions gracefully
+    const items = this.crdt.getItems();
+    let visibleCount = 0;
+    for (const item of items) {
+      if (item && item.content !== undefined && item.prepareState >= PrepareState.INSERTED && !item.everDeleted && !this.deletionMarkerSet.has(item.id)) {
+        visibleCount++;
+      }
+    }
+    
+    // Clamp position to valid range (0 to visibleCount)
+    const clampedPosition = Math.min(event.position, visibleCount);
+    const initialInsertIndex = this.crdt.indexOfPosition(clampedPosition, true);
 
     // Get the initial left and right origins based on the insertion position
     const initialPrevItem = this.crdt.getPrevItem(initialInsertIndex);
@@ -371,7 +400,7 @@ export class EgWalker {
 
     // When searching for the delete position, we need to consider the prepare state
     // to get the view of the document as it was at the event's parent version
-    let searchPosition = 0;
+    let visiblePosition = 0;
 
     for (const item of items) {
       // Skip sentinels
@@ -383,11 +412,11 @@ export class EgWalker {
       // An item is visible if it has prepareState >= 1 and isn't deleted
       if (item.prepareState >= PrepareState.INSERTED && !item.everDeleted && !this.deletionMarkerSet.has(item.id)) {
         // Count position in the prepare-state view
-        if (searchPosition === event.position) {
+        if (visiblePosition === event.position) {
           foundItem = item;
           break;
         }
-        searchPosition++;
+        visiblePosition++;
       }
     }
 
@@ -399,7 +428,7 @@ export class EgWalker {
     }
 
     // Check if already deleted
-    if (foundItem.everDeleted) {
+    if (foundItem.everDeleted || this.deletionMarkerSet.has(foundItem.id)) {
       return; // Already deleted, nothing to do
     }
 

@@ -260,4 +260,62 @@ export class CRDT {
     this.positionCache.clear();
     this.cacheValid = true;
   }
+
+  /**
+   * Get position at prepare state (visible position counting only items with prepareState >= 1)
+   */
+  getPositionAtPrepareState(position: number): number {
+    let visibleCount = 0;
+    
+    // Count visible items up to the requested position
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
+      
+      // Skip sentinels and non-content items
+      if (!item || item.id === START_ID || item.id === END_ID || item.content === undefined) {
+        continue;
+      }
+      
+      // Count items that are visible at prepare state
+      if (item.prepareState >= 1) {
+        if (visibleCount === position) {
+          // Return the visible position, not the CRDT index
+          return visibleCount;
+        }
+        visibleCount++;
+      }
+    }
+    
+    // If position is beyond available items, return the count of visible items
+    return visibleCount;
+  }
+
+  /**
+   * Get position at effect state (visible position counting only non-deleted items)
+   */
+  getPositionAtEffectState(position: number): number {
+    let visibleCount = 0;
+    
+    // Count visible items up to the requested position
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
+      
+      // Skip sentinels and non-content items
+      if (!item || item.id === START_ID || item.id === END_ID || item.content === undefined) {
+        continue;
+      }
+      
+      // Count items that are visible at effect state (not deleted)
+      if (!item.everDeleted) {
+        if (visibleCount === position) {
+          // Return the visible position
+          return visibleCount;
+        }
+        visibleCount++;
+      }
+    }
+    
+    // If position is beyond available items, return the count of visible items
+    return visibleCount;
+  }
 }

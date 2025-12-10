@@ -208,8 +208,8 @@ export class ColumnarStorage {
       if (match) {
         return [match[1], parseInt(match[2])];
       }
-      // Fallback for simple IDs
-      return [id, 0];
+      // Non-standard IDs must follow {replica}_{seq} format
+      throw new Error(`Invalid event ID format: "${id}". Expected format: "replica_sequence"`);
     };
 
     let [currentReplica, currentSeq] = parseEventId(events[0].id);

@@ -303,6 +303,18 @@ export class ColumnarStorage {
     const jsonStr = new TextDecoder().decode(jsonBytes);
     const data = JSON.parse(jsonStr);
 
+    // Validate data structure
+    if (!data.segments || !Array.isArray(data.segments)) {
+      throw new Error(
+        "Invalid columnar format: missing or invalid segments array",
+      );
+    }
+    if (!data.eventIdRuns || !Array.isArray(data.eventIdRuns)) {
+      throw new Error(
+        "Invalid columnar format: missing or invalid eventIdRuns array",
+      );
+    }
+
     // Decompress content if needed
     const contentBytes = Array.isArray(data.content)
       ? new Uint8Array(data.content)
@@ -323,8 +335,27 @@ export class ColumnarStorage {
 
     for (const segment of data.segments) {
       for (let i = 0; i < segment.length; i++) {
-        // Get event ID from runs
+        // Defensive check for event ID runs
+        if (currentRunIndex >= data.eventIdRuns.length) {
+          throw new Error(
+            `Event ID runs exhausted: expected run at index ${currentRunIndex} but only ${data.eventIdRuns.length} runs available`,
+          );
+        }
+
         const run = data.eventIdRuns[currentRunIndex];
+        if (
+          !run ||
+          typeof run.replicaId !== "string" ||
+          typeof run.startSeq !== "number" ||
+          run.startSeq < 0 ||
+          typeof run.count !== "number" ||
+          run.count <= 0
+        ) {
+          throw new Error(
+            `Invalid event ID run at index ${currentRunIndex}: ${JSON.stringify(run)}`,
+          );
+        }
+
         const eventId = `${run.replicaId}_${run.startSeq + currentRunOffset}`;
 
         // Get parent version
@@ -351,9 +382,15 @@ export class ColumnarStorage {
           parentVersion,
           timestamp,
         };
-        event.content = contentChars[contentIndex++];
+
+        // Defensive check for content access
         if (segment.type === EventType.INSERT) {
-          event.content = data.content[contentIndex++];
+          if (contentIndex >= contentChars.length) {
+            throw new Error(
+              `Content exhausted: expected character at index ${contentIndex} but only ${contentChars.length} characters available`,
+            );
+          }
+          event.content = contentChars[contentIndex++];
         }
 
         events.push(event);

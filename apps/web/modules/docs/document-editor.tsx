@@ -15,6 +15,7 @@ import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import type { DocHeaderProps } from "@/modules/docs/doc-header";
 
+// Conservative HTML preview: allow plain HTML only, block forms/embeds/SVG/MathML/styles.
 const DOMPURIFY_CONFIG: DomPurifyConfig = {
   FORBID_TAGS: [
     "form",
@@ -29,6 +30,9 @@ const DOMPURIFY_CONFIG: DomPurifyConfig = {
     "embed",
     "svg",
     "math",
+    "script",
+    "noscript",
+    "template",
   ],
   FORBID_ATTR: ["style"],
   SAFE_FOR_TEMPLATES: true,

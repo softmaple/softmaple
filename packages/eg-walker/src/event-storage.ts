@@ -4,18 +4,21 @@
 
 import { Event, EventId } from './types';
 import { CausalGraph } from './causal-graph';
+import { ColumnarStorage } from './columnar-storage';
 
 export class EventStorage {
   private events: Map<EventId, Event>;
   private causalGraph: CausalGraph;
   private eventOrder: Event[];
   private eventsByTimestamp: Event[];
+  private columnarStorage: ColumnarStorage;
   
   constructor() {
     this.events = new Map();
     this.causalGraph = new CausalGraph();
     this.eventOrder = [];
     this.eventsByTimestamp = [];
+    this.columnarStorage = new ColumnarStorage();
   }
   
   /**
@@ -111,5 +114,37 @@ export class EventStorage {
    */
   size(): number {
     return this.events.size;
+  }
+  /** Serialize events to compact columnar format
+   */
+  async serialize(finalDocument?: string): Promise<Uint8Array> {
+    const events = this.getAllEvents();
+    return this.columnarStorage.serialize(events, finalDocument);
+  }
+  
+  /**
+   * Deserialize events from columnar format
+   */
+  async deserialize(buffer: Uint8Array): Promise<void> {
+    const { events } = await this.columnarStorage.deserialize(buffer);
+    
+    // Clear existing events
+    this.events.clear();
+    this.causalGraph = new CausalGraph();
+    this.eventOrder = [];
+    this.eventsByTimestamp = [];
+    
+    // Add all deserialized events
+    for (const event of events) {
+      this.addEvent(event);
+    }
+  }
+  
+  /**
+   * Get storage statistics
+   */
+  async getStorageStatistics(): Promise<any> {
+    const events = this.getAllEvents();
+    return this.columnarStorage.getStatistics(events);
   }
 }

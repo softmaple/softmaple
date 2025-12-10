@@ -62,6 +62,32 @@ class VersionDiffCache {
 }
 
 export class EgWalker {
+  /** Save the event graph to disk using columnar storage
+   */
+  async saveToFile(filePath: string, finalDocument?: string): Promise<void> {
+    const buffer = await this.eventStorage.serialize(finalDocument || this.document.join(''));
+    const fs = require('fs');
+    fs.writeFileSync(filePath, buffer);
+  }
+
+  /**
+   * Load the event graph from disk using columnar storage
+   */
+  async loadFromFile(filePath: string): Promise<void> {
+    const fs = require('fs');
+    const buffer = fs.readFileSync(filePath);
+    await this.eventStorage.deserialize(new Uint8Array(buffer));
+    
+    // Rebuild document from loaded events
+    this.regenerateFromEvents();
+  }
+
+  /**
+   * Get storage statistics
+   */
+  async getStorageStatistics(): Promise<any> {
+    return this.eventStorage.getStorageStatistics();
+  }
  private eventStorage: EventStorage;
  private crdt: CRDT;
  private currentVersion: Version;

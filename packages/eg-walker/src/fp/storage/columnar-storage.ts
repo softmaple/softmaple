@@ -126,9 +126,13 @@ const simpleDecompress = (compressed: Uint8Array): string => {
 
   for (let i = 0; i < compressed.length; i += 2) {
     const char = compressed[i] ?? 0;
-    const count = compressed[i + 1] || 1;
-    for (let j = 0; j < count; j++) {
-      bytes.push(char);
+    // Treat 0 as valid count, only use 1 as default if undefined
+    const rawCount = compressed[i + 1];
+    const count = rawCount !== undefined ? rawCount : 1;
+    if (count >= 0) {
+      for (let j = 0; j < count; j++) {
+        bytes.push(char);
+      }
     }
   }
 
@@ -137,15 +141,46 @@ const simpleDecompress = (compressed: Uint8Array): string => {
 
 // ============ Pure Event Processing Functions ============
 
-const sortEventsByTopology = (events: readonly Event[]): Event[] =>
-  [...events].sort((a, b) => {
-    const aParents = a.parentVersion.size;
-    const bParents = b.parentVersion.size;
-    if (aParents !== bParents) return aParents - bParents;
-    return a.id.localeCompare(b.id);
-  });
+const sortEventsByTopology = (events: readonly Event[]): Event[] => {
+  // Kahn's algorithm for topological sort
+  const eventMap = new Map(events.map((e) => [e.id, e]));
+  const sorted: Event[] = [];
+  const visited = new Set<EventId>();
+  const visiting = new Set<EventId>();
+
+  const visit = (id: EventId): void => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) {
+      // Cycle detected, skip this event
+      return;
+    }
+
+    visiting.add(id);
+    const event = eventMap.get(id);
+    if (event) {
+      // Visit all parents first
+      for (const parentId of event.parentVersion) {
+        if (eventMap.has(parentId)) {
+          visit(parentId);
+        }
+      }
+      sorted.push(event);
+    }
+    visiting.delete(id);
+    visited.add(id);
+  };
+
+  // Visit all events
+  for (const event of events) {
+    visit(event.id);
+  }
+
+  return sorted;
+};
 
 const extractSegments = (events: readonly Event[]): EventSegment[] => {
+  const TIMESTAMP_MISSING = -1; // Deterministic sentinel value
+
   if (events.length === 0) return [];
 
   const firstEvent = events[0];
@@ -156,7 +191,7 @@ const extractSegments = (events: readonly Event[]): EventSegment[] => {
     type: firstEvent.type,
     startPosition: firstEvent.position,
     count: 1,
-    timestamps: [firstEvent.timestamp ?? Date.now()],
+    timestamps: [firstEvent.timestamp ?? TIMESTAMP_MISSING],
   };
 
   for (let i = 1; i < events.length; i++) {
@@ -173,7 +208,7 @@ const extractSegments = (events: readonly Event[]): EventSegment[] => {
         count: currentSegment.count + 1,
         timestamps: [
           ...(currentSegment.timestamps ?? []),
-          event.timestamp ?? Date.now(),
+          event.timestamp ?? TIMESTAMP_MISSING,
         ],
       };
     } else {
@@ -182,7 +217,7 @@ const extractSegments = (events: readonly Event[]): EventSegment[] => {
         type: event.type,
         startPosition: event.position,
         count: 1,
-        timestamps: [event.timestamp ?? Date.now()],
+        timestamps: [event.timestamp ?? TIMESTAMP_MISSING],
       };
     }
   }
@@ -367,7 +402,8 @@ const reconstructEvents = (data: ColumnarData): Event[] => {
           ? new Set([events[globalEventIndex - 1]?.id || ("" as EventId)])
           : new Set<EventId>();
 
-      const timestamp = segment.timestamps?.[i] ?? Date.now();
+      const TIMESTAMP_MISSING = -1; // Use the same sentinel value
+      const timestamp = segment.timestamps?.[i] ?? TIMESTAMP_MISSING;
 
       events.push({
         id: eventId,
@@ -396,7 +432,20 @@ const reconstructEvents = (data: ColumnarData): Event[] => {
 
 // ============ Storage Statistics ============
 
-export const calculateStorageStats = memoize((events: readonly Event[]) => {
+// Custom key generator for memoization that handles Sets correctly
+const createEventCacheKey = (events: readonly Event[]): string => {
+  const plainEvents = events.map((e) => ({
+    id: e.id,
+    type: e.type,
+    position: e.position,
+    content: e.content,
+    parentVersion: Array.from(e.parentVersion).sort(), // Convert Set to sorted array
+    timestamp: e.timestamp,
+  }));
+  return JSON.stringify(plainEvents);
+};
+
+export const calculateStorageStats = (events: readonly Event[]) => {
   const sortedEvents = sortEventsByTopology(events);
   const segments = extractSegments(sortedEvents);
   const content = extractContent(sortedEvents);
@@ -411,7 +460,7 @@ export const calculateStorageStats = memoize((events: readonly Event[]) => {
     eventIdRuns: eventIdRuns.length,
     compressionRatio: calculateCompressionRatio(events, segments),
   };
-});
+};
 
 const calculateCompressionRatio = (
   events: readonly Event[],

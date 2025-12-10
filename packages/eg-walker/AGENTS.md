@@ -31,9 +31,9 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 - Run build: `pnpm --filter @softmaple/eg-walker build`
 
 ### Performance Optimizations
-- Optimizations are disabled by default (`enableOptimizations = false`)
-- Enable for production: Pass `enableOptimizations: true` to constructor
-- Benchmark tests in `src/test/benchmark.test.ts`
+- Optimizations are enabled by default (`enableOptimizations = true`)
+- To disable optimizations: Call `setOptimizationsEnabled(false)` after instantiation
+- Benchmark tests in `src/test/benchmark.test.ts` exercise both enabled and disabled paths
 
 ### Commit Guidelines
 - Use scope: `packages/eg-walker` not just `eg-walker`

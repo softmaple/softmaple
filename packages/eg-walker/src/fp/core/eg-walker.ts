@@ -135,10 +135,18 @@ const processDirectEvent = (
 const createCRDTItem = (
   event: Event,
   prepareState: number,
+  crdt: CRDT,
+  position: number,
 ): AugmentedCRDTItem => ({
   id: event.id,
-  originLeft: START_ID, // Will be updated by CRDT integration
-  originRight: END_ID, // Will be updated by CRDT integration
+  originLeft:
+    position > 0 && crdt.getItems()[position - 1]
+      ? crdt.getItems()[position - 1]!.id
+      : START_ID,
+  originRight:
+    position < crdt.getItems().length && crdt.getItems()[position]
+      ? crdt.getItems()[position]!.id
+      : END_ID,
   content: getEventContent(event),
   everDeleted: false,
   prepareState,
@@ -202,19 +210,28 @@ const saveToFile = async (
 const loadFromFile = async (filePath: string): Promise<EgWalkerState> => {
   try {
     const buffer = await fs.readFile(filePath);
-    const state = createInitialState();
-    state.eventStorage.deserialize(new Uint8Array(buffer));
+    // Create a new EventStorage instance with deserialized data
+    const tempStorage = new EventStorage();
+    tempStorage.deserialize(new Uint8Array(buffer));
 
     // Regenerate document from events
-    const events = state.eventStorage.getAllEvents();
+    const events = tempStorage.getAllEvents();
     const sortedEvents = sortEventsByDependencies(events).filter(
       (e): e is Event => e !== undefined,
     );
 
-    return sortedEvents.reduce(
+    // Build state immutably from scratch
+    const freshState = createInitialState();
+    const finalState = sortedEvents.reduce(
       (currentState, event) => processDirectEvent(currentState, event),
-      state,
+      freshState,
     );
+
+    // Update the event storage with all events
+    return {
+      ...finalState,
+      eventStorage: tempStorage,
+    };
   } catch (error) {
     throw new Error(
       `Failed to load from ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
@@ -308,23 +325,52 @@ export class FunctionalEgWalker {
 
     if (canApplyDirectly(event, this.state.currentVersion)) {
       this.state = processDirectEvent(this.state, event);
+      // processDirectEvent already adds the event ID to the version
     } else {
       // Need to use CRDT for complex merging
-      const item = createCRDTItem(event, 1);
+      const position = isInsertionEvent(event) ? event.position : 0;
+      const item = createCRDTItem(event, 1, this.state.crdt, position);
       integrateCRDTItem(this.state.crdt, item);
       const newDocument = regenerateFromCRDT(this.state.crdt);
       this.state = updateDocument(this.state, newDocument);
-    }
 
-    this.state = updateVersion(
-      this.state,
-      addToVersion(this.state.currentVersion, event.id),
-    );
+      // Update version only for the CRDT path
+      this.state = updateVersion(
+        this.state,
+        addToVersion(this.state.currentVersion, event.id),
+      );
+    }
   }
 
   applyBatch(events: Event[]): void {
+    // Split events into those that can apply directly and those that need CRDT
+    const canApply = events.filter((e) =>
+      canApplyDirectly(e, this.state.currentVersion),
+    );
+    const needCRDT = events.filter(
+      (e) => !canApplyDirectly(e, this.state.currentVersion),
+    );
+
+    // Add all events to storage
     events.forEach((e) => this.state.eventStorage.addEvent(e));
-    this.state = processBatch(this.state, events);
+
+    // Process the events that can apply directly in batch
+    if (canApply.length > 0) {
+      this.state = processBatch(this.state, canApply);
+    }
+
+    // Process remaining events through CRDT path one by one
+    needCRDT.forEach((event) => {
+      const position = isInsertionEvent(event) ? event.position : 0;
+      const item = createCRDTItem(event, 1, this.state.crdt, position);
+      integrateCRDTItem(this.state.crdt, item);
+      const newDocument = regenerateFromCRDT(this.state.crdt);
+      this.state = updateDocument(this.state, newDocument);
+      this.state = updateVersion(
+        this.state,
+        addToVersion(this.state.currentVersion, event.id),
+      );
+    });
   }
 
   getDocument(): string {

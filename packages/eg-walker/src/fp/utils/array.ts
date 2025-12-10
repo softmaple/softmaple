@@ -10,16 +10,15 @@ export const groupBy = <T, K extends string | number>(
   array: readonly T[],
   keyFn: (item: T) => K,
 ): Record<K, T[]> => {
-  return array.reduce(
-    (groups, item) => {
-      const key = keyFn(item);
-      return {
-        ...groups,
-        [key]: [...(groups[key] || []), item],
-      };
-    },
-    {} as Record<K, T[]>,
-  );
+  const groups: Record<K, T[]> = {} as Record<K, T[]>;
+  for (const item of array) {
+    const key = keyFn(item);
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(item);
+  }
+  return groups;
 };
 
 /**
@@ -29,11 +28,16 @@ export const partition = <T>(
   array: readonly T[],
   predicate: (item: T) => boolean,
 ): [T[], T[]] => {
-  return array.reduce(
-    ([pass, fail], item) =>
-      predicate(item) ? [[...pass, item], fail] : [pass, [...fail, item]],
-    [[] as T[], [] as T[]],
-  );
+  const pass: T[] = [];
+  const fail: T[] = [];
+  for (const item of array) {
+    if (predicate(item)) {
+      pass.push(item);
+    } else {
+      fail.push(item);
+    }
+  }
+  return [pass, fail];
 };
 
 /**
@@ -104,4 +108,4 @@ export const last = <T>(array: readonly T[]): T | undefined =>
  * Flatten nested arrays one level
  */
 export const flatten = <T>(arrays: readonly (readonly T[])[]): T[] =>
-  arrays.reduce<T[]>((flat, arr) => [...flat, ...arr], []);
+  arrays.flat();

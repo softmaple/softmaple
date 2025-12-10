@@ -29,9 +29,8 @@ export const memoize = <T, R>(
   const cache = new Map<string, R>();
   return (arg: T): R => {
     const key = keyFn(arg);
-    const cached = cache.get(key);
-    if (cached !== undefined) {
-      return cached;
+    if (cache.has(key)) {
+      return cache.get(key) as R;
     }
     const result = fn(arg);
     cache.set(key, result);

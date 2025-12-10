@@ -34,7 +34,9 @@ const DOMPURIFY_CONFIG: DomPurifyConfig = {
     "noscript",
     "template",
   ],
+  ALLOW_DATA_ATTR: false,
   FORBID_ATTR: ["style"],
+  KEEP_CONTENT: false,
   SAFE_FOR_TEMPLATES: true,
 };
 

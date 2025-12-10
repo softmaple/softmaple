@@ -149,6 +149,13 @@ export class ColumnarStorage {
   }
 
   /**
+   * Extract timestamps from events
+   */
+  private extractTimestamps(events: Event[]): number[] {
+    return events.map((event) => event.timestamp || Date.now());
+  }
+
+  /**
    * Find parent exceptions (events that don't follow default pattern)
    */
   private findParentExceptions(events: Event[]): Map<number, EventId[]> {
@@ -235,6 +242,7 @@ export class ColumnarStorage {
     );
     const parentExceptions = this.findParentExceptions(sortedEvents);
     const eventIdRuns = this.findEventIdRuns(sortedEvents);
+    const timestamps = this.extractTimestamps(sortedEvents);
 
     // Build binary format with simple encoding
     const buffers: Uint8Array[] = [];
@@ -248,6 +256,7 @@ export class ColumnarStorage {
       content: Array.from(content),
       parentExceptions: Array.from(parentExceptions.entries()),
       eventIdRuns,
+      timestamps,
       finalDocument,
     };
 
@@ -301,6 +310,9 @@ export class ColumnarStorage {
     const decompressedContent = SimpleCompressor.decompress(contentBytes);
     const contentChars = decompressedContent.split("");
 
+    // Extract timestamps array (for backwards compatibility, fall back to Date.now())
+    const timestamps = data.timestamps || [];
+
     // Reconstruct events
     const events: Event[] = [];
     const parentExceptions = new Map(data.parentExceptions);
@@ -325,13 +337,19 @@ export class ColumnarStorage {
           parentVersion = new Set();
         }
 
+        // Get timestamp with backwards compatibility
+        const timestamp =
+          timestamps[eventIndex] !== undefined
+            ? timestamps[eventIndex]
+            : Date.now();
+
         // Create event
         const event: Event = {
           id: eventId,
           type: segment.type,
           position: segment.startPosition + i,
           parentVersion,
-          timestamp: Date.now(), // Placeholder
+          timestamp,
         };
         event.content = contentChars[contentIndex++];
         if (segment.type === EventType.INSERT) {

@@ -18,6 +18,7 @@ import {
 } from "../constants/crdt-states";
 import { CRDT_SENTINELS } from "../constants/sentinels";
 import type { EventId, GraphEvent } from "../types";
+import type { Version } from "../types";
 
 // Re-export for backward compatibility
 export { OPERATION_TYPE, PREPARE_STATE_TYPE, EFFECT_STATE_TYPE };
@@ -51,8 +52,10 @@ export interface Record {
   prepareState: PrepareState;
   effectState: EffectState;
   // Additional fields for efficient operations
-  readonly content?: string; // For text content
+  content?: string; // For text content (made mutable for compaction)
   readonly eventId: EventId; // Event that created this record
+  metadata?: any; // For tracking placeholder and compaction state
+  position?: number; // For ordering records
 }
 
 // ============================================================================
@@ -649,21 +652,20 @@ applyOperation(operation: any, eventId: EventId): void {
    * Add a placeholder for a deleted event (used in partial replay)
    */
   addPlaceholder(eventId: string, event: any): void {
-    // Create a minimal record for the placeholder
-    const placeholder: Record = {
-      id: eventId,
-      content: "",  // Empty content for placeholder
+   // Create a minimal record for the placeholder
+   const placeholder: Record = {
+     id: eventId,
+     eventId: eventId,
+     content: "",  // Empty content for placeholder
       position: this.orderedRecords.length,
       originLeft: null,
       originRight: null,
       prepareState: {
-        type: PREPARE_STATE_TYPE.VISIBLE,
-        tombstone: false,
-      },
-      effectState: {
-        type: EFFECT_STATE_TYPE.DELETED,  // Mark as deleted
-        tombstone: true,
-      },
+      type: PREPARE_STATE_TYPE.VISIBLE,
+    },
+    effectState: {
+      type: EFFECT_STATE_TYPE.DELETED,  // Mark as deleted
+    },
       metadata: {
         placeholder: true,
         originalEvent: event,
@@ -701,17 +703,16 @@ applyOperation(operation: any, eventId: EventId): void {
   }
 
  /**
-  * Clear prepare state completely (for critical version clearing)
-  */
-  clearPrepareState(): void {
-    for (const record of this.records.values()) {
-      // Reset prepare state to null/undefined
-      record.prepareState = {
-        type: PREPARE_STATE_TYPE.VISIBLE,
-        tombstone: false,
-      };
-    }
+ * Clear prepare state completely (for critical version clearing)
+ */
+clearPrepareState(): void {
+  for (const record of this.records.values()) {
+    // Reset prepare state to null/undefined
+    record.prepareState = {
+      type: PREPARE_STATE_TYPE.VISIBLE,
+    };
   }
+}
 
   /**
    * Compact effect state, keeping only minimal placeholders
@@ -757,13 +758,15 @@ applyOperation(operation: any, eventId: EventId): void {
   }
 
   /**
-   * Rebuild the ordered records array from the records map
-   */
-  private rebuildOrderedRecords(): void {
-    this.orderedRecords = Array.from(this.records.values()).sort((a, b) => {
-      // Sort by position, then by id for stability
-      if (a.position !== b.position) {
-        return a.position - b.position;
+ * Rebuild the ordered records array from the records map
+ */
+private rebuildOrderedRecords(): void {
+  this.orderedRecords = Array.from(this.records.values()).sort((a, b) => {
+    // Sort by position, then by id for stability
+      const aPos = a.position ?? 0;
+      const bPos = b.position ?? 0;
+      if (aPos !== bPos) {
+        return aPos - bPos;
       }
       return a.id.localeCompare(b.id);
     });

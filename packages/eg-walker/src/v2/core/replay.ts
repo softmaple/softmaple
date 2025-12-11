@@ -6,7 +6,6 @@
 import type { EventId, Version } from "../types";
 import type { GraphEvent, EventGraph } from "../graph/event-graph";
 import type { InternalCRDTState } from "../crdt/internal-state";
-import { TopologicalWalker } from "../graph/topological-walker";
 
 /**
  * Manages partial replay of events when state has been cleared
@@ -236,21 +235,22 @@ computeReplayRange(from: Version, to: Version): EventId[] {
   }
 
   /**
-   * Get an event by ID (from cache or graph)
-   */
-  private getEvent(eventId: EventId): GraphEvent | null {
-    // Check cache first
-    if (this.eventCache.has(eventId)) {
-      return this.eventCache.get(eventId)!;
-    }
-
-    // Get from graph
-    const event = this.eventGraph.getEvent(eventId);
-    if (event) {
-      this.eventCache.set(eventId, event);
-    }
-    return event;
+ * Get an event by ID (from cache or graph)
+ */
+private getEvent(eventId: EventId): GraphEvent | null {
+  // Check cache first
+  if (this.eventCache.has(eventId)) {
+    return this.eventCache.get(eventId)!;
   }
+
+  // Get from graph
+  const event = this.eventGraph.getEvent(eventId);
+  if (event) {
+    this.eventCache.set(eventId, event);
+      return event;
+  }
+    return null;
+}
 
   /**
    * Check if all dependencies for an event are satisfied

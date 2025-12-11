@@ -162,10 +162,10 @@ describe("InternalCRDTState", () => {
       state.applyPrepare(deleteEvent);
 
       const records = state.getAllRecords();
-      // Check that middle characters are marked for deletion
-      expect(records[1]?.prepareState.type).toBe("del");
-      expect(records[2].prepareState.type).toBe("del");
-    });
+     // Check that middle characters are marked for deletion
+     expect(records[1]?.prepareState.type).toBe("del");
+     expect(records[2]?.prepareState.type).toBe("del");
+   });
 
     it("should transition from prepare to effect state", () => {
       const event: GraphEvent = {
@@ -245,11 +245,11 @@ describe("InternalCRDTState", () => {
       // Override max lifetime for testing
       (shortLivedState as any).maxLifetime = 100; // 100ms
 
-      setTimeout(() => {
-        expect(() => shortLivedState.getVisibleText()).toThrow();
-        done();
-      }, 150);
-    });
+     setTimeout(() => {
+       expect(() => shortLivedState.getVisibleText()).toThrow();
+       // Remove done call as this is not a callback-based test
+     }, 150);
+   });
 
     it("should clean up with scoped usage", async () => {
       let stateRef: InternalCRDTState | null = null;

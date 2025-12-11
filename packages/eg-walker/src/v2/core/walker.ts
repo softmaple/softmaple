@@ -57,6 +57,7 @@ export class EgWalker {
   private internalCRDT: InternalCRDTState;
   private versionManager: VersionAlignmentManager;
   private debug: boolean;
+  private stateClearer: StateClearer;
 
   constructor(config: WalkerConfig = {}) {
     this.graphWalker = config.graphWalker || new DefaultEventGraphWalker();
@@ -138,7 +139,7 @@ export class EgWalker {
       advanceCount += advanceResult.advanceCount;
 
       // Step 6: Check for critical version and clear state if needed
-      this.stateClearer.updateVersion(this.versionManager.getEffectVersion());
+      this.stateClearer.updateVersion(this.versionManager.getEffectVersion() as any);
       // Try to clear state if we have an InternalCRDTState with clearing methods
       if ("clearPrepareState" in this.internalCRDT) {
         this.stateClearer.tryClearToCriticalVersion(this.internalCRDT as any);

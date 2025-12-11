@@ -162,14 +162,12 @@ export class EventGraph {
    * Returns only the data that should be saved to disk
    */
   serialize(): SerializedGraph {
-    const events = this.getAllEvents();
-    return {
-      version: new Set<EventId>(Array.from(this.events.keys())),
-      events: events.map((e) => ({
-        id: e.id,
-        operation: e.operation,
-        parentVersion: Array.from(e.parentVersion),
-        timestamp: e.timestamp,
+  const events = this.getAllEvents();
+  return {
+    version: new Set<EventId>(Array.from(this.events.keys())),
+    events: events.map((e) => ({
+        ...e,
+        parentVersion: new Set(Array.from(e.parentVersion)),
       })),
       metadata: this.metadata,
     };

@@ -12,10 +12,10 @@ describe("TemporaryCRDT", () => {
   });
 
   describe("auto-cleanup", () => {
-    it("should destroy itself after maxLifetime", () => {
-      const crdt = new TemporaryCRDT({ maxLifetime: 1000 });
+   it("should destroy itself after maxLifetime", () => {
+     const crdt = new TemporaryCRDT(1000);
 
-      expect(crdt.isDestroyed()).toBe(false);
+     expect((crdt as any).destroyed).toBe(false);
 
       // Advance time past maxLifetime
       vi.advanceTimersByTime(1001);

@@ -3,34 +3,34 @@
  * Manages prepare-version and effect-version for graph walking
  */
 
-import type { EventID, Version } from "../types";
+import type { EventId, Version } from "../types";
 
 /**
  * Represents the difference between two versions
  */
 export interface VersionDiff {
   /** Events in version A but not in B */
-  onlyInA: Set<EventID>;
+  onlyInA: Set<EventId>;
   /** Events in version B but not in A */
-  onlyInB: Set<EventID>;
+  onlyInB: Set<EventId>;
   /** Events in both versions */
-  inBoth: Set<EventID>;
+  inBoth: Set<EventId>;
 }
 
 /**
  * Version represented as a frontier (set of event IDs)
  */
-export class FrontierVersion implements Version {
-  readonly frontier: Set<EventID>;
+export class FrontierVersion {
+  readonly frontier: Set<EventId>;
 
-  constructor(events: Iterable<EventID> = []) {
+  constructor(events: Iterable<EventId> = []) {
     this.frontier = new Set(events);
   }
 
   /**
    * Add an event to this version
    */
-  add(eventId: EventID): FrontierVersion {
+  add(eventId: EventId): FrontierVersion {
     const newFrontier = new Set(this.frontier);
     newFrontier.add(eventId);
     return new FrontierVersion(newFrontier);
@@ -39,7 +39,7 @@ export class FrontierVersion implements Version {
   /**
    * Remove an event from this version
    */
-  remove(eventId: EventID): FrontierVersion {
+  remove(eventId: EventId): FrontierVersion {
     const newFrontier = new Set(this.frontier);
     newFrontier.delete(eventId);
     return new FrontierVersion(newFrontier);
@@ -48,14 +48,14 @@ export class FrontierVersion implements Version {
   /**
    * Check if this version includes an event
    */
-  has(eventId: EventID): boolean {
+  has(eventId: EventId): boolean {
     return this.frontier.has(eventId);
   }
 
   /**
    * Get all event IDs in this version
    */
-  getEvents(): EventID[] {
+  getEvents(): EventId[] {
     return Array.from(this.frontier);
   }
 
@@ -89,9 +89,9 @@ export function compareVersions(
   a: FrontierVersion,
   b: FrontierVersion,
 ): VersionDiff {
-  const onlyInA = new Set<EventID>();
-  const onlyInB = new Set<EventID>();
-  const inBoth = new Set<EventID>();
+  const onlyInA = new Set<EventId>();
+  const onlyInB = new Set<EventId>();
+  const inBoth = new Set<EventId>();
 
   // Check events in A
   for (const id of a.frontier) {
@@ -152,7 +152,7 @@ export class VersionAlignmentManager {
    * Add an event to the effect version
    * Called after successfully processing an event
    */
-  addToEffectVersion(eventId: EventID): void {
+  addToEffectVersion(eventId: EventId): void {
     this.effectVersion = this.effectVersion.add(eventId);
   }
 
@@ -177,7 +177,7 @@ export class VersionAlignmentManager {
   /**
    * Get events to retreat (events in prepare but not in target)
    */
-  getEventsToRetreat(targetVersion: FrontierVersion): EventID[] {
+  getEventsToRetreat(targetVersion: FrontierVersion): EventId[] {
     const diff = compareVersions(this.prepareVersion, targetVersion);
     return Array.from(diff.onlyInA).sort().reverse(); // Reverse for retreat order
   }
@@ -185,7 +185,7 @@ export class VersionAlignmentManager {
   /**
    * Get events to advance (events in target but not in prepare)
    */
-  getEventsToAdvance(targetVersion: FrontierVersion): EventID[] {
+  getEventsToAdvance(targetVersion: FrontierVersion): EventId[] {
     const diff = compareVersions(this.prepareVersion, targetVersion);
     return Array.from(diff.onlyInB).sort(); // Forward for advance order
   }

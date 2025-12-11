@@ -3,18 +3,18 @@
  * Main walker implementation that coordinates graph traversal with version alignment
  */
 
-import type { EventID } from "../types";
+import type { EventId } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
-import type { EventGraphWalker } from "../walker-graph/event-graph-walker";
-import type { InternalCRDTState } from "../walker-crdt/retreat-advance-stubs";
+import type { EventGraphWalker } from "../graph/topological-walker";
+import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 
 import {
   FrontierVersion,
   VersionAlignmentManager,
   compareVersions,
 } from "./version-alignment";
-import { DefaultEventGraphWalker } from "../walker-graph/event-graph-walker";
-import { StubInternalCRDT } from "../walker-crdt/retreat-advance-stubs";
+import { DefaultEventGraphWalker } from "../graph/topological-walker";
+import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 
 /**
  * Configuration for the walker

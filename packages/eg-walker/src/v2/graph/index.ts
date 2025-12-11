@@ -5,6 +5,10 @@
  * causal relationships between editing operations.
  */
 
-export { EventGraph } from "./event-graph";
+export { EventGraph, type GraphEvent } from "./event-graph";
+export {
+  DefaultEventGraphWalker,
+  type EventGraphWalker,
+} from "./topological-walker";
 
-export type { Event, SerializedEventGraph } from "../types";
+export type { EventId, Version, GraphEvent as Event } from "../types";

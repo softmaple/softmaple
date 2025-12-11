@@ -76,15 +76,15 @@ export class TemporaryCRDT {
       // Create items for each character, but mark them as from same event
       // This preserves non-interleaving
       const text = op.text;
-      let prevId: EventId | null = this.findLeftNeighbor(op.index);
+      let prevId: EventId | null = this.findLeftNeighbor(op.index) ?? null;
 
       for (let i = 0; i < text.length; i++) {
         const itemId = `${event.id}:${i}`;
         const item: CRDTItem = {
           id: itemId,
-          content: text[i],
+          content: text[i] ?? "",
           originLeft: prevId,
-          originRight: this.findRightNeighbor(op.index + i),
+          originRight: this.findRightNeighbor(op.index + i) ?? null,
           isDeleted: false,
           insertedBy: event.id,
         };
@@ -133,7 +133,8 @@ export class TemporaryCRDT {
     // Start after originLeft
     if (item.originLeft) {
       for (let i = 0; i < this.items.length; i++) {
-        if (this.items[i].id === item.originLeft) {
+        const currentItem = this.items[i];
+        if (currentItem && currentItem.id === item.originLeft) {
           left = i + 1;
           break;
         }
@@ -143,7 +144,8 @@ export class TemporaryCRDT {
     // Stop before originRight
     if (item.originRight) {
       for (let i = left; i < this.items.length; i++) {
-        if (this.items[i].id === item.originRight) {
+        const currentItem = this.items[i];
+        if (currentItem && currentItem.id === item.originRight) {
           right = i;
           break;
         }
@@ -153,6 +155,7 @@ export class TemporaryCRDT {
     // Find position between left and right using ordering rule
     for (let i = left; i < right; i++) {
       const current = this.items[i];
+      if (!current) continue;
 
       // Items with same origin are concurrent
       if (current.originLeft === item.originLeft) {
@@ -207,9 +210,10 @@ export class TemporaryCRDT {
   private findLeftNeighbor(index: number): EventId | null {
     let visibleCount = 0;
     for (let i = this.items.length - 1; i >= 0; i--) {
-      if (!this.items[i].isDeleted) {
+      const item = this.items[i];
+      if (item && !item.isDeleted) {
         if (visibleCount === index - 1) {
-          return this.items[i].id;
+          return item.id;
         }
         visibleCount++;
       }
@@ -277,3 +281,8 @@ export class TemporaryCRDT {
     }
   }
 }
+
+/**
+ * Export withTemporaryCRDT as a standalone function
+ */
+export const withTemporaryCRDT = TemporaryCRDT.withTemporaryCRDT;

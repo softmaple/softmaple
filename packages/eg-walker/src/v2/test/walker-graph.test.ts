@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { DefaultEventGraphWalker } from "../walker-graph/event-graph-walker";
+import { DefaultEventGraphWalker } from "../graph/topological-walker";
 import type { GraphEvent } from "../graph/event-graph";
 
 describe("Section 3.2: EventGraphWalker", () => {
@@ -16,23 +16,20 @@ describe("Section 3.2: EventGraphWalker", () => {
         {
           id: "e1",
           parentVersion: new Set(),
-          type: "insert",
-          position: 0,
-          content: "a",
+          operation: { type: "insert", index: 0, text: "a" },
+          timestamp: Date.now(),
         },
         {
           id: "e2",
           parentVersion: new Set(["e1"]),
-          type: "insert",
-          position: 1,
-          content: "b",
+          operation: { type: "insert", index: 1, text: "b" },
+          timestamp: Date.now() + 1,
         },
         {
           id: "e3",
           parentVersion: new Set(["e2"]),
-          type: "insert",
-          position: 2,
-          content: "c",
+          operation: { type: "insert", index: 2, text: "c" },
+          timestamp: Date.now() + 2,
         },
       ];
 
@@ -51,30 +48,26 @@ describe("Section 3.2: EventGraphWalker", () => {
         {
           id: "root",
           parentVersion: new Set(),
-          type: "insert",
-          position: 0,
-          content: "r",
+          operation: { type: "insert", index: 0, text: "r" },
+          timestamp: Date.now(),
         },
         {
           id: "a1",
           parentVersion: new Set(["root"]),
-          type: "insert",
-          position: 1,
-          content: "a1",
+          operation: { type: "insert", index: 1, text: "a1" },
+          timestamp: Date.now() + 1,
         },
         {
           id: "b1",
           parentVersion: new Set(["root"]),
-          type: "insert",
-          position: 1,
-          content: "b1",
+          operation: { type: "insert", index: 1, text: "b1" },
+          timestamp: Date.now() + 2,
         },
         {
           id: "merge",
           parentVersion: new Set(["a1", "b1"]),
-          type: "insert",
-          position: 2,
-          content: "m",
+          operation: { type: "insert", index: 2, text: "m" },
+          timestamp: Date.now() + 3,
         },
       ];
 
@@ -106,30 +99,26 @@ describe("Section 3.2: EventGraphWalker", () => {
         {
           id: "base",
           parentVersion: new Set(),
-          type: "insert",
-          position: 0,
-          content: "base",
+          operation: { type: "insert", index: 0, text: "base" },
+          timestamp: Date.now(),
         },
         {
           id: "c1",
           parentVersion: new Set(["base"]),
-          type: "insert",
-          position: 1,
-          content: "c1",
+          operation: { type: "insert", index: 1, text: "c1" },
+          timestamp: Date.now() + 1,
         },
         {
           id: "c2",
           parentVersion: new Set(["base"]),
-          type: "insert",
-          position: 1,
-          content: "c2",
+          operation: { type: "insert", index: 1, text: "c2" },
+          timestamp: Date.now() + 2,
         },
         {
           id: "c3",
           parentVersion: new Set(["base"]),
-          type: "insert",
-          position: 1,
-          content: "c3",
+          operation: { type: "insert", index: 1, text: "c3" },
+          timestamp: Date.now() + 3,
         },
       ];
 
@@ -155,23 +144,20 @@ describe("Section 3.2: EventGraphWalker", () => {
       walker.addEvent({
         id: "e1",
         parentVersion: new Set(["e3"]),
-        type: "insert",
-        position: 0,
-        content: "1",
+        operation: { type: "insert", index: 0, text: "1" },
+        timestamp: Date.now(),
       });
       walker.addEvent({
         id: "e2",
         parentVersion: new Set(["e1"]),
-        type: "insert",
-        position: 1,
-        content: "2",
+        operation: { type: "insert", index: 1, text: "2" },
+        timestamp: Date.now() + 1,
       });
       walker.addEvent({
         id: "e3",
         parentVersion: new Set(["e2"]),
-        type: "insert",
-        position: 2,
-        content: "3",
+        operation: { type: "insert", index: 2, text: "3" },
+        timestamp: Date.now() + 2,
       });
 
       expect(() => walker.topologicalOrder()).toThrow(/Cycle detected/);
@@ -184,31 +170,27 @@ describe("Section 3.2: EventGraphWalker", () => {
       walker.addEvent({
         id: "a1",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "a1",
+        operation: { type: "insert", index: 0, text: "a1" },
+        timestamp: Date.now(),
       });
       walker.addEvent({
         id: "a2",
         parentVersion: new Set(["a1"]),
-        type: "insert",
-        position: 1,
-        content: "a2",
+        operation: { type: "insert", index: 1, text: "a2" },
+        timestamp: Date.now() + 1,
       });
 
       walker.addEvent({
         id: "b1",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "b1",
+        operation: { type: "insert", index: 0, text: "b1" },
+        timestamp: Date.now(),
       });
       walker.addEvent({
         id: "b2",
         parentVersion: new Set(["b1"]),
-        type: "insert",
-        position: 1,
-        content: "b2",
+        operation: { type: "insert", index: 1, text: "b2" },
+        timestamp: Date.now() + 1,
       });
 
       const order = walker.topologicalOrder();

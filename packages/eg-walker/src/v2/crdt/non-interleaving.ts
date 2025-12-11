@@ -40,8 +40,11 @@ export function groupIntoRuns(
     if (currentRun && currentRun.eventId === item.insertedBy) {
       // Extend current run
       currentRun = {
-        ...currentRun,
+        eventId: currentRun.eventId,
         content: currentRun.content + item.content,
+        startIndex: currentRun.startIndex,
+        originLeft: currentRun.originLeft,
+        originRight: currentRun.originRight,
       };
     } else {
       // Start new run
@@ -104,7 +107,7 @@ export class NonInterleavingOrder implements OrderingRule {
       case "replica-id": {
         const [replicaA] = a.insertedBy.split(":");
         const [replicaB] = b.insertedBy.split(":");
-        return replicaA < replicaB;
+        return (replicaA ?? "") < (replicaB ?? "");
       }
 
       case "lexicographic":
@@ -145,6 +148,20 @@ export function verifyNonInterleaving(items: ReadonlyArray<CRDTItem>): boolean {
 
   return true;
 }
+
+/**
+ * Alias for verifyNonInterleaving (for backward compatibility)
+ */
+export const ensureNonInterleaving = verifyNonInterleaving;
+
+/**
+ * Block order strategies for non-interleaving
+ */
+export const BLOCK_ORDER_STRATEGIES = {
+  TIMESTAMP: "timestamp" as const,
+  REPLICA_ID: "replica-id" as const,
+  LEXICOGRAPHIC: "lexicographic" as const,
+};
 
 /**
  * Merge concurrent runs while preserving non-interleaving

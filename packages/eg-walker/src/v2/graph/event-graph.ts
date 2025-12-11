@@ -7,6 +7,9 @@
 
 import type { GraphEvent, EventId, Version } from "../types";
 
+// Re-export GraphEvent for use by other modules
+export type { GraphEvent } from "../types";
+
 /**
  * Event graph for storing operation history
  * This is what gets persisted to disk

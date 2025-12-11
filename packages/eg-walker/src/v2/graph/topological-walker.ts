@@ -3,7 +3,7 @@
  * Topological traversal of the event graph with efficient ordering
  */
 
-import type { EventID, Version } from "../types";
+import type { EventId, Version } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
 
 export interface EventGraphWalker {
@@ -12,12 +12,12 @@ export interface EventGraphWalker {
    * Keeps events from same branch grouped when possible
    * Deterministic ordering for concurrent events
    */
-  topologicalOrder(): EventID[];
+  topologicalOrder(): EventId[];
 
   /**
    * Get all parent event IDs for an event
    */
-  getParents(eventId: EventID): EventID[];
+  getParents(eventId: EventId): EventId[];
 
   /**
    * Get all events in the graph
@@ -35,9 +35,9 @@ export interface EventGraphWalker {
  * Uses depth-first post-order traversal with branch grouping
  */
 export class DefaultEventGraphWalker implements EventGraphWalker {
-  private events = new Map<EventID, GraphEvent>();
-  private children = new Map<EventID, Set<EventID>>();
-  private topoOrderCache: EventID[] | null = null;
+  private events = new Map<EventId, GraphEvent>();
+  private children = new Map<EventId, Set<EventId>>();
+  private topoOrderCache: EventId[] | null = null;
 
   addEvent(event: GraphEvent): void {
     this.events.set(event.id, event);
@@ -56,23 +56,23 @@ export class DefaultEventGraphWalker implements EventGraphWalker {
     return Array.from(this.events.values());
   }
 
-  getParents(eventId: EventID): EventID[] {
+  getParents(eventId: EventId): EventId[] {
     const event = this.events.get(eventId);
     if (!event) return [];
     return Array.from(event.parentVersion);
   }
 
-  topologicalOrder(): EventID[] {
+  topologicalOrder(): EventId[] {
     if (this.topoOrderCache) {
       return this.topoOrderCache;
     }
 
-    const result: EventID[] = [];
-    const visited = new Set<EventID>();
-    const processed = new Set<EventID>(); // Track fully processed nodes
+    const result: EventId[] = [];
+    const visited = new Set<EventId>();
+    const processed = new Set<EventId>(); // Track fully processed nodes
 
     // DFS post-order traversal
-    const visit = (id: EventID): void => {
+    const visit = (id: EventId): void => {
       if (processed.has(id)) return;
 
       if (visited.has(id)) {
@@ -99,7 +99,7 @@ export class DefaultEventGraphWalker implements EventGraphWalker {
     };
 
     // Find roots (events with no parents in the graph)
-    const roots = new Set<EventID>();
+    const roots = new Set<EventId>();
     for (const [id, event] of this.events) {
       if (event.parentVersion.size === 0) {
         roots.add(id);

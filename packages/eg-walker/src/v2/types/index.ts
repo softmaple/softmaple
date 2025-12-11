@@ -146,3 +146,15 @@ export interface EgWalkerConstraints {
   readonly requireCleanup: boolean; // Enforce CRDT cleanup
   readonly strictNonInterleaving: boolean; // Enforce run grouping
 }
+
+// ============================================================================
+// Type Aliases for Compatibility
+// ============================================================================
+
+export type Event = GraphEvent;
+export type SerializedGraph = {
+  readonly version: Version;
+  readonly events: ReadonlyArray<GraphEvent>;
+  readonly metadata?: Record<string, unknown>;
+};
+export type SerializedEventGraph = SerializedGraph;

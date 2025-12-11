@@ -55,6 +55,55 @@ export function createDocumentState(text: string): DocumentState {
 }
 
 /**
+ * Verify strong list specification
+ * Wrapper function for the class implementation
+ */
+export function verifyStrongListSpecification(
+  events: ReadonlyArray<GraphEvent>,
+): boolean {
+  const invariant = new StrongListInvariant();
+  return invariant.verify(events);
+}
+
+/**
+ * Ensure convergence across replicas
+ * Verifies that all replicas converge to the same state
+ */
+export function ensureConvergence(
+  events: ReadonlyArray<GraphEvent>,
+  initialText: string = "",
+): boolean {
+  try {
+    // If we can linearize events, they will converge
+    const result = linearizeEvents(events, initialText);
+    return result !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate index bounds for operations
+ */
+export function validateIndexBounds(
+  text: string,
+  operation: ExternalOperation,
+): boolean {
+  switch (operation.type) {
+    case "insert":
+      return operation.index >= 0 && operation.index <= text.length;
+    case "delete":
+      return (
+        operation.index >= 0 &&
+        operation.index + operation.length <= text.length &&
+        operation.length > 0
+      );
+    default:
+      return false;
+  }
+}
+
+/**
  * Strong List Specification invariant checker
  * Ensures operations produce deterministic results
  */

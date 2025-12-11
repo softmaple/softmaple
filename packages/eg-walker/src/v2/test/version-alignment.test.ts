@@ -8,7 +8,7 @@ import {
   FrontierVersion,
   compareVersions,
   VersionAlignmentManager,
-} from "../walker-core/version-alignment";
+} from "../core/version-alignment";
 
 describe("Section 3.2: Version Alignment", () => {
   describe("FrontierVersion", () => {

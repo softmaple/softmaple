@@ -4,9 +4,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { EgWalker } from "../walker-core/walker";
+import { EgWalker } from "../core/walker";
+import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../graph/event-graph";
-import { StubInternalCRDT } from "../walker-crdt/retreat-advance-stubs";
+import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 
 describe("Section 3.2: EgWalker Integration", () => {
   it("should process sequential events without retreat/advance", () => {
@@ -16,16 +17,14 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "e1",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "a",
+        operation: { type: "insert", index: 0, text: "a" },
+        timestamp: Date.now(),
       },
       {
         id: "e2",
         parentVersion: new Set(["e1"]),
-        type: "insert",
-        position: 1,
-        content: "b",
+        operation: { type: "insert", index: 1, text: "b" },
+        timestamp: Date.now() + 1,
       },
     ];
 
@@ -46,30 +45,26 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "base",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "base",
+        operation: { type: "insert", index: 0, text: "base" },
+        timestamp: Date.now(),
       },
       {
         id: "a1",
         parentVersion: new Set(["base"]),
-        type: "insert",
-        position: 1,
-        content: "a1",
+        operation: { type: "insert", index: 1, text: "a1" },
+        timestamp: Date.now() + 1,
       },
       {
         id: "b1",
         parentVersion: new Set(["base"]),
-        type: "insert",
-        position: 1,
-        content: "b1",
+        operation: { type: "insert", index: 1, text: "b1" },
+        timestamp: Date.now() + 2,
       },
       {
         id: "merge",
         parentVersion: new Set(["a1", "b1"]),
-        type: "insert",
-        position: 2,
-        content: "merge",
+        operation: { type: "insert", index: 2, text: "merge" },
+        timestamp: Date.now() + 3,
       },
     ];
 
@@ -95,16 +90,14 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "e1",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "1",
+        operation: { type: "insert", index: 0, text: "1" },
+        timestamp: Date.now(),
       },
       {
         id: "e2",
         parentVersion: new Set(["e1"]),
-        type: "insert",
-        position: 1,
-        content: "2",
+        operation: { type: "insert", index: 1, text: "2" },
+        timestamp: Date.now() + 1,
       },
     ];
 
@@ -128,30 +121,26 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "base",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "X",
+        operation: { type: "insert", index: 0, text: "X" },
+        timestamp: Date.now(),
       },
       {
         id: "a1",
         parentVersion: new Set(["base"]),
-        type: "insert",
-        position: 1,
-        content: "A",
+        operation: { type: "insert", index: 1, text: "A" },
+        timestamp: Date.now() + 1,
       },
       {
         id: "b1",
         parentVersion: new Set(["base"]),
-        type: "insert",
-        position: 1,
-        content: "B",
+        operation: { type: "insert", index: 1, text: "B" },
+        timestamp: Date.now() + 2,
       },
       {
         id: "merge",
         parentVersion: new Set(["a1", "b1"]),
-        type: "insert",
-        position: 2,
-        content: "M",
+        operation: { type: "insert", index: 2, text: "M" },
+        timestamp: Date.now() + 3,
       },
     ];
 
@@ -172,58 +161,50 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "root",
         parentVersion: new Set(),
-        type: "insert",
-        position: 0,
-        content: "R",
+        operation: { type: "insert", index: 0, text: "R" },
+        timestamp: Date.now(),
       },
       {
         id: "a1",
         parentVersion: new Set(["root"]),
-        type: "insert",
-        position: 1,
-        content: "A1",
+        operation: { type: "insert", index: 1, text: "A1" },
+        timestamp: Date.now() + 1,
       },
       {
         id: "a2",
         parentVersion: new Set(["a1"]),
-        type: "insert",
-        position: 2,
-        content: "A2",
+        operation: { type: "insert", index: 2, text: "A2" },
+        timestamp: Date.now() + 2,
       },
       {
         id: "b1",
         parentVersion: new Set(["root"]),
-        type: "insert",
-        position: 1,
-        content: "B1",
+        operation: { type: "insert", index: 1, text: "B1" },
+        timestamp: Date.now() + 3,
       },
       {
         id: "b2",
         parentVersion: new Set(["b1"]),
-        type: "insert",
-        position: 2,
-        content: "B2",
+        operation: { type: "insert", index: 2, text: "B2" },
+        timestamp: Date.now() + 4,
       },
       {
         id: "merge1",
         parentVersion: new Set(["a1", "b1"]),
-        type: "insert",
-        position: 3,
-        content: "M1",
+        operation: { type: "insert", index: 3, text: "M1" },
+        timestamp: Date.now() + 5,
       },
       {
         id: "merge2",
         parentVersion: new Set(["a2", "b2"]),
-        type: "insert",
-        position: 4,
-        content: "M2",
+        operation: { type: "insert", index: 4, text: "M2" },
+        timestamp: Date.now() + 6,
       },
       {
         id: "final",
         parentVersion: new Set(["merge1", "merge2"]),
-        type: "insert",
-        position: 5,
-        content: "F",
+        operation: { type: "insert", index: 5, text: "F" },
+        timestamp: Date.now() + 7,
       },
     ];
 

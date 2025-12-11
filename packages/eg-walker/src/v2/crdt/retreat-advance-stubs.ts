@@ -4,7 +4,7 @@
  * Actual implementation deferred to later sections
  */
 
-import type { EventID } from "../types";
+import type { EventId } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
 
 /**
@@ -17,14 +17,14 @@ export interface InternalCRDTState {
    * Called when prepareVersion has events not in target parent version
    * @param eventId - The event to retreat/undo
    */
-  retreat(eventId: EventID): void;
+  retreat(eventId: EventId): void;
 
   /**
    * Advance the CRDT state by applying an event
    * Called when target version has events not in prepareVersion
    * @param eventId - The event to advance/apply
    */
-  advance(eventId: EventID): void;
+  advance(eventId: EventId): void;
 
   /**
    * Apply an event in prepare state
@@ -49,12 +49,12 @@ export interface InternalCRDTState {
  * To be replaced with actual CRDT implementation in later sections
  */
 export class StubInternalCRDT implements InternalCRDTState {
-  private appliedEvents = new Set<EventID>();
-  private retreatLog: EventID[] = [];
-  private advanceLog: EventID[] = [];
+  private appliedEvents = new Set<EventId>();
+  private retreatLog: EventId[] = [];
+  private advanceLog: EventId[] = [];
   private prepareLog: GraphEvent[] = [];
 
-  retreat(eventId: EventID): void {
+  retreat(eventId: EventId): void {
     // Stub: just track the retreat for testing
     this.retreatLog.push(eventId);
     this.appliedEvents.delete(eventId);
@@ -63,7 +63,7 @@ export class StubInternalCRDT implements InternalCRDTState {
     // by restoring CRDT to state before event was applied
   }
 
-  advance(eventId: EventID): void {
+  advance(eventId: EventId): void {
     // Stub: just track the advance for testing
     this.advanceLog.push(eventId);
     this.appliedEvents.add(eventId);
@@ -96,11 +96,11 @@ export class StubInternalCRDT implements InternalCRDTState {
   }
 
   // Test helpers to verify correct call order
-  getRetreatLog(): EventID[] {
+  getRetreatLog(): EventId[] {
     return [...this.retreatLog];
   }
 
-  getAdvanceLog(): EventID[] {
+  getAdvanceLog(): EventId[] {
     return [...this.advanceLog];
   }
 

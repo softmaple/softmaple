@@ -9,36 +9,11 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
-import DOMPurify, { type Config as DomPurifyConfig } from "dompurify";
 import { Room } from "@/modules/docs/room";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import type { DocHeaderProps } from "@/modules/docs/doc-header";
-
-// Conservative HTML preview: allow plain HTML only, block forms/embeds/SVG/MathML/styles.
-const DOMPURIFY_CONFIG: DomPurifyConfig = {
-  FORBID_TAGS: [
-    "form",
-    "input",
-    "textarea",
-    "button",
-    "select",
-    "option",
-    "style",
-    "iframe",
-    "object",
-    "embed",
-    "svg",
-    "math",
-    "script",
-    "noscript",
-    "template",
-  ],
-  ALLOW_DATA_ATTR: false,
-  FORBID_ATTR: ["style"],
-  KEEP_CONTENT: false,
-  SAFE_FOR_TEMPLATES: true,
-};
+import { sanitizeHtml } from "@/modules/docs/sanitize-html";
 
 export type DocumentEditorProps = Omit<
   DocHeaderProps,
@@ -60,10 +35,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 
   const [title, setTitle] = useState<string>(initialTitle);
   const [content, setContent] = useState<string>(initialContent);
-  const sanitizedPreview = useMemo(
-    () => DOMPurify.sanitize(content.replace(/\n/g, "<br>"), DOMPURIFY_CONFIG),
-    [content],
-  );
+  const sanitizedPreview = useMemo(() => sanitizeHtml(content), [content]);
 
   return (
     <div className="flex-1 flex flex-col">

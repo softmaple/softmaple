@@ -70,10 +70,18 @@ describe("Strong List Specification", () => {
 
   describe("validateIndexBounds", () => {
    it("should validate index bounds", () => {
-     const result = validateIndexBounds("Hello", 0);
+     const result = validateIndexBounds("Hello", {
+       type: OPERATION_TYPE.INSERT,
+       index: 0,
+       text: "X",
+     });
      expect(result).toBe(true);
 
-     const invalidResult = validateIndexBounds("Hello", 10);
+     const invalidResult = validateIndexBounds("Hello", {
+       type: OPERATION_TYPE.INSERT,
+       index: 10,
+       text: "X",
+     });
      expect(invalidResult).toBe(false);
    });
   });

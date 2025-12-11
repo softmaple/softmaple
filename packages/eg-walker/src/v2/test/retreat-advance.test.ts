@@ -1,11 +1,9 @@
 import { OPERATION_TYPE } from "../crdt/internal-state";
-import { OPERATION_TYPE } from "../crdt/internal-state";
-import { OPERATION_TYPE } from "../crdt/internal-state";
 /**
  * Tests for Section 3.3 - Retreat/Advance Mechanics
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   ConcreteCRDTState,
   RetreatAdvanceCoordinator,
@@ -319,7 +317,7 @@ describe("Retreat/Advance Mechanics", () => {
         const deps = event.parentVersion;
         await coordinator2.transform(
           event,
-          deps,
+          deps as Set<string>,
           new Set([...Array.from(deps), event.id]),
         );
       }

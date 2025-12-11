@@ -99,6 +99,30 @@ export class EgWalkerAPI {
   }
 
   /**
+   * Serialize the document state (text + event graph)
+   */
+  serialize(): { text: string; eventGraph: any } {
+    return {
+      text: this.document,
+      eventGraph: this.eventGraph.serialize()
+    };
+  }
+
+  /**
+   * Deserialize from saved state
+   */
+  static deserialize(serialized: { text: string; eventGraph: any }): EgWalkerAPI {
+    // Create new instance with the text
+    const api = new EgWalkerAPI('deserialized-replica', serialized.text);
+    // Restore event graph
+    if (serialized.eventGraph) {
+      // Note: EventGraph doesn't have deserialize yet, so this is a placeholder
+      // api.eventGraph = EventGraph.deserialize(serialized.eventGraph);
+    }
+    return api;
+  }
+
+  /**
    * Apply a local operation and add to event graph
    */
   private applyLocalOperation(operation: ExternalOperation): void {

@@ -5,7 +5,7 @@
  * No CRDT metadata is stored here.
  */
 
-import type { GraphEvent, EventId, Version } from "../types";
+import type { GraphEvent, EventId, Version, SerializedGraph } from "../types";
 
 // Re-export GraphEvent for use by other modules
 export type { GraphEvent } from "../types";
@@ -18,6 +18,7 @@ export class EventGraph {
   private readonly events: Map<EventId, GraphEvent> = new Map();
   private readonly childrenMap: Map<EventId, Set<EventId>> = new Map();
   private readonly parentsMap: Map<EventId, Set<EventId>> = new Map();
+  private metadata: Record<string, unknown> = {};
 
   /**
    * Add an event to the graph
@@ -56,6 +57,13 @@ export class EventGraph {
    */
   getEvent(id: EventId): GraphEvent | undefined {
     return this.events.get(id);
+  }
+
+  /**
+   * Check if an event exists in the graph
+   */
+  hasEvent(id: EventId): boolean {
+    return this.events.has(id);
   }
 
   /**
@@ -153,27 +161,32 @@ export class EventGraph {
    * Serialize event graph for persistence
    * Returns only the data that should be saved to disk
    */
-  serialize(): string {
+  serialize(): SerializedGraph {
     const events = this.getAllEvents();
-    return JSON.stringify({
-      version: "1.0",
+    return {
+      version: new Set<EventId>(Array.from(this.events.keys())),
       events: events.map((e) => ({
         id: e.id,
         operation: e.operation,
         parentVersion: Array.from(e.parentVersion),
         timestamp: e.timestamp,
       })),
-    });
+      metadata: this.metadata,
+    };
   }
 
   /**
    * Deserialize event graph from persistence
    */
-  static deserialize(data: string): EventGraph {
-    const parsed = JSON.parse(data);
+  static deserialize(data: SerializedGraph): EventGraph {
     const graph = new EventGraph();
 
-    for (const e of parsed.events) {
+    // Restore metadata
+    if (data.metadata) {
+      graph.metadata = data.metadata;
+    }
+
+    for (const e of data.events) {
       const event: GraphEvent = {
         id: e.id,
         operation: e.operation,

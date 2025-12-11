@@ -2,8 +2,13 @@
  * Tests for Section 3.3 - Internal CRDT State
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { InternalCRDTState, withInternalState } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
+import {
+  PREPARE_STATE_TYPE,
+  EFFECT_STATE_TYPE,
+} from "../constants/crdt-states";
 import type { Record, PrepareState, EffectState } from "../crdt/internal-state";
 import type { GraphEvent } from "../types";
 
@@ -15,7 +20,7 @@ describe("InternalCRDTState", () => {
   });
 
   afterEach(() => {
-    state.destroy();
+    state?.destroy();
   });
 
   describe("Record Management", () => {
@@ -24,8 +29,8 @@ describe("InternalCRDTState", () => {
         id: "a:1",
         originLeft: null,
         originRight: null,
-        prepareState: { type: "ins" },
-        effectState: { type: "ins" },
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
         content: "A",
         eventId: "a",
       };
@@ -34,8 +39,8 @@ describe("InternalCRDTState", () => {
         id: "b:1",
         originLeft: "a:1",
         originRight: null,
-        prepareState: { type: "ins" },
-        effectState: { type: "ins" },
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
         content: "B",
         eventId: "b",
       };
@@ -45,8 +50,8 @@ describe("InternalCRDTState", () => {
 
       const records = state.getAllRecords();
       expect(records).toHaveLength(2);
-      expect(records[0].id).toBe("a:1");
-      expect(records[1].id).toBe("b:1");
+      expect(records[0]?.id).toBe("a:1");
+      expect(records[1]?.id).toBe("b:1");
     });
 
     it("should handle concurrent insertions with non-interleaving", () => {
@@ -55,8 +60,8 @@ describe("InternalCRDTState", () => {
         id: "a:1",
         originLeft: null,
         originRight: null,
-        prepareState: { type: "ins" },
-        effectState: { type: "ins" },
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
         content: "H",
         eventId: "a",
       };
@@ -65,8 +70,8 @@ describe("InternalCRDTState", () => {
         id: "a:2",
         originLeft: "a:1",
         originRight: null,
-        prepareState: { type: "ins" },
-        effectState: { type: "ins" },
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
         content: "i",
         eventId: "a",
       };
@@ -75,8 +80,8 @@ describe("InternalCRDTState", () => {
         id: "b:1",
         originLeft: null,
         originRight: null,
-        prepareState: { type: "ins" },
-        effectState: { type: "ins" },
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
         content: "W",
         eventId: "b",
       };
@@ -85,8 +90,8 @@ describe("InternalCRDTState", () => {
         id: "b:2",
         originLeft: "b:1",
         originRight: null,
-        prepareState: { type: "ins" },
-        effectState: { type: "ins" },
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
         content: "o",
         eventId: "b",
       };
@@ -108,7 +113,7 @@ describe("InternalCRDTState", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
         },
@@ -120,7 +125,9 @@ describe("InternalCRDTState", () => {
 
       const records = state.getAllRecords();
       expect(records).toHaveLength(5); // "Hello" = 5 characters
-      expect(records[0].prepareState.type).toBe("not-inserted-yet");
+      expect(records[0]?.prepareState.type).toBe(
+        PREPARE_STATE_TYPE.NOT_YET_INSERTED,
+      );
       expect(state.getVisibleText()).toBe("Hello");
     });
 
@@ -129,7 +136,7 @@ describe("InternalCRDTState", () => {
       const insertEvent: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Test",
         },
@@ -144,7 +151,7 @@ describe("InternalCRDTState", () => {
       const deleteEvent: GraphEvent = {
         id: "e2",
         operation: {
-          type: "delete",
+          type: OPERATION_TYPE.DELETE,
           index: 1,
           length: 2,
         },
@@ -156,7 +163,7 @@ describe("InternalCRDTState", () => {
 
       const records = state.getAllRecords();
       // Check that middle characters are marked for deletion
-      expect(records[1].prepareState.type).toBe("del");
+      expect(records[1]?.prepareState.type).toBe("del");
       expect(records[2].prepareState.type).toBe("del");
     });
 
@@ -164,7 +171,7 @@ describe("InternalCRDTState", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hi",
         },
@@ -176,21 +183,23 @@ describe("InternalCRDTState", () => {
 
       // Records should be in "not-inserted-yet" state
       let records = state.getAllRecords();
-      expect(records[0].prepareState.type).toBe("not-inserted-yet");
+      expect(records[0]?.prepareState.type).toBe(
+        PREPARE_STATE_TYPE.NOT_YET_INSERTED,
+      );
 
       // Apply effect to transition to "ins" state
       state.applyEffect(event);
 
       records = state.getAllRecords();
-      expect(records[0].prepareState.type).toBe("ins");
-      expect(records[0].effectState.type).toBe("ins");
+      expect(records[0]?.prepareState.type).toBe(PREPARE_STATE_TYPE.VISIBLE);
+      expect(records[0]?.effectState.type).toBe(PREPARE_STATE_TYPE.VISIBLE);
     });
 
     it("should undo prepare state", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Undo",
         },
@@ -214,8 +223,8 @@ describe("InternalCRDTState", () => {
           id: `r:${i}`,
           originLeft: i > 0 ? `r:${i - 1}` : null,
           originRight: null,
-          prepareState: { type: "ins" },
-          effectState: { type: "ins" },
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
           content: String.fromCharCode(65 + (i % 26)),
           eventId: `e${i}`,
         };
@@ -261,7 +270,7 @@ describe("InternalCRDTState", () => {
       const event1: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "ABC",
         },
@@ -276,7 +285,7 @@ describe("InternalCRDTState", () => {
       const event2: GraphEvent = {
         id: "e2",
         operation: {
-          type: "delete",
+          type: OPERATION_TYPE.DELETE,
           index: 1,
           length: 1,
         },

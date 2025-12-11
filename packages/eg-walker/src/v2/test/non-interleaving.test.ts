@@ -5,13 +5,14 @@ import {
   ensureNonInterleaving,
   BLOCK_ORDER_STRATEGIES,
 } from "../crdt/non-interleaving";
+import { OPERATION_TYPE } from "../crdt/internal-state";
 
 describe("Non-interleaving invariants", () => {
   describe("groupIntoRuns", () => {
     it("should group consecutive operations from same author", () => {
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "H",
           eventId: "a1",
@@ -19,7 +20,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "e",
           eventId: "a2",
@@ -27,7 +28,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 101,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 2,
           text: "l",
           eventId: "a3",
@@ -35,7 +36,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 102,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 3,
           text: "l",
           eventId: "a4",
@@ -43,7 +44,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 103,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 4,
           text: "o",
           eventId: "a5",
@@ -62,7 +63,7 @@ describe("Non-interleaving invariants", () => {
     it("should separate operations from different authors", () => {
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "H",
           eventId: "a1",
@@ -70,7 +71,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "W",
           eventId: "b1",
@@ -78,7 +79,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 2,
           text: "e",
           eventId: "a2",
@@ -86,7 +87,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 101,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 3,
           text: "o",
           eventId: "b2",
@@ -106,7 +107,7 @@ describe("Non-interleaving invariants", () => {
     it("should create separate runs when author changes back", () => {
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
           eventId: "a1",
@@ -114,7 +115,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "B",
           eventId: "b1",
@@ -122,7 +123,7 @@ describe("Non-interleaving invariants", () => {
           timestamp: 101,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 2,
           text: "C",
           eventId: "a2",

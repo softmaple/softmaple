@@ -4,6 +4,7 @@
  * Ensures deterministic behavior and consistency across replicas
  */
 
+import { OPERATION_TYPE } from "../constants/operation-types";
 import type {
   DocumentState,
   GraphEvent,
@@ -21,7 +22,7 @@ export function applyOperation(
   operation: ExternalOperation,
 ): string {
   switch (operation.type) {
-    case "insert": {
+    case OPERATION_TYPE.INSERT: {
       const { index, text: insertText } = operation;
       if (index < 0 || index > text.length) {
         throw new Error(`Invalid insert index: ${index}`);
@@ -29,7 +30,7 @@ export function applyOperation(
       return text.slice(0, index) + insertText + text.slice(index);
     }
 
-    case "delete": {
+    case OPERATION_TYPE.DELETE: {
       const { index, length } = operation;
       if (index < 0 || index + length > text.length) {
         throw new Error(`Invalid delete range: [${index}, ${index + length})`);
@@ -90,9 +91,9 @@ export function validateIndexBounds(
   operation: ExternalOperation,
 ): boolean {
   switch (operation.type) {
-    case "insert":
+    case OPERATION_TYPE.INSERT:
       return operation.index >= 0 && operation.index <= text.length;
-    case "delete":
+    case OPERATION_TYPE.DELETE:
       return (
         operation.index >= 0 &&
         operation.index + operation.length <= text.length &&
@@ -163,13 +164,13 @@ export class StrongListInvariant implements ListInvariant {
       const op = event.operation;
 
       switch (op.type) {
-        case "insert":
+        case OPERATION_TYPE.INSERT:
           if (op.index < 0 || op.text.length === 0) {
             return false;
           }
           break;
 
-        case "delete":
+        case OPERATION_TYPE.DELETE:
           if (op.index < 0 || op.length <= 0) {
             return false;
           }

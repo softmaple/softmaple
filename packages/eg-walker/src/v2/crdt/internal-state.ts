@@ -6,26 +6,39 @@
  * and support O(log n) operations.
  */
 
+import {
+  OPERATION_TYPE,
+  type OperationType,
+} from "../constants/operation-types";
+import {
+  PREPARE_STATE_TYPE,
+  EFFECT_STATE_TYPE,
+  type PrepareStateType,
+  type EffectStateType,
+} from "../constants/crdt-states";
+import { CRDT_SENTINELS } from "../constants/sentinels";
 import type { EventId, GraphEvent } from "../types";
 
-// ============================================================================
-// State Types
-// ============================================================================
+// Re-export for backward compatibility
+export { OPERATION_TYPE, PREPARE_STATE_TYPE, EFFECT_STATE_TYPE };
+export type { OperationType, PrepareStateType, EffectStateType };
 
 /**
  * Prepare state represents the state before an event is applied.
  * Used during retreat operations.
  */
 export type PrepareState =
-  | { type: "not-inserted-yet" }
-  | { type: "ins" }
-  | { type: "del"; count: number };
+  | { type: typeof PREPARE_STATE_TYPE.NOT_YET_INSERTED }
+  | { type: typeof PREPARE_STATE_TYPE.VISIBLE }
+  | { type: typeof PREPARE_STATE_TYPE.DELETED; count: number };
 
 /**
  * Effect state represents the state after an event is applied.
  * Used during advance operations.
  */
-export type EffectState = { type: "ins" } | { type: "del" };
+export type EffectState =
+  | { type: typeof EFFECT_STATE_TYPE.VISIBLE }
+  | { type: typeof EFFECT_STATE_TYPE.DELETED };
 
 /**
  * Internal CRDT record - exists only temporarily during transformations.
@@ -161,7 +174,7 @@ export class InternalCRDTState {
     }
 
     // Update state to deleted
-    record.effectState = { type: "del" };
+    record.effectState = { type: EFFECT_STATE_TYPE.DELETED };
 
     // Update B-tree (scaffolding)
     this.updateBTreeDelete(recordId);
@@ -179,7 +192,7 @@ export class InternalCRDTState {
 
     const op = event.operation;
 
-    if (op.type === "insert") {
+    if (op.type === OPERATION_TYPE.INSERT) {
       // For insertions, create records in "not-inserted-yet" state
       const text = op.text;
       let prevId: EventId | null = null;
@@ -190,8 +203,8 @@ export class InternalCRDTState {
           id: recordId,
           originLeft: prevId,
           originRight: this.findRightOrigin(op.index + i),
-          prepareState: { type: "not-inserted-yet" },
-          effectState: { type: "ins" },
+          prepareState: { type: PREPARE_STATE_TYPE.NOT_YET_INSERTED },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
           content: text[i],
           eventId: event.id,
         };
@@ -199,15 +212,18 @@ export class InternalCRDTState {
         this.insertRecord(record);
         prevId = recordId;
       }
-    } else if (op.type === "delete") {
+    } else if (op.type === OPERATION_TYPE.DELETE) {
       // For deletions, mark records' prepare state
       const toDelete = this.findRecordsInRange(op.index, op.length);
       for (const record of toDelete) {
         const delCount =
-          record.prepareState.type === "del"
+          record.prepareState.type === PREPARE_STATE_TYPE.DELETED
             ? record.prepareState.count + 1
             : 1;
-        record.prepareState = { type: "del", count: delCount };
+        record.prepareState = {
+          type: PREPARE_STATE_TYPE.DELETED,
+          count: delCount,
+        };
       }
     }
   }
@@ -220,7 +236,7 @@ export class InternalCRDTState {
 
     const op = event.operation;
 
-    if (op.type === "insert") {
+    if (op.type === OPERATION_TYPE.INSERT) {
       // Remove records that were created for this event
       for (let i = 0; i < op.text.length; i++) {
         const recordId = `${event.id}:${i}`;
@@ -230,20 +246,20 @@ export class InternalCRDTState {
           this.orderedRecords.splice(idx, 1);
         }
       }
-    } else if (op.type === "delete") {
+    } else if (op.type === OPERATION_TYPE.DELETE) {
       // Restore prepare state
       const toRestore = this.findRecordsInRange(op.index, op.length);
       for (const record of toRestore) {
         if (
-          record.prepareState.type === "del" &&
+          record.prepareState.type === PREPARE_STATE_TYPE.DELETED &&
           record.prepareState.count > 1
         ) {
           record.prepareState = {
-            type: "del",
+            type: PREPARE_STATE_TYPE.DELETED,
             count: record.prepareState.count - 1,
           };
         } else {
-          record.prepareState = { type: "ins" };
+          record.prepareState = { type: EFFECT_STATE_TYPE.VISIBLE };
         }
       }
     }
@@ -257,21 +273,24 @@ export class InternalCRDTState {
 
     const op = event.operation;
 
-    if (op.type === "insert") {
+    if (op.type === OPERATION_TYPE.INSERT) {
       // Transition from "not-inserted-yet" to "ins"
       for (let i = 0; i < op.text.length; i++) {
         const recordId = `${event.id}:${i}`;
         const record = this.records.get(recordId);
-        if (record && record.prepareState.type === "not-inserted-yet") {
-          record.prepareState = { type: "ins" };
-          record.effectState = { type: "ins" };
+        if (
+          record &&
+          record.prepareState.type === PREPARE_STATE_TYPE.NOT_YET_INSERTED
+        ) {
+          record.prepareState = { type: EFFECT_STATE_TYPE.VISIBLE };
+          record.effectState = { type: EFFECT_STATE_TYPE.VISIBLE };
         }
       }
-    } else if (op.type === "delete") {
+    } else if (op.type === OPERATION_TYPE.DELETE) {
       // Mark records as deleted in effect state
       const toDelete = this.findRecordsInRange(op.index, op.length);
       for (const record of toDelete) {
-        record.effectState = { type: "del" };
+        record.effectState = { type: EFFECT_STATE_TYPE.DELETED };
       }
     }
   }
@@ -333,7 +352,7 @@ export class InternalCRDTState {
   private findRightOrigin(index: number): EventId | null {
     let visibleCount = 0;
     for (const record of this.orderedRecords) {
-      if (record.effectState.type === "ins") {
+      if (record.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
         if (visibleCount === index) {
           return record.id;
         }
@@ -351,7 +370,7 @@ export class InternalCRDTState {
     let visibleCount = 0;
 
     for (const record of this.orderedRecords) {
-      if (record.effectState.type === "ins") {
+      if (record.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
         if (visibleCount >= index && visibleCount < index + length) {
           result.push(record);
         }
@@ -417,8 +436,9 @@ export class InternalCRDTState {
       // 1. Already inserted (ins)
       // 2. Deleted but with count > 0 (deleted-but-visible)
       if (
-        record.prepareState.type === "ins" ||
-        (record.prepareState.type === "del" && record.prepareState.count > 0)
+        record.prepareState.type === PREPARE_STATE_TYPE.VISIBLE ||
+        (record.prepareState.type === PREPARE_STATE_TYPE.DELETED &&
+          record.prepareState.count > 0)
       ) {
         if (currentIndex === index) {
           return record;
@@ -451,7 +471,7 @@ export class InternalCRDTState {
     for (const r of this.orderedRecords) {
       if (r.id === record.id) {
         // Found the target record
-        if (record.effectState.type === "del") {
+        if (record.effectState.type === EFFECT_STATE_TYPE.DELETED) {
           // Deleted records have no effect-index
           return -1;
         }
@@ -459,7 +479,7 @@ export class InternalCRDTState {
       }
 
       // Only count records that are visible in effect state
-      if (r.effectState.type === "ins") {
+      if (r.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
         effectIndex++;
       }
     }
@@ -475,7 +495,10 @@ export class InternalCRDTState {
 
     const chars: string[] = [];
     for (const record of this.orderedRecords) {
-      if (record.effectState.type === "ins" && record.content) {
+      if (
+        record.effectState.type === EFFECT_STATE_TYPE.VISIBLE &&
+        record.content
+      ) {
         chars.push(record.content);
       }
     }
@@ -512,7 +535,7 @@ export class InternalCRDTState {
     let deleted = 0;
 
     for (const record of this.orderedRecords) {
-      if (record.effectState.type === "ins") {
+      if (record.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
         visible++;
       } else {
         deleted++;

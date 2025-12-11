@@ -61,19 +61,19 @@ describe("TemporaryCRDT", () => {
       const item1: CRDTItem = {
         id: "item-1",
         content: "Hello",
-        authorId: "alice",
-        timestamp: 100,
-        leftId: null,
-        rightId: null,
+        insertedBy: "alice",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
       };
 
       const item2: CRDTItem = {
         id: "item-2",
         content: "World",
-        authorId: "bob",
-        timestamp: 200,
-        leftId: "item-1",
-        rightId: null,
+        insertedBy: "bob",
+        originLeft: "item-1",
+        originRight: null,
+        isDeleted: false,
       };
 
       crdt.insertItem(item1);
@@ -91,10 +91,10 @@ describe("TemporaryCRDT", () => {
       const item: CRDTItem = {
         id: "item-1",
         content: "Test",
-        authorId: "alice",
-        timestamp: 100,
-        leftId: null,
-        rightId: null,
+        insertedBy: "alice",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
       };
 
       crdt.insertItem(item);
@@ -110,19 +110,19 @@ describe("TemporaryCRDT", () => {
       const item1: CRDTItem = {
         id: "alice-1",
         content: "Hello",
-        authorId: "alice",
-        timestamp: 100,
-        leftId: null,
-        rightId: null,
+        insertedBy: "alice",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
       };
 
       const item2: CRDTItem = {
         id: "bob-1",
         content: "World",
-        authorId: "bob",
-        timestamp: 100,
-        leftId: null,
-        rightId: null,
+        insertedBy: "bob",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
       };
 
       crdt.insertItem(item1);
@@ -148,10 +148,10 @@ describe("TemporaryCRDT", () => {
         crdt.insertItem({
           id: "test",
           content: "Test",
-          authorId: "test",
-          timestamp: 100,
-          leftId: null,
-          rightId: null,
+          insertedBy: "test",
+          originLeft: null,
+          originRight: null,
+          isDeleted: false,
         });
 
         return crdt.getOrderedItems().length;
@@ -194,10 +194,10 @@ describe("TemporaryCRDT", () => {
       const item1: CRDTItem = {
         id: "item-1",
         content: "A",
-        authorId: "alice",
-        timestamp: 100,
-        leftId: null,
-        rightId: null,
+        insertedBy: "alice",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
       };
 
       crdt.insertItem(item1);
@@ -205,10 +205,10 @@ describe("TemporaryCRDT", () => {
       const newItem: CRDTItem = {
         id: "item-2",
         content: "B",
-        authorId: "bob",
-        timestamp: 200,
-        leftId: "item-1",
-        rightId: null,
+        insertedBy: "bob",
+        originLeft: "item-1",
+        originRight: null,
+        isDeleted: false,
       };
 
       const position = crdt.findInsertPosition(newItem);
@@ -221,10 +221,10 @@ describe("TemporaryCRDT", () => {
       const existingItem: CRDTItem = {
         id: "item-1",
         content: "B",
-        authorId: "alice",
-        timestamp: 200,
-        leftId: null,
-        rightId: null,
+        insertedBy: "alice",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
       };
 
       crdt.insertItem(existingItem);
@@ -232,10 +232,10 @@ describe("TemporaryCRDT", () => {
       const newItem: CRDTItem = {
         id: "item-0",
         content: "A",
-        authorId: "bob",
-        timestamp: 100,
-        leftId: null,
-        rightId: "item-1",
+        insertedBy: "bob",
+        originLeft: null,
+        originRight: "item-1",
+        isDeleted: false,
       };
 
       const position = crdt.findInsertPosition(newItem);

@@ -1,3 +1,6 @@
+import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../crdt/internal-state";
 /**
  * Tests for Section 3.3 - Retreat/Advance Mechanics
  */
@@ -26,7 +29,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
         },
@@ -42,7 +45,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event1: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "First",
         },
@@ -53,7 +56,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event2: GraphEvent = {
         id: "e2",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 5,
           text: "Second",
         },
@@ -74,7 +77,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Test",
         },
@@ -91,7 +94,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Reset",
         },
@@ -122,7 +125,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Transform",
         },
@@ -147,7 +150,7 @@ describe("Retreat/Advance Mechanics", () => {
       const event: GraphEvent = {
         id: "e2",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 100, // Beyond current text length
           text: "Adjusted",
         },
@@ -173,7 +176,7 @@ describe("Retreat/Advance Mechanics", () => {
       const insertEvent: GraphEvent = {
         id: "e1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "DeleteMe",
         },
@@ -187,7 +190,7 @@ describe("Retreat/Advance Mechanics", () => {
       const deleteEvent: GraphEvent = {
         id: "e2",
         operation: {
-          type: "delete",
+          type: OPERATION_TYPE.DELETE,
           index: 2,
           length: 4,
         },
@@ -201,7 +204,7 @@ describe("Retreat/Advance Mechanics", () => {
         new Set(["e1", "e2"]),
       );
 
-      expect(transformed.operation.type).toBe("delete");
+      expect(transformed.operation.type).toBe(OPERATION_TYPE.DELETE);
       expect(transformed.operation.index).toBeLessThanOrEqual(8);
     });
 
@@ -215,7 +218,7 @@ describe("Retreat/Advance Mechanics", () => {
         const event: GraphEvent = {
           id: "e1",
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 0,
             text: "Scoped",
           },
@@ -240,7 +243,7 @@ describe("Retreat/Advance Mechanics", () => {
       const eventA: GraphEvent = {
         id: "a:1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
         },
@@ -252,7 +255,7 @@ describe("Retreat/Advance Mechanics", () => {
       const eventB: GraphEvent = {
         id: "b:1",
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "World",
         },
@@ -284,19 +287,19 @@ describe("Retreat/Advance Mechanics", () => {
       const events: GraphEvent[] = [
         {
           id: "e1",
-          operation: { type: "insert", index: 0, text: "A" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
           parentVersion: new Set(),
           timestamp: 1000,
         },
         {
           id: "e2",
-          operation: { type: "insert", index: 1, text: "B" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
           parentVersion: new Set(["e1"]),
           timestamp: 1001,
         },
         {
           id: "e3",
-          operation: { type: "insert", index: 0, text: "C" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "C" },
           parentVersion: new Set(["e1"]),
           timestamp: 1002,
         },

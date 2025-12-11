@@ -1,3 +1,7 @@
+import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../crdt/internal-state";
 /**
  * Section 3.1 Compliance Test Suite
  *
@@ -43,7 +47,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         timestamp: 100,
         parentIds: [],
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
           eventId: "alice-1",
@@ -58,7 +62,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         timestamp: 100,
         parentIds: [],
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "World",
           eventId: "bob-1",
@@ -91,7 +95,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
           timestamp: 100,
           parentIds: [],
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 0,
             text: "H",
             eventId: "alice-1",
@@ -105,7 +109,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
           timestamp: 101,
           parentIds: ["alice-1"],
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 1,
             text: "e",
             eventId: "alice-2",
@@ -119,7 +123,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
           timestamp: 102,
           parentIds: ["alice-2"],
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 2,
             text: "llo",
             eventId: "alice-3",
@@ -136,7 +140,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
           timestamp: 100,
           parentIds: [],
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 0,
             text: "W",
             eventId: "bob-1",
@@ -150,7 +154,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
           timestamp: 101,
           parentIds: ["bob-1"],
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 1,
             text: "o",
             eventId: "bob-2",
@@ -164,7 +168,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
           timestamp: 102,
           parentIds: ["bob-2"],
           operation: {
-            type: "insert",
+            type: OPERATION_TYPE.INSERT,
             index: 2,
             text: "rld",
             eventId: "bob-3",
@@ -204,7 +208,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         timestamp: 100,
         parentIds: [],
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
           eventId: "alice-1",
@@ -220,7 +224,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         timestamp: 100,
         parentIds: [],
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "World",
           eventId: "bob-1",
@@ -388,7 +392,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         timestamp: 100,
         parentIds: [],
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello World", // 11 characters as one event
           eventId: "event-1",

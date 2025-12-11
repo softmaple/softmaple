@@ -1,3 +1,4 @@
+import { OPERATION_TYPE } from "../constants/operation-types";
 /**
  * Tests for Section 3.2 — Graph Walking
  * Verify topological traversal and deterministic ordering
@@ -16,19 +17,19 @@ describe("Section 3.2: EventGraphWalker", () => {
         {
           id: "e1",
           parentVersion: new Set(),
-          operation: { type: "insert", index: 0, text: "a" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
           timestamp: Date.now(),
         },
         {
           id: "e2",
           parentVersion: new Set(["e1"]),
-          operation: { type: "insert", index: 1, text: "b" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
           timestamp: Date.now() + 1,
         },
         {
           id: "e3",
           parentVersion: new Set(["e2"]),
-          operation: { type: "insert", index: 2, text: "c" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "c" },
           timestamp: Date.now() + 2,
         },
       ];
@@ -48,25 +49,25 @@ describe("Section 3.2: EventGraphWalker", () => {
         {
           id: "root",
           parentVersion: new Set(),
-          operation: { type: "insert", index: 0, text: "r" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "r" },
           timestamp: Date.now(),
         },
         {
           id: "a1",
           parentVersion: new Set(["root"]),
-          operation: { type: "insert", index: 1, text: "a1" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "a1" },
           timestamp: Date.now() + 1,
         },
         {
           id: "b1",
           parentVersion: new Set(["root"]),
-          operation: { type: "insert", index: 1, text: "b1" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b1" },
           timestamp: Date.now() + 2,
         },
         {
           id: "merge",
           parentVersion: new Set(["a1", "b1"]),
-          operation: { type: "insert", index: 2, text: "m" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "m" },
           timestamp: Date.now() + 3,
         },
       ];
@@ -99,25 +100,25 @@ describe("Section 3.2: EventGraphWalker", () => {
         {
           id: "base",
           parentVersion: new Set(),
-          operation: { type: "insert", index: 0, text: "base" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "base" },
           timestamp: Date.now(),
         },
         {
           id: "c1",
           parentVersion: new Set(["base"]),
-          operation: { type: "insert", index: 1, text: "c1" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "c1" },
           timestamp: Date.now() + 1,
         },
         {
           id: "c2",
           parentVersion: new Set(["base"]),
-          operation: { type: "insert", index: 1, text: "c2" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "c2" },
           timestamp: Date.now() + 2,
         },
         {
           id: "c3",
           parentVersion: new Set(["base"]),
-          operation: { type: "insert", index: 1, text: "c3" },
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "c3" },
           timestamp: Date.now() + 3,
         },
       ];
@@ -144,19 +145,19 @@ describe("Section 3.2: EventGraphWalker", () => {
       walker.addEvent({
         id: "e1",
         parentVersion: new Set(["e3"]),
-        operation: { type: "insert", index: 0, text: "1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "1" },
         timestamp: Date.now(),
       });
       walker.addEvent({
         id: "e2",
         parentVersion: new Set(["e1"]),
-        operation: { type: "insert", index: 1, text: "2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "2" },
         timestamp: Date.now() + 1,
       });
       walker.addEvent({
         id: "e3",
         parentVersion: new Set(["e2"]),
-        operation: { type: "insert", index: 2, text: "3" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "3" },
         timestamp: Date.now() + 2,
       });
 
@@ -170,26 +171,26 @@ describe("Section 3.2: EventGraphWalker", () => {
       walker.addEvent({
         id: "a1",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "a1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a1" },
         timestamp: Date.now(),
       });
       walker.addEvent({
         id: "a2",
         parentVersion: new Set(["a1"]),
-        operation: { type: "insert", index: 1, text: "a2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "a2" },
         timestamp: Date.now() + 1,
       });
 
       walker.addEvent({
         id: "b1",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "b1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b1" },
         timestamp: Date.now(),
       });
       walker.addEvent({
         id: "b2",
         parentVersion: new Set(["b1"]),
-        operation: { type: "insert", index: 1, text: "b2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b2" },
         timestamp: Date.now() + 1,
       });
 

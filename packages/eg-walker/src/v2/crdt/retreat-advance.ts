@@ -8,6 +8,7 @@
 import type { EventId } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
 import { InternalCRDTState } from "./internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
 import type { InternalCRDTState as ICRDTStateInterface } from "./retreat-advance-stubs";
 
 /**
@@ -178,7 +179,7 @@ export class RetreatAdvanceCoordinator {
     const op = event.operation;
     const currentText = this.crdtState.getCurrentText();
 
-    if (op.type === "insert") {
+    if (op.type === OPERATION_TYPE.INSERT) {
       // Adjust index based on current state
       const adjustedIndex = Math.min(op.index, currentText.length);
       return {
@@ -188,7 +189,7 @@ export class RetreatAdvanceCoordinator {
           index: adjustedIndex,
         },
       };
-    } else if (op.type === "delete") {
+    } else if (op.type === OPERATION_TYPE.DELETE) {
       // Adjust range based on current state
       const adjustedIndex = Math.min(op.index, currentText.length);
       const adjustedLength = Math.min(
@@ -198,7 +199,7 @@ export class RetreatAdvanceCoordinator {
       return {
         ...event,
         operation: {
-          type: "delete",
+          type: OPERATION_TYPE.DELETE,
           index: adjustedIndex,
           length: adjustedLength,
         },

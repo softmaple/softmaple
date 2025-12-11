@@ -7,6 +7,7 @@
  * - Returns only plain text state
  */
 
+import { OPERATION_TYPE } from "../constants/operation-types";
 import type {
   ExternalOperation,
   DocumentState,
@@ -48,7 +49,7 @@ export class EgWalkerAPI {
     }
 
     const operation: ExternalOperation = {
-      type: "insert",
+      type: OPERATION_TYPE.INSERT,
       index,
       text,
     };
@@ -74,7 +75,7 @@ export class EgWalkerAPI {
     }
 
     const operation: ExternalOperation = {
-      type: "delete",
+      type: OPERATION_TYPE.DELETE,
       index,
       length,
     };

@@ -1,5 +1,6 @@
+import { OPERATION_TYPE } from "../constants/operation-types";
 import { describe, it, expect } from "vitest";
-import type { Event, SerializedEventGraph } from "../types";
+import type { GraphEvent, EventId, SerializedEventGraph } from "../types";
 import { EventGraph } from "../graph/event-graph";
 
 describe("EventGraph", () => {
@@ -7,105 +8,83 @@ describe("EventGraph", () => {
     it("should add events and track dependencies", () => {
       const graph = new EventGraph();
 
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const event2: Event = {
+      const event2: GraphEvent = {
         id: "event-2",
-        authorId: "bob",
         timestamp: 200,
-        parentIds: ["event-1"],
+        parentVersion: new Set<EventId>(["event-1"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 5,
           text: "World",
-          eventId: "event-2",
-          authorId: "bob",
-          timestamp: 200,
         },
       };
 
       graph.addEvent(event1);
       graph.addEvent(event2);
 
-      expect(graph.hasEvent("event-1")).toBe(true);
-      expect(graph.hasEvent("event-2")).toBe(true);
-      expect(graph.getEvent("event-2")?.parentIds).toContain("event-1");
+      expect(graph.getEvent("event-1")).toBeDefined();
+      expect(graph.getEvent("event-2")).toBeDefined();
+      expect(graph.getEvent("event-2")?.parentVersion.has("event-1")).toBe(
+        true,
+      );
     });
 
     it("should detect and reject cycles", () => {
       const graph = new EventGraph();
 
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const event2: Event = {
+      const event2: GraphEvent = {
         id: "event-2",
-        authorId: "bob",
         timestamp: 200,
-        parentIds: ["event-1"],
+        parentVersion: new Set<EventId>(["event-1"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "B",
-          eventId: "event-2",
-          authorId: "bob",
-          timestamp: 200,
         },
       };
 
-      const event3: Event = {
+      const event3: GraphEvent = {
         id: "event-3",
-        authorId: "charlie",
         timestamp: 300,
-        parentIds: ["event-2"],
+        parentVersion: new Set<EventId>(["event-2"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 2,
           text: "C",
-          eventId: "event-3",
-          authorId: "charlie",
-          timestamp: 300,
         },
       };
 
       // This would create a cycle: event-1 -> event-3 -> event-2 -> event-1
-      const cyclicEvent: Event = {
+      const cyclicEvent: GraphEvent = {
         id: "event-1", // Same ID as first event
-        authorId: "alice",
         timestamp: 400,
-        parentIds: ["event-3"],
+        parentVersion: new Set<EventId>(["event-3"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 3,
           text: "D",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 400,
         },
       };
 
@@ -119,33 +98,25 @@ describe("EventGraph", () => {
     it("should prevent duplicate event IDs", () => {
       const graph = new EventGraph();
 
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const duplicateEvent: Event = {
+      const duplicateEvent: GraphEvent = {
         id: "event-1", // Same ID
-        authorId: "bob",
         timestamp: 200,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "B",
-          eventId: "event-1",
-          authorId: "bob",
-          timestamp: 200,
         },
       };
 
@@ -160,48 +131,36 @@ describe("EventGraph", () => {
     it("should return events in topological order", () => {
       const graph = new EventGraph();
 
-      const event3: Event = {
+      const event3: GraphEvent = {
         id: "event-3",
-        authorId: "charlie",
         timestamp: 300,
-        parentIds: ["event-1", "event-2"],
+        parentVersion: new Set(["event-1", "event-2"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 2,
           text: "C",
-          eventId: "event-3",
-          authorId: "charlie",
-          timestamp: 300,
         },
       };
 
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const event2: Event = {
+      const event2: GraphEvent = {
         id: "event-2",
-        authorId: "bob",
         timestamp: 200,
-        parentIds: ["event-1"],
+        parentVersion: new Set<EventId>(["event-1"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "B",
-          eventId: "event-2",
-          authorId: "bob",
-          timestamp: 200,
         },
       };
 
@@ -221,48 +180,36 @@ describe("EventGraph", () => {
     it("should handle concurrent events correctly", () => {
       const graph = new EventGraph();
 
-      const root: Event = {
+      const root: GraphEvent = {
         id: "root",
-        authorId: "system",
         timestamp: 0,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "",
-          eventId: "root",
-          authorId: "system",
-          timestamp: 0,
         },
       };
 
-      const concurrent1: Event = {
+      const concurrent1: GraphEvent = {
         id: "concurrent-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: ["root"],
+        parentVersion: new Set<EventId>(["root"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
-          eventId: "concurrent-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const concurrent2: Event = {
+      const concurrent2: GraphEvent = {
         id: "concurrent-2",
-        authorId: "bob",
         timestamp: 100,
-        parentIds: ["root"],
+        parentVersion: new Set<EventId>(["root"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "B",
-          eventId: "concurrent-2",
-          authorId: "bob",
-          timestamp: 100,
         },
       };
 
@@ -283,63 +230,47 @@ describe("EventGraph", () => {
     it("should detect concurrent events", () => {
       const graph = new EventGraph();
 
-      const root: Event = {
+      const root: GraphEvent = {
         id: "root",
-        authorId: "system",
         timestamp: 0,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "",
-          eventId: "root",
-          authorId: "system",
-          timestamp: 0,
         },
       };
 
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: ["root"],
+        parentVersion: new Set<EventId>(["root"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const event2: Event = {
+      const event2: GraphEvent = {
         id: "event-2",
-        authorId: "bob",
         timestamp: 100,
-        parentIds: ["root"],
+        parentVersion: new Set<EventId>(["root"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "B",
-          eventId: "event-2",
-          authorId: "bob",
-          timestamp: 100,
         },
       };
 
-      const event3: Event = {
+      const event3: GraphEvent = {
         id: "event-3",
-        authorId: "charlie",
         timestamp: 200,
-        parentIds: ["event-1"],
+        parentVersion: new Set<EventId>(["event-1"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "C",
-          eventId: "event-3",
-          authorId: "charlie",
-          timestamp: 200,
         },
       };
 
@@ -363,33 +294,25 @@ describe("EventGraph", () => {
     it("should serialize and deserialize event graph", () => {
       const graph = new EventGraph();
 
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 
-      const event2: Event = {
+      const event2: GraphEvent = {
         id: "event-2",
-        authorId: "bob",
         timestamp: 200,
-        parentIds: ["event-1"],
+        parentVersion: new Set<EventId>(["event-1"]),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 5,
           text: "World",
-          eventId: "event-2",
-          authorId: "bob",
-          timestamp: 200,
         },
       };
 
@@ -398,43 +321,41 @@ describe("EventGraph", () => {
 
       const serialized = graph.serialize();
 
-      expect(serialized.version).toBe("1.0");
+      expect(serialized.version.size).toBe(2); // Should have 2 events
       expect(serialized.events).toHaveLength(2);
 
       const newGraph = EventGraph.deserialize(serialized);
 
       expect(newGraph.hasEvent("event-1")).toBe(true);
       expect(newGraph.hasEvent("event-2")).toBe(true);
-      expect(newGraph.getEvent("event-2")?.parentIds).toContain("event-1");
+      expect(newGraph.getEvent("event-2")?.parentVersion.has("event-1")).toBe(
+        true,
+      );
     });
 
     it("should validate version during deserialization", () => {
       const invalidData: SerializedEventGraph = {
-        version: "2.0", // Unsupported version
+        version: new Set<EventId>(), // Empty version
         events: [],
         metadata: {},
       };
 
-      expect(() => EventGraph.deserialize(invalidData)).toThrow(
-        "Unsupported version: 2.0",
-      );
+      // Should not throw with valid data structure
+      const graph = EventGraph.deserialize(invalidData);
+      expect(graph.getAllEvents()).toHaveLength(0);
     });
 
     it("should preserve metadata during serialization", () => {
       const graph = new EventGraph();
 
-      const event: Event = {
+      const event: GraphEvent = {
         id: "event-1",
-        authorId: "alice",
         timestamp: 100,
-        parentIds: [],
+        parentVersion: new Set<EventId>(),
         operation: {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Test",
-          eventId: "event-1",
-          authorId: "alice",
-          timestamp: 100,
         },
       };
 

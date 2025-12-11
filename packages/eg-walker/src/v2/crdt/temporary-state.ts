@@ -6,6 +6,7 @@
  * temporary nature of CRDT metadata.
  */
 
+import { OPERATION_TYPE } from "../constants/operation-types";
 import type {
   CRDTItem,
   PrepareState,
@@ -72,7 +73,7 @@ export class TemporaryCRDT {
     const items: CRDTItem[] = [];
     const op = event.operation;
 
-    if (op.type === "insert") {
+    if (op.type === OPERATION_TYPE.INSERT) {
       // Create items for each character, but mark them as from same event
       // This preserves non-interleaving
       const text = op.text;
@@ -91,7 +92,7 @@ export class TemporaryCRDT {
         items.push(item);
         prevId = itemId;
       }
-    } else if (op.type === "delete") {
+    } else if (op.type === OPERATION_TYPE.DELETE) {
       // Mark items as deleted
       const toDelete = this.findItemsInRange(op.index, op.length);
       for (const item of toDelete) {

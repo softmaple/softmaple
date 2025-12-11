@@ -1,3 +1,5 @@
+import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../crdt/internal-state";
 import { describe, it, expect } from "vitest";
 import type { ExternalOperation, DocumentState } from "../types";
 import {
@@ -16,7 +18,7 @@ describe("Strong List Specification", () => {
 
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "H",
           eventId: "e1",
@@ -24,7 +26,7 @@ describe("Strong List Specification", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 1,
           text: "ello",
           eventId: "e2",
@@ -32,7 +34,7 @@ describe("Strong List Specification", () => {
           timestamp: 101,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 5,
           text: " ",
           eventId: "e3",
@@ -40,7 +42,7 @@ describe("Strong List Specification", () => {
           timestamp: 102,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 6,
           text: "World",
           eventId: "e4",
@@ -65,7 +67,7 @@ describe("Strong List Specification", () => {
       const operations: ExternalOperation[] = [
         // Invalid: index out of bounds
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 10,
           text: "X",
           eventId: "e1",
@@ -89,7 +91,7 @@ describe("Strong List Specification", () => {
 
       const operations: ExternalOperation[] = [
         {
-          type: "delete",
+          type: OPERATION_TYPE.DELETE,
           index: 5,
           length: 6,
           eventId: "e1",
@@ -97,7 +99,7 @@ describe("Strong List Specification", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 5,
           text: "TypeScript",
           eventId: "e2",
@@ -120,7 +122,7 @@ describe("Strong List Specification", () => {
 
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "A",
           eventId: "e1",
@@ -128,7 +130,7 @@ describe("Strong List Specification", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "B",
           eventId: "e2",
@@ -136,7 +138,7 @@ describe("Strong List Specification", () => {
           timestamp: 101,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 2,
           text: "C",
           eventId: "e3",
@@ -163,7 +165,7 @@ describe("Strong List Specification", () => {
 
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "Hello",
           eventId: "e1",
@@ -171,7 +173,7 @@ describe("Strong List Specification", () => {
           timestamp: 100,
         },
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 5,
           text: " World",
           eventId: "e2",
@@ -194,7 +196,7 @@ describe("Strong List Specification", () => {
 
       const operations: ExternalOperation[] = [
         {
-          type: "insert",
+          type: OPERATION_TYPE.INSERT,
           index: 0,
           text: "X",
           eventId: "e1",
@@ -230,7 +232,7 @@ describe("Strong List Specification", () => {
       const state: DocumentState = { text: "Hello", version: 1 };
 
       const validOp: ExternalOperation = {
-        type: "insert",
+        type: OPERATION_TYPE.INSERT,
         index: 5,
         text: "!",
         eventId: "e1",
@@ -239,7 +241,7 @@ describe("Strong List Specification", () => {
       };
 
       const invalidOp: ExternalOperation = {
-        type: "insert",
+        type: OPERATION_TYPE.INSERT,
         index: 10,
         text: "!",
         eventId: "e2",
@@ -258,7 +260,7 @@ describe("Strong List Specification", () => {
       const state: DocumentState = { text: "Hello World", version: 1 };
 
       const validDelete: ExternalOperation = {
-        type: "delete",
+        type: OPERATION_TYPE.DELETE,
         index: 6,
         length: 5,
         eventId: "e1",
@@ -267,7 +269,7 @@ describe("Strong List Specification", () => {
       };
 
       const invalidDelete1: ExternalOperation = {
-        type: "delete",
+        type: OPERATION_TYPE.DELETE,
         index: 15,
         length: 1,
         eventId: "e2",
@@ -276,7 +278,7 @@ describe("Strong List Specification", () => {
       };
 
       const invalidDelete2: ExternalOperation = {
-        type: "delete",
+        type: OPERATION_TYPE.DELETE,
         index: 5,
         length: 20,
         eventId: "e3",
@@ -293,7 +295,7 @@ describe("Strong List Specification", () => {
       const state: DocumentState = { text: "Hello", version: 1 };
 
       const appendOp: ExternalOperation = {
-        type: "insert",
+        type: OPERATION_TYPE.INSERT,
         index: 5, // Equal to text.length
         text: "!",
         eventId: "e1",
@@ -308,7 +310,7 @@ describe("Strong List Specification", () => {
       const state: DocumentState = { text: "Hello", version: 1 };
 
       const negativeInsert: ExternalOperation = {
-        type: "insert",
+        type: OPERATION_TYPE.INSERT,
         index: -1,
         text: "X",
         eventId: "e1",
@@ -317,7 +319,7 @@ describe("Strong List Specification", () => {
       };
 
       const negativeDelete: ExternalOperation = {
-        type: "delete",
+        type: OPERATION_TYPE.DELETE,
         index: -1,
         length: 1,
         eventId: "e2",

@@ -1,3 +1,4 @@
+import { OPERATION_TYPE } from "../constants/operation-types";
 /**
  * Integration tests for Section 3.2 — Walking the Event Graph
  * Verify the complete walker flow with retreat/advance
@@ -17,13 +18,13 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "e1",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "a" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
         timestamp: Date.now(),
       },
       {
         id: "e2",
         parentVersion: new Set(["e1"]),
-        operation: { type: "insert", index: 1, text: "b" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
         timestamp: Date.now() + 1,
       },
     ];
@@ -45,25 +46,25 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "base",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "base" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "base" },
         timestamp: Date.now(),
       },
       {
         id: "a1",
         parentVersion: new Set(["base"]),
-        operation: { type: "insert", index: 1, text: "a1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "a1" },
         timestamp: Date.now() + 1,
       },
       {
         id: "b1",
         parentVersion: new Set(["base"]),
-        operation: { type: "insert", index: 1, text: "b1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b1" },
         timestamp: Date.now() + 2,
       },
       {
         id: "merge",
         parentVersion: new Set(["a1", "b1"]),
-        operation: { type: "insert", index: 2, text: "merge" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "merge" },
         timestamp: Date.now() + 3,
       },
     ];
@@ -90,13 +91,13 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "e1",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "1" },
         timestamp: Date.now(),
       },
       {
         id: "e2",
         parentVersion: new Set(["e1"]),
-        operation: { type: "insert", index: 1, text: "2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "2" },
         timestamp: Date.now() + 1,
       },
     ];
@@ -121,25 +122,25 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "base",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "X" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
         timestamp: Date.now(),
       },
       {
         id: "a1",
         parentVersion: new Set(["base"]),
-        operation: { type: "insert", index: 1, text: "A" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "A" },
         timestamp: Date.now() + 1,
       },
       {
         id: "b1",
         parentVersion: new Set(["base"]),
-        operation: { type: "insert", index: 1, text: "B" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
         timestamp: Date.now() + 2,
       },
       {
         id: "merge",
         parentVersion: new Set(["a1", "b1"]),
-        operation: { type: "insert", index: 2, text: "M" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "M" },
         timestamp: Date.now() + 3,
       },
     ];
@@ -161,49 +162,49 @@ describe("Section 3.2: EgWalker Integration", () => {
       {
         id: "root",
         parentVersion: new Set(),
-        operation: { type: "insert", index: 0, text: "R" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
         timestamp: Date.now(),
       },
       {
         id: "a1",
         parentVersion: new Set(["root"]),
-        operation: { type: "insert", index: 1, text: "A1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "A1" },
         timestamp: Date.now() + 1,
       },
       {
         id: "a2",
         parentVersion: new Set(["a1"]),
-        operation: { type: "insert", index: 2, text: "A2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "A2" },
         timestamp: Date.now() + 2,
       },
       {
         id: "b1",
         parentVersion: new Set(["root"]),
-        operation: { type: "insert", index: 1, text: "B1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B1" },
         timestamp: Date.now() + 3,
       },
       {
         id: "b2",
         parentVersion: new Set(["b1"]),
-        operation: { type: "insert", index: 2, text: "B2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "B2" },
         timestamp: Date.now() + 4,
       },
       {
         id: "merge1",
         parentVersion: new Set(["a1", "b1"]),
-        operation: { type: "insert", index: 3, text: "M1" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "M1" },
         timestamp: Date.now() + 5,
       },
       {
         id: "merge2",
         parentVersion: new Set(["a2", "b2"]),
-        operation: { type: "insert", index: 4, text: "M2" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 4, text: "M2" },
         timestamp: Date.now() + 6,
       },
       {
         id: "final",
         parentVersion: new Set(["merge1", "merge2"]),
-        operation: { type: "insert", index: 5, text: "F" },
+        operation: { type: OPERATION_TYPE.INSERT, index: 5, text: "F" },
         timestamp: Date.now() + 7,
       },
     ];

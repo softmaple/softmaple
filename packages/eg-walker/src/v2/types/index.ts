@@ -8,6 +8,7 @@
  * - No persistent CRDT metadata
  */
 
+import { OPERATION_TYPE } from "../constants/operation-types";
 // ============================================================================
 // External API Types (Index-based, no CRDT exposure)
 // ============================================================================
@@ -17,8 +18,8 @@
  * Never expose CRDT IDs or internal metadata
  */
 export type ExternalOperation =
-  | { type: "insert"; index: number; text: string }
-  | { type: "delete"; index: number; length: number };
+  | { type: typeof OPERATION_TYPE.INSERT; index: number; text: string }
+  | { type: typeof OPERATION_TYPE.DELETE; index: number; length: number };
 
 /**
  * Public document state - just plain text

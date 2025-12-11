@@ -9,6 +9,10 @@ import type { EventGraphWalker } from "../graph/topological-walker";
 import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 
 import {
+  StateClearer,
+  DefaultCriticalVersionDetector,
+} from "./critical-version";
+import {
   FrontierVersion,
   VersionAlignmentManager,
   compareVersions,
@@ -71,6 +75,10 @@ export class EgWalker {
       })();
     this.versionManager = new VersionAlignmentManager();
     this.debug = config.debug || false;
+
+    // Initialize state clearer with critical version detection
+    const detector = new DefaultCriticalVersionDetector();
+    this.stateClearer = new StateClearer(detector);
   }
 
   /**
@@ -127,6 +135,13 @@ export class EgWalker {
       // Step 5: Advance internal state until prepareVersion = effectVersion
       const advanceResult = this.advanceToEffectVersion();
       advanceCount += advanceResult.advanceCount;
+
+      // Step 6: Check for critical version and clear state if needed
+      this.stateClearer.updateVersion(this.versionManager.getEffectVersion());
+      // Try to clear state if we have an InternalCRDTState with clearing methods
+      if ("clearPrepareState" in this.internalCRDT) {
+        this.stateClearer.tryClearToCriticalVersion(this.internalCRDT as any);
+      }
     }
 
     return {

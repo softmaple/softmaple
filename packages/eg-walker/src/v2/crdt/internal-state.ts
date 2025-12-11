@@ -554,6 +554,75 @@ export class InternalCRDTState {
   // ============================================================================
 
   /**
+   * Clear prepare state completely (for critical version clearing)
+   */
+  clearPrepareState(): void {
+    for (const record of this.records.values()) {
+      // Reset prepare state to null/undefined
+      record.prepareState = {
+        type: PREPARE_STATE_TYPE.VISIBLE,
+        tombstone: false,
+      };
+    }
+  }
+
+  /**
+   * Compact effect state, keeping only minimal placeholders
+   * for later partial replay
+   */
+  compactEffectState(criticalVersion: Version): void {
+    // Keep only deleted records as tombstones
+    // Remove unnecessary metadata from visible records
+    const toRemove: string[] = [];
+
+    for (const [id, record] of this.records.entries()) {
+      if (record.effectState.type === EFFECT_STATE_TYPE.DELETED) {
+        // Keep tombstone but clear unnecessary data
+        record.content = "";
+        record.metadata = { compacted: true, criticalVersion };
+      } else if (record.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
+        // For visible records, we can clear some metadata
+        // but keep the record itself for ordering
+        if (record.metadata) {
+          record.metadata = { ...record.metadata, compacted: true };
+        }
+      }
+    }
+
+    // Remove records that are no longer needed
+    for (const id of toRemove) {
+      this.records.delete(id);
+    }
+
+    // Rebuild ordered records
+    this.rebuildOrderedRecords();
+  }
+
+  /**
+   * Clear cached metadata
+   */
+  clearCachedMetadata(): void {
+    // Clear any B-tree cache
+    this.btreeRoot = null;
+
+    // Clear any other cached computations
+    // (would clear memoization caches if we had them)
+  }
+
+  /**
+   * Rebuild the ordered records array from the records map
+   */
+  private rebuildOrderedRecords(): void {
+    this.orderedRecords = Array.from(this.records.values()).sort((a, b) => {
+      // Sort by position, then by id for stability
+      if (a.position !== b.position) {
+        return a.position - b.position;
+      }
+      return a.id.localeCompare(b.id);
+    });
+  }
+
+  /**
    * Destroy this state and release all resources
    */
   destroy(): void {

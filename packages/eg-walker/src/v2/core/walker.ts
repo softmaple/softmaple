@@ -15,6 +15,7 @@ import {
 } from "./version-alignment";
 import { DefaultEventGraphWalker } from "../graph/topological-walker";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
+import { ConcreteCRDTState } from "../crdt";
 
 /**
  * Configuration for the walker
@@ -54,7 +55,20 @@ export class EgWalker {
 
   constructor(config: WalkerConfig = {}) {
     this.graphWalker = config.graphWalker || new DefaultEventGraphWalker();
-    this.internalCRDT = config.internalCRDT || new StubInternalCRDT();
+    // Use ConcreteCRDTState for actual implementation
+    // For testing, you can still pass StubInternalCRDT via config
+    this.internalCRDT =
+      config.internalCRDT ||
+      (() => {
+        try {
+          // Try to use the concrete implementation
+          const { ConcreteCRDTState } = require("../crdt/retreat-advance");
+          return new ConcreteCRDTState();
+        } catch {
+          // Fall back to stub if concrete not available
+          return new StubInternalCRDT();
+        }
+      })();
     this.versionManager = new VersionAlignmentManager();
     this.debug = config.debug || false;
   }

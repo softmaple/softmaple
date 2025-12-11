@@ -23,6 +23,21 @@ export {
   type InternalCRDTState,
 } from "./retreat-advance-stubs";
 
+// Section 3.3 exports
+export {
+  InternalCRDTState as InternalCRDTStateImpl,
+  withInternalState,
+  type Record,
+  type PrepareState as PrepareStateInternal,
+  type EffectState as EffectStateInternal,
+} from "./internal-state";
+
+export {
+  ConcreteCRDTState,
+  RetreatAdvanceCoordinator,
+  withCoordinator,
+} from "./retreat-advance";
+
 export type {
   CRDTItem,
   PrepareState,

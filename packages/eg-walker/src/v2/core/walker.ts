@@ -12,6 +12,7 @@ import {
   StateClearer,
   DefaultCriticalVersionDetector,
 } from "./critical-version";
+import { PartialReplayManager } from "./replay";
 import {
   FrontierVersion,
   VersionAlignmentManager,

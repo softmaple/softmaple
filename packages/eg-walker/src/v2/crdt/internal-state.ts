@@ -98,20 +98,112 @@ export class InternalCRDTState {
   }
 
   /**
-   * Initialize the B-tree structure
+ * Initialize the B-tree structure
+ */
+private initializeBTree(): void {
+  this.btreeRoot = {
+    keys: [],
+    values: [],
+    children: null,
+    leaf: true,
+    size: 0,
+  };
+}
+
+  /**
+   * Switch to prepare state mode for replay operations
    */
-  private initializeBTree(): void {
-    this.btreeRoot = {
-      keys: [],
-      values: [],
-      children: null,
-      leaf: true,
-      size: 0,
-    };
+  switchToPrepareState(): void {
+    this.checkValid();
+    // Set a flag to indicate we're in prepare state mode
+    // This affects how operations are applied
+    (this as any).currentMode = 'prepare';
   }
 
   /**
-   * Schedule automatic cleanup to ensure temporary nature
+ * Switch to effect state mode for normal operations
+ */
+switchToEffectState(): void {
+  this.checkValid();
+  // Set a flag to indicate we're in effect state mode
+  // This is the default mode
+  (this as any).currentMode = 'effect';
+}
+
+  /**
+ * Apply an operation to the CRDT state
+ * Used during replay to reconstruct state
+ */
+applyOperation(operation: any, eventId: EventId): void {
+  this.checkValid();
+  
+  if (!operation || !operation.type) {
+    return;
+  }
+
+  const mode = (this as any).currentMode || 'effect';
+  
+  if (operation.type === OPERATION_TYPE.INSERT) {
+    // Handle insert operation
+    const record: Record = {
+      id: eventId,
+      originLeft: null, // Would be computed from context
+      originRight: null,
+      prepareState: mode === 'prepare' ? 
+        { type: PREPARE_STATE_TYPE.VISIBLE } :
+        { type: PREPARE_STATE_TYPE.NOT_YET_INSERTED },
+      effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+      content: operation.text || operation.content || '',
+      eventId,
+    };
+    
+    this.records.set(eventId, record);
+    this.orderedRecords.push(record);
+    
+  } else if (operation.type === OPERATION_TYPE.DELETE) {
+    // Handle delete operation
+    // In a real implementation, this would update existing records
+    // For now, create a tombstone record
+    const record: Record = {
+      id: eventId,
+      originLeft: null,
+      originRight: null,
+      prepareState: { type: PREPARE_STATE_TYPE.DELETED, count: operation.length || 1 },
+      effectState: { type: EFFECT_STATE_TYPE.DELETED },
+      eventId,
+    };
+    
+    this.records.set(eventId, record);
+    this.orderedRecords.push(record);
+  }
+}
+
+  /**
+   * Get statistics about the current state
+   */
+  getStatistics(): { totalRecords: number; visibleRecords: number; deletedRecords: number } {
+    this.checkValid();
+    
+    let visibleRecords = 0;
+    let deletedRecords = 0;
+    
+    for (const record of this.records.values()) {
+      if (record.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
+        visibleRecords++;
+      } else if (record.effectState.type === EFFECT_STATE_TYPE.DELETED) {
+        deletedRecords++;
+      }
+    }
+    
+    return {
+      totalRecords: this.records.size,
+      visibleRecords,
+      deletedRecords,
+    };
+  }
+
+/**
+ * Schedule automatic cleanup to ensure temporary nature
    */
   private scheduleAutoCleanup(): void {
     setTimeout(() => {
@@ -549,13 +641,68 @@ export class InternalCRDTState {
     };
   }
 
-  // ============================================================================
-  // Cleanup
-  // ============================================================================
+ // ============================================================================
+ // Cleanup
+ // ============================================================================
 
   /**
-   * Clear prepare state completely (for critical version clearing)
+   * Add a placeholder for a deleted event (used in partial replay)
    */
+  addPlaceholder(eventId: string, event: any): void {
+    // Create a minimal record for the placeholder
+    const placeholder: Record = {
+      id: eventId,
+      content: "",  // Empty content for placeholder
+      position: this.orderedRecords.length,
+      originLeft: null,
+      originRight: null,
+      prepareState: {
+        type: PREPARE_STATE_TYPE.VISIBLE,
+        tombstone: false,
+      },
+      effectState: {
+        type: EFFECT_STATE_TYPE.DELETED,  // Mark as deleted
+        tombstone: true,
+      },
+      metadata: {
+        placeholder: true,
+        originalEvent: event,
+      },
+    };
+
+    // Add to records
+    this.records.set(eventId, placeholder);
+    this.orderedRecords.push(placeholder);
+  }
+
+  /**
+   * Check if state has placeholders
+   */
+  hasPlaceholders(): boolean {
+    for (const record of this.records.values()) {
+      if (record.metadata?.placeholder) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get all placeholder IDs
+   */
+  getPlaceholderIds(): string[] {
+    const ids: string[] = [];
+    for (const [id, record] of this.records.entries()) {
+      if (record.metadata?.placeholder) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }
+
+ /**
+  * Clear prepare state completely (for critical version clearing)
+  */
   clearPrepareState(): void {
     for (const record of this.records.values()) {
       // Reset prepare state to null/undefined

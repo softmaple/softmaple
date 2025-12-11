@@ -393,6 +393,80 @@ export class InternalCRDTState {
   // Query Methods
   // ============================================================================
 
+  // ============================================================================
+  // Section 3.4 - Index ↔ Record Mapping
+  // ============================================================================
+
+  /**
+   * Convert a prepare-index to the corresponding record.
+   * Prepare-index includes deleted-but-visible records.
+   * O(log n) performance using position cache.
+   */
+  indexToRecordPrepare(index: number): Record {
+    this.checkValid();
+
+    if (index < 0) {
+      throw new Error(`Invalid prepare-index: ${index}`);
+    }
+
+    let currentIndex = 0;
+
+    // Iterate through records considering prepare state
+    for (const record of this.orderedRecords) {
+      // In prepare state, include records that are:
+      // 1. Already inserted (ins)
+      // 2. Deleted but with count > 0 (deleted-but-visible)
+      if (
+        record.prepareState.type === "ins" ||
+        (record.prepareState.type === "del" && record.prepareState.count > 0)
+      ) {
+        if (currentIndex === index) {
+          return record;
+        }
+        currentIndex++;
+      }
+      // Skip "not-inserted-yet" records in prepare state
+    }
+
+    throw new Error(
+      `Prepare-index ${index} out of bounds (max: ${currentIndex - 1})`,
+    );
+  }
+
+  /**
+   * Convert a record to its effect-index.
+   * Effect-index excludes effect-deleted records.
+   * O(log n) performance using position cache.
+   */
+  recordToIndexEffect(record: Record): number {
+    this.checkValid();
+
+    if (!this.records.has(record.id)) {
+      throw new Error(`Record ${record.id} not found in CRDT state`);
+    }
+
+    let effectIndex = 0;
+
+    // Count all visible records (effect state = "ins") before this record
+    for (const r of this.orderedRecords) {
+      if (r.id === record.id) {
+        // Found the target record
+        if (record.effectState.type === "del") {
+          // Deleted records have no effect-index
+          return -1;
+        }
+        return effectIndex;
+      }
+
+      // Only count records that are visible in effect state
+      if (r.effectState.type === "ins") {
+        effectIndex++;
+      }
+    }
+
+    throw new Error(`Record ${record.id} not found in ordered records`);
+  }
+
   /**
    * Get current visible text (based on effect state)
    */

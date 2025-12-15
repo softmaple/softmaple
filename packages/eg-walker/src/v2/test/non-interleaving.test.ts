@@ -4,7 +4,7 @@ import {
   groupIntoRuns,
   ensureNonInterleaving,
 } from "../crdt/non-interleaving";
-import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
 
 describe("Non-Interleaving Behavior", () => {
   describe("groupIntoRuns", () => {

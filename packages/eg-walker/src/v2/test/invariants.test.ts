@@ -1,4 +1,4 @@
-import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
 import { describe, it, expect } from "vitest";
 import type { GraphEvent } from "../types";
 import {

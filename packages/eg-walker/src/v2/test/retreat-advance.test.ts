@@ -1,4 +1,4 @@
-import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
 /**
  * Tests for Section 3.3 - Retreat/Advance Mechanics
  */

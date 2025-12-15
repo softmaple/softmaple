@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CRDTItem, GraphEvent } from "../types";
 import { TemporaryCRDT, withTemporaryCRDT } from "../crdt/temporary-state";
-import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
 
 describe("TemporaryCRDT", () => {
   beforeEach(() => {

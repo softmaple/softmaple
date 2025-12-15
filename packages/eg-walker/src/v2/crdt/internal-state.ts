@@ -20,10 +20,6 @@ import { CRDT_SENTINELS } from "../constants/sentinels";
 import type { EventId, GraphEvent } from "../types";
 import type { Version } from "../types";
 
-// Re-export for backward compatibility
-export { OPERATION_TYPE, PREPARE_STATE_TYPE, EFFECT_STATE_TYPE };
-export type { OperationType, PrepareStateType, EffectStateType };
-
 /**
  * Prepare state represents the state before an event is applied.
  * Used during retreat operations.

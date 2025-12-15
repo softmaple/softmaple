@@ -1,4 +1,4 @@
-import { OPERATION_TYPE } from "../crdt/internal-state";
+import { OPERATION_TYPE } from "../constants/operation-types";
 /**
  * Section 3.1 Compliance Test Suite
  *

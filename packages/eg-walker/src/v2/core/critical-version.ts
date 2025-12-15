@@ -7,6 +7,15 @@ import type { Version } from "../types";
 import type { InternalCRDTState } from "../crdt/internal-state";
 
 /**
+ * Interface for CRDT state that supports clearing operations
+ */
+export interface ClearableCRDTState {
+  clearPrepareState(): void;
+  compactEffectState(v?: Version): void;
+  clearCachedMetadata(): void;
+}
+
+/**
  * Shared helper function to convert a Version to a sorted array of strings
  * for consistent comparison operations across different classes
  */
@@ -185,8 +194,13 @@ export class StateClearer {
       return false;
     }
 
+    // Check if state supports clearing operations
+    if (!this.isClearable(state)) {
+      return false;
+    }
+
     // Perform the actual clearing
-    this.performClear(state, v);
+    this.performClear(state as ClearableCRDTState, v);
     this.lastClearedVersion = v;
     return true;
   }
@@ -194,12 +208,49 @@ export class StateClearer {
   /**
    * Try to clear state based on current critical version
    */
-  tryClearToCriticalVersion(state: InternalCRDTState): boolean {
+  tryClearToCriticalVersion(
+    state: InternalCRDTState | ClearableCRDTState,
+  ): boolean {
     const criticalVersion = this.detector.getCurrentCriticalVersion();
     if (criticalVersion) {
-      return this.clearInternalState(state, criticalVersion);
+      // Check if state supports clearing operations
+      if (!this.isClearable(state)) {
+        return false;
+      }
+      // We know state is ClearableCRDTState after the type guard
+      // For InternalCRDTState, we can simply perform the clear operations
+      // Clear prepare state completely
+      state.clearPrepareState();
+      // Keep minimal placeholders in effect state
+      state.compactEffectState(criticalVersion);
+      // Clear any cached metadata
+      state.clearCachedMetadata();
+      this.lastClearedVersion = criticalVersion;
+      return true;
     }
     return false;
+  }
+
+  /**
+   * Type guard to check if state supports clearing operations
+   */
+  private isClearable(state: unknown): state is ClearableCRDTState {
+    if (!state || typeof state !== "object") {
+      return false;
+    }
+
+    // Use proper type narrowing without any casts
+    return (
+      "clearPrepareState" in state &&
+      "compactEffectState" in state &&
+      "clearCachedMetadata" in state &&
+      typeof (state as Record<string, unknown>).clearPrepareState ===
+        "function" &&
+      typeof (state as Record<string, unknown>).compactEffectState ===
+        "function" &&
+      typeof (state as Record<string, unknown>).clearCachedMetadata ===
+        "function"
+    );
   }
 
   /**
@@ -209,7 +260,7 @@ export class StateClearer {
     this.detector.updateVersion(v);
   }
 
-  private performClear(state: InternalCRDTState, v: Version): void {
+  private performClear(state: ClearableCRDTState, v: Version): void {
     // Clear prepare state completely
     state.clearPrepareState();
 

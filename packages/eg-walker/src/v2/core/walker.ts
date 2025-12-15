@@ -8,28 +8,27 @@ import type { GraphEvent } from "../graph/event-graph";
 import type { EventGraphWalker } from "../graph/topological-walker";
 import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 import { InternalCRDTState as ConcreteInternalCRDTState } from "../crdt/internal-state";
-
-/**
- * Interface for CRDT state that supports clearing operations
- */
-interface ClearableCRDTState {
-  clearPrepareState(): void;
-  compactEffectState(): void;
-  clearCachedMetadata(): void;
-}
+import type { ClearableCRDTState } from "./critical-version";
 
 /**
  * Type guard to check if CRDT state supports clearing operations
  */
-function isClearable(state: any): state is ClearableCRDTState {
+function isClearable(state: unknown): state is ClearableCRDTState {
+  // Guard against null/undefined and non-object values
+  if (!state || typeof state !== "object") {
+    return false;
+  }
+
+  // Now state is narrowed to object type
+  const obj = state as object;
+
   return (
-    state &&
-    'clearPrepareState' in state &&
-    'compactEffectState' in state &&
-    'clearCachedMetadata' in state &&
-    typeof (state as any).clearPrepareState === 'function' &&
-    typeof (state as any).compactEffectState === 'function' &&
-    typeof (state as any).clearCachedMetadata === 'function'
+    "clearPrepareState" in obj &&
+    "compactEffectState" in obj &&
+    "clearCachedMetadata" in obj &&
+    typeof (obj as ClearableCRDTState).clearPrepareState === "function" &&
+    typeof (obj as ClearableCRDTState).compactEffectState === "function" &&
+    typeof (obj as ClearableCRDTState).clearCachedMetadata === "function"
   );
 }
 
@@ -170,8 +169,8 @@ export class EgWalker {
       }
       // Try to clear state if we have an InternalCRDTState with clearing methods
       if (isClearable(this.internalCRDT)) {
-        // Safe cast since we're checking the existence of the concrete class methods
-        this.stateClearer.tryClearToCriticalVersion(this.internalCRDT as unknown as ConcreteInternalCRDTState);
+        // No cast needed - isClearable already narrowed the type
+        this.stateClearer.tryClearToCriticalVersion(this.internalCRDT);
       }
     }
 

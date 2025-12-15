@@ -7,6 +7,20 @@ import type { Version } from "../types";
 import type { InternalCRDTState } from "../crdt/internal-state";
 
 /**
+ * Shared helper function to convert a Version to a sorted array of strings
+ * for consistent comparison operations across different classes
+ */
+function versionToSortedArray(v: Version | string): string[] {
+  if (typeof v === "string") {
+    return [v];
+  }
+  if (v instanceof Set || (v && typeof v === "object" && "has" in v)) {
+    return Array.from(v).sort();
+  }
+  return [];
+}
+
+/**
  * A critical version is a point where we can safely clear internal state
  * because all replicas have acknowledged seeing events up to this point.
  */
@@ -119,11 +133,27 @@ export class DefaultCriticalVersionDetector implements CriticalVersionDetector {
   }
 
   private compareVersions(v1: Version, v2: Version): number {
-    // Implement actual version comparison logic
-    // This is a placeholder implementation
-    const id1 = typeof v1 === "string" ? v1 : JSON.stringify(v1);
-    const id2 = typeof v2 === "string" ? v2 : JSON.stringify(v2);
-    return id1.localeCompare(id2);
+    // Normalize versions to sorted arrays
+    const arr1 = versionToSortedArray(v1);
+    const arr2 = versionToSortedArray(v2);
+
+    // Compare by length first
+    if (arr1.length !== arr2.length) {
+      return arr1.length - arr2.length;
+    }
+
+    // Compare elements pairwise
+    for (let i = 0; i < arr1.length; i++) {
+      const elem1 = arr1[i];
+      const elem2 = arr2[i];
+      if (!elem1 || !elem2) continue;
+      const cmp = elem1.localeCompare(elem2);
+      if (cmp !== 0) {
+        return cmp;
+      }
+    }
+
+    return 0;
   }
 }
 
@@ -192,8 +222,23 @@ export class StateClearer {
   }
 
   private versionEquals(v1: Version, v2: Version): boolean {
-    // Simplified equality check
-    return JSON.stringify(v1) === JSON.stringify(v2);
+    // Normalize both versions to sorted arrays and compare
+    const arr1 = versionToSortedArray(v1);
+    const arr2 = versionToSortedArray(v2);
+
+    // Check length equality first
+    if (arr1.length !== arr2.length) {
+      return false;
+    }
+
+    // Compare each element
+    for (let i = 0; i < arr1.length; i++) {
+      if (arr1[i] !== arr2[i]) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }
 

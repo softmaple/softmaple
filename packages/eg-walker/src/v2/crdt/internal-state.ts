@@ -17,7 +17,7 @@ import {
   type EffectStateType,
 } from "../constants/crdt-states";
 import { CRDT_SENTINELS } from "../constants/sentinels";
-import type { EventId, GraphEvent } from "../types";
+import type { EventId, GraphEvent, ExternalOperation } from "../types";
 import type { Version } from "../types";
 
 /**
@@ -90,7 +90,7 @@ export class InternalCRDTState {
   private destroyed = false;
   private readonly createdAt = Date.now();
   private readonly maxLifetime = 10000; // 10 seconds max
-  private currentMode: 'prepare' | 'effect' = 'effect';
+  private currentMode: "prepare" | "effect" = "effect";
 
   constructor() {
     this.initializeBTree();
@@ -98,95 +98,102 @@ export class InternalCRDTState {
   }
 
   /**
- * Initialize the B-tree structure
- */
-private initializeBTree(): void {
-  this.btreeRoot = {
-    keys: [],
-    values: [],
-    children: null,
-    leaf: true,
-    size: 0,
-  };
-}
+   * Initialize the B-tree structure
+   */
+  private initializeBTree(): void {
+    this.btreeRoot = {
+      keys: [],
+      values: [],
+      children: null,
+      leaf: true,
+      size: 0,
+    };
+  }
 
   /**
    * Switch to prepare state mode for replay operations
-  */
+   */
   switchToPrepareState(): void {
     this.checkValid();
     // Set a flag to indicate we're in prepare state mode
     // This affects how operations are applied
-    this.currentMode = 'prepare';
+    this.currentMode = "prepare";
   }
 
   /**
- * Switch to effect state mode for normal operations
- */
-switchToEffectState(): void {
-  this.checkValid();
-  // Set a flag to indicate we're in effect state mode
-  // This is the default mode
-  this.currentMode = 'effect';
-}
+   * Switch to effect state mode for normal operations
+   */
+  switchToEffectState(): void {
+    this.checkValid();
+    // Set a flag to indicate we're in effect state mode
+    // This is the default mode
+    this.currentMode = "effect";
+  }
 
   /**
- * Apply an operation to the CRDT state
- * Used during replay to reconstruct state
- */
-applyOperation(operation: any, eventId: EventId): void {
-  this.checkValid();
-  
-  if (!operation || !operation.type) {
-    return;
-  }
+   * Apply an operation to the CRDT state
+   * Used during replay to reconstruct state
+   */
+  applyOperation(operation: ExternalOperation, eventId: EventId): void {
+    this.checkValid();
 
-  const mode = this.currentMode || 'effect';
-  
-  if (operation.type === OPERATION_TYPE.INSERT) {
-    // Handle insert operation
-    const record: Record = {
-      id: eventId,
-      originLeft: null, // Would be computed from context
-      originRight: null,
-      prepareState: mode === 'prepare' ? 
-        { type: PREPARE_STATE_TYPE.VISIBLE } :
-        { type: PREPARE_STATE_TYPE.NOT_YET_INSERTED },
-      effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
-      content: operation.text || operation.content || '',
-      eventId,
-    };
-    
-    this.records.set(eventId, record);
-    this.orderedRecords.push(record);
-    
-  } else if (operation.type === OPERATION_TYPE.DELETE) {
-    // Handle delete operation
-    // In a real implementation, this would update existing records
-    // For now, create a tombstone record
-    const record: Record = {
-      id: eventId,
-      originLeft: null,
-      originRight: null,
-      prepareState: { type: PREPARE_STATE_TYPE.DELETED, count: operation.length || 1 },
-      effectState: { type: EFFECT_STATE_TYPE.DELETED },
-      eventId,
-    };
-    
-    this.records.set(eventId, record);
-    this.orderedRecords.push(record);
+    if (!operation || !operation.type) {
+      return;
+    }
+
+    const mode = this.currentMode || "effect";
+
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      // Handle insert operation
+      const record: Record = {
+        id: eventId,
+        originLeft: null, // Would be computed from context
+        originRight: null,
+        prepareState:
+          mode === "prepare"
+            ? { type: PREPARE_STATE_TYPE.VISIBLE }
+            : { type: PREPARE_STATE_TYPE.NOT_YET_INSERTED },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: operation.text || "",
+        eventId,
+      };
+
+      this.records.set(eventId, record);
+      this.orderedRecords.push(record);
+    } else if (operation.type === OPERATION_TYPE.DELETE) {
+      // Handle delete operation
+      // In a real implementation, this would update existing records
+      // For now, create a tombstone record
+      const record: Record = {
+        id: eventId,
+        originLeft: null,
+        originRight: null,
+        prepareState: {
+          type: PREPARE_STATE_TYPE.DELETED,
+          count: operation.length || 1,
+        },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED },
+        eventId,
+      };
+
+      this.records.set(eventId, record);
+      this.orderedRecords.push(record);
+    }
   }
-}
 
   /**
    * Get statistics about the current state
    */
-  getStatistics(): { totalRecords: number; visibleRecords: number; deletedRecords: number } {
+  getStatistics(): {
+    totalRecords: number;
+    visibleRecords: number;
+    deletedRecords: number;
+  } {
     this.checkValid();
-    
+
     let visibleRecords = 0;
     let deletedRecords = 0;
-    
+
     for (const record of this.records.values()) {
       if (record.effectState.type === EFFECT_STATE_TYPE.VISIBLE) {
         visibleRecords++;
@@ -194,7 +201,7 @@ applyOperation(operation: any, eventId: EventId): void {
         deletedRecords++;
       }
     }
-    
+
     return {
       totalRecords: this.records.size,
       visibleRecords,
@@ -202,8 +209,8 @@ applyOperation(operation: any, eventId: EventId): void {
     };
   }
 
-/**
- * Schedule automatic cleanup to ensure temporary nature
+  /**
+   * Schedule automatic cleanup to ensure temporary nature
    */
   private scheduleAutoCleanup(): void {
     setTimeout(() => {
@@ -641,28 +648,28 @@ applyOperation(operation: any, eventId: EventId): void {
     };
   }
 
- // ============================================================================
- // Cleanup
- // ============================================================================
+  // ============================================================================
+  // Cleanup
+  // ============================================================================
 
   /**
    * Add a placeholder for a deleted event (used in partial replay)
    */
   addPlaceholder(eventId: string, event: GraphEvent): void {
-   // Create a minimal record for the placeholder
-   const placeholder: Record = {
-     id: eventId,
-     eventId: eventId,
-     content: "",  // Empty content for placeholder
+    // Create a minimal record for the placeholder
+    const placeholder: Record = {
+      id: eventId,
+      eventId: eventId,
+      content: "", // Empty content for placeholder
       position: this.orderedRecords.length,
       originLeft: null,
       originRight: null,
       prepareState: {
-      type: PREPARE_STATE_TYPE.VISIBLE,
-    },
-    effectState: {
-      type: EFFECT_STATE_TYPE.DELETED,  // Mark as deleted
-    },
+        type: PREPARE_STATE_TYPE.VISIBLE,
+      },
+      effectState: {
+        type: EFFECT_STATE_TYPE.DELETED, // Mark as deleted
+      },
       metadata: {
         placeholder: true,
         originalEvent: event,
@@ -699,17 +706,17 @@ applyOperation(operation: any, eventId: EventId): void {
     return ids;
   }
 
- /**
- * Clear prepare state completely (for critical version clearing)
- */
-clearPrepareState(): void {
-  for (const record of this.records.values()) {
-    // Reset prepare state to null/undefined
-    record.prepareState = {
-      type: PREPARE_STATE_TYPE.VISIBLE,
-    };
+  /**
+   * Clear prepare state completely (for critical version clearing)
+   */
+  clearPrepareState(): void {
+    for (const record of this.records.values()) {
+      // Reset prepare state to null/undefined
+      record.prepareState = {
+        type: PREPARE_STATE_TYPE.VISIBLE,
+      };
+    }
   }
-}
 
   /**
    * Compact effect state, keeping only minimal placeholders
@@ -755,11 +762,11 @@ clearPrepareState(): void {
   }
 
   /**
- * Rebuild the ordered records array from the records map
- */
-private rebuildOrderedRecords(): void {
-  this.orderedRecords = Array.from(this.records.values()).sort((a, b) => {
-    // Sort by position, then by id for stability
+   * Rebuild the ordered records array from the records map
+   */
+  private rebuildOrderedRecords(): void {
+    this.orderedRecords = Array.from(this.records.values()).sort((a, b) => {
+      // Sort by position, then by id for stability
       const aPos = a.position ?? 0;
       const bPos = b.position ?? 0;
       if (aPos !== bPos) {

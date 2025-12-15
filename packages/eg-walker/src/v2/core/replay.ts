@@ -8,6 +8,25 @@ import type { GraphEvent, EventGraph } from "../graph/event-graph";
 import type { InternalCRDTState } from "../crdt/internal-state";
 
 /**
+ * Interface for a version object that contains events
+ */
+interface VersionWithEvents {
+  events: EventId[];
+}
+
+/**
+ * Type predicate to check if a value is a VersionWithEvents
+ */
+function isVersionWithEvents(v: unknown): v is VersionWithEvents {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    'events' in v &&
+    Array.isArray((v as VersionWithEvents).events)
+  );
+}
+
+/**
  * Manages partial replay of events when state has been cleared
  */
 export class PartialReplayManager {
@@ -133,8 +152,8 @@ computeReplayRange(from: Version, to: Version): EventId[] {
     if (Array.isArray(version)) {
       return new Set(version);
     }
-    if (typeof version === "object" && version !== null && "events" in version) {
-      return new Set((version as any).events);
+    if (isVersionWithEvents(version)) {
+      return new Set(version.events);
     }
     return new Set();
   }

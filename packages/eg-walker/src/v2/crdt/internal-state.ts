@@ -90,6 +90,7 @@ export class InternalCRDTState {
   private destroyed = false;
   private readonly createdAt = Date.now();
   private readonly maxLifetime = 10000; // 10 seconds max
+  private currentMode: 'prepare' | 'effect' = 'effect';
 
   constructor() {
     this.initializeBTree();
@@ -111,12 +112,12 @@ private initializeBTree(): void {
 
   /**
    * Switch to prepare state mode for replay operations
-   */
+  */
   switchToPrepareState(): void {
     this.checkValid();
     // Set a flag to indicate we're in prepare state mode
     // This affects how operations are applied
-    (this as any).currentMode = 'prepare';
+    this.currentMode = 'prepare';
   }
 
   /**
@@ -126,7 +127,7 @@ switchToEffectState(): void {
   this.checkValid();
   // Set a flag to indicate we're in effect state mode
   // This is the default mode
-  (this as any).currentMode = 'effect';
+  this.currentMode = 'effect';
 }
 
   /**
@@ -140,7 +141,7 @@ applyOperation(operation: any, eventId: EventId): void {
     return;
   }
 
-  const mode = (this as any).currentMode || 'effect';
+  const mode = this.currentMode || 'effect';
   
   if (operation.type === OPERATION_TYPE.INSERT) {
     // Handle insert operation
@@ -647,7 +648,7 @@ applyOperation(operation: any, eventId: EventId): void {
   /**
    * Add a placeholder for a deleted event (used in partial replay)
    */
-  addPlaceholder(eventId: string, event: any): void {
+  addPlaceholder(eventId: string, event: GraphEvent): void {
    // Create a minimal record for the placeholder
    const placeholder: Record = {
      id: eventId,

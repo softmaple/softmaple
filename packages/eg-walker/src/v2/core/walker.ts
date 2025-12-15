@@ -7,6 +7,31 @@ import type { EventId } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
 import type { EventGraphWalker } from "../graph/topological-walker";
 import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
+import { InternalCRDTState as ConcreteInternalCRDTState } from "../crdt/internal-state";
+
+/**
+ * Interface for CRDT state that supports clearing operations
+ */
+interface ClearableCRDTState {
+  clearPrepareState(): void;
+  compactEffectState(): void;
+  clearCachedMetadata(): void;
+}
+
+/**
+ * Type guard to check if CRDT state supports clearing operations
+ */
+function isClearable(state: any): state is ClearableCRDTState {
+  return (
+    state &&
+    'clearPrepareState' in state &&
+    'compactEffectState' in state &&
+    'clearCachedMetadata' in state &&
+    typeof (state as any).clearPrepareState === 'function' &&
+    typeof (state as any).compactEffectState === 'function' &&
+    typeof (state as any).clearCachedMetadata === 'function'
+  );
+}
 
 import {
   StateClearer,
@@ -139,10 +164,14 @@ export class EgWalker {
       advanceCount += advanceResult.advanceCount;
 
       // Step 6: Check for critical version and clear state if needed
-      this.stateClearer.updateVersion(this.versionManager.getEffectVersion() as any);
+      const effectVersion = this.versionManager.getEffectVersion();
+      if (effectVersion) {
+        this.stateClearer.updateVersion(effectVersion.frontier);
+      }
       // Try to clear state if we have an InternalCRDTState with clearing methods
-      if ("clearPrepareState" in this.internalCRDT) {
-        this.stateClearer.tryClearToCriticalVersion(this.internalCRDT as any);
+      if (isClearable(this.internalCRDT)) {
+        // Safe cast since we're checking the existence of the concrete class methods
+        this.stateClearer.tryClearToCriticalVersion(this.internalCRDT as unknown as ConcreteInternalCRDTState);
       }
     }
 

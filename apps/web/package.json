@@ -49,7 +49,6 @@
     "@softmaple/db": "workspace:*",
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",
-    "@types/dompurify": "^3.2.0",
     "@types/lodash": "^4.17.21",
     "@types/node": "^24.10.1",
     "@types/react": "19.2.7",

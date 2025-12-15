@@ -212,23 +212,25 @@ export class StateClearer {
     state: InternalCRDTState | ClearableCRDTState,
   ): boolean {
     const criticalVersion = this.detector.getCurrentCriticalVersion();
-    if (criticalVersion) {
-      // Check if state supports clearing operations
-      if (!this.isClearable(state)) {
-        return false;
-      }
-      // We know state is ClearableCRDTState after the type guard
-      // For InternalCRDTState, we can simply perform the clear operations
-      // Clear prepare state completely
-      state.clearPrepareState();
-      // Keep minimal placeholders in effect state
-      state.compactEffectState(criticalVersion);
-      // Clear any cached metadata
-      state.clearCachedMetadata();
-      this.lastClearedVersion = criticalVersion;
-      return true;
+    if (!criticalVersion) {
+      return false;
     }
-    return false;
+
+    // Check if state supports clearing operations
+    if (!this.isClearable(state)) {
+      return false;
+    }
+
+    // We know state is ClearableCRDTState after the type guard
+    // For InternalCRDTState, we can simply perform the clear operations
+    // Clear prepare state completely
+    state.clearPrepareState();
+    // Keep minimal placeholders in effect state
+    state.compactEffectState(criticalVersion);
+    // Clear any cached metadata
+    state.clearCachedMetadata();
+    this.lastClearedVersion = criticalVersion;
+    return true;
   }
 
   /**

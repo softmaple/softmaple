@@ -33,7 +33,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
       expect(api1.getText()).toBe(api2.getText());
     });
 
-    it("should produce deterministic output independent of delivery order", () => {
+    it("should produce deterministic output independent of delivery order", async () => {
       const api1 = new EgWalkerAPI('replica1');
       const api2 = new EgWalkerAPI('replica1');
 
@@ -61,11 +61,11 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
       };
 
       // Apply in different orders
-      api1.applyRemoteEvent(event1);
-      api1.applyRemoteEvent(event2);
+      await api1.applyRemoteEvent(event1);
+      await api1.applyRemoteEvent(event2);
 
-      api2.applyRemoteEvent(event2);
-      api2.applyRemoteEvent(event1);
+      await api2.applyRemoteEvent(event2);
+      await api2.applyRemoteEvent(event1);
 
       // Must converge to same result
       expect(api1.getText()).toBe(api2.getText());
@@ -73,7 +73,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
   });
 
   describe("Characteristic 2: Maximally non-interleaving behavior", () => {
-    it("should never produce character-by-character interleaving", () => {
+    it("should never produce character-by-character interleaving", async () => {
       const api = new EgWalkerAPI('replica1');
 
       // Simulate concurrent insertions at same position
@@ -144,12 +144,12 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
      ];
 
      // Apply all events (simulating interleaved network delivery)
-      if (aliceEvents[0]) api.applyRemoteEvent(aliceEvents[0]);
-      if (bobEvents[0]) api.applyRemoteEvent(bobEvents[0]);
-      if (aliceEvents[1]) api.applyRemoteEvent(aliceEvents[1]);
-      if (bobEvents[1]) api.applyRemoteEvent(bobEvents[1]);
-      if (aliceEvents[2]) api.applyRemoteEvent(aliceEvents[2]);
-      if (bobEvents[2]) api.applyRemoteEvent(bobEvents[2]);
+      if (aliceEvents[0]) await api.applyRemoteEvent(aliceEvents[0]);
+      if (bobEvents[0]) await api.applyRemoteEvent(bobEvents[0]);
+      if (aliceEvents[1]) await api.applyRemoteEvent(aliceEvents[1]);
+      if (bobEvents[1]) await api.applyRemoteEvent(bobEvents[1]);
+      if (aliceEvents[2]) await api.applyRemoteEvent(aliceEvents[2]);
+      if (bobEvents[2]) await api.applyRemoteEvent(bobEvents[2]);
 
       const result = api.getText();
 
@@ -163,7 +163,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
       expect(result).not.toContain("WH");
     });
 
-    it("should group multi-character insertions as blocks", () => {
+    it("should group multi-character insertions as blocks", async () => {
       const api = new EgWalkerAPI('replica1');
 
       // Alice inserts "Hello" as one operation
@@ -190,8 +190,8 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         },
       };
 
-      api.applyRemoteEvent(aliceEvent);
-      api.applyRemoteEvent(bobEvent);
+      await api.applyRemoteEvent(aliceEvent);
+      await api.applyRemoteEvent(bobEvent);
 
       const result = api.getText();
 

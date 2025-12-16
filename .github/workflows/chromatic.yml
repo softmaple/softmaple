@@ -25,7 +25,7 @@ jobs:
   chromatic:
     name: Run Chromatic
     runs-on: ubuntu-latest
-    # Only run if changes are in packages/editor or workflow itself
+    # Only run on direct pushes or PRs from the same repository (not forks)
     if: |
       github.event_name == 'push' || 
       (github.event_name == 'pull_request' && 

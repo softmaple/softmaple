@@ -51,7 +51,7 @@ describe("TemporaryCRDT", () => {
   describe("createItemsFromEvent", () => {
     it("should create items from insert event", () => {
       const crdt = new TemporaryCRDT();
-      
+
       const event: GraphEvent = {
         id: "e1",
         parentVersion: new Set(),
@@ -71,16 +71,16 @@ describe("TemporaryCRDT", () => {
   describe("integrate", () => {
     it("should integrate items into CRDT", () => {
       const crdt = new TemporaryCRDT();
-      
-     const items: CRDTItem[] = [
-       {
-         id: "i1",
-         content: "H",
-         originLeft: null,
-         originRight: null,
-         isDeleted: false,
+
+      const items: CRDTItem[] = [
+        {
+          id: "i1",
+          content: "H",
+          originLeft: null,
+          originRight: null,
+          isDeleted: false,
           insertedBy: "e1",
-       },
+        },
       ];
 
       crdt.integrate(items);

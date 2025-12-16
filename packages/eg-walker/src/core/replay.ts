@@ -19,9 +19,9 @@ interface VersionWithEvents {
  */
 function isVersionWithEvents(v: unknown): v is VersionWithEvents {
   return (
-    typeof v === 'object' &&
+    typeof v === "object" &&
     v !== null &&
-    'events' in v &&
+    "events" in v &&
     Array.isArray((v as VersionWithEvents).events)
   );
 }
@@ -41,21 +41,21 @@ export class PartialReplayManager {
   }
 
   /**
- * Compute the minimal set of events to replay from one version to another
- * O(k log k) where k is the number of events to replay
- */
-computeReplayRange(from: Version, to: Version): EventId[] {
-  // Extract event IDs from versions
-  const fromEvents = this.extractEventIds(from);
-  const toEvents = this.extractEventIds(to);
+   * Compute the minimal set of events to replay from one version to another
+   * O(k log k) where k is the number of events to replay
+   */
+  computeReplayRange(from: Version, to: Version): EventId[] {
+    // Extract event IDs from versions
+    const fromEvents = this.extractEventIds(from);
+    const toEvents = this.extractEventIds(to);
 
-  // Find events that are in 'to' but not in 'from'
-  const newEvents = new Set<EventId>();
-  for (const eventId of toEvents) {
-    if (!fromEvents.has(eventId)) {
-      newEvents.add(eventId);
+    // Find events that are in 'to' but not in 'from'
+    const newEvents = new Set<EventId>();
+    for (const eventId of toEvents) {
+      if (!fromEvents.has(eventId)) {
+        newEvents.add(eventId);
+      }
     }
-  }
 
     // Compute minimal dependency set
     // This will include all dependencies of the new events
@@ -69,9 +69,9 @@ computeReplayRange(from: Version, to: Version): EventId[] {
       }
     }
 
-  // Sort topologically for replay order
-  return this.topologicalSort(eventsToReplay);
-}
+    // Sort topologically for replay order
+    return this.topologicalSort(eventsToReplay);
+  }
 
   /**
    * Replay a set of events to reconstruct state
@@ -116,7 +116,10 @@ computeReplayRange(from: Version, to: Version): EventId[] {
   /**
    * Support placeholder reconstruction from cleared state
    */
-  reconstructPlaceholders(state: InternalCRDTState, criticalVersion: Version): void {
+  reconstructPlaceholders(
+    state: InternalCRDTState,
+    criticalVersion: Version,
+  ): void {
     // Get all events up to critical version
     const eventsToReconstruct = this.computeReplayRange(
       this.emptyVersion(),
@@ -254,27 +257,30 @@ computeReplayRange(from: Version, to: Version): EventId[] {
   }
 
   /**
- * Get an event by ID (from cache or graph)
- */
-private getEvent(eventId: EventId): GraphEvent | null {
-  // Check cache first
-  if (this.eventCache.has(eventId)) {
-    return this.eventCache.get(eventId)!;
-  }
+   * Get an event by ID (from cache or graph)
+   */
+  private getEvent(eventId: EventId): GraphEvent | null {
+    // Check cache first
+    if (this.eventCache.has(eventId)) {
+      return this.eventCache.get(eventId)!;
+    }
 
-  // Get from graph
-  const event = this.eventGraph.getEvent(eventId);
-  if (event) {
-    this.eventCache.set(eventId, event);
+    // Get from graph
+    const event = this.eventGraph.getEvent(eventId);
+    if (event) {
+      this.eventCache.set(eventId, event);
       return event;
-  }
+    }
     return null;
-}
+  }
 
   /**
    * Check if all dependencies for an event are satisfied
    */
-  private checkDependencies(event: GraphEvent, replayingSet: Set<EventId>): boolean {
+  private checkDependencies(
+    event: GraphEvent,
+    replayingSet: Set<EventId>,
+  ): boolean {
     if (!event.parentVersion) {
       return true;
     }
@@ -293,7 +299,10 @@ private getEvent(eventId: EventId): GraphEvent | null {
   /**
    * Apply an event during replay
    */
-  private applyEventForReplay(event: GraphEvent, state: InternalCRDTState): void {
+  private applyEventForReplay(
+    event: GraphEvent,
+    state: InternalCRDTState,
+  ): void {
     // Switch to prepare state for replay
     state.switchToPrepareState();
 

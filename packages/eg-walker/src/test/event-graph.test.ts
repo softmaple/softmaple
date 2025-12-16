@@ -169,13 +169,13 @@ describe("EventGraph", () => {
       graph.addEvent(event1);
       graph.addEvent(event2);
 
-     const ordered = graph.getTopologicalOrder();
+      const ordered = graph.getTopologicalOrder();
 
-     expect(ordered).toHaveLength(3);
-     expect(ordered[0]?.id).toBe("event-1"); // No dependencies
-     expect(ordered[1]?.id).toBe("event-2"); // Depends on event-1
-     expect(ordered[2]?.id).toBe("event-3"); // Depends on event-1 and event-2
-   });
+      expect(ordered).toHaveLength(3);
+      expect(ordered[0]?.id).toBe("event-1"); // No dependencies
+      expect(ordered[1]?.id).toBe("event-2"); // Depends on event-1
+      expect(ordered[2]?.id).toBe("event-3"); // Depends on event-1 and event-2
+    });
 
     it("should handle concurrent events correctly", () => {
       const graph = new EventGraph();
@@ -215,12 +215,12 @@ describe("EventGraph", () => {
 
       graph.addEvent(root);
       graph.addEvent(concurrent1);
-     graph.addEvent(concurrent2);
+      graph.addEvent(concurrent2);
 
-     const ordered = graph.getTopologicalOrder();
+      const ordered = graph.getTopologicalOrder();
 
-     expect(ordered[0]?.id).toBe("root");
-     // concurrent1 and concurrent2 can be in any order, but both after root
+      expect(ordered[0]?.id).toBe("root");
+      // concurrent1 and concurrent2 can be in any order, but both after root
       expect(ordered.slice(1).map((e) => e.id)).toContain("concurrent-1");
       expect(ordered.slice(1).map((e) => e.id)).toContain("concurrent-2");
     });
@@ -359,18 +359,18 @@ describe("EventGraph", () => {
         },
       };
 
-     graph.addEvent(event);
+      graph.addEvent(event);
 
-     const serialized = graph.serialize();
-     const modifiedSerialized = {
-       ...serialized,
-       metadata: { customField: "test-value" }
-     };
+      const serialized = graph.serialize();
+      const modifiedSerialized = {
+        ...serialized,
+        metadata: { customField: "test-value" },
+      };
 
-     const newGraph = EventGraph.deserialize(modifiedSerialized);
-     const reSerialized = newGraph.serialize();
+      const newGraph = EventGraph.deserialize(modifiedSerialized);
+      const reSerialized = newGraph.serialize();
 
-     expect(reSerialized.metadata?.customField).toBe("test-value");
-   });
+      expect(reSerialized.metadata?.customField).toBe("test-value");
+    });
   });
 });

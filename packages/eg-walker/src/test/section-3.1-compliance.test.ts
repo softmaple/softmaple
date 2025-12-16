@@ -15,8 +15,8 @@ import type { ExternalOperation, Event } from "../types";
 describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
   describe("Characteristic 1: Strong list specification", () => {
     it("should preserve sequential semantics of text editing", () => {
-      const api1 = new EgWalkerAPI('replica1');
-      const api2 = new EgWalkerAPI('replica1');
+      const api1 = new EgWalkerAPI("replica1");
+      const api2 = new EgWalkerAPI("replica1");
 
       // Apply same operations to both replicas
       api1.insert(0, "Hello");
@@ -34,8 +34,8 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
     });
 
     it("should produce deterministic output independent of delivery order", async () => {
-      const api1 = new EgWalkerAPI('replica1');
-      const api2 = new EgWalkerAPI('replica1');
+      const api1 = new EgWalkerAPI("replica1");
+      const api2 = new EgWalkerAPI("replica1");
 
       // Simulate concurrent edits with different delivery orders
       const event1: Event = {
@@ -74,14 +74,14 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
 
   describe("Characteristic 2: Maximally non-interleaving behavior", () => {
     it("should never produce character-by-character interleaving", async () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       // Simulate concurrent insertions at same position
       const aliceEvents: Event[] = [
         {
           id: "alice-1",
           parentVersion: new Set<string>(),
-        timestamp: Date.now(),
+          timestamp: Date.now(),
           operation: {
             type: OPERATION_TYPE.INSERT,
             index: 0,
@@ -91,7 +91,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         {
           id: "alice-2",
           parentVersion: new Set(["alice-1"]),
-        timestamp: Date.now(),
+          timestamp: Date.now(),
           operation: {
             type: OPERATION_TYPE.INSERT,
             index: 1,
@@ -101,7 +101,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         {
           id: "alice-3",
           parentVersion: new Set(["alice-2"]),
-        timestamp: Date.now(),
+          timestamp: Date.now(),
           operation: {
             type: OPERATION_TYPE.INSERT,
             index: 2,
@@ -114,7 +114,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         {
           id: "bob-1",
           parentVersion: new Set<string>(),
-        timestamp: Date.now(),
+          timestamp: Date.now(),
           operation: {
             type: OPERATION_TYPE.INSERT,
             index: 0,
@@ -124,7 +124,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         {
           id: "bob-2",
           parentVersion: new Set(["bob-1"]),
-        timestamp: Date.now(),
+          timestamp: Date.now(),
           operation: {
             type: OPERATION_TYPE.INSERT,
             index: 1,
@@ -134,16 +134,16 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         {
           id: "bob-3",
           parentVersion: new Set(["bob-2"]),
-        timestamp: Date.now(),
+          timestamp: Date.now(),
           operation: {
             type: OPERATION_TYPE.INSERT,
             index: 2,
             text: "rld",
           },
         },
-     ];
+      ];
 
-     // Apply all events (simulating interleaved network delivery)
+      // Apply all events (simulating interleaved network delivery)
       if (aliceEvents[0]) await api.applyRemoteEvent(aliceEvents[0]);
       if (bobEvents[0]) await api.applyRemoteEvent(bobEvents[0]);
       if (aliceEvents[1]) await api.applyRemoteEvent(aliceEvents[1]);
@@ -164,7 +164,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
     });
 
     it("should group multi-character insertions as blocks", async () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       // Alice inserts "Hello" as one operation
       const aliceEvent: Event = {
@@ -212,12 +212,12 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
         // @ts-ignore - isDestroyed not implemented yet
         expect(crdt.isDestroyed ? crdt.isDestroyed() : false).toBe(false);
 
-//         crdt.insertItem({
-//           id: "test-item",
-//           content: "test",
-//           leftId: null,
-//           rightId: null,
-//         });
+        //         crdt.insertItem({
+        //           id: "test-item",
+        //           content: "test",
+        //           leftId: null,
+        //           rightId: null,
+        //         });
 
         // Set up check for destruction
         const originalDestroy = crdt.destroy.bind(crdt);
@@ -235,7 +235,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
     });
 
     it("should not expose CRDT internals through public API", () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       api.insert(0, "Test");
 
@@ -250,7 +250,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
 
   describe("Characteristic 4: Index-based external API", () => {
     it("should only accept numeric indices in public API", () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       // These should work with numeric indices
       expect(() => api.insert(0, "Hello")).not.toThrow();
@@ -264,7 +264,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
     });
 
     it("should validate index bounds", () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       api.insert(0, "Hello");
 
@@ -280,7 +280,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
     });
 
     it("should provide simple text-based getters", () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       api.insert(0, "Hello World");
 
@@ -296,7 +296,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
 
   describe("Characteristic 5: No persistent CRDT tombstones or per-character IDs", () => {
     it("should serialize only text and event graph", () => {
-      const api = new EgWalkerAPI('replica1');
+      const api = new EgWalkerAPI("replica1");
 
       api.insert(0, "Hello");
       api.delete(2, 2); // Delete 'll'
@@ -317,7 +317,7 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
     });
 
     it("should deserialize without restoring CRDT state", () => {
-      const api1 = new EgWalkerAPI('replica1');
+      const api1 = new EgWalkerAPI("replica1");
 
       api1.insert(0, "Original");
       api1.delete(0, 8);
@@ -358,8 +358,13 @@ describe("Section 3.1 - Eg-walker Characteristics Compliance", () => {
 
       const serialized = graph.serialize();
       expect(serialized.events).toHaveLength(1); // Only 1 event, not 11
-// @ts-ignore - operation.text may not exist
-      expect('operation' in serialized.events[0] && serialized.events[0].operation.type === OPERATION_TYPE.INSERT ? serialized.events[0].operation.text : '').toBe("Hello World");
+      // @ts-ignore - operation.text may not exist
+      expect(
+        "operation" in serialized.events[0] &&
+          serialized.events[0].operation.type === OPERATION_TYPE.INSERT
+          ? serialized.events[0].operation.text
+          : "",
+      ).toBe("Hello World");
     });
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@softmaple/eg-walker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "draft": true,
   "description": "Eg-walker algorithm for collaborative editing",

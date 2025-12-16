@@ -56,7 +56,10 @@ describe("Section 3.6: Partial Replay", () => {
       // Compute replay from e1 to e3
       const fromVersion: Version = new Set(["e1"]);
       const toVersion: Version = new Set(["e1", "e2", "e3"]);
-      const replayRange = replayManager.computeReplayRange(fromVersion, toVersion);
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
 
       // Should only replay e2 and e3
       expect(replayRange).toHaveLength(2);
@@ -69,7 +72,10 @@ describe("Section 3.6: Partial Replay", () => {
     it("should handle empty version ranges", () => {
       const fromVersion: Version = new Set();
       const toVersion: Version = new Set();
-      const replayRange = replayManager.computeReplayRange(fromVersion, toVersion);
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
 
       expect(replayRange).toHaveLength(0);
     });
@@ -110,7 +116,10 @@ describe("Section 3.6: Partial Replay", () => {
       // Replay from empty to e4 should include all dependencies
       const fromVersion: Version = new Set();
       const toVersion: Version = new Set(["e4"]);
-      const replayRange = replayManager.computeReplayRange(fromVersion, toVersion);
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
 
       // Should include all events in dependency chain
       expect(replayRange).toHaveLength(4);
@@ -274,7 +283,10 @@ describe("Section 3.6: Partial Replay", () => {
       const toVersion: Version = new Set([`e${eventCount - 1}`]);
 
       const startTime = performance.now();
-      const replayRange = replayManager.computeReplayRange(fromVersion, toVersion);
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
       const endTime = performance.now();
 
       // Should complete quickly (< 100ms for 1000 events)

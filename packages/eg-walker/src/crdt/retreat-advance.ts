@@ -17,7 +17,7 @@ import type { InternalCRDTState as ICRDTStateInterface } from "./retreat-advance
  */
 export class ConcreteCRDTState implements ICRDTStateInterface {
   private internalState: InternalCRDTState;
-  private eventMap: Map<EventId, GraphEvent> = new Map();
+  public readonly eventMap: Map<EventId, GraphEvent> = new Map();
   private appliedEvents = new Set<EventId>();
   private retreatStack: EventId[] = [];
 
@@ -74,6 +74,13 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
   }
 
   /**
+   * Get the prepare state text (for transformation)
+   */
+  getPrepareText(): string {
+    return this.internalState.getPrepareText();
+  }
+
+  /**
    * Reset to initial state
    */
   reset(): void {
@@ -100,6 +107,7 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
  */
 export class RetreatAdvanceCoordinator {
   private crdtState: ConcreteCRDTState;
+  private appliedEvents: Map<EventId, GraphEvent> = new Map();
 
   constructor() {
     this.crdtState = new ConcreteCRDTState();
@@ -113,6 +121,30 @@ export class RetreatAdvanceCoordinator {
     prepareVersion: Set<EventId>,
     effectVersion: Set<EventId>,
   ): Promise<GraphEvent> {
+    // If this is the first event being transformed
+    if (prepareVersion.size === 0 && event.parentVersion.size === 0) {
+      // Still need to transform for index adjustment
+      const transformedEvent = this.transformEvent(event);
+      this.crdtState.applyPrepare(event);
+      this.appliedEvents.set(event.id, event);
+      return transformedEvent;
+    }
+
+    // Register previously applied events if not already in the eventMap
+    // We need to ensure ALL events in prepareVersion are registered
+    for (const eventId of [...prepareVersion, ...effectVersion]) {
+      if (!this.crdtState.eventMap.has(eventId)) {
+        const previousEvent = this.appliedEvents.get(eventId);
+        if (!previousEvent) {
+          // If we don't have the event, we can't proceed
+          // This would be a programming error in test setup
+          console.warn(`Event ${eventId} not found in appliedEvents`);
+        } else {
+          this.crdtState.eventMap.set(eventId, previousEvent);
+        }
+      }
+    }
+
     // Phase 1: Retreat - undo events not in target parent version
     const toRetreat = this.findEventsToRetreat(
       event.parentVersion,
@@ -125,10 +157,18 @@ export class RetreatAdvanceCoordinator {
     // Phase 2: Apply - transform and apply the event
     const transformedEvent = this.transformEvent(event);
     this.crdtState.applyPrepare(transformedEvent);
+    this.appliedEvents.set(transformedEvent.id, transformedEvent);
 
     // Phase 3: Advance - reapply events to reach effect version
-    const toAdvance = this.findEventsToAdvance(effectVersion, prepareVersion);
+    const toAdvance = this.findEventsToAdvance(effectVersion, event.parentVersion);
     for (const eventId of toAdvance) {
+      // Need to ensure the event is in the eventMap before advancing
+      if (!this.crdtState.eventMap.has(eventId)) {
+        const advanceEvent = this.appliedEvents.get(eventId);
+        if (advanceEvent) {
+          this.crdtState.eventMap.set(eventId, advanceEvent);
+        }
+      }
       this.crdtState.advance(eventId);
     }
 
@@ -177,7 +217,8 @@ export class RetreatAdvanceCoordinator {
    */
   private transformEvent(event: GraphEvent): GraphEvent {
     const op = event.operation;
-    const currentText = this.crdtState.getCurrentText();
+    // Use prepare text for transformation (not effect text)
+    const currentText = this.crdtState.getPrepareText();
 
     if (op.type === OPERATION_TYPE.INSERT) {
       // Adjust index based on current state

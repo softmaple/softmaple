@@ -77,20 +77,24 @@ export class TemporaryCRDT {
       // Create items for each character, but mark them as from same event
       // This preserves non-interleaving
       const text = op.text;
-      let prevId: EventId | null = this.findLeftNeighbor(op.index) ?? null;
-
+      
+      // For first character, find neighbors at current position
+      const originLeft = this.findLeftNeighbor(op.index) ?? null;
+      const originRight = this.findRightNeighbor(op.index) ?? null;
+      
       for (let i = 0; i < text.length; i++) {
         const itemId = `${event.id}:${i}`;
         const item: CRDTItem = {
           id: itemId,
           content: text[i] ?? "",
-          originLeft: prevId,
-          originRight: this.findRightNeighbor(op.index + i) ?? null,
+          // All chars from the same event should have the same originLeft and originRight
+          // to ensure they stay together (non-interleaving)
+          originLeft: originLeft,
+          originRight: originRight,
           isDeleted: false,
           insertedBy: event.id,
         };
         items.push(item);
-        prevId = itemId;
       }
     } else if (op.type === OPERATION_TYPE.DELETE) {
       // Mark items as deleted
@@ -112,15 +116,34 @@ export class TemporaryCRDT {
   integrate(newItems: ReadonlyArray<CRDTItem>): void {
     this.checkValid();
 
+    // Group items by event to maintain non-interleaving
+    const itemsByEvent = new Map<EventId, CRDTItem[]>();
     for (const item of newItems) {
       if (this.itemsById.has(item.id)) {
         continue; // Already integrated
       }
-
-      // Find insertion position using RGA algorithm
-      const position = this.findInsertPosition(item);
-      this.items.splice(position, 0, item);
-      this.itemsById.set(item.id, item);
+      const eventItems = itemsByEvent.get(item.insertedBy) || [];
+      eventItems.push(item);
+      itemsByEvent.set(item.insertedBy, eventItems);
+    }
+ 
+    // Integrate items event by event to preserve non-interleaving
+    for (const [eventId, eventItems] of itemsByEvent) {
+      if (eventItems.length === 0) continue;
+      
+      // Find insertion position for the first item of this event
+      const firstItem = eventItems[0];
+      if (!firstItem) continue;
+      
+      const position = this.findInsertPosition(firstItem);
+      
+      // Insert all items from this event together at the same position
+      let insertPos = position;
+      for (const item of eventItems) {
+        this.items.splice(insertPos, 0, item);
+        this.itemsById.set(item.id, item);
+        insertPos++;
+      }
     }
   }
 
@@ -209,10 +232,11 @@ export class TemporaryCRDT {
    * Find left neighbor at position
    */
   private findLeftNeighbor(index: number): EventId | null {
+    if (index === 0) return null;
+    
     let visibleCount = 0;
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const item = this.items[i];
-      if (item && !item.isDeleted) {
+    for (const item of this.items) {
+      if (!item.isDeleted) {
         if (visibleCount === index - 1) {
           return item.id;
         }

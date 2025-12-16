@@ -77,38 +77,40 @@ export class EventGraph {
    * Get events in topological order
    */
   getTopologicalOrder(): ReadonlyArray<GraphEvent> {
-    const result: GraphEvent[] = [];
-    const visited = new Set<EventId>();
-    const visiting = new Set<EventId>();
+   const result: GraphEvent[] = [];
+   const visited = new Set<EventId>();
+   const visiting = new Set<EventId>();
 
-    const visit = (id: EventId): void => {
-      if (visited.has(id)) return;
-      if (visiting.has(id)) {
-        throw new Error("Cycle detected in event graph");
-      }
+   const visit = (id: EventId): void => {
+     if (visited.has(id)) return;
+     if (visiting.has(id)) {
+       throw new Error("Cycle detected in event graph");
+     }
 
-      visiting.add(id);
+     visiting.add(id);
 
-      const event = this.events.get(id);
-      if (!event) return;
+     const event = this.events.get(id);
+     if (!event) return;
 
-      // Visit parents first
-      for (const parentId of event.parentVersion) {
-        visit(parentId);
-      }
+     // Visit parents first
+     for (const parentId of event.parentVersion) {
+       visit(parentId);
+     }
 
-      visiting.delete(id);
-      visited.add(id);
-      result.push(event);
-    };
+     visiting.delete(id);
+     visited.add(id);
+     result.push(event);
+   };
 
-    // Visit all events
-    for (const id of this.events.keys()) {
-      visit(id);
-    }
+   // Visit all events
+    // Sort event IDs to ensure deterministic order
+    const sortedIds = Array.from(this.events.keys()).sort();
+    for (const id of sortedIds) {
+     visit(id);
+   }
 
-    return result;
-  }
+   return result;
+ }
 
   /**
    * Get children of an event

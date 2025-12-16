@@ -153,23 +153,32 @@ export class EgWalkerAPI {
    * This will use temporary CRDT for transformation
    */
   async applyRemoteEvent(event: GraphEvent): Promise<void> {
-    // Add to event graph
-    this.eventGraph.addEvent(event);
+   // Add to event graph
+   this.eventGraph.addEvent(event);
 
-    // Use temporary CRDT for transformation
-    await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
-      // This is where retreat/advance would happen
-      // For now, just apply directly if no conflicts
-      if (this.canApplyDirectly(event)) {
-        this.document = applyOperation(this.document, event.operation);
-        this.currentVersion = new Set([...this.currentVersion, event.id]);
-      } else {
-        // Would perform retreat/advance here
-        // Placeholder for Section 3.2 implementation
-        throw new Error(
-          "Concurrent operations require transformation (not yet implemented)",
-        );
+   // Use temporary CRDT for transformation
+   await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
+     // Get all events in topological order
+      const sortedEvents = this.eventGraph.getTopologicalOrder();
+     
+     // Rebuild document from scratch by replaying all events
+     // This ensures deterministic ordering regardless of receipt order
+      this.document = "";
+      
+      // Process each event with CRDT
+      for (const sortedEvent of sortedEvents) {
+        // Create CRDT items from event
+        const items = crdt.createItemsFromEvent(sortedEvent);
+        // Integrate items into CRDT
+        crdt.integrate(items);
       }
+      
+      // Get the final text from CRDT
+      const effectState = crdt.getEffectState();
+      this.document = effectState.visibleText;
+      
+      // Update current version
+      this.currentVersion = new Set(sortedEvents.map(e => e.id));
     });
   }
 

@@ -426,6 +426,18 @@ export class InternalCRDTState {
     }
 
     // Apply non-interleaving ordering for concurrent insertions
+    // First, if this record's originLeft is from the same event,
+    // it should go right after it to maintain non-interleaving
+    if (record.originLeft) {
+      for (let i = 0; i < this.orderedRecords.length; i++) {
+        const prev = this.orderedRecords[i];
+        if (prev && prev.id === record.originLeft && prev.eventId === record.eventId) {
+          // This record immediately follows another from same event
+          return i + 1;
+        }
+      }
+    }
+
     for (let i = left; i < right; i++) {
       const current = this.orderedRecords[i];
       if (!current) continue;
@@ -435,12 +447,8 @@ export class InternalCRDTState {
         current.originLeft === record.originLeft &&
         current.originRight === record.originRight
       ) {
-        // Group by event ID to maintain non-interleaving
-        // If same eventId, keep together; if different, compare eventIds
-        if (record.eventId === current.eventId) {
-          // Keep characters from same event together
-          continue;
-        } else if (record.eventId < current.eventId) {
+        // Compare event IDs for ordering
+        if (record.eventId < current.eventId) {
           return i;
         }
       }
@@ -600,6 +608,24 @@ export class InternalCRDTState {
     for (const record of this.orderedRecords) {
       if (
         record.effectState.type === EFFECT_STATE_TYPE.VISIBLE &&
+        record.content
+      ) {
+        chars.push(record.content);
+      }
+    }
+    return chars.join("");
+  }
+
+  /**
+   * Get text based on prepare state (for transformation)
+   */
+  getPrepareText(): string {
+    this.checkValid();
+
+    const chars: string[] = [];
+    for (const record of this.orderedRecords) {
+      if (
+        record.prepareState.type === PREPARE_STATE_TYPE.INSERTED &&
         record.content
       ) {
         chars.push(record.content);

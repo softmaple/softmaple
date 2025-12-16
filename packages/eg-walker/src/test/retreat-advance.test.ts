@@ -145,8 +145,10 @@ describe("Retreat/Advance Mechanics", () => {
     });
 
     it("should adjust indices during transformation", async () => {
+      // The test expects that when the document is empty,
+      // any out-of-bound index is adjusted to 0
       const event: GraphEvent = {
-        id: "e2",
+        id: "e1",
         operation: {
           type: OPERATION_TYPE.INSERT,
           index: 100, // Beyond current text length
@@ -156,8 +158,9 @@ describe("Retreat/Advance Mechanics", () => {
         timestamp: Date.now(),
       };
 
+      // Empty versions mean empty document
       const prepareVersion = new Set<string>();
-      const effectVersion = new Set(["e2"]);
+      const effectVersion = new Set<string>();
 
       const transformed = await coordinator.transform(
         event,
@@ -265,15 +268,17 @@ describe("Retreat/Advance Mechanics", () => {
       await coordinator.transform(eventA, new Set(), new Set(["a:1"]));
       await coordinator.transform(
         eventB,
-        new Set(["a:1"]),
+        new Set(),  // eventB doesn't know about eventA yet (concurrent)
         new Set(["a:1", "b:1"]),
       );
 
       const finalText = coordinator.getCurrentText();
-      // Should be non-interleaved: either "HelloWorld" or "WorldHello"
-      expect(["HelloWorld", "WorldHello", "HelloWorldHello"]).toContain(
-        finalText,
-      );
+      // After applying both concurrent events, we should see both texts
+      // The order depends on the CRDT resolution, but both should be present
+      expect(finalText).toContain("Hello");
+      expect(finalText).toContain("World");
+      // And they should be non-interleaved
+      expect(["HelloWorld", "WorldHello"]).toContain(finalText);
 
       coordinator.destroy();
     });

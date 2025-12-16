@@ -25,12 +25,12 @@ export class EventGraph {
    */
   addEvent(event: GraphEvent): void {
     if (this.events.has(event.id)) {
-      return; // Already added
+      throw new Error(`Event ${event.id} already exists`);
     }
 
     // Validate dependencies exist
     for (const parentId of event.parentVersion) {
-      if (!this.events.has(parentId) && event.parentVersion.size > 0) {
+      if (!this.events.has(parentId)) {
         throw new Error(`Missing parent event: ${parentId}`);
       }
     }

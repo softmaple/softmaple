@@ -436,7 +436,11 @@ export class InternalCRDTState {
         current.originRight === record.originRight
       ) {
         // Group by event ID to maintain non-interleaving
-        if (record.eventId < current.eventId) {
+        // If same eventId, keep together; if different, compare eventIds
+        if (record.eventId === current.eventId) {
+          // Keep characters from same event together
+          continue;
+        } else if (record.eventId < current.eventId) {
           return i;
         }
       }

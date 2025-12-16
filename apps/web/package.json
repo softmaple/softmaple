@@ -22,7 +22,7 @@
     "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
-    "@lexical/react": "^0.31.2",
+    "@lexical/react": "^0.39.0",
     "@liveblocks/client": "^3.0.0",
     "@liveblocks/node": "^3.0.0",
     "@liveblocks/react": "^3.0.0",
@@ -35,7 +35,7 @@
     "@supabase/supabase-js": "^2.87.3",
     "dayjs": "^1.11.19",
     "dompurify": "^3.3.1",
-    "lexical": "^0.31.2",
+    "lexical": "^0.39.0",
     "lodash": "^4.17.21",
     "lucide-react": "^0.561.0",
     "next": "16.0.10",

@@ -117,7 +117,7 @@ jobs:
           NEXT_PUBLIC_E2E_TEST_MODE: true
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with:
           name: playwright-report-shard-${{ matrix.shard }}
@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test artifacts on failure
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-traces-shard-${{ matrix.shard }}
@@ -140,14 +140,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all test reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: playwright-report-shard-*
           merge-multiple: true
           path: all-reports/
 
       - name: Upload merged report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-report-merged
           path: all-reports/

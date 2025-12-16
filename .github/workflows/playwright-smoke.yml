@@ -109,7 +109,7 @@ jobs:
           NEXT_PUBLIC_E2E_TEST_MODE: true
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with:
           name: playwright-smoke-report
@@ -117,7 +117,7 @@ jobs:
           retention-days: 7
 
       - name: Upload test artifacts on failure
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-smoke-traces

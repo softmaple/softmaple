@@ -239,16 +239,18 @@ describe("InternalCRDTState", () => {
   });
 
   describe("Temporary Nature", () => {
-    it("should auto-destroy after max lifetime", (done) => {
+    it("should auto-destroy after max lifetime", async () => {
       const shortLivedState = new InternalCRDTState();
 
-      // Override max lifetime for testing
-      (shortLivedState as any).maxLifetime = 100; // 100ms
+      // Override max lifetime for testing - accessing private field via reflection
+      // TODO: Consider adding a test-only constructor option or setter
+      const stateWithMaxLifetime = shortLivedState as any;
+      stateWithMaxLifetime.maxLifetime = 100; // 100ms for test
 
-      setTimeout(() => {
-        expect(() => shortLivedState.getVisibleText()).toThrow();
-        // Remove done call as this is not a callback-based test
-      }, 150);
+      // Wait for the state to auto-destroy
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(() => shortLivedState.getVisibleText()).toThrow();
     });
 
     it("should clean up with scoped usage", async () => {

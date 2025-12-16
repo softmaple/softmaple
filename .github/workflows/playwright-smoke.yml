@@ -57,14 +57,14 @@ jobs:
 
       # Cache Playwright browsers
       - name: Cache Playwright Browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-smoke-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
 
       # Cache Next.js build output
       - name: Cache Next.js Build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             apps/web/.next/cache

@@ -21,7 +21,7 @@
   "license": "MIT",
   "packageManager": "pnpm@10.26.0",
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.0.13",
-    "vitest": "^4.0.13"
+    "@vitest/coverage-v8": "^4.0.15",
+    "vitest": "^4.0.15"
   }
 }

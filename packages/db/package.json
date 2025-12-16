@@ -18,7 +18,7 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "packageManager": "pnpm@10.23.0",
+  "packageManager": "pnpm@10.26.0",
   "devDependencies": {
     "prisma": "^6.13.0"
   },

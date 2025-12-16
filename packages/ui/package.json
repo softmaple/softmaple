@@ -32,7 +32,7 @@
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.18",
-    "@turbo/gen": "^2.5.8",
+    "@turbo/gen": "^2.6.3",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

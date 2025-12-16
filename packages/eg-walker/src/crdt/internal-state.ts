@@ -431,7 +431,11 @@ export class InternalCRDTState {
     if (record.originLeft) {
       for (let i = 0; i < this.orderedRecords.length; i++) {
         const prev = this.orderedRecords[i];
-        if (prev && prev.id === record.originLeft && prev.eventId === record.eventId) {
+        if (
+          prev &&
+          prev.id === record.originLeft &&
+          prev.eventId === record.eventId
+        ) {
           // This record immediately follows another from same event
           return i + 1;
         }
@@ -625,7 +629,7 @@ export class InternalCRDTState {
     const chars: string[] = [];
     for (const record of this.orderedRecords) {
       if (
-        record.prepareState.type === PREPARE_STATE_TYPE.INSERTED &&
+        record.prepareState.type === PREPARE_STATE_TYPE.VISIBLE &&
         record.content
       ) {
         chars.push(record.content);

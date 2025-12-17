@@ -142,7 +142,18 @@ export class EgWalkerAPI {
     this.document = applyOperation(this.document, operation);
 
     // Add to event graph
-    this.eventGraph.addEvent(event);
+    try {
+      this.eventGraph.addEvent(event);
+    } catch (error) {
+      // Log duplicate event and continue gracefully
+      if (error instanceof Error && error.message.includes("already exists")) {
+        console.warn(
+          `Duplicate event detected in applyLocalOperation: id=${event.id}, source=local, timestamp=${event.timestamp}`,
+        );
+        return; // Ignore duplicate and continue
+      }
+      throw error; // Re-throw other errors
+    }
 
     // Update version
     this.currentVersion = new Set([...this.currentVersion, eventId]);
@@ -153,18 +164,29 @@ export class EgWalkerAPI {
    * This will use temporary CRDT for transformation
    */
   async applyRemoteEvent(event: GraphEvent): Promise<void> {
-   // Add to event graph
-   this.eventGraph.addEvent(event);
+    // Add to event graph
+    try {
+      this.eventGraph.addEvent(event);
+    } catch (error) {
+      // Log duplicate event and continue gracefully
+      if (error instanceof Error && error.message.includes("already exists")) {
+        console.warn(
+          `Duplicate event detected in applyRemoteEvent: id=${event.id}, source=remote, timestamp=${event.timestamp}`,
+        );
+        return; // Ignore duplicate and continue
+      }
+      throw error; // Re-throw other errors
+    }
 
-   // Use temporary CRDT for transformation
-   await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
-     // Get all events in topological order
+    // Use temporary CRDT for transformation
+    await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
+      // Get all events in topological order
       const sortedEvents = this.eventGraph.getTopologicalOrder();
-     
-     // Rebuild document from scratch by replaying all events
-     // This ensures deterministic ordering regardless of receipt order
+
+      // Rebuild document from scratch by replaying all events
+      // This ensures deterministic ordering regardless of receipt order
       this.document = "";
-      
+
       // Process each event with CRDT
       for (const sortedEvent of sortedEvents) {
         // Create CRDT items from event
@@ -172,13 +194,13 @@ export class EgWalkerAPI {
         // Integrate items into CRDT
         crdt.integrate(items);
       }
-      
+
       // Get the final text from CRDT
       const effectState = crdt.getEffectState();
       this.document = effectState.visibleText;
-      
+
       // Update current version
-      this.currentVersion = new Set(sortedEvents.map(e => e.id));
+      this.currentVersion = new Set(sortedEvents.map((e) => e.id));
     });
   }
 

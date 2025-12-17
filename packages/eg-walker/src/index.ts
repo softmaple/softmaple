@@ -4,44 +4,22 @@
  * Implementation of the Eg-walker algorithm for collaborative text editing
  */
 
-// Core exports
-export { EgWalker } from "./eg-walker";
-export { EventStorage } from "./event-storage";
-export { CausalGraph } from "./causal-graph";
-export { CRDT, START_ID, END_ID } from "./crdt";
+// Core exports from v2 implementation
+export { EgWalker } from "./core/walker";
+export { EgWalkerAPI } from "./core/external-api";
+export { EventGraph } from "./graph/event-graph";
+export { InternalCRDTState } from "./crdt/internal-state";
+export type { CriticalVersionDetector } from "./core/critical-version";
+export { DefaultCriticalVersionDetector } from "./core/critical-version";
 
-// Functional module exports
-// FP utilities exported directly from submodules
-export * as fpArray from "./fp/utils/array";
-export * as fpComposition from "./fp/utils/composition";
-export * as fpVersion from "./fp/utils/version";
-export * as fpEvent from "./fp/utils/event";
-export * as fpDocument from "./fp/utils/document";
-export {
-  serializeEvents,
-  deserializeEvents,
-  calculateStorageStats,
-  encodeVarInt,
-  decodeVarInt,
-} from "./fp/storage/columnar-storage";
-export {
-  FunctionalEgWalker,
-  createEgWalker,
-  createEgWalkerWithEvents,
-} from "./fp/core/eg-walker";
+// Constants exports
+export { OPERATION_TYPE } from "./constants/operation-types";
+export { PREPARE_STATE_TYPE, EFFECT_STATE_TYPE } from "./constants/crdt-states";
+export { CRDT_SENTINELS } from "./constants/sentinels";
+export type { SentinelId } from "./constants/sentinels";
 
 // Type exports
-export {
-  type Event,
-  type EventId,
-  type EventType,
-  type Position,
-  type Version,
-  type PrepareState,
-  type AugmentedCRDTItem,
-  spaceInPrepareState,
-  spaceInEffectState,
-} from "./types";
+export * from "./types";
 
 // Default export
-export { EgWalker as default } from "./eg-walker";
+export { EgWalker as default } from "./core/walker";

@@ -18,7 +18,6 @@ import type { InternalCRDTState as ICRDTStateInterface } from "./retreat-advance
 export class ConcreteCRDTState implements ICRDTStateInterface {
   private internalState: InternalCRDTState;
   public readonly eventMap: Map<EventId, GraphEvent> = new Map();
-  private appliedEvents = new Set<EventId>();
   private retreatStack: EventId[] = [];
 
   constructor() {
@@ -27,8 +26,9 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
 
   /**
    * Retreat the CRDT state by undoing an event
+   * @param appliedEvents - Current set of applied event IDs from coordinator
    */
-  retreat(eventId: EventId): void {
+  retreat(eventId: EventId, appliedEvents: ReadonlySet<EventId>): Set<EventId> {
     const event = this.eventMap.get(eventId);
     if (!event) {
       throw new Error(`Event ${eventId} not found for retreat`);
@@ -36,14 +36,19 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
 
     // Undo the event's effects
     this.internalState.undoPrepare(event);
-    this.appliedEvents.delete(eventId);
     this.retreatStack.push(eventId);
+
+    // Return new immutable set without the retreated event
+    const newAppliedEvents = new Set(appliedEvents);
+    newAppliedEvents.delete(eventId);
+    return newAppliedEvents;
   }
 
   /**
    * Advance the CRDT state by applying an event
+   * @param appliedEvents - Current set of applied event IDs from coordinator
    */
-  advance(eventId: EventId): void {
+  advance(eventId: EventId, appliedEvents: ReadonlySet<EventId>): Set<EventId> {
     const event = this.eventMap.get(eventId);
     if (!event) {
       throw new Error(`Event ${eventId} not found for advance`);
@@ -51,19 +56,31 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
 
     // Apply the event's effects
     this.internalState.applyEffect(event);
-    this.appliedEvents.add(eventId);
+
+    // Return new immutable set with the advanced event
+    const newAppliedEvents = new Set(appliedEvents);
+    newAppliedEvents.add(eventId);
+    return newAppliedEvents;
   }
 
   /**
    * Apply an event in prepare state
+   * @param appliedEvents - Current set of applied event IDs from coordinator
    */
-  applyPrepare(event: GraphEvent): void {
+  applyPrepare(
+    event: GraphEvent,
+    appliedEvents: ReadonlySet<EventId>,
+  ): Set<EventId> {
     // Store event for later retreat/advance
     this.eventMap.set(event.id, event);
 
     // Apply prepare state
     this.internalState.applyPrepare(event);
-    this.appliedEvents.add(event.id);
+
+    // Return new immutable set with the new event
+    const newAppliedEvents = new Set(appliedEvents);
+    newAppliedEvents.add(event.id);
+    return newAppliedEvents;
   }
 
   /**
@@ -87,7 +104,6 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
     this.internalState.destroy();
     this.internalState = new InternalCRDTState();
     this.eventMap.clear();
-    this.appliedEvents.clear();
     this.retreatStack = [];
   }
 
@@ -97,7 +113,6 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
   destroy(): void {
     this.internalState.destroy();
     this.eventMap.clear();
-    this.appliedEvents.clear();
     this.retreatStack = [];
   }
 }
@@ -108,9 +123,24 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
 export class RetreatAdvanceCoordinator {
   private crdtState: ConcreteCRDTState;
   private appliedEvents: Map<EventId, GraphEvent> = new Map();
+  private appliedEventIds: Set<EventId> = new Set();
 
   constructor() {
     this.crdtState = new ConcreteCRDTState();
+  }
+
+  /**
+   * Get an immutable view of currently applied event IDs
+   */
+  getAppliedEventIds(): ReadonlySet<EventId> {
+    return new Set(this.appliedEventIds);
+  }
+
+  /**
+   * Check if an event has been applied
+   */
+  isEventApplied(eventId: EventId): boolean {
+    return this.appliedEventIds.has(eventId);
   }
 
   /**
@@ -125,7 +155,11 @@ export class RetreatAdvanceCoordinator {
     if (prepareVersion.size === 0 && event.parentVersion.size === 0) {
       // Still need to transform for index adjustment
       const transformedEvent = this.transformEvent(event);
-      this.crdtState.applyPrepare(event);
+      this.appliedEventIds = this.crdtState.applyPrepare(
+        event,
+        this.appliedEventIds,
+      );
+      this.appliedEvents = new Map(this.appliedEvents);
       this.appliedEvents.set(event.id, event);
       return transformedEvent;
     }
@@ -151,16 +185,26 @@ export class RetreatAdvanceCoordinator {
       prepareVersion,
     );
     for (const eventId of toRetreat) {
-      this.crdtState.retreat(eventId);
+      this.appliedEventIds = this.crdtState.retreat(
+        eventId,
+        this.appliedEventIds,
+      );
     }
 
     // Phase 2: Apply - transform and apply the event
     const transformedEvent = this.transformEvent(event);
-    this.crdtState.applyPrepare(transformedEvent);
+    this.appliedEventIds = this.crdtState.applyPrepare(
+      transformedEvent,
+      this.appliedEventIds,
+    );
+    this.appliedEvents = new Map(this.appliedEvents);
     this.appliedEvents.set(transformedEvent.id, transformedEvent);
 
     // Phase 3: Advance - reapply events to reach effect version
-    const toAdvance = this.findEventsToAdvance(effectVersion, event.parentVersion);
+    const toAdvance = this.findEventsToAdvance(
+      effectVersion,
+      event.parentVersion,
+    );
     for (const eventId of toAdvance) {
       // Need to ensure the event is in the eventMap before advancing
       if (!this.crdtState.eventMap.has(eventId)) {
@@ -169,7 +213,10 @@ export class RetreatAdvanceCoordinator {
           this.crdtState.eventMap.set(eventId, advanceEvent);
         }
       }
-      this.crdtState.advance(eventId);
+      this.appliedEventIds = this.crdtState.advance(
+        eventId,
+        this.appliedEventIds,
+      );
     }
 
     return transformedEvent;
@@ -262,6 +309,8 @@ export class RetreatAdvanceCoordinator {
    */
   reset(): void {
     this.crdtState.reset();
+    this.appliedEvents.clear();
+    this.appliedEventIds.clear();
   }
 
   /**
@@ -269,6 +318,8 @@ export class RetreatAdvanceCoordinator {
    */
   destroy(): void {
     this.crdtState.destroy();
+    this.appliedEvents.clear();
+    this.appliedEventIds.clear();
   }
 
   /**

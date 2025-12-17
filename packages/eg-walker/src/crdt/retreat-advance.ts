@@ -164,18 +164,29 @@ export class RetreatAdvanceCoordinator {
       return transformedEvent;
     }
 
-    // Register previously applied events if not already in the eventMap
-    // We need to ensure ALL events in prepareVersion are registered
-    for (const eventId of [...prepareVersion, ...effectVersion]) {
+    // Register previously applied events from prepareVersion if not already in the eventMap
+    // Note: effectVersion may contain events not yet applied (like the current event being transformed)
+    for (const eventId of prepareVersion) {
       if (!this.crdtState.eventMap.has(eventId)) {
         const previousEvent = this.appliedEvents.get(eventId);
-        if (!previousEvent) {
-          // If we don't have the event, we can't proceed
-          // This would be a programming error in test setup
-          console.warn(`Event ${eventId} not found in appliedEvents`);
-        } else {
+        // Skip events that haven't been applied yet (expected when events arrive out-of-order)
+        if (previousEvent) {
           this.crdtState.eventMap.set(eventId, previousEvent);
         }
+      }
+    }
+
+    // Register events from effectVersion (for advance phase) that are already applied
+    for (const eventId of effectVersion) {
+      if (
+        !this.crdtState.eventMap.has(eventId) &&
+        eventId !== event.id // Skip the current event being transformed
+      ) {
+        const previousEvent = this.appliedEvents.get(eventId);
+        if (previousEvent) {
+          this.crdtState.eventMap.set(eventId, previousEvent);
+        }
+        // If not found, that's okay - it might be the current event or a future event
       }
     }
 

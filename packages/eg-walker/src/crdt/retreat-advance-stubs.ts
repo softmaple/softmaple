@@ -16,22 +16,31 @@ export interface InternalCRDTState {
    * Retreat the CRDT state by undoing an event
    * Called when prepareVersion has events not in target parent version
    * @param eventId - The event to retreat/undo
+   * @param appliedEvents - Current set of applied event IDs
+   * @returns New set of applied event IDs after retreat
    */
-  retreat(eventId: EventId): void;
+  retreat(eventId: EventId, appliedEvents: ReadonlySet<EventId>): Set<EventId>;
 
   /**
    * Advance the CRDT state by applying an event
    * Called when target version has events not in prepareVersion
    * @param eventId - The event to advance/apply
+   * @param appliedEvents - Current set of applied event IDs
+   * @returns New set of applied event IDs after advance
    */
-  advance(eventId: EventId): void;
+  advance(eventId: EventId, appliedEvents: ReadonlySet<EventId>): Set<EventId>;
 
   /**
    * Apply an event in prepare state
    * This is called when the CRDT is aligned to parent version
    * @param event - The event to apply
+   * @param appliedEvents - Current set of applied event IDs
+   * @returns New set of applied event IDs after apply
    */
-  applyPrepare(event: GraphEvent): void;
+  applyPrepare(
+    event: GraphEvent,
+    appliedEvents: ReadonlySet<EventId>,
+  ): Set<EventId>;
 
   /**
    * Get the current state as a string (for debugging/testing)
@@ -54,25 +63,34 @@ export class StubInternalCRDT implements InternalCRDTState {
   private advanceLog: EventId[] = [];
   private prepareLog: GraphEvent[] = [];
 
-  retreat(eventId: EventId): void {
+  retreat(eventId: EventId, appliedEvents: ReadonlySet<EventId>): Set<EventId> {
     // Stub: just track the retreat for testing
     this.retreatLog.push(eventId);
     this.appliedEvents.delete(eventId);
 
     // TODO: Actual implementation will undo the event's effects
     // by restoring CRDT to state before event was applied
+    const newAppliedEvents = new Set(appliedEvents);
+    newAppliedEvents.delete(eventId);
+    return newAppliedEvents;
   }
 
-  advance(eventId: EventId): void {
+  advance(eventId: EventId, appliedEvents: ReadonlySet<EventId>): Set<EventId> {
     // Stub: just track the advance for testing
     this.advanceLog.push(eventId);
     this.appliedEvents.add(eventId);
 
     // TODO: Actual implementation will apply the event's effects
     // by transforming and applying to current CRDT state
+    const newAppliedEvents = new Set(appliedEvents);
+    newAppliedEvents.add(eventId);
+    return newAppliedEvents;
   }
 
-  applyPrepare(event: GraphEvent): void {
+  applyPrepare(
+    event: GraphEvent,
+    appliedEvents: ReadonlySet<EventId>,
+  ): Set<EventId> {
     // Stub: just track the prepare application for testing
     this.prepareLog.push(event);
     this.appliedEvents.add(event.id);
@@ -81,6 +99,9 @@ export class StubInternalCRDT implements InternalCRDTState {
     // 1. Transform event indices based on current CRDT state
     // 2. Apply the operation to internal CRDT
     // 3. Update internal CRDT metadata
+    const newAppliedEvents = new Set(appliedEvents);
+    newAppliedEvents.add(event.id);
+    return newAppliedEvents;
   }
 
   getCurrentText(): string {

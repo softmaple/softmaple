@@ -213,8 +213,8 @@ export class RetreatAdvanceCoordinator {
 
     // Phase 3: Advance - reapply events to reach effect version
     const toAdvance = this.findEventsToAdvance(
-      effectVersion,
-      event.parentVersion,
+      new Set(effectVersion),
+      new Set(event.parentVersion),
     );
     for (const eventId of toAdvance) {
       // Need to ensure the event is in the eventMap before advancing

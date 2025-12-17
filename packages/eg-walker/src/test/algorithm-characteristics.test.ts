@@ -21,7 +21,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
   describe("Characteristic 1: Strong list specification", () => {
     it("should preserve sequential semantics of text editing", () => {
       const api1 = new EgWalkerAPI("replica1");
-      const api2 = new EgWalkerAPI("replica1");
+      const api2 = new EgWalkerAPI("replica2");
 
       // Apply same operations to both replicas
       api1.insert(0, "Hello");
@@ -39,11 +39,11 @@ describe("Eg-walker Algorithm Characteristics", () => {
     });
 
     it("should produce deterministic output independent of delivery order", async () => {
-     const api1 = new EgWalkerAPI("replica1");
+      const api1 = new EgWalkerAPI("replica1");
       const api2 = new EgWalkerAPI("replica2");
 
-     // Simulate concurrent edits with different delivery orders
-     const event1: Event = {
+      // Simulate concurrent edits with different delivery orders
+      const event1: Event = {
         id: "alice-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -116,7 +116,6 @@ describe("Eg-walker Algorithm Characteristics", () => {
       expect(result === "HelloWorld" || result === "WorldHello").toBe(true);
     });
 
-
     it("should group multi-character insertions as blocks", async () => {
       const api = new EgWalkerAPI("replica1");
 
@@ -160,33 +159,22 @@ describe("Eg-walker Algorithm Characteristics", () => {
 
   describe("Characteristic 3: Minimal and temporary internal metadata", () => {
     it("should automatically clean up CRDT state", async () => {
-     let crdtDestroyed = false;
+      let crdtDestroyed = false;
 
       await withTemporaryCRDT(async (crdt) => {
-       // @ts-ignore - isDestroyed not implemented yet
-       expect(crdt.isDestroyed ? crdt.isDestroyed() : false).toBe(false);
+        // Set up check for destruction
+        const originalDestroy = crdt.destroy.bind(crdt);
+        crdt.destroy = () => {
+          crdtDestroyed = true;
+          return originalDestroy();
+        };
 
-       //         crdt.insertItem({
-       //           id: "test-item",
-       //           content: "test",
-       //           leftId: null,
-       //           rightId: null,
-       //         });
+        return [];
+      });
 
-       // Set up check for destruction
-       const originalDestroy = crdt.destroy.bind(crdt);
-       crdt.destroy = () => {
-         crdtDestroyed = true;
-         originalDestroy();
-       };
-
-       // @ts-ignore - getOrderedItems not implemented
-       return [];
-     });
-
-     // CRDT should be destroyed after use
-     expect(crdtDestroyed).toBe(true);
-   });
+      // CRDT should be destroyed after use
+      expect(crdtDestroyed).toBe(true);
+    });
 
     it("should not expose CRDT internals through public API", () => {
       const api = new EgWalkerAPI("replica1");
@@ -312,13 +300,16 @@ describe("Eg-walker Algorithm Characteristics", () => {
 
       const serialized = graph.serialize();
       expect(serialized.events).toHaveLength(1); // Only 1 event, not 11
-      // @ts-ignore - operation.text may not exist
-      expect(
-        "operation" in serialized.events[0] &&
-          serialized.events[0].operation.type === OPERATION_TYPE.INSERT
-          ? serialized.events[0].operation.text
-          : "",
-      ).toBe("Hello World");
+      // Explicitly handle possibly-undefined operation and text properties
+      const firstEvent = serialized.events[0];
+      if (!firstEvent) {
+        throw new Error("Expected at least one event in serialized graph");
+      }
+      const hasOperation = "operation" in firstEvent;
+      const isInsert =
+        hasOperation && firstEvent.operation.type === OPERATION_TYPE.INSERT;
+      const text = isInsert ? (firstEvent.operation.text ?? "") : "";
+      expect(text).toBe("Hello World");
     });
   });
 });

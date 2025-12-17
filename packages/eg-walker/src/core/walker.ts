@@ -82,6 +82,7 @@ export class EgWalker {
   private versionManager: VersionAlignmentManager;
   private debug: boolean;
   private stateClearer: StateClearer;
+  private appliedEvents: Set<EventId>;
 
   constructor(config: WalkerConfig = {}) {
     this.graphWalker = config.graphWalker || new DefaultEventGraphWalker();
@@ -101,6 +102,7 @@ export class EgWalker {
       })();
     this.versionManager = new VersionAlignmentManager();
     this.debug = config.debug || false;
+    this.appliedEvents = new Set();
 
     // Initialize state clearer with critical version detection
     const detector = new DefaultCriticalVersionDetector();
@@ -115,6 +117,7 @@ export class EgWalker {
     // Reset state
     this.internalCRDT.reset();
     this.versionManager = new VersionAlignmentManager();
+    this.appliedEvents = new Set();
 
     // Build the event graph
     for (const event of events) {
@@ -152,7 +155,10 @@ export class EgWalker {
       retreatCount += retreatResult.retreatCount;
 
       // Step 3: Apply the operation to internal CRDT prepare-state
-      this.internalCRDT.applyPrepare(event);
+      this.appliedEvents = this.internalCRDT.applyPrepare(
+        event,
+        this.appliedEvents,
+      );
       this.versionManager.setPrepareVersion(parentVersion.add(event.id));
 
       // Step 4: Add e to effectVersion
@@ -202,7 +208,10 @@ export class EgWalker {
           if (this.debug) {
             console.log(`  Advancing event ${eventId}`);
           }
-          this.internalCRDT.advance(eventId);
+          this.appliedEvents = this.internalCRDT.advance(
+            eventId,
+            this.appliedEvents,
+          );
           this.versionManager.setPrepareVersion(
             this.versionManager.getPrepareVersion().add(eventId),
           );
@@ -220,7 +229,10 @@ export class EgWalker {
       if (this.debug) {
         console.log(`  Retreating event ${eventId}`);
       }
-      this.internalCRDT.retreat(eventId);
+      this.appliedEvents = this.internalCRDT.retreat(
+        eventId,
+        this.appliedEvents,
+      );
       retreatCount++;
     }
 
@@ -246,7 +258,10 @@ export class EgWalker {
       if (this.debug) {
         console.log(`  Advancing to effect: ${eventId}`);
       }
-      this.internalCRDT.advance(eventId);
+      this.appliedEvents = this.internalCRDT.advance(
+        eventId,
+        this.appliedEvents,
+      );
       advanceCount++;
 
       // Update prepare version

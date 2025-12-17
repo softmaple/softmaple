@@ -14,9 +14,11 @@ import type { GraphEvent } from "../types";
 describe("Retreat/Advance Mechanics", () => {
   describe("ConcreteCRDTState", () => {
     let crdtState: ConcreteCRDTState;
+    let appliedEvents: Set<string>;
 
     beforeEach(() => {
       crdtState = new ConcreteCRDTState();
+      appliedEvents = new Set();
     });
 
     afterEach(() => {
@@ -35,7 +37,7 @@ describe("Retreat/Advance Mechanics", () => {
         timestamp: Date.now(),
       };
 
-      crdtState.applyPrepare(event);
+      appliedEvents = crdtState.applyPrepare(event, appliedEvents);
       expect(crdtState.getCurrentText()).toBe("Hello");
     });
 
@@ -62,12 +64,12 @@ describe("Retreat/Advance Mechanics", () => {
         timestamp: Date.now(),
       };
 
-      crdtState.applyPrepare(event1);
-      crdtState.applyPrepare(event2);
+      appliedEvents = crdtState.applyPrepare(event1, appliedEvents);
+      appliedEvents = crdtState.applyPrepare(event2, appliedEvents);
       expect(crdtState.getCurrentText()).toBe("FirstSecond");
 
       // Retreat event2
-      crdtState.retreat("e2");
+      appliedEvents = crdtState.retreat("e2", appliedEvents);
       expect(crdtState.getCurrentText()).toBe("First");
     });
 
@@ -83,8 +85,8 @@ describe("Retreat/Advance Mechanics", () => {
         timestamp: Date.now(),
       };
 
-      crdtState.applyPrepare(event);
-      crdtState.advance("e1");
+      appliedEvents = crdtState.applyPrepare(event, appliedEvents);
+      appliedEvents = crdtState.advance("e1", appliedEvents);
       expect(crdtState.getCurrentText()).toBe("Test");
     });
 
@@ -100,10 +102,11 @@ describe("Retreat/Advance Mechanics", () => {
         timestamp: Date.now(),
       };
 
-      crdtState.applyPrepare(event);
+      appliedEvents = crdtState.applyPrepare(event, appliedEvents);
       expect(crdtState.getCurrentText()).toBe("Reset");
 
       crdtState.reset();
+      appliedEvents = new Set();
       expect(crdtState.getCurrentText()).toBe("");
     });
   });
@@ -268,7 +271,7 @@ describe("Retreat/Advance Mechanics", () => {
       await coordinator.transform(eventA, new Set(), new Set(["a:1"]));
       await coordinator.transform(
         eventB,
-        new Set(),  // eventB doesn't know about eventA yet (concurrent)
+        new Set(), // eventB doesn't know about eventA yet (concurrent)
         new Set(["a:1", "b:1"]),
       );
 

@@ -336,5 +336,52 @@ describe("Retreat/Advance Mechanics", () => {
       coordinator1.destroy();
       coordinator2.destroy();
     });
+
+    it("should handle reset operation on coordinator", async () => {
+      const coordinator = new RetreatAdvanceCoordinator();
+
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      await coordinator.transform(event, new Set(), new Set(["e1"]));
+      expect(coordinator.getCurrentText()).toBe("Test");
+
+      coordinator.reset();
+      expect(coordinator.getCurrentText()).toBe("");
+      expect(coordinator.isEventApplied("e1")).toBe(false);
+
+      coordinator.destroy();
+    });
+
+    it("should handle advance errors for non-existent events", () => {
+      const crdtState = new ConcreteCRDTState();
+      const appliedEvents = new Set<string>();
+
+      expect(() => crdtState.advance("nonexistent", appliedEvents)).toThrow(
+        /Event nonexistent not found/,
+      );
+
+      crdtState.destroy();
+    });
+
+    it("should handle retreat errors for non-existent events", () => {
+      const crdtState = new ConcreteCRDTState();
+      const appliedEvents = new Set<string>();
+
+      expect(() => crdtState.retreat("nonexistent", appliedEvents)).toThrow(
+        /Event nonexistent not found/,
+      );
+
+      crdtState.destroy();
+    });
+
   });
 });

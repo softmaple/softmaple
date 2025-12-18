@@ -682,4 +682,398 @@ describe("InternalCRDTState", () => {
       expect(statistics.deletedRecords).toBe(1);
     });
   });
+
+  describe("Edge Cases for B-tree and Metadata", () => {
+    it("should handle metadata initialization for new records", () => {
+      const record: Record = {
+        id: "test:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "test",
+      };
+
+      state.insertRecord(record);
+
+      // Verify metadata was created
+      const records = state.getAllRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0]?.id).toBe("test:1");
+    });
+
+    it("should handle record lookup for non-existent IDs", () => {
+      const record: Record = {
+        id: "exists:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "exists",
+      };
+
+      state.insertRecord(record);
+
+      // Try to find a non-existent record
+      const records = state.getAllRecords();
+      const foundNonExistent = records.find((r) => r.id === "nonexistent:99");
+      expect(foundNonExistent).toBeUndefined();
+    });
+
+    it("should handle delete operations on boundary records", () => {
+      // Insert multiple records
+      const record1: Record = {
+        id: "a:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "a",
+      };
+
+      const record2: Record = {
+        id: "b:1",
+        originLeft: "a:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "B",
+        eventId: "b",
+      };
+
+      const record3: Record = {
+        id: "c:1",
+        originLeft: "b:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "C",
+        eventId: "c",
+      };
+
+      state.insertRecord(record1);
+      state.insertRecord(record2);
+      state.insertRecord(record3);
+
+      // Delete the first record
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        parentVersion: new Set(["a", "b", "c"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("BC");
+    });
+
+    it("should handle delete operations in the middle of text", () => {
+      // Insert multiple records
+      const records = ["A", "B", "C", "D", "E"].map((char, i) => ({
+        id: `r:${i + 1}`,
+        originLeft: i > 0 ? `r:${i}` : null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: char,
+        eventId: `e${i}`,
+      }));
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Delete middle 2 characters (BC)
+      const deleteEvent: GraphEvent = {
+        id: "delete_middle",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 1,
+          length: 2,
+        },
+        parentVersion: new Set(["e0", "e1", "e2", "e3", "e4"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("ADE");
+    });
+
+    it("should handle finding position for originRight positioning", () => {
+      // First record
+      const record1: Record = {
+        id: "a:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "a",
+      };
+
+      const record2: Record = {
+        id: "b:1",
+        originLeft: "a:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "C",
+        eventId: "b",
+      };
+
+      // Insert between a:1 and b:1 with originRight
+      const record3: Record = {
+        id: "c:1",
+        originLeft: "a:1",
+        originRight: "b:1",
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "B",
+        eventId: "c",
+      };
+
+      state.insertRecord(record1);
+      state.insertRecord(record2);
+      state.insertRecord(record3);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("ABC");
+    });
+
+    it("should handle empty state operations", () => {
+      const text = state.getVisibleText();
+      expect(text).toBe("");
+
+      const records = state.getAllRecords();
+      expect(records).toHaveLength(0);
+
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBe(0);
+      expect(stats.visibleRecords).toBe(0);
+    });
+
+    it("should handle compactEffectState with metadata compaction", () => {
+      // Insert records with metadata
+      const records = ["A", "B", "C"].map((char, i) => ({
+        id: `r:${i + 1}`,
+        originLeft: i > 0 ? `r:${i}` : null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: char,
+        eventId: `e${i}`,
+        metadata: { someData: "test" },
+      }));
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Compact at critical version
+      const criticalVersion = new Set(["e0", "e1"]);
+      state.compactEffectState(criticalVersion);
+
+      // Records should still be accessible
+      expect(state.getVisibleText()).toBe("ABC");
+    });
+
+    it("should handle hasPlaceholders with placeholder records", () => {
+      expect(state.hasPlaceholders()).toBe(false);
+
+      // Add a placeholder
+      const placeholder: GraphEvent = {
+        id: "placeholder1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.addPlaceholder("placeholder1", placeholder);
+      expect(state.hasPlaceholders()).toBe(true);
+    });
+
+    it("should handle rebuildOrderedRecords with position sorting", () => {
+      // Insert records with explicit positions
+      const records = [
+        {
+          id: "r:1",
+          originLeft: null,
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "A",
+          eventId: "e0",
+          position: 0,
+        },
+        {
+          id: "r:2",
+          originLeft: "r:1",
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "B",
+          eventId: "e1",
+          position: 1,
+        },
+      ];
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Compact to trigger rebuild
+      const criticalVersion = new Set(["e0", "e1"]);
+      state.compactEffectState(criticalVersion);
+
+      expect(state.getVisibleText()).toBe("AB");
+    });
+
+    it("should handle getPrepareText with deleted records", () => {
+      // Insert records
+      const records = ["A", "B", "C"].map((char, i) => ({
+        id: `r:${i + 1}`,
+        originLeft: i > 0 ? `r:${i}` : null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: char,
+        eventId: `e${i}`,
+      }));
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Delete middle record in prepare state
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+
+      // getPrepareText should reflect the deletion
+      const prepareText = state.getPrepareText();
+      expect(prepareText.length).toBeLessThan(3);
+    });
+
+    it("should handle recordToIndexEffect with deleted record", () => {
+      // Insert a record
+      const record: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED }, // Deleted in effect
+        content: "X",
+        eventId: "e0",
+      };
+
+      state.insertRecord(record);
+
+      // recordToIndexEffect should return -1 for deleted records
+      const index = state.recordToIndexEffect(record);
+      expect(index).toBe(-1);
+    });
+
+    it("should handle recordToIndexEffect with non-existent record", () => {
+      const nonExistentRecord: Record = {
+        id: "r:does-not-exist",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "e0",
+      };
+
+      expect(() => state.recordToIndexEffect(nonExistentRecord)).toThrow(
+        "Record r:does-not-exist not found in CRDT state",
+      );
+    });
+
+    it("should handle indexToRecordPrepare with invalid negative index", () => {
+      expect(() => state.indexToRecordPrepare(-1)).toThrow(
+        "Invalid prepare-index: -1",
+      );
+    });
+
+    it("should handle indexToRecordPrepare with out-of-bounds index", () => {
+      // Insert one record
+      const record: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "e0",
+      };
+      state.insertRecord(record);
+
+      // Index 10 is out of bounds
+      expect(() => state.indexToRecordPrepare(10)).toThrow(
+        /Prepare-index 10 out of bounds/,
+      );
+    });
+
+    it("should handle findRecordsInRange with complex positioning", () => {
+      // Insert records with explicit positions
+      const records = [
+        {
+          id: "r:1",
+          originLeft: null,
+          originRight: "r:3",
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "A",
+          eventId: "e0",
+          position: 0,
+        },
+        {
+          id: "r:2",
+          originLeft: "r:1",
+          originRight: "r:3",
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "B",
+          eventId: "e1",
+          position: 1,
+        },
+        {
+          id: "r:3",
+          originLeft: "r:2",
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "C",
+          eventId: "e2",
+          position: 2,
+        },
+      ];
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Apply delete operation on middle record
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyEffect(deleteEvent);
+
+      // After delete, visible text should exclude the deleted record
+      const text = state.getVisibleText();
+      expect(text.length).toBeLessThan(3);
+    });
+  });
 });

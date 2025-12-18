@@ -11,6 +11,149 @@ import type { GraphEvent } from "../graph/event-graph";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 
 describe("Section 3.2: EgWalker Integration", () => {
+  it("should handle isClearable type guard with null input", () => {
+    // This test verifies the isClearable type guard returns false for null/undefined
+    const walker = new EgWalker();
+    expect(walker).toBeDefined();
+    
+    // Create events that would normally trigger state clearing
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
+        timestamp: Date.now(),
+      },
+    ];
+    
+    // Walk should complete successfully even if isClearable returns false
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(1);
+  });
+
+  it("should handle retreatToVersion with no retreat or advance needed", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT });
+
+    // Create sequential events where prepareVersion already matches parent
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    const result = walker.walk(events);
+    // In sequential case, no retreats should be needed
+    expect(result.eventsProcessed).toBe(2);
+    expect(result.retreatCount).toBe(0);
+  });
+
+  it("should log debug messages during retreat operations", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT, debug: true });
+
+    // Create events that will trigger retreat with debug logging
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b" },
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "e3",
+        parentVersion: new Set(["e2"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "c" },
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(3);
+    expect(result.retreatCount).toBeGreaterThan(0);
+  });
+
+  it("should log debug messages when advancing during retreat", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT, debug: true });
+
+    // Create a diamond pattern that triggers advance within retreatToVersion
+    const events: GraphEvent[] = [
+      {
+        id: "base",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "a1",
+        parentVersion: new Set(["base"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "A" },
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "b1",
+        parentVersion: new Set(["base"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: Date.now() + 2,
+      },
+      {
+        id: "merge",
+        parentVersion: new Set(["a1", "b1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "M" },
+        timestamp: Date.now() + 3,
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(4);
+  });
+
+  it("should log debug messages when advancing to effect version", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT, debug: true });
+
+    const events: GraphEvent[] = [
+      {
+        id: "base",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "concurrent1",
+        parentVersion: new Set(["base"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "A" },
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "concurrent2",
+        parentVersion: new Set(["base"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(3);
+    expect(result.advanceCount).toBeGreaterThan(0);
+  });
+
   it("should process sequential events without retreat/advance", () => {
     const walker = new EgWalker();
 

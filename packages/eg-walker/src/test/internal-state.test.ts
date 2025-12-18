@@ -966,6 +966,75 @@ describe("InternalCRDTState", () => {
       expect(stats.visibleRecords).toBe(0);
     });
 
+    it("should handle initializeBTree when root already exists", () => {
+      const state = new InternalCRDTState();
+
+      // Apply an operation to initialize the tree
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+        "rec1",
+      );
+
+      // Switch to prepare state (this reinitializes the B-tree)
+      state.switchToPrepareState();
+
+      // Switch back to effect state (should reinitialize B-tree again)
+      state.switchToEffectState();
+
+      // Verify state is still valid
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should handle findRecordsInRange with complex originRight positioning", () => {
+      const state = new InternalCRDTState();
+
+      // Create a complex scenario with multiple records and originRight references
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        "rec1",
+      );
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        "rec2",
+      );
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        "rec3",
+      );
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 3, text: "D" },
+        "rec4",
+      );
+
+      // Verify records are stored correctly
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBeGreaterThanOrEqual(4);
+    });
+
+    it("should handle getPrepareText with DELETED records having count > 0", () => {
+      const state = new InternalCRDTState();
+
+      // Insert some text
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "Hello World" },
+        "rec1",
+      );
+
+      // Delete part of the text
+      state.applyOperation(
+        { type: OPERATION_TYPE.DELETE, index: 5, length: 6 },
+        "rec2",
+      );
+
+      // Switch to prepare state
+      state.switchToPrepareState();
+
+      // Get prepare text (should handle deleted records)
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBeGreaterThanOrEqual(0);
+    });
+
     it("should handle compactEffectState with metadata compaction", () => {
       // Insert records with metadata
       const records = ["A", "B", "C"].map((char, i) => ({

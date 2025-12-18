@@ -21,10 +21,10 @@ export default defineConfig({
         "src/constants/walker-states.ts",
       ],
       thresholds: {
-        lines: 91,
+        lines: 92,
         functions: 95,
-        branches: 77,
-        statements: 90,
+        branches: 79,
+        statements: 91,
       },
     },
   },

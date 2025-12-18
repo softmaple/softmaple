@@ -55,7 +55,8 @@ const withLogging = (fn: Function) => (...args: any[]) => {
 **Commits:** `type(scope): summary`
 - Types: `fix`, `feat`, `build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`
 - Scopes: `apps/web`, `packages/<name>`, or empty for root
-- Branch naming: `feature-name-$(date +%s)`
+- **Branch naming:** `feature-name-$(date +%s)`
+- **IMPORTANT: Never commit directly to the `next` branch.** Always create a new feature branch before making changes if you are on the default `next` branch.
 - **Always request user approval before commits/pushes**
 
 **PRs:** Include summary, test commands, screenshots for UI changes

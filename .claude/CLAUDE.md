@@ -164,6 +164,23 @@ fix/duplicate-event-handling-1737154800
 docs/update-readme-1737154800
 ```
 
+### Branch Protection Rule
+
+**CRITICAL: Never commit directly to the `next` branch.**
+
+Before making any changes:
+1. Check current branch: `git branch --show-current`
+2. If on `next`, create a new feature branch: `git checkout -b type/description-$(date +%s)`
+3. Make your changes on the feature branch
+4. Push the feature branch and create a PR
+
+```bash
+# Example workflow
+git branch --show-current  # Check if on 'next'
+git checkout -b refactor/cleanup-types-1737154800
+# Now safe to make changes
+```
+
 ### Commit Messages
 ```bash
 # Format: type(scope): summary

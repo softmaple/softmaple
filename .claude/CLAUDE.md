@@ -181,6 +181,21 @@ git checkout -b refactor/cleanup-types-1737154800
 # Now safe to make changes
 ```
 
+### Returning to `next` Branch
+
+**IMPORTANT: When switching back to `next` from a feature branch, always sync with remote and update dependencies:**
+
+```bash
+git checkout next
+git pull              # Sync with remote changes
+pnpm i                # Update dependencies
+```
+
+This ensures:
+- You have the latest merged changes from other PRs
+- Dependencies are up to date with lockfile changes
+- No conflicts or outdated packages
+
 ### Commit Messages
 ```bash
 # Format: type(scope): summary

@@ -57,6 +57,7 @@ const withLogging = (fn: Function) => (...args: any[]) => {
 - Scopes: `apps/web`, `packages/<name>`, or empty for root
 - **Branch naming:** `feature-name-$(date +%s)`
 - **IMPORTANT: Never commit directly to the `next` branch.** Always create a new feature branch before making changes if you are on the default `next` branch.
+- **When switching back to `next` from a feature branch:** Always run `git pull` and `pnpm i` to sync with remote and update dependencies
 - **Always request user approval before commits/pushes**
 
 **PRs:** Include summary, test commands, screenshots for UI changes

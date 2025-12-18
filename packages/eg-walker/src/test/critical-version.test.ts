@@ -231,3 +231,155 @@ describe("Section 3.5: Module exports", () => {
     expect(state).toBeDefined();
   });
 });
+
+describe("Section 3.5: Edge cases and uncovered paths", () => {
+  describe("getCurrentCriticalVersion edge cases", () => {
+    it("should return null when no critical version exists", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      // Before any version updates, should return null
+      expect(detector.getCurrentCriticalVersion()).toBeNull();
+    });
+
+    it("should handle version with Set type", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      const versionSet = new Set(["e1", "e2"]);
+      detector.updateVersion({ replicaId: "replica1" } as any);
+
+      // Should handle Set-based versions
+      detector.isCriticalVersion(versionSet as any);
+      expect(detector).toBeDefined();
+    });
+
+    it("should handle version comparison with different types", () => {
+      const detector = new DefaultCriticalVersionDetector([
+        "replica1",
+        "replica2",
+      ]);
+
+      // Update with version that has no extractable numeric version
+      detector.updateVersion({ replicaId: "replica1", data: "test" } as any);
+      detector.updateVersion({ replicaId: "replica2", data: "test" } as any);
+
+      // Should not crash when checking versions without numeric comparison
+      const result = detector.isCriticalVersion({ data: "test" } as any);
+      expect(typeof result).toBe("boolean");
+    });
+  });
+
+  describe("tryClearToCriticalVersion", () => {
+    it("should return false when no critical version exists", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      const clearer = new StateClearer(detector);
+      const state = new InternalCRDTState();
+
+      // Should return false when no critical version
+      expect(clearer.tryClearToCriticalVersion(state)).toBe(false);
+    });
+
+    it("should return false when state is not clearable", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      detector.updateVersion({ replicaId: "replica1", version: 1 } as any);
+
+      const clearer = new StateClearer(detector);
+      const nonClearableState = { someProperty: "value" };
+
+      // Should return false for non-clearable state
+      expect(clearer.tryClearToCriticalVersion(nonClearableState as any)).toBe(
+        false,
+      );
+    });
+
+    it("should successfully clear when critical version exists", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      detector.updateVersion({ replicaId: "replica1", version: 1 } as any);
+
+      const clearer = new StateClearer(detector);
+      const state = new InternalCRDTState();
+
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+        "rec1",
+      );
+
+      // Should successfully clear to critical version
+      expect(clearer.tryClearToCriticalVersion(state)).toBe(true);
+
+      // Note: tryClearToCriticalVersion doesn't track already-cleared versions
+      // It will clear again if called multiple times with the same critical version
+      // This is different from clearInternalState which does track cleared versions
+      expect(clearer.tryClearToCriticalVersion(state)).toBe(true);
+    });
+  });
+
+  describe("StateClearer edge cases", () => {
+    it("should handle null/undefined state gracefully", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      detector.updateVersion({ replicaId: "replica1", version: 1 } as any);
+
+      const clearer = new StateClearer(detector);
+
+      // Should return false for null/undefined state
+      expect(
+        clearer.clearInternalState(null as any, { version: 1 } as any),
+      ).toBe(false);
+      expect(
+        clearer.clearInternalState(undefined as any, { version: 1 } as any),
+      ).toBe(false);
+    });
+
+    it("should update version through StateClearer", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      const clearer = new StateClearer(detector);
+
+      // Should delegate to detector
+      clearer.updateVersion({ replicaId: "replica1", version: 1 } as any);
+
+      expect(detector.getCurrentCriticalVersion()).toBeTruthy();
+    });
+  });
+
+  describe("Version comparison edge cases", () => {
+    it("should handle empty version arrays", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      detector.updateVersion({ replicaId: "replica1" } as any);
+
+      // Empty version should be handled
+      const result = detector.isCriticalVersion({} as any);
+      expect(typeof result).toBe("boolean");
+    });
+
+    it("should handle string versions", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      detector.updateVersion({ replicaId: "replica1" } as any);
+
+      // String version should be converted to array
+      const result = detector.isCriticalVersion("version1" as any);
+      expect(typeof result).toBe("boolean");
+    });
+
+    it("should compare versions with different lengths", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      const version1 = new Set(["e1", "e2"]);
+      const version2 = new Set(["e1"]);
+
+      detector.updateVersion({ replicaId: "replica1" } as any);
+
+      // Should handle different length comparisons
+      detector.isCriticalVersion(version1 as any);
+      detector.isCriticalVersion(version2 as any);
+      expect(detector).toBeDefined();
+    });
+  });
+
+  describe("Replica ID extraction", () => {
+    it("should handle version without replicaId", () => {
+      const detector = new DefaultCriticalVersionDetector();
+
+      // Update with version that has no replicaId field
+      detector.updateVersion({ someOtherField: "value" } as any);
+
+      // Should not add unknown replicas
+      expect(detector.getCurrentCriticalVersion()).toBeNull();
+    });
+  });
+});

@@ -32,8 +32,8 @@ export default mergeConfig(
             browser: {
               enabled: true,
               // Make sure to install Playwright
-              // TODO: fix me type issue
-              provider: playwright({}) as any,
+              // @ts-expect-error - Playwright provider has type incompatibility with vitest browser config
+              provider: playwright({}),
               headless: true,
               instances: [{ browser: 'chromium' }],
             },

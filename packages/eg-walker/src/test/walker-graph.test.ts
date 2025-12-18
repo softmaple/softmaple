@@ -205,5 +205,53 @@ describe("Section 3.2: EventGraphWalker", () => {
       // but processes disconnected components in the order encountered
       expect(order).toEqual(["a1", "b1", "a2", "b2"]);
     });
+
+    it("should handle getParents with non-existent event", () => {
+      const walker = new DefaultEventGraphWalker();
+
+      // Try to get parents of event that doesn't exist
+      const parents = walker.getParents("nonexistent");
+      expect(parents).toEqual([]);
+    });
+
+    it("should return all events via getAllEvents", () => {
+      const walker = new DefaultEventGraphWalker();
+
+      walker.addEvent({
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: 1,
+      });
+      walker.addEvent({
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
+        timestamp: 2,
+      });
+
+      const events = walker.getAllEvents();
+      expect(events).toHaveLength(2);
+      expect(events.map((e) => e.id).sort()).toEqual(["e1", "e2"]);
+    });
+
+    it("should cache topological order on repeated calls", () => {
+      const walker = new DefaultEventGraphWalker();
+
+      walker.addEvent({
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: 1,
+      });
+
+      // First call computes order
+      const order1 = walker.topologicalOrder();
+      // Second call should return cached result
+      const order2 = walker.topologicalOrder();
+
+      expect(order1).toEqual(order2);
+      expect(order1).toEqual(["e1"]);
+    });
   });
 });

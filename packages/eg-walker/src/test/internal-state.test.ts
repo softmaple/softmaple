@@ -14,7 +14,7 @@ import type { GraphEvent } from "../types";
 
 describe("InternalCRDTState", () => {
   describe("Edge Cases for Record Insertion", () => {
-    it("should handle insertRecord with duplicate ID gracefully", () => {
+    it("should prevent duplicate records when inserting same ID twice", () => {
       const record1: Record = {
         id: "dup:1",
         originLeft: null,
@@ -30,10 +30,10 @@ describe("InternalCRDTState", () => {
       // Try to insert the same record again
       state.insertRecord(record1);
 
-      // Duplicates are allowed (implementation permits multiple insertions)
+      // Duplicates should be prevented (implementation checks for existing ID)
       const records = state.getAllRecords();
       const duplicates = records.filter((r) => r.id === "dup:1");
-      expect(duplicates.length).toBeGreaterThanOrEqual(1);
+      expect(duplicates.length).toBe(1);
     });
 
     it("should handle findRecordsInRange with no visible records", () => {
@@ -981,9 +981,17 @@ describe("InternalCRDTState", () => {
       // Switch back to effect state (should reinitialize B-tree again)
       state.switchToEffectState();
 
-      // Verify state is still valid
+      // Verify state is still valid after reinitializing
+      const text = state.getVisibleText();
+      expect(text).toBe("Test");
+
       const stats = state.getStatistics();
-      expect(stats.totalRecords).toBeGreaterThanOrEqual(0);
+      expect(stats.totalRecords).toBeGreaterThanOrEqual(1); // At least 1 record for "Test"
+      expect(stats.visibleRecords).toBeGreaterThanOrEqual(1);
+
+      // Verify records can still be retrieved after state switches
+      const records = state.getAllRecords();
+      expect(records.length).toBeGreaterThanOrEqual(1);
     });
 
     it("should handle findRecordsInRange with complex originRight positioning", () => {
@@ -1010,29 +1018,6 @@ describe("InternalCRDTState", () => {
       // Verify records are stored correctly
       const stats = state.getStatistics();
       expect(stats.totalRecords).toBeGreaterThanOrEqual(4);
-    });
-
-    it("should handle getPrepareText with DELETED records having count > 0", () => {
-      const state = new InternalCRDTState();
-
-      // Insert some text
-      state.applyOperation(
-        { type: OPERATION_TYPE.INSERT, index: 0, text: "Hello World" },
-        "rec1",
-      );
-
-      // Delete part of the text
-      state.applyOperation(
-        { type: OPERATION_TYPE.DELETE, index: 5, length: 6 },
-        "rec2",
-      );
-
-      // Switch to prepare state
-      state.switchToPrepareState();
-
-      // Get prepare text (should handle deleted records)
-      const stats = state.getStatistics();
-      expect(stats.totalRecords).toBeGreaterThanOrEqual(0);
     });
 
     it("should handle compactEffectState with metadata compaction", () => {
@@ -1267,7 +1252,7 @@ describe("InternalCRDTState", () => {
     });
 
     it("should handle recordToIndexEffect when record is not in ordered list", () => {
-      // Create a record but don't add it to ordered list properly
+      // Create a record but don't insert it into state
       const record: Record = {
         id: "r:orphan",
         originLeft: null,
@@ -1278,8 +1263,8 @@ describe("InternalCRDTState", () => {
         eventId: "e0",
       };
 
-      // Don't insert through insertRecord - manually add to map only
-      // This simulates a corrupted state where record is in map but not in ordered list
+      // Call recordToIndexEffect without inserting the record
+      // This tests the error handling for non-existent records
       expect(() => state.recordToIndexEffect(record)).toThrow(
         /Record r:orphan not found/,
       );

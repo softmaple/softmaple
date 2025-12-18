@@ -547,4 +547,63 @@ describe("Section 3.2: EgWalker Integration", () => {
     const result = walker.walk(events);
     expect(result.eventsProcessed).toBe(1);
   });
+
+  describe("Edge cases for isClearable type guard", () => {
+    it("should handle CRDT without clearable methods", () => {
+      // Create walker with stub that has clearable methods
+      const config = {
+        internalCRDT: {
+          reset: () => {},
+          getCurrentText: () => "",
+          applyPrepare: () => {},
+          retreat: () => new Set(),
+          advance: () => new Set(),
+          // Missing clearable methods - should not crash
+        } as unknown as InternalCRDTState,
+      };
+      const walker = new EgWalker(config);
+
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+          timestamp: 1,
+        },
+      ];
+
+      // Should not crash even without clearable methods
+      const result = walker.walk(events);
+      expect(result.eventsProcessed).toBe(1);
+    });
+
+    it("should handle concurrent events requiring retreat then advance", () => {
+      const walker = new EgWalker();
+
+      const events: GraphEvent[] = [
+        {
+          id: "base",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Base" },
+          timestamp: 1,
+        },
+        {
+          id: "concurrent1",
+          parentVersion: new Set(["base"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 4, text: " A" },
+          timestamp: 2,
+        },
+        {
+          id: "concurrent2",
+          parentVersion: new Set(["base"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 4, text: " B" },
+          timestamp: 3,
+        },
+      ];
+
+      const result = walker.walk(events);
+      expect(result.eventsProcessed).toBe(3);
+      expect(result.retreatCount).toBeGreaterThan(0);
+    });
+  });
 });

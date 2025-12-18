@@ -46,7 +46,7 @@ export interface Record {
   // Additional fields for efficient operations
   content?: string; // For text content (made mutable for compaction)
   readonly eventId: EventId; // Event that created this record
-  metadata?: Record<string, unknown>; // For tracking placeholder and compaction state
+  metadata?: { [key: string]: unknown }; // For tracking placeholder and compaction state
   position?: number; // For ordering records
 }
 
@@ -60,7 +60,7 @@ export interface Record {
 interface BTreeNode<T> {
   keys: EventId[];
   values: T[];
-  children: BTreeNode<T>[] | null; // @ts-expect-error - Recursive type definition
+  children: BTreeNode<T>[] | null;
   leaf: boolean;
   size: number; // Total elements in this subtree
 }

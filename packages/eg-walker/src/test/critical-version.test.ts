@@ -246,7 +246,6 @@ describe("Section 3.5: Edge cases and uncovered paths", () => {
       detector.updateVersion({ replicaId: "replica1" });
 
       // Should handle Set-based versions
-      // @ts-expect-error - Testing with Set as Version
       detector.isCriticalVersion(versionSet);
       expect(detector).toBeDefined();
     });
@@ -375,9 +374,7 @@ describe("Section 3.5: Edge cases and uncovered paths", () => {
       detector.updateVersion({ replicaId: "replica1" });
 
       // Should handle different length comparisons
-      // @ts-expect-error - Testing with Set as version
       detector.isCriticalVersion(version1);
-      // @ts-expect-error - Testing with Set as version
       detector.isCriticalVersion(version2);
       expect(detector).toBeDefined();
     });

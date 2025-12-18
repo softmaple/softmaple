@@ -1,6 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { describe, it, expect } from "vitest";
-import type { GraphEvent } from "../types";
+import type { GraphEvent, ExternalOperation } from "../types";
 import {
   verifyStrongListSpecification,
   ensureConvergence,
@@ -198,7 +198,7 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["missing-parent"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
       },
@@ -211,7 +211,7 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: -1, text: "test" },
       },
@@ -224,7 +224,7 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
       },
@@ -237,7 +237,7 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.DELETE, index: -1, length: 5 },
       },
@@ -250,7 +250,7 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 0 },
       },
@@ -263,7 +263,7 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         // @ts-expect-error - Testing with invalid operation type
         operation: { type: "UNKNOWN" },
@@ -291,8 +291,7 @@ describe("Section 3.1: validateIndexBounds", () => {
 
   it("should reject unknown operation type", () => {
     const text = "hello";
-    // @ts-expect-error - Testing with invalid operation type
-    const operation = { type: "UNKNOWN" };
+    const operation = { type: "UNKNOWN" } as unknown as ExternalOperation;
 
     expect(validateIndexBounds(text, operation)).toBe(false);
   });
@@ -310,13 +309,13 @@ describe("Section 3.1: ensureConvergence", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e2"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
       },
       {
         id: "e2",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e1"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b" },
       },
@@ -329,7 +328,7 @@ describe("Section 3.1: ensureConvergence", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.DELETE, index: 100, length: 5 },
       },
@@ -342,7 +341,7 @@ describe("Section 3.1: ensureConvergence", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "hello" },
       },
@@ -357,7 +356,7 @@ describe("Section 3.1: topologicalSort", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
       },
@@ -365,20 +364,20 @@ describe("Section 3.1: topologicalSort", () => {
 
     const sorted = topologicalSort(events);
     expect(sorted.length).toBe(1);
-    expect(sorted[0].id).toBe("e1");
+    expect(sorted[0]?.id).toBe("e1");
   });
 
   it("should throw on cycle detection", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e2"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
       },
       {
         id: "e2",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e1"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b" },
       },
@@ -391,19 +390,19 @@ describe("Section 3.1: topologicalSort", () => {
     const events: GraphEvent[] = [
       {
         id: "e3",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e1", "e2"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "c" },
       },
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
       },
       {
         id: "e2",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e1"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b" },
       },
@@ -412,9 +411,9 @@ describe("Section 3.1: topologicalSort", () => {
     const sorted = topologicalSort(events);
     expect(sorted.length).toBe(3);
     // e1 must come first, then e2, then e3
-    expect(sorted[0].id).toBe("e1");
-    expect(sorted[1].id).toBe("e2");
-    expect(sorted[2].id).toBe("e3");
+    expect(sorted[0]?.id).toBe("e1");
+    expect(sorted[1]?.id).toBe("e2");
+    expect(sorted[2]?.id).toBe("e3");
   });
 });
 
@@ -423,7 +422,7 @@ describe("Section 3.1: linearizeEvents", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 5, text: " world" },
       },
@@ -437,13 +436,13 @@ describe("Section 3.1: linearizeEvents", () => {
     const events: GraphEvent[] = [
       {
         id: "e2",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(["e1"]),
         operation: { type: OPERATION_TYPE.INSERT, index: 5, text: " world" },
       },
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "hello" },
       },
@@ -470,7 +469,7 @@ describe("Section 3.1: StrongListInvariant class", () => {
     const events: GraphEvent[] = [
       {
         id: "e1",
-        replicaId: "r1",
+        timestamp: Date.now(),
         parentVersion: new Set(),
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "hello" },
       },

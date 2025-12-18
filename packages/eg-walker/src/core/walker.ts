@@ -89,7 +89,6 @@ export class EgWalker {
       (() => {
         try {
           // Try to use the concrete implementation
-          // @ts-expect-error - Dynamic require for optional concrete implementation
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const { ConcreteCRDTState } = require("../crdt/retreat-advance");
           return new ConcreteCRDTState();

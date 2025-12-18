@@ -139,9 +139,8 @@ export class DefaultCriticalVersionDetector implements CriticalVersionDetector {
   private extractReplicaId(v: Version): string | null {
     // This is a simplified implementation
     // In practice, this would extract replica ID from the version structure
-    if (typeof v === "object" && v !== null && "replicaId" in v) {
-      // @ts-expect-error - Dynamic property access on version object
-      return v.replicaId as string;
+    if (typeof v === "object" && v !== null && "replicaId" in v && typeof (v as Record<string, unknown>).replicaId === "string") {
+      return (v as Record<string, unknown>).replicaId as string;
     }
     return null;
   }
@@ -149,9 +148,8 @@ export class DefaultCriticalVersionDetector implements CriticalVersionDetector {
   private extractVersionNumber(v: Version | undefined): number | null {
     if (!v) return null;
     // Handle test case that passes an object with version property
-    if (typeof v === "object" && v !== null && "version" in v) {
-      // @ts-expect-error - Dynamic property access on version object
-      return v.version as number;
+    if (typeof v === "object" && v !== null && "version" in v && typeof (v as Record<string, unknown>).version === "number") {
+      return (v as Record<string, unknown>).version as number;
     }
     // Handle direct number
     if (typeof v === "number") {

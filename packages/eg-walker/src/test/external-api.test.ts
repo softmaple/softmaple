@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { EgWalkerAPI, createEgWalker } from "../core/external-api";
 import { OPERATION_TYPE } from "../constants/operation-types";
-import type { GraphEvent } from "../types";
+import type { GraphEvent, SerializedGraph } from "../types";
 
 describe("EgWalkerAPI", () => {
   describe("insert", () => {
@@ -93,7 +93,7 @@ describe("EgWalkerAPI", () => {
     it("should deserialize document state", () => {
       const api = EgWalkerAPI.deserialize({
         text: "Hello",
-        eventGraph: null,
+        eventGraph: null as unknown as SerializedGraph,
       });
       expect(api.getText()).toBe("Hello");
     });
@@ -207,7 +207,6 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
     const event: GraphEvent = {
       id: "r2:0",
-      replicaId: "r2",
       parentVersion: new Set(),
       operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
       timestamp: Date.now(),
@@ -234,7 +233,6 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     // Create an event with a parent that doesn't exist in currentVersion
     const event: GraphEvent = {
       id: "r2:1",
-      replicaId: "r2",
       parentVersion: new Set(["r2:0"]), // This parent doesn't exist in current version
       operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
       timestamp: Date.now(),
@@ -253,12 +251,11 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     // Get the current version after first insert
     // @ts-expect-error - Accessing private currentVersion for testing
     const currentVersion = api.currentVersion;
-    const parentId = Array.from(currentVersion)[0];
+    const parentId = Array.from(currentVersion)[0] ?? "";
 
     // Create an event that has parent in current version
     const event: GraphEvent = {
       id: "r1:1",
-      replicaId: "r1",
       parentVersion: new Set([parentId]),
       operation: { type: OPERATION_TYPE.INSERT, index: 5, text: " World" },
       timestamp: Date.now(),

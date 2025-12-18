@@ -263,9 +263,131 @@ describe("Section 3.6: Partial Replay", () => {
       replayManager.reconstructPlaceholders(state, criticalVersion);
       
       // No crash, just skip missing events
-      expect(state.hasPlaceholders()).toBe(false);
-    });
+    expect(state.hasPlaceholders()).toBe(false);
   });
+
+  it("should handle extractEventIds with empty Set", () => {
+    const emptyVersion: Version = new Set();
+    const fromVersion: Version = new Set();
+    const toVersion = new Set(["e1"]);
+
+    // Add event to graph
+    const event: GraphEvent = {
+      id: "e1",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    };
+    eventGraph.addEvent(event);
+
+    // This should cover the extractEventIds with empty Set
+    const replayRange = replayManager.computeReplayRange(
+      fromVersion,
+      toVersion,
+    );
+    expect(replayRange).toContain("e1");
+  });
+
+  it("should handle computeDependencies with empty dependencies", () => {
+    // Event with no parents
+    const event: GraphEvent = {
+      id: "e1",
+      parentVersion: new Set(), // Empty parent version
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    };
+    eventGraph.addEvent(event);
+
+    const fromVersion: Version = new Set();
+    const toVersion: Version = new Set(["e1"]);
+    const replayRange = replayManager.computeReplayRange(
+      fromVersion,
+      toVersion,
+    );
+
+    // Should include e1 even though it has no dependencies
+    expect(replayRange).toContain("e1");
+  });
+
+  it("should handle reconstructPlaceholders with events not in graph", () => {
+    // Create a critical version with an event that doesn't exist in the graph
+    const criticalVersion: Version = new Set(["missing-event"]);
+
+    // Should handle gracefully without crashing
+    replayManager.reconstructPlaceholders(state, criticalVersion);
+
+    // State should remain empty
+    expect(state.getStatistics().totalRecords).toBe(0);
+  });
+
+  it("should cover checkDependencies with parent not in history", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      },
+    ];
+
+    for (const event of events) {
+      eventGraph.addEvent(event);
+    }
+
+    // Try to replay e2 without replaying e1 first
+    // This should trigger the checkDependencies logic
+    replayManager.replayEvents(["e2", "e1"], state);
+
+    // Should handle dependency checking
+    expect(state.getStatistics().totalRecords).toBeGreaterThan(0);
+  });
+
+  it("should cover topologicalSort in computeReplayRange", () => {
+    // Create events with complex dependency graph
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "1" },
+        timestamp: 1,
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "2" },
+        timestamp: 2,
+      },
+      {
+        id: "e3",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "3" },
+        timestamp: 3,
+      },
+    ];
+
+    for (const event of events) {
+      eventGraph.addEvent(event);
+    }
+
+    // Compute replay range to trigger topological sort
+    const fromVersion: Version = new Set();
+    const toVersion: Version = new Set(["e2", "e3"]);
+    const replayRange = replayManager.computeReplayRange(
+      fromVersion,
+      toVersion,
+    );
+
+    // Should return events in topological order
+    expect(replayRange[0]).toBe("e1");
+    expect(replayRange).toHaveLength(3);
+  });
+});
 
   describe("Performance", () => {
     it("should handle O(k log k) complexity for topological sort", () => {

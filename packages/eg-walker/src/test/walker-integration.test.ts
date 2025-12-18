@@ -612,5 +612,47 @@ describe("Section 3.2: EgWalker Integration", () => {
       expect(result.eventsProcessed).toBe(3);
       expect(result.retreatCount).toBeGreaterThan(0);
     });
+
+    it("should handle null internalCRDT in isClearable", () => {
+      // Create walker with null internalCRDT (edge case)
+      const config = {
+        internalCRDT: null as unknown as InternalCRDTState,
+      };
+      const walker = new EgWalker(config);
+
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+          timestamp: 1,
+        },
+      ];
+
+      // Should not crash even with null internalCRDT
+      const result = walker.walk(events);
+      expect(result.eventsProcessed).toBe(1);
+    });
+
+    it("should handle undefined internalCRDT in isClearable", () => {
+      // Create walker with undefined internalCRDT (edge case)
+      const config = {
+        internalCRDT: undefined as unknown as InternalCRDTState,
+      };
+      const walker = new EgWalker(config);
+
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+          timestamp: 1,
+        },
+      ];
+
+      // Should not crash even with undefined internalCRDT
+      const result = walker.walk(events);
+      expect(result.eventsProcessed).toBe(1);
+    });
   });
 });

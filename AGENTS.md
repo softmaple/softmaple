@@ -20,6 +20,31 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
 - **Linting:** ESLint configs in `packages/eslint-config/`
 - Husky pre-commit hooks auto-format staged files
 
+### Functional Programming Principles
+Where possible, prefer functional programming patterns:
+- **Pure functions:** Functions should not have side effects and should return the same output for the same inputs
+- **Immutability:** Avoid mutating data structures; return new copies instead (use spread operators, `Array.map()`, `Object.freeze()`, etc.)
+- **Higher-order functions:** Leverage functions that take or return other functions (e.g., `map`, `filter`, `reduce`)
+- **Function composition:** Build complex logic by composing smaller, reusable functions
+
+Examples:
+```typescript
+// ✅ Good: Pure function with immutability
+const addItem = (items: Item[], newItem: Item): Item[] => [...items, newItem];
+
+// ❌ Avoid: Mutating input
+const addItem = (items: Item[], newItem: Item): void => { items.push(newItem); };
+
+// ✅ Good: Function composition
+const processData = compose(validate, transform, sanitize);
+
+// ✅ Good: Higher-order function
+const withLogging = (fn: Function) => (...args: any[]) => {
+  const result = fn(...args);
+  return result;
+};
+```
+
 ## Testing Guidelines
 - **Unit tests:** Vitest in `packages/md2latex/tests/` (*.test.ts)
 - **E2E tests:** Playwright in `apps/web/e2e/` (*.spec.ts)  
@@ -30,7 +55,8 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
 **Commits:** `type(scope): summary`
 - Types: `fix`, `feat`, `build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`
 - Scopes: `apps/web`, `packages/<name>`, or empty for root
-- Branch naming: `feature-name-$(date +%s)`
+- **Branch naming:** `feature-name-$(date +%s)`
+- **IMPORTANT: Never commit directly to the `next` branch.** Always create a new feature branch before making changes if you are on the default `next` branch.
 - **Always request user approval before commits/pushes**
 
 **PRs:** Include summary, test commands, screenshots for UI changes

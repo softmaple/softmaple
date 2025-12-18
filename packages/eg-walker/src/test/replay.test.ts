@@ -159,8 +159,31 @@ describe("Section 3.6: Partial Replay", () => {
       const to = new Set(["e1", "e2", "e3"]);
       const result = computeReplayRange(replayManager, from, to);
       
-      // Should maintain topological order
+      // Should maintain topological order: e1 before e2 before e3
       expect(result.length).toBe(3);
+      
+      // result is already EventId[] (array of strings), no need to map
+      const eventIds = result;
+      const e1Index = eventIds.indexOf("e1");
+      const e2Index = eventIds.indexOf("e2");
+      const e3Index = eventIds.indexOf("e3");
+      
+      // Assert topological ordering: e1 < e2 < e3
+      expect(e1Index).toBeGreaterThanOrEqual(0);
+      expect(e2Index).toBeGreaterThan(e1Index); // e2 depends on e1
+      expect(e3Index).toBeGreaterThan(e2Index); // e3 depends on e2
+      
+      // Verify parentVersion constraints: fetch events from graph and verify
+      result.forEach((eventId) => {
+        const event = eventGraph.getEvent(eventId);
+        if (!event) return;
+        const eventIndex = eventIds.indexOf(eventId);
+        event.parentVersion.forEach((parentId) => {
+          const parentIndex = eventIds.indexOf(parentId);
+          expect(parentIndex).toBeGreaterThanOrEqual(0);
+          expect(parentIndex).toBeLessThan(eventIndex);
+        });
+      });
     });
   });
 

@@ -16,7 +16,7 @@ describe("Section 3.2: EgWalker Integration", () => {
     const internalCRDT = new StubInternalCRDT();
     const walker = new EgWalker({ internalCRDT });
 
-    // Create perfectly sequential events where prepareVersion always matches parent
+    // Create sequential events - note: walker may still retreat once for algorithmic reasons
     const events: GraphEvent[] = [
       {
         id: "e1",
@@ -32,7 +32,7 @@ describe("Section 3.2: EgWalker Integration", () => {
       },
       {
         id: "e3",
-        parentVersion: new Set(["e1", "e2"]),
+        parentVersion: new Set(["e2"]), // Sequential: e3 depends only on e2
         operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
         timestamp: Date.now() + 2,
       },
@@ -40,8 +40,8 @@ describe("Section 3.2: EgWalker Integration", () => {
 
     const result = walker.walk(events);
     expect(result.eventsProcessed).toBe(3);
-    // Should have minimal retreats in this simple sequential case
-    expect(result.retreatCount).toBeLessThanOrEqual(2);
+    // Walker retreats once even for sequential events (expected eg-walker behavior)
+    expect(result.retreatCount).toBeLessThanOrEqual(1);
   });
 
   it("should handle isClearable type guard with null/undefined input", () => {

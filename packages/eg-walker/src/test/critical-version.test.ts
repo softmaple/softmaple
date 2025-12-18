@@ -508,7 +508,17 @@ describe("Section 3.5: Edge cases and uncovered paths", () => {
     });
 
     it("should handle versionEquals with different element values (lines 319-320)", () => {
-      const detector = new DefaultCriticalVersionDetector();
+      // Initialize detector with a replica - critical version detection requires 
+      // that all known replicas update their versions. Since we pass ["replica1"],
+      // the detector tracks this replica but has no version updates yet.
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      
+      // Create a version object with replicaId for proper extraction
+      const versionWithReplica = Object.assign(new Set(["e1", "e2"]), { 
+        replicaId: "replica1" 
+      });
+      detector.updateVersion(versionWithReplica);
+      
       const clearer = new StateClearer(detector);
       
       const mockState: ClearableCRDTState = {
@@ -517,16 +527,17 @@ describe("Section 3.5: Edge cases and uncovered paths", () => {
         clearCachedMetadata: vi.fn(),
       };
       
-      // Clear to a version
+      // Clear to v1 (equals critical version) - should succeed
       const v1 = new Set(["e1", "e2"]);
-      clearer.clearInternalState(mockState as InternalCRDTState, v1);
+      const result1 = clearer.clearInternalState(mockState as InternalCRDTState, v1);
+      // Now that detector has a critical version (versionWithReplica), v1 should match
+      expect(result1).toBe(true);
       
-      // Try clearing to a version with same length but different elements
+      // Try clearing to v2 (same length but different elements) - should fail
       // This triggers line 319: if (arr1[i] !== arr2[i])
       const v2 = new Set(["e1", "e3"]);
-      const result = clearer.clearInternalState(mockState as InternalCRDTState, v2);
-      // The second call should succeed because v2 is different from v1
-      expect(result).toBe(false); // clearInternalState can't clear because no critical version
+      const result2 = clearer.clearInternalState(mockState as InternalCRDTState, v2);
+      expect(result2).toBe(false); // Cannot clear because v2 doesn't equal critical version
     });
 
     it("should handle updateVersion with replicaId extraction (line 78)", () => {

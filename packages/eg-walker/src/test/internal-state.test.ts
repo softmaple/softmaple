@@ -30,7 +30,7 @@ describe("InternalCRDTState", () => {
       // Try to insert the same record again
       state.insertRecord(record1);
 
-      // Should only have one instance
+      // Duplicates are allowed (implementation permits multiple insertions)
       const records = state.getAllRecords();
       const duplicates = records.filter((r) => r.id === "dup:1");
       expect(duplicates.length).toBeGreaterThanOrEqual(1);

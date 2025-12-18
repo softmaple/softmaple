@@ -255,6 +255,16 @@ describe("Section 3.6: Partial Replay", () => {
       // Should have no placeholders (no deletes)
       expect(state.hasPlaceholders()).toBe(false);
     });
+
+    it("should handle placeholder events not in graph", () => {
+      const criticalVersion: Version = new Set(["missing-event"]);
+      
+      // Should handle gracefully when event is not found
+      replayManager.reconstructPlaceholders(state, criticalVersion);
+      
+      // No crash, just skip missing events
+      expect(state.hasPlaceholders()).toBe(false);
+    });
   });
 
   describe("Performance", () => {

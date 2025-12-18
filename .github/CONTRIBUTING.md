@@ -37,6 +37,31 @@ Please follow these steps to have your contribution considered by the maintainer
 
 1. Follow all instructions in [the template](PULL_REQUEST_TEMPLATE.md).
 2. Follow the [styleguides](#styleguides).
+3. Keep your branch up to date with `next` using `git rebase` (not `git merge`).
+
+#### Keeping Your Branch Updated
+
+When the `next` branch has new commits, update your feature branch using rebase:
+
+```bash
+# Fetch latest changes from remote
+git fetch origin
+
+# Rebase your branch onto the latest next
+git rebase origin/next
+
+# If there are conflicts, resolve them and continue
+git rebase --continue
+
+# Force push to update your branch (if already pushed)
+git push --force-with-lease
+```
+
+**Why rebase instead of merge?**
+- Keeps a linear, clean commit history
+- Makes it easier to review changes
+- Avoids unnecessary merge commits
+- Simplifies bisecting and reverting changes
 
 ## Styleguides
 

@@ -20,6 +20,13 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
 - **Linting:** ESLint configs in `packages/eslint-config/`
 - Husky pre-commit hooks auto-format staged files
 
+### TypeScript Guidelines
+- **No `any` type:** The `@typescript-eslint/no-explicit-any` rule is enforced as an error
+- When encountering `any` types:
+  1. **Preferred:** Replace with proper types (union types, generics, or specific interfaces)
+  2. **If proper typing is not feasible:** Use `@ts-expect-error` with a descriptive comment explaining why
+  3. **Never use `@ts-ignore`:** Always use `@ts-expect-error` to ensure the error still exists
+
 ### Functional Programming Principles
 Where possible, prefer functional programming patterns:
 - **Pure functions:** Functions should not have side effects and should return the same output for the same inputs

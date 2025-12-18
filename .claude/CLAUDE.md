@@ -89,7 +89,11 @@ const processInput = (input: string): string =>
 
 ### 2. TypeScript Best Practices
 
-- Use strict TypeScript (no \`any\`, avoid \`@ts-ignore\`)
+- **No `any` type:** The `@typescript-eslint/no-explicit-any` rule is enforced as an error
+- When encountering `any` types:
+  1. **Preferred:** Replace with proper types (union types, generics, or specific interfaces)
+  2. **If proper typing is not feasible:** Use `@ts-expect-error` with a descriptive comment explaining why
+  3. **Never use `@ts-ignore`:** Always use `@ts-expect-error` to ensure the error still exists
 - Prefer type inference when obvious
 - Use discriminated unions for complex types
 - Define interfaces for data structures

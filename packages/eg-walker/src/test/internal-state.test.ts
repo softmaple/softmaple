@@ -682,4 +682,185 @@ describe("InternalCRDTState", () => {
       expect(statistics.deletedRecords).toBe(1);
     });
   });
+
+  describe("Edge Cases for B-tree and Metadata", () => {
+    it("should handle metadata initialization for new records", () => {
+      const record: Record = {
+        id: "test:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "test",
+      };
+
+      state.insertRecord(record);
+
+      // Verify metadata was created
+      const records = state.getAllRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0]?.id).toBe("test:1");
+    });
+
+    it("should handle record lookup for non-existent IDs", () => {
+      const record: Record = {
+        id: "exists:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "exists",
+      };
+
+      state.insertRecord(record);
+
+      // Try to find a non-existent record
+      const records = state.getAllRecords();
+      const foundNonExistent = records.find((r) => r.id === "nonexistent:99");
+      expect(foundNonExistent).toBeUndefined();
+    });
+
+    it("should handle delete operations on boundary records", () => {
+      // Insert multiple records
+      const record1: Record = {
+        id: "a:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "a",
+      };
+
+      const record2: Record = {
+        id: "b:1",
+        originLeft: "a:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "B",
+        eventId: "b",
+      };
+
+      const record3: Record = {
+        id: "c:1",
+        originLeft: "b:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "C",
+        eventId: "c",
+      };
+
+      state.insertRecord(record1);
+      state.insertRecord(record2);
+      state.insertRecord(record3);
+
+      // Delete the first record
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        parentVersion: new Set(["a", "b", "c"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("BC");
+    });
+
+    it("should handle delete operations in the middle of text", () => {
+      // Insert multiple records
+      const records = ["A", "B", "C", "D", "E"].map((char, i) => ({
+        id: `r:${i + 1}`,
+        originLeft: i > 0 ? `r:${i}` : null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: char,
+        eventId: `e${i}`,
+      }));
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Delete middle 2 characters (BC)
+      const deleteEvent: GraphEvent = {
+        id: "delete_middle",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 1,
+          length: 2,
+        },
+        parentVersion: new Set(["e0", "e1", "e2", "e3", "e4"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("ADE");
+    });
+
+    it("should handle finding position for originRight positioning", () => {
+      // First record
+      const record1: Record = {
+        id: "a:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "a",
+      };
+
+      const record2: Record = {
+        id: "b:1",
+        originLeft: "a:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "C",
+        eventId: "b",
+      };
+
+      // Insert between a:1 and b:1 with originRight
+      const record3: Record = {
+        id: "c:1",
+        originLeft: "a:1",
+        originRight: "b:1",
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "B",
+        eventId: "c",
+      };
+
+      state.insertRecord(record1);
+      state.insertRecord(record2);
+      state.insertRecord(record3);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("ABC");
+    });
+
+    it("should handle empty state operations", () => {
+      const text = state.getVisibleText();
+      expect(text).toBe("");
+
+      const records = state.getAllRecords();
+      expect(records).toHaveLength(0);
+
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBe(0);
+      expect(stats.visibleRecords).toBe(0);
+    });
+  });
 });

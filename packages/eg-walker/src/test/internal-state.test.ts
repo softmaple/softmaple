@@ -862,5 +862,106 @@ describe("InternalCRDTState", () => {
       expect(stats.totalRecords).toBe(0);
       expect(stats.visibleRecords).toBe(0);
     });
+
+    it("should handle compactEffectState with metadata compaction", () => {
+      // Insert records with metadata
+      const records = ["A", "B", "C"].map((char, i) => ({
+        id: `r:${i + 1}`,
+        originLeft: i > 0 ? `r:${i}` : null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: char,
+        eventId: `e${i}`,
+        metadata: { someData: "test" },
+      }));
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Compact at critical version
+      const criticalVersion = new Set(["e0", "e1"]);
+      state.compactEffectState(criticalVersion);
+
+      // Records should still be accessible
+      expect(state.getVisibleText()).toBe("ABC");
+    });
+
+    it("should handle hasPlaceholders with placeholder records", () => {
+      expect(state.hasPlaceholders()).toBe(false);
+
+      // Add a placeholder
+      const placeholder: GraphEvent = {
+        id: "placeholder1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.addPlaceholder("placeholder1", placeholder);
+      expect(state.hasPlaceholders()).toBe(true);
+    });
+
+    it("should handle rebuildOrderedRecords with position sorting", () => {
+      // Insert records with explicit positions
+      const records = [
+        {
+          id: "r:1",
+          originLeft: null,
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "A",
+          eventId: "e0",
+          position: 0,
+        },
+        {
+          id: "r:2",
+          originLeft: "r:1",
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "B",
+          eventId: "e1",
+          position: 1,
+        },
+      ];
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Compact to trigger rebuild
+      const criticalVersion = new Set(["e0", "e1"]);
+      state.compactEffectState(criticalVersion);
+
+      expect(state.getVisibleText()).toBe("AB");
+    });
+
+    it("should handle getPrepareText with deleted records", () => {
+      // Insert records
+      const records = ["A", "B", "C"].map((char, i) => ({
+        id: `r:${i + 1}`,
+        originLeft: i > 0 ? `r:${i}` : null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: char,
+        eventId: `e${i}`,
+      }));
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Delete middle record in prepare state
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+
+      // getPrepareText should reflect the deletion
+      const prepareText = state.getPrepareText();
+      expect(prepareText.length).toBeLessThan(3);
+    });
   });
 });

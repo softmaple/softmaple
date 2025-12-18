@@ -452,5 +452,42 @@ describe("TemporaryCRDT", () => {
       // Deleted item should still exist but marked as deleted
       expect(state.items.length).toBeGreaterThanOrEqual(2);
     });
+
+    it("should handle integrate with originRight positioning when left sibling is deleted", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "i2", originLeft: "i1", originRight: null, content: "B", insertedBy: "e2", isDeleted: true },
+        { id: "i3", originLeft: "i2", originRight: null, content: "C", insertedBy: "e3", isDeleted: false },
+      ];
+
+      crdt.integrate(items);
+
+      const state = crdt.getEffectState();
+      // Should handle positioning correctly when originLeft is deleted
+      expect(state.items.length).toBe(3);
+      expect(state.items.find((item) => item.id === "i3")).toBeDefined();
+    });
+
+    it("should handle integrate with complex originRight chains", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Create a chain: i1 -> i2 -> i3 where i2 has originRight to i3
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "i3", originLeft: "i1", originRight: null, content: "C", insertedBy: "e3", isDeleted: false },
+        { id: "i2", originLeft: "i1", originRight: "i3", content: "B", insertedBy: "e2", isDeleted: false },
+      ];
+
+      crdt.integrate(items);
+
+      const state = crdt.getEffectState();
+      // Should correctly position i2 between i1 and i3
+      expect(state.items.length).toBe(3);
+      const i2Index = state.items.findIndex((item) => item.id === "i2");
+      const i3Index = state.items.findIndex((item) => item.id === "i3");
+      expect(i2Index).toBeLessThan(i3Index);
+    });
   });
 });

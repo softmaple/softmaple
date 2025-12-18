@@ -382,6 +382,5 @@ describe("Retreat/Advance Mechanics", () => {
 
       crdtState.destroy();
     });
-
   });
 });

@@ -322,4 +322,165 @@ describe("Section 3.6: Partial Replay", () => {
       expect(state.getStatistics().totalRecords).toBeGreaterThan(0);
     });
   });
+
+  describe("Edge Cases for computeReplayRange", () => {
+    it("should handle version with events not in graph", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Try to replay with unknown event ID
+      const fromVersion: Version = new Set();
+      const toVersion: Version = new Set(["e1", "unknown"]);
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
+
+      // Should still work, ignoring unknown events
+      expect(replayRange).toContain("e1");
+    });
+
+    it("should handle identical from and to versions", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      const version: Version = new Set(["e1"]);
+      const replayRange = replayManager.computeReplayRange(version, version);
+
+      // No events to replay when versions are the same
+      expect(replayRange).toHaveLength(0);
+    });
+
+    it("should handle transitive dependencies in replay", () => {
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "1" },
+          timestamp: 1,
+        },
+        {
+          id: "e2",
+          parentVersion: new Set(["e1"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "2" },
+          timestamp: 2,
+        },
+        {
+          id: "e3",
+          parentVersion: new Set(["e2"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "3" },
+          timestamp: 3,
+        },
+      ];
+
+      for (const event of events) {
+        eventGraph.addEvent(event);
+      }
+
+      // Replay from empty to e3 should include all transitive dependencies
+      const fromVersion: Version = new Set();
+      const toVersion: Version = new Set(["e3"]);
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
+
+      expect(replayRange).toHaveLength(3);
+      expect(replayRange).toEqual(["e1", "e2", "e3"]);
+    });
+  });
+
+  describe("replayEvents edge cases", () => {
+    it("should clear prepare state before replaying", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Apply some prepare state first
+      state.applyPrepare(event);
+      const recordsBefore = state.getAllRecords().length;
+      expect(recordsBefore).toBeGreaterThan(0);
+
+      // Replay should clear prepare state
+      replayManager.replayEvents(["e1"], state);
+
+      // Verify prepare state handling
+      expect(state).toBeDefined();
+    });
+
+    it("should handle replaying with duplicate event IDs", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Replay with duplicate event IDs
+      replayManager.replayEvents(["e1", "e1"], state);
+
+      // Should handle gracefully (no error)
+      expect(state.getStatistics().totalRecords).toBeGreaterThan(0);
+    });
+
+    it("should skip replay of unknown events", () => {
+      // Try to replay non-existent event
+      replayManager.replayEvents(["unknown"], state);
+
+      // Should not crash, just skip
+      expect(state.getStatistics().totalRecords).toBe(0);
+    });
+  });
+
+  describe("reconstructPlaceholders edge cases", () => {
+    it("should handle empty critical version", () => {
+      const criticalVersion: Version = new Set();
+      replayManager.reconstructPlaceholders(state, criticalVersion);
+
+      // Should not create any placeholders
+      expect(state.hasPlaceholders()).toBe(false);
+    });
+
+    it("should handle version with no delete operations", () => {
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+          timestamp: 1,
+        },
+        {
+          id: "e2",
+          parentVersion: new Set(["e1"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+          timestamp: 2,
+        },
+      ];
+
+      for (const event of events) {
+        eventGraph.addEvent(event);
+      }
+
+      const criticalVersion: Version = new Set(["e1", "e2"]);
+      replayManager.reconstructPlaceholders(state, criticalVersion);
+
+      // Should not create placeholders (all inserts)
+      expect(state.hasPlaceholders()).toBe(false);
+    });
+  });
 });

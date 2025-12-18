@@ -2,7 +2,7 @@
  * Tests for Section 3.5: State Clearing (Critical Versions)
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   createTestVersion,
   createSimpleTestVersion,
@@ -12,6 +12,7 @@ import {
   StateClearer,
   isCriticalVersion,
   clearInternalState,
+  ClearableCRDTState,
 } from "../core/critical-version";
 import { InternalCRDTState } from "../crdt/internal-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
@@ -59,6 +60,32 @@ describe("Section 3.5: Critical Version Detection", () => {
       // No critical version with no replicas
       expect(detector.isCriticalVersion(createSimpleTestVersion(1))).toBe(false);
       expect(detector.getCurrentCriticalVersion()).toBeNull();
+    });
+
+    it("should handle getCurrentCriticalVersion when no events have been added", () => {
+      const detector = new DefaultCriticalVersionDetector();
+
+      // Call getCurrentCriticalVersion without updating any version first
+      const result = detector.getCurrentCriticalVersion();
+      expect(result).toBe(null);
+    });
+
+    it("should handle tryClearToCriticalVersion with empty critical version", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      const clearer = new StateClearer(detector);
+
+      // Create a mock clearable state
+      const mockState: ClearableCRDTState = {
+        clearPrepareState: vi.fn(),
+        compactEffectState: vi.fn(),
+        clearCachedMetadata: vi.fn(),
+      };
+
+      // Try to clear without any critical version set
+      clearer.tryClearToCriticalVersion(mockState);
+
+      // Should not call any clearing methods when no critical version
+      expect(mockState.clearPrepareState).not.toHaveBeenCalled();
     });
   });
 });

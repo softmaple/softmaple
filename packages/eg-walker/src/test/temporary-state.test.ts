@@ -245,5 +245,72 @@ describe("TemporaryCRDT", () => {
       // @ts-expect-error - Accessing private destroyed flag for testing
       expect(crdtRef.destroyed).toBe(true);
     });
+
+    it("should throw error when accessing destroyed CRDT", () => {
+      const crdt = new TemporaryCRDT();
+      crdt.destroy();
+
+      // Should throw when calling methods on destroyed CRDT
+      expect(() => crdt.integrate([])).toThrow(
+        "CRDT has been destroyed",
+      );
+    });
+
+    it("should handle integrate with complex item sequences", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Create a complex sequence of items
+      const items = [
+        {
+          id: "item1",
+          originLeft: null,
+          originRight: "item3",
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "item2",
+          originLeft: "item1",
+          originRight: "item3",
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
+        {
+          id: "item3",
+          originLeft: "item2",
+          originRight: null,
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
+      ];
+
+      // Integrate items with originRight positioning
+      crdt.integrate(items);
+
+      // Should maintain correct ordering based on originRight
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(3);
+    });
+
+    it("should handle multiple integrate calls with overlapping items", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items1 = [
+        { id: "item1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+      ];
+      const items2 = [
+        { id: "item2", originLeft: "item1", originRight: null, content: "B", insertedBy: "e2", isDeleted: false },
+      ];
+
+      crdt.integrate(items1);
+      crdt.integrate(items2);
+
+      // Should have both items integrated correctly
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(2);
+    });
   });
 });

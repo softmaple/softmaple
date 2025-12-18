@@ -10,10 +10,43 @@ import type { GraphEvent } from "../graph/event-graph";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 
 describe("Section 3.2: EgWalker Integration", () => {
-  it("should handle isClearable type guard with null input", () => {
-    // This test verifies the isClearable type guard returns false for null/undefined
-    const walker = new EgWalker();
-    expect(walker).toBeDefined();
+  it("should handle retreatToVersion early return when no retreat or advance needed", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT });
+
+    // Create perfectly sequential events where prepareVersion always matches parent
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "e3",
+        parentVersion: new Set(["e1", "e2"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(3);
+    // Should have minimal retreats in this simple sequential case
+    expect(result.retreatCount).toBeLessThanOrEqual(2);
+  });
+
+  it("should handle isClearable type guard with null/undefined input", () => {
+    // This test verifies the isClearable type guard returns false for null/undefined/non-objects
+    // Create a walker with explicit null internalCRDT to trigger type guard check
+    // @ts-expect-error - Testing with null internalCRDT to trigger type guard
+    const walker = new EgWalker({ internalCRDT: null });
     
     // Create events that would normally trigger state clearing
     const events: GraphEvent[] = [
@@ -25,7 +58,7 @@ describe("Section 3.2: EgWalker Integration", () => {
       },
     ];
     
-    // Walk should complete successfully even if isClearable returns false
+    // Walk should complete successfully even when isClearable returns false
     const result = walker.walk(events);
     expect(result.eventsProcessed).toBe(1);
   });

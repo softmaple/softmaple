@@ -316,5 +316,5 @@ if (!found) {
 ## Resources
 
 - Main guidelines: \`AGENTS.md\`
-- Repository: https://github.com/softmaple/softmaple
-- Docs: https://docs.softmaple.com
+- [Repository](https://github.com/softmaple/softmaple)
+- [Documentation](https://docs.softmaple.ink)

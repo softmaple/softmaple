@@ -7,7 +7,6 @@ import type { EventId } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
 import type { EventGraphWalker } from "../graph/topological-walker";
 import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
-import { InternalCRDTState as ConcreteInternalCRDTState } from "../crdt/internal-state";
 import type { ClearableCRDTState } from "./critical-version";
 
 /**
@@ -36,15 +35,12 @@ import {
   StateClearer,
   DefaultCriticalVersionDetector,
 } from "./critical-version";
-import { PartialReplayManager } from "./replay";
 import {
   FrontierVersion,
   VersionAlignmentManager,
-  compareVersions,
 } from "./version-alignment";
 import { DefaultEventGraphWalker } from "../graph/topological-walker";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
-import { ConcreteCRDTState } from "../crdt";
 
 /**
  * Configuration for the walker
@@ -93,6 +89,7 @@ export class EgWalker {
       (() => {
         try {
           // Try to use the concrete implementation
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const { ConcreteCRDTState } = require("../crdt/retreat-advance");
           return new ConcreteCRDTState();
         } catch {
@@ -195,7 +192,6 @@ export class EgWalker {
     retreatCount: number;
   } {
     let retreatCount = 0;
-    const currentPrepare = this.versionManager.getPrepareVersion();
 
     // Check if retreat is needed
     if (!this.versionManager.needsRetreat(targetVersion)) {

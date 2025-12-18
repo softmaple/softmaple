@@ -139,7 +139,7 @@ export function verifyNonInterleaving(items: ReadonlyArray<CRDTItem>): boolean {
 
   // Check that each event has at most one run
   // (multiple runs would indicate interleaving)
-  for (const [eventId, eventRunList] of eventRuns) {
+  for (const [, eventRunList] of eventRuns) {
     if (eventRunList.length > 1) {
       // Event was split into multiple runs - interleaving detected!
       return false;

@@ -3,9 +3,9 @@
  * Manages prepare-version and effect-version for graph walking
  */
 
-import type { EventId, Version } from "../types";
+import type { EventId } from "../types";
 
-/**
+/** 
  * Represents the difference between two versions
  */
 export interface VersionDiff {

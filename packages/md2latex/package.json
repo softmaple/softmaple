@@ -1,9 +1,11 @@
 {
   "name": "@softmaple/md2latex",
+  "type": "module",
   "version": "0.1.0",
   "description": "A Markdown Transformer for LaTeX",
   "main": "index.js",
   "scripts": {
+    "lint": "eslint .",
     "test": "vitest",
     "coverage": "vitest run --coverage"
   },
@@ -21,7 +23,10 @@
   "license": "MIT",
   "packageManager": "pnpm@10.26.0",
   "devDependencies": {
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
     "@vitest/coverage-v8": "^4.0.15",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.15"
   }
 }

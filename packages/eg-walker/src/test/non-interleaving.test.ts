@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import type { ExternalOperation } from "../types";
 import {
   groupIntoRuns,
   ensureNonInterleaving,
@@ -8,7 +7,6 @@ import {
   verifyNonInterleaving,
   BLOCK_ORDER_STRATEGIES,
 } from "../crdt/non-interleaving";
-import { OPERATION_TYPE } from "../constants/operation-types";
 import type { CRDTItem } from "../types";
 
 describe("Non-Interleaving Behavior", () => {

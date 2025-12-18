@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 import { EgWalkerAPI } from "../core/external-api";
 import { withTemporaryCRDT } from "../crdt/temporary-state";
 import { EventGraph } from "../graph/event-graph";
-import type { ExternalOperation, Event } from "../types";
+import type { Event } from "../types";
 
 describe("Eg-walker Algorithm Characteristics", () => {
   describe("Characteristic 1: Strong list specification", () => {

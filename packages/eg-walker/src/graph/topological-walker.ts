@@ -3,7 +3,7 @@
  * Topological traversal of the event graph with efficient ordering
  */
 
-import type { EventId, Version } from "../types";
+import type { EventId } from "../types";
 import type { GraphEvent } from "../graph/event-graph";
 
 export interface EventGraphWalker {

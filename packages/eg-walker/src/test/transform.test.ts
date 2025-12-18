@@ -5,10 +5,6 @@
 import { describe, it, expect } from "vitest";
 import { InternalCRDTState } from "../crdt/internal-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
-import {
-  PREPARE_STATE_TYPE,
-  EFFECT_STATE_TYPE,
-} from "../constants/crdt-states";
 import type { GraphEvent } from "../types";
 
 describe("Section 3.4 - Transform Mechanics", () => {

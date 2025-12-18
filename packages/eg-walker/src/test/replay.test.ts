@@ -12,7 +12,7 @@ import { EventGraph } from "../graph/event-graph";
 import { InternalCRDTState } from "../crdt/internal-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import type { GraphEvent } from "../graph/event-graph";
-import type { EventId, Version } from "../types";
+import type { Version } from "../types";
 
 describe("Section 3.6: Partial Replay", () => {
   let eventGraph: EventGraph;
@@ -267,7 +267,7 @@ describe("Section 3.6: Partial Replay", () => {
   });
 
   it("should handle extractEventIds with empty Set", () => {
-    const emptyVersion: Version = new Set();
+    const _emptyVersion: Version = new Set();
     const fromVersion: Version = new Set();
     const toVersion = new Set(["e1"]);
 

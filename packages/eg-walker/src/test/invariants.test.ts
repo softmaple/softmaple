@@ -107,10 +107,8 @@ describe("Strong List Specification", () => {
     });
 
     it("should reject unknown operation types", () => {
-      const invalidResult = validateIndexBounds("Hello", {
-        type: "UNKNOWN" as any,
-        index: 0,
-      });
+      // @ts-expect-error - Testing with invalid operation type
+      const invalidResult = validateIndexBounds("Hello", { type: "UNKNOWN", index: 0 });
       expect(invalidResult).toBe(false);
     });
   });
@@ -171,12 +169,10 @@ describe("Strong List Specification", () => {
     });
 
     it("should throw error for unknown operation type", () => {
-      expect(() =>
-        applyOperation("Hello", {
-          type: "UNKNOWN" as any,
-          index: 0,
-        }),
-      ).toThrow("Unknown operation type");
+      // @ts-expect-error - Testing with invalid operation type
+      expect(() => applyOperation("Hello", { type: "UNKNOWN", index: 0 })).toThrow(
+        "Unknown operation type",
+      );
     });
   });
 
@@ -190,7 +186,8 @@ describe("Strong List Specification", () => {
       const state = createDocumentState("test");
       expect(Object.isFrozen(state)).toBe(true);
       expect(() => {
-        (state as any).text = "modified";
+        // @ts-expect-error - Testing frozen object modification
+        state.text = "modified";
       }).toThrow();
     });
   });
@@ -268,7 +265,8 @@ describe("Section 3.1: verifyStrongListSpecification", () => {
         id: "e1",
         replicaId: "r1",
         parentVersion: new Set(),
-        operation: { type: "UNKNOWN" } as any,
+        // @ts-expect-error - Testing with invalid operation type
+        operation: { type: "UNKNOWN" },
       },
     ];
 
@@ -293,7 +291,8 @@ describe("Section 3.1: validateIndexBounds", () => {
 
   it("should reject unknown operation type", () => {
     const text = "hello";
-    const operation = { type: "UNKNOWN" } as any;
+    // @ts-expect-error - Testing with invalid operation type
+    const operation = { type: "UNKNOWN" };
 
     expect(validateIndexBounds(text, operation)).toBe(false);
   });

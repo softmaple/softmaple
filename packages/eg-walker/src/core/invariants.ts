@@ -10,7 +10,6 @@ import type {
   GraphEvent,
   ExternalOperation,
   ListInvariant,
-  Version,
 } from "../types";
 
 /**
@@ -38,10 +37,10 @@ export function applyOperation(
       return text.slice(0, index) + text.slice(index + length);
     }
 
-    default:
+    default: {
       // Type exhaustiveness check
-      const _exhaustive: never = operation;
       throw new Error(`Unknown operation type`);
+    }
   }
 }
 

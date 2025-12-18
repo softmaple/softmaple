@@ -9,7 +9,7 @@ import {
   PREPARE_STATE_TYPE,
   EFFECT_STATE_TYPE,
 } from "../constants/crdt-states";
-import type { Record, PrepareState, EffectState } from "../crdt/internal-state";
+import type { Record } from "../crdt/internal-state";
 import type { GraphEvent } from "../types";
 
 describe("InternalCRDTState", () => {
@@ -244,7 +244,8 @@ describe("InternalCRDTState", () => {
 
       // Override max lifetime for testing - accessing private field via reflection
       // TODO: Consider adding a test-only constructor option or setter
-      const stateWithMaxLifetime = shortLivedState as any;
+      // @ts-expect-error - Accessing private maxLifetime for testing
+      const stateWithMaxLifetime = shortLivedState;
       stateWithMaxLifetime.maxLifetime = 100; // 100ms for test
 
       // Wait for the state to auto-destroy

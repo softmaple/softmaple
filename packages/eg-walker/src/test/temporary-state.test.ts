@@ -17,27 +17,32 @@ describe("TemporaryCRDT", () => {
       const crdt = new TemporaryCRDT(1000);
 
       // Check it's not destroyed initially
-      expect((crdt as any).destroyed).toBe(false);
+      // @ts-expect-error - Accessing private destroyed flag for testing
+      expect(crdt.destroyed).toBe(false);
 
       // Advance time past maxLifetime
       vi.advanceTimersByTime(1001);
 
       // Should be destroyed now
-      expect((crdt as any).destroyed).toBe(true);
+      // @ts-expect-error - Accessing private destroyed flag for testing
+      expect(crdt.destroyed).toBe(true);
     });
 
     it("should allow manual destroy before timeout", () => {
       const crdt = new TemporaryCRDT(5000);
 
-      expect((crdt as any).destroyed).toBe(false);
+      // @ts-expect-error - Accessing private destroyed flag for testing
+      expect(crdt.destroyed).toBe(false);
 
       crdt.destroy();
 
-      expect((crdt as any).destroyed).toBe(true);
+      // @ts-expect-error - Accessing private destroyed flag for testing
+      expect(crdt.destroyed).toBe(true);
 
       // Ensure timer is cleared (advancing time should not cause issues)
       vi.advanceTimersByTime(6000);
-      expect((crdt as any).destroyed).toBe(true);
+      // @ts-expect-error - Accessing private destroyed flag for testing
+      expect(crdt.destroyed).toBe(true);
     });
 
     it("should throw when accessing destroyed CRDT", () => {
@@ -232,11 +237,13 @@ describe("TemporaryCRDT", () => {
 
       await withTemporaryCRDT(async (crdt) => {
         crdtRef = crdt;
-        expect((crdtRef as any).destroyed).toBe(false);
+        // @ts-expect-error - Accessing private destroyed flag for testing
+        expect(crdtRef.destroyed).toBe(false);
       });
 
       // Should be destroyed after scope exits
-      expect((crdtRef as any).destroyed).toBe(true);
+      // @ts-expect-error - Accessing private destroyed flag for testing
+      expect(crdtRef.destroyed).toBe(true);
     });
   });
 });

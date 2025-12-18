@@ -14,6 +14,7 @@ import type {
   GraphEvent,
   EventId,
   Version,
+  SerializedGraph,
 } from "../types";
 import { createDocumentState, applyOperation } from "./invariants";
 import { EventGraph } from "../graph/event-graph";
@@ -101,7 +102,7 @@ export class EgWalkerAPI {
   /**
    * Serialize the document state (text + event graph)
    */
-  serialize(): { text: string; eventGraph: any } {
+  serialize(): { text: string; eventGraph: SerializedGraph } {
     return {
       text: this.document,
       eventGraph: this.eventGraph.serialize(),
@@ -113,7 +114,7 @@ export class EgWalkerAPI {
    */
   static deserialize(serialized: {
     text: string;
-    eventGraph: any;
+    eventGraph: SerializedGraph;
   }): EgWalkerAPI {
     // Create new instance with the text
     const api = new EgWalkerAPI("deserialized-replica", serialized.text);

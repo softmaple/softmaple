@@ -5,7 +5,7 @@
  * No CRDT metadata is stored here.
  */
 
-import type { GraphEvent, EventId, Version, SerializedGraph } from "../types";
+import type { GraphEvent, EventId, SerializedGraph } from "../types";
 
 // Re-export GraphEvent for use by other modules
 export type { GraphEvent } from "../types";

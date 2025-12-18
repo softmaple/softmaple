@@ -128,7 +128,7 @@ export class TemporaryCRDT {
     }
  
     // Integrate items event by event to preserve non-interleaving
-    for (const [eventId, eventItems] of itemsByEvent) {
+    for (const [, eventItems] of itemsByEvent) {
       if (eventItems.length === 0) continue;
       
       // Find insertion position for the first item of this event

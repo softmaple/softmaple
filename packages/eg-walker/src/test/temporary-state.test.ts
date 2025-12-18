@@ -51,6 +51,16 @@ describe("TemporaryCRDT", () => {
 
       expect(() => crdt.getPrepareState()).toThrow("CRDT has been destroyed");
     });
+
+    it("should throw error when accessing destroyed CRDT", () => {
+      const crdt = new TemporaryCRDT();
+      crdt.destroy();
+
+      // Should throw when calling methods on destroyed CRDT
+      expect(() => crdt.integrate([])).toThrow(
+        "CRDT has been destroyed",
+      );
+    });
   });
 
   describe("createItemsFromEvent", () => {
@@ -244,16 +254,6 @@ describe("TemporaryCRDT", () => {
       // Should be destroyed after scope exits
       // @ts-expect-error - Accessing private destroyed flag for testing
       expect(crdtRef.destroyed).toBe(true);
-    });
-
-    it("should throw error when accessing destroyed CRDT", () => {
-      const crdt = new TemporaryCRDT();
-      crdt.destroy();
-
-      // Should throw when calling methods on destroyed CRDT
-      expect(() => crdt.integrate([])).toThrow(
-        "CRDT has been destroyed",
-      );
     });
 
     it("should handle integrate with complex item sequences", () => {

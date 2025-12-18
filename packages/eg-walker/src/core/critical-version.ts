@@ -121,7 +121,7 @@ export class DefaultCriticalVersionDetector implements CriticalVersionDetector {
     }
 
     let minVersion: Version | null = null;
-    for (const [_, version] of this.replicaVersions) {
+    for (const [, version] of this.replicaVersions) {
       if (!minVersion || this.versionLess(version, minVersion)) {
         minVersion = version;
       }
@@ -139,8 +139,8 @@ export class DefaultCriticalVersionDetector implements CriticalVersionDetector {
   private extractReplicaId(v: Version): string | null {
     // This is a simplified implementation
     // In practice, this would extract replica ID from the version structure
-    if (typeof v === "object" && v !== null && "replicaId" in v) {
-      return (v as any).replicaId;
+    if (typeof v === "object" && v !== null && "replicaId" in v && typeof (v as Record<string, unknown>).replicaId === "string") {
+      return (v as Record<string, unknown>).replicaId as string;
     }
     return null;
   }
@@ -148,8 +148,8 @@ export class DefaultCriticalVersionDetector implements CriticalVersionDetector {
   private extractVersionNumber(v: Version | undefined): number | null {
     if (!v) return null;
     // Handle test case that passes an object with version property
-    if (typeof v === "object" && v !== null && "version" in v) {
-      return (v as any).version;
+    if (typeof v === "object" && v !== null && "version" in v && typeof (v as Record<string, unknown>).version === "number") {
+      return (v as Record<string, unknown>).version as number;
     }
     // Handle direct number
     if (typeof v === "number") {

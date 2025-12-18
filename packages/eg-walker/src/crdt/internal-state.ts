@@ -8,15 +8,11 @@
 
 import {
   OPERATION_TYPE,
-  type OperationType,
 } from "../constants/operation-types";
 import {
   PREPARE_STATE_TYPE,
   EFFECT_STATE_TYPE,
-  type PrepareStateType,
-  type EffectStateType,
 } from "../constants/crdt-states";
-import { CRDT_SENTINELS } from "../constants/sentinels";
 import type { EventId, GraphEvent, ExternalOperation } from "../types";
 import type { Version } from "../types";
 
@@ -50,7 +46,7 @@ export interface Record {
   // Additional fields for efficient operations
   content?: string; // For text content (made mutable for compaction)
   readonly eventId: EventId; // Event that created this record
-  metadata?: any; // For tracking placeholder and compaction state
+  metadata?: { [key: string]: unknown }; // For tracking placeholder and compaction state
   position?: number; // For ordering records
 }
 
@@ -72,8 +68,6 @@ interface BTreeNode<T> {
 /**
  * B-tree configuration
  */
-const B_TREE_ORDER = 32; // Max children per node
-const MIN_DEGREE = Math.floor(B_TREE_ORDER / 2);
 
 // ============================================================================
 // Internal State Manager
@@ -506,7 +500,8 @@ export class InternalCRDTState {
   /**
    * Update B-tree after insertion (simplified scaffolding)
    */
-  private updateBTreeInsert(record: Record): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private updateBTreeInsert(_record: Record): void {
     // Simplified for now - full B-tree implementation would go here
     if (this.btreeRoot) {
       this.btreeRoot.size++;
@@ -516,7 +511,8 @@ export class InternalCRDTState {
   /**
    * Update B-tree after deletion (simplified scaffolding)
    */
-  private updateBTreeDelete(recordId: EventId): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private updateBTreeDelete(_recordId: EventId): void {
     // Simplified for now - full B-tree implementation would go here
     if (this.btreeRoot) {
       this.btreeRoot.size = Math.max(0, this.btreeRoot.size - 1);
@@ -761,7 +757,7 @@ export class InternalCRDTState {
     // Remove unnecessary metadata from visible records
     const toRemove: string[] = [];
 
-    for (const [id, record] of this.records.entries()) {
+    for (const [, record] of this.records.entries()) {
       if (record.effectState.type === EFFECT_STATE_TYPE.DELETED) {
         // Keep tombstone but clear unnecessary data
         record.content = "";

@@ -7,7 +7,7 @@ export function markdownToLatex(markdown: string) {
   let inBlockquote = false;
   let inCodeBlock = false;
 
-  for (let rawLine of lines) {
+  for (const rawLine of lines) {
     let line = rawLine.trim();
 
     // Handle code blocks

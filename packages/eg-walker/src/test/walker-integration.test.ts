@@ -6,7 +6,6 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 
 import { describe, it, expect } from "vitest";
 import { EgWalker } from "../core/walker";
-import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../graph/event-graph";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 
@@ -389,7 +388,8 @@ describe("Section 3.2: EgWalker Integration", () => {
       topologicalOrder: () => [],
     };
 
-    const walker = new EgWalker({ graphWalker: mockGraphWalker as any });
+    // @ts-expect-error - Testing with minimal mock object
+    const walker = new EgWalker({ graphWalker: mockGraphWalker });
     const result = walker.walk([]);
 
     expect(result.eventsProcessed).toBe(0);

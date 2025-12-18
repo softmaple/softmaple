@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { EgWalkerAPI, createEgWalker } from "../core/external-api";
 import { OPERATION_TYPE } from "../constants/operation-types";
-import type { GraphEvent } from "../types";
+import type { GraphEvent, SerializedGraph } from "../types";
 
 describe("EgWalkerAPI", () => {
   describe("insert", () => {
@@ -93,7 +93,7 @@ describe("EgWalkerAPI", () => {
     it("should deserialize document state", () => {
       const api = EgWalkerAPI.deserialize({
         text: "Hello",
-        eventGraph: null,
+        eventGraph: null as unknown as SerializedGraph,
       });
       expect(api.getText()).toBe("Hello");
     });
@@ -188,15 +188,18 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     const api = new EgWalkerAPI("r1");
 
     // Mock eventGraph.addEvent to throw a non-duplicate error
-    const originalAddEvent = (api as any).eventGraph.addEvent;
-    (api as any).eventGraph.addEvent = () => {
+    // @ts-expect-error - Accessing private eventGraph for testing
+    const originalAddEvent = api.eventGraph.addEvent;
+    // @ts-expect-error - Mocking private eventGraph method for testing
+    api.eventGraph.addEvent = () => {
       throw new Error("Some other error");
     };
 
     expect(() => api.insert(0, "test")).toThrow("Some other error");
 
     // Restore
-    (api as any).eventGraph.addEvent = originalAddEvent;
+    // @ts-expect-error - Restoring private eventGraph method
+    api.eventGraph.addEvent = originalAddEvent;
   });
 
   it("should handle non-duplicate errors in applyRemoteEvent", async () => {
@@ -204,22 +207,24 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
     const event: GraphEvent = {
       id: "r2:0",
-      replicaId: "r2",
       parentVersion: new Set(),
       operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
       timestamp: Date.now(),
     };
 
     // Mock eventGraph.addEvent to throw a non-duplicate error
-    const originalAddEvent = (api as any).eventGraph.addEvent;
-    (api as any).eventGraph.addEvent = () => {
+    // @ts-expect-error - Accessing private eventGraph for testing
+    const originalAddEvent = api.eventGraph.addEvent;
+    // @ts-expect-error - Mocking private eventGraph method for testing
+    api.eventGraph.addEvent = () => {
       throw new Error("Network error");
     };
 
     await expect(api.applyRemoteEvent(event)).rejects.toThrow("Network error");
 
     // Restore
-    (api as any).eventGraph.addEvent = originalAddEvent;
+    // @ts-expect-error - Restoring private eventGraph method
+    api.eventGraph.addEvent = originalAddEvent;
   });
 
   it("should test canApplyDirectly with missing parents", async () => {
@@ -228,14 +233,14 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     // Create an event with a parent that doesn't exist in currentVersion
     const event: GraphEvent = {
       id: "r2:1",
-      replicaId: "r2",
       parentVersion: new Set(["r2:0"]), // This parent doesn't exist in current version
       operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
       timestamp: Date.now(),
     };
 
     // Access private method using any cast
-    const canApply = (api as any).canApplyDirectly(event);
+    // @ts-expect-error - Accessing private method for testing
+    const canApply = api.canApplyDirectly(event);
     expect(canApply).toBe(false);
   });
 
@@ -244,19 +249,20 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     api.insert(0, "Hello");
 
     // Get the current version after first insert
-    const currentVersion = (api as any).currentVersion;
-    const parentId = Array.from(currentVersion)[0];
+    // @ts-expect-error - Accessing private currentVersion for testing
+    const currentVersion = api.currentVersion;
+    const parentId = Array.from(currentVersion)[0] ?? "";
 
     // Create an event that has parent in current version
     const event: GraphEvent = {
       id: "r1:1",
-      replicaId: "r1",
       parentVersion: new Set([parentId]),
       operation: { type: OPERATION_TYPE.INSERT, index: 5, text: " World" },
       timestamp: Date.now(),
     };
 
-    const canApply = (api as any).canApplyDirectly(event);
+    // @ts-expect-error - Accessing private method for testing
+    const canApply = api.canApplyDirectly(event);
     expect(canApply).toBe(true);
   });
 

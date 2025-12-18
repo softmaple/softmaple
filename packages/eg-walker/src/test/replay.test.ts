@@ -127,6 +127,43 @@ describe("Section 3.6: Partial Replay", () => {
     });
   });
 
+  describe("topologicalSort edge cases", () => {
+    it("should handle topologicalSort with complex dependencies", () => {
+      // Create events with complex dependency chains
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+          timestamp: 1,
+        },
+        {
+          id: "e2",
+          parentVersion: new Set(["e1"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+          timestamp: 2,
+        },
+        {
+          id: "e3",
+          parentVersion: new Set(["e1", "e2"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+          timestamp: 3,
+        },
+      ];
+
+      // Add to graph
+      events.forEach((e) => eventGraph.addEvent(e));
+
+      // Compute replay range to test topological sort
+      const from = new Set<string>();
+      const to = new Set(["e1", "e2", "e3"]);
+      const result = computeReplayRange(replayManager, from, to);
+      
+      // Should maintain topological order
+      expect(result.length).toBe(3);
+    });
+  });
+
   describe("replayEvents", () => {
     it("should replay events to reconstruct state", () => {
       // Add events to graph

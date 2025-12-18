@@ -61,6 +61,85 @@ describe("TemporaryCRDT", () => {
         "CRDT has been destroyed",
       );
     });
+
+    it("should handle integrate with complex originRight positioning", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Insert items with various originRight references
+      const items = [
+        {
+          id: "item1",
+          originLeft: null,
+          originRight: "item3", // Points to item3 which doesn't exist yet
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "item2",
+          originLeft: "item1",
+          originRight: "item3",
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
+        {
+          id: "item3",
+          originLeft: "item2",
+          originRight: null,
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
+      ];
+
+      // Integrate in order - should exercise originRight search loop
+      items.forEach((item) => crdt.integrate([item]));
+
+      const prepareState = crdt.getPrepareState();
+      expect(prepareState.visibleIndices.size).toBe(3);
+    });
+
+    it("should handle integrate with concurrent items same originLeft", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Insert base item
+      const baseItem = {
+        id: "base",
+        originLeft: null,
+        originRight: null,
+        content: "B",
+        insertedBy: "e0",
+        isDeleted: false,
+      };
+      crdt.integrate([baseItem]);
+
+      // Insert two concurrent items with same originLeft
+      const concurrent1 = {
+        id: "concurrent1",
+        originLeft: "base",
+        originRight: null,
+        content: "X",
+        insertedBy: "e1",
+        isDeleted: false,
+      };
+
+      const concurrent2 = {
+        id: "concurrent2",
+        originLeft: "base",
+        originRight: null,
+        content: "Y",
+        insertedBy: "e2",
+        isDeleted: false,
+      };
+
+      // Integrate concurrent items - ordering rule determines order
+      crdt.integrate([concurrent1]);
+      crdt.integrate([concurrent2]);
+
+      const prepareState = crdt.getPrepareState();
+      expect(prepareState.visibleIndices.size).toBe(3);
+    });
   });
 
   describe("createItemsFromEvent", () => {

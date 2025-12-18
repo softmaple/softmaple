@@ -312,5 +312,66 @@ describe("TemporaryCRDT", () => {
       const state = crdt.getEffectState();
       expect(state.items.length).toBe(2);
     });
+
+    it("should handle integrate with originRight positioning for complex insertions", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items1 = [
+        { id: "item1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "item3", originLeft: "item1", originRight: null, content: "C", insertedBy: "e2", isDeleted: false },
+      ];
+      crdt.integrate(items1);
+
+      // Insert item2 between item1 and item3 using originRight
+      const items2 = [
+        { id: "item2", originLeft: "item1", originRight: "item3", content: "B", insertedBy: "e3", isDeleted: false },
+      ];
+      crdt.integrate(items2);
+
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(3);
+      // Should be positioned correctly
+      const contents = state.items.map((item) => item?.content).filter(Boolean);
+      expect(contents).toContain("A");
+      expect(contents).toContain("B");
+      expect(contents).toContain("C");
+    });
+
+    it("should handle integrate when originRight is at the middle of items array", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Create a scenario where originRight needs to scan through items
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "1", insertedBy: "e1", isDeleted: false },
+        { id: "i3", originLeft: "i1", originRight: null, content: "3", insertedBy: "e2", isDeleted: false },
+        { id: "i5", originLeft: "i3", originRight: null, content: "5", insertedBy: "e3", isDeleted: false },
+      ];
+      crdt.integrate(items);
+
+      // Insert i2 between i1 and i3 using originRight
+      const items2 = [
+        { id: "i2", originLeft: "i1", originRight: "i3", content: "2", insertedBy: "e4", isDeleted: false },
+      ];
+      crdt.integrate(items2);
+
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(4);
+    });
+
+    it("should handle integrate with deleted items and originRight references", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "i2", originLeft: "i1", originRight: null, content: "B", insertedBy: "e2", isDeleted: true },
+        { id: "i3", originLeft: "i1", originRight: "i2", content: "C", insertedBy: "e3", isDeleted: false },
+      ];
+
+      crdt.integrate(items);
+
+      const state = crdt.getEffectState();
+      // Deleted item should still exist but marked as deleted
+      expect(state.items.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

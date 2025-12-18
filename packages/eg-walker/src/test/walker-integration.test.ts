@@ -63,10 +63,10 @@ describe("Section 3.2: EgWalker Integration", () => {
     
     // Walk should complete successfully even when isClearable returns false
     const result = walker.walk(events);
-    expect(result.eventsProcessed).toBe(1);
-  });
+      expect(result.eventsProcessed).toBe(1);
+    });
 
-  it("should handle retreatToVersion with no retreat or advance needed", () => {
+    it("should handle retreatToVersion with no retreat or advance needed", () => {
     const internalCRDT = new StubInternalCRDT();
     const walker = new EgWalker({ internalCRDT });
 

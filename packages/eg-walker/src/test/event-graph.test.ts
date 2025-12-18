@@ -379,4 +379,161 @@ describe("EventGraph", () => {
       expect(reSerialized.metadata?.customField).toBe("test-value");
     });
   });
+
+  describe("branch coverage improvements", () => {
+    it("should handle getEvent for non-existent event", () => {
+      const graph = new EventGraph();
+      const result = graph.getEvent("non-existent");
+      expect(result).toBeUndefined();
+    });
+
+    it("should handle getChildren for event with no children", () => {
+      const graph = new EventGraph();
+
+      const event: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      };
+
+      graph.addEvent(event);
+
+      const children = graph.getChildren("event-1");
+      expect(children.size).toBe(0);
+    });
+
+    it("should handle getParents for event with no parents", () => {
+      const graph = new EventGraph();
+
+      const event: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      };
+
+      graph.addEvent(event);
+
+      const parents = graph.getParents("event-1");
+      expect(parents.size).toBe(0);
+    });
+
+    it("should handle isAncestor when events are the same", () => {
+      const graph = new EventGraph();
+
+      const event: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      };
+
+      graph.addEvent(event);
+
+      // Same event should return false
+      expect(graph.isAncestor("event-1", "event-1")).toBe(false);
+    });
+
+    it("should handle isAncestor with visited set to prevent infinite loops", () => {
+      const graph = new EventGraph();
+
+      const event1: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "A",
+        },
+      };
+
+      const event2: GraphEvent = {
+        id: "event-2",
+        timestamp: 200,
+        parentVersion: new Set<EventId>(["event-1"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 1,
+          text: "B",
+        },
+      };
+
+      const event3: GraphEvent = {
+        id: "event-3",
+        timestamp: 300,
+        parentVersion: new Set<EventId>(["event-1", "event-2"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 2,
+          text: "C",
+        },
+      };
+
+      graph.addEvent(event1);
+      graph.addEvent(event2);
+      graph.addEvent(event3);
+
+      // event-1 is ancestor of event-3 (through multiple paths)
+      expect(graph.isAncestor("event-1", "event-3")).toBe(true);
+
+      // event-3 is not ancestor of event-1
+      expect(graph.isAncestor("event-3", "event-1")).toBe(false);
+    });
+
+    it("should handle areConcurrent for same event IDs", () => {
+      const graph = new EventGraph();
+
+      const event: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      };
+
+      graph.addEvent(event);
+
+      // Same event should not be concurrent with itself
+      expect(graph.areConcurrent("event-1", "event-1")).toBe(false);
+    });
+
+    it("should handle getTopologicalOrder with cycle detection", () => {
+      const graph = new EventGraph();
+
+      const event1: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "A",
+        },
+      };
+
+      graph.addEvent(event1);
+
+      // Should return events in topological order
+      const order = graph.getTopologicalOrder();
+      expect(order).toHaveLength(1);
+      expect(order[0]?.id).toBe("event-1");
+    });
+  });
 });

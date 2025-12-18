@@ -66,6 +66,41 @@ describe("TemporaryCRDT", () => {
       const items = crdt.createItemsFromEvent(event);
       expect(items).toHaveLength(5); // "Hello" split into 5 items
     });
+
+    it("should create items from delete event", () => {
+      const crdt = new TemporaryCRDT();
+
+      // First insert some items
+      const insertEvent: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello",
+        },
+      };
+
+      const insertedItems = crdt.createItemsFromEvent(insertEvent);
+      crdt.integrate(insertedItems);
+
+      // Now delete some items
+      const deleteEvent: GraphEvent = {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 2,
+        },
+      };
+
+      const deletedItems = crdt.createItemsFromEvent(deleteEvent);
+      expect(deletedItems).toHaveLength(2);
+      expect(deletedItems.every((item) => item.isDeleted)).toBe(true);
+    });
   });
 
   describe("integrate", () => {
@@ -86,6 +121,108 @@ describe("TemporaryCRDT", () => {
       crdt.integrate(items);
       const state = crdt.getEffectState();
       expect(state.visibleText).toBe("H");
+    });
+
+    it("should integrate items with originLeft positioning", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Insert first item
+      const item1: CRDTItem = {
+        id: "i1",
+        content: "A",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
+        insertedBy: "e1",
+      };
+
+      crdt.integrate([item1]);
+
+      // Insert second item after the first
+      const item2: CRDTItem = {
+        id: "i2",
+        content: "B",
+        originLeft: "i1",
+        originRight: null,
+        isDeleted: false,
+        insertedBy: "e2",
+      };
+
+      crdt.integrate([item2]);
+
+      const state = crdt.getEffectState();
+      expect(state.visibleText).toBe("AB");
+    });
+
+    it("should integrate items with originRight positioning", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Insert first and last items
+      const item1: CRDTItem = {
+        id: "i1",
+        content: "A",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
+        insertedBy: "e1",
+      };
+
+      const item3: CRDTItem = {
+        id: "i3",
+        content: "C",
+        originLeft: "i1",
+        originRight: null,
+        isDeleted: false,
+        insertedBy: "e3",
+      };
+
+      crdt.integrate([item1, item3]);
+
+      // Insert middle item with originRight
+      const item2: CRDTItem = {
+        id: "i2",
+        content: "B",
+        originLeft: "i1",
+        originRight: "i3",
+        isDeleted: false,
+        insertedBy: "e2",
+      };
+
+      crdt.integrate([item2]);
+
+      const state = crdt.getEffectState();
+      expect(state.visibleText).toBe("ABC");
+    });
+
+    it("should skip already integrated items", () => {
+      const crdt = new TemporaryCRDT();
+
+      const item: CRDTItem = {
+        id: "i1",
+        content: "A",
+        originLeft: null,
+        originRight: null,
+        isDeleted: false,
+        insertedBy: "e1",
+      };
+
+      // Integrate same item twice
+      crdt.integrate([item]);
+      crdt.integrate([item]);
+
+      const state = crdt.getEffectState();
+      expect(state.visibleText).toBe("A");
+      expect(state.items).toHaveLength(1);
+    });
+
+    it("should handle empty event items gracefully", () => {
+      const crdt = new TemporaryCRDT();
+
+      // This shouldn't crash
+      crdt.integrate([]);
+
+      const state = crdt.getEffectState();
+      expect(state.visibleText).toBe("");
     });
   });
 

@@ -303,5 +303,383 @@ describe("InternalCRDTState", () => {
       expect(stats.visibleRecords).toBe(2); // A and C
       expect(stats.deletedRecords).toBe(1); // B
     });
+
+    it("should track record count", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      const stats = state.getStats();
+      expect(stats.totalRecords).toBe(4);
+    });
+  });
+
+  describe("Edge Cases and Error Handling", () => {
+    it("should handle inserting duplicate records gracefully", () => {
+      const record: Record = {
+        id: "dup:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "D",
+        eventId: "e1",
+      };
+
+      state.insertRecord(record);
+      const initialCount = state.getAllRecords().length;
+
+      // Try inserting same record again
+      state.insertRecord(record);
+      const finalCount = state.getAllRecords().length;
+
+      // Should not duplicate
+      expect(finalCount).toBe(initialCount);
+      expect(finalCount).toBe(1);
+    });
+
+    it("should handle complex originRight positioning", () => {
+      // Create a chain: A -> C, then insert B between them
+      const recordA: Record = {
+        id: "a:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "e1",
+      };
+
+      const recordC: Record = {
+        id: "c:1",
+        originLeft: "a:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "C",
+        eventId: "e2",
+      };
+
+      state.insertRecord(recordA);
+      state.insertRecord(recordC);
+
+      // Now insert B with originRight = C
+      const recordB: Record = {
+        id: "b:1",
+        originLeft: "a:1",
+        originRight: "c:1",
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "B",
+        eventId: "e3",
+      };
+
+      state.insertRecord(recordB);
+
+      const text = state.getVisibleText();
+      expect(text).toBe("ABC");
+    });
+
+    it("should handle delete operations at boundaries", () => {
+      const event1: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "ABCDE",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event1);
+      state.applyEffect(event1);
+
+      // Delete at start
+      const event2: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event2);
+      state.applyEffect(event2);
+
+      expect(state.getVisibleText()).toBe("BCDE");
+
+      // Delete at end
+      const event3: GraphEvent = {
+        id: "e3",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 3,
+          length: 1,
+        },
+        parentVersion: new Set(["e1", "e2"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event3);
+      state.applyEffect(event3);
+
+      expect(state.getVisibleText()).toBe("BCD");
+    });
+
+    it("should handle finding records in middle range", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "0123456789",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Delete middle range
+      const deleteEvent: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 3,
+          length: 4,
+        },
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      expect(state.getVisibleText()).toBe("012789");
+    });
+
+    it("should handle record lookup for non-existent IDs", () => {
+      const record = state.getRecord("nonexistent");
+      expect(record).toBeUndefined();
+    });
+
+    it("should handle getting state when empty", () => {
+      const text = state.getVisibleText();
+      expect(text).toBe("");
+      const records = state.getAllRecords();
+      expect(records).toEqual([]);
+    });
+
+    it("should preserve record order with concurrent edits", () => {
+      // Insert base text
+      const base: GraphEvent = {
+        id: "base",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "X",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(base);
+      state.applyEffect(base);
+
+      // Two concurrent insertions after X
+      const e1: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 1,
+          text: "AAA",
+        },
+        parentVersion: new Set(["base"]),
+        timestamp: Date.now(),
+      };
+
+      const e2: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 1,
+          text: "BBB",
+        },
+        parentVersion: new Set(["base"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(e1);
+      state.applyEffect(e1);
+      state.applyPrepare(e2);
+      state.applyEffect(e2);
+
+      const text = state.getVisibleText();
+      // Should maintain non-interleaving
+      expect(["XAAABBB", "XBBBAAA"]).toContain(text);
+    });
+
+    it("should handle placeholder records for deleted content", () => {
+      // Insert base text
+      const insertEvent: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(insertEvent);
+      state.applyEffect(insertEvent);
+
+      // Delete the text
+      const deleteEvent: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 4,
+        },
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      // Add placeholder
+      state.addPlaceholder("e2", deleteEvent);
+
+      // Check if placeholders exist
+      expect(state.hasPlaceholders()).toBe(true);
+      const placeholderIds = state.getPlaceholderIds();
+      expect(placeholderIds).toContain("e2");
+    });
+
+    it("should compact effect state at critical versions", () => {
+      // Insert multiple records
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello World",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Compact effect state
+      const criticalVersion = new Set(["e1"]);
+      state.compactEffectState(criticalVersion);
+
+      // State should still be valid (text may be affected by compaction)
+      const text = state.getVisibleText();
+      expect(text.length).toBeGreaterThan(0);
+    });
+
+    it("should clear cached metadata", () => {
+      // Insert records
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Clear cached metadata
+      state.clearCachedMetadata();
+
+      // State should still be valid
+      expect(state.getVisibleText()).toBe("Test");
+    });
+
+    it("should get statistics from state", () => {
+      // Insert records
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Get statistics
+      const statistics = state.getStatistics();
+      expect(statistics.totalRecords).toBe(5);
+      expect(statistics.visibleRecords).toBe(5);
+      expect(statistics.deletedRecords).toBe(0);
+    });
+
+    it("should handle deleted records in statistics", () => {
+      // Insert and delete
+      const insertEvent: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "AB",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(insertEvent);
+      state.applyEffect(insertEvent);
+
+      const deleteEvent: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      // Get statistics
+      const statistics = state.getStatistics();
+      expect(statistics.totalRecords).toBe(2);
+      expect(statistics.visibleRecords).toBe(1);
+      expect(statistics.deletedRecords).toBe(1);
+    });
   });
 });

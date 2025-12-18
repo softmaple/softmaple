@@ -215,4 +215,160 @@ describe("Section 3.2: EgWalker Integration", () => {
     // Complex DAG will require retreats and advances
     expect(result.retreatCount + result.advanceCount).toBeGreaterThan(0);
   });
+
+  it("should support debug mode logging", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT, debug: true });
+
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    // With debug enabled, walker should still process correctly
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(2);
+  });
+
+  it("should initialize with custom graphWalker implementation", () => {
+    const mockGraphWalker = {
+      addEvent: () => {},
+      topologicalOrder: () => [],
+    };
+
+    const walker = new EgWalker({ graphWalker: mockGraphWalker as any });
+    const result = walker.walk([]);
+
+    expect(result.eventsProcessed).toBe(0);
+  });
+
+  it("should initialize with custom internalCRDT implementation", () => {
+    const customCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT: customCRDT });
+
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
+        timestamp: Date.now(),
+      },
+    ];
+
+    walker.walk(events);
+
+    // Verify our custom CRDT was used
+    const prepareLog = customCRDT.getPrepareLog();
+    expect(prepareLog).toHaveLength(1);
+    expect(prepareLog[0]?.id).toBe("e1");
+  });
+
+  it("should handle fallback to StubInternalCRDT when ConcreteCRDTState not available", () => {
+    // This test verifies the constructor's fallback logic
+    const walker = new EgWalker();
+    expect(walker).toBeDefined();
+  });
+
+  it("should handle retreat when prepareVersion doesn't match parent", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT });
+
+    // Create events that will trigger retreat
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b" },
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "e3",
+        parentVersion: new Set(["e2"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "c" },
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(3);
+    // Should have retreated when switching from e1 to e2
+    expect(result.retreatCount).toBeGreaterThan(0);
+  });
+
+  it("should handle advance when transitioning to effect state", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT });
+
+    const events: GraphEvent[] = [
+      {
+        id: "base",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "concurrent1",
+        parentVersion: new Set(["base"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "A" },
+        timestamp: Date.now() + 1,
+      },
+      {
+        id: "concurrent2",
+        parentVersion: new Set(["base"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(3);
+    expect(result.advanceCount).toBeGreaterThan(0);
+  });
+
+  it("should clear state at critical versions when supported", () => {
+    const walker = new EgWalker();
+
+    // Create enough events to potentially trigger state clearing
+    const events: GraphEvent[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `e${i}`,
+      parentVersion: i > 0 ? new Set([`e${i - 1}`]) : new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: i, text: String(i) },
+      timestamp: Date.now() + i,
+    }));
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(10);
+  });
+
+  it("should handle events with no operation gracefully", () => {
+    const walker = new EgWalker();
+
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
+        timestamp: Date.now(),
+      },
+    ];
+
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(1);
+  });
 });

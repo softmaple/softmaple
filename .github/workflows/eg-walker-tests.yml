@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   test:
@@ -45,7 +46,13 @@ jobs:
       - name: Build eg-walker package
         run: pnpm --filter @softmaple/eg-walker build
 
-      - name: Run unit tests
-        run: pnpm --filter @softmaple/eg-walker test
+      - name: Run unit tests with coverage
+        run: pnpm --filter @softmaple/eg-walker test:coverage
         env:
           CI: true
+
+      - name: Report coverage to PR
+        if: github.event_name == 'pull_request'
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: packages/eg-walker

@@ -63,7 +63,7 @@ describe("Section 3.2: EgWalker Integration", () => {
     
     // Walk should complete successfully even when isClearable returns false
     const result = walker.walk(events);
-      expect(result.eventsProcessed).toBe(1);
+    expect(result.eventsProcessed).toBe(1);
     });
 
     it("should handle retreatToVersion with no retreat or advance needed", () => {
@@ -583,7 +583,7 @@ describe("Section 3.2: EgWalker Integration", () => {
 
       // Should not crash even without clearable methods
       const result = walker.walk(events);
-      expect(result.eventsProcessed).toBe(1);
+    expect(result.eventsProcessed).toBe(1);
     });
 
     it("should handle concurrent events requiring retreat then advance", () => {
@@ -633,7 +633,7 @@ describe("Section 3.2: EgWalker Integration", () => {
 
       // Should not crash even with null internalCRDT
       const result = walker.walk(events);
-      expect(result.eventsProcessed).toBe(1);
+    expect(result.eventsProcessed).toBe(1);
     });
 
     it("should handle undefined internalCRDT in isClearable", () => {
@@ -654,7 +654,7 @@ describe("Section 3.2: EgWalker Integration", () => {
 
       // Should not crash even with undefined internalCRDT
       const result = walker.walk(events);
-      expect(result.eventsProcessed).toBe(1);
+    expect(result.eventsProcessed).toBe(1);
     });
 
   });

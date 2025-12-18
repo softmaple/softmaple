@@ -730,12 +730,12 @@ describe("Section 3.6: Partial Replay", () => {
 
   describe("applyEventForReplay edge cases", () => {
     it("should handle events without operation property", () => {
-      const event: GraphEvent = {
+      const event = {
         id: "e1",
         parentVersion: new Set(),
-        operation: undefined as any,
+        operation: undefined,
         timestamp: 1,
-      };
+      } as unknown as GraphEvent;
       eventGraph.addEvent(event);
 
       // Should not crash when event has no operation
@@ -746,12 +746,12 @@ describe("Section 3.6: Partial Replay", () => {
 
   describe("needsPlaceholder edge cases", () => {
     it("should return false for events with no operation", () => {
-      const event: GraphEvent = {
+      const event = {
         id: "e1",
         parentVersion: new Set(),
-        operation: undefined as any,
+        operation: undefined,
         timestamp: 1,
-      };
+      } as unknown as GraphEvent;
       eventGraph.addEvent(event);
 
       // Verify it doesn't crash
@@ -760,12 +760,12 @@ describe("Section 3.6: Partial Replay", () => {
     });
 
     it("should return false for events with operation but no type", () => {
-      const event: GraphEvent = {
+      const event = {
         id: "e1",
         parentVersion: new Set(),
-        operation: { index: 0, text: "test" } as any,
+        operation: { index: 0, text: "test" },
         timestamp: 1,
-      };
+      } as unknown as GraphEvent;
       eventGraph.addEvent(event);
 
       // Verify it doesn't crash

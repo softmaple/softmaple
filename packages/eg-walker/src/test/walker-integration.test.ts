@@ -8,6 +8,8 @@ import { describe, it, expect } from "vitest";
 import { EgWalker } from "../core/walker";
 import type { GraphEvent } from "../graph/event-graph";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
+import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
+import type { EventId } from "../types";
 
 describe("Section 3.2: EgWalker Integration", () => {
   it("should handle retreatToVersion early return when no retreat or advance needed", () => {
@@ -551,15 +553,20 @@ describe("Section 3.2: EgWalker Integration", () => {
   describe("Edge cases for isClearable type guard", () => {
     it("should handle CRDT without clearable methods", () => {
       // Create walker with stub that has clearable methods
-      const config = {
-        internalCRDT: {
+      const mockCRDT = {
           reset: () => {},
           getCurrentText: () => "",
-          applyPrepare: () => {},
-          retreat: () => new Set(),
-          advance: () => new Set(),
+          applyPrepare: (_event: GraphEvent, appliedEvents: ReadonlySet<EventId>) =>
+            new Set(appliedEvents),
+          retreat: (_eventId: EventId, appliedEvents: ReadonlySet<EventId>) =>
+            new Set(appliedEvents),
+          advance: (_eventId: EventId, appliedEvents: ReadonlySet<EventId>) =>
+            new Set(appliedEvents),
           // Missing clearable methods - should not crash
-        } as unknown as InternalCRDTState,
+      } as unknown as InternalCRDTState;
+
+      const config: { internalCRDT?: InternalCRDTState } = {
+        internalCRDT: mockCRDT,
       };
       const walker = new EgWalker(config);
 

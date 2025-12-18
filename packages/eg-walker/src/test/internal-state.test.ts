@@ -533,5 +533,153 @@ describe("InternalCRDTState", () => {
       // Should maintain non-interleaving
       expect(["XAAABBB", "XBBBAAA"]).toContain(text);
     });
+
+    it("should handle placeholder records for deleted content", () => {
+      // Insert base text
+      const insertEvent: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(insertEvent);
+      state.applyEffect(insertEvent);
+
+      // Delete the text
+      const deleteEvent: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 4,
+        },
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      // Add placeholder
+      state.addPlaceholder("e2", deleteEvent);
+
+      // Check if placeholders exist
+      expect(state.hasPlaceholders()).toBe(true);
+      const placeholderIds = state.getPlaceholderIds();
+      expect(placeholderIds).toContain("e2");
+    });
+
+    it("should compact effect state at critical versions", () => {
+      // Insert multiple records
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello World",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Compact effect state
+      const criticalVersion = new Set(["e1"]);
+      state.compactEffectState(criticalVersion);
+
+      // State should still be valid (text may be affected by compaction)
+      const text = state.getVisibleText();
+      expect(text.length).toBeGreaterThan(0);
+    });
+
+    it("should clear cached metadata", () => {
+      // Insert records
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Clear cached metadata
+      state.clearCachedMetadata();
+
+      // State should still be valid
+      expect(state.getVisibleText()).toBe("Test");
+    });
+
+    it("should get statistics from state", () => {
+      // Insert records
+      const event: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(event);
+      state.applyEffect(event);
+
+      // Get statistics
+      const statistics = state.getStatistics();
+      expect(statistics.totalRecords).toBe(5);
+      expect(statistics.visibleRecords).toBe(5);
+      expect(statistics.deletedRecords).toBe(0);
+    });
+
+    it("should handle deleted records in statistics", () => {
+      // Insert and delete
+      const insertEvent: GraphEvent = {
+        id: "e1",
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "AB",
+        },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(insertEvent);
+      state.applyEffect(insertEvent);
+
+      const deleteEvent: GraphEvent = {
+        id: "e2",
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        parentVersion: new Set(["e1"]),
+        timestamp: Date.now(),
+      };
+
+      state.applyPrepare(deleteEvent);
+      state.applyEffect(deleteEvent);
+
+      // Get statistics
+      const statistics = state.getStatistics();
+      expect(statistics.totalRecords).toBe(2);
+      expect(statistics.visibleRecords).toBe(1);
+      expect(statistics.deletedRecords).toBe(1);
+    });
   });
 });

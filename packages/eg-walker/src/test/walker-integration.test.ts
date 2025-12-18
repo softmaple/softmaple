@@ -654,5 +654,6 @@ describe("Section 3.2: EgWalker Integration", () => {
       const result = walker.walk(events);
       expect(result.eventsProcessed).toBe(1);
     });
+
   });
 });

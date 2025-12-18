@@ -963,5 +963,117 @@ describe("InternalCRDTState", () => {
       const prepareText = state.getPrepareText();
       expect(prepareText.length).toBeLessThan(3);
     });
+
+    it("should handle recordToIndexEffect with deleted record", () => {
+      // Insert a record
+      const record: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED }, // Deleted in effect
+        content: "X",
+        eventId: "e0",
+      };
+
+      state.insertRecord(record);
+
+      // recordToIndexEffect should return -1 for deleted records
+      const index = state.recordToIndexEffect(record);
+      expect(index).toBe(-1);
+    });
+
+    it("should handle recordToIndexEffect with non-existent record", () => {
+      const nonExistentRecord: Record = {
+        id: "r:does-not-exist",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "e0",
+      };
+
+      expect(() => state.recordToIndexEffect(nonExistentRecord)).toThrow(
+        "Record r:does-not-exist not found in CRDT state",
+      );
+    });
+
+    it("should handle indexToRecordPrepare with invalid negative index", () => {
+      expect(() => state.indexToRecordPrepare(-1)).toThrow(
+        "Invalid prepare-index: -1",
+      );
+    });
+
+    it("should handle indexToRecordPrepare with out-of-bounds index", () => {
+      // Insert one record
+      const record: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "e0",
+      };
+      state.insertRecord(record);
+
+      // Index 10 is out of bounds
+      expect(() => state.indexToRecordPrepare(10)).toThrow(
+        /Prepare-index 10 out of bounds/,
+      );
+    });
+
+    it("should handle findRecordsInRange with complex positioning", () => {
+      // Insert records with explicit positions
+      const records = [
+        {
+          id: "r:1",
+          originLeft: null,
+          originRight: "r:3",
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "A",
+          eventId: "e0",
+          position: 0,
+        },
+        {
+          id: "r:2",
+          originLeft: "r:1",
+          originRight: "r:3",
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "B",
+          eventId: "e1",
+          position: 1,
+        },
+        {
+          id: "r:3",
+          originLeft: "r:2",
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "C",
+          eventId: "e2",
+          position: 2,
+        },
+      ];
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Apply delete operation on middle record
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyEffect(deleteEvent);
+
+      // After delete, visible text should exclude the deleted record
+      const text = state.getVisibleText();
+      expect(text.length).toBeLessThan(3);
+    });
   });
 });

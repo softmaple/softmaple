@@ -132,9 +132,7 @@ describe("EgWalkerAPI", () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("Duplicate event detected"),
       );
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("remote:1"),
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("remote:1"));
 
       warnSpy.mockRestore();
     });
@@ -182,5 +180,92 @@ describe("createEgWalker", () => {
   it("should create API with empty text by default", () => {
     const api = createEgWalker("r1");
     expect(api.getText()).toBe("");
+  });
+});
+
+describe("EgWalkerAPI - Edge cases and error handling", () => {
+  it("should handle non-duplicate errors in applyLocalOperation", () => {
+    const api = new EgWalkerAPI("r1");
+
+    // Mock eventGraph.addEvent to throw a non-duplicate error
+    const originalAddEvent = (api as any).eventGraph.addEvent;
+    (api as any).eventGraph.addEvent = () => {
+      throw new Error("Some other error");
+    };
+
+    expect(() => api.insert(0, "test")).toThrow("Some other error");
+
+    // Restore
+    (api as any).eventGraph.addEvent = originalAddEvent;
+  });
+
+  it("should handle non-duplicate errors in applyRemoteEvent", async () => {
+    const api = new EgWalkerAPI("r1");
+
+    const event: GraphEvent = {
+      id: "r2:0",
+      replicaId: "r2",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
+      timestamp: Date.now(),
+    };
+
+    // Mock eventGraph.addEvent to throw a non-duplicate error
+    const originalAddEvent = (api as any).eventGraph.addEvent;
+    (api as any).eventGraph.addEvent = () => {
+      throw new Error("Network error");
+    };
+
+    await expect(api.applyRemoteEvent(event)).rejects.toThrow("Network error");
+
+    // Restore
+    (api as any).eventGraph.addEvent = originalAddEvent;
+  });
+
+  it("should test canApplyDirectly with missing parents", async () => {
+    const api = new EgWalkerAPI("r1");
+
+    // Create an event with a parent that doesn't exist in currentVersion
+    const event: GraphEvent = {
+      id: "r2:1",
+      replicaId: "r2",
+      parentVersion: new Set(["r2:0"]), // This parent doesn't exist in current version
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
+      timestamp: Date.now(),
+    };
+
+    // Access private method using any cast
+    const canApply = (api as any).canApplyDirectly(event);
+    expect(canApply).toBe(false);
+  });
+
+  it("should test canApplyDirectly with all parents in currentVersion", async () => {
+    const api = new EgWalkerAPI("r1");
+    api.insert(0, "Hello");
+
+    // Get the current version after first insert
+    const currentVersion = (api as any).currentVersion;
+    const parentId = Array.from(currentVersion)[0];
+
+    // Create an event that has parent in current version
+    const event: GraphEvent = {
+      id: "r1:1",
+      replicaId: "r1",
+      parentVersion: new Set([parentId]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 5, text: " World" },
+      timestamp: Date.now(),
+    };
+
+    const canApply = (api as any).canApplyDirectly(event);
+    expect(canApply).toBe(true);
+  });
+
+  it("should handle deserialize with eventGraph data", () => {
+    const api = new EgWalkerAPI("r1", "Test");
+    const serialized = api.serialize();
+
+    // Deserialize should handle eventGraph even though it's not fully implemented
+    const deserialized = EgWalkerAPI.deserialize(serialized);
+    expect(deserialized.getText()).toBe("Test");
   });
 });

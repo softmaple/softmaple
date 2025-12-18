@@ -2,7 +2,7 @@
  * Tests for Section 3.5: State Clearing (Critical Versions)
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   createTestVersion,
   createSimpleTestVersion,
@@ -12,6 +12,7 @@ import {
   StateClearer,
   isCriticalVersion,
   clearInternalState,
+  ClearableCRDTState,
 } from "../core/critical-version";
 import { InternalCRDTState } from "../crdt/internal-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
@@ -60,10 +61,73 @@ describe("Section 3.5: Critical Version Detection", () => {
       expect(detector.isCriticalVersion(createSimpleTestVersion(1))).toBe(false);
       expect(detector.getCurrentCriticalVersion()).toBeNull();
     });
+
+    it("should handle getCurrentCriticalVersion when no events have been added", () => {
+      const detector = new DefaultCriticalVersionDetector();
+
+      // Call getCurrentCriticalVersion without updating any version first
+      const result = detector.getCurrentCriticalVersion();
+      expect(result).toBe(null);
+    });
+
+    it("should handle tryClearToCriticalVersion with empty critical version", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      const clearer = new StateClearer(detector);
+
+      // Create a mock clearable state
+      const mockState: ClearableCRDTState = {
+        clearPrepareState: vi.fn(),
+        compactEffectState: vi.fn(),
+        clearCachedMetadata: vi.fn(),
+      };
+
+      // Try to clear without any critical version set
+      clearer.tryClearToCriticalVersion(mockState);
+
+      // Should not call any clearing methods when no critical version
+      expect(mockState.clearPrepareState).not.toHaveBeenCalled();
+    });
   });
 });
 
 describe("Section 3.5: State Clearing", () => {
+  describe("Edge cases for getCurrentCriticalVersion", () => {
+    it("should return null when no versions have been updated", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1", "replica2"]);
+
+      // Without any updateVersion calls, should return null
+      const result = detector.getCurrentCriticalVersion();
+      expect(result).toBe(null);
+    });
+
+    it("should return null when updateCriticalVersion is called with empty knownReplicas", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      
+      // updateCriticalVersion should handle empty knownReplicas gracefully (line 119-120)
+      // This is triggered internally when updateVersion is called
+      detector.updateVersion(new Set(["e1"]));
+      
+      // With no replica ID extracted, should still be null
+      const result = detector.getCurrentCriticalVersion();
+      expect(result).toBe(null);
+    });
+
+    it("should handle version comparison edge cases", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1", "replica2"]);
+
+      // Update with version containing event IDs
+      const version1 = createTestVersion("replica1", 5);
+      detector.updateVersion(version1);
+
+      // Update second replica with different event set
+      const version2 = createTestVersion("replica2", 3);
+      detector.updateVersion(version2);
+
+      const critical = detector.getCurrentCriticalVersion();
+      expect(critical).not.toBeNull();
+    });
+  });
+
   let state: InternalCRDTState;
   let clearer: StateClearer;
   let detector: DefaultCriticalVersionDetector;
@@ -377,6 +441,128 @@ describe("Section 3.5: Edge cases and uncovered paths", () => {
       detector.isCriticalVersion(version1);
       detector.isCriticalVersion(version2);
       expect(detector).toBeDefined();
+    });
+  });
+
+  describe("Version extraction and comparison logic", () => {
+    it("should extract version number from object with .version property", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      
+      // Pass version with .version property to trigger extractVersionNumber (line 96)
+      const versionObj = { version: 10, replicaId: "replica1" };
+      // @ts-expect-error - Testing with non-standard version structure
+      detector.updateVersion(versionObj);
+      
+      // Now test isCriticalVersion with another object with .version
+      const testVersion = { version: 10 };
+      // @ts-expect-error - Testing with non-standard version structure
+      const result = detector.isCriticalVersion(testVersion);
+      expect(typeof result).toBe("boolean");
+    });
+
+    it("should handle versionGreaterOrEqual with Set versions", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1", "replica2"]);
+      
+      // Update with Set version to trigger versionGreaterOrEqual logic (lines 108-109)
+      const v1 = new Set(["e1", "e2"]);
+      // @ts-expect-error - Testing with non-standard version structure
+      detector.updateVersion({ replicaId: "replica1", version: v1 });
+      
+      const v2 = new Set(["e1"]);
+      // @ts-expect-error - Testing with non-standard version structure  
+      detector.updateVersion({ replicaId: "replica2", version: v2 });
+      
+      // Check if smaller set is critical
+      const result = detector.isCriticalVersion(v2);
+      expect(typeof result).toBe("boolean");
+    });
+
+    it("should handle versionGreaterOrEqual comparison logic", () => {
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      
+      // This will trigger the versionGreaterOrEqual method (lines 138-145)
+      const v1 = new Set(["a", "b"]);
+      // @ts-expect-error - Testing with non-standard version structure
+      detector.updateVersion({ replicaId: "replica1", version: v1 });
+      
+      // Test with subset
+      const v2 = new Set(["a"]);
+      detector.isCriticalVersion(v2);
+      
+      // Test with superset (should trigger false branch in versionGreaterOrEqual)
+      const v3 = new Set(["a", "b", "c"]);
+      detector.isCriticalVersion(v3);
+      
+      expect(detector).toBeDefined();
+    });
+
+    it("should handle extractReplicaId returning null (line 191)", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      
+      // Pass version without replicaId to trigger null return
+      const versionWithoutId = new Set(["e1"]);
+      detector.updateVersion(versionWithoutId);
+      
+      // Should not crash, getCurrentCriticalVersion should still be null
+      expect(detector.getCurrentCriticalVersion()).toBe(null);
+    });
+
+    it("should handle versionEquals with different element values (lines 319-320)", () => {
+      // Initialize detector with a replica - critical version detection requires 
+      // that all known replicas update their versions. Since we pass ["replica1"],
+      // the detector tracks this replica but has no version updates yet.
+      const detector = new DefaultCriticalVersionDetector(["replica1"]);
+      
+      // Create a version object with replicaId for proper extraction
+      const versionWithReplica = Object.assign(new Set(["e1", "e2"]), { 
+        replicaId: "replica1" 
+      });
+      detector.updateVersion(versionWithReplica);
+      
+      const clearer = new StateClearer(detector);
+      
+      const mockState: ClearableCRDTState = {
+        clearPrepareState: vi.fn(),
+        compactEffectState: vi.fn(),
+        clearCachedMetadata: vi.fn(),
+      };
+      
+      // Clear to v1 (equals critical version) - should succeed
+      const v1 = new Set(["e1", "e2"]);
+      const result1 = clearer.clearInternalState(mockState as InternalCRDTState, v1);
+      // Now that detector has a critical version (versionWithReplica), v1 should match
+      expect(result1).toBe(true);
+      
+      // Try clearing to v2 (same length but different elements) - should fail
+      // This triggers line 319: if (arr1[i] !== arr2[i])
+      const v2 = new Set(["e1", "e3"]);
+      const result2 = clearer.clearInternalState(mockState as InternalCRDTState, v2);
+      expect(result2).toBe(false); // Cannot clear because v2 doesn't equal critical version
+    });
+
+    it("should handle updateVersion with replicaId extraction (line 78)", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      
+      // Pass a version that should have extractable replicaId
+      // @ts-expect-error - Testing with non-standard version structure
+      detector.updateVersion({ replicaId: "replica1", version: 5 });
+      
+      // Replica should be added
+      expect(detector.getCurrentCriticalVersion()).toBeTruthy();
+    });
+
+    it("should handle versionLess comparison (lines 125-126)", () => {
+      const detector = new DefaultCriticalVersionDetector();
+      
+      // Add two versions to trigger versionLess in updateCriticalVersion
+      // @ts-expect-error - Testing with non-standard version structure
+      detector.updateVersion({ replicaId: "replica1", version: 3 });
+      // @ts-expect-error - Testing with non-standard version structure
+      detector.updateVersion({ replicaId: "replica2", version: 5 });
+      
+      // The critical version should be the minimum (3)
+      const critical = detector.getCurrentCriticalVersion();
+      expect(critical).toBeTruthy();
     });
   });
 

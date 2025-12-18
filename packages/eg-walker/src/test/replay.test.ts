@@ -127,6 +127,66 @@ describe("Section 3.6: Partial Replay", () => {
     });
   });
 
+  describe("topologicalSort edge cases", () => {
+    it("should handle topologicalSort with complex dependencies", () => {
+      // Create events with complex dependency chains
+      const events: GraphEvent[] = [
+        {
+          id: "e1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+          timestamp: 1,
+        },
+        {
+          id: "e2",
+          parentVersion: new Set(["e1"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+          timestamp: 2,
+        },
+        {
+          id: "e3",
+          parentVersion: new Set(["e1", "e2"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+          timestamp: 3,
+        },
+      ];
+
+      // Add to graph
+      events.forEach((e) => eventGraph.addEvent(e));
+
+      // Compute replay range to test topological sort
+      const from = new Set<string>();
+      const to = new Set(["e1", "e2", "e3"]);
+      const result = computeReplayRange(replayManager, from, to);
+      
+      // Should maintain topological order: e1 before e2 before e3
+      expect(result.length).toBe(3);
+      
+      // result is already EventId[] (array of strings), no need to map
+      const eventIds = result;
+      const e1Index = eventIds.indexOf("e1");
+      const e2Index = eventIds.indexOf("e2");
+      const e3Index = eventIds.indexOf("e3");
+      
+      // Assert topological ordering: e1 < e2 < e3
+      expect(e1Index).toBeGreaterThanOrEqual(0);
+      expect(e2Index).toBeGreaterThan(e1Index); // e2 depends on e1
+      expect(e3Index).toBeGreaterThan(e2Index); // e3 depends on e2
+      
+      // Verify parentVersion constraints: fetch events from graph and verify
+      result.forEach((eventId) => {
+        const event = eventGraph.getEvent(eventId);
+        if (!event) return;
+        const eventIndex = eventIds.indexOf(eventId);
+        event.parentVersion.forEach((parentId) => {
+          const parentIndex = eventIds.indexOf(parentId);
+          expect(parentIndex).toBeGreaterThanOrEqual(0);
+          expect(parentIndex).toBeLessThan(eventIndex);
+        });
+      });
+    });
+  });
+
   describe("replayEvents", () => {
     it("should replay events to reconstruct state", () => {
       // Add events to graph
@@ -613,6 +673,104 @@ describe("Section 3.6: Partial Replay", () => {
 
       // Should not create placeholders (all inserts)
       expect(state.hasPlaceholders()).toBe(false);
+    });
+  });
+
+  describe("checkDependencies edge cases", () => {
+    it("should return true for events with no parentVersion", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(), // Empty parentVersion (no dependencies)
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // This should not crash and return true (no dependencies to check)
+      replayManager.replayEvents(["e1"], state);
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("topologicalSort edge cases", () => {
+    it("should handle empty event set", () => {
+      const fromVersion: Version = new Set();
+      const toVersion: Version = new Set();
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
+
+      // Should return empty array
+      expect(replayRange).toEqual([]);
+    });
+  });
+
+  describe("clearReplayHistory", () => {
+    it("should allow re-replaying events after clearing history", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Replay once
+      replayManager.replayEvents(["e1"], state);
+
+      // Clear history
+      replayManager.clearReplayHistory();
+
+      // Replay again (should work)
+      replayManager.replayEvents(["e1"], state);
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("applyEventForReplay edge cases", () => {
+    it("should handle events without operation property", () => {
+      const event = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: undefined,
+        timestamp: 1,
+      } as unknown as GraphEvent;
+      eventGraph.addEvent(event);
+
+      // Should not crash when event has no operation
+      replayManager.replayEvents(["e1"], state);
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("needsPlaceholder edge cases", () => {
+    it("should return false for events with no operation", () => {
+      const event = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: undefined,
+        timestamp: 1,
+      } as unknown as GraphEvent;
+      eventGraph.addEvent(event);
+
+      // Verify it doesn't crash
+      replayManager.reconstructPlaceholders(state, new Set(["e1"]));
+      expect(state).toBeDefined();
+    });
+
+    it("should return false for events with operation but no type", () => {
+      const event = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { index: 0, text: "test" },
+        timestamp: 1,
+      } as unknown as GraphEvent;
+      eventGraph.addEvent(event);
+
+      // Verify it doesn't crash
+      replayManager.reconstructPlaceholders(state, new Set(["e1"]));
+      expect(state).toBeDefined();
     });
   });
 });

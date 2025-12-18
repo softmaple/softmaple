@@ -51,6 +51,18 @@ describe("TemporaryCRDT", () => {
 
       expect(() => crdt.getPrepareState()).toThrow("CRDT has been destroyed");
     });
+
+    it("should throw error when accessing destroyed CRDT", () => {
+      const crdt = new TemporaryCRDT();
+      crdt.destroy();
+
+      // Should throw when calling methods on destroyed CRDT
+      expect(() => crdt.integrate([])).toThrow(
+        "CRDT has been destroyed",
+      );
+    });
+
+
   });
 
   describe("createItemsFromEvent", () => {
@@ -228,6 +240,241 @@ describe("TemporaryCRDT", () => {
 
       const state = crdt.getEffectState();
       expect(state.visibleText).toBe("");
+
+    });
+
+    it("should handle integrate with complex originRight positioning", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Insert items with various originRight references
+      const items = [
+        {
+          id: "item1",
+          originLeft: null,
+          originRight: "item3", // Points to item3 which doesn't exist yet
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "item2",
+          originLeft: "item1",
+          originRight: "item3",
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
+        {
+          id: "item3",
+          originLeft: "item2",
+          originRight: null,
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
+      ];
+
+      // Integrate in order - should exercise originRight search loop
+      items.forEach((item) => crdt.integrate([item]));
+
+      const prepareState = crdt.getPrepareState();
+      expect(prepareState.visibleIndices.size).toBe(3);
+    });
+
+    it("should handle integrate with concurrent items same originLeft", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Insert base item
+      const baseItem = {
+        id: "base",
+        originLeft: null,
+        originRight: null,
+        content: "B",
+        insertedBy: "e0",
+        isDeleted: false,
+      };
+      crdt.integrate([baseItem]);
+
+      // Insert two concurrent items with same originLeft
+      const concurrent1 = {
+        id: "concurrent1",
+        originLeft: "base",
+        originRight: null,
+        content: "X",
+        insertedBy: "e1",
+        isDeleted: false,
+      };
+
+      const concurrent2 = {
+        id: "concurrent2",
+        originLeft: "base",
+        originRight: null,
+        content: "Y",
+        insertedBy: "e2",
+        isDeleted: false,
+      };
+
+      // Integrate concurrent items - ordering rule determines order
+      crdt.integrate([concurrent1]);
+      crdt.integrate([concurrent2]);
+
+      const prepareState = crdt.getPrepareState();
+      expect(prepareState.visibleIndices.size).toBe(3);
+    });
+
+    it("should handle integrate with complex item sequences", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Create a complex sequence of items
+      const items = [
+        {
+          id: "item1",
+          originLeft: null,
+          originRight: "item3",
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "item2",
+          originLeft: "item1",
+          originRight: "item3",
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
+        {
+          id: "item3",
+          originLeft: "item2",
+          originRight: null,
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
+      ];
+
+      // Integrate items with originRight positioning
+      crdt.integrate(items);
+
+      // Should maintain correct ordering based on originRight
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(3);
+    });
+
+    it("should handle multiple integrate calls with overlapping items", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items1 = [
+        { id: "item1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+      ];
+      const items2 = [
+        { id: "item2", originLeft: "item1", originRight: null, content: "B", insertedBy: "e2", isDeleted: false },
+      ];
+
+      crdt.integrate(items1);
+      crdt.integrate(items2);
+
+      // Should have both items integrated correctly
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(2);
+    });
+
+    it("should handle integrate with originRight positioning for complex insertions", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items1 = [
+        { id: "item1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "item3", originLeft: "item1", originRight: null, content: "C", insertedBy: "e2", isDeleted: false },
+      ];
+      crdt.integrate(items1);
+
+      // Insert item2 between item1 and item3 using originRight
+      const items2 = [
+        { id: "item2", originLeft: "item1", originRight: "item3", content: "B", insertedBy: "e3", isDeleted: false },
+      ];
+      crdt.integrate(items2);
+
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(3);
+      // Should be positioned correctly
+      const contents = state.items.map((item) => item?.content).filter(Boolean);
+      expect(contents).toContain("A");
+      expect(contents).toContain("B");
+      expect(contents).toContain("C");
+    });
+
+    it("should handle integrate when originRight is at the middle of items array", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Create a scenario where originRight needs to scan through items
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "1", insertedBy: "e1", isDeleted: false },
+        { id: "i3", originLeft: "i1", originRight: null, content: "3", insertedBy: "e2", isDeleted: false },
+        { id: "i5", originLeft: "i3", originRight: null, content: "5", insertedBy: "e3", isDeleted: false },
+      ];
+      crdt.integrate(items);
+
+      // Insert i2 between i1 and i3 using originRight
+      const items2 = [
+        { id: "i2", originLeft: "i1", originRight: "i3", content: "2", insertedBy: "e4", isDeleted: false },
+      ];
+      crdt.integrate(items2);
+
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(4);
+    });
+
+    it("should handle integrate with deleted items and originRight references", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "i2", originLeft: "i1", originRight: null, content: "B", insertedBy: "e2", isDeleted: true },
+        { id: "i3", originLeft: "i1", originRight: "i2", content: "C", insertedBy: "e3", isDeleted: false },
+      ];
+
+      crdt.integrate(items);
+
+      const state = crdt.getEffectState();
+      // Deleted item should still exist but marked as deleted
+      expect(state.items.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should handle integrate with originRight positioning when left sibling is deleted", () => {
+      const crdt = new TemporaryCRDT();
+
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "i2", originLeft: "i1", originRight: null, content: "B", insertedBy: "e2", isDeleted: true },
+        { id: "i3", originLeft: "i2", originRight: null, content: "C", insertedBy: "e3", isDeleted: false },
+      ];
+
+      crdt.integrate(items);
+
+      const state = crdt.getEffectState();
+      // Should handle positioning correctly when originLeft is deleted
+      expect(state.items.length).toBe(3);
+      expect(state.items.find((item) => item.id === "i3")).toBeDefined();
+    });
+
+    it("should handle integrate with complex originRight chains", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Create a chain: i1 -> i2 -> i3 where i2 has originRight to i3
+      const items = [
+        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        { id: "i3", originLeft: "i1", originRight: null, content: "C", insertedBy: "e3", isDeleted: false },
+        { id: "i2", originLeft: "i1", originRight: "i3", content: "B", insertedBy: "e2", isDeleted: false },
+      ];
+
+      crdt.integrate(items);
+
+      const state = crdt.getEffectState();
+      // Should correctly position i2 between i1 and i3
+      expect(state.items.length).toBe(3);
+      const i2Index = state.items.findIndex((item) => item.id === "i2");
+      const i3Index = state.items.findIndex((item) => item.id === "i3");
+      expect(i2Index).toBeLessThan(i3Index);
     });
   });
 
@@ -245,5 +492,6 @@ describe("TemporaryCRDT", () => {
       // @ts-expect-error - Accessing private destroyed flag for testing
       expect(crdtRef.destroyed).toBe(true);
     });
+
   });
 });

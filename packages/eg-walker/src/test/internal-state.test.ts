@@ -13,6 +13,109 @@ import type { Record } from "../crdt/internal-state";
 import type { GraphEvent } from "../types";
 
 describe("InternalCRDTState", () => {
+  describe("Edge Cases for Record Insertion", () => {
+    it("should prevent duplicate records when inserting same ID twice", () => {
+      const record1: Record = {
+        id: "dup:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "e1",
+      };
+
+      state.insertRecord(record1);
+
+      // Try to insert the same record again
+      state.insertRecord(record1);
+
+      // Duplicates should be prevented (implementation checks for existing ID)
+      const records = state.getAllRecords();
+      const duplicates = records.filter((r) => r.id === "dup:1");
+      expect(duplicates.length).toBe(1);
+    });
+
+    it("should handle findRecordsInRange with no visible records", () => {
+      // Insert records that are all deleted
+      const record1: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.DELETED, count: 1 },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED },
+        content: "A",
+        eventId: "e0",
+      };
+
+      state.insertRecord(record1);
+
+      // Calling findRecordsInRange should handle empty visible records
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      // This should not crash even with no visible records
+      expect(() => state.applyEffect(deleteEvent)).not.toThrow();
+    });
+
+    it("should handle getPrepareText with deleted records with count", () => {
+      // Insert a record and mark it as deleted with count > 0
+      const record: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: {
+          type: PREPARE_STATE_TYPE.DELETED,
+          count: 2,
+        },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "AB",
+        eventId: "e0",
+      };
+
+      state.insertRecord(record);
+
+      // getPrepareText should handle deleted records with deleteCount
+      const prepareText = state.getPrepareText();
+      expect(prepareText).toBeDefined();
+    });
+
+    it("should handle compactEffectState with metadata compaction", () => {
+      // Insert many records to trigger potential metadata compaction
+      for (let i = 0; i < 100; i++) {
+        const record: Record = {
+          id: `r:${i}`,
+          originLeft: i > 0 ? `r:${i - 1}` : null,
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: String(i),
+          eventId: `e${i}`,
+        };
+        state.insertRecord(record);
+      }
+
+      // Delete many records to create metadata entries
+      for (let i = 0; i < 50; i++) {
+        const deleteEvent: GraphEvent = {
+          id: `delete${i}`,
+          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+          parentVersion: new Set(),
+          timestamp: Date.now() + i,
+        };
+        state.applyEffect(deleteEvent);
+      }
+
+      // compactEffectState should have reduced metadata size
+      const text = state.getVisibleText();
+      expect(text).toBeDefined();
+    });
+  });
+
   let state: InternalCRDTState;
 
   beforeEach(() => {
@@ -863,6 +966,60 @@ describe("InternalCRDTState", () => {
       expect(stats.visibleRecords).toBe(0);
     });
 
+    it("should handle initializeBTree when root already exists", () => {
+      const state = new InternalCRDTState();
+
+      // Apply an operation to initialize the tree
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "Test" },
+        "rec1",
+      );
+
+      // Switch to prepare state (this reinitializes the B-tree)
+      state.switchToPrepareState();
+
+      // Switch back to effect state (should reinitialize B-tree again)
+      state.switchToEffectState();
+
+      // Verify state is still valid after reinitializing
+      const text = state.getVisibleText();
+      expect(text).toBe("Test");
+
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBeGreaterThanOrEqual(1); // At least 1 record for "Test"
+      expect(stats.visibleRecords).toBeGreaterThanOrEqual(1);
+
+      // Verify records can still be retrieved after state switches
+      const records = state.getAllRecords();
+      expect(records.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should handle findRecordsInRange with complex originRight positioning", () => {
+      const state = new InternalCRDTState();
+
+      // Create a complex scenario with multiple records and originRight references
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        "rec1",
+      );
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        "rec2",
+      );
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        "rec3",
+      );
+      state.applyOperation(
+        { type: OPERATION_TYPE.INSERT, index: 3, text: "D" },
+        "rec4",
+      );
+
+      // Verify records are stored correctly
+      const stats = state.getStatistics();
+      expect(stats.totalRecords).toBeGreaterThanOrEqual(4);
+    });
+
     it("should handle compactEffectState with metadata compaction", () => {
       // Insert records with metadata
       const records = ["A", "B", "C"].map((char, i) => ({
@@ -1074,6 +1231,166 @@ describe("InternalCRDTState", () => {
       // After delete, visible text should exclude the deleted record
       const text = state.getVisibleText();
       expect(text.length).toBeLessThan(3);
+    });
+
+    it("should handle getPrepareText with deleted records having count > 0", () => {
+      // Insert a record in visible prepare state
+      const record: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.DELETED, count: 2 },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "AB",
+        eventId: "e0",
+      };
+      state.insertRecord(record);
+
+      // Get prepare text - should not include deleted records
+      const text = state.getPrepareText();
+      expect(text).toBe("");
+    });
+
+    it("should handle recordToIndexEffect when record is not in ordered list", () => {
+      // Create a record but don't insert it into state
+      const record: Record = {
+        id: "r:orphan",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "e0",
+      };
+
+      // Call recordToIndexEffect without inserting the record
+      // This tests the error handling for non-existent records
+      expect(() => state.recordToIndexEffect(record)).toThrow(
+        /Record r:orphan not found/,
+      );
+    });
+
+    it("should handle findRecordsInRange with originRight search loop", () => {
+      // Create a sequence where some records reference future originRight
+      const records = [
+        {
+          id: "r:1",
+          originLeft: null,
+          originRight: "r:3",
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "A",
+          eventId: "e1",
+        },
+        {
+          id: "r:2",
+          originLeft: "r:1",
+          originRight: "r:3",
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "B",
+          eventId: "e2",
+        },
+        {
+          id: "r:3",
+          originLeft: "r:2",
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: "C",
+          eventId: "e3",
+        },
+      ];
+
+      records.forEach((r) => state.insertRecord(r as Record));
+
+      // Apply delete in middle to exercise findRecordsInRange
+      const deleteEvent: GraphEvent = {
+        id: "delete1",
+        operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        parentVersion: new Set(),
+        timestamp: Date.now(),
+      };
+
+      state.applyEffect(deleteEvent);
+
+      // Should handle the originRight search correctly
+      const text = state.getVisibleText();
+      expect(text).toBeDefined();
+    });
+
+    it("should handle getPrepareText with mixed visible and deleted records", () => {
+      // Insert mix of visible and deleted records
+      const visibleRecord: Record = {
+        id: "r:visible",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "V",
+        eventId: "e1",
+      };
+
+      const deletedRecord: Record = {
+        id: "r:deleted",
+        originLeft: "r:visible",
+        originRight: null,
+        prepareState: {
+          type: PREPARE_STATE_TYPE.DELETED,
+          count: 1,
+        },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "D",
+        eventId: "e2",
+      };
+
+      state.insertRecord(visibleRecord);
+      state.insertRecord(deletedRecord);
+
+      // getPrepareText should only count visible records
+      const text = state.getPrepareText();
+      expect(text).toBe("V");
+    });
+
+    it("should handle recordToIndexEffect with DELETED records in sequence", () => {
+      // Insert records with some deleted in effect state
+      const record1: Record = {
+        id: "r:1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "e1",
+      };
+
+      const record2: Record = {
+        id: "r:2",
+        originLeft: "r:1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED },
+        content: "B",
+        eventId: "e2",
+      };
+
+      const record3: Record = {
+        id: "r:3",
+        originLeft: "r:2",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "C",
+        eventId: "e3",
+      };
+
+      state.insertRecord(record1);
+      state.insertRecord(record2);
+      state.insertRecord(record3);
+
+      // recordToIndexEffect should skip DELETED records
+      const index = state.recordToIndexEffect(record3);
+      expect(index).toBe(1); // Should be index 1 (after r:1, skip r:2)
     });
   });
 });

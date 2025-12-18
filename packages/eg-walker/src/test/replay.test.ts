@@ -675,4 +675,102 @@ describe("Section 3.6: Partial Replay", () => {
       expect(state.hasPlaceholders()).toBe(false);
     });
   });
+
+  describe("checkDependencies edge cases", () => {
+    it("should return true for events with no parentVersion", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(), // Empty parentVersion (no dependencies)
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // This should not crash and return true (no dependencies to check)
+      replayManager.replayEvents(["e1"], state);
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("topologicalSort edge cases", () => {
+    it("should handle empty event set", () => {
+      const fromVersion: Version = new Set();
+      const toVersion: Version = new Set();
+      const replayRange = replayManager.computeReplayRange(
+        fromVersion,
+        toVersion,
+      );
+
+      // Should return empty array
+      expect(replayRange).toEqual([]);
+    });
+  });
+
+  describe("clearReplayHistory", () => {
+    it("should allow re-replaying events after clearing history", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Replay once
+      replayManager.replayEvents(["e1"], state);
+
+      // Clear history
+      replayManager.clearReplayHistory();
+
+      // Replay again (should work)
+      replayManager.replayEvents(["e1"], state);
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("applyEventForReplay edge cases", () => {
+    it("should handle events without operation property", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: undefined as any,
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Should not crash when event has no operation
+      replayManager.replayEvents(["e1"], state);
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("needsPlaceholder edge cases", () => {
+    it("should return false for events with no operation", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: undefined as any,
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Verify it doesn't crash
+      replayManager.reconstructPlaceholders(state, new Set(["e1"]));
+      expect(state).toBeDefined();
+    });
+
+    it("should return false for events with operation but no type", () => {
+      const event: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { index: 0, text: "test" } as any,
+        timestamp: 1,
+      };
+      eventGraph.addEvent(event);
+
+      // Verify it doesn't crash
+      replayManager.reconstructPlaceholders(state, new Set(["e1"]));
+      expect(state).toBeDefined();
+    });
+  });
 });

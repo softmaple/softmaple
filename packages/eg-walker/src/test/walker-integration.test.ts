@@ -215,4 +215,61 @@ describe("Section 3.2: EgWalker Integration", () => {
     // Complex DAG will require retreats and advances
     expect(result.retreatCount + result.advanceCount).toBeGreaterThan(0);
   });
+
+  it("should support debug mode logging", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT, debug: true });
+
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: Date.now(),
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    // With debug enabled, walker should still process correctly
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(2);
+  });
+
+  it("should initialize with custom graphWalker implementation", () => {
+    const mockGraphWalker = {
+      addEvent: () => {},
+      topologicalOrder: () => [],
+    };
+
+    const walker = new EgWalker({ graphWalker: mockGraphWalker as any });
+    const result = walker.walk([]);
+
+    expect(result.eventsProcessed).toBe(0);
+  });
+
+  it("should initialize with custom internalCRDT implementation", () => {
+    const customCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT: customCRDT });
+
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
+        timestamp: Date.now(),
+      },
+    ];
+
+    walker.walk(events);
+
+    // Verify our custom CRDT was used
+    const prepareLog = customCRDT.getPrepareLog();
+    expect(prepareLog).toHaveLength(1);
+    expect(prepareLog[0]?.id).toBe("e1");
+  });
 });

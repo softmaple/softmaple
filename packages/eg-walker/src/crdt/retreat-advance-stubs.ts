@@ -68,8 +68,6 @@ export class StubInternalCRDT implements InternalCRDTState {
     this.retreatLog.push(eventId);
     this.appliedEvents.delete(eventId);
 
-    // TODO: Actual implementation will undo the event's effects
-    // by restoring CRDT to state before event was applied
     const newAppliedEvents = new Set(appliedEvents);
     newAppliedEvents.delete(eventId);
     return newAppliedEvents;
@@ -80,8 +78,6 @@ export class StubInternalCRDT implements InternalCRDTState {
     this.advanceLog.push(eventId);
     this.appliedEvents.add(eventId);
 
-    // TODO: Actual implementation will apply the event's effects
-    // by transforming and applying to current CRDT state
     const newAppliedEvents = new Set(appliedEvents);
     newAppliedEvents.add(eventId);
     return newAppliedEvents;
@@ -95,10 +91,6 @@ export class StubInternalCRDT implements InternalCRDTState {
     this.prepareLog.push(event);
     this.appliedEvents.add(event.id);
 
-    // TODO: Actual implementation will:
-    // 1. Transform event indices based on current CRDT state
-    // 2. Apply the operation to internal CRDT
-    // 3. Update internal CRDT metadata
     const newAppliedEvents = new Set(appliedEvents);
     newAppliedEvents.add(event.id);
     return newAppliedEvents;

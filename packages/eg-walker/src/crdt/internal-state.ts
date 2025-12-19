@@ -83,10 +83,21 @@ export class InternalCRDTState {
   private btreeRoot: BTreeNode<Record> | null = null;
   private destroyed = false;
   private readonly createdAt = Date.now();
-  private readonly maxLifetime = 10000; // 10 seconds max
+  private maxLifetime = 10000; // 10 seconds max
   private currentMode: "prepare" | "effect" = "effect";
 
-  constructor() {
+  /**
+   * Create a new InternalCRDTState instance.
+   * @param options - Configuration options
+   * @param options.maxLifetime - Maximum lifetime in milliseconds before auto-cleanup (default: 10000ms)
+   */
+  constructor(options?: { maxLifetime?: number }) {
+    if (options?.maxLifetime !== undefined) {
+      if (options.maxLifetime <= 0) {
+        throw new Error(`maxLifetime must be positive, got ${options.maxLifetime}`);
+      }
+      this.maxLifetime = options.maxLifetime;
+    }
     this.initializeBTree();
     this.scheduleAutoCleanup();
   }

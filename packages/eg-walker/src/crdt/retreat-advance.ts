@@ -161,7 +161,9 @@ export class RetreatAdvanceCoordinator {
         this.appliedEventIds,
       );
       // Track the event
-      this.appliedEvents.set(event.id, event);
+      const updatedAppliedEvents = new Map(this.appliedEvents);
+      updatedAppliedEvents.set(event.id, event);
+      this.appliedEvents = updatedAppliedEvents;
       return transformedEvent;
     }
 

@@ -235,10 +235,7 @@ export class PartialReplayManager {
     while (queue.length > 0) {
       // Sort queue for deterministic ordering
       queue.sort();
-      const eventId = queue[0];
-      if (!eventId) break;
-      const remainingQueue = queue.slice(1);
-      queue = remainingQueue;
+      const eventId = queue.shift()!;
       result.push(eventId);
 
       // Reduce in-degree of neighbors

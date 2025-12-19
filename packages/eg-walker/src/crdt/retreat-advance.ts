@@ -18,7 +18,7 @@ import type { InternalCRDTState as ICRDTStateInterface } from "./retreat-advance
 export class ConcreteCRDTState implements ICRDTStateInterface {
   private internalState: InternalCRDTState;
   public readonly eventMap: Map<EventId, GraphEvent> = new Map();
-  private retreatStack: EventId[] = [];
+  private retreatStack: readonly EventId[] = [];
 
   constructor() {
     this.internalState = new InternalCRDTState();
@@ -36,7 +36,8 @@ export class ConcreteCRDTState implements ICRDTStateInterface {
 
     // Undo the event's effects
     this.internalState.undoPrepare(event);
-    this.retreatStack.push(eventId);
+    // Use immutable pattern for stack operations
+    this.retreatStack = [...this.retreatStack, eventId];
 
     // Return new immutable set without the retreated event
     const newAppliedEvents = new Set(appliedEvents);
@@ -159,8 +160,10 @@ export class RetreatAdvanceCoordinator {
         event,
         this.appliedEventIds,
       );
-      this.appliedEvents = new Map(this.appliedEvents);
-      this.appliedEvents.set(event.id, event);
+      // Track the event
+      const updatedAppliedEvents = new Map(this.appliedEvents);
+      updatedAppliedEvents.set(event.id, event);
+      this.appliedEvents = updatedAppliedEvents;
       return transformedEvent;
     }
 

@@ -27,7 +27,7 @@ export function groupIntoRuns(
 ): ReadonlyArray<InsertionRun> {
   if (items.length === 0) return [];
 
-  const runs: InsertionRun[] = [];
+  let runs: ReadonlyArray<InsertionRun> = [];
   let currentRun: InsertionRun | null = null;
   let currentIndex = 0;
 
@@ -49,7 +49,8 @@ export function groupIntoRuns(
     } else {
       // Start new run
       if (currentRun) {
-        runs.push(currentRun);
+        // Use immutable pattern for adding to array
+        runs = [...runs, currentRun];
       }
       currentRun = {
         eventId: item.insertedBy,
@@ -64,7 +65,8 @@ export function groupIntoRuns(
   }
 
   if (currentRun) {
-    runs.push(currentRun);
+    // Use immutable pattern for adding to array
+    runs = [...runs, currentRun];
   }
 
   return runs;
@@ -132,9 +134,9 @@ export function verifyNonInterleaving(items: ReadonlyArray<CRDTItem>): boolean {
 
   // Group runs by event
   for (const run of runs) {
+    // Use immutable pattern for Map updates
     const existing = eventRuns.get(run.eventId) || [];
-    existing.push(run);
-    eventRuns.set(run.eventId, existing);
+    eventRuns.set(run.eventId, [...existing, run]);
   }
 
   // Check that each event has at most one run

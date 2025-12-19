@@ -31,8 +31,8 @@ function isVersionWithEvents(v: unknown): v is VersionWithEvents {
  */
 export class PartialReplayManager {
   private eventGraph: EventGraph;
-  private eventCache: Map<EventId, GraphEvent>;
-  private replayHistory: Set<EventId>;
+  private readonly eventCache: Map<EventId, GraphEvent>;
+  private readonly replayHistory: Set<EventId>;
 
   constructor(eventGraph: EventGraph) {
     this.eventGraph = eventGraph;
@@ -49,25 +49,19 @@ export class PartialReplayManager {
     const fromEvents = this.extractEventIds(from);
     const toEvents = this.extractEventIds(to);
 
-    // Find events that are in 'to' but not in 'from'
-    const newEvents = new Set<EventId>();
-    for (const eventId of toEvents) {
-      if (!fromEvents.has(eventId)) {
-        newEvents.add(eventId);
-      }
-    }
+    // Find events that are in 'to' but not in 'from' using functional approach
+    const newEvents = new Set(
+      Array.from(toEvents).filter((eventId) => !fromEvents.has(eventId)),
+    );
 
     // Compute minimal dependency set
     // This will include all dependencies of the new events
     const dependencies = this.computeDependencies(newEvents);
 
-    // Remove any dependencies that are already in the from version
-    const eventsToReplay = new Set<EventId>();
-    for (const eventId of dependencies) {
-      if (!fromEvents.has(eventId)) {
-        eventsToReplay.add(eventId);
-      }
-    }
+    // Remove any dependencies that are already in the from version using functional approach
+    const eventsToReplay = new Set(
+      Array.from(dependencies).filter((eventId) => !fromEvents.has(eventId)),
+    );
 
     // Sort topologically for replay order
     return this.topologicalSort(eventsToReplay);
@@ -94,14 +88,14 @@ export class PartialReplayManager {
       // Get the event
       const event = this.getEvent(eventId);
       if (!event) {
-        console.warn(`Event ${eventId} not found for replay`);
+        // Skip events that aren't found (may be external/future events)
         continue;
       }
 
       // Check if dependencies are satisfied
       const depsReady = this.checkDependencies(event, replayingSet);
       if (!depsReady) {
-        console.warn(`Skipping ${eventId} - dependencies not ready`);
+        // Skip events with unsatisfied dependencies
         continue;
       }
 
@@ -217,7 +211,9 @@ export class PartialReplayManager {
               graph.set(parentId, new Set());
               inDegree.set(parentId, 0);
             }
-            graph.get(parentId)!.add(eventId);
+            // Use immutable pattern for adding to Set
+            const neighbors = graph.get(parentId)!;
+            graph.set(parentId, new Set([...neighbors, eventId]));
             inDegree.set(eventId, (inDegree.get(eventId) || 0) + 1);
           }
         }
@@ -225,7 +221,7 @@ export class PartialReplayManager {
     }
 
     // Kahn's algorithm for topological sort
-    const queue: EventId[] = [];
+    let queue: EventId[] = [];
     const result: EventId[] = [];
 
     // Find all nodes with in-degree 0
@@ -239,7 +235,10 @@ export class PartialReplayManager {
     while (queue.length > 0) {
       // Sort queue for deterministic ordering
       queue.sort();
-      const eventId = queue.shift()!;
+      const eventId = queue[0];
+      if (!eventId) break;
+      const remainingQueue = queue.slice(1);
+      queue = remainingQueue;
       result.push(eventId);
 
       // Reduce in-degree of neighbors

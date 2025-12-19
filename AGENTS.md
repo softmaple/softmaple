@@ -26,6 +26,17 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
   1. **Preferred:** Replace with proper types (union types, generics, or specific interfaces)
   2. **If proper typing is not feasible:** Use `@ts-expect-error` with a descriptive comment explaining why
   3. **Never use `@ts-ignore`:** Always use `@ts-expect-error` to ensure the error still exists
+- **No TypeScript enums:** Enums are disallowed for performance and bundle-size optimization
+  - **Instead:** Use const objects with `as const` assertion
+  - **Example:**
+    ```typescript
+    // ❌ Avoid: TypeScript enum
+    enum Status { Active, Inactive }
+    
+    // ✅ Good: Const object with as const
+    const Status = { Active: "active", Inactive: "inactive" } as const;
+    type Status = typeof Status[keyof typeof Status];
+    ```
 
 ### Functional Programming Principles
 Where possible, prefer functional programming patterns:

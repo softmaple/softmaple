@@ -20,6 +20,13 @@ export const config = [
     rules: {
       "turbo/no-undeclared-env-vars": "warn",
       "@typescript-eslint/no-explicit-any": "error",
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "TSEnumDeclaration",
+          message: "Enums are not allowed. Use const objects with 'as const' instead for better performance and smaller bundle size.",
+        },
+      ],
     },
   },
   {

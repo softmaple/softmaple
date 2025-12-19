@@ -12,11 +12,11 @@ import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 import type { EventId } from "../types";
 
 describe("Section 3.2: EgWalker Integration", () => {
-  it("should exercise debug logging in retreatToVersion advance path", () => {
+  it("should log advances when events form a concurrent diamond and debug is enabled", () => {
     const internalCRDT = new StubInternalCRDT();
     const walker = new EgWalker({ internalCRDT, debug: true });
 
-    // Create events where retreatToVersion needs to advance instead of retreat
+    // Create diamond pattern: e1 (root) → e2, e3 (concurrent) → e4 (merge)
     const events: GraphEvent[] = [
       {
         id: "e1",
@@ -32,15 +32,21 @@ describe("Section 3.2: EgWalker Integration", () => {
       },
       {
         id: "e3",
-        parentVersion: new Set(["e2"]),
+        parentVersion: new Set(["e1"]), // Concurrent with e2
         operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
         timestamp: 3,
+      },
+      {
+        id: "e4",
+        parentVersion: new Set(["e2", "e3"]), // Merge point
+        operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "D" },
+        timestamp: 4,
       },
     ];
 
     // With debug enabled, should log advance operations
     const result = walker.walk(events);
-    expect(result.eventsProcessed).toBe(3);
+    expect(result.eventsProcessed).toBe(4);
     expect(result.advanceCount).toBeGreaterThan(0);
   });
 

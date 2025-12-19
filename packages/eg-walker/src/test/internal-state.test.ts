@@ -1471,7 +1471,7 @@ describe("InternalCRDTState", () => {
       expect(text).toBe("M");
     });
 
-    it("should handle recordToIndexEffect returning -1 for deleted", () => {
+    it("should return -1 from recordToIndexEffect when record is deleted", () => {
       const record: Record = {
         id: "del_check",
         originLeft: null,
@@ -1483,7 +1483,10 @@ describe("InternalCRDTState", () => {
       };
       state.insertRecord(record);
 
-      // recordToIndexEffect should return -1 for DELETED (line 586-588)
+      // recordToIndexEffect method should return -1 for DELETED records
+      const index = state.recordToIndexEffect(record);
+      expect(index).toBe(-1);
+
       const stats = state.getStatistics();
       expect(stats.deletedRecords).toBe(1);
     });

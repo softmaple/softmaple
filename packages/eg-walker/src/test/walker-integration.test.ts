@@ -12,6 +12,38 @@ import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 import type { EventId } from "../types";
 
 describe("Section 3.2: EgWalker Integration", () => {
+  it("should exercise debug logging in retreatToVersion advance path", () => {
+    const internalCRDT = new StubInternalCRDT();
+    const walker = new EgWalker({ internalCRDT, debug: true });
+
+    // Create events where retreatToVersion needs to advance instead of retreat
+    const events: GraphEvent[] = [
+      {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+      {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      },
+      {
+        id: "e3",
+        parentVersion: new Set(["e2"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        timestamp: 3,
+      },
+    ];
+
+    // With debug enabled, should log advance operations
+    const result = walker.walk(events);
+    expect(result.eventsProcessed).toBe(3);
+    expect(result.advanceCount).toBeGreaterThan(0);
+  });
+
   it("should handle retreatToVersion early return when no retreat or advance needed", () => {
     const internalCRDT = new StubInternalCRDT();
     const walker = new EgWalker({ internalCRDT });

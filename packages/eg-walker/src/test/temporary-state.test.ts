@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CRDTItem, GraphEvent } from "../types";
 import { TemporaryCRDT, withTemporaryCRDT } from "../crdt/temporary-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { EFFECT_STATE_TYPE } from "../constants/crdt-states";
 
 describe("TemporaryCRDT", () => {
   beforeEach(() => {
@@ -493,5 +494,83 @@ describe("TemporaryCRDT", () => {
       expect(crdtRef.destroyed).toBe(true);
     });
 
+    it("should handle integrate with originRight positioning edge case", () => {
+      const crdt = new TemporaryCRDT();
+
+      const item1: CRDTItem = {
+        id: "pos1",
+        originLeft: null,
+        originRight: null,
+        content: "A",
+        isDeleted: false,
+        insertedBy: "e1",
+      };
+
+      const item2: CRDTItem = {
+        id: "pos2",
+        originLeft: null,
+        originRight: "pos1", // Insert before pos1
+        content: "B",
+        isDeleted: false,
+        insertedBy: "e2",
+      };
+
+      const item3: CRDTItem = {
+        id: "pos3",
+        originLeft: null,
+        originRight: "pos2", // Insert before pos2
+        content: "C",
+        isDeleted: false,
+        insertedBy: "e3",
+      };
+
+      crdt.integrate([item1]);
+      crdt.integrate([item2]);
+      crdt.integrate([item3]);
+
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(3);
+
+      // Verify correct ordering
+      const ids = state.items.map((i) => i.id);
+      const pos2Index = ids.indexOf("pos2");
+      const pos1Index = ids.indexOf("pos1");
+      expect(pos2Index).toBeLessThan(pos1Index);
+    });
+
+    it("should handle integrate when originRight is missing", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Item with originRight that doesn't exist yet
+      const item: CRDTItem = {
+        id: "orphan",
+        originLeft: null,
+        originRight: "nonexistent",
+        content: "X",
+        isDeleted: false,
+        insertedBy: "e1",
+      };
+
+      // Should still integrate (line 246 null check)
+      crdt.integrate([item]);
+
+      const state = crdt.getEffectState();
+      expect(state.items.length).toBe(1);
+      expect(state.items[0]?.id).toBe("orphan");
+    });
+
+    it("should handle checkValid with exceeded lifetime", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Manually set createdAt to trigger lifetime check (line 48-49)
+      // @ts-expect-error - Accessing private field for testing
+      crdt.createdAt = Date.now() - 15000; // 15 seconds ago
+
+      // This should trigger the lifetime exceeded error
+      expect(() => {
+        // @ts-expect-error - Accessing private method for testing
+        crdt.checkValid();
+      }).toThrow("exceeded maximum lifetime");
+    });
   });
 });

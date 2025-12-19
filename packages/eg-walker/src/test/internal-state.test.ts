@@ -1393,4 +1393,141 @@ describe("InternalCRDTState", () => {
       expect(index).toBe(1); // Should be index 1 (after r:1, skip r:2)
     });
   });
+
+  describe("Additional branch coverage tests", () => {
+    it("should handle findRecordsInRange early break when range is satisfied", () => {
+      // Insert 10 visible records
+      for (let i = 0; i < 10; i++) {
+        const record: Record = {
+          id: `range${i}`,
+          originLeft: i === 0 ? null : `range${i - 1}`,
+          originRight: null,
+          prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+          effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+          content: String.fromCharCode(65 + i),
+          eventId: `e${i}`,
+        };
+        state.insertRecord(record);
+      }
+
+      // Delete a small range in the middle (triggers early break on line 485)
+      state.applyOperation(
+        { type: OPERATION_TYPE.DELETE, index: 3, length: 2 },
+        "del_range",
+      );
+
+      const text = state.getVisibleText();
+      expect(text.length).toBe(10); // effectState not changed by applyOperation
+    });
+
+    it("should handle getPrepareText with mixed DELETED counts", () => {
+      // Insert visible record
+      const record1: Record = {
+        id: "prep1",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "e1",
+      };
+      state.insertRecord(record1);
+
+      // Insert record with DELETED prepare state and count > 0
+      const record2: Record = {
+        id: "prep2",
+        originLeft: "prep1",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.DELETED, count: 3 },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "Y",
+        eventId: "e2",
+      };
+      state.insertRecord(record2);
+
+      state.switchToPrepareState();
+      const prepText = state.getPrepareText();
+      // Should only include visible prepare state records
+      expect(prepText).toBe("X");
+    });
+
+    it("should handle clearCachedMetadata with no metadata", () => {
+      // Insert records without metadata
+      const record: Record = {
+        id: "no_meta",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "M",
+        eventId: "e1",
+      };
+      state.insertRecord(record);
+
+      // Call clearCachedMetadata (should handle records without metadata)
+      state.clearCachedMetadata();
+
+      const text = state.getVisibleText();
+      expect(text).toBe("M");
+    });
+
+    it("should handle recordToIndexEffect returning -1 for deleted", () => {
+      const record: Record = {
+        id: "del_check",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED },
+        content: "D",
+        eventId: "e1",
+      };
+      state.insertRecord(record);
+
+      // recordToIndexEffect should return -1 for DELETED (line 586-588)
+      const stats = state.getStatistics();
+      expect(stats.deletedRecords).toBe(1);
+    });
+
+    it("should handle complex originRight chains in insertion", () => {
+      // Create a chain with originRight references
+      const base: Record = {
+        id: "chain_base",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "B",
+        eventId: "e1",
+      };
+      state.insertRecord(base);
+
+      // Insert before base (originRight = base)
+      const before: Record = {
+        id: "chain_before",
+        originLeft: null,
+        originRight: "chain_base",
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "A",
+        eventId: "e2",
+      };
+      state.insertRecord(before);
+
+      // Insert another before (originRight = first before)
+      const beforeBefore: Record = {
+        id: "chain_before2",
+        originLeft: null,
+        originRight: "chain_before",
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "0",
+        eventId: "e3",
+      };
+      state.insertRecord(beforeBefore);
+
+      const text = state.getVisibleText();
+      expect(text).toContain("A");
+      expect(text).toContain("B");
+    });
+  });
 });

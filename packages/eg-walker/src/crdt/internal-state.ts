@@ -86,8 +86,16 @@ export class InternalCRDTState {
   private maxLifetime = 10000; // 10 seconds max
   private currentMode: "prepare" | "effect" = "effect";
 
+  /**
+   * Create a new InternalCRDTState instance.
+   * @param options - Configuration options
+   * @param options.maxLifetime - Maximum lifetime in milliseconds before auto-cleanup (default: 10000ms)
+   */
   constructor(options?: { maxLifetime?: number }) {
     if (options?.maxLifetime !== undefined) {
+      if (options.maxLifetime <= 0) {
+        throw new Error(`maxLifetime must be positive, got ${options.maxLifetime}`);
+      }
       this.maxLifetime = options.maxLifetime;
     }
     this.initializeBTree();

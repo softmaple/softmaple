@@ -53,7 +53,7 @@
     "chromatic": "^13.3.4",
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.25",
+    "eslint-plugin-react-refresh": "^0.4.26",
     "eslint-plugin-storybook": "^10.1.10",
     "globals": "^16.5.0",
     "playwright": "^1.57.0",

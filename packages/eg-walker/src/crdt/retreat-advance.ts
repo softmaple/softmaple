@@ -6,7 +6,7 @@
  */
 
 import type { EventId } from "../types";
-import type { GraphEvent } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
 import { InternalCRDTState } from "./internal-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import type { InternalCRDTState as ICRDTStateInterface } from "./retreat-advance-stubs";

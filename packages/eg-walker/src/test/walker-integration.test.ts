@@ -6,7 +6,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 
 import { describe, it, expect } from "vitest";
 import { EgWalker } from "../core/walker";
-import type { GraphEvent } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 import type { EventId } from "../types";

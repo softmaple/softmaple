@@ -11,6 +11,3 @@ export type SerializedEventGraph = {
   readonly events: ReadonlyArray<GraphEvent>;
   readonly metadata?: Record<string, unknown>;
 };
-
-// Re-export all types from index
-export * from "./index";

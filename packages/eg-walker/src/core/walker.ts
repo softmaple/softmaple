@@ -4,7 +4,7 @@
  */
 
 import type { EventId } from "../types";
-import type { GraphEvent } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
 import type { EventGraphWalker } from "../graph/topological-walker";
 import type { InternalCRDTState } from "../crdt/retreat-advance-stubs";
 import type { ClearableCRDTState } from "./critical-version";

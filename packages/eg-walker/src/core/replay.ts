@@ -4,7 +4,8 @@
  */
 
 import type { EventId, Version } from "../types";
-import type { GraphEvent, EventGraph } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
+import type { EventGraph } from "../graph/event-graph";
 import type { InternalCRDTState } from "../crdt/internal-state";
 
 /**

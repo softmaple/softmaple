@@ -5,7 +5,7 @@
  */
 
 import type { EventId } from "../types";
-import type { GraphEvent } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
 
 /**
  * Internal CRDT state manager (stub)

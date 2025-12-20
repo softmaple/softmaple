@@ -11,7 +11,7 @@ import {
 import { EventGraph } from "../graph/event-graph";
 import { InternalCRDTState } from "../crdt/internal-state";
 import { OPERATION_TYPE } from "../constants/operation-types";
-import type { GraphEvent } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
 import type { Version } from "../types";
 
 describe("Section 3.6: Partial Replay", () => {

@@ -22,37 +22,37 @@ function TwoPanelEditor() {
         {/* Two-panel layout: side-by-side on desktop, stacked on mobile */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Editor A */}
-          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl">
-            <CardHeader className="pb-0 bg-white/5 border-b border-white/20">
-              <CardTitle id="editor-a-label" className="text-white">
+          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
+            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
+              <CardTitle id="editor-a-label" className="text-xl text-white">
                 Editor A
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col pt-4">
+            <CardContent className="flex-1 p-0">
               <Textarea
                 value={editorAContent}
                 onChange={(e) => setEditorAContent(e.target.value)}
                 placeholder="Start typing in Editor A..."
                 aria-labelledby="editor-a-label"
-                className="flex-1 min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-blue-400"
+                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-blue-400 border-0 rounded-none p-4"
               />
             </CardContent>
           </Card>
 
           {/* Editor B */}
-          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl">
-            <CardHeader className="pb-0 bg-white/5 border-b border-white/20">
-              <CardTitle id="editor-b-label" className="text-white">
+          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
+            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
+              <CardTitle id="editor-b-label" className="text-xl text-white">
                 Editor B
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col pt-4">
+            <CardContent className="flex-1 p-0">
               <Textarea
                 value={editorBContent}
                 onChange={(e) => setEditorBContent(e.target.value)}
                 placeholder="Start typing in Editor B..."
                 aria-labelledby="editor-b-label"
-                className="flex-1 min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-green-400"
+                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-green-400 border-0 rounded-none p-4"
               />
             </CardContent>
           </Card>

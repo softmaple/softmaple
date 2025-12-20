@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -7,7 +7,7 @@ import {
   CardTitle,
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
-import { EgWalkerAPI } from "@softmaple/eg-walker";
+import { EgWalkerAPI, type GraphEvent } from "@softmaple/eg-walker";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
   component: CollaborativeEditor,
@@ -18,13 +18,43 @@ function CollaborativeEditor() {
   const [replica2Text, setReplica2Text] = useState("");
   const [api1] = useState(() => new EgWalkerAPI("replica-1"));
   const [api2] = useState(() => new EgWalkerAPI("replica-2"));
+  const [pendingEvents, setPendingEvents] = useState<
+    {
+      source: "replica1" | "replica2";
+      events: GraphEvent[];
+    }[]
+  >([]);
+
+  // Process pending events to sync between replicas
+  useEffect(() => {
+    const processPendingEvents = async () => {
+      for (const { source, events } of pendingEvents) {
+        for (const event of events) {
+          if (source === "replica1") {
+            // Apply event from replica1 to replica2
+            await api2.applyRemoteEvent(event);
+            setReplica2Text(api2.getText());
+          } else {
+            // Apply event from replica2 to replica1
+            await api1.applyRemoteEvent(event);
+            setReplica1Text(api1.getText());
+          }
+        }
+      }
+      // Clear processed events
+      if (pendingEvents.length > 0) {
+        setPendingEvents([]);
+      }
+    };
+
+    processPendingEvents();
+  }, [pendingEvents, api1, api2]);
 
   const handleReplica1Change = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
       const oldText = replica1Text;
 
-      // Simple diff: find the change and apply it
       if (newText.length > oldText.length) {
         // Insertion
         const insertPos = findInsertPosition(oldText, newText);
@@ -34,22 +64,35 @@ function CollaborativeEditor() {
         );
         api1.insert(insertPos, insertedText);
 
-        // Sync to replica 2 (simulate network sync)
-        // In real app, events would be sent over network
-        setReplica2Text(api2.getText());
+        // Get the latest event from replica1 and queue it for replica2
+        const events = api1.exportEventGraph();
+        const latestEvent = events[events.length - 1];
+        if (latestEvent) {
+          setPendingEvents((prev) => [
+            ...prev,
+            { source: "replica1", events: [latestEvent] },
+          ]);
+        }
       } else if (newText.length < oldText.length) {
         // Deletion
         const deletePos = findDeletePosition(oldText, newText);
         const deleteCount = oldText.length - newText.length;
         api1.delete(deletePos, deleteCount);
 
-        // Sync to replica 2 (simulate network sync)
-        setReplica2Text(api2.getText());
+        // Get the latest event from replica1 and queue it for replica2
+        const events = api1.exportEventGraph();
+        const latestEvent = events[events.length - 1];
+        if (latestEvent) {
+          setPendingEvents((prev) => [
+            ...prev,
+            { source: "replica1", events: [latestEvent] },
+          ]);
+        }
       }
 
       setReplica1Text(newText);
     },
-    [replica1Text, api1, api2],
+    [replica1Text, api1],
   );
 
   const handleReplica2Change = useCallback(
@@ -57,7 +100,6 @@ function CollaborativeEditor() {
       const newText = e.target.value;
       const oldText = replica2Text;
 
-      // Simple diff: find the change and apply it
       if (newText.length > oldText.length) {
         // Insertion
         const insertPos = findInsertPosition(oldText, newText);
@@ -67,21 +109,35 @@ function CollaborativeEditor() {
         );
         api2.insert(insertPos, insertedText);
 
-        // Sync to replica 1 (simulate network sync)
-        setReplica1Text(api1.getText());
+        // Get the latest event from replica2 and queue it for replica1
+        const events = api2.exportEventGraph();
+        const latestEvent = events[events.length - 1];
+        if (latestEvent) {
+          setPendingEvents((prev) => [
+            ...prev,
+            { source: "replica2", events: [latestEvent] },
+          ]);
+        }
       } else if (newText.length < oldText.length) {
         // Deletion
         const deletePos = findDeletePosition(oldText, newText);
         const deleteCount = oldText.length - newText.length;
         api2.delete(deletePos, deleteCount);
 
-        // Sync to replica 1 (simulate network sync)
-        setReplica1Text(api1.getText());
+        // Get the latest event from replica2 and queue it for replica1
+        const events = api2.exportEventGraph();
+        const latestEvent = events[events.length - 1];
+        if (latestEvent) {
+          setPendingEvents((prev) => [
+            ...prev,
+            { source: "replica2", events: [latestEvent] },
+          ]);
+        }
       }
 
       setReplica2Text(newText);
     },
-    [replica2Text, api1, api2],
+    [replica2Text, api2],
   );
 
   return (

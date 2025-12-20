@@ -1,5 +1,12 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "@softmaple/ui/components/card";
+import { Textarea } from "@softmaple/ui/components/textarea";
 
 function TwoPanelEditor() {
   const [editorAContent, setEditorAContent] = useState("");
@@ -15,42 +22,40 @@ function TwoPanelEditor() {
         {/* Two-panel layout: side-by-side on desktop, stacked on mobile */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Editor A */}
-          <div className="flex flex-col bg-white/10 backdrop-blur-md rounded-lg border border-white/20 shadow-xl overflow-hidden">
-            <div className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <h2
-                id="editor-a-label"
-                className="text-xl font-semibold text-white"
-              >
+          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
+            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
+              <CardTitle id="editor-a-label" className="text-xl text-white">
                 Editor A
-              </h2>
-            </div>
-            <textarea
-              value={editorAContent}
-              onChange={(e) => setEditorAContent(e.target.value)}
-              placeholder="Start typing in Editor A..."
-              aria-labelledby="editor-a-label"
-              className="flex-1 w-full p-4 bg-transparent text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none min-h-[400px] lg:min-h-[600px]"
-            />
-          </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 p-0">
+              <Textarea
+                value={editorAContent}
+                onChange={(e) => setEditorAContent(e.target.value)}
+                placeholder="Start typing in Editor A..."
+                aria-labelledby="editor-a-label"
+                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-blue-400 border-0 rounded-none p-4"
+              />
+            </CardContent>
+          </Card>
 
           {/* Editor B */}
-          <div className="flex flex-col bg-white/10 backdrop-blur-md rounded-lg border border-white/20 shadow-xl overflow-hidden">
-            <div className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <h2
-                id="editor-b-label"
-                className="text-xl font-semibold text-white"
-              >
+          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
+            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
+              <CardTitle id="editor-b-label" className="text-xl text-white">
                 Editor B
-              </h2>
-            </div>
-            <textarea
-              value={editorBContent}
-              onChange={(e) => setEditorBContent(e.target.value)}
-              placeholder="Start typing in Editor B..."
-              aria-labelledby="editor-b-label"
-              className="flex-1 w-full p-4 bg-transparent text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-green-400 resize-none min-h-[400px] lg:min-h-[600px]"
-            />
-          </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 p-0">
+              <Textarea
+                value={editorBContent}
+                onChange={(e) => setEditorBContent(e.target.value)}
+                placeholder="Start typing in Editor B..."
+                aria-labelledby="editor-b-label"
+                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-green-400 border-0 rounded-none p-4"
+              />
+            </CardContent>
+          </Card>
         </div>
 
         {/* Character count info */}

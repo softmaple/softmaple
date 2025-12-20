@@ -1,5 +1,6 @@
 {
-  "name": "playground",
+  "name": "@softmaple/playground",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +14,7 @@
   },
   "dependencies": {
     "@t3-oss/env-core": "^0.13.8",
+    "@softmaple/ui": "workspace:*",
     "@tailwindcss/vite": "^4.0.6",
     "@tanstack/query-db-collection": "^0.2.0",
     "@tanstack/react-db": "^0.1.1",

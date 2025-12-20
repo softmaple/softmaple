@@ -1,0 +1,24 @@
+{
+  "projectName": "playground",
+  "mode": "file-router",
+  "typescript": true,
+  "tailwind": true,
+  "packageManager": "pnpm",
+  "addOnOptions": {
+    "prisma": {
+      "database": "postgres"
+    }
+  },
+  "git": true,
+  "version": 1,
+  "framework": "react-cra",
+  "chosenAddOns": [
+    "biome",
+    "cloudflare",
+    "start",
+    "mcp",
+    "shadcn",
+    "prisma",
+    "t3env"
+  ]
+}

@@ -35,3 +35,6 @@ npm-debug.log*
 # Misc
 .DS_Store
 *.pem
+
+# TanStack Router generated files
+apps/playground/src/routeTree.gen.ts

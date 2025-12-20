@@ -9,23 +9,16 @@
     "test": "vitest run",
     "format": "biome format",
     "lint": "biome lint",
-    "check": "biome check",
-    "deploy": "npm run build && wrangler deploy",
-    "post-cta-init": "npx create-db@latest --user-agent tanstack/tsrouter",
-    "db:generate": "dotenv -e .env.local -- prisma generate",
-    "db:push": "dotenv -e .env.local -- prisma db push",
-    "db:migrate": "dotenv -e .env.local -- prisma migrate dev",
-    "db:studio": "dotenv -e .env.local -- prisma studio",
-    "db:seed": "dotenv -e .env.local -- prisma db seed"
+    "check": "biome check"
   },
   "dependencies": {
-    "@cloudflare/vite-plugin": "^1.13.8",
-    "@modelcontextprotocol/sdk": "^1.17.0",
-    "@prisma/adapter-pg": "^7.0.0",
-    "@prisma/client": "^7.0.0",
     "@t3-oss/env-core": "^0.13.8",
     "@tailwindcss/vite": "^4.0.6",
+    "@tanstack/query-db-collection": "^0.2.0",
+    "@tanstack/react-db": "^0.1.1",
     "@tanstack/react-devtools": "^0.7.0",
+    "@tanstack/react-query": "^5.66.5",
+    "@tanstack/react-query-devtools": "^5.84.2",
     "@tanstack/react-router": "^1.132.0",
     "@tanstack/react-router-devtools": "^1.132.0",
     "@tanstack/react-router-ssr-query": "^1.131.7",
@@ -34,7 +27,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.544.0",
-    "prisma": "^6.16.3",
+    "nitro": "latest",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwind-merge": "^3.0.2",
@@ -52,13 +45,10 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
-    "dotenv-cli": "^10.0.0",
     "jsdom": "^27.0.0",
-    "tsx": "^4.20.6",
     "typescript": "^5.7.2",
     "vite": "^7.1.7",
     "vitest": "^3.0.5",
-    "web-vitals": "^5.1.0",
-    "wrangler": "^4.40.3"
+    "web-vitals": "^5.1.0"
   }
 }

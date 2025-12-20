@@ -4,21 +4,17 @@
   "typescript": true,
   "tailwind": true,
   "packageManager": "pnpm",
-  "addOnOptions": {
-    "prisma": {
-      "database": "postgres"
-    }
-  },
+  "addOnOptions": {},
   "git": true,
   "version": 1,
   "framework": "react-cra",
   "chosenAddOns": [
     "biome",
-    "cloudflare",
+    "nitro",
     "start",
-    "mcp",
+    "db",
+    "t3env",
     "shadcn",
-    "prisma",
-    "t3env"
+    "tanstack-query"
   ]
 }

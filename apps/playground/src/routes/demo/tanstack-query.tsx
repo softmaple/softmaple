@@ -1,53 +1,56 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { useQuery, useMutation } from '@tanstack/react-query'
+
+export const Route = createFileRoute('/demo/tanstack-query')({
+  component: TanStackQueryDemo,
+})
 
 type Todo = {
   id: number
-  title: string
+  name: string
 }
 
-export const Route = createFileRoute('/demo/mcp-todos')({
-  component: ORPCTodos,
-})
+function TanStackQueryDemo() {
+  const { data, refetch } = useQuery<Todo[]>({
+    queryKey: ['todos'],
+    queryFn: () => fetch('/demo/api/tq-todos').then((res) => res.json()),
+    initialData: [],
+  })
 
-function ORPCTodos() {
-  const [todos, setTodos] = useState<Todo[]>([])
-
-  useEffect(() => {
-    const eventSource = new EventSource('/demo/api/mcp-todos')
-    eventSource.onmessage = (event) => {
-      setTodos(JSON.parse(event.data))
-    }
-    return () => eventSource.close()
-  }, [])
+  const { mutate: addTodo } = useMutation({
+    mutationFn: (todo: string) =>
+      fetch('/demo/api/tq-todos', {
+        method: 'POST',
+        body: JSON.stringify(todo),
+      }).then((res) => res.json()),
+    onSuccess: () => refetch(),
+  })
 
   const [todo, setTodo] = useState('')
 
   const submitTodo = useCallback(async () => {
-    await fetch('/demo/api/mcp-todos', {
-      method: 'POST',
-      body: JSON.stringify({ title: todo }),
-    })
+    await addTodo(todo)
     setTodo('')
-  }, [todo])
+  }, [addTodo, todo])
 
   return (
     <div
-      className="flex items-center justify-center min-h-screen bg-gradient-to-br from-teal-200 to-emerald-900 p-4 text-white"
+      className="flex items-center justify-center min-h-screen bg-gradient-to-br from-red-900 via-red-800 to-black p-4 text-white"
       style={{
         backgroundImage:
-          'radial-gradient(70% 70% at 20% 20%, #07A798 0%, #045C4B 60%, #01251F 100%)',
+          'radial-gradient(50% 50% at 80% 20%, #3B021F 0%, #7B1028 60%, #1A000A 100%)',
       }}
     >
       <div className="w-full max-w-2xl p-8 rounded-xl backdrop-blur-md bg-black/50 shadow-xl border-8 border-black/10">
-        <h1 className="text-2xl mb-4">MCP Todos list</h1>
+        <h1 className="text-2xl mb-4">TanStack Query Todos list</h1>
         <ul className="mb-4 space-y-2">
-          {todos?.map((t) => (
+          {data?.map((t) => (
             <li
               key={t.id}
               className="bg-white/10 border border-white/20 rounded-lg p-3 backdrop-blur-sm shadow-md"
             >
-              <span className="text-lg text-white">{t.title}</span>
+              <span className="text-lg text-white">{t.name}</span>
             </li>
           ))}
         </ul>

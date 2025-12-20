@@ -10,7 +10,6 @@ import {
   Network,
   SquareFunction,
   StickyNote,
-  Webhook,
   X,
 } from 'lucide-react'
 
@@ -172,20 +171,7 @@ export default function Header() {
           )}
 
           <Link
-            to="/demo/mcp-todos"
-            onClick={() => setIsOpen(false)}
-            className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors mb-2"
-            activeProps={{
-              className:
-                'flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2',
-            }}
-          >
-            <Webhook size={20} />
-            <span className="font-medium">MCP</span>
-          </Link>
-
-          <Link
-            to="/demo/prisma"
+            to="/demo/db-chat"
             onClick={() => setIsOpen(false)}
             className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors mb-2"
             activeProps={{
@@ -194,7 +180,20 @@ export default function Header() {
             }}
           >
             <Database size={20} />
-            <span className="font-medium">Prisma</span>
+            <span className="font-medium">DB Chat</span>
+          </Link>
+
+          <Link
+            to="/demo/tanstack-query"
+            onClick={() => setIsOpen(false)}
+            className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors mb-2"
+            activeProps={{
+              className:
+                'flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2',
+            }}
+          >
+            <Network size={20} />
+            <span className="font-medium">TanStack Query</span>
           </Link>
 
           {/* Demo Links End */}

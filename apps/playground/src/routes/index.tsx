@@ -13,6 +13,7 @@ import {
   Waves,
   Sparkles,
   SplitSquareHorizontal,
+  Users,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: App });
@@ -25,6 +26,13 @@ function App() {
       description:
         "Independent text editors side-by-side. Perfect for comparing, note-taking, or dual-language editing.",
       link: "/demo/two-panel-editor",
+    },
+    {
+      icon: <Users className="w-12 h-12 text-cyan-400" />,
+      title: "Collaborative Editor",
+      description:
+        "Real-time collaborative text editing powered by Eg-Walker CRDT algorithm. Type in either editor to see instant synchronization.",
+      link: "/demo/collaborative-editor",
     },
     {
       icon: <Zap className="w-12 h-12 text-cyan-400" />,

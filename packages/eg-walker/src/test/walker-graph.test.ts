@@ -6,7 +6,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 
 import { describe, it, expect } from "vitest";
 import { DefaultEventGraphWalker } from "../graph/topological-walker";
-import type { GraphEvent } from "../graph/event-graph";
+import type { GraphEvent } from "../types";
 
 describe("Section 3.2: EventGraphWalker", () => {
   describe("topologicalOrder", () => {

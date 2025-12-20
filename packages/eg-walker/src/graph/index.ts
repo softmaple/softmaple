@@ -5,7 +5,7 @@
  * causal relationships between editing operations.
  */
 
-export { EventGraph, type GraphEvent } from "./event-graph";
+export { EventGraph } from "./event-graph";
 export {
   DefaultEventGraphWalker,
   type EventGraphWalker,

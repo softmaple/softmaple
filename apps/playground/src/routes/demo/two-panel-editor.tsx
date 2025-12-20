@@ -17,12 +17,18 @@ function TwoPanelEditor() {
           {/* Editor A */}
           <div className="flex flex-col bg-white/10 backdrop-blur-md rounded-lg border border-white/20 shadow-xl overflow-hidden">
             <div className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <h2 className="text-xl font-semibold text-white">Editor A</h2>
+              <h2
+                id="editor-a-label"
+                className="text-xl font-semibold text-white"
+              >
+                Editor A
+              </h2>
             </div>
             <textarea
               value={editorAContent}
               onChange={(e) => setEditorAContent(e.target.value)}
               placeholder="Start typing in Editor A..."
+              aria-labelledby="editor-a-label"
               className="flex-1 w-full p-4 bg-transparent text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none min-h-[400px] lg:min-h-[600px]"
             />
           </div>
@@ -30,12 +36,18 @@ function TwoPanelEditor() {
           {/* Editor B */}
           <div className="flex flex-col bg-white/10 backdrop-blur-md rounded-lg border border-white/20 shadow-xl overflow-hidden">
             <div className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <h2 className="text-xl font-semibold text-white">Editor B</h2>
+              <h2
+                id="editor-b-label"
+                className="text-xl font-semibold text-white"
+              >
+                Editor B
+              </h2>
             </div>
             <textarea
               value={editorBContent}
               onChange={(e) => setEditorBContent(e.target.value)}
               placeholder="Start typing in Editor B..."
+              aria-labelledby="editor-b-label"
               className="flex-1 w-full p-4 bg-transparent text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-green-400 resize-none min-h-[400px] lg:min-h-[600px]"
             />
           </div>

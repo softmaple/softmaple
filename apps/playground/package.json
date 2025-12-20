@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
+    "prebuild": "pnpm --filter @softmaple/eg-walker build",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",

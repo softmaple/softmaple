@@ -41,7 +41,7 @@ jobs:
         run: pnpm install
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install chromium --with-deps
+        run: pnpm --filter @softmaple/playground exec playwright install chromium --with-deps
 
       - name: Build eg-walker
         run: pnpm --filter @softmaple/eg-walker build

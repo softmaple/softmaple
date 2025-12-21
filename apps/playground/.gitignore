@@ -11,3 +11,8 @@ count.txt
 .output
 .vinxi
 todos.json
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/

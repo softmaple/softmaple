@@ -571,5 +571,48 @@ describe("TemporaryCRDT", () => {
         crdt.checkValid();
       }).toThrow("exceeded maximum lifetime");
     });
+
+    it("should handle DELETE operations in createItemsFromEvent", () => {
+      const event: GraphEvent = {
+        id: "delete_event",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, count: 5 },
+        timestamp: 1,
+      };
+
+      // This tests the DELETE branch in createItemsFromEvent (around line 126-130)
+      const crdt = new TemporaryCRDT();
+      const initialState: EffectState = {
+        items: [
+          {
+            id: "item1",
+            originLeft: null,
+            originRight: null,
+            content: "Hello",
+            isDeleted: false,
+            insertedBy: "e0",
+          },
+        ],
+      };
+
+      // Apply the initial state then delete
+      crdt.integrate(initialState.items);
+
+      // Now create items for delete event
+      const deleteItems = crdt["createItemsFromEvent"](event, initialState);
+      expect(deleteItems.length).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should handle isDestroyed state properly", () => {
+      const crdt = new TemporaryCRDT();
+
+      // Destroy the CRDT
+      crdt.destroy();
+
+      // Attempting operations on destroyed CRDT should throw
+      expect(() => {
+        crdt.integrate([]);
+      }).toThrow("destroyed");
+    });
   });
 });

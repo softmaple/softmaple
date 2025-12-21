@@ -382,5 +382,88 @@ describe("Retreat/Advance Mechanics", () => {
 
       crdtState.destroy();
     });
+
+    it("should handle concurrent events with complex retreat/advance patterns", () => {
+      const crdtState = new ConcreteCRDTState();
+
+      // Create a base event
+      const e1: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Base" },
+        timestamp: 1,
+      };
+      let appliedEvents = crdtState.applyPrepare(e1, new Set());
+      appliedEvents = crdtState.advance("e1", appliedEvents);
+
+      // Create two concurrent events
+      const e2: GraphEvent = {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 4, text: " A" },
+        timestamp: 2,
+      };
+      appliedEvents = crdtState.applyPrepare(e2, appliedEvents);
+      appliedEvents = crdtState.advance("e2", appliedEvents);
+
+      const e3: GraphEvent = {
+        id: "e3",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 4, text: " B" },
+        timestamp: 3,
+      };
+
+      // Retreat e2 before applying e3
+      appliedEvents = crdtState.retreat("e2", appliedEvents);
+      appliedEvents = crdtState.applyPrepare(e3, appliedEvents);
+      appliedEvents = crdtState.advance("e3", appliedEvents);
+
+      const text = crdtState.getCurrentText();
+      expect(text).toContain("Base");
+      expect(text).toContain("B");
+
+      crdtState.destroy();
+    });
+
+    it("should handle multiple retreats in sequence", () => {
+      const crdtState = new ConcreteCRDTState();
+
+      // Create three sequential events
+      const e1: GraphEvent = {
+        id: "e1",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      };
+      let appliedEvents = crdtState.applyPrepare(e1, new Set());
+      appliedEvents = crdtState.advance("e1", appliedEvents);
+
+      const e2: GraphEvent = {
+        id: "e2",
+        parentVersion: new Set(["e1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      };
+      appliedEvents = crdtState.applyPrepare(e2, appliedEvents);
+      appliedEvents = crdtState.advance("e2", appliedEvents);
+
+      const e3: GraphEvent = {
+        id: "e3",
+        parentVersion: new Set(["e2"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        timestamp: 3,
+      };
+      appliedEvents = crdtState.applyPrepare(e3, appliedEvents);
+      appliedEvents = crdtState.advance("e3", appliedEvents);
+
+      // Now retreat in reverse order
+      appliedEvents = crdtState.retreat("e3", appliedEvents);
+      appliedEvents = crdtState.retreat("e2", appliedEvents);
+
+      expect(crdtState.getCurrentText()).toBe("A");
+
+      crdtState.destroy();
+    });
+
   });
 });

@@ -114,18 +114,33 @@ export class TemporaryCRDT {
    * Integrate items into the CRDT using RGA rules
    */
   integrate(newItems: ReadonlyArray<CRDTItem>): void {
-    this.checkValid();
+  this.checkValid();
 
-    // Group items by event to maintain non-interleaving
-    const itemsByEvent = new Map<EventId, CRDTItem[]>();
-    for (const item of newItems) {
-      if (this.itemsById.has(item.id)) {
-        continue; // Already integrated
+  // Group items by event to maintain non-interleaving
+  const itemsByEvent = new Map<EventId, CRDTItem[]>();
+  for (const item of newItems) {
+    const existingItem = this.itemsById.get(item.id);
+    if (existingItem) {
+      // If this is a delete operation (isDeleted = true), update the existing item
+      if (item.isDeleted && !existingItem.isDeleted) {
+        // Create a new item with isDeleted = true to maintain immutability
+        const updatedItem: CRDTItem = {
+          ...existingItem,
+          isDeleted: true,
+        };
+        this.itemsById.set(item.id, updatedItem);
+        // Update the item in the items array
+        const index = this.items.findIndex(i => i.id === item.id);
+        if (index !== -1) {
+          this.items[index] = updatedItem;
+        }
       }
-      const eventItems = itemsByEvent.get(item.insertedBy) || [];
-      eventItems.push(item);
-      itemsByEvent.set(item.insertedBy, eventItems);
+      continue; // Item already integrated, skip grouping
     }
+    const eventItems = itemsByEvent.get(item.insertedBy) || [];
+    eventItems.push(item);
+    itemsByEvent.set(item.insertedBy, eventItems);
+  }
  
     // Integrate items event by event to preserve non-interleaving
     for (const [, eventItems] of itemsByEvent) {

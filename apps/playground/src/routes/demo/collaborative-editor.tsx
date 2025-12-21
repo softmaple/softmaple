@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -7,7 +7,7 @@ import {
   CardTitle,
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
-import { EgWalkerAPI, type GraphEvent } from "@softmaple/eg-walker";
+import { EgWalkerAPI } from "@softmaple/eg-walker";
 import {
   findInsertPosition,
   findDeletePosition,
@@ -23,83 +23,11 @@ function CollaborativeEditor() {
   const [replica2Text, setReplica2Text] = useState("");
   const [api1] = useState(() => new EgWalkerAPI("replica-1"));
   const [api2] = useState(() => new EgWalkerAPI("replica-2"));
-  const [pendingEvents, setPendingEvents] = useState<
-    {
-      source: "replica1" | "replica2";
-      events: GraphEvent[];
-    }[]
-  >([]);
-  const processingRef = useRef(false);
-  const mountedRef = useRef(true);
-
-  // Process pending events to sync between replicas
-  useEffect(() => {
-    mountedRef.current = true;
-
-    const processPendingEvents = async () => {
-      // Prevent concurrent processing
-      if (processingRef.current || !mountedRef.current) {
-        return;
-      }
-
-      processingRef.current = true;
-
-      try {
-        // Keep processing until the queue is empty
-        while (true) {
-          // Exit if component unmounted
-          if (!mountedRef.current) {
-            break;
-          }
-
-          // Atomically grab and clear the queue
-          let snapshot: typeof pendingEvents = [];
-          setPendingEvents((prev) => {
-            snapshot = prev;
-            return [];
-          });
-
-          // If no events to process, exit
-          if (snapshot.length === 0) {
-            break;
-          }
-
-          // Process the snapshot
-          for (const { source, events } of snapshot) {
-            // Check mounted state before processing each event batch
-            if (!mountedRef.current) {
-              break;
-            }
-
-            for (const event of events) {
-              if (source === "replica1") {
-                // Apply event from replica1 to replica2
-                await api2.applyRemoteEvent(event);
-                setReplica2Text(api2.getText());
-              } else {
-                // Apply event from replica2 to replica1
-                await api1.applyRemoteEvent(event);
-                setReplica1Text(api1.getText());
-              }
-            }
-          }
-        }
-      } finally {
-        processingRef.current = false;
-      }
-    };
-
-    processPendingEvents();
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [pendingEvents, api1, api2]);
 
   const handleReplica1Change = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
-      const oldText = replica1Text;
+      const oldText = api1.getText();
 
       if (newText.length > oldText.length) {
         // Insertion
@@ -110,31 +38,35 @@ function CollaborativeEditor() {
         );
         api1.insert(insertPos, insertedText);
 
-        // Get the latest event from replica1 and queue it for replica2
+        // Get the latest event from replica1 and propagate to replica2 asynchronously
         const events = api1.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          setPendingEvents((prev) => [
-            ...prev,
-            { source: "replica1", events: [latestEvent] },
-          ]);
+          try {
+            await api2.applyRemoteEvent(latestEvent);
+            setReplica2Text(api2.getText());
+          } catch (error) {
+            console.error("Failed to sync insert to replica2:", error);
+          }
         }
       } else if (newText.length < oldText.length) {
-        // Deletion
-        const deletePos = findDeletePosition(oldText, newText);
-        const deleteCount = oldText.length - newText.length;
-        api1.delete(deletePos, deleteCount);
+    // Deletion
+    const deletePos = findDeletePosition(oldText, newText);
+    const deleteCount = oldText.length - newText.length;
+    api1.delete(deletePos, deleteCount);
 
-        // Get the latest event from replica1 and queue it for replica2
-        const events = api1.exportEventGraph();
-        const latestEvent = events[events.length - 1];
-        if (latestEvent) {
-          setPendingEvents((prev) => [
-            ...prev,
-            { source: "replica1", events: [latestEvent] },
-          ]);
-        }
-      } else if (newText.length === oldText.length && newText !== oldText) {
+    // Get the latest event from replica1 and propagate to replica2 asynchronously
+    const events = api1.exportEventGraph();
+    const latestEvent = events[events.length - 1];
+    if (latestEvent) {
+      try {
+        await api2.applyRemoteEvent(latestEvent);
+        setReplica2Text(api2.getText());
+      } catch (error) {
+        console.error("Failed to sync delete to replica2:", error);
+      }
+    }
+  } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
         const { start, end } = findDifferingRange(oldText, newText);
         const deleteCount = end - start + 1;
@@ -144,27 +76,30 @@ function CollaborativeEditor() {
         api1.delete(start, deleteCount);
         api1.insert(start, replacementText);
 
-        // Get the latest two events (delete + insert) and queue them
+        // Get the latest two events (delete + insert) and propagate to replica2 asynchronously
         const events = api1.exportEventGraph();
         const latestEvents = events.slice(-2);
-        if (latestEvents.length > 0) {
-          setPendingEvents((prev) => [
-            ...prev,
-            { source: "replica1", events: latestEvents },
-          ]);
+        try {
+          for (const event of latestEvents) {
+            await api2.applyRemoteEvent(event);
+          }
+          setReplica2Text(api2.getText());
+        } catch (error) {
+          console.error("Failed to sync replacement to replica2:", error);
         }
       }
 
       // Sync local state with API's getText() to ensure consistency
       setReplica1Text(api1.getText());
+      setReplica2Text(api2.getText());
     },
-    [replica1Text, api1],
+    [api1, api2],
   );
 
   const handleReplica2Change = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
-      const oldText = replica2Text;
+      const oldText = api2.getText();
 
       if (newText.length > oldText.length) {
         // Insertion
@@ -175,14 +110,16 @@ function CollaborativeEditor() {
         );
         api2.insert(insertPos, insertedText);
 
-        // Get the latest event from replica2 and queue it for replica1
+        // Get the latest event from replica2 and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          setPendingEvents((prev) => [
-            ...prev,
-            { source: "replica2", events: [latestEvent] },
-          ]);
+          try {
+            await api1.applyRemoteEvent(latestEvent);
+            setReplica1Text(api1.getText());
+          } catch (error) {
+            console.error("Failed to sync insert to replica1:", error);
+          }
         }
       } else if (newText.length < oldText.length) {
         // Deletion
@@ -190,14 +127,16 @@ function CollaborativeEditor() {
         const deleteCount = oldText.length - newText.length;
         api2.delete(deletePos, deleteCount);
 
-        // Get the latest event from replica2 and queue it for replica1
+        // Get the latest event from replica2 and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          setPendingEvents((prev) => [
-            ...prev,
-            { source: "replica2", events: [latestEvent] },
-          ]);
+          try {
+            await api1.applyRemoteEvent(latestEvent);
+            setReplica1Text(api1.getText());
+          } catch (error) {
+            console.error("Failed to sync delete to replica1:", error);
+          }
         }
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -209,21 +148,24 @@ function CollaborativeEditor() {
         api2.delete(start, deleteCount);
         api2.insert(start, replacementText);
 
-        // Get the latest two events (delete + insert) and queue them
+        // Get the latest two events (delete + insert) and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvents = events.slice(-2);
-        if (latestEvents.length > 0) {
-          setPendingEvents((prev) => [
-            ...prev,
-            { source: "replica2", events: latestEvents },
-          ]);
+        try {
+          for (const event of latestEvents) {
+            await api1.applyRemoteEvent(event);
+          }
+          setReplica1Text(api1.getText());
+        } catch (error) {
+          console.error("Failed to sync replacement to replica1:", error);
         }
       }
 
       // Sync local state with API's getText() to ensure consistency
       setReplica2Text(api2.getText());
+      setReplica1Text(api1.getText());
     },
-    [replica2Text, api2],
+    [api1, api2],
   );
 
   return (
@@ -248,6 +190,7 @@ function CollaborativeEditor() {
             </CardHeader>
             <CardContent className="flex-1 p-0">
               <Textarea
+                data-testid="replica-1"
                 value={replica1Text}
                 onChange={handleReplica1Change}
                 placeholder="Start typing in Replica 1..."
@@ -266,6 +209,7 @@ function CollaborativeEditor() {
             </CardHeader>
             <CardContent className="flex-1 p-0">
               <Textarea
+                data-testid="replica-2"
                 value={replica2Text}
                 onChange={handleReplica2Change}
                 placeholder="Start typing in Replica 2..."

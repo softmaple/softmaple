@@ -1,0 +1,65 @@
+name: E2E Tests "@softmaple/playground" app
+
+on:
+  pull_request:
+    paths:
+      - 'apps/playground/**/*.ts'
+      - 'apps/playground/**/*.tsx'
+      - 'apps/playground/e2e/**'
+      - 'apps/playground/package.json'
+      - 'apps/playground/vite.config.*'
+      - 'apps/playground/playwright.config.ts'
+      - 'apps/playground/src/**'
+      - 'packages/eg-walker/**'
+      - 'packages/ui/**'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    name: Run Playwright E2E tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Build eg-walker
+        run: pnpm --filter @softmaple/eg-walker build
+
+      - name: Run E2E tests
+        run: pnpm --filter @softmaple/playground test:e2e
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/playground/playwright-report/
+          retention-days: 30
+
+      - name: Upload test screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-screenshots
+          path: apps/playground/test-results/
+          retention-days: 7

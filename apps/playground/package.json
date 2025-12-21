@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
+    "prebuild": "pnpm --filter @softmaple/eg-walker build",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -15,6 +16,7 @@
   "dependencies": {
     "@t3-oss/env-core": "^0.13.8",
     "@softmaple/ui": "workspace:*",
+    "@softmaple/eg-walker": "workspace:*",
     "@tailwindcss/vite": "^4.0.6",
     "@tanstack/query-db-collection": "^0.2.0",
     "@tanstack/react-db": "^0.1.1",

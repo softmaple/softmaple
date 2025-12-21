@@ -39,6 +39,9 @@ importers:
 
   apps/playground:
     dependencies:
+      '@softmaple/eg-walker':
+        specifier: workspace:*
+        version: link:../../packages/eg-walker
       '@softmaple/ui':
         specifier: workspace:*
         version: link:../../packages/ui

@@ -3,7 +3,7 @@ import {
   findInsertPosition,
   findDeletePosition,
   findDifferingRange,
-} from "./text-diff";
+} from "../../lib/text-diff";
 
 describe("text-diff utilities", () => {
   describe("findInsertPosition", () => {

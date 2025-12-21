@@ -4,7 +4,7 @@ import {
   findInsertPosition,
   findDeletePosition,
   findDifferingRange,
-} from "./text-diff";
+} from "../lib/text-diff";
 
 // Mock EgWalkerAPI
 vi.mock("@softmaple/eg-walker", () => {

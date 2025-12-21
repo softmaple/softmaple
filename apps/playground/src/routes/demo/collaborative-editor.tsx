@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -29,26 +29,50 @@ function CollaborativeEditor() {
       events: GraphEvent[];
     }[]
   >([]);
+  const processingRef = useRef(false);
 
   // Process pending events to sync between replicas
   useEffect(() => {
     const processPendingEvents = async () => {
-      for (const { source, events } of pendingEvents) {
-        for (const event of events) {
-          if (source === "replica1") {
-            // Apply event from replica1 to replica2
-            await api2.applyRemoteEvent(event);
-            setReplica2Text(api2.getText());
-          } else {
-            // Apply event from replica2 to replica1
-            await api1.applyRemoteEvent(event);
-            setReplica1Text(api1.getText());
+      // Prevent concurrent processing
+      if (processingRef.current) {
+        return;
+      }
+
+      processingRef.current = true;
+
+      try {
+        // Keep processing until the queue is empty
+        while (true) {
+          // Atomically grab and clear the queue
+          let snapshot: typeof pendingEvents = [];
+          setPendingEvents((prev) => {
+            snapshot = prev;
+            return [];
+          });
+
+          // If no events to process, exit
+          if (snapshot.length === 0) {
+            break;
+          }
+
+          // Process the snapshot
+          for (const { source, events } of snapshot) {
+            for (const event of events) {
+              if (source === "replica1") {
+                // Apply event from replica1 to replica2
+                await api2.applyRemoteEvent(event);
+                setReplica2Text(api2.getText());
+              } else {
+                // Apply event from replica2 to replica1
+                await api1.applyRemoteEvent(event);
+                setReplica1Text(api1.getText());
+              }
+            }
           }
         }
-      }
-      // Clear processed events
-      if (pendingEvents.length > 0) {
-        setPendingEvents([]);
+      } finally {
+        processingRef.current = false;
       }
     };
 

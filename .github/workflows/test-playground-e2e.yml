@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Run Playwright E2E tests
+    environment:
+      name: e2e-tests
+      url: ${{ github.event.pull_request.html_url }}
 
     steps:
       - name: Checkout

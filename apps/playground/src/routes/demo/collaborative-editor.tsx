@@ -236,3 +236,5 @@ function CollaborativeEditor() {
     </div>
   );
 }
+
+export default CollaborativeEditor;

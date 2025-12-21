@@ -38,12 +38,16 @@ function CollaborativeEditor() {
         );
         api1.insert(insertPos, insertedText);
 
-        // Get the latest event from replica1 and apply to replica2 synchronously
+        // Get the latest event from replica1 and propagate to replica2 asynchronously
         const events = api1.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          await api2.applyRemoteEvent(latestEvent);
-          setReplica2Text(api2.getText());
+          try {
+            await api2.applyRemoteEvent(latestEvent);
+            setReplica2Text(api2.getText());
+          } catch (error) {
+            console.error("Failed to sync insert to replica2:", error);
+          }
         }
       } else if (newText.length < oldText.length) {
     // Deletion
@@ -51,11 +55,16 @@ function CollaborativeEditor() {
     const deleteCount = oldText.length - newText.length;
     api1.delete(deletePos, deleteCount);
 
-    // Get the latest event from replica1 and apply to replica2 synchronously
+    // Get the latest event from replica1 and propagate to replica2 asynchronously
     const events = api1.exportEventGraph();
     const latestEvent = events[events.length - 1];
     if (latestEvent) {
-      await api2.applyRemoteEvent(latestEvent);
+      try {
+        await api2.applyRemoteEvent(latestEvent);
+        setReplica2Text(api2.getText());
+      } catch (error) {
+        console.error("Failed to sync delete to replica2:", error);
+      }
     }
   } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -67,13 +76,17 @@ function CollaborativeEditor() {
         api1.delete(start, deleteCount);
         api1.insert(start, replacementText);
 
-        // Get the latest two events (delete + insert) and apply to replica2 synchronously
+        // Get the latest two events (delete + insert) and propagate to replica2 asynchronously
         const events = api1.exportEventGraph();
         const latestEvents = events.slice(-2);
-        for (const event of latestEvents) {
-          await api2.applyRemoteEvent(event);
+        try {
+          for (const event of latestEvents) {
+            await api2.applyRemoteEvent(event);
+          }
+          setReplica2Text(api2.getText());
+        } catch (error) {
+          console.error("Failed to sync replacement to replica2:", error);
         }
-        setReplica2Text(api2.getText());
       }
 
       // Sync local state with API's getText() to ensure consistency
@@ -97,12 +110,16 @@ function CollaborativeEditor() {
         );
         api2.insert(insertPos, insertedText);
 
-        // Get the latest event from replica2 and apply to replica1 synchronously
+        // Get the latest event from replica2 and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          await api1.applyRemoteEvent(latestEvent);
-          setReplica1Text(api1.getText());
+          try {
+            await api1.applyRemoteEvent(latestEvent);
+            setReplica1Text(api1.getText());
+          } catch (error) {
+            console.error("Failed to sync insert to replica1:", error);
+          }
         }
       } else if (newText.length < oldText.length) {
         // Deletion
@@ -110,11 +127,16 @@ function CollaborativeEditor() {
         const deleteCount = oldText.length - newText.length;
         api2.delete(deletePos, deleteCount);
 
-        // Get the latest event from replica2 and apply to replica1 synchronously
+        // Get the latest event from replica2 and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          await api1.applyRemoteEvent(latestEvent);
+          try {
+            await api1.applyRemoteEvent(latestEvent);
+            setReplica1Text(api1.getText());
+          } catch (error) {
+            console.error("Failed to sync delete to replica1:", error);
+          }
         }
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -126,13 +148,17 @@ function CollaborativeEditor() {
         api2.delete(start, deleteCount);
         api2.insert(start, replacementText);
 
-        // Get the latest two events (delete + insert) and apply to replica1 synchronously
+        // Get the latest two events (delete + insert) and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvents = events.slice(-2);
-        for (const event of latestEvents) {
-          await api1.applyRemoteEvent(event);
+        try {
+          for (const event of latestEvents) {
+            await api1.applyRemoteEvent(event);
+          }
+          setReplica1Text(api1.getText());
+        } catch (error) {
+          console.error("Failed to sync replacement to replica1:", error);
         }
-        setReplica1Text(api1.getText());
       }
 
       // Sync local state with API's getText() to ensure consistency
@@ -164,6 +190,7 @@ function CollaborativeEditor() {
             </CardHeader>
             <CardContent className="flex-1 p-0">
               <Textarea
+                data-testid="replica-1"
                 value={replica1Text}
                 onChange={handleReplica1Change}
                 placeholder="Start typing in Replica 1..."
@@ -182,6 +209,7 @@ function CollaborativeEditor() {
             </CardHeader>
             <CardContent className="flex-1 p-0">
               <Textarea
+                data-testid="replica-2"
                 value={replica2Text}
                 onChange={handleReplica2Change}
                 placeholder="Start typing in Replica 2..."

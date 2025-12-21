@@ -123,11 +123,16 @@ export class TemporaryCRDT {
     if (existingItem) {
       // If this is a delete operation (isDeleted = true), update the existing item
       if (item.isDeleted && !existingItem.isDeleted) {
-        existingItem.isDeleted = true;
+        // Create a new item with isDeleted = true to maintain immutability
+        const updatedItem: CRDTItem = {
+          ...existingItem,
+          isDeleted: true,
+        };
+        this.itemsById.set(item.id, updatedItem);
         // Update the item in the items array
         const index = this.items.findIndex(i => i.id === item.id);
         if (index !== -1) {
-          this.items[index] = existingItem;
+          this.items[index] = updatedItem;
         }
       }
       continue; // Item already integrated, skip grouping

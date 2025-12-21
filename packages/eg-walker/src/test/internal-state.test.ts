@@ -1527,5 +1527,71 @@ describe("InternalCRDTState", () => {
       expect(text).toContain("A");
       expect(text).toContain("B");
     });
+
+    it("should handle edge cases in record insertion with complex positioning", () => {
+      const state = new InternalCRDTState();
+
+      // Create a base record
+      const base: Record = {
+        id: "base",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "X",
+        eventId: "e1",
+      };
+      state.insertRecord(base);
+
+      // Insert with specific originLeft pointing to base
+      const leftBased: Record = {
+        id: "left_based",
+        originLeft: "base",
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "Y",
+        eventId: "e2",
+      };
+      state.insertRecord(leftBased);
+
+      const text = state.getVisibleText();
+      expect(text).toContain("X");
+      expect(text).toContain("Y");
+    });
+
+    it("should handle records with explicit DELETED state", () => {
+      const state = new InternalCRDTState();
+
+      // Create a record that is marked as deleted
+      const deletedRecord: Record = {
+        id: "deleted_item",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.DELETED },
+        effectState: { type: EFFECT_STATE_TYPE.DELETED },
+        content: "Deleted",
+        eventId: "e1",
+      };
+      state.insertRecord(deletedRecord);
+
+      // Create a visible record
+      const visibleRecord: Record = {
+        id: "visible_item",
+        originLeft: null,
+        originRight: null,
+        prepareState: { type: PREPARE_STATE_TYPE.VISIBLE },
+        effectState: { type: EFFECT_STATE_TYPE.VISIBLE },
+        content: "Visible",
+        eventId: "e2",
+      };
+      state.insertRecord(visibleRecord);
+
+      const text = state.getVisibleText();
+      // Deleted record should not appear in visible text
+      expect(text).not.toContain("Deleted");
+      // Visible record should appear
+      expect(text).toContain("Visible");
+    });
   });
 });

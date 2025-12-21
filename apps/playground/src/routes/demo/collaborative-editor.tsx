@@ -46,18 +46,18 @@ function CollaborativeEditor() {
           setReplica2Text(api2.getText());
         }
       } else if (newText.length < oldText.length) {
-        // Deletion
-        const deletePos = findDeletePosition(oldText, newText);
-        const deleteCount = oldText.length - newText.length;
-        api1.delete(deletePos, deleteCount);
+    // Deletion
+    const deletePos = findDeletePosition(oldText, newText);
+    const deleteCount = oldText.length - newText.length;
+    api1.delete(deletePos, deleteCount);
 
-        // Get the latest event from replica1 and apply to replica2 synchronously
-        const events = api1.exportEventGraph();
-        const latestEvent = events[events.length - 1];
-        if (latestEvent) {
-          await api2.applyRemoteEvent(latestEvent);
-        }
-      } else if (newText.length === oldText.length && newText !== oldText) {
+    // Get the latest event from replica1 and apply to replica2 synchronously
+    const events = api1.exportEventGraph();
+    const latestEvent = events[events.length - 1];
+    if (latestEvent) {
+      await api2.applyRemoteEvent(latestEvent);
+    }
+  } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
         const { start, end } = findDifferingRange(oldText, newText);
         const deleteCount = end - start + 1;

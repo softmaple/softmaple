@@ -114,7 +114,8 @@ function CollaborativeEditor() {
         }
       }
 
-      setReplica1Text(newText);
+      // Sync local state with API's getText() to ensure consistency
+      setReplica1Text(api1.getText());
     },
     [replica1Text, api1],
   );
@@ -178,7 +179,8 @@ function CollaborativeEditor() {
         }
       }
 
-      setReplica2Text(newText);
+      // Sync local state with API's getText() to ensure consistency
+      setReplica2Text(api2.getText());
     },
     [replica2Text, api2],
   );

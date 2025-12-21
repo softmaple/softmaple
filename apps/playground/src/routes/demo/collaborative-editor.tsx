@@ -30,12 +30,15 @@ function CollaborativeEditor() {
     }[]
   >([]);
   const processingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // Process pending events to sync between replicas
   useEffect(() => {
+    mountedRef.current = true;
+
     const processPendingEvents = async () => {
       // Prevent concurrent processing
-      if (processingRef.current) {
+      if (processingRef.current || !mountedRef.current) {
         return;
       }
 
@@ -44,6 +47,11 @@ function CollaborativeEditor() {
       try {
         // Keep processing until the queue is empty
         while (true) {
+          // Exit if component unmounted
+          if (!mountedRef.current) {
+            break;
+          }
+
           // Atomically grab and clear the queue
           let snapshot: typeof pendingEvents = [];
           setPendingEvents((prev) => {
@@ -58,6 +66,11 @@ function CollaborativeEditor() {
 
           // Process the snapshot
           for (const { source, events } of snapshot) {
+            // Check mounted state before processing each event batch
+            if (!mountedRef.current) {
+              break;
+            }
+
             for (const event of events) {
               if (source === "replica1") {
                 // Apply event from replica1 to replica2
@@ -77,6 +90,10 @@ function CollaborativeEditor() {
     };
 
     processPendingEvents();
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [pendingEvents, api1, api2]);
 
   const handleReplica1Change = useCallback(

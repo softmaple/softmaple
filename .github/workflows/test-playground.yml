@@ -1,0 +1,55 @@
+name: Test "@softmaple/playground" app
+
+on:
+  push:
+    paths:
+      - 'apps/playground/**/*.ts'
+      - 'apps/playground/**/*.tsx'
+      - 'apps/playground/**/*.test.ts'
+      - 'apps/playground/**/*.test.tsx'
+      - 'apps/playground/package.json'
+      - 'apps/playground/vite.config.*'
+      - 'apps/playground/src/**'
+      - 'packages/eg-walker/**'
+  pull_request:
+    paths:
+      - 'apps/playground/**/*.ts'
+      - 'apps/playground/**/*.tsx'
+      - 'apps/playground/**/*.test.ts'
+      - 'apps/playground/**/*.test.tsx'
+      - 'apps/playground/package.json'
+      - 'apps/playground/vite.config.*'
+      - 'apps/playground/src/**'
+      - 'packages/eg-walker/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run unit tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build eg-walker
+        run: pnpm --filter @softmaple/eg-walker build
+
+      - name: Run unit tests
+        run: pnpm --filter @softmaple/playground test --run

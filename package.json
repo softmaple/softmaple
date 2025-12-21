@@ -31,6 +31,7 @@
   "author": "Yadong Zhang",
   "license": "Apache-2.0",
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "eslint": "^9.39.2",

@@ -65,7 +65,7 @@ test.describe("Collaborative Text Editor", () => {
     await page.waitForTimeout(500);
     await expect(replica2).toHaveValue("Hello World", { timeout: 5000 });
 
-    // Delete some text in Replica 1
+    // Delete some text by directly setting a shorter value
     await replica1.fill("Hello");
     await page.waitForTimeout(500);
     await expect(replica2).toHaveValue("Hello", { timeout: 5000 });
@@ -81,7 +81,7 @@ test.describe("Collaborative Text Editor", () => {
     await page.waitForTimeout(500);
     await expect(replica2).toHaveValue("hello", { timeout: 5000 });
 
-    // Replace with same-length text
+    // Replace with different text (will test full replacement logic)
     await replica1.fill("HELLO");
     await page.waitForTimeout(500);
     await expect(replica2).toHaveValue("HELLO", { timeout: 5000 });

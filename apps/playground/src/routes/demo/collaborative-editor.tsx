@@ -27,7 +27,7 @@ function CollaborativeEditor() {
   const handleReplica1Change = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
-      const oldText = replica1Text;
+      const oldText = api1.getText();
 
       if (newText.length > oldText.length) {
         // Insertion
@@ -56,7 +56,6 @@ function CollaborativeEditor() {
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
           await api2.applyRemoteEvent(latestEvent);
-          setReplica2Text(api2.getText());
         }
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -79,14 +78,15 @@ function CollaborativeEditor() {
 
       // Sync local state with API's getText() to ensure consistency
       setReplica1Text(api1.getText());
+      setReplica2Text(api2.getText());
     },
-    [replica1Text, api1, api2],
+    [api1, api2],
   );
 
   const handleReplica2Change = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
-      const oldText = replica2Text;
+      const oldText = api2.getText();
 
       if (newText.length > oldText.length) {
         // Insertion
@@ -115,7 +115,6 @@ function CollaborativeEditor() {
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
           await api1.applyRemoteEvent(latestEvent);
-          setReplica1Text(api1.getText());
         }
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -138,8 +137,9 @@ function CollaborativeEditor() {
 
       // Sync local state with API's getText() to ensure consistency
       setReplica2Text(api2.getText());
+      setReplica1Text(api1.getText());
     },
-    [replica2Text, api1, api2],
+    [api1, api2],
   );
 
   return (

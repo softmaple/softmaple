@@ -9,9 +9,9 @@ on:
       - 'apps/playground/package.json'
       - 'apps/playground/vite.config.*'
       - 'apps/playground/playwright.config.ts'
-      - 'apps/playground/src/**'
       - 'packages/eg-walker/**'
       - 'packages/ui/**'
+      - '.github/workflows/test-playground-e2e.yml'
 
 permissions:
   contents: read
@@ -19,6 +19,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     name: Run Playwright E2E tests
 
     steps:

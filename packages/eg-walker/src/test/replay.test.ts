@@ -772,5 +772,6 @@ describe("Section 3.6: Partial Replay", () => {
       replayManager.reconstructPlaceholders(state, new Set(["e1"]));
       expect(state).toBeDefined();
     });
+
   });
 });

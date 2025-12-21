@@ -8,6 +8,11 @@ import {
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
 import { EgWalkerAPI, type GraphEvent } from "@softmaple/eg-walker";
+import {
+  findInsertPosition,
+  findDeletePosition,
+  findDifferingRange,
+} from "@/lib/text-diff";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
   component: CollaborativeEditor,
@@ -88,6 +93,25 @@ function CollaborativeEditor() {
             { source: "replica1", events: [latestEvent] },
           ]);
         }
+      } else if (newText.length === oldText.length && newText !== oldText) {
+        // Replacement (same length, different content)
+        const { start, end } = findDifferingRange(oldText, newText);
+        const deleteCount = end - start + 1;
+        const replacementText = newText.slice(start, end + 1);
+
+        // Perform delete then insert
+        api1.delete(start, deleteCount);
+        api1.insert(start, replacementText);
+
+        // Get the latest two events (delete + insert) and queue them
+        const events = api1.exportEventGraph();
+        const latestEvents = events.slice(-2);
+        if (latestEvents.length > 0) {
+          setPendingEvents((prev) => [
+            ...prev,
+            { source: "replica1", events: latestEvents },
+          ]);
+        }
       }
 
       setReplica1Text(newText);
@@ -131,6 +155,25 @@ function CollaborativeEditor() {
           setPendingEvents((prev) => [
             ...prev,
             { source: "replica2", events: [latestEvent] },
+          ]);
+        }
+      } else if (newText.length === oldText.length && newText !== oldText) {
+        // Replacement (same length, different content)
+        const { start, end } = findDifferingRange(oldText, newText);
+        const deleteCount = end - start + 1;
+        const replacementText = newText.slice(start, end + 1);
+
+        // Perform delete then insert
+        api2.delete(start, deleteCount);
+        api2.insert(start, replacementText);
+
+        // Get the latest two events (delete + insert) and queue them
+        const events = api2.exportEventGraph();
+        const latestEvents = events.slice(-2);
+        if (latestEvents.length > 0) {
+          setPendingEvents((prev) => [
+            ...prev,
+            { source: "replica2", events: latestEvents },
           ]);
         }
       }
@@ -193,23 +236,3 @@ function CollaborativeEditor() {
     </div>
   );
 }
-
-// Helper function to find where text was inserted
-const findInsertPosition = (oldText: string, newText: string): number => {
-  for (let i = 0; i < Math.min(oldText.length, newText.length); i++) {
-    if (oldText[i] !== newText[i]) {
-      return i;
-    }
-  }
-  return oldText.length;
-};
-
-// Helper function to find where text was deleted
-const findDeletePosition = (oldText: string, newText: string): number => {
-  for (let i = 0; i < Math.min(oldText.length, newText.length); i++) {
-    if (oldText[i] !== newText[i]) {
-      return i;
-    }
-  }
-  return newText.length;
-};

@@ -47,7 +47,7 @@
   "devDependencies": {
   "@playwright/test": "^1.57.0",
   "@biomejs/biome": "2.2.4",
-  "@tanstack/devtools-vite": "^0.3.11",
+  "@tanstack/devtools-vite": "^0.3.12",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.2.0",
     "@types/node": "^22.10.2",

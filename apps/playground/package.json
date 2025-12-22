@@ -17,7 +17,7 @@
     "check": "biome check"
   },
   "dependencies": {
-    "@t3-oss/env-core": "^0.13.8",
+    "@t3-oss/env-core": "^0.13.10",
     "@softmaple/ui": "workspace:*",
     "@softmaple/eg-walker": "workspace:*",
     "@tailwindcss/vite": "^4.0.6",

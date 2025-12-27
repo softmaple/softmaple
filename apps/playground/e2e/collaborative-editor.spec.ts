@@ -11,15 +11,11 @@ test.describe("Collaborative Text Editor", () => {
   });
 
   test("should display two replica editors", async ({ page }) => {
-    // Check for Replica 1
-    await expect(
-      page.getByRole("heading", { name: /Replica 1/i }),
-    ).toBeVisible();
+    // Check for Replica 1 - CardTitle renders as div, not heading
+    await expect(page.getByText("Replica 1")).toBeVisible();
 
     // Check for Replica 2
-    await expect(
-      page.getByRole("heading", { name: /Replica 2/i }),
-    ).toBeVisible();
+    await expect(page.getByText("Replica 2")).toBeVisible();
 
     // Check for textareas
     const textareas = page.getByRole("textbox");

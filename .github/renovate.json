@@ -23,6 +23,13 @@
       "schedule": ["before 10am on monday"]
     },
     {
+      "description": "Group TanStack ecosystem updates",
+      "groupName": "TanStack",
+      "matchPackageNames": ["/^@tanstack\\//"],
+      "automerge": false,
+      "schedule": ["before 10am on monday"]
+    },
+    {
       "description": "Group Lexical editor updates",
       "groupName": "Lexical",
       "matchPackageNames": ["lexical", "/^@lexical\\//"],

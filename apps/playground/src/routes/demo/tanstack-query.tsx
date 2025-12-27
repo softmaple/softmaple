@@ -1,45 +1,45 @@
-import { useCallback, useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useCallback, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useMutation } from "@tanstack/react-query";
 
-export const Route = createFileRoute('/demo/tanstack-query')({
+export const Route = createFileRoute("/demo/tanstack-query")({
   component: TanStackQueryDemo,
-})
+});
 
 type Todo = {
-  id: number
-  name: string
-}
+  id: number;
+  name: string;
+};
 
 function TanStackQueryDemo() {
   const { data, refetch } = useQuery<Todo[]>({
-    queryKey: ['todos'],
-    queryFn: () => fetch('/demo/api/tq-todos').then((res) => res.json()),
+    queryKey: ["todos"],
+    queryFn: () => fetch("/demo/api/tq-todos").then((res) => res.json()),
     initialData: [],
-  })
+  });
 
   const { mutate: addTodo } = useMutation({
     mutationFn: (todo: string) =>
-      fetch('/demo/api/tq-todos', {
-        method: 'POST',
+      fetch("/demo/api/tq-todos", {
+        method: "POST",
         body: JSON.stringify(todo),
       }).then((res) => res.json()),
     onSuccess: () => refetch(),
-  })
+  });
 
-  const [todo, setTodo] = useState('')
+  const [todo, setTodo] = useState("");
 
   const submitTodo = useCallback(async () => {
-    await addTodo(todo)
-    setTodo('')
-  }, [addTodo, todo])
+    await addTodo(todo);
+    setTodo("");
+  }, [addTodo, todo]);
 
   return (
     <div
       className="flex items-center justify-center min-h-screen bg-gradient-to-br from-red-900 via-red-800 to-black p-4 text-white"
       style={{
         backgroundImage:
-          'radial-gradient(50% 50% at 80% 20%, #3B021F 0%, #7B1028 60%, #1A000A 100%)',
+          "radial-gradient(50% 50% at 80% 20%, #3B021F 0%, #7B1028 60%, #1A000A 100%)",
       }}
     >
       <div className="w-full max-w-2xl p-8 rounded-xl backdrop-blur-md bg-black/50 shadow-xl border-8 border-black/10">
@@ -60,8 +60,8 @@ function TanStackQueryDemo() {
             value={todo}
             onChange={(e) => setTodo(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                submitTodo()
+              if (e.key === "Enter") {
+                submitTodo();
               }
             }}
             placeholder="Enter a new todo..."
@@ -77,5 +77,5 @@ function TanStackQueryDemo() {
         </div>
       </div>
     </div>
-  )
+  );
 }

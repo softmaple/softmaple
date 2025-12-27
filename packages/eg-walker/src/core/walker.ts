@@ -35,10 +35,7 @@ import {
   StateClearer,
   DefaultCriticalVersionDetector,
 } from "./critical-version";
-import {
-  FrontierVersion,
-  VersionAlignmentManager,
-} from "./version-alignment";
+import { FrontierVersion, VersionAlignmentManager } from "./version-alignment";
 import { DefaultEventGraphWalker } from "../graph/topological-walker";
 import { StubInternalCRDT } from "../crdt/retreat-advance-stubs";
 

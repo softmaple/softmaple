@@ -15,7 +15,9 @@ interface ResetPasswordPageProps {
   searchParams: Promise<{ message?: string; error?: string }>;
 }
 
-export default async function ResetPasswordPage({ searchParams }: ResetPasswordPageProps) {
+export default async function ResetPasswordPage({
+  searchParams,
+}: ResetPasswordPageProps) {
   const params = await searchParams;
   const message = params?.message;
   const error = params?.error;
@@ -32,7 +34,8 @@ export default async function ResetPasswordPage({ searchParams }: ResetPasswordP
             </div>
             <CardTitle className="text-2xl">Reset your password</CardTitle>
             <CardDescription>
-              Enter your email address and we'll send you a link to reset your password
+              Enter your email address and we'll send you a link to reset your
+              password
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

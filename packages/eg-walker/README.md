@@ -25,6 +25,7 @@ Each replica's state consists of three parts:
 ### How It Works
 
 The algorithm uses a two-phase approach:
+
 1. **Prepare Phase**: Retreat/advance the internal CRDT state to align with an event's parent version
 2. **Apply Phase**: Execute the operation (insert or delete) in the prepared context
 
@@ -67,7 +68,7 @@ import { EgWalker } from "@softmaple/eg-walker";
 
 ### Key Operations
 
-1. **Prepare Phase**: 
+1. **Prepare Phase**:
    - Retreat: Decrement prepare_state for events only in current version
    - Advance: Increment prepare_state for events only in target version
 

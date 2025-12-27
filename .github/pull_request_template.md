@@ -2,9 +2,11 @@
 <!-- If it fixed a bug, please use **fixes #<issue-number>** -->
 <!-- If it resolved a issue, please use **resolves #<issue-number>** -->
 <!-- otherwise, use **closes #<issue-number>** instead. -->
+
 Fixes # .
 
 Changes proposed in this pull request:
-- 
-- 
-- 
+
+-
+-
+-

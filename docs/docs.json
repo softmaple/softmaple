@@ -9,26 +9,22 @@
   },
   "favicon": "/favicon.svg",
   "contextual": {
-   "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
- },
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
   "navigation": {
     "groups": [
       {
         "group": "Get Started",
-        "pages": [
-          "welcome",
-          "quickstart",
-          "development"
-        ]
+        "pages": ["welcome", "quickstart", "development"]
       },
       {
         "group": "Essentials",
@@ -51,9 +47,7 @@
       },
       {
         "group": "API Documentation",
-        "pages": [
-          "api-reference/introduction"
-        ]
+        "pages": ["api-reference/introduction"]
       },
       {
         "group": "Endpoint Examples",
@@ -65,9 +59,9 @@
       }
     ]
   },
- "logo": {
-   "light": "/logo/light.svg",
-   "dark": "/logo/dark.svg"
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "footer": {
     "links": [

@@ -34,7 +34,9 @@ describe("sanitizeRedirectUrl", () => {
       expect(sanitizeRedirectUrl("https://evil.com")).toBe("/");
       expect(sanitizeRedirectUrl("ftp://evil.com")).toBe("/");
       expect(sanitizeRedirectUrl("javascript:alert(1)")).toBe("/");
-      expect(sanitizeRedirectUrl("data:text/html,<script>alert(1)</script>")).toBe("/");
+      expect(
+        sanitizeRedirectUrl("data:text/html,<script>alert(1)</script>"),
+      ).toBe("/");
     });
 
     it("should reject URLs with @ character", () => {

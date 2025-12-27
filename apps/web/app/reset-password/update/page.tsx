@@ -14,7 +14,9 @@ interface UpdatePasswordPageProps {
   searchParams: Promise<{ message?: string; error?: string }>;
 }
 
-export default async function UpdatePasswordPage({ searchParams }: UpdatePasswordPageProps) {
+export default async function UpdatePasswordPage({
+  searchParams,
+}: UpdatePasswordPageProps) {
   const params = await searchParams;
   const message = params?.message;
   const error = params?.error;
@@ -29,9 +31,7 @@ export default async function UpdatePasswordPage({ searchParams }: UpdatePasswor
             </div>
           </div>
           <CardTitle className="text-2xl">Create new password</CardTitle>
-          <CardDescription>
-            Enter your new password below
-          </CardDescription>
+          <CardDescription>Enter your new password below</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {message && (

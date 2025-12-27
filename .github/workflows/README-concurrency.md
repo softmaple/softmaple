@@ -44,6 +44,7 @@ concurrency:
 ## Monitoring
 
 To see queued workflows:
+
 1. Go to Actions tab
 2. Look for workflows with "Queued" status
 3. Check the concurrency message for details
@@ -51,5 +52,6 @@ To see queued workflows:
 ## Override Options
 
 To temporarily allow parallel execution:
+
 1. Comment out the `concurrency` block in the workflow files
 2. Or change `group` names to be unique per workflow

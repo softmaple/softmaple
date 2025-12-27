@@ -1,27 +1,27 @@
-import { useEffect, useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
-import { getPunkSongs } from '@/data/demo.punk-songs'
+import { useEffect, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { getPunkSongs } from "@/data/demo.punk-songs";
 
-export const Route = createFileRoute('/demo/start/ssr/spa-mode')({
+export const Route = createFileRoute("/demo/start/ssr/spa-mode")({
   ssr: false,
   component: RouteComponent,
-})
+});
 
 function RouteComponent() {
   const [punkSongs, setPunkSongs] = useState<
     Awaited<ReturnType<typeof getPunkSongs>>
-  >([])
+  >([]);
 
   useEffect(() => {
-    getPunkSongs().then(setPunkSongs)
-  }, [])
+    getPunkSongs().then(setPunkSongs);
+  }, []);
 
   return (
     <div
       className="flex items-center justify-center min-h-screen bg-gradient-to-br from-zinc-800 to-black p-4 text-white"
       style={{
         backgroundImage:
-          'radial-gradient(50% 50% at 20% 60%, #1a1a1a 0%, #0a0a0a 50%, #000000 100%)',
+          "radial-gradient(50% 50% at 20% 60%, #1a1a1a 0%, #0a0a0a 50%, #000000 100%)",
       }}
     >
       <div className="w-full max-w-2xl p-8 rounded-xl backdrop-blur-md bg-black/50 shadow-xl border-8 border-black/10">
@@ -43,5 +43,5 @@ function RouteComponent() {
         </ul>
       </div>
     </div>
-  )
+  );
 }

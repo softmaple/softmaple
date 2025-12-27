@@ -274,7 +274,7 @@ describe("Section 3.2: EventGraphWalker", () => {
       });
 
       const order = walker.topologicalOrder();
-      
+
       // Both events should be in the result (treated as roots)
       expect(order).toContain("child");
       expect(order).toContain("orphan");
@@ -300,7 +300,7 @@ describe("Section 3.2: EventGraphWalker", () => {
       });
 
       const order = walker.topologicalOrder();
-      
+
       // Should handle mixed parent situation gracefully
       expect(order).toEqual(["e1", "e2"]);
       expect(order.indexOf("e1")).toBeLessThan(order.indexOf("e2"));

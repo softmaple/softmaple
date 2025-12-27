@@ -5,7 +5,7 @@
 
 import type { EventId } from "../types";
 
-/** 
+/**
  * Represents the difference between two versions
  */
 export interface VersionDiff {

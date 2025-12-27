@@ -50,23 +50,23 @@ function CollaborativeEditor() {
           }
         }
       } else if (newText.length < oldText.length) {
-    // Deletion
-    const deletePos = findDeletePosition(oldText, newText);
-    const deleteCount = oldText.length - newText.length;
-    api1.delete(deletePos, deleteCount);
+        // Deletion
+        const deletePos = findDeletePosition(oldText, newText);
+        const deleteCount = oldText.length - newText.length;
+        api1.delete(deletePos, deleteCount);
 
-    // Get the latest event from replica1 and propagate to replica2 asynchronously
-    const events = api1.exportEventGraph();
-    const latestEvent = events[events.length - 1];
-    if (latestEvent) {
-      try {
-        await api2.applyRemoteEvent(latestEvent);
-        setReplica2Text(api2.getText());
-      } catch (error) {
-        console.error("Failed to sync delete to replica2:", error);
-      }
-    }
-  } else if (newText.length === oldText.length && newText !== oldText) {
+        // Get the latest event from replica1 and propagate to replica2 asynchronously
+        const events = api1.exportEventGraph();
+        const latestEvent = events[events.length - 1];
+        if (latestEvent) {
+          try {
+            await api2.applyRemoteEvent(latestEvent);
+            setReplica2Text(api2.getText());
+          } catch (error) {
+            console.error("Failed to sync delete to replica2:", error);
+          }
+        }
+      } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
         const { start, end } = findDifferingRange(oldText, newText);
         const deleteCount = end - start + 1;

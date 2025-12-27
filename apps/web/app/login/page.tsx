@@ -41,8 +41,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <LoginForm />
 
             <div className="text-right">
-              <Link 
-                href="/reset-password" 
+              <Link
+                href="/reset-password"
                 className="text-sm text-muted-foreground hover:text-primary transition-colors"
               >
                 Forgot password?

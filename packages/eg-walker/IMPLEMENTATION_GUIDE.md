@@ -5,6 +5,7 @@ This document maps the theoretical Eg-walker algorithm (Sections 3.1-3.6) to our
 ## Algorithm Overview
 
 Eg-walker is a collaborative text editing algorithm based on event graph replay. It ensures convergence across replicas using:
+
 1. **Event Graph**: Persisted DAG of operations
 2. **Document State**: Current text with no metadata
 3. **Internal State**: Temporary CRDT for merging concurrent edits (not persisted)
@@ -13,20 +14,22 @@ Eg-walker is a collaborative text editing algorithm based on event graph replay.
 
 ### Core Components (Section 3)
 
-| Algorithm Component | Implementation File | Description |
-|-------------------|-------------------|-------------|
-| Event Graph | `graph/event-graph.ts` | DAG storage and traversal |
-| Document State | `core/external-api.ts` | Index-based external API |
-| Internal State | `crdt/internal-state.ts` | Temporary CRDT structure |
+| Algorithm Component | Implementation File      | Description               |
+| ------------------- | ------------------------ | ------------------------- |
+| Event Graph         | `graph/event-graph.ts`   | DAG storage and traversal |
+| Document State      | `core/external-api.ts`   | Index-based external API  |
+| Internal State      | `crdt/internal-state.ts` | Temporary CRDT structure  |
 
 ### Section 3.1: Characteristics
 
 **Strong List Specification & Non-interleaving:**
+
 - `crdt/non-interleaving.ts` - Ensures concurrent sequences aren't interleaved
 - `core/invariants.ts` - Maintains algorithm invariants
 - `crdt/temporary-state.ts` - Manages temporary CRDT lifecycle
 
 **Key Properties:**
+
 - ✅ Converges to same state regardless of traversal order
 - ✅ Maximally non-interleaving for concurrent insertions
 - ✅ Internal state discarded when no concurrency
@@ -45,6 +48,7 @@ class EgWalker {
 ```
 
 **Version Management:** `core/version-alignment.ts`
+
 - Manages prepare version (context where event was generated)
 - Manages effect version (all events applied so far)
 - Computes retreat/advance sequences
@@ -55,18 +59,20 @@ class EgWalker {
 
 ```typescript
 interface CRDTItem {
-  id: EventId;           // Event that inserted character
-  prepareState: PrepareStateType;  // State in prepare version
-  effectState: EffectStateType;    // State in effect version
+  id: EventId; // Event that inserted character
+  prepareState: PrepareStateType; // State in prepare version
+  effectState: EffectStateType; // State in effect version
   // CRDT ordering fields...
 }
 ```
 
 **State Types:** `constants/crdt-states.ts`
+
 - `PREPARE_STATE_TYPE`: NotInsertedYet, Visible, Del1, Del2, ...
 - `EFFECT_STATE_TYPE`: Visible, Deleted
 
 **Methods:** `crdt/retreat-advance.ts`
+
 - `apply(e)`: Updates both versions, outputs transformed op
 - `retreat(e)`: Removes event from prepare version
 - `advance(e)`: Adds event to prepare version
@@ -79,15 +85,16 @@ interface CRDTItem {
 // In internal-state.ts
 class InternalCRDTState {
   // B-tree for O(log n) index lookups
-  indexToRecordPrepare(index: number): CRDTItem
-  recordToIndexEffect(record: CRDTItem): number
-  
+  indexToRecordPrepare(index: number): CRDTItem;
+  recordToIndexEffect(record: CRDTItem): number;
+
   // Second B-tree: eventId -> record mapping
-  eventToRecord: Map<EventId, CRDTItem>
+  eventToRecord: Map<EventId, CRDTItem>;
 }
 ```
 
 **Operations:**
+
 - Insert(i, text): Find ith visible character in prepare state
 - Delete(i): Mark ith visible character as deleted
 - Transform: Map prepare index → effect index
@@ -100,12 +107,13 @@ class InternalCRDTState {
 interface CriticalVersionDetector {
   // Version V is critical if it partitions graph:
   // All events before V happened-before all events after V
-  isCritical(version: Version, graph: EventGraph): boolean
-  findLatestCritical(graph: EventGraph): Version | null
+  isCritical(version: Version, graph: EventGraph): boolean;
+  findLatestCritical(graph: EventGraph): Version | null;
 }
 ```
 
 **Optimizations:**
+
 - Discard internal state at critical versions
 - Skip transformation for events between critical versions
 - Only replay from most recent critical version
@@ -117,17 +125,18 @@ interface CriticalVersionDetector {
 ```typescript
 class ReplayManager {
   // Replays subset of event graph from critical version
-  replayFromCritical(criticalVersion: Version, newEvents: Event[])
-  
+  replayFromCritical(criticalVersion: Version, newEvents: Event[]);
+
   // Uses placeholders for unknown document content
-  initializePlaceholder(range: [number, number])
-  
+  initializePlaceholder(range: [number, number]);
+
   // Splits placeholders as events are applied
-  applyToPlaceholder(event: Event, placeholder: Placeholder)
+  applyToPlaceholder(event: Event, placeholder: Placeholder);
 }
 ```
 
 **Process:**
+
 1. Find latest critical version before new events
 2. Initialize placeholder for document at critical version
 3. Replay events from critical version to current
@@ -169,34 +178,37 @@ class ReplayManager {
 ## Testing Strategy
 
 ### Unit Tests
+
 - `test/internal-state.test.ts` - CRDT operations
 - `test/retreat-advance.test.ts` - Version transitions
 - `test/critical-version.test.ts` - Critical version detection
 - `test/replay.test.ts` - Partial replay logic
 
 ### Integration Tests
+
 - `test/walker-integration.test.ts` - Full algorithm flow
 - `test/section-3.1-compliance.test.ts` - Spec compliance
 
 ### Property-Based Tests
+
 - Non-interleaving guarantees
 - Convergence regardless of traversal order
 - Invariant preservation
 
 ## Performance Characteristics
 
-| Operation | Complexity | Notes |
-|-----------|-----------|-------|
-| Apply event | O(log n) | Using B-tree indexes |
-| Retreat/Advance | O(log n) | Event ID lookup |
-| Find critical version | O(\|V\|) | Version comparison |
-| Partial replay | O(k log n) | k = events since critical |
-| Full replay | O(m log n) | m = total events |
+| Operation             | Complexity | Notes                     |
+| --------------------- | ---------- | ------------------------- |
+| Apply event           | O(log n)   | Using B-tree indexes      |
+| Retreat/Advance       | O(log n)   | Event ID lookup           |
+| Find critical version | O(\|V\|)   | Version comparison        |
+| Partial replay        | O(k log n) | k = events since critical |
+| Full replay           | O(m log n) | m = total events          |
 
 ## Usage Example
 
 ```typescript
-import { EgWalker, EventGraph } from '@softmaple/eg-walker';
+import { EgWalker, EventGraph } from "@softmaple/eg-walker";
 
 // Initialize
 const walker = new EgWalker();
@@ -204,9 +216,9 @@ const graph = new EventGraph();
 
 // Add event to graph
 const event = {
-  id: 'e1',
-  operation: { type: 'insert', index: 0, text: 'Hello' },
-  parents: []
+  id: "e1",
+  operation: { type: "insert", index: 0, text: "Hello" },
+  parents: [],
 };
 
 graph.addEvent(event);

@@ -5,6 +5,7 @@ This file contains specific instructions for Claude AI when working on the Softm
 ## Project Overview
 
 Softmaple is a Turborepo monorepo containing:
+
 - **apps/web/** - Next.js 16 application with app router
 - **packages/** - Shared packages (ui, db, editor, md2latex, etc.)
 - **docs/** - Mintlify documentation
@@ -16,23 +17,27 @@ Softmaple is a Turborepo monorepo containing:
 Always prefer functional programming patterns:
 
 **Pure Functions**
+
 - No side effects
 - Same input → same output
 - Predictable and testable
 
 ```typescript
 // ✅ Good: Pure function
-const calculateTotal = (items: Item[]): number => 
+const calculateTotal = (items: Item[]): number =>
   items.reduce((sum, item) => sum + item.price, 0);
 
 // ❌ Avoid: Side effects
 let total = 0;
 const calculateTotal = (items: Item[]) => {
-  items.forEach(item => { total += item.price; });
+  items.forEach((item) => {
+    total += item.price;
+  });
 };
 ```
 
 **Immutability**
+
 - Never mutate inputs
 - Return new objects/arrays
 - Use spread operators, map, filter, reduce
@@ -42,7 +47,7 @@ const calculateTotal = (items: Item[]) => {
 const updateUser = (user: User, name: string): User => ({
   ...user,
   name,
-  updatedAt: Date.now()
+  updatedAt: Date.now(),
 });
 
 // ❌ Avoid: Mutation
@@ -53,13 +58,15 @@ const updateUser = (user: User, name: string) => {
 ```
 
 **Higher-Order Functions**
+
 - Leverage map, filter, reduce
 - Pass functions as arguments
 - Return functions from functions
 
 ```typescript
 // ✅ Good: Higher-order function
-const withRetry = <T>(fn: () => Promise<T>, maxAttempts = 3) => 
+const withRetry =
+  <T>(fn: () => Promise<T>, maxAttempts = 3) =>
   async (): Promise<T> => {
     for (let i = 0; i < maxAttempts; i++) {
       try {
@@ -73,6 +80,7 @@ const withRetry = <T>(fn: () => Promise<T>, maxAttempts = 3) =>
 ```
 
 **Function Composition**
+
 - Build complex logic from small functions
 - Use compose/pipe utilities
 - Keep functions focused and reusable
@@ -83,8 +91,7 @@ const sanitize = (str: string) => str.trim().toLowerCase();
 const validate = (str: string) => str.length > 0;
 const normalize = (str: string) => str.replace(/\\s+/g, " ");
 
-const processInput = (input: string): string => 
-  normalize(sanitize(input));
+const processInput = (input: string): string => normalize(sanitize(input));
 ```
 
 ### 2. TypeScript Best Practices
@@ -98,20 +105,22 @@ const processInput = (input: string): string =>
   - **Instead:** Use const objects with `as const` assertion
   - **Benefit:** Better tree-shaking, smaller bundle size, no additional runtime code
   - **Example:**
+
     ```typescript
     // ❌ Avoid: TypeScript enum (generates runtime code)
     enum Status {
       Active = "active",
-      Inactive = "inactive"
+      Inactive = "inactive",
     }
-    
+
     // ✅ Good: Const object with as const (zero runtime cost)
     const Status = {
       Active: "active",
-      Inactive: "inactive"
+      Inactive: "inactive",
     } as const;
-    type Status = typeof Status[keyof typeof Status];
+    type Status = (typeof Status)[keyof typeof Status];
     ```
+
 - Prefer type inference when obvious
 - Use discriminated unions for complex types
 - Define interfaces for data structures
@@ -178,6 +187,7 @@ pnpm test
 ## Development Workflow
 
 ### Branch Naming
+
 ```bash
 # Format: type/description-timestamp
 feature/add-user-auth-1737154800
@@ -191,6 +201,7 @@ docs/update-readme-1737154800
 **CRITICAL: Never commit directly to the `next` branch.**
 
 Before making any changes:
+
 1. Check current branch: `git branch --show-current`
 2. If on `next`, create a new feature branch: `git checkout -b type/description-$(date +%s)`
 3. Make your changes on the feature branch
@@ -214,11 +225,13 @@ pnpm i                # Update dependencies
 ```
 
 This ensures:
+
 - You have the latest merged changes from other PRs
 - Dependencies are up to date with lockfile changes
 - No conflicts or outdated packages
 
 ### Commit Messages
+
 ```bash
 # Format: type(scope): summary
 feat(packages/eg-walker): add incremental CRDT integration
@@ -228,6 +241,7 @@ docs: update functional programming guidelines
 ```
 
 ### Before Committing
+
 1. Run type checks: \`pnpm --filter <package> typecheck\`
 2. Run tests: \`pnpm --filter <package> test\`
 3. Run linter: \`pnpm lint\`
@@ -239,12 +253,14 @@ docs: update functional programming guidelines
 ### packages/eg-walker/
 
 **CRDT Operations**
+
 - Use immutable patterns for state updates
 - Return new Set/Map copies instead of mutating
 - Handle out-of-order event delivery gracefully
 - Throw explicit errors for invalid states
 
 **Event Graph**
+
 - Validate event IDs before adding
 - Handle duplicate events gracefully (log and ignore)
 - Maintain topological ordering
@@ -253,6 +269,7 @@ docs: update functional programming guidelines
 ### apps/web/
 
 **Next.js 16**
+
 - Use app router conventions
 - Server components by default
 - Client components only when needed
@@ -261,16 +278,17 @@ docs: update functional programming guidelines
 ## Common Patterns
 
 ### Updating Collections Immutably
+
 ```typescript
 // Set operations
-const addToSet = <T>(set: ReadonlySet<T>, item: T): Set<T> => 
+const addToSet = <T>(set: ReadonlySet<T>, item: T): Set<T> =>
   new Set([...set, item]);
 
-const removeFromSet = <T>(set: ReadonlySet<T>, item: T): Set<T> => 
-  new Set([...set].filter(x => x !== item));
+const removeFromSet = <T>(set: ReadonlySet<T>, item: T): Set<T> =>
+  new Set([...set].filter((x) => x !== item));
 
 // Map operations
-const updateMap = <K, V>(map: ReadonlyMap<K, V>, key: K, value: V): Map<K, V> => 
+const updateMap = <K, V>(map: ReadonlyMap<K, V>, key: K, value: V): Map<K, V> =>
   new Map(map).set(key, value);
 
 const deleteFromMap = <K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> => {
@@ -281,10 +299,10 @@ const deleteFromMap = <K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> => {
 ```
 
 ### Handling Optional Values
+
 ```typescript
 // ✅ Good: Optional chaining and nullish coalescing
-const getUserName = (user?: User): string => 
-  user?.profile?.name ?? "Anonymous";
+const getUserName = (user?: User): string => user?.profile?.name ?? "Anonymous";
 
 // Type narrowing
 const processEvent = (event: Event) => {
@@ -296,6 +314,7 @@ const processEvent = (event: Event) => {
 ```
 
 ### Graceful Duplicate Handling
+
 ```typescript
 // ✅ Good: Try-catch for expected failures
 const addEventSafely = (graph: EventGraph, event: Event) => {
@@ -314,6 +333,7 @@ const addEventSafely = (graph: EventGraph, event: Event) => {
 ## What to Avoid
 
 ❌ **Don't mutate inputs**
+
 ```typescript
 // BAD
 const addItem = (items: Item[], item: Item) => {
@@ -322,6 +342,7 @@ const addItem = (items: Item[], item: Item) => {
 ```
 
 ❌ **Don't use @ts-ignore**
+
 ```typescript
 // BAD
 // @ts-ignore
@@ -332,6 +353,7 @@ const value = "property" in obj ? obj.property : undefined;
 ```
 
 ❌ **Don't use console.warn/error for control flow**
+
 ```typescript
 // BAD
 if (!found) {
@@ -346,6 +368,7 @@ if (!found) {
 ```
 
 ❌ **Don't fix unrelated bugs**
+
 - Focus on the task at hand
 - Note other issues in your final message
 - Create separate issues/PRs for unrelated fixes

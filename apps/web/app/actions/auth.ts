@@ -57,7 +57,7 @@ export async function signup(formData: FormData) {
     email,
     password,
     options: {
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/confirm`,
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/confirm`,
       data: {
         first_name: firstName,
         last_name: lastName,
@@ -101,7 +101,7 @@ export async function resetPassword(formData: FormData) {
   }
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback?type=recovery`,
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback?type=recovery`,
   });
 
   if (error) {
@@ -109,7 +109,9 @@ export async function resetPassword(formData: FormData) {
     redirect(`/reset-password?error=${encodeURIComponent(error.message)}`);
   }
 
-  redirect("/reset-password?message=Check your email for the password reset link");
+  redirect(
+    "/reset-password?message=Check your email for the password reset link",
+  );
 }
 
 export async function updatePassword(formData: FormData) {
@@ -127,7 +129,9 @@ export async function updatePassword(formData: FormData) {
   }
 
   if (password.length < 6) {
-    redirect("/reset-password/update?error=Password must be at least 6 characters");
+    redirect(
+      "/reset-password/update?error=Password must be at least 6 characters",
+    );
   }
 
   // This works for both:
@@ -139,13 +143,17 @@ export async function updatePassword(formData: FormData) {
 
   if (error) {
     console.error("Password update error:", error);
-    redirect(`/reset-password/update?error=${encodeURIComponent(error.message)}`);
+    redirect(
+      `/reset-password/update?error=${encodeURIComponent(error.message)}`,
+    );
   }
 
   // Sign out the user after successful password reset to ensure they login with new password
   await supabase.auth.signOut();
-  
-  redirect("/login?message=Password updated successfully. Please sign in with your new password.");
+
+  redirect(
+    "/login?message=Password updated successfully. Please sign in with your new password.",
+  );
 }
 
 export async function logout() {

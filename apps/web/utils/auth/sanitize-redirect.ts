@@ -2,7 +2,7 @@
  * Sanitizes a redirect URL to prevent open redirect attacks.
  * Only allows relative paths that start with a single "/".
  * Rejects protocol-relative URLs (//), absolute URLs, and URLs with protocols.
- * 
+ *
  * @param url - The URL to sanitize
  * @returns A safe internal path or "/" as fallback
  */
@@ -44,8 +44,8 @@ export function sanitizeRedirectUrl(url: string | null): string {
   try {
     const decoded = decodeURIComponent(trimmed);
     if (
-      decoded.startsWith("//") || 
-      decoded.includes("://") || 
+      decoded.startsWith("//") ||
+      decoded.includes("://") ||
       decoded.includes("@") ||
       decoded.includes("\\")
     ) {

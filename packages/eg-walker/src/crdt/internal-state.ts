@@ -6,9 +6,7 @@
  * and support O(log n) operations.
  */
 
-import {
-  OPERATION_TYPE,
-} from "../constants/operation-types";
+import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   PREPARE_STATE_TYPE,
   EFFECT_STATE_TYPE,
@@ -94,7 +92,9 @@ export class InternalCRDTState {
   constructor(options?: { maxLifetime?: number }) {
     if (options?.maxLifetime !== undefined) {
       if (options.maxLifetime <= 0) {
-        throw new Error(`maxLifetime must be positive, got ${options.maxLifetime}`);
+        throw new Error(
+          `maxLifetime must be positive, got ${options.maxLifetime}`,
+        );
       }
       this.maxLifetime = options.maxLifetime;
     }

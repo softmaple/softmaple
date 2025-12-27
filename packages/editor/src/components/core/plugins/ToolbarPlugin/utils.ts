@@ -35,7 +35,7 @@ export const formatParagraph = (editor: LexicalEditor) => {
 export const formatHeading = (
   editor: LexicalEditor,
   blockType: string,
-  headingSize: HeadingTagType
+  headingSize: HeadingTagType,
 ) => {
   if (blockType !== headingSize) {
     editor.update(() => {
@@ -63,7 +63,7 @@ export const formatCheckList = (editor: LexicalEditor, blockType: string) => {
 
 export const formatNumberedList = (
   editor: LexicalEditor,
-  blockType: string
+  blockType: string,
 ) => {
   if (blockType !== "number") {
     editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined);
@@ -105,7 +105,7 @@ export const formatQuote = (editor: LexicalEditor, blockType: string) => {
 
 export const formatText = (
   editor: LexicalEditor,
-  textFormat: TextFormatType
+  textFormat: TextFormatType,
 ) => {
   editor.dispatchCommand(FORMAT_TEXT_COMMAND, textFormat);
 };

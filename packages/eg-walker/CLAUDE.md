@@ -5,6 +5,7 @@ This file contains specific instructions for Claude AI when working on the eg-wa
 ## Package Overview
 
 The `@softmaple/eg-walker` package implements the Eg-walker algorithm for collaborative text editing. It provides:
+
 - **CRDT (Conflict-free Replicated Data Type)** for concurrent editing
 - **Event-based synchronization** for distributed collaboration
 - **Causal ordering** and topological event management
@@ -44,7 +45,7 @@ All state updates must be immutable:
 // ✅ Good: Return new Set/Map copies
 const addEvent = (
   appliedEvents: ReadonlySet<EventId>,
-  newEventId: EventId
+  newEventId: EventId,
 ): Set<EventId> => new Set([...appliedEvents, newEventId]);
 
 // ❌ Bad: Mutate input
@@ -59,7 +60,7 @@ const addEvent = (appliedEvents: Set<EventId>, newEventId: EventId) => {
 // ✅ Good: Pure function for event transformation
 const transformEvent = (
   event: GraphEvent,
-  prepareVersion: VersionVector
+  prepareVersion: VersionVector,
 ): GraphEvent => ({
   ...event,
   prepareVersion,
@@ -125,7 +126,9 @@ try {
 
 ```typescript
 // ✅ Good: Handle missing dependencies gracefully
-const missingDeps = prepareVersion.filter(id => !coordinator.isEventApplied(id));
+const missingDeps = prepareVersion.filter(
+  (id) => !coordinator.isEventApplied(id),
+);
 if (missingDeps.length > 0) {
   // Queue event or request missing dependencies
   return { status: "pending", missingDeps };
@@ -158,11 +161,11 @@ test("should maintain causal order when applying concurrent events", () => {
   // Arrange
   const api1 = new EgWalkerAPI({ replicaId: "replica1" });
   const api2 = new EgWalkerAPI({ replicaId: "replica2" });
-  
+
   // Act
   const event1 = api1.applyLocalOperation({ type: "INSERT", text: "Hello" });
   const event2 = api2.applyLocalOperation({ type: "INSERT", text: "World" });
-  
+
   // Assert
   expect(api1.getText()).toBe("Hello");
   api1.applyRemoteEvent(event2);
@@ -212,7 +215,8 @@ src/
 // ❌ Bad: Replaying all events every time
 for (const remoteEvent of remoteEvents) {
   const tempCRDT = new TemporaryCRDT();
-  for (const event of allEvents) { // O(n²)!
+  for (const event of allEvents) {
+    // O(n²)!
     tempCRDT.apply(event);
   }
 }
@@ -258,7 +262,7 @@ const version = api.getCurrentVersion();
 const version: VersionVector = ["event1", "event2", "event3"];
 
 // Pattern: Check if version is applied
-const isApplied = version.every(id => coordinator.isEventApplied(id));
+const isApplied = version.every((id) => coordinator.isEventApplied(id));
 ```
 
 ## Before Committing

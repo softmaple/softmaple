@@ -6,7 +6,7 @@
       "@/*": ["./*"],
       "@softmaple/ui/*": ["../../packages/ui/src/*"],
       "@softmaple/editor/*": ["../../packages/editor/src/*"],
-      "@softmaple/db/*": ["../../packages/db/src/*"],
+      "@softmaple/db/*": ["../../packages/db/src/*"]
     },
     "plugins": [
       {

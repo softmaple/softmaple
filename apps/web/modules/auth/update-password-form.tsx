@@ -13,7 +13,10 @@ export const UpdatePasswordForm: FC<UpdatePasswordFormProps> = (props) => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
 
-  const validatePasswords = (pwd: string = password, confirmPwd: string = confirmPassword) => {
+  const validatePasswords = (
+    pwd: string = password,
+    confirmPwd: string = confirmPassword,
+  ) => {
     if (pwd && confirmPwd && pwd !== confirmPwd) {
       setError("Passwords do not match");
       return false;
@@ -61,13 +64,12 @@ export const UpdatePasswordForm: FC<UpdatePasswordFormProps> = (props) => {
         />
       </div>
 
-      {error && (
-        <div className="text-sm text-red-600">
-          {error}
-        </div>
-      )}
+      {error && <div className="text-sm text-red-600">{error}</div>}
 
-      <SubmitButton text="Update password" disabled={!!error || !password || !confirmPassword} />
+      <SubmitButton
+        text="Update password"
+        disabled={!!error || !password || !confirmPassword}
+      />
     </form>
   );
 };

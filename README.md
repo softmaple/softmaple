@@ -29,28 +29,28 @@
 ## shadcn/ui [turborepo](https://turborepo.org/) architecture:
 
 - apps
-    - [web](apps/web) - Main web application
-      - **Next.js** v16 with `app` folder
-      - **Liveblocks** for real-time collaboration
-      - **Supabase** for database and authentication
+  - [web](apps/web) - Main web application
+    - **Next.js** v16 with `app` folder
+    - **Liveblocks** for real-time collaboration
+    - **Supabase** for database and authentication
 
 - packages
-    - [config](packages/config) - Site configuration
-    - [db](packages/db) - Database schema and migrations
-      - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
-      - **Supabase** self-hosted guide
-    - [editor](packages/editor) - Rich text editor
-      - **Lexical** for rich text editing
-      - **React** 19 and **Vite**
-    - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
-    - [eslint-config](packages/eslint-config) - Shared ESLint configuration
-    - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`
-    - [ui](packages/ui) - Shared React component library
-      - **shadcn/ui** for UI components
-      - **Tailwind CSS** v4 for styling
+  - [config](packages/config) - Site configuration
+  - [db](packages/db) - Database schema and migrations
+    - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
+    - **Supabase** self-hosted guide
+  - [editor](packages/editor) - Rich text editor
+    - **Lexical** for rich text editing
+    - **React** 19 and **Vite**
+  - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
+  - [eslint-config](packages/eslint-config) - Shared ESLint configuration
+  - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`
+  - [ui](packages/ui) - Shared React component library
+    - **shadcn/ui** for UI components
+    - **Tailwind CSS** v4 for styling
 
 - docs
-    - [docs](docs) - **Mintlify Documentation** - Project documentation
+  - [docs](docs) - **Mintlify Documentation** - Project documentation
 
 We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation.
 
@@ -60,6 +60,7 @@ pnpm dev
 ```
 
 # Community
+
 The SoftMaple community can be found on [GitHub Discussions](https://github.com/softmaple/softmaple/discussions), where you can ask questions and voice ideas.
 
 To chat with other community members you can join the [SoftMaple Discord](https://discord.gg/Vwsuqq7dQD).

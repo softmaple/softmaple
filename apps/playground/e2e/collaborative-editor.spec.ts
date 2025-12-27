@@ -69,7 +69,7 @@ test.describe("Collaborative Text Editor", () => {
       await replica1.press("Backspace");
       await page.waitForTimeout(50);
     }
-    
+
     await expect(replica2).toHaveValue("Hello", { timeout: 5000 });
   });
 

@@ -1,28 +1,28 @@
-import type { Message } from '@/db-collections'
+import type { Message } from "@/db-collections";
 
 export const getAvatarColor = (username: string) => {
   const colors = [
-    'bg-blue-500',
-    'bg-green-500',
-    'bg-purple-500',
-    'bg-pink-500',
-    'bg-indigo-500',
-    'bg-red-500',
-    'bg-yellow-500',
-    'bg-teal-500',
-  ]
+    "bg-blue-500",
+    "bg-green-500",
+    "bg-purple-500",
+    "bg-pink-500",
+    "bg-indigo-500",
+    "bg-red-500",
+    "bg-yellow-500",
+    "bg-teal-500",
+  ];
   const index = username
-    .split('')
-    .reduce((acc, char) => acc + char.charCodeAt(0), 0)
-  return colors[index % colors.length]
-}
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return colors[index % colors.length];
+};
 
 export default function Messages({
   messages,
   user,
 }: {
-  messages: Message[]
-  user: string
+  messages: Message[];
+  user: string;
 }) {
   return (
     <>
@@ -30,12 +30,12 @@ export default function Messages({
         <div
           key={msg.id}
           className={`flex ${
-            msg.user === user ? 'justify-end' : 'justify-start'
+            msg.user === user ? "justify-end" : "justify-start"
           }`}
         >
           <div
             className={`flex items-start space-x-3 max-w-xs lg:max-w-md ${
-              msg.user === user ? 'flex-row-reverse space-x-reverse' : ''
+              msg.user === user ? "flex-row-reverse space-x-reverse" : ""
             }`}
           >
             <div
@@ -49,8 +49,8 @@ export default function Messages({
             <div
               className={`px-4 py-2 rounded-2xl ${
                 msg.user === user
-                  ? 'bg-blue-500 text-white rounded-br-md'
-                  : 'bg-white text-gray-800 border border-gray-200 rounded-bl-md'
+                  ? "bg-blue-500 text-white rounded-br-md"
+                  : "bg-white text-gray-800 border border-gray-200 rounded-bl-md"
               }`}
             >
               {msg.user !== user && (
@@ -64,5 +64,5 @@ export default function Messages({
         </div>
       ))}
     </>
-  )
+  );
 }

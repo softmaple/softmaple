@@ -9,13 +9,15 @@ The following is a set of guidelines for contributing to SoftMaple and its repos
 [Code of Conduct](#code-of-conduct)
 
 [How Can I Contribute?](#how-can-i-contribute)
-  * [Reporting Bugs](#reporting-bugs)
-  * [Suggesting Enhancements](#suggesting-enhancements)
-  * [Pull Requests](#pull-requests)
+
+- [Reporting Bugs](#reporting-bugs)
+- [Suggesting Enhancements](#suggesting-enhancements)
+- [Pull Requests](#pull-requests)
 
 [Styleguides](#styleguides)
-  * [Git Commit Messages](#git-commit-messages)
-  * [Code Styleguide](#code-styleguide)
+
+- [Git Commit Messages](#git-commit-messages)
+- [Code Styleguide](#code-styleguide)
 
 ## Code of Conduct
 
@@ -58,6 +60,7 @@ git push --force-with-lease
 ```
 
 **Why rebase instead of merge?**
+
 - Keeps a linear, clean commit history
 - Makes it easier to review changes
 - Avoids unnecessary merge commits
@@ -80,10 +83,12 @@ All JavaScript code is linted with [Prettier](https://prettier.io/).
 
 There are 2 ways to submit a PR, the normal is **Fork the repo** and another is **to be the collaborator**.
 
-If you forked the repo and submit a PR, there is no branch name limitaion, otherwise, please use this convention: 
+If you forked the repo and submit a PR, there is no branch name limitaion, otherwise, please use this convention:
+
 ```bash
 <username>-<app>-issue-<issue-number>
 ```
+
 for example, `yadong-editor-issue-60`.
 
 **Whatever you contributed, if the PR is merged, I will invite you as the repo collaborator.**

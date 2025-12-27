@@ -57,12 +57,8 @@ describe("TemporaryCRDT", () => {
       crdt.destroy();
 
       // Should throw when calling methods on destroyed CRDT
-      expect(() => crdt.integrate([])).toThrow(
-        "CRDT has been destroyed",
-      );
+      expect(() => crdt.integrate([])).toThrow("CRDT has been destroyed");
     });
-
-
   });
 
   describe("createItemsFromEvent", () => {
@@ -240,7 +236,6 @@ describe("TemporaryCRDT", () => {
 
       const state = crdt.getEffectState();
       expect(state.visibleText).toBe("");
-
     });
 
     it("should handle integrate with complex originRight positioning", () => {
@@ -365,10 +360,24 @@ describe("TemporaryCRDT", () => {
       const crdt = new TemporaryCRDT();
 
       const items1 = [
-        { id: "item1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
+        {
+          id: "item1",
+          originLeft: null,
+          originRight: null,
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
       ];
       const items2 = [
-        { id: "item2", originLeft: "item1", originRight: null, content: "B", insertedBy: "e2", isDeleted: false },
+        {
+          id: "item2",
+          originLeft: "item1",
+          originRight: null,
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
       ];
 
       crdt.integrate(items1);
@@ -383,14 +392,35 @@ describe("TemporaryCRDT", () => {
       const crdt = new TemporaryCRDT();
 
       const items1 = [
-        { id: "item1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
-        { id: "item3", originLeft: "item1", originRight: null, content: "C", insertedBy: "e2", isDeleted: false },
+        {
+          id: "item1",
+          originLeft: null,
+          originRight: null,
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "item3",
+          originLeft: "item1",
+          originRight: null,
+          content: "C",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
       ];
       crdt.integrate(items1);
 
       // Insert item2 between item1 and item3 using originRight
       const items2 = [
-        { id: "item2", originLeft: "item1", originRight: "item3", content: "B", insertedBy: "e3", isDeleted: false },
+        {
+          id: "item2",
+          originLeft: "item1",
+          originRight: "item3",
+          content: "B",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
       ];
       crdt.integrate(items2);
 
@@ -408,15 +438,43 @@ describe("TemporaryCRDT", () => {
 
       // Create a scenario where originRight needs to scan through items
       const items = [
-        { id: "i1", originLeft: null, originRight: null, content: "1", insertedBy: "e1", isDeleted: false },
-        { id: "i3", originLeft: "i1", originRight: null, content: "3", insertedBy: "e2", isDeleted: false },
-        { id: "i5", originLeft: "i3", originRight: null, content: "5", insertedBy: "e3", isDeleted: false },
+        {
+          id: "i1",
+          originLeft: null,
+          originRight: null,
+          content: "1",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "i3",
+          originLeft: "i1",
+          originRight: null,
+          content: "3",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
+        {
+          id: "i5",
+          originLeft: "i3",
+          originRight: null,
+          content: "5",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
       ];
       crdt.integrate(items);
 
       // Insert i2 between i1 and i3 using originRight
       const items2 = [
-        { id: "i2", originLeft: "i1", originRight: "i3", content: "2", insertedBy: "e4", isDeleted: false },
+        {
+          id: "i2",
+          originLeft: "i1",
+          originRight: "i3",
+          content: "2",
+          insertedBy: "e4",
+          isDeleted: false,
+        },
       ];
       crdt.integrate(items2);
 
@@ -428,9 +486,30 @@ describe("TemporaryCRDT", () => {
       const crdt = new TemporaryCRDT();
 
       const items = [
-        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
-        { id: "i2", originLeft: "i1", originRight: null, content: "B", insertedBy: "e2", isDeleted: true },
-        { id: "i3", originLeft: "i1", originRight: "i2", content: "C", insertedBy: "e3", isDeleted: false },
+        {
+          id: "i1",
+          originLeft: null,
+          originRight: null,
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "i2",
+          originLeft: "i1",
+          originRight: null,
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: true,
+        },
+        {
+          id: "i3",
+          originLeft: "i1",
+          originRight: "i2",
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
       ];
 
       crdt.integrate(items);
@@ -444,9 +523,30 @@ describe("TemporaryCRDT", () => {
       const crdt = new TemporaryCRDT();
 
       const items = [
-        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
-        { id: "i2", originLeft: "i1", originRight: null, content: "B", insertedBy: "e2", isDeleted: true },
-        { id: "i3", originLeft: "i2", originRight: null, content: "C", insertedBy: "e3", isDeleted: false },
+        {
+          id: "i1",
+          originLeft: null,
+          originRight: null,
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "i2",
+          originLeft: "i1",
+          originRight: null,
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: true,
+        },
+        {
+          id: "i3",
+          originLeft: "i2",
+          originRight: null,
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
       ];
 
       crdt.integrate(items);
@@ -462,9 +562,30 @@ describe("TemporaryCRDT", () => {
 
       // Create a chain: i1 -> i2 -> i3 where i2 has originRight to i3
       const items = [
-        { id: "i1", originLeft: null, originRight: null, content: "A", insertedBy: "e1", isDeleted: false },
-        { id: "i3", originLeft: "i1", originRight: null, content: "C", insertedBy: "e3", isDeleted: false },
-        { id: "i2", originLeft: "i1", originRight: "i3", content: "B", insertedBy: "e2", isDeleted: false },
+        {
+          id: "i1",
+          originLeft: null,
+          originRight: null,
+          content: "A",
+          insertedBy: "e1",
+          isDeleted: false,
+        },
+        {
+          id: "i3",
+          originLeft: "i1",
+          originRight: null,
+          content: "C",
+          insertedBy: "e3",
+          isDeleted: false,
+        },
+        {
+          id: "i2",
+          originLeft: "i1",
+          originRight: "i3",
+          content: "B",
+          insertedBy: "e2",
+          isDeleted: false,
+        },
       ];
 
       crdt.integrate(items);

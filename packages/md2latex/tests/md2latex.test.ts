@@ -14,7 +14,7 @@ describe("inline formatting", () => {
 
   test("bold and italic", () => {
     expect(markdownToLatex("***bold-italic***")).toBe(
-      "\\textbf{\\textit{bold-italic}}\\\\"
+      "\\textbf{\\textit{bold-italic}}\\\\",
     );
   });
 
@@ -91,13 +91,12 @@ code line
     const expected = `\\begin{enumerate}\n  \\item Ordered item\n\\end{enumerate}\n\\begin{itemize}\n  \\item Unordered item\n\\end{itemize}`;
     expect(markdownToLatex(md)).toBe(expected);
   });
-
 });
 
 describe("complex scenarios", () => {
   test("mixed inline styles", () => {
     expect(markdownToLatex("**bold *italic* text**")).toBe(
-      "\\textbf{bold \\textit{italic} text}\\\\"
+      "\\textbf{bold \\textit{italic} text}\\\\",
     );
   });
 

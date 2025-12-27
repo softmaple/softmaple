@@ -77,11 +77,11 @@ export class TemporaryCRDT {
       // Create items for each character, but mark them as from same event
       // This preserves non-interleaving
       const text = op.text;
-      
+
       // For first character, find neighbors at current position
       const originLeft = this.findLeftNeighbor(op.index) ?? null;
       const originRight = this.findRightNeighbor(op.index) ?? null;
-      
+
       for (let i = 0; i < text.length; i++) {
         const itemId = `${event.id}:${i}`;
         const item: CRDTItem = {
@@ -114,44 +114,44 @@ export class TemporaryCRDT {
    * Integrate items into the CRDT using RGA rules
    */
   integrate(newItems: ReadonlyArray<CRDTItem>): void {
-  this.checkValid();
+    this.checkValid();
 
-  // Group items by event to maintain non-interleaving
-  const itemsByEvent = new Map<EventId, CRDTItem[]>();
-  for (const item of newItems) {
-    const existingItem = this.itemsById.get(item.id);
-    if (existingItem) {
-      // If this is a delete operation (isDeleted = true), update the existing item
-      if (item.isDeleted && !existingItem.isDeleted) {
-        // Create a new item with isDeleted = true to maintain immutability
-        const updatedItem: CRDTItem = {
-          ...existingItem,
-          isDeleted: true,
-        };
-        this.itemsById.set(item.id, updatedItem);
-        // Update the item in the items array
-        const index = this.items.findIndex(i => i.id === item.id);
-        if (index !== -1) {
-          this.items[index] = updatedItem;
+    // Group items by event to maintain non-interleaving
+    const itemsByEvent = new Map<EventId, CRDTItem[]>();
+    for (const item of newItems) {
+      const existingItem = this.itemsById.get(item.id);
+      if (existingItem) {
+        // If this is a delete operation (isDeleted = true), update the existing item
+        if (item.isDeleted && !existingItem.isDeleted) {
+          // Create a new item with isDeleted = true to maintain immutability
+          const updatedItem: CRDTItem = {
+            ...existingItem,
+            isDeleted: true,
+          };
+          this.itemsById.set(item.id, updatedItem);
+          // Update the item in the items array
+          const index = this.items.findIndex((i) => i.id === item.id);
+          if (index !== -1) {
+            this.items[index] = updatedItem;
+          }
         }
+        continue; // Item already integrated, skip grouping
       }
-      continue; // Item already integrated, skip grouping
+      const eventItems = itemsByEvent.get(item.insertedBy) || [];
+      eventItems.push(item);
+      itemsByEvent.set(item.insertedBy, eventItems);
     }
-    const eventItems = itemsByEvent.get(item.insertedBy) || [];
-    eventItems.push(item);
-    itemsByEvent.set(item.insertedBy, eventItems);
-  }
- 
+
     // Integrate items event by event to preserve non-interleaving
     for (const [, eventItems] of itemsByEvent) {
       if (eventItems.length === 0) continue;
-      
+
       // Find insertion position for the first item of this event
       const firstItem = eventItems[0];
       if (!firstItem) continue;
-      
+
       const position = this.findInsertPosition(firstItem);
-      
+
       // Insert all items from this event together at the same position
       let insertPos = position;
       for (const item of eventItems) {
@@ -248,7 +248,7 @@ export class TemporaryCRDT {
    */
   private findLeftNeighbor(index: number): EventId | null {
     if (index === 0) return null;
-    
+
     let visibleCount = 0;
     for (const item of this.items) {
       if (!item.isDeleted) {

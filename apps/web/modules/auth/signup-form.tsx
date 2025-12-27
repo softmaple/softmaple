@@ -72,76 +72,76 @@ export const SignupForm: FC<SignupFormProps> = () => {
         </div>
       )}
       <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="firstName">First name</Label>
+            <Input
+              id="firstName"
+              name="firstName"
+              type="text"
+              placeholder="John"
+              value={formData.firstName}
+              onChange={handleChange}
+              required
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="lastName">Last name</Label>
+            <Input
+              id="lastName"
+              name="lastName"
+              type="text"
+              placeholder="Doe"
+              value={formData.lastName}
+              onChange={handleChange}
+              required
+              disabled={isPending}
+            />
+          </div>
+        </div>
         <div className="space-y-2">
-          <Label htmlFor="firstName">First name</Label>
+          <Label htmlFor="email">Email</Label>
           <Input
-            id="firstName"
-            name="firstName"
-            type="text"
-            placeholder="John"
-            value={formData.firstName}
+            id="email"
+            name="email"
+            type="email"
+            placeholder="you@example.com"
+            value={formData.email}
             onChange={handleChange}
             required
             disabled={isPending}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="lastName">Last name</Label>
+          <Label htmlFor="password">Password</Label>
           <Input
-            id="lastName"
-            name="lastName"
-            type="text"
-            placeholder="Doe"
-            value={formData.lastName}
+            id="password"
+            name="password"
+            type="password"
+            value={formData.password}
             onChange={handleChange}
             required
             disabled={isPending}
+            minLength={6}
+            placeholder="At least 6 characters"
           />
         </div>
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="email">Email</Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          placeholder="you@example.com"
-          value={formData.email}
-          onChange={handleChange}
-          required
-          disabled={isPending}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          value={formData.password}
-          onChange={handleChange}
-          required
-          disabled={isPending}
-          minLength={6}
-          placeholder="At least 6 characters"
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="confirmPassword">Confirm password</Label>
-        <Input
-          id="confirmPassword"
-          name="confirmPassword"
-          type="password"
-          value={formData.confirmPassword}
-          onChange={handleChange}
-          required
-          disabled={isPending}
-          minLength={6}
-        />
-      </div>
+        <div className="space-y-2">
+          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <Input
+            id="confirmPassword"
+            name="confirmPassword"
+            type="password"
+            value={formData.confirmPassword}
+            onChange={handleChange}
+            required
+            disabled={isPending}
+            minLength={6}
+          />
+        </div>
         <SubmitButton text="Create account" loadingText="Creating account..." />
-    </form>
+      </form>
     </div>
   );
 };

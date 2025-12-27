@@ -24,8 +24,11 @@ export async function GET(request: NextRequest) {
   // Return 400 error for missing parameters
   if (!token_hash || !type) {
     return NextResponse.json(
-      { error: "Invalid request parameters. Please provide a valid token_hash and type." },
-      { status: 400 }
+      {
+        error:
+          "Invalid request parameters. Please provide a valid token_hash and type.",
+      },
+      { status: 400 },
     );
   }
 
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
   if (!VALID_EMAIL_OTP_TYPES.includes(type as any)) {
     return NextResponse.json(
       { error: "Invalid type parameter. Must be a valid EmailOtpType." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -43,12 +46,12 @@ export async function GET(request: NextRequest) {
     type,
     token_hash,
   });
-  
+
   if (error) {
     // Return error response instead of throwing
     return NextResponse.json(
       { error: error.message },
-      { status: error.status || 400 }
+      { status: error.status || 400 },
     );
   }
 

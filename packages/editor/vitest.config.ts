@@ -1,14 +1,14 @@
-import { defineConfig, mergeConfig } from 'vitest/config';
-import { playwright } from '@vitest/browser-playwright';
+import { defineConfig, mergeConfig } from "vitest/config";
+import { playwright } from "@vitest/browser-playwright";
 
-import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
+import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
-import viteConfig from './vite.config.js';
+import viteConfig from "./vite.config.js";
 
 export default mergeConfig(
   viteConfig,
@@ -20,14 +20,14 @@ export default mergeConfig(
           plugins: [
             storybookTest({
               // The location of your Storybook config, main.js|ts
-              configDir: path.join(dirname, '.storybook'),
+              configDir: path.join(dirname, ".storybook"),
               // This should match your package.json script to run Storybook
               // The --no-open flag will skip the automatic opening of a browser
-              storybookScript: 'yarn storybook --no-open',
+              storybookScript: "yarn storybook --no-open",
             }),
           ],
           test: {
-            name: 'storybook',
+            name: "storybook",
             // Enable browser mode
             browser: {
               enabled: true,
@@ -35,9 +35,9 @@ export default mergeConfig(
               // @ts-expect-error - Playwright provider has type incompatibility with vitest browser config
               provider: playwright({}),
               headless: true,
-              instances: [{ browser: 'chromium' }],
+              instances: [{ browser: "chromium" }],
             },
-            setupFiles: ['./.storybook/vitest.setup.ts'],
+            setupFiles: ["./.storybook/vitest.setup.ts"],
           },
         },
       ],

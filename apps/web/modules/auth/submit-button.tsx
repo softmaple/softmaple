@@ -9,13 +9,13 @@ interface SubmitButtonProps {
   disabled?: boolean;
 }
 
-export const SubmitButton = ({ 
-  text = "Sign in", 
+export const SubmitButton = ({
+  text = "Sign in",
   loadingText,
-  disabled = false 
+  disabled = false,
 }: SubmitButtonProps = {}) => {
   const { pending: isLoading } = useFormStatus();
-  const displayLoadingText = loadingText || `${text.replace(/\.$/, '')}...`;
+  const displayLoadingText = loadingText || `${text.replace(/\.$/, "")}...`;
 
   return (
     <Button type="submit" className="w-full" disabled={isLoading || disabled}>

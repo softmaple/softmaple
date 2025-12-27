@@ -3,7 +3,7 @@ import { ElementNode, TextNode } from "lexical";
 import type { RangeSelection } from "lexical";
 
 export const getSelectedNode = (
-  selection: RangeSelection
+  selection: RangeSelection,
 ): TextNode | ElementNode => {
   const anchor = selection.anchor;
   const focus = selection.focus;

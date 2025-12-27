@@ -83,7 +83,7 @@ All JavaScript code is linted with [Prettier](https://prettier.io/).
 
 There are 2 ways to submit a PR, the normal is **Fork the repo** and another is **to be the collaborator**.
 
-If you forked the repo and submit a PR, there is no branch name limitaion, otherwise, please use this convention:
+If you forked the repo and submit a PR, there is no branch name limitation, otherwise, please use this convention:
 
 ```bash
 <username>-<app>-issue-<issue-number>

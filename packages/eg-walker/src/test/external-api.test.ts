@@ -220,7 +220,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
       throw new Error("Network error");
     };
 
-    expect(() => api.applyRemoteEvent(event)).toThrow("Network error");
+    await expect(api.applyRemoteEvent(event)).rejects.toThrow("Network error");
 
     // Restore
     // @ts-expect-error - Restoring private eventGraph method

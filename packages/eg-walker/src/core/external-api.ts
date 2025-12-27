@@ -164,7 +164,7 @@ export class EgWalkerAPI {
    * Apply a remote event
    * This will use temporary CRDT for transformation
    */
-  applyRemoteEvent(event: GraphEvent): void {
+  async applyRemoteEvent(event: GraphEvent): Promise<void> {
     // Add to event graph
     try {
       this.eventGraph.addEvent(event);
@@ -180,8 +180,7 @@ export class EgWalkerAPI {
     }
 
     // Use temporary CRDT for transformation
-    const crdt = new TemporaryCRDT();
-    try {
+    await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
       // Get all events in topological order
       const sortedEvents = this.eventGraph.getTopologicalOrder();
 
@@ -203,9 +202,7 @@ export class EgWalkerAPI {
 
       // Update current version
       this.currentVersion = new Set(sortedEvents.map((e) => e.id));
-    } finally {
-      crdt.destroy();
-    }
+    });
   }
 
   /**
@@ -251,16 +248,16 @@ export class EgWalkerAPI {
   /**
    * Import event graph from persistence
    */
-  static fromEventGraph(
+  static async fromEventGraph(
     replicaId: string,
     events: ReadonlyArray<GraphEvent>,
     initialText: string = "",
-  ): EgWalkerAPI {
+  ): Promise<EgWalkerAPI> {
     const api = new EgWalkerAPI(replicaId, initialText);
 
     // Apply events in causal order
     for (const event of events) {
-      api.applyRemoteEvent(event);
+      await api.applyRemoteEvent(event);
     }
 
     return api;

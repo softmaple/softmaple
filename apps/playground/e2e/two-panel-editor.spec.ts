@@ -23,20 +23,14 @@ test.describe("Two-Panel Text Editor", () => {
   });
 
   test("should allow typing in Editor A", async ({ page }) => {
-    const editorA = page
-      .getByRole("textbox")
-      .filter({ has: page.locator('[aria-labelledby="editor-a-label"]') })
-      .first();
+    const editorA = page.getByLabel("Editor A");
 
     await editorA.fill("Hello from Editor A");
     await expect(editorA).toHaveValue("Hello from Editor A");
   });
 
   test("should allow typing in Editor B", async ({ page }) => {
-    const editorB = page
-      .getByRole("textbox")
-      .filter({ has: page.locator('[aria-labelledby="editor-b-label"]') })
-      .last();
+    const editorB = page.getByLabel("Editor B");
 
     await editorB.fill("Hello from Editor B");
     await expect(editorB).toHaveValue("Hello from Editor B");

@@ -22,14 +22,14 @@ function App() {
   const features = [
     {
       icon: <SplitSquareHorizontal className="w-12 h-12 text-cyan-400" />,
-      title: "Two-Panel Editor Demo",
+      title: "Two-Panel Text Editor",
       description:
         "Independent text editors side-by-side. Perfect for comparing, note-taking, or dual-language editing.",
       link: "/demo/two-panel-editor",
     },
     {
       icon: <Users className="w-12 h-12 text-cyan-400" />,
-      title: "Collaborative Editor",
+      title: "Collaborative Text Editor",
       description:
         "Real-time collaborative text editing powered by Eg-Walker CRDT algorithm. Type in either editor to see instant synchronization.",
       link: "/demo/collaborative-editor",
@@ -86,23 +86,19 @@ function App() {
           <div className="flex items-center justify-center gap-6 mb-6">
             <img
               src="/tanstack-circle-logo.png"
-              alt="TanStack Logo"
+              alt="SoftMaple logo"
               className="w-24 h-24 md:w-32 md:h-32"
             />
             <h1 className="text-6xl md:text-7xl font-black text-white [letter-spacing:-0.08em]">
-              <span className="text-gray-300">TANSTACK</span>{" "}
-              <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                START
-              </span>
+              SoftMaple Playground
             </h1>
           </div>
           <p className="text-2xl md:text-3xl text-gray-300 mb-4 font-light">
-            The framework for next generation AI applications
+            Your playground for collaborative text editing experiments.
           </p>
           <p className="text-lg text-gray-400 max-w-3xl mx-auto mb-8">
-            Full-stack framework powered by TanStack Router for React and Solid.
-            Build modern applications with server functions, streaming, and type
-            safety.
+            Explore two synchronized editor experiences built with TanStack
+            Router and SoftMaple UI components.
           </p>
           <div className="flex flex-col items-center gap-4">
             <a
@@ -114,7 +110,7 @@ function App() {
               Documentation
             </a>
             <p className="text-gray-400 text-sm mt-2">
-              Begin your TanStack Start journey by editing{" "}
+              Begin your SoftMaple Playground journey by editing{" "}
               <code className="px-2 py-1 bg-slate-700 rounded text-cyan-400">
                 /src/routes/index.tsx
               </code>
@@ -138,7 +134,11 @@ function App() {
               >
                 <CardHeader>
                   <div className="mb-4">{feature.icon}</div>
-                  <CardTitle>{feature.title}</CardTitle>
+                  <CardTitle>
+                    <h2 className="text-xl font-semibold leading-snug">
+                      {feature.title}
+                    </h2>
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-muted-foreground leading-relaxed">

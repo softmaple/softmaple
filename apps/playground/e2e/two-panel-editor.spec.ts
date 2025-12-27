@@ -7,15 +7,11 @@ test.describe("Two-Panel Text Editor", () => {
   });
 
   test("should display two editor panels", async ({ page }) => {
-    // Check for Editor A
-    await expect(
-      page.getByRole("heading", { name: /Editor A/i }),
-    ).toBeVisible();
+    // Check for Editor A - CardTitle renders as div, not heading
+    await expect(page.getByText("Editor A", { exact: true })).toBeVisible();
 
-    // Check for Editor B
-    await expect(
-      page.getByRole("heading", { name: /Editor B/i }),
-    ).toBeVisible();
+    // Check for Editor B - CardTitle renders as div, not heading
+    await expect(page.getByText("Editor B", { exact: true })).toBeVisible();
 
     // Check for textareas
     const textareas = page.getByRole("textbox");
@@ -23,20 +19,16 @@ test.describe("Two-Panel Text Editor", () => {
   });
 
   test("should allow typing in Editor A", async ({ page }) => {
-    const editorA = page
-      .getByRole("textbox")
-      .filter({ has: page.locator('[aria-labelledby="editor-a-label"]') })
-      .first();
+    // The textbox has aria-label="Editor A", not aria-labelledby
+    const editorA = page.getByRole("textbox", { name: "Editor A" });
 
     await editorA.fill("Hello from Editor A");
     await expect(editorA).toHaveValue("Hello from Editor A");
   });
 
   test("should allow typing in Editor B", async ({ page }) => {
-    const editorB = page
-      .getByRole("textbox")
-      .filter({ has: page.locator('[aria-labelledby="editor-b-label"]') })
-      .last();
+    // The textbox has aria-label="Editor B", not aria-labelledby
+    const editorB = page.getByRole("textbox", { name: "Editor B" });
 
     await editorB.fill("Hello from Editor B");
     await expect(editorB).toHaveValue("Hello from Editor B");
@@ -69,9 +61,9 @@ test.describe("Two-Panel Text Editor", () => {
   });
 
   test("should have accessible labels", async ({ page }) => {
-    // Check that textareas have proper aria-labelledby attributes
-    const editorA = page.locator('[aria-labelledby="editor-a-label"]');
-    const editorB = page.locator('[aria-labelledby="editor-b-label"]');
+    // Check that textareas have proper aria-label attributes
+    const editorA = page.getByRole("textbox", { name: "Editor A" });
+    const editorB = page.getByRole("textbox", { name: "Editor B" });
 
     await expect(editorA).toBeVisible();
     await expect(editorB).toBeVisible();

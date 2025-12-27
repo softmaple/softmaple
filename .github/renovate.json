@@ -18,7 +18,7 @@
     {
       "description": "Group Next.js updates",
       "groupName": "Next.js",
-      "matchPackageNames": ["next", "/^eslint-config-next/", "/^@next/"],
+      "matchPackageNames": ["next", "eslint-config-next", "/^@next/"],
       "automerge": false,
       "schedule": ["before 10am on monday"]
     },
@@ -59,7 +59,11 @@
     {
       "description": "Group ESLint ecosystem",
       "groupName": "ESLint",
-      "matchPackageNames": ["eslint", "/^eslint-/", "/^@eslint\\//"],
+      "matchPackageNames": [
+        "eslint",
+        "/^eslint-(?!config-next)/",
+        "/^@eslint\\//"
+      ],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]

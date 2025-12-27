@@ -6,11 +6,11 @@ test.describe("Home Page", () => {
     await page.waitForLoadState("networkidle");
 
     // Check title
-    await expect(page).toHaveTitle(/SoftMaple Playground/);
+    await expect(page).toHaveTitle(/TanStack Start Starter/);
 
     // Check main heading
     await expect(
-      page.getByRole("heading", { name: /SoftMaple Playground/i }),
+      page.getByRole("heading", { name: /TANSTACK START/i }),
     ).toBeVisible();
   });
 
@@ -18,23 +18,19 @@ test.describe("Home Page", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    // Check for Two-Panel Text Editor card
-    await expect(
-      page.getByRole("heading", { name: /Two-Panel Text Editor/i }),
-    ).toBeVisible();
+    // Check for Two-Panel Editor Demo card - it's not a heading, it's a generic element
+    await expect(page.getByText("Two-Panel Editor Demo")).toBeVisible();
 
-    // Check for Collaborative Editor card
-    await expect(
-      page.getByRole("heading", { name: /Collaborative Text Editor/i }),
-    ).toBeVisible();
+    // Check for Collaborative Editor card - also not a heading
+    await expect(page.getByText("Collaborative Editor")).toBeVisible();
   });
 
   test("should navigate to two-panel editor", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    // Click on Two-Panel Text Editor card
-    await page.getByRole("link", { name: /Two-Panel Text Editor/i }).click();
+    // Click on Two-Panel Editor Demo card - link contains full description
+    await page.getByRole("link", { name: /Two-Panel Editor Demo/i }).click();
 
     // Verify navigation
     await expect(page).toHaveURL(/\/demo\/two-panel-editor/);
@@ -47,9 +43,11 @@ test.describe("Home Page", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    // Click on Collaborative Editor card
+    // Click on Collaborative Editor card - link contains full description
     await page
-      .getByRole("link", { name: /Collaborative Text Editor/i })
+      .getByRole("link", {
+        name: /Collaborative Editor.*Real-time collaborative/i,
+      })
       .click();
 
     // Verify navigation

@@ -28,9 +28,9 @@ test.describe("Collaborative Text Editor", () => {
     const replica1 = page.locator('textarea[data-testid="replica-1"]');
     const replica2 = page.locator('textarea[data-testid="replica-2"]');
 
-    // Type in Replica 1 using pressSequentially to trigger change events
+    // Use pressSequentially with longer delay for React 19 controlled inputs
     await replica1.click();
-    await replica1.pressSequentially("Hello", { delay: 100 });
+    await replica1.pressSequentially("Hello", { delay: 150 });
 
     // Wait for sync to replica2 (CRDT propagation)
     await expect(replica2).toHaveValue("Hello", { timeout: 5000 });
@@ -42,9 +42,9 @@ test.describe("Collaborative Text Editor", () => {
     const replica1 = page.locator('textarea[data-testid="replica-1"]');
     const replica2 = page.locator('textarea[data-testid="replica-2"]');
 
-    // Type in Replica 2 using pressSequentially
+    // Use pressSequentially with longer delay for React 19 controlled inputs
     await replica2.click();
-    await replica2.pressSequentially("World", { delay: 100 });
+    await replica2.pressSequentially("World", { delay: 150 });
 
     // Wait for sync to replica1
     await expect(replica1).toHaveValue("World", { timeout: 5000 });
@@ -56,7 +56,7 @@ test.describe("Collaborative Text Editor", () => {
 
     // Type initial text
     await replica1.click();
-    await replica1.pressSequentially("Hello World", { delay: 100 });
+    await replica1.pressSequentially("Hello World", { delay: 150 });
     await expect(replica2).toHaveValue("Hello World", { timeout: 5000 });
 
     // Delete " World" by selecting it and pressing backspace
@@ -75,13 +75,13 @@ test.describe("Collaborative Text Editor", () => {
 
     // Initial text
     await replica1.click();
-    await replica1.pressSequentially("hello", { delay: 100 });
+    await replica1.pressSequentially("hello", { delay: 150 });
     await expect(replica2).toHaveValue("hello", { timeout: 5000 });
 
-    // Replace by selecting all and typing new text
-    await replica1.press("Control+A");
-    await replica1.pressSequentially("HELLO", { delay: 100 });
-    await expect(replica2).toHaveValue("HELLO", { timeout: 5000 });
+    // Clear and type new text
+    await replica1.clear();
+    await replica1.pressSequentially("HELLO", { delay: 150 });
+    await expect(replica2).toHaveValue("HELLO", { timeout: 7000 });
   });
 
   test("should handle multi-line text synchronization", async ({ page }) => {

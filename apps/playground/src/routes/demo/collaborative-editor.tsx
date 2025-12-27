@@ -25,7 +25,7 @@ function CollaborativeEditor() {
   const [api2] = useState(() => new EgWalkerAPI("replica-2"));
 
   const handleReplica1Change = useCallback(
-    async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
       const oldText = api1.getText();
 
@@ -42,12 +42,8 @@ function CollaborativeEditor() {
         const events = api1.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          try {
-            await api2.applyRemoteEvent(latestEvent);
-            setReplica2Text(api2.getText());
-          } catch (error) {
-            console.error("Failed to sync insert to replica2:", error);
-          }
+          api2.applyRemoteEvent(latestEvent);
+          setReplica2Text(api2.getText());
         }
       } else if (newText.length < oldText.length) {
         // Deletion
@@ -59,12 +55,8 @@ function CollaborativeEditor() {
         const events = api1.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          try {
-            await api2.applyRemoteEvent(latestEvent);
-            setReplica2Text(api2.getText());
-          } catch (error) {
-            console.error("Failed to sync delete to replica2:", error);
-          }
+          api2.applyRemoteEvent(latestEvent);
+          setReplica2Text(api2.getText());
         }
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -79,14 +71,10 @@ function CollaborativeEditor() {
         // Get the latest two events (delete + insert) and propagate to replica2 asynchronously
         const events = api1.exportEventGraph();
         const latestEvents = events.slice(-2);
-        try {
-          for (const event of latestEvents) {
-            await api2.applyRemoteEvent(event);
-          }
-          setReplica2Text(api2.getText());
-        } catch (error) {
-          console.error("Failed to sync replacement to replica2:", error);
+        for (const event of latestEvents) {
+          api2.applyRemoteEvent(event);
         }
+        setReplica2Text(api2.getText());
       }
 
       // Sync local state with API's getText() to ensure consistency
@@ -97,7 +85,7 @@ function CollaborativeEditor() {
   );
 
   const handleReplica2Change = useCallback(
-    async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
       const oldText = api2.getText();
 
@@ -114,12 +102,8 @@ function CollaborativeEditor() {
         const events = api2.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          try {
-            await api1.applyRemoteEvent(latestEvent);
-            setReplica1Text(api1.getText());
-          } catch (error) {
-            console.error("Failed to sync insert to replica1:", error);
-          }
+          api1.applyRemoteEvent(latestEvent);
+          setReplica1Text(api1.getText());
         }
       } else if (newText.length < oldText.length) {
         // Deletion
@@ -131,12 +115,8 @@ function CollaborativeEditor() {
         const events = api2.exportEventGraph();
         const latestEvent = events[events.length - 1];
         if (latestEvent) {
-          try {
-            await api1.applyRemoteEvent(latestEvent);
-            setReplica1Text(api1.getText());
-          } catch (error) {
-            console.error("Failed to sync delete to replica1:", error);
-          }
+          api1.applyRemoteEvent(latestEvent);
+          setReplica1Text(api1.getText());
         }
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
@@ -151,14 +131,10 @@ function CollaborativeEditor() {
         // Get the latest two events (delete + insert) and propagate to replica1 asynchronously
         const events = api2.exportEventGraph();
         const latestEvents = events.slice(-2);
-        try {
-          for (const event of latestEvents) {
-            await api1.applyRemoteEvent(event);
-          }
-          setReplica1Text(api1.getText());
-        } catch (error) {
-          console.error("Failed to sync replacement to replica1:", error);
+        for (const event of latestEvents) {
+          api1.applyRemoteEvent(event);
         }
+        setReplica1Text(api1.getText());
       }
 
       // Sync local state with API's getText() to ensure consistency

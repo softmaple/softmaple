@@ -62,9 +62,9 @@
       "matchPackageNames": [
         "eslint",
         "/^eslint-/",
-        "/^@eslint\\//"
+        "/^@eslint\\//",
+        "!eslint-config-next"
       ],
-      "excludePackageNames": ["eslint-config-next"],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]

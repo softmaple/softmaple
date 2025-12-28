@@ -46,19 +46,8 @@ Two environments need to be configured in GitHub repository settings:
 
 ### Manual Workflow Dispatch
 
-When manually triggering workflows:
-
-```yaml
-workflow_dispatch:
-  inputs:
-    skip_approval:
-      description: 'Skip approval requirement (admin only)'
-      type: boolean
-      default: false
-```
-
-- Set `skip_approval: true` to bypass approval (requires admin permissions)
-- Default behavior requires approval
+Manual workflow dispatch also requires approval - there is no bypass option.
+All test runs must go through the approval process.
 
 ## Benefits
 
@@ -88,7 +77,7 @@ workflow_dispatch:
 
 - **PR Reviews**: Consider if PR already reviewed before requiring test approval
 - **Time Zones**: Ensure reviewers cover different time zones
-- **Emergency Bypass**: Admins can use `skip_approval` in critical situations
+- **No Bypass**: All test runs require approval, even manual triggers
 
 ## Monitoring
 

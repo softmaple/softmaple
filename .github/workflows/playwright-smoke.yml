@@ -2,12 +2,6 @@ name: Smoke Tests (Fast)
 
 on:
   workflow_dispatch:
-    inputs:
-      skip_approval:
-        description: 'Skip approval requirement (admin only)'
-        required: false
-        type: boolean
-        default: false
   push:
     branches: [ main, next ]
     paths:
@@ -38,7 +32,6 @@ jobs:
   approve:
     name: Approve Smoke Test Run
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_approval }}
     environment: apps/web-e2e-smoke
     steps:
       - name: Request approval
@@ -47,7 +40,7 @@ jobs:
   smoke:
     name: Smoke Tests
     needs: [approve]
-    if: ${{ always() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') }}
+    if: ${{ needs.approve.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10  # Much faster than full E2E
     env:

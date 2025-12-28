@@ -2,12 +2,6 @@ name: Playwright Tests
 
 on:
   workflow_dispatch:
-    inputs:
-      skip_approval:
-        description: 'Skip approval requirement (admin only)'
-        required: false
-        type: boolean
-        default: false
   push:
     branches: [ main, next ]
     paths:
@@ -38,7 +32,6 @@ jobs:
   approve:
     name: Approve E2E Test Run
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_approval }}
     environment: apps/web-e2e
     steps:
       - name: Request approval
@@ -47,7 +40,7 @@ jobs:
   e2e:
     name: E2E Tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
     needs: [approve]
-    if: ${{ always() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') }}
+    if: ${{ needs.approve.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:

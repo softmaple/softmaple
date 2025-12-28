@@ -14,6 +14,7 @@ import {
   Sparkles,
   SplitSquareHorizontal,
   Users,
+  FileText,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: App });
@@ -33,6 +34,13 @@ function App() {
       description:
         "Real-time collaborative text editing powered by Eg-Walker CRDT algorithm. Type in either editor to see instant synchronization.",
       link: "/demo/collaborative-editor",
+    },
+    {
+      icon: <FileText className="w-12 h-12 text-purple-400" />,
+      title: "Rich Text Collaborative Editor",
+      description:
+        "Real-time collaborative rich text editing with Lexical Editor and Eg-Walker CRDT. Supports bold, italic, lists, and more!",
+      link: "/demo/rich-text-collab",
     },
     {
       icon: <Zap className="w-12 h-12 text-cyan-400" />,

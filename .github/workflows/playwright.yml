@@ -1,23 +1,29 @@
 name: Playwright Tests
 
 on:
-  workflow_dispatch: # Temporarily disabled - manual trigger only
-  # push:
-  #   branches: [ main, next ]
-  #   paths:
-  #     - 'apps/web/**'
-  #     - 'packages/**'
-  #     - '.github/workflows/playwright.yml'
-  #     - 'pnpm-lock.yaml'
-  #     - 'turbo.json'
-  # pull_request:
-  #   branches: [ main, next ]
-  #   paths:
-  #     - 'apps/web/**'
-  #     - 'packages/**'
-  #     - '.github/workflows/playwright.yml'
-  #     - 'pnpm-lock.yaml'
-  #     - 'turbo.json'
+  workflow_dispatch:
+    inputs:
+      skip_approval:
+        description: 'Skip approval requirement (admin only)'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [ main, next ]
+    paths:
+      - 'apps/web/**'
+      - 'packages/**'
+      - '.github/workflows/playwright.yml'
+      - 'pnpm-lock.yaml'
+      - 'turbo.json'
+  pull_request:
+    branches: [ main, next ]
+    paths:
+      - 'apps/web/**'
+      - 'packages/**'
+      - '.github/workflows/playwright.yml'
+      - 'pnpm-lock.yaml'
+      - 'turbo.json'
 
 # Concurrency control - only one Playwright test suite (smoke or E2E) runs at a time globally
 # New runs will wait in queue behind the currently running one
@@ -29,8 +35,19 @@ permissions:
   contents: read
 
 jobs:
+  approve:
+    name: Approve E2E Test Run
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_approval }}
+    environment: apps/web-e2e
+    steps:
+      - name: Request approval
+        run: echo "✅ E2E tests approved for execution"
+
   e2e:
     name: E2E Tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: [approve]
+    if: ${{ always() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:

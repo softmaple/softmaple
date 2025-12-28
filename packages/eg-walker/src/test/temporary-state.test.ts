@@ -720,7 +720,7 @@ describe("TemporaryCRDT", () => {
       crdt.integrate(initialState.items);
 
       // Now create items for delete event
-      const deleteItems = (crdt as any).createItemsFromEvent(event);
+      const deleteItems = crdt.createItemsFromEvent(event);
       expect(deleteItems.length).toBeGreaterThanOrEqual(0);
     });
 

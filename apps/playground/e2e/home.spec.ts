@@ -6,11 +6,11 @@ test.describe("Home Page", () => {
     await page.waitForLoadState("networkidle");
 
     // Check title
-    await expect(page).toHaveTitle(/TanStack Start Starter/);
+    await expect(page).toHaveTitle(/SoftMaple Playground/);
 
     // Check main heading
     await expect(
-      page.getByRole("heading", { name: /TANSTACK START/i }),
+      page.getByRole("heading", { name: /SOFTMAPLE PLAYGROUND/i }),
     ).toBeVisible();
   });
 

@@ -12,7 +12,7 @@ import appCss from "@/styles.css?url";
 
 import type { QueryClient } from "@tanstack/react-query";
 
-interface MyRouterContext {
+export interface MyRouterContext {
   queryClient: QueryClient;
 }
 

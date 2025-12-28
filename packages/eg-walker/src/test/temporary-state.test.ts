@@ -697,13 +697,13 @@ describe("TemporaryCRDT", () => {
       const event: GraphEvent = {
         id: "delete_event",
         parentVersion: new Set(),
-        operation: { type: OPERATION_TYPE.DELETE, index: 0, count: 5 },
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 5 },
         timestamp: 1,
       };
 
       // This tests the DELETE branch in createItemsFromEvent (around line 126-130)
       const crdt = new TemporaryCRDT();
-      const initialState: EffectState = {
+      const initialState = {
         items: [
           {
             id: "item1",
@@ -720,7 +720,7 @@ describe("TemporaryCRDT", () => {
       crdt.integrate(initialState.items);
 
       // Now create items for delete event
-      const deleteItems = crdt["createItemsFromEvent"](event, initialState);
+      const deleteItems = (crdt as any).createItemsFromEvent(event);
       expect(deleteItems.length).toBeGreaterThanOrEqual(0);
     });
 

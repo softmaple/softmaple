@@ -20,11 +20,11 @@ vi.mock("@softmaple/eg-walker", () => {
 });
 
 describe("Collaborative Editor Integration", () => {
-  let api: ReturnType<typeof EgWalkerAPI>;
+  let api: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    api = new EgWalkerAPI("test-replica");
+    api = new (EgWalkerAPI as any)("test-replica");
   });
 
   describe("Insertion operations", () => {

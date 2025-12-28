@@ -107,11 +107,10 @@ describe("Strong List Specification", () => {
     });
 
     it("should reject unknown operation types", () => {
-      // @ts-expect-error - Testing with invalid operation type
       const invalidResult = validateIndexBounds("Hello", {
-        type: "UNKNOWN",
+        type: "UNKNOWN" as any,
         index: 0,
-      });
+      } as ExternalOperation);
       expect(invalidResult).toBe(false);
     });
   });
@@ -172,9 +171,11 @@ describe("Strong List Specification", () => {
     });
 
     it("should throw error for unknown operation type", () => {
-      // @ts-expect-error - Testing with invalid operation type
       expect(() =>
-        applyOperation("Hello", { type: "UNKNOWN", index: 0 }),
+        applyOperation("Hello", {
+          type: "UNKNOWN" as any,
+          index: 0,
+        } as ExternalOperation),
       ).toThrow("Unknown operation type");
     });
   });

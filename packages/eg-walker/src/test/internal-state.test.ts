@@ -1568,7 +1568,7 @@ describe("InternalCRDTState", () => {
         id: "deleted_item",
         originLeft: null,
         originRight: null,
-        prepareState: { type: PREPARE_STATE_TYPE.DELETED },
+        prepareState: { type: PREPARE_STATE_TYPE.DELETED, count: 0 },
         effectState: { type: EFFECT_STATE_TYPE.DELETED },
         content: "Deleted",
         eventId: "e1",

@@ -8,6 +8,7 @@
     "prebuild": "pnpm --filter @softmaple/eg-walker build",
     "build": "vite build",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

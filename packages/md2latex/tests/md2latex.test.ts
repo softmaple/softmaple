@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { markdownToLatex } from "../src/md2latex";
+import { markdownToLatex } from "../src/md2latex.js";
 
 describe("inline formatting", () => {
   test("bold text", () => {

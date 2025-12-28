@@ -1,6 +1,8 @@
 {
   "extends": "@softmaple/typescript-config/base.json",
   "compilerOptions": {
+    "moduleResolution": "bundler",
+    "module": "ESNext",
     "outDir": "./dist",
     "rootDir": "./"
   },

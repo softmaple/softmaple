@@ -6,6 +6,14 @@ import {
   findDifferingRange,
 } from "../lib/text-diff";
 
+interface MockEgWalkerAPI {
+  insert: ReturnType<typeof vi.fn>;
+  delete: ReturnType<typeof vi.fn>;
+  getText: ReturnType<typeof vi.fn>;
+  exportEventGraph: ReturnType<typeof vi.fn>;
+  applyRemoteEvent: ReturnType<typeof vi.fn>;
+}
+
 // Mock EgWalkerAPI
 vi.mock("@softmaple/eg-walker", () => {
   return {
@@ -20,11 +28,11 @@ vi.mock("@softmaple/eg-walker", () => {
 });
 
 describe("Collaborative Editor Integration", () => {
-  let api: ReturnType<typeof EgWalkerAPI>;
+  let api: MockEgWalkerAPI;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    api = new EgWalkerAPI("test-replica");
+    api = new (EgWalkerAPI as any)("test-replica") as MockEgWalkerAPI;
   });
 
   describe("Insertion operations", () => {

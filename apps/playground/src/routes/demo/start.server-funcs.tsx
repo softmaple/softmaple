@@ -3,6 +3,11 @@ import { useCallback, useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 
+export interface Todo {
+  id: number;
+  name: string;
+}
+
 /*
 const loggingMiddleware = createMiddleware().server(
   async ({ next, request }) => {
@@ -17,7 +22,7 @@ const loggedServerFunction = createServerFn({ method: "GET" }).middleware([
 
 const TODOS_FILE = "todos.json";
 
-async function readTodos() {
+async function readTodos(): Promise<Todo[]> {
   return JSON.parse(
     await fs.promises.readFile(TODOS_FILE, "utf-8").catch(() =>
       JSON.stringify(

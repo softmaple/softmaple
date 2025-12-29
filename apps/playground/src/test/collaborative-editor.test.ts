@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EgWalkerAPI } from "@softmaple/eg-walker";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  findInsertPosition,
   findDeletePosition,
   findDifferingRange,
+  findInsertPosition,
 } from "../lib/text-diff";
 
 interface MockEgWalkerAPI {
@@ -17,13 +17,16 @@ interface MockEgWalkerAPI {
 // Mock EgWalkerAPI
 vi.mock("@softmaple/eg-walker", () => {
   return {
-    EgWalkerAPI: vi.fn().mockImplementation(() => ({
-      insert: vi.fn(),
-      delete: vi.fn(),
-      getText: vi.fn(() => ""),
-      exportEventGraph: vi.fn(() => []),
-      applyRemoteEvent: vi.fn(),
-    })),
+    // biome-ignore lint/complexity/useArrowFunction: Vitest 4 requires function keyword for constructor mocks
+    EgWalkerAPI: vi.fn().mockImplementation(function () {
+      return {
+        insert: vi.fn(),
+        delete: vi.fn(),
+        getText: vi.fn(() => ""),
+        exportEventGraph: vi.fn(() => []),
+        applyRemoteEvent: vi.fn(),
+      };
+    }),
   };
 });
 
@@ -32,7 +35,8 @@ describe("Collaborative Editor Integration", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    api = new (EgWalkerAPI as any)("test-replica") as MockEgWalkerAPI;
+    // @ts-expect-error - EgWalkerAPI is mocked as MockEgWalkerAPI
+    api = new EgWalkerAPI("test-replica") as MockEgWalkerAPI;
   });
 
   describe("Insertion operations", () => {

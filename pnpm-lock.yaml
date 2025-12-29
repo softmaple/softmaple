@@ -103,7 +103,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(react@19.2.3)
       tailwind-merge:
-        specifier: ^3.0.2
+        specifier: ^3.4.0
         version: 3.4.0
       tailwindcss:
         specifier: ^4.0.17

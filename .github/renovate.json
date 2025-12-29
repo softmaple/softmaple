@@ -87,7 +87,7 @@
     {
       "description": "Group Turbo updates",
       "groupName": "Turbo",
-      "matchPackageNames": ["turbo", "/^@turbo\\//"],
+      "matchPackageNames": ["turbo", "/^@turbo\\//", "eslint-plugin-turbo"],
       "automerge": true,
       "automergeType": "pr",
       "schedule": ["before 10am on monday"]

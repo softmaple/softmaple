@@ -4,7 +4,8 @@
     "config:recommended",
     ":dependencyDashboard",
     ":semanticCommits",
-    ":separatePatchReleases"
+    ":separatePatchReleases",
+    "customManagers:biomeVersions"
   ],
   "rangeStrategy": "bump",
   "packageRules": [

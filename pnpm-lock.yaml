@@ -46,7 +46,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
       '@t3-oss/env-core':
-        specifier: ^0.13.8
+        specifier: ^0.13.10
         version: 0.13.10(typescript@5.9.3)(zod@4.2.1)
       '@tailwindcss/vite':
         specifier: ^4.0.6

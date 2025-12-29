@@ -75,6 +75,7 @@
       "groupName": "Build tools",
       "matchPackageNames": [
         "vite",
+        "vite-tsconfig-paths",
         "prettier",
         "/^@vitejs\\//",
         "tailwindcss",

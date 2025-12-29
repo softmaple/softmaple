@@ -77,8 +77,13 @@
         "vite",
         "prettier",
         "/^@vitejs\\//",
+        "tailwindcss",
         "/^@tailwindcss\\//",
-        "/^tailwindcss/"
+        "/^tailwindcss/",
+        "tailwind-merge",
+        "autoprefixer",
+        "postcss",
+        "tw-animate-css"
       ],
       "automerge": true,
       "automergeType": "pr",
@@ -120,7 +125,6 @@
       "matchPackageNames": [
         "clsx",
         "class-variance-authority",
-        "tailwind-merge",
         "lucide-react"
       ],
       "automerge": true,

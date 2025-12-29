@@ -71,16 +71,16 @@
       "schedule": ["before 10am on monday"]
     },
     {
-     "description": "Group build tools",
-     "groupName": "Build tools",
+      "description": "Group build tools",
+      "groupName": "Build tools",
       "matchPackageNames": [
         "vite",
-       "vite-tsconfig-paths",
+        "vite-tsconfig-paths",
         "prettier",
         "/^@vitejs\\//",
         "tailwindcss",
-       "/^@tailwindcss\\//",
-       "/^tailwindcss/",
+        "/^@tailwindcss\\//",
+        "/^tailwindcss/",
         "tailwind-merge",
         "autoprefixer",
         "postcss",

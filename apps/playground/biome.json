@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.3.10/schema.json",
   "vcs": {
     "enabled": false,
     "clientKind": "git",
@@ -12,13 +12,15 @@
       "**/.vscode/**/*",
       "**/index.html",
       "**/vite.config.js",
+      "**/package.json",
       "!**/src/routeTree.gen.ts",
       "!**/src/styles.css"
     ]
   },
   "formatter": {
     "enabled": true,
-    "indentStyle": "tab"
+    "indentStyle": "space",
+    "indentWidth": 2
   },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {

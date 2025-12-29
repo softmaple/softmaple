@@ -26,12 +26,23 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "complexity": {
+        "useArrowFunction": {
+          "level": "warn"
+        }
+      },
+      "suspicious": {
+        "noExplicitAny": {
+          "level": "error"
+        }
+      }
     }
   },
   "javascript": {
     "formatter": {
       "quoteStyle": "double"
     }
-  }
+  },
+  "overrides": []
 }

@@ -22,7 +22,7 @@
     "@softmaple/ui": "workspace:*",
     "@softmaple/eg-walker": "workspace:*",
     "@tailwindcss/vite": "^4.0.17",
-    "@tanstack/query-db-collection": "^0.3.0",
+    "@tanstack/query-db-collection": "^1.0.12",
     "@tanstack/react-db": "^0.1.60",
     "@tanstack/react-devtools": "^0.9.0",
     "@tanstack/react-query": "^5.90.14",

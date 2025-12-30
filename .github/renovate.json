@@ -51,7 +51,8 @@
       "matchPackageNames": [
         "typescript",
         "/^@types\\//",
-        "/^typescript-eslint/"
+        "/^typescript-eslint/",
+        "typescript-eslint"
       ],
       "automerge": true,
       "automergeType": "pr",

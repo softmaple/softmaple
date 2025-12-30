@@ -52,8 +52,8 @@ importers:
         specifier: ^4.0.17
         version: 4.1.18(vite@7.3.0(@types/node@22.19.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/query-db-collection':
-        specifier: ^0.3.0
-        version: 0.3.0(@tanstack/db@0.5.16(typescript@5.9.3))(@tanstack/query-core@5.90.14)(typescript@5.9.3)
+        specifier: ^1.0.12
+        version: 1.0.12(@tanstack/query-core@5.90.14)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.60
         version: 0.1.60(react@19.2.3)(typescript@5.9.3)
@@ -2680,10 +2680,9 @@ packages:
   '@tanstack/query-core@5.90.14':
     resolution: {integrity: sha512-/6di2yNI+YxpVrH9Ig74Q+puKnkCE+D0LGyagJEGndJHJc6ahkcc/UqirHKy8zCYE/N9KLggxcQvzYCsUBWgdw==}
 
-  '@tanstack/query-db-collection@0.3.0':
-    resolution: {integrity: sha512-v1GSFHHLRL9pOsuknfFIxdlDgO04ax0uVSITf+paPiGLfve1hcAGtxXYFbtBRlxXBKe9UMwI+rDEr6uAxcMiSg==}
+  '@tanstack/query-db-collection@1.0.12':
+    resolution: {integrity: sha512-kwE9lfGhbnRbRHut1k4yrshoTSDNqP/uY7Brr0l1HbOJZuW7V8Q1zQ1GN4TMAtsLohKaSsL/XDxZULCi6MGngg==}
     peerDependencies:
-      '@tanstack/db': '*'
       '@tanstack/query-core': ^5.0.0
       typescript: '>=4.7'
 
@@ -8651,7 +8650,7 @@ snapshots:
 
   '@tanstack/query-core@5.90.14': {}
 
-  '@tanstack/query-db-collection@0.3.0(@tanstack/db@0.5.16(typescript@5.9.3))(@tanstack/query-core@5.90.14)(typescript@5.9.3)':
+  '@tanstack/query-db-collection@1.0.12(@tanstack/query-core@5.90.14)(typescript@5.9.3)':
     dependencies:
       '@standard-schema/spec': 1.0.0
       '@tanstack/db': 0.5.16(typescript@5.9.3)
@@ -10261,7 +10260,7 @@ snapshots:
       eslint: 9.39.2(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-react: 7.37.5(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-react-hooks: 7.0.1(eslint@9.39.2(jiti@2.6.1))
@@ -10298,7 +10297,7 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
@@ -10312,7 +10311,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)):
+  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9

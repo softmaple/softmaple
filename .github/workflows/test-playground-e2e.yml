@@ -12,6 +12,7 @@ on:
       - 'packages/eg-walker/**'
       - 'packages/ui/**'
       - '.github/workflows/test-playground-e2e.yml'
+      - '!**/*.md'
 
 # Concurrency control - cancel old runs within the same PR when new commits arrive
 # Different PRs can run in parallel

@@ -32,7 +32,7 @@
     "@softmaple/editor": "workspace:*",
     "@softmaple/ui": "workspace:*",
     "@supabase/ssr": "^0.8.0",
-    "@supabase/supabase-js": "^2.87.3",
+    "@supabase/supabase-js": "^2.89.0",
     "dayjs": "^1.11.19",
     "dompurify": "^3.3.1",
     "lexical": "^0.31.2",

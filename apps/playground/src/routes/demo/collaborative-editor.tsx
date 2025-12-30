@@ -1,16 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useCallback, useRef } from "react";
+import { EgWalkerAPI } from "@softmaple/eg-walker";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@softmaple/ui/components/card";
-import { EgWalkerAPI } from "@softmaple/eg-walker";
+import { createFileRoute } from "@tanstack/react-router";
+import { useCallback, useRef, useState } from "react";
 import {
-  findInsertPosition,
   findDeletePosition,
   findDifferingRange,
+  findInsertPosition,
 } from "@/lib/text-diff";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
@@ -136,7 +136,7 @@ function CollaborativeEditor() {
       setReplica1Text(api1.getText());
       setReplica2Text(api2.getText());
     },
-    [api1, api2, replica1Ref],
+    [api1, api2],
   );
 
   const handleReplica2Change = useCallback(
@@ -250,7 +250,7 @@ function CollaborativeEditor() {
       setReplica2Text(api2.getText());
       setReplica1Text(api1.getText());
     },
-    [api1, api2, replica2Ref],
+    [api1, api2],
   );
 
   return (

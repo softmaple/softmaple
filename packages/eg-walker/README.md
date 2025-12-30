@@ -2,6 +2,9 @@
 
 Implementation of the Eg-Walker algorithm for collaborative editing, based on the paper ["Collaborative Text Editing with Eg-walker: Better, Faster, Smaller"](https://arxiv.org/abs/2409.14252).
 
+[![Test Coverage](https://img.shields.io/badge/coverage-88%25-green)](./coverage)
+[![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+
 ## Overview
 
 Eg-Walker is a novel algorithm for collaborative text editing based on event graph replay. The algorithm builds on a replication layer that ensures all non-crashed replicas eventually receive every event.
@@ -40,9 +43,36 @@ pnpm add @softmaple/eg-walker
 ## Usage
 
 ```typescript
-import { EgWalker } from "@softmaple/eg-walker";
+import { EgWalkerAPI, createEgWalker } from "@softmaple/eg-walker";
 
-// TODO: Add usage examples once implementation is complete
+// Create a new instance
+const walker = createEgWalker("replica-1");
+
+// Apply local operations
+walker.applyLocalOperation({
+  type: "insert",
+  position: 0,
+  text: "Hello, World!"
+});
+
+walker.applyLocalOperation({
+  type: "delete",
+  position: 7,
+  count: 6
+});
+
+// Apply remote events
+walker.applyRemoteEvent(remoteEvent);
+
+// Get current document state
+const text = walker.getDocumentState();
+console.log(text); // "Hello, !"
+
+// Serialize for persistence
+const serialized = walker.serialize();
+
+// Restore from serialized state
+const restored = EgWalkerAPI.deserialize(serialized, "replica-2");
 ```
 
 ## Features
@@ -81,6 +111,9 @@ import { EgWalker } from "@softmaple/eg-walker";
 ## Development
 
 ```bash
+# Install dependencies
+pnpm install
+
 # Build the package
 pnpm build
 
@@ -89,12 +122,79 @@ pnpm dev
 
 # Type checking
 pnpm typecheck
+
+# Run tests
+pnpm test
+
+# Run tests with coverage
+pnpm test:coverage
+
+# Run tests in watch mode
+pnpm test:watch
+```
+
+## Testing
+
+The package maintains high test coverage (88%+) with comprehensive unit tests for:
+
+- Core algorithm implementation
+- CRDT operations (insert, delete, merge)
+- Event graph management
+- Retreat/advance functionality
+- Non-interleaving behavior
+- Concurrent operation handling
+- Serialization/deserialization
+
+Run tests with:
+```bash
+pnpm test
+pnpm test:coverage  # Generate coverage report
+```
+
+## API Reference
+
+### `EgWalkerAPI`
+
+The main API class for interacting with the Eg-Walker algorithm.
+
+#### Methods
+
+- `applyLocalOperation(operation)` - Apply a local insert or delete operation
+- `applyRemoteEvent(event)` - Apply an event from a remote replica
+- `getDocumentState()` - Get the current document text
+- `serialize()` - Serialize the current state for persistence
+- `static deserialize(data, replicaId)` - Restore from serialized state
+
+### `createEgWalker(replicaId, options?)`
+
+Factory function to create a new EgWalker instance.
+
+#### Parameters
+
+- `replicaId`: Unique identifier for this replica
+- `options`: Optional configuration object
+
+### Types
+
+```typescript
+type Operation = 
+  | { type: "insert"; position: number; text: string }
+  | { type: "delete"; position: number; count: number };
+
+type Event = {
+  id: EventId;
+  operation: Operation;
+  parentVersion: Version;
+  replicaId: string;
+};
 ```
 
 ## References
 
 - [Research Paper](https://arxiv.org/abs/2409.14252)
 - [Reference Implementation](https://github.com/josephg/eg-walker-reference)
+- [Algorithm Characteristics Tests](./src/test/algorithm-characteristics.test.ts)
+- [Integration Tests](./src/test/external-api.test.ts)
 
 ## License
 

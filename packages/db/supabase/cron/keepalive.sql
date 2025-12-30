@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 -- Grant usage on cron schema to postgres
 GRANT USAGE ON SCHEMA cron TO postgres;
 
--- Remove existing keepalive job if it exists (makes this migration idempotent)
+-- Remove existing keepalive job if it exists (makes this idempotent)
 SELECT cron.unschedule('database-keepalive');
 
 -- Schedule a simple keep-alive ping every 5 minutes

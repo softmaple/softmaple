@@ -1,13 +1,8 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 
 export const loginFormSchema = z
   .object({
-    email: z
-      .email({
-        pattern: z.regexes.html5Email,
-        error: "Invalid email address",
-      })
-      .trim(),
+    email: z.email({ error: "Invalid email address" }).trim(),
     password: z
       .string()
       .trim()
@@ -18,7 +13,7 @@ export const loginFormSchema = z
 
 export const signupFormSchema = z
   .object({
-    email: z.email({ pattern: z.regexes.html5Email }).trim(),
+    email: z.email().trim(),
     firstName: z.string().trim().min(1, { error: "First name is too short" }),
     lastName: z.string().trim().min(1, { error: "Last name is too short" }),
     fullName: z.string().trim().min(1, { error: "Full name is too short" }),

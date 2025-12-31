@@ -1,5 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useCallback } from "react";
+import { EgWalkerAPI } from "@softmaple/eg-walker";
 import {
   Card,
   CardContent,
@@ -7,11 +6,12 @@ import {
   CardTitle,
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
-import { EgWalkerAPI } from "@softmaple/eg-walker";
+import { createFileRoute } from "@tanstack/react-router";
+import { useCallback, useRef, useState } from "react";
 import {
-  findInsertPosition,
   findDeletePosition,
   findDifferingRange,
+  findInsertPosition,
 } from "@/lib/text-diff";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
@@ -23,6 +23,35 @@ function CollaborativeEditor() {
   const [replica2Text, setReplica2Text] = useState("");
   const [api1] = useState(() => new EgWalkerAPI("replica-1"));
   const [api2] = useState(() => new EgWalkerAPI("replica-2"));
+  const replica1Ref = useRef<HTMLTextAreaElement>(null);
+  const replica2Ref = useRef<HTMLTextAreaElement>(null);
+
+  // Helper to preserve cursor position when updating text from remote changes
+  const updateTextPreservingCursor = useCallback(
+    (
+      textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+      setText: React.Dispatch<React.SetStateAction<string>>,
+      newText: string,
+    ) => {
+      // Save current cursor position before update
+      const currentStart = textareaRef.current?.selectionStart ?? 0;
+      const currentEnd = textareaRef.current?.selectionEnd ?? 0;
+
+      // Update the text
+      setText(newText);
+
+      // Restore cursor position after React re-render
+      setTimeout(() => {
+        if (textareaRef.current) {
+          // Ensure cursor position doesn't exceed new text length
+          const safeStart = Math.min(currentStart, newText.length);
+          const safeEnd = Math.min(currentEnd, newText.length);
+          textareaRef.current.setSelectionRange(safeStart, safeEnd);
+        }
+      }, 0);
+    },
+    [],
+  );
 
   const handleReplica1Change = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -36,6 +65,8 @@ function CollaborativeEditor() {
           insertPos,
           insertPos + (newText.length - oldText.length),
         );
+        const expectedCursorPos = insertPos + insertedText.length;
+
         api1.insert(insertPos, insertedText);
 
         // Get the latest event from replica1 and propagate to replica2 asynchronously
@@ -44,15 +75,34 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api2.applyRemoteEvent(latestEvent);
-            setReplica2Text(api2.getText());
+            // Update replica2 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica2Ref,
+              setReplica2Text,
+              api2.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync insert to replica2:", error);
           }
         }
+
+        // Update local state and preserve cursor position after insertion
+        setReplica1Text(api1.getText());
+        setTimeout(() => {
+          if (replica1Ref.current) {
+            replica1Ref.current.setSelectionRange(
+              expectedCursorPos,
+              expectedCursorPos,
+            );
+          }
+        }, 0);
+        return;
       } else if (newText.length < oldText.length) {
         // Deletion
         const deletePos = findDeletePosition(oldText, newText);
         const deleteCount = oldText.length - newText.length;
+        const expectedCursorPos = deletePos;
+
         api1.delete(deletePos, deleteCount);
 
         // Get the latest event from replica1 and propagate to replica2 asynchronously
@@ -61,16 +111,35 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api2.applyRemoteEvent(latestEvent);
-            setReplica2Text(api2.getText());
+            // Update replica2 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica2Ref,
+              setReplica2Text,
+              api2.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync delete to replica2:", error);
           }
         }
+
+        // Update local state and restore cursor position
+        setReplica1Text(api1.getText());
+        // Use setTimeout to ensure cursor restoration happens after React re-render
+        setTimeout(() => {
+          if (replica1Ref.current) {
+            replica1Ref.current.setSelectionRange(
+              expectedCursorPos,
+              expectedCursorPos,
+            );
+          }
+        }, 0);
+        return; // Early return to avoid duplicate state updates at the end
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
         const { start, end } = findDifferingRange(oldText, newText);
         const deleteCount = end - start + 1;
         const replacementText = newText.slice(start, end + 1);
+        const expectedCursorPos = end + 1;
 
         // Perform delete then insert
         api1.delete(start, deleteCount);
@@ -83,17 +152,38 @@ function CollaborativeEditor() {
           for (const event of latestEvents) {
             await api2.applyRemoteEvent(event);
           }
-          setReplica2Text(api2.getText());
+          // Update replica2 text while preserving its cursor position
+          updateTextPreservingCursor(
+            replica2Ref,
+            setReplica2Text,
+            api2.getText(),
+          );
         } catch (error) {
           console.error("Failed to sync replacement to replica2:", error);
         }
+
+        // Update local state and preserve cursor position
+        setReplica1Text(api1.getText());
+        setTimeout(() => {
+          if (replica1Ref.current) {
+            replica1Ref.current.setSelectionRange(
+              expectedCursorPos,
+              expectedCursorPos,
+            );
+          }
+        }, 0);
+        return;
       }
 
       // Sync local state with API's getText() to ensure consistency
       setReplica1Text(api1.getText());
       setReplica2Text(api2.getText());
     },
-    [api1, api2],
+    [
+      api1,
+      api2, // Update replica2 text while preserving its cursor position
+      updateTextPreservingCursor,
+    ],
   );
 
   const handleReplica2Change = useCallback(
@@ -108,6 +198,8 @@ function CollaborativeEditor() {
           insertPos,
           insertPos + (newText.length - oldText.length),
         );
+        const expectedCursorPos = insertPos + insertedText.length;
+
         api2.insert(insertPos, insertedText);
 
         // Get the latest event from replica2 and propagate to replica1 asynchronously
@@ -116,15 +208,34 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api1.applyRemoteEvent(latestEvent);
-            setReplica1Text(api1.getText());
+            // Update replica1 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica1Ref,
+              setReplica1Text,
+              api1.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync insert to replica1:", error);
           }
         }
+
+        // Update local state and preserve cursor position after insertion
+        setReplica2Text(api2.getText());
+        setTimeout(() => {
+          if (replica2Ref.current) {
+            replica2Ref.current.setSelectionRange(
+              expectedCursorPos,
+              expectedCursorPos,
+            );
+          }
+        }, 0);
+        return;
       } else if (newText.length < oldText.length) {
         // Deletion
         const deletePos = findDeletePosition(oldText, newText);
         const deleteCount = oldText.length - newText.length;
+        const expectedCursorPos = deletePos;
+
         api2.delete(deletePos, deleteCount);
 
         // Get the latest event from replica2 and propagate to replica1 asynchronously
@@ -133,16 +244,35 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api1.applyRemoteEvent(latestEvent);
-            setReplica1Text(api1.getText());
+            // Update replica1 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica1Ref,
+              setReplica1Text,
+              api1.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync delete to replica1:", error);
           }
         }
+
+        // Update local state and restore cursor position
+        setReplica2Text(api2.getText());
+        // Use setTimeout to ensure cursor restoration happens after React re-render
+        setTimeout(() => {
+          if (replica2Ref.current) {
+            replica2Ref.current.setSelectionRange(
+              expectedCursorPos,
+              expectedCursorPos,
+            );
+          }
+        }, 0);
+        return; // Early return to avoid duplicate state updates at the end
       } else if (newText.length === oldText.length && newText !== oldText) {
         // Replacement (same length, different content)
         const { start, end } = findDifferingRange(oldText, newText);
         const deleteCount = end - start + 1;
         const replacementText = newText.slice(start, end + 1);
+        const expectedCursorPos = end + 1;
 
         // Perform delete then insert
         api2.delete(start, deleteCount);
@@ -155,17 +285,38 @@ function CollaborativeEditor() {
           for (const event of latestEvents) {
             await api1.applyRemoteEvent(event);
           }
-          setReplica1Text(api1.getText());
+          // Update replica1 text while preserving its cursor position
+          updateTextPreservingCursor(
+            replica1Ref,
+            setReplica1Text,
+            api1.getText(),
+          );
         } catch (error) {
           console.error("Failed to sync replacement to replica1:", error);
         }
+
+        // Update local state and preserve cursor position
+        setReplica2Text(api2.getText());
+        setTimeout(() => {
+          if (replica2Ref.current) {
+            replica2Ref.current.setSelectionRange(
+              expectedCursorPos,
+              expectedCursorPos,
+            );
+          }
+        }, 0);
+        return;
       }
 
       // Sync local state with API's getText() to ensure consistency
       setReplica2Text(api2.getText());
       setReplica1Text(api1.getText());
     },
-    [api1, api2],
+    [
+      api1,
+      api2, // Update replica1 text while preserving its cursor position
+      updateTextPreservingCursor,
+    ],
   );
 
   return (
@@ -190,6 +341,7 @@ function CollaborativeEditor() {
             </CardHeader>
             <CardContent className="flex-1 p-0">
               <Textarea
+                ref={replica1Ref}
                 data-testid="replica-1"
                 value={replica1Text}
                 onChange={handleReplica1Change}
@@ -209,6 +361,7 @@ function CollaborativeEditor() {
             </CardHeader>
             <CardContent className="flex-1 p-0">
               <Textarea
+                ref={replica2Ref}
                 data-testid="replica-2"
                 value={replica2Text}
                 onChange={handleReplica2Change}

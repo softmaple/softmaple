@@ -25,6 +25,33 @@ function CollaborativeEditor() {
   const replica1Ref = useRef<HTMLTextAreaElement>(null);
   const replica2Ref = useRef<HTMLTextAreaElement>(null);
 
+  // Helper to preserve cursor position when updating text from remote changes
+  const updateTextPreservingCursor = useCallback(
+    (
+      textareaRef: React.RefObject<HTMLTextAreaElement>,
+      setText: React.Dispatch<React.SetStateAction<string>>,
+      newText: string,
+    ) => {
+      // Save current cursor position before update
+      const currentStart = textareaRef.current?.selectionStart ?? 0;
+      const currentEnd = textareaRef.current?.selectionEnd ?? 0;
+
+      // Update the text
+      setText(newText);
+
+      // Restore cursor position after React re-render
+      setTimeout(() => {
+        if (textareaRef.current) {
+          // Ensure cursor position doesn't exceed new text length
+          const safeStart = Math.min(currentStart, newText.length);
+          const safeEnd = Math.min(currentEnd, newText.length);
+          textareaRef.current.setSelectionRange(safeStart, safeEnd);
+        }
+      }, 0);
+    },
+    [],
+  );
+
   const handleReplica1Change = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
@@ -47,7 +74,12 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api2.applyRemoteEvent(latestEvent);
-            setReplica2Text(api2.getText());
+            // Update replica2 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica2Ref,
+              setReplica2Text,
+              api2.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync insert to replica2:", error);
           }
@@ -78,7 +110,12 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api2.applyRemoteEvent(latestEvent);
-            setReplica2Text(api2.getText());
+            // Update replica2 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica2Ref,
+              setReplica2Text,
+              api2.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync delete to replica2:", error);
           }
@@ -114,7 +151,12 @@ function CollaborativeEditor() {
           for (const event of latestEvents) {
             await api2.applyRemoteEvent(event);
           }
-          setReplica2Text(api2.getText());
+          // Update replica2 text while preserving its cursor position
+          updateTextPreservingCursor(
+            replica2Ref,
+            setReplica2Text,
+            api2.getText(),
+          );
         } catch (error) {
           console.error("Failed to sync replacement to replica2:", error);
         }
@@ -136,7 +178,11 @@ function CollaborativeEditor() {
       setReplica1Text(api1.getText());
       setReplica2Text(api2.getText());
     },
-    [api1, api2],
+    [
+      api1,
+      api2, // Update replica2 text while preserving its cursor position
+      updateTextPreservingCursor,
+    ],
   );
 
   const handleReplica2Change = useCallback(
@@ -161,7 +207,12 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api1.applyRemoteEvent(latestEvent);
-            setReplica1Text(api1.getText());
+            // Update replica1 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica1Ref,
+              setReplica1Text,
+              api1.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync insert to replica1:", error);
           }
@@ -192,7 +243,12 @@ function CollaborativeEditor() {
         if (latestEvent) {
           try {
             await api1.applyRemoteEvent(latestEvent);
-            setReplica1Text(api1.getText());
+            // Update replica1 text while preserving its cursor position
+            updateTextPreservingCursor(
+              replica1Ref,
+              setReplica1Text,
+              api1.getText(),
+            );
           } catch (error) {
             console.error("Failed to sync delete to replica1:", error);
           }
@@ -228,7 +284,12 @@ function CollaborativeEditor() {
           for (const event of latestEvents) {
             await api1.applyRemoteEvent(event);
           }
-          setReplica1Text(api1.getText());
+          // Update replica1 text while preserving its cursor position
+          updateTextPreservingCursor(
+            replica1Ref,
+            setReplica1Text,
+            api1.getText(),
+          );
         } catch (error) {
           console.error("Failed to sync replacement to replica1:", error);
         }
@@ -250,7 +311,11 @@ function CollaborativeEditor() {
       setReplica2Text(api2.getText());
       setReplica1Text(api1.getText());
     },
-    [api1, api2],
+    [
+      api1,
+      api2, // Update replica1 text while preserving its cursor position
+      updateTextPreservingCursor,
+    ],
   );
 
   return (

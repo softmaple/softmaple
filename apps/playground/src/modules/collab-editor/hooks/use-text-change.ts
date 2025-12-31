@@ -1,28 +1,31 @@
-import { useCallback, useEffect } from 'react';
-import type { RoomManager } from '../room-manager';
-import { debounce } from '../utils';
+import { useCallback, useEffect } from "react";
+import type { RoomManager } from "../room-manager";
+import { debounce } from "../utils";
 
 /**
  * Hook for handling text changes in the collaborative editor
  */
 export function useTextChange(
   roomManager: RoomManager | null,
-  onTextUpdate?: (text: string) => void
+  onTextUpdate?: (text: string) => void,
 ) {
   // Debounced text change handler to reduce events
   const handleTextChange = useCallback(
-    debounce((value: string, source: 'local' | 'remote' = 'local') => {
-      if (!roomManager || source === 'remote') return;
-      
+    debounce((value: string, source: "local" | "remote" = "local") => {
+      if (!roomManager || source === "remote") return;
+
       const currentText = roomManager.getText();
-      
+
       if (value === currentText) return; // No change
-      
+
       // Determine operation type
       if (value.length > currentText.length) {
         // Insert operation
         const insertPos = findFirstDifference(currentText, value);
-        const insertedText = value.slice(insertPos, insertPos + (value.length - currentText.length));
+        const insertedText = value.slice(
+          insertPos,
+          insertPos + (value.length - currentText.length),
+        );
         roomManager.insert(insertPos, insertedText);
       } else if (value.length < currentText.length) {
         // Delete operation
@@ -39,24 +42,24 @@ export function useTextChange(
         }
       }
     }, 100),
-    [roomManager]
+    [],
   );
-  
+
   // Subscribe to remote text changes
   useEffect(() => {
     if (!roomManager || !onTextUpdate) return;
-    
+
     const originalHandler = roomManager.onContentChange;
     roomManager.onContentChange = () => {
       originalHandler?.();
       onTextUpdate(roomManager.getText());
     };
-    
+
     return () => {
       roomManager.onContentChange = originalHandler;
     };
   }, [roomManager, onTextUpdate]);
-  
+
   return { handleTextChange };
 }
 

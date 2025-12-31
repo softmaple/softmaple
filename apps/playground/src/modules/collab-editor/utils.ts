@@ -7,18 +7,18 @@
  */
 export function getRandomColor(): string {
   const colors = [
-    '#FF6B6B', // Red
-    '#4ECDC4', // Teal
-    '#45B7D1', // Blue
-    '#FFA07A', // Light Salmon
-    '#98D8C8', // Mint
-    '#FFD700', // Gold
-    '#9370DB', // Medium Purple
-    '#20B2AA', // Light Sea Green
-    '#FF69B4', // Hot Pink
-    '#87CEEB', // Sky Blue
+    "#FF6B6B", // Red
+    "#4ECDC4", // Teal
+    "#45B7D1", // Blue
+    "#FFA07A", // Light Salmon
+    "#98D8C8", // Mint
+    "#FFD700", // Gold
+    "#9370DB", // Medium Purple
+    "#20B2AA", // Light Sea Green
+    "#FF69B4", // Hot Pink
+    "#87CEEB", // Sky Blue
   ];
-  return colors[Math.floor(Math.random() * colors.length)] || '#45B7D1';
+  return colors[Math.floor(Math.random() * colors.length)] || "#45B7D1";
 }
 
 /**
@@ -39,12 +39,12 @@ export function formatTimestamp(timestamp: number): string {
 /**
  * Debounce function for text input
  */
-export function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  delay: number
-): (...args: Parameters<T>) => void {
+export function debounce<Args extends unknown[], Return>(
+  func: (...args: Args) => Return,
+  delay: number,
+): (...args: Args) => void {
   let timeoutId: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<T>) => {
+  return (...args: Args) => {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => func(...args), delay);
   };

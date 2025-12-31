@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@softmaple/ui/components/card";
+import { Textarea } from "@softmaple/ui/components/textarea";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
 import {
@@ -28,7 +29,7 @@ function CollaborativeEditor() {
   // Helper to preserve cursor position when updating text from remote changes
   const updateTextPreservingCursor = useCallback(
     (
-      textareaRef: React.RefObject<HTMLTextAreaElement>,
+      textareaRef: React.RefObject<HTMLTextAreaElement | null>,
       setText: React.Dispatch<React.SetStateAction<string>>,
       newText: string,
     ) => {
@@ -339,7 +340,7 @@ function CollaborativeEditor() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 p-0">
-              <textarea
+              <Textarea
                 ref={replica1Ref}
                 data-testid="replica-1"
                 value={replica1Text}
@@ -359,7 +360,7 @@ function CollaborativeEditor() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 p-0">
-              <textarea
+              <Textarea
                 ref={replica2Ref}
                 data-testid="replica-2"
                 value={replica2Text}

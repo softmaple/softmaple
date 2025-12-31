@@ -39,7 +39,7 @@ export function useCollabEditor(wsUrl?: string) {
 
       try {
         const user: User = {
-          id: Math.random().toString(36).substring(2, 9),
+          id: crypto.randomUUID(),
           name: userName,
           color: getRandomColor(),
         };
@@ -70,7 +70,7 @@ export function useCollabEditor(wsUrl?: string) {
 
       try {
         const user: User = {
-          id: Math.random().toString(36).substring(2, 9),
+          id: crypto.randomUUID(),
           name: userName,
           color: getRandomColor(),
         };

@@ -25,7 +25,7 @@ export function getRandomColor(): string {
  * Generate a unique room ID
  */
 export function generateRoomId(): string {
-  return `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `room_${crypto.randomUUID()}`;
 }
 
 /**

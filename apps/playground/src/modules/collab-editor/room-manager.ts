@@ -261,7 +261,7 @@ export class RoomManager {
   }
 
   private generateRoomId(): string {
-    return Math.random().toString(36).substring(2, 9);
+    return crypto.randomUUID();
   }
 
   // Event handlers to be overridden

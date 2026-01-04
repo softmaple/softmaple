@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 test.describe("Home Page", () => {
   test("should load home page successfully", async ({ page }) => {
@@ -21,11 +21,13 @@ test.describe("Home Page", () => {
     // Check for Two-Panel Editor Demo card - it's not a heading, it's a generic element
     await expect(page.getByText("Two-Panel Editor Demo")).toBeVisible();
 
-   // Check for Collaborative Editor card - use exact match to avoid ambiguity with Online Collaborative Editor
-   await expect(page.getByText("Collaborative Editor", { exact: true })).toBeVisible();
-   
-   // Check for Online Collaborative Editor card
-   await expect(page.getByText("Online Collaborative Editor")).toBeVisible();
+    // Check for Collaborative Editor card - use exact match to avoid ambiguity with Online Collaborative Editor
+    await expect(
+      page.getByText("Collaborative Editor", { exact: true }),
+    ).toBeVisible();
+
+    // Check for Online Collaborative Editor card
+    await expect(page.getByText("Online Collaborative Editor")).toBeVisible();
   });
 
   test("should navigate to two-panel editor", async ({ page }) => {

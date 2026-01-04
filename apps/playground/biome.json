@@ -9,6 +9,7 @@
     "ignoreUnknown": false,
     "includes": [
       "**/src/**/*",
+      "**/e2e/**/*",
       "**/.vscode/**/*",
       "**/index.html",
       "**/vite.config.js",

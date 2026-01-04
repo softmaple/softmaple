@@ -15,6 +15,7 @@ export interface Document {
   content: string;
   version: number;
   events: GraphEvent[]; // eg-walker events
+  lastModified: number; // Unix timestamp
 }
 
 export interface User {

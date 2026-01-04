@@ -217,6 +217,7 @@ export class RoomManager {
       content: this.api.getText(),
       version: events.length,
       events: Array.from(events),
+      lastModified: Date.now(),
     };
 
     await storage.saveDocument(doc);

@@ -1,10 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RoomManager } from "../modules/collab-editor/room-manager";
+import { storage } from "../modules/collab-editor/storage";
 import type { User } from "../modules/collab-editor/types";
 
 describe("RoomManager async operations", () => {
+  beforeEach(async () => {
+    // Clear all storage data before each test
+    await storage.init();
+    await storage.clearAll();
+  });
+
+  afterEach(async () => {
+    // Clean up after each test
+    await storage.clearAll();
+  });
+
   it("should maintain order when using replace operation", async () => {
-    const manager = new RoomManager();
+    // Disable sync adapter for testing to avoid cross-test contamination
+    const manager = new RoomManager(undefined, { disableSync: true });
     await manager.init();
 
     const user: User = {
@@ -33,7 +46,8 @@ describe("RoomManager async operations", () => {
   });
 
   it("should handle async operations in correct order", async () => {
-    const manager = new RoomManager();
+    // Disable sync adapter for testing to avoid cross-test contamination
+    const manager = new RoomManager(undefined, { disableSync: true });
     await manager.init();
 
     const user: User = {
@@ -57,7 +71,8 @@ describe("RoomManager async operations", () => {
   });
 
   it("should handle concurrent operations with potential conflicts", async () => {
-    const manager = new RoomManager();
+    // Disable sync adapter for testing to avoid cross-test contamination
+    const manager = new RoomManager(undefined, { disableSync: true });
     await manager.init();
 
     const user: User = {

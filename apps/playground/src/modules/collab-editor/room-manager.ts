@@ -13,8 +13,14 @@ export class RoomManager {
   private currentUser: User | null = null;
   private participants = new Map<string, User>();
   private lastSyncedVersion = 0;
+  private disableSync: boolean;
 
-  constructor(private wsUrl?: string) {}
+  constructor(
+    private wsUrl?: string,
+    options?: { disableSync?: boolean },
+  ) {
+    this.disableSync = options?.disableSync ?? false;
+  }
 
   async init(): Promise<void> {
     await storage.init();
@@ -83,6 +89,11 @@ export class RoomManager {
   }
 
   private initSyncAdapter(_roomId: string, user: User): void {
+    // Skip sync adapter initialization if sync is disabled (e.g., in tests)
+    if (this.disableSync) {
+      return;
+    }
+
     this.syncAdapter = new SyncAdapter(this.wsUrl);
 
     this.syncAdapter.on("user-joined", (msg: SyncMessage) => {
@@ -211,27 +222,27 @@ export class RoomManager {
     await storage.saveDocument(doc);
   }
 
- getText(): string {
-   return this.api?.getText() || "";
- }
+  getText(): string {
+    return this.api?.getText() || "";
+  }
 
   insert(position: number, text: string): Promise<void> {
     return this.handleLocalChange("insert", position, text);
- }
+  }
 
   delete(position: number, length: number): Promise<void> {
     return this.handleLocalChange("delete", position, undefined, length);
- }
+  }
 
   async replace(position: number, length: number, text: string): Promise<void> {
-   // Replace is a delete followed by an insert
+    // Replace is a delete followed by an insert
     await this.delete(position, length);
     await this.insert(position, text);
- }
+  }
 
- getParticipants(): User[] {
-   return Array.from(this.participants.values());
- }
+  getParticipants(): User[] {
+    return Array.from(this.participants.values());
+  }
 
   getCurrentRoom(): Room | null {
     return this.currentRoom;

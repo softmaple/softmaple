@@ -190,6 +190,40 @@ export class LocalStorage {
     const docsStr = localStorage.getItem("collab-documents");
     return docsStr ? JSON.parse(docsStr) : {};
   }
+
+  // Cleanup methods for testing
+  async close(): Promise<void> {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+  }
+
+  async clear(): Promise<void> {
+    if (this.db) {
+      // Clear all object stores
+      const storeNames = ["rooms", "documents", "users", "participants"];
+      const tx = this.db.transaction(storeNames, "readwrite");
+
+      for (const storeName of storeNames) {
+        const request = tx.objectStore(storeName).clear();
+        await this.wrapRequest(request);
+      }
+
+      await this.wrapTransaction(tx);
+    } else {
+      // Clear localStorage fallback
+      localStorage.removeItem("collab-rooms");
+      localStorage.removeItem("collab-documents");
+      // Clear all user keys
+      const keys = Object.keys(localStorage);
+      for (const key of keys) {
+        if (key.startsWith("user-")) {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+  }
 }
 
 // Singleton instance

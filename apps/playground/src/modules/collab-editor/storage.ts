@@ -9,6 +9,26 @@ export class LocalStorage {
   private readonly DB_VERSION = 1;
   private db: IDBDatabase | null = null;
 
+  /**
+   * Wraps an IDBRequest in a Promise for proper async/await handling
+   */
+  private wrapRequest<T>(request: IDBRequest<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  /**
+   * Waits for a transaction to complete
+   */
+  private wrapTransaction(tx: IDBTransaction): Promise<void> {
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async init(): Promise<void> {
     if (!("indexedDB" in window)) {
       console.warn("IndexedDB not available, using localStorage fallback");
@@ -61,7 +81,9 @@ export class LocalStorage {
   async saveRoom(room: Room): Promise<void> {
     if (this.db) {
       const tx = this.db.transaction(["rooms"], "readwrite");
-      await tx.objectStore("rooms").put(room);
+      const request = tx.objectStore("rooms").put(room);
+      await this.wrapRequest(request);
+      await this.wrapTransaction(tx);
     } else {
       // Fallback to localStorage
       const rooms = this.getLocalStorageRooms();
@@ -108,7 +130,9 @@ export class LocalStorage {
   async saveDocument(doc: Document): Promise<void> {
     if (this.db) {
       const tx = this.db.transaction(["documents"], "readwrite");
-      await tx.objectStore("documents").put(doc);
+      const request = tx.objectStore("documents").put(doc);
+      await this.wrapRequest(request);
+      await this.wrapTransaction(tx);
     } else {
       const docs = this.getLocalStorageDocuments();
       docs[doc.roomId] = doc;
@@ -134,7 +158,9 @@ export class LocalStorage {
   async saveUser(user: User): Promise<void> {
     if (this.db) {
       const tx = this.db.transaction(["users"], "readwrite");
-      await tx.objectStore("users").put(user);
+      const request = tx.objectStore("users").put(user);
+      await this.wrapRequest(request);
+      await this.wrapTransaction(tx);
     } else {
       localStorage.setItem(`user-${user.id}`, JSON.stringify(user));
     }

@@ -20,6 +20,7 @@ import {
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useCollabEditor } from "@/modules/collab-editor/hooks/use-collab-editor";
 import { useRecentRooms } from "@/modules/collab-editor/hooks/use-recent-rooms";
 import { useTextChange } from "@/modules/collab-editor/hooks/use-text-change";
@@ -123,6 +124,7 @@ function OnlineCollabEditor() {
       await navigator.clipboard.writeText(roomLink);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      toast.success("Room link copied to clipboard");
     } catch (error) {
       console.error("Failed to copy using clipboard API:", error);
 
@@ -143,12 +145,17 @@ function OnlineCollabEditor() {
           setTimeout(() => setCopied(false), 2000);
         } else {
           console.error("Fallback copy failed");
-          // Could show an error toast/notification here
-          alert(`Please copy the room link manually: ${roomLink}`);
+          toast.error("Failed to copy to clipboard", {
+            description: roomLink,
+            duration: 5000,
+          });
         }
       } catch (fallbackError) {
         console.error("Fallback copy error:", fallbackError);
-        alert(`Please copy the room link manually: ${roomLink}`);
+        toast.error("Failed to copy to clipboard", {
+          description: roomLink,
+          duration: 5000,
+        });
       } finally {
         document.body.removeChild(textarea);
       }

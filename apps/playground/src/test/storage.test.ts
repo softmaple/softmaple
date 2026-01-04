@@ -23,7 +23,7 @@ describe("LocalStorage with Dexie", () => {
     }
 
     // Delete the test database completely
-    await Dexie.delete("collab-editor");
+    await Dexie.delete("collab-editor-v2");
   });
 
   it("should properly save and retrieve rooms with Dexie", async () => {

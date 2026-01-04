@@ -13,15 +13,31 @@ export class LocalStorage extends Dexie {
   participants!: Table<{ roomId: string; userId: string; joinedAt: Date }>;
 
   constructor() {
-    super("collab-editor");
+    // Use a versioned database name to avoid conflicts with old schemas
+    super("collab-editor-v2");
 
     // Define database schema
-    // Note: createdBy is optional and not indexed to avoid primary key issues
+    // Using a new database name to avoid primary key migration issues
     this.version(1).stores({
       rooms: "id, createdAt", // Primary key is 'id', indexed on 'createdAt'
       documents: "roomId, lastModified",
       users: "id, name, color",
       participants: "[roomId+userId], roomId, userId, joinedAt",
+    });
+
+    // Clean up old database with incompatible schema if it exists
+    this.on("ready", async () => {
+      try {
+        // Check if old database exists and delete it
+        const databases = await Dexie.getDatabaseNames();
+        if (databases.includes("collab-editor")) {
+          await Dexie.delete("collab-editor");
+          console.log("Cleaned up old collab-editor database");
+        }
+      } catch (error) {
+        // getDatabaseNames might not be available in all browsers
+        console.warn("Could not check for old database:", error);
+      }
     });
   }
 

@@ -79,8 +79,8 @@ pnpm typecheck
 ## Development
 
 ```bash
-# Start dev server (DO NOT use pnpm dev)
-pnpm --filter playground dev
+# Start dev server
+pnpm dev
 
 # Build for production
 pnpm build

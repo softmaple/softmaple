@@ -1,48 +1,42 @@
+import Dexie from "dexie";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalStorage } from "../modules/collab-editor/storage";
 import type { Room } from "../modules/collab-editor/types";
 
-describe("LocalStorage IDBRequest handling", () => {
+// Mock IndexedDB for tests
+import "fake-indexeddb/auto";
+
+describe("LocalStorage with Dexie", () => {
   let storage: LocalStorage;
 
   beforeEach(async () => {
     storage = new LocalStorage();
-    // Properly initialize IndexedDB to avoid falling back to localStorage
+    // Initialize Dexie database
     await storage.init();
   });
 
   afterEach(async () => {
     // Clean up test data and close connections for test isolation
     if (storage) {
-      await storage.clear();
-      await storage.close();
+      await storage.clearAll();
+      storage.close();
     }
 
-    // Additionally, delete the test database completely
-    if ("indexedDB" in window) {
-      await new Promise<void>((resolve, reject) => {
-        const deleteReq = indexedDB.deleteDatabase("collab-editor");
-        deleteReq.onsuccess = () => resolve();
-        deleteReq.onerror = () => reject(deleteReq.error);
-        deleteReq.onblocked = () => {
-          console.warn("Database deletion blocked");
-          resolve(); // Continue anyway
-        };
-      });
-    }
+    // Delete the test database completely
+    await Dexie.delete("collab-editor");
   });
 
-  it("should properly wait for IndexedDB operations to complete", async () => {
-    // This test verifies that our wrapRequest helper works correctly
-    // by ensuring saveRoom actually waits for the DB write
+  it("should properly save and retrieve rooms with Dexie", async () => {
+    // This test verifies that Dexie operations work correctly
     const room: Room = {
       id: `test-room-${Date.now()}`,
       name: "Test Room",
+      createdBy: "test-user",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
-    // Without proper IDBRequest wrapping, this would not wait
+    // Save room using Dexie
     await storage.saveRoom(room);
 
     // Verify the room was actually saved
@@ -50,54 +44,87 @@ describe("LocalStorage IDBRequest handling", () => {
     expect(savedRoom).toEqual(room);
   });
 
-  it("should use IndexedDB when available, not localStorage fallback", async () => {
-    // Skip this test if IndexedDB is not available in the test environment
-    if (!("indexedDB" in window)) {
-      console.log(
-        "Skipping IndexedDB test - not available in test environment",
-      );
-      return;
-    }
-
+  it("should retrieve rooms by user", async () => {
     const room: Room = {
       id: `test-room-${Date.now()}`,
-      name: "Test IndexedDB Room",
+      name: "User Room",
+      createdBy: "test-user-123",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
     await storage.saveRoom(room);
 
-    // Check that localStorage doesn't have the room (proving we used IndexedDB)
-    const localStorageRooms = localStorage.getItem("collab-rooms");
-    if (localStorageRooms) {
-      const rooms = JSON.parse(localStorageRooms);
-      expect(rooms[room.id]).toBeUndefined();
-    }
-
-    // But the room should be retrievable via the storage API
-    const savedRoom = await storage.getRoom(room.id);
-    expect(savedRoom).toEqual(room);
+    // Get rooms by user
+    const userRooms = await storage.getRoomsByUser("test-user-123");
+    expect(userRooms).toHaveLength(1);
+    expect(userRooms[0]).toEqual(room);
   });
 
-  it("should properly clean up between tests", async () => {
-    // Create a room
-    const room1: Room = {
-      id: "cleanup-test-room",
-      name: "Cleanup Test",
+  it("should handle concurrent operations without errors", async () => {
+    // Test that concurrent saves work correctly
+    const rooms = await Promise.all(
+      new Array(5).fill(null).map(async (_, i) => {
+        const room: Room = {
+          id: `concurrent-room-${i}`,
+          name: `Concurrent Room ${i}`,
+          createdBy: "test-user",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        await storage.saveRoom(room);
+        return room;
+      }),
+    );
+
+    // Verify all rooms were saved
+    for (const room of rooms) {
+      const savedRoom = await storage.getRoom(room.id);
+      expect(savedRoom).toEqual(room);
+    }
+  });
+
+  it("should handle missing room gracefully", async () => {
+    const room = await storage.getRoom("non-existent-room-id");
+    expect(room).toBeUndefined();
+  });
+
+  it("should delete a room and its associated data", async () => {
+    const room: Room = {
+      id: `room-to-delete-${Date.now()}`,
+      name: "Room to Delete",
+      createdBy: "test-user",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
-    await storage.saveRoom(room1);
-    const saved = await storage.getRoom(room1.id);
-    expect(saved).toEqual(room1);
+    await storage.saveRoom(room);
 
-    // Clear storage
-    await storage.clear();
+    // Verify it was saved
+    let savedRoom = await storage.getRoom(room.id);
+    expect(savedRoom).toEqual(room);
 
-    // Room should be gone
-    const afterClear = await storage.getRoom(room1.id);
-    expect(afterClear).toBeNull();
+    // Delete the room
+    await storage.deleteRoom(room.id);
+
+    // Verify it was deleted
+    savedRoom = await storage.getRoom(room.id);
+    expect(savedRoom).toBeUndefined();
+  });
+
+  it("should clean up all data when clear is called", async () => {
+    const room: Room = {
+      id: `room-to-clear-${Date.now()}`,
+      name: "Room to Clear",
+      createdBy: "test-user",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await storage.saveRoom(room);
+    await storage.clearAll();
+
+    const savedRoom = await storage.getRoom(room.id);
+    expect(savedRoom).toBeUndefined();
   });
 });

@@ -10,7 +10,7 @@ describe("RoomManager async operations", () => {
     const user: User = {
       id: "test-user",
       name: "Test User",
-      avatar: "#000",
+      color: "#000",
     };
 
     const room = await manager.createRoom("Test Room", user);
@@ -39,7 +39,7 @@ describe("RoomManager async operations", () => {
     const user: User = {
       id: "test-user-2",
       name: "Test User 2",
-      avatar: "#111",
+      color: "#111",
     };
 
     await manager.createRoom("Test Room 2", user);
@@ -63,7 +63,7 @@ describe("RoomManager async operations", () => {
     const user: User = {
       id: "test-user-3",
       name: "Test User 3",
-      avatar: "#222",
+      color: "#222",
     };
 
     await manager.createRoom("Test Room 3", user);

@@ -1,230 +1,162 @@
+import Dexie, { type Table } from "dexie";
 import type { Document, Room, User } from "./types";
 
 /**
- * Local-first storage layer using IndexedDB for persistence
- * Falls back to localStorage for simpler demo environments
+ * Local-first storage layer using Dexie.js (IndexedDB wrapper)
+ * Provides a simpler API for IndexedDB operations
  */
-export class LocalStorage {
-  private readonly DB_NAME = "collab-editor";
-  private readonly DB_VERSION = 1;
-  private db: IDBDatabase | null = null;
+export class LocalStorage extends Dexie {
+  // Declare tables
+  rooms!: Table<Room>;
+  documents!: Table<Document>;
+  users!: Table<User>;
+  participants!: Table<{ roomId: string; userId: string; joinedAt: Date }>;
 
-  /**
-   * Wraps an IDBRequest in a Promise for proper async/await handling
-   */
-  private wrapRequest<T>(request: IDBRequest<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+  constructor() {
+    super("collab-editor");
+
+    // Define database schema (version 1)
+    this.version(1).stores({
+      rooms: "id, createdBy, createdAt",
+      documents: "roomId, lastModified",
+      users: "id, name, color",
+      participants: "[roomId+userId], roomId, userId, joinedAt",
     });
   }
 
   /**
-   * Waits for a transaction to complete
+   * Initialize the storage (Dexie handles this automatically on first use)
    */
-  private wrapTransaction(tx: IDBTransaction): Promise<void> {
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
   async init(): Promise<void> {
-    if (!("indexedDB" in window)) {
-      console.warn("IndexedDB not available, using localStorage fallback");
-      return;
-    }
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.DB_NAME, this.DB_VERSION);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve();
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        // Rooms store
-        if (!db.objectStoreNames.contains("rooms")) {
-          const roomStore = db.createObjectStore("rooms", { keyPath: "id" });
-          roomStore.createIndex("updatedAt", "updatedAt", { unique: false });
-        }
-
-        // Documents store
-        if (!db.objectStoreNames.contains("documents")) {
-          const docStore = db.createObjectStore("documents", {
-            keyPath: "roomId",
-          });
-          docStore.createIndex("version", "version", { unique: false });
-        }
-
-        // Users store
-        if (!db.objectStoreNames.contains("users")) {
-          db.createObjectStore("users", { keyPath: "id" });
-        }
-
-        // Participants store
-        if (!db.objectStoreNames.contains("participants")) {
-          const participantStore = db.createObjectStore("participants", {
-            keyPath: ["userId", "roomId"],
-          });
-          participantStore.createIndex("roomId", "roomId", { unique: false });
-        }
-      };
-    });
+    // Dexie automatically opens the database on first operation
+    // This method is kept for API compatibility
+    await this.open();
   }
 
   // Room operations
   async saveRoom(room: Room): Promise<void> {
-    if (this.db) {
-      const tx = this.db.transaction(["rooms"], "readwrite");
-      const request = tx.objectStore("rooms").put(room);
-      await this.wrapRequest(request);
-      await this.wrapTransaction(tx);
-    } else {
-      // Fallback to localStorage
-      const rooms = this.getLocalStorageRooms();
-      rooms[room.id] = room;
-      localStorage.setItem("collab-rooms", JSON.stringify(rooms));
-    }
+    await this.rooms.put(room);
   }
 
-  async getRoom(roomId: string): Promise<Room | null> {
-    if (this.db) {
-      const tx = this.db.transaction(["rooms"], "readonly");
-      const request = tx.objectStore("rooms").get(roomId);
-      return new Promise((resolve) => {
-        request.onsuccess = () => resolve(request.result || null);
-        request.onerror = () => resolve(null);
-      });
-    } else {
-      const rooms = this.getLocalStorageRooms();
-      return rooms[roomId] || null;
-    }
+  async getRoom(roomId: string): Promise<Room | undefined> {
+    return await this.rooms.get(roomId);
   }
 
-  async getAllRooms(): Promise<Room[]> {
-    if (this.db) {
-      const tx = this.db.transaction(["rooms"], "readonly");
-      const request = tx.objectStore("rooms").getAll();
-      return new Promise((resolve) => {
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => resolve([]);
-      });
-    } else {
-      return Object.values(this.getLocalStorageRooms());
-    }
+  async getRoomsByUser(userId: string): Promise<Room[]> {
+    return await this.rooms.where("createdBy").equals(userId).toArray();
   }
 
-  async getRecentRooms(limit: number = 10): Promise<Room[]> {
-    const rooms = await this.getAllRooms();
-    return rooms
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-      .slice(0, limit);
+  async getRecentRooms(limit = 10): Promise<Room[]> {
+    const rooms = await this.rooms
+      .orderBy("createdAt")
+      .reverse()
+      .limit(limit)
+      .toArray();
+    return rooms;
+  }
+
+  async deleteRoom(roomId: string): Promise<void> {
+    await this.transaction(
+      "rw",
+      this.rooms,
+      this.documents,
+      this.participants,
+      async () => {
+        await this.rooms.delete(roomId);
+        await this.documents.delete(roomId);
+        await this.participants.where("roomId").equals(roomId).delete();
+      },
+    );
   }
 
   // Document operations
   async saveDocument(doc: Document): Promise<void> {
-    if (this.db) {
-      const tx = this.db.transaction(["documents"], "readwrite");
-      const request = tx.objectStore("documents").put(doc);
-      await this.wrapRequest(request);
-      await this.wrapTransaction(tx);
-    } else {
-      const docs = this.getLocalStorageDocuments();
-      docs[doc.roomId] = doc;
-      localStorage.setItem("collab-documents", JSON.stringify(docs));
-    }
+    await this.documents.put(doc);
   }
 
-  async getDocument(roomId: string): Promise<Document | null> {
-    if (this.db) {
-      const tx = this.db.transaction(["documents"], "readonly");
-      const request = tx.objectStore("documents").get(roomId);
-      return new Promise((resolve) => {
-        request.onsuccess = () => resolve(request.result || null);
-        request.onerror = () => resolve(null);
-      });
-    } else {
-      const docs = this.getLocalStorageDocuments();
-      return docs[roomId] || null;
-    }
+  async getDocument(roomId: string): Promise<Document | undefined> {
+    return await this.documents.get(roomId);
+  }
+
+  async deleteDocument(roomId: string): Promise<void> {
+    await this.documents.delete(roomId);
   }
 
   // User operations
   async saveUser(user: User): Promise<void> {
-    if (this.db) {
-      const tx = this.db.transaction(["users"], "readwrite");
-      const request = tx.objectStore("users").put(user);
-      await this.wrapRequest(request);
-      await this.wrapTransaction(tx);
-    } else {
-      localStorage.setItem(`user-${user.id}`, JSON.stringify(user));
-    }
+    await this.users.put(user);
   }
 
-  async getUser(userId: string): Promise<User | null> {
-    if (this.db) {
-      const tx = this.db.transaction(["users"], "readonly");
-      const request = tx.objectStore("users").get(userId);
-      return new Promise((resolve) => {
-        request.onsuccess = () => resolve(request.result || null);
-        request.onerror = () => resolve(null);
-      });
-    } else {
-      const userStr = localStorage.getItem(`user-${userId}`);
-      return userStr ? JSON.parse(userStr) : null;
-    }
+  async getUser(userId: string): Promise<User | undefined> {
+    return await this.users.get(userId);
   }
 
-  // Helper methods for localStorage fallback
-  private getLocalStorageRooms(): Record<string, Room> {
-    const roomsStr = localStorage.getItem("collab-rooms");
-    return roomsStr ? JSON.parse(roomsStr) : {};
+  async getUsersByRoom(roomId: string): Promise<User[]> {
+    const participantRecords = await this.participants
+      .where("roomId")
+      .equals(roomId)
+      .toArray();
+    const userIds = participantRecords.map((p) => p.userId);
+    const users = await this.users.where("id").anyOf(userIds).toArray();
+    return users;
   }
 
-  private getLocalStorageDocuments(): Record<string, Document> {
-    const docsStr = localStorage.getItem("collab-documents");
-    return docsStr ? JSON.parse(docsStr) : {};
+  // Participant operations
+  async addParticipant(roomId: string, userId: string): Promise<void> {
+    await this.participants.put({
+      roomId,
+      userId,
+      joinedAt: new Date(),
+    });
   }
 
-  // Cleanup methods for testing
-  async close(): Promise<void> {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
+  async removeParticipant(roomId: string, userId: string): Promise<void> {
+    await this.participants.where({ roomId, userId }).delete();
   }
 
-  async clear(): Promise<void> {
-    if (this.db) {
-      // Clear all object stores
-      const storeNames = ["rooms", "documents", "users", "participants"];
-      const tx = this.db.transaction(storeNames, "readwrite");
+  async isParticipant(roomId: string, userId: string): Promise<boolean> {
+    const count = await this.participants.where({ roomId, userId }).count();
+    return count > 0;
+  }
 
-      for (const storeName of storeNames) {
-        const request = tx.objectStore(storeName).clear();
-        await this.wrapRequest(request);
-      }
+  // Cleanup operations
+  async clearAll(): Promise<void> {
+    await this.transaction(
+      "rw",
+      this.rooms,
+      this.documents,
+      this.users,
+      this.participants,
+      async () => {
+        await this.rooms.clear();
+        await this.documents.clear();
+        await this.users.clear();
+        await this.participants.clear();
+      },
+    );
+  }
 
-      await this.wrapTransaction(tx);
-    } else {
-      // Clear localStorage fallback
-      localStorage.removeItem("collab-rooms");
-      localStorage.removeItem("collab-documents");
-      // Clear all user keys
-      const keys = Object.keys(localStorage);
-      for (const key of keys) {
-        if (key.startsWith("user-")) {
-          localStorage.removeItem(key);
-        }
-      }
-    }
+  async clearRoom(roomId: string): Promise<void> {
+    await this.transaction(
+      "rw",
+      this.rooms,
+      this.documents,
+      this.participants,
+      async () => {
+        await this.rooms.delete(roomId);
+        await this.documents.delete(roomId);
+        await this.participants.where("roomId").equals(roomId).delete();
+      },
+    );
+  }
+
+  /**
+   * Close the database connection
+   */
+  async closeDb(): Promise<void> {
+    this.close();
   }
 }
 
-// Singleton instance
+// Create and export a singleton instance
 export const storage = new LocalStorage();

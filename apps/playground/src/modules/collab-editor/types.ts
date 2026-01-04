@@ -3,6 +3,7 @@ export interface Room {
   name: string;
   createdAt: number;
   updatedAt: number;
+  createdBy?: string;
 }
 
 // Re-import and re-export GraphEvent from eg-walker

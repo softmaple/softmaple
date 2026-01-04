@@ -99,6 +99,13 @@ If pre-commit hooks fail, you must:
 
 Bypassing these checks undermines code quality safeguards and is unacceptable.
 
+## Adding shadcn UI Components
+
+To add shadcn UI components in the turbo repo, run the `add` command in the path of the app:
+```bash
+pnpm dlx shadcn@latest add [COMPONENT]
+```
+
 ## Commit & Pull Request Guidelines
 
 **Commits:** `type(scope): summary`

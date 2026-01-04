@@ -255,6 +255,13 @@ docs: update functional programming guidelines
 5. **NEVER use `--no-verify` flag** - Pre-commit hooks ensure code quality and must not be bypassed
 6. **Request user approval before pushing**
 
+### Adding shadcn UI Components
+
+To add shadcn UI components in the turbo repo, run the `add` command in the path of the app:
+```bash
+pnpm dlx shadcn@latest add [COMPONENT]
+```
+
 ## Package-Specific Guidelines
 
 ### packages/eg-walker/

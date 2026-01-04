@@ -211,29 +211,27 @@ export class RoomManager {
     await storage.saveDocument(doc);
   }
 
-  getText(): string {
-    return this.api?.getText() || "";
-  }
+ getText(): string {
+   return this.api?.getText() || "";
+ }
 
-  insert(position: number, text: string): void {
-    this.handleLocalChange("insert", position, text).catch(console.error);
-  }
+  insert(position: number, text: string): Promise<void> {
+    return this.handleLocalChange("insert", position, text);
+ }
 
-  delete(position: number, length: number): void {
-    this.handleLocalChange("delete", position, undefined, length).catch(
-      console.error,
-    );
-  }
+  delete(position: number, length: number): Promise<void> {
+    return this.handleLocalChange("delete", position, undefined, length);
+ }
 
-  replace(position: number, length: number, text: string): void {
-    // Replace is a delete followed by an insert
-    this.delete(position, length);
-    this.insert(position, text);
-  }
+  async replace(position: number, length: number, text: string): Promise<void> {
+   // Replace is a delete followed by an insert
+    await this.delete(position, length);
+    await this.insert(position, text);
+ }
 
-  getParticipants(): User[] {
-    return Array.from(this.participants.values());
-  }
+ getParticipants(): User[] {
+   return Array.from(this.participants.values());
+ }
 
   getCurrentRoom(): Room | null {
     return this.currentRoom;

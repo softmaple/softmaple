@@ -15,9 +15,10 @@ export class LocalStorage extends Dexie {
   constructor() {
     super("collab-editor");
 
-    // Define database schema (version 1)
+    // Define database schema
+    // Note: createdBy is optional and not indexed to avoid primary key issues
     this.version(1).stores({
-      rooms: "id, createdBy, createdAt",
+      rooms: "id, createdAt", // Primary key is 'id', indexed on 'createdAt'
       documents: "roomId, lastModified",
       users: "id, name, color",
       participants: "[roomId+userId], roomId, userId, joinedAt",
@@ -43,7 +44,9 @@ export class LocalStorage extends Dexie {
   }
 
   async getRoomsByUser(userId: string): Promise<Room[]> {
-    return await this.rooms.where("createdBy").equals(userId).toArray();
+    // Since createdBy is optional and not indexed, we need to filter manually
+    const allRooms = await this.rooms.toArray();
+    return allRooms.filter((room) => room.createdBy === userId);
   }
 
   async getRecentRooms(limit = 10): Promise<Room[]> {

@@ -1,5 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useRef, useCallback, useEffect } from "react";
+import { Button } from "@softmaple/ui/components/button";
 import {
   Card,
   CardContent,
@@ -7,19 +6,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@softmaple/ui/components/card";
-import { Button } from "@softmaple/ui/components/button";
 import { Input } from "@softmaple/ui/components/input";
 import { Textarea } from "@softmaple/ui/components/textarea";
+import { createFileRoute } from "@tanstack/react-router";
 import {
+  AlertCircle,
+  Clock,
   Copy,
+  Loader2,
+  LogIn,
+  Plus,
   Share2,
   Users,
-  Plus,
-  LogIn,
-  Clock,
-  Loader2,
-  AlertCircle,
 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCollabEditor } from "@/modules/collab-editor/hooks/use-collab-editor";
 import { useRecentRooms } from "@/modules/collab-editor/hooks/use-recent-rooms";
 import { useTextChange } from "@/modules/collab-editor/hooks/use-text-change";
@@ -29,13 +29,13 @@ export const Route = createFileRoute("/demo/online-collab-editor")({
 });
 
 function OnlineCollabEditor() {
-  const [userName, setUserName] = useState('');
-  const [roomName, setRoomName] = useState('');
-  const [joinRoomId, setJoinRoomId] = useState('');
+  const [userName, setUserName] = useState("");
+  const [roomName, setRoomName] = useState("");
+  const [joinRoomId, setJoinRoomId] = useState("");
   const [hasJoined, setHasJoined] = useState(false);
   const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  
+
   const {
     roomManager,
     currentRoom,
@@ -47,19 +47,19 @@ function OnlineCollabEditor() {
     joinRoom,
     leaveRoom,
   } = useCollabEditor();
-  
+
   const { recentRooms, isLoadingRooms } = useRecentRooms();
   const { handleTextChange } = useTextChange(roomManager, () => {});
-  
+
   // Check URL params for room ID
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const roomId = urlParams.get('room');
+    const roomId = urlParams.get("room");
     if (roomId) {
       setJoinRoomId(roomId);
     }
   }, []);
-  
+
   const handleCreateRoom = useCallback(async () => {
     const roomId = await createRoom(roomName, userName);
     if (roomId) {
@@ -67,12 +67,12 @@ function OnlineCollabEditor() {
       // Update URL with room ID
       window.history.replaceState(
         null,
-        '',
-        `${window.location.pathname}?room=${roomId}`
+        "",
+        `${window.location.pathname}?room=${roomId}`,
       );
     }
   }, [createRoom, roomName, userName]);
-  
+
   const handleJoinRoom = useCallback(async () => {
     const success = await joinRoom(joinRoomId, userName);
     if (success) {
@@ -80,28 +80,28 @@ function OnlineCollabEditor() {
       // Update URL with room ID
       window.history.replaceState(
         null,
-        '',
-        `${window.location.pathname}?room=${joinRoomId}`
+        "",
+        `${window.location.pathname}?room=${joinRoomId}`,
       );
     }
   }, [joinRoom, joinRoomId, userName]);
-  
+
   const handleLeaveRoom = useCallback(async () => {
     await leaveRoom();
     setHasJoined(false);
     // Clear URL params
-    window.history.replaceState(null, '', window.location.pathname);
+    window.history.replaceState(null, "", window.location.pathname);
   }, [leaveRoom]);
-  
+
   const handleTextAreaChange = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
-      
+
       // Save cursor position
       const cursorPos = e.target.selectionStart;
-      
+
       handleTextChange(newText);
-      
+
       // Restore cursor position
       setTimeout(() => {
         if (textareaRef.current) {
@@ -110,18 +110,51 @@ function OnlineCollabEditor() {
         }
       }, 0);
     },
-    [handleTextChange]
+    [handleTextChange],
   );
-  
-  const copyRoomLink = useCallback(() => {
+
+  const copyRoomLink = useCallback(async () => {
     if (!currentRoom) return;
-    
+
     const roomLink = `${window.location.origin}/demo/online-collab-editor?room=${currentRoom.id}`;
-    navigator.clipboard.writeText(roomLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+
+    try {
+      // Try using the modern clipboard API
+      await navigator.clipboard.writeText(roomLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error("Failed to copy using clipboard API:", error);
+
+      // Fallback: Create a textarea, select and copy
+      const textarea = document.createElement("textarea");
+      textarea.value = roomLink;
+      textarea.style.position = "fixed";
+      textarea.style.top = "-9999px";
+      textarea.style.left = "-9999px";
+      textarea.setAttribute("aria-hidden", "true");
+      document.body.appendChild(textarea);
+
+      try {
+        textarea.select();
+        const successful = document.execCommand("copy");
+        if (successful) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } else {
+          console.error("Fallback copy failed");
+          // Could show an error toast/notification here
+          alert(`Please copy the room link manually: ${roomLink}`);
+        }
+      } catch (fallbackError) {
+        console.error("Fallback copy error:", fallbackError);
+        alert(`Please copy the room link manually: ${roomLink}`);
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
   }, [currentRoom]);
-  
+
   if (!hasJoined) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 p-4">
@@ -176,7 +209,7 @@ function OnlineCollabEditor() {
                   {isLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    'Create Room'
+                    "Create Room"
                   )}
                 </Button>
               </CardContent>
@@ -213,7 +246,7 @@ function OnlineCollabEditor() {
                   {isLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    'Join Room'
+                    "Join Room"
                   )}
                 </Button>
               </CardContent>
@@ -225,7 +258,7 @@ function OnlineCollabEditor() {
               <Loader2 className="w-6 h-6 animate-spin" />
             </div>
           )}
-          
+
           {recentRooms.length > 0 && (
             <Card className="mt-6 bg-white/10 backdrop-blur-md border-white/20">
               <CardHeader>
@@ -238,13 +271,15 @@ function OnlineCollabEditor() {
                 <div className="space-y-2">
                   {recentRooms.map((room) => (
                     <button
+                      type="button"
                       key={room.id}
                       onClick={() => setJoinRoomId(room.id)}
                       className="w-full text-left p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
                     >
                       <div className="font-medium">{room.name}</div>
                       <div className="text-sm text-white/60">
-                        ID: {room.id} • Created {new Date(room.createdAt).toLocaleDateString()}
+                        ID: {room.id} • Created{" "}
+                        {new Date(room.createdAt).toLocaleDateString()}
                       </div>
                     </button>
                   ))}
@@ -265,18 +300,17 @@ function OnlineCollabEditor() {
             <div>
               <h1 className="text-3xl font-bold">{currentRoom?.name}</h1>
               <p className="text-white/80">
-                Room ID: <span className="font-mono bg-white/10 px-2 py-1 rounded">{currentRoom?.id}</span>
+                Room ID:{" "}
+                <span className="font-mono bg-white/10 px-2 py-1 rounded">
+                  {currentRoom?.id}
+                </span>
               </p>
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleLeaveRoom}
-            >
+            <Button variant="destructive" size="sm" onClick={handleLeaveRoom}>
               Leave Room
             </Button>
           </div>
-          
+
           <div className="flex flex-wrap gap-2 mb-4">
             <Button
               variant="secondary"
@@ -293,14 +327,15 @@ function OnlineCollabEditor() {
                 </>
               )}
             </Button>
-            
+
             <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-md">
               <Users className="w-4 h-4" />
               <span className="text-sm">
-                {participants.length + 1} participant{participants.length !== 0 ? 's' : ''}
+                {participants.length + 1} participant
+                {participants.length !== 0 ? "s" : ""}
               </span>
             </div>
-            
+
             {participants.length > 0 && (
               <div className="flex items-center gap-2">
                 {participants.map((user) => (
@@ -322,10 +357,13 @@ function OnlineCollabEditor() {
 
           {currentRoom && (
             <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-lg p-3">
-              <p className="text-sm text-white/80 mb-1">Share this link to collaborate:</p>
+              <p className="text-sm text-white/80 mb-1">
+                Share this link to collaborate:
+              </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 bg-black/20 px-2 py-1 rounded text-xs break-all">
-                  {window.location.origin}/demo/online-collab-editor?room={currentRoom.id}
+                  {window.location.origin}/demo/online-collab-editor?room=
+                  {currentRoom.id}
                 </code>
                 <Button
                   size="sm"

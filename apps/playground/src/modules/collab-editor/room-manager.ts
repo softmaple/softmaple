@@ -14,6 +14,7 @@ export class RoomManager {
   private participants = new Map<string, User>();
   private lastSyncedVersion = 0;
   private disableSync: boolean;
+  private contentChangeListeners = new Set<() => void>();
 
   constructor(
     private wsUrl?: string,
@@ -112,7 +113,7 @@ export class RoomManager {
       if (msg.userId !== user.id && this.api && msg.type === "event") {
         try {
           await this.api.applyRemoteEvent(msg.data);
-          this.onContentChange();
+          this.notifyContentChange();
           await this.saveDocument();
         } catch (error) {
           console.error("Failed to apply remote event:", error);
@@ -147,7 +148,7 @@ export class RoomManager {
       this.syncAdapter?.send({
         type: "sync-response",
         roomId: this.currentRoom.id,
-        userId: this.currentUser?.id,
+        userId: this.currentUser?.id ?? "",
         data: { events: newEvents, version: events.length },
         timestamp: Date.now(),
       });
@@ -169,7 +170,7 @@ export class RoomManager {
       }
 
       this.lastSyncedVersion = version;
-      this.onContentChange();
+      this.notifyContentChange();
       await this.saveDocument();
     }
   }
@@ -190,7 +191,7 @@ export class RoomManager {
     }
 
     // Notify content change
-    this.onContentChange();
+    this.notifyContentChange();
 
     // Get the latest event
     const events = this.api.exportEventGraph();
@@ -201,7 +202,7 @@ export class RoomManager {
       this.syncAdapter?.send({
         type: "event",
         roomId: this.currentRoom.id,
-        userId: this.currentUser?.id,
+        userId: this.currentUser?.id ?? "",
         data: latestEvent,
         timestamp: Date.now(),
       });
@@ -278,6 +279,25 @@ export class RoomManager {
   }
 
   // Event handlers to be overridden
-  onContentChange(): void {}
+  /**
+   * Add a listener for content changes
+   * @returns A function to unsubscribe the listener
+   */
+  addContentChangeListener(listener: () => void): () => void {
+    this.contentChangeListeners.add(listener);
+    return () => {
+      this.contentChangeListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Notify all registered listeners of content changes
+   */
+  notifyContentChange(): void {
+    for (const listener of this.contentChangeListeners) {
+      listener();
+    }
+  }
+
   onParticipantsChange(): void {}
 }

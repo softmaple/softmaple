@@ -19,15 +19,16 @@ export function useCollabEditor(wsUrl?: string) {
     roomManager.init().catch(console.error);
 
     // Override event handlers
-    roomManager.onContentChange = () => {
+    const unsubscribeContent = roomManager.addContentChangeListener(() => {
       setText(roomManager.getText());
-    };
+    });
 
     roomManager.onParticipantsChange = () => {
       setParticipants(roomManager.getParticipants());
     };
 
     return () => {
+      unsubscribeContent();
       roomManager.leaveRoom();
     };
   }, [roomManager]);

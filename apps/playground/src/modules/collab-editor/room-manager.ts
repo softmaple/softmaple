@@ -113,6 +113,15 @@ export class RoomManager {
       if (msg.userId !== user.id) {
         this.participants.set(msg.userId, msg.data as User);
         this.notifyParticipantsChange();
+
+        // Send our presence back to the new joiner
+        this.syncAdapter?.send({
+          type: "join",
+          roomId: this.currentRoom?.id || "",
+          userId: user.id,
+          data: user,
+          timestamp: Date.now(),
+        });
       }
     });
 
@@ -162,6 +171,17 @@ export class RoomManager {
         roomId: this.currentRoom.id,
         userId: this.currentUser?.id ?? "",
         data: { events: newEvents, version: events.length },
+        timestamp: Date.now(),
+      });
+    }
+
+    // Also send our user info as part of sync
+    if (this.currentUser) {
+      this.syncAdapter?.send({
+        type: "join",
+        roomId: this.currentRoom.id,
+        userId: this.currentUser.id,
+        data: this.currentUser,
         timestamp: Date.now(),
       });
     }

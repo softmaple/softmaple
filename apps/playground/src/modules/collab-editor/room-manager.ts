@@ -189,6 +189,9 @@ export class RoomManager {
       this.api.delete(position, length);
     }
 
+    // Notify content change
+    this.onContentChange();
+
     // Get the latest event
     const events = this.api.exportEventGraph();
     const latestEvent = events[events.length - 1];

@@ -14,6 +14,7 @@ import {
   Sparkles,
   SplitSquareHorizontal,
   Users,
+  Globe,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: App });
@@ -33,6 +34,13 @@ function App() {
       description:
         "Real-time collaborative text editing powered by Eg-Walker CRDT algorithm. Type in either editor to see instant synchronization.",
       link: "/demo/collaborative-editor",
+    },
+    {
+      icon: <Globe className="w-12 h-12 text-cyan-400" />,
+      title: "Online Collaborative Editor",
+      description:
+        "Create or join rooms to collaborate with multiple users in real-time. Share room links for instant collaboration.",
+      link: "/demo/online-collab-editor",
     },
     {
       icon: <Zap className="w-12 h-12 text-cyan-400" />,

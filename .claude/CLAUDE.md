@@ -2,6 +2,12 @@
 
 This file contains specific instructions for Claude AI when working on the Softmaple codebase.
 
+## CRITICAL RULES - NEVER VIOLATE
+
+1. **NEVER use `--no-verify` flag when committing** - Pre-commit hooks are essential for code quality. If hooks fail, fix the issues and retry without bypassing.
+2. **NEVER commit directly to `next` branch** - Always create a feature branch first.
+3. **ALWAYS request user approval before commits/pushes** - No exceptions.
+
 ## Project Overview
 
 Softmaple is a Turborepo monorepo containing:
@@ -246,7 +252,15 @@ docs: update functional programming guidelines
 2. Run tests: \`pnpm --filter <package> test\`
 3. Run linter: \`pnpm lint\`
 4. Format code: \`pnpm format\`
-5. **Request user approval before pushing**
+5. **NEVER use `--no-verify` flag** - Pre-commit hooks ensure code quality and must not be bypassed
+6. **Request user approval before pushing**
+
+### Adding shadcn UI Components
+
+To add shadcn UI components in the turbo repo, run the `add` command in the path of the app:
+```bash
+pnpm dlx shadcn@latest add [COMPONENT]
+```
 
 ## Package-Specific Guidelines
 

@@ -1,0 +1,115 @@
+import { Button } from "@softmaple/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@softmaple/ui/components/card";
+import { Input } from "@softmaple/ui/components/input";
+import { Label } from "@softmaple/ui/components/label";
+import { Loader2 } from "lucide-react";
+import type { FormEvent } from "react";
+
+interface RoomCreationFormProps {
+  userName: string;
+  roomName: string;
+  isLoading: boolean;
+  onUserNameChange: (value: string) => void;
+  onRoomNameChange: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
+}
+
+export function RoomCreationForm({
+  userName,
+  roomName,
+  isLoading,
+  onUserNameChange,
+  onRoomNameChange,
+  onSubmit,
+}: RoomCreationFormProps) {
+  return (
+    <Card
+      className="w-full max-w-md guofeng-scroll guofeng-corner"
+      role="region"
+      aria-label="Create a new room"
+    >
+      <CardHeader>
+        <CardTitle className="guofeng-heading flex items-center gap-2">
+          <span className="text-sm guofeng-seal inline-block">创</span>
+          Create a Room
+        </CardTitle>
+        <CardDescription className="guofeng-text">
+          Start a new collaborative editing session
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          onSubmit={onSubmit}
+          className="space-y-4"
+          aria-label="Room creation form"
+        >
+          <div className="space-y-2">
+            <Label
+              htmlFor="create-username"
+              className="guofeng-text font-medium"
+            >
+              Your Name
+            </Label>
+            <Input
+              id="create-username"
+              type="text"
+              placeholder="Enter your name"
+              value={userName}
+              onChange={(e) => onUserNameChange(e.target.value)}
+              required
+              aria-required="true"
+              aria-describedby="create-username-desc"
+              className="guofeng-input guofeng-hover guofeng-focus"
+            />
+            <span id="create-username-desc" className="sr-only">
+              Enter your display name for this session
+            </span>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="room-name" className="guofeng-text font-medium">
+              Room Name
+            </Label>
+            <Input
+              id="room-name"
+              type="text"
+              placeholder="Enter room name"
+              value={roomName}
+              onChange={(e) => onRoomNameChange(e.target.value)}
+              required
+              aria-required="true"
+              aria-describedby="room-name-desc"
+              className="guofeng-input guofeng-hover guofeng-focus"
+            />
+            <span id="room-name-desc" className="sr-only">
+              Choose a name for your collaborative room
+            </span>
+          </div>
+          <Button
+            type="submit"
+            className="w-full guofeng-btn-primary guofeng-btn"
+            disabled={isLoading}
+            aria-busy={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2
+                  className="mr-2 h-4 w-4 animate-spin"
+                  aria-hidden="true"
+                />
+                <span>Creating...</span>
+              </>
+            ) : (
+              "Create Room"
+            )}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

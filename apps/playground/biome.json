@@ -9,10 +9,12 @@
     "ignoreUnknown": false,
     "includes": [
       "**/src/**/*",
+      "**/e2e/**/*",
       "**/.vscode/**/*",
       "**/index.html",
       "**/vite.config.js",
       "**/package.json",
+      "**/tsconfig.json",
       "!**/src/routeTree.gen.ts",
       "!**/src/styles.css"
     ]

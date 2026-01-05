@@ -85,6 +85,27 @@ const withLogging =
 - Run tests before merging
 - Regenerate Prisma after schema changes
 
+## Pre-commit Hooks and Code Quality
+
+**CRITICAL: Never use `--no-verify` flag when committing code.** Pre-commit hooks run essential quality checks including:
+- Code formatting with Prettier/Biome
+- Linting with ESLint
+- Type checking
+
+If pre-commit hooks fail, you must:
+1. Fix the issues (run `pnpm format` or `npx biome check --write`)
+2. Stage the fixes
+3. Retry the commit WITHOUT `--no-verify`
+
+Bypassing these checks undermines code quality safeguards and is unacceptable.
+
+## Adding shadcn UI Components
+
+To add shadcn UI components in the turbo repo, run the `add` command in the path of the app:
+```bash
+pnpm dlx shadcn@latest add [COMPONENT]
+```
+
 ## Commit & Pull Request Guidelines
 
 **Commits:** `type(scope): summary`
@@ -94,6 +115,7 @@ const withLogging =
 - **Branch naming:** `feature-name-$(date +%s)`
 - **IMPORTANT: Never commit directly to the `next` branch.** Always create a new feature branch before making changes if you are on the default `next` branch.
 - **When switching back to `next` from a feature branch:** Always run `git pull` and `pnpm i` to sync with remote and update dependencies
+- **NEVER use `--no-verify` flag when committing** - Pre-commit hooks are critical for code quality and must not be bypassed. Work through any formatting or linting issues instead.
 - **Always request user approval before commits/pushes**
 
 **PRs:** Include summary, test commands, screenshots for UI changes

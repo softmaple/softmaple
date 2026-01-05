@@ -32,7 +32,8 @@ export function useCollabEditor(wsUrl?: string) {
     return () => {
       unsubscribeContent();
       unsubscribeParticipants();
-      roomManager.leaveRoom();
+      // Fire-and-forget: leaveRoom is async but we don't await it in cleanup
+      void roomManager.leaveRoom();
     };
   }, [roomManager]);
 

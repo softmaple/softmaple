@@ -58,7 +58,9 @@ export function RecentRoomsList({
                   >
                     <span className="truncate">{room.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {room.id.slice(0, 8)}...
+                      {room.id.length > 8
+                        ? `${room.id.slice(0, 8)}...`
+                        : room.id}
                     </span>
                   </Button>
                 </li>

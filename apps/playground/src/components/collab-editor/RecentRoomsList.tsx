@@ -11,6 +11,8 @@ import { Skeleton } from "@softmaple/ui/components/skeleton";
 import { Clock } from "lucide-react";
 import type { Room } from "../../modules/collab-editor/types";
 
+const ROOM_ID_PREVIEW_LENGTH = 8;
+
 interface RecentRoomsListProps {
   rooms: Room[];
   isLoading: boolean;
@@ -58,8 +60,8 @@ export function RecentRoomsList({
                   >
                     <span className="truncate">{room.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {room.id.length > 8
-                        ? `${room.id.slice(0, 8)}...`
+                      {room.id.length > ROOM_ID_PREVIEW_LENGTH
+                        ? `${room.id.slice(0, ROOM_ID_PREVIEW_LENGTH)}...`
                         : room.id}
                     </span>
                   </Button>

@@ -195,13 +195,24 @@
     inset 0 1px 3px rgba(227, 214, 196, 0.8);
 }
 
-.guofeng-focus:focus,
+/* Use focus-visible for keyboard-only focus ring */
 .guofeng-focus:focus-visible {
   outline: none;
   border-color: var(--guofeng-ink);
   box-shadow:
-    0 0 0 2px rgba(27, 26, 25, 0.1),
+    0 0 0 2px rgba(27, 26, 25, 0.4),
     0 4px 16px var(--guofeng-shadow-ink);
+}
+
+/* Fallback for browsers without focus-visible support */
+@supports not selector(:focus-visible) {
+  .guofeng-focus:focus {
+    outline: none;
+    border-color: var(--guofeng-ink);
+    box-shadow:
+      0 0 0 2px rgba(27, 26, 25, 0.4),
+      0 4px 16px var(--guofeng-shadow-ink);
+  }
 }
 
 /* Text Styles */
@@ -257,13 +268,26 @@
   transition: all 0.2s ease;
 }
 
-.guofeng-input:focus {
+/* Use focus-visible for keyboard-only focus ring on inputs */
+.guofeng-input:focus-visible {
   background: var(--guofeng-paper);
   border-color: var(--guofeng-ink-muted);
   outline: none;
   box-shadow:
-    0 0 0 3px rgba(27, 26, 25, 0.05),
+    0 0 0 3px rgba(27, 26, 25, 0.25),
     inset 0 1px 3px rgba(227, 214, 196, 0.5);
+}
+
+/* Fallback for browsers without focus-visible support */
+@supports not selector(:focus-visible) {
+  .guofeng-input:focus {
+    background: var(--guofeng-paper);
+    border-color: var(--guofeng-ink-muted);
+    outline: none;
+    box-shadow:
+      0 0 0 3px rgba(27, 26, 25, 0.25),
+      inset 0 1px 3px rgba(227, 214, 196, 0.5);
+  }
 }
 
 .guofeng-input::placeholder {

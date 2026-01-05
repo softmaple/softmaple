@@ -29,7 +29,10 @@ export class SyncAdapter extends EventEmitter {
   private initBroadcastChannel(): void {
     this.broadcastChannel = new BroadcastChannel("collab-editor-sync");
     this.broadcastChannel.onmessage = (event) => {
-      this.handleMessage(event.data);
+      // Wrap in setTimeout to avoid async listener issues from browser extensions
+      setTimeout(() => {
+        this.handleMessage(event.data);
+      }, 0);
     };
     this.isConnected = true;
     this.emit("connected");
@@ -112,7 +115,16 @@ export class SyncAdapter extends EventEmitter {
 
   send(message: SyncMessage): void {
     if (this.broadcastChannel) {
-      this.broadcastChannel.postMessage(message);
+      // Wrap in try-catch and setTimeout to avoid browser extension interference
+      try {
+        // Use setTimeout to ensure message is sent outside of current execution context
+        // This prevents browser extensions from interfering with async listeners
+        setTimeout(() => {
+          this.broadcastChannel?.postMessage(message);
+        }, 0);
+      } catch (error) {
+        console.error("Failed to send broadcast message:", error);
+      }
     } else if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {

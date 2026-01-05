@@ -36,8 +36,16 @@ export class RoomManager {
       updatedAt: Date.now(),
     };
 
-    await storage.saveRoom(room);
-    await this.joinRoom(room.id, user);
+    try {
+      await storage.saveRoom(room);
+      await this.joinRoom(room.id, user);
+    } catch (error) {
+      console.error("Failed to create room:", error);
+      // Re-throw with more context
+      throw new Error(
+        `Failed to create room: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
+    }
 
     return room;
   }

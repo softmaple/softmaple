@@ -55,7 +55,8 @@ async function performReplace(
   newValue: string,
 ): Promise<void> {
   const replacePos = findFirstDifference(currentText, newValue);
-  if (replacePos === -1) return; // No difference
+  // If strings are identical, no replacement needed
+  if (replacePos >= Math.min(currentText.length, newValue.length)) return;
 
   const diffIndex = findLastDifference(currentText, newValue);
   const endPos =

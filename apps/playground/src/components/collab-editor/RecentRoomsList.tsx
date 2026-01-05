@@ -1,13 +1,13 @@
-import { Button } from "@softmaple/ui/button";
+import { Button } from "@softmaple/ui/components/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@softmaple/ui/card";
-import { ScrollArea } from "@softmaple/ui/scroll-area";
-import { Skeleton } from "@softmaple/ui/skeleton";
+} from "@softmaple/ui/components/card";
+import { ScrollArea } from "@softmaple/ui/components/scroll-area";
+import { Skeleton } from "@softmaple/ui/components/skeleton";
 import { Clock } from "lucide-react";
 import type { Room } from "../../modules/collab-editor/types";
 
@@ -36,10 +36,10 @@ export function RecentRoomsList({
       <CardContent>
         {isLoading ? (
           <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
             <span className="sr-only">Loading recent rooms...</span>
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
           </div>
         ) : rooms.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">

@@ -1,6 +1,6 @@
-import { Badge } from "@softmaple/ui/badge";
-import { Card, CardContent } from "@softmaple/ui/card";
-import { Textarea } from "@softmaple/ui/textarea";
+import { Badge } from "@softmaple/ui/components/badge";
+import { Card, CardContent } from "@softmaple/ui/components/card";
+import { Textarea } from "@softmaple/ui/components/textarea";
 import type { RefObject } from "react";
 import type { User } from "../../modules/collab-editor/types";
 

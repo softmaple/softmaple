@@ -1,13 +1,13 @@
-import { Button } from "@softmaple/ui/button";
+import { Button } from "@softmaple/ui/components/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@softmaple/ui/card";
-import { Input } from "@softmaple/ui/input";
-import { Label } from "@softmaple/ui/label";
+} from "@softmaple/ui/components/card";
+import { Input } from "@softmaple/ui/components/input";
+import { Label } from "@softmaple/ui/components/label";
 import { Loader2 } from "lucide-react";
 import type { FormEvent } from "react";
 

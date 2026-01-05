@@ -297,12 +297,21 @@ export class RoomManager {
 
   async leaveRoom(): Promise<void> {
     if (this.currentRoom && this.currentUser) {
-      this.syncAdapter?.send({
+      // Send leave message before disconnecting
+      // Use a small delay to ensure the message is broadcast
+      const leaveMessage: SyncMessage = {
         type: "leave",
         roomId: this.currentRoom.id,
         userId: this.currentUser.id,
+        data: this.currentUser,
         timestamp: Date.now(),
-      });
+      };
+
+      this.syncAdapter?.send(leaveMessage);
+
+      // Give a small delay to ensure the message is sent
+      // This is especially important for BroadcastChannel
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     this.syncAdapter?.disconnect();
@@ -311,6 +320,7 @@ export class RoomManager {
     this.currentRoom = null;
     this.currentUser = null;
     this.participants.clear();
+    this.notifyParticipantsChange();
   }
 
   private generateRoomId(): string {

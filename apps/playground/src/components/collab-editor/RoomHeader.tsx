@@ -57,19 +57,19 @@ export function RoomHeader({
   if (!currentRoom) return null;
 
   return (
-    <header className="bg-zinc-800/50 backdrop-blur-sm border-b border-zinc-700 px-4 py-3">
+    <header className="guofeng-header px-4 py-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-white">
+            <h1 className="text-xl font-semibold guofeng-text-ink">
               {currentRoom.name}
             </h1>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs guofeng-text-muted">
               Room ID: {currentRoom.id.slice(0, 8)}...
             </p>
           </div>
           <div
-            className="flex items-center gap-2 text-sm text-zinc-300"
+            className="flex items-center gap-2 text-sm guofeng-text-muted"
             aria-live="polite"
           >
             <Users className="h-4 w-4" aria-hidden="true" />
@@ -82,9 +82,9 @@ export function RoomHeader({
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={copyRoomLink}
-            className="text-white border-zinc-600 hover:bg-zinc-700"
+            className="guofeng-button-ghost guofeng-hover-deepen"
           >
             <Copy className="h-4 w-4 mr-1" aria-hidden="true" />
             {copied ? "Copied!" : "Share Link"}
@@ -93,13 +93,14 @@ export function RoomHeader({
             size="sm"
             variant="ghost"
             onClick={onLeaveRoom}
-            className="text-red-400 hover:text-red-300 hover:bg-red-950/50"
+            className="guofeng-button-seal guofeng-hover-deepen"
           >
             <LogOut className="h-4 w-4 mr-1" aria-hidden="true" />
             Leave
           </Button>
         </div>
       </div>
+      <div className="guofeng-brush-divider-horizontal mt-3 opacity-20"></div>
     </header>
   );
 }

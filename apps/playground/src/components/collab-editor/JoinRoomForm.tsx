@@ -30,13 +30,16 @@ export function JoinRoomForm({
 }: JoinRoomFormProps) {
   return (
     <Card
-      className="w-full max-w-md"
+      className="w-full max-w-md guofeng-scroll guofeng-corner"
       role="region"
       aria-label="Join existing room"
     >
       <CardHeader>
-        <CardTitle>Join a Room</CardTitle>
-        <CardDescription>
+        <CardTitle className="guofeng-heading flex items-center gap-2">
+          <span className="text-sm guofeng-seal inline-block">入</span>
+          Join a Room
+        </CardTitle>
+        <CardDescription className="guofeng-text">
           Enter a room ID to join an existing session
         </CardDescription>
       </CardHeader>
@@ -47,7 +50,9 @@ export function JoinRoomForm({
           aria-label="Join room form"
         >
           <div className="space-y-2">
-            <Label htmlFor="join-username">Your Name</Label>
+            <Label htmlFor="join-username" className="guofeng-text font-medium">
+              Your Name
+            </Label>
             <Input
               id="join-username"
               type="text"
@@ -57,13 +62,16 @@ export function JoinRoomForm({
               required
               aria-required="true"
               aria-describedby="join-username-desc"
+              className="guofeng-input guofeng-hover guofeng-focus"
             />
             <span id="join-username-desc" className="sr-only">
               Enter your display name for this session
             </span>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="room-id">Room ID</Label>
+            <Label htmlFor="room-id" className="guofeng-text font-medium">
+              Room ID
+            </Label>
             <Input
               id="room-id"
               type="text"
@@ -73,6 +81,7 @@ export function JoinRoomForm({
               required
               aria-required="true"
               aria-describedby="room-id-desc"
+              className="guofeng-input guofeng-hover guofeng-focus"
             />
             <span id="room-id-desc" className="sr-only">
               Enter the ID of the room you want to join
@@ -80,7 +89,7 @@ export function JoinRoomForm({
           </div>
           <Button
             type="submit"
-            className="w-full"
+            className="w-full guofeng-btn-primary guofeng-btn"
             disabled={isLoading}
             aria-busy={isLoading}
           >

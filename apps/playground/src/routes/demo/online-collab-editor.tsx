@@ -9,6 +9,7 @@ import { RoomHeader } from "@/components/collab-editor/RoomHeader";
 import { useCollabEditor } from "@/modules/collab-editor/hooks/use-collab-editor";
 import { useRecentRooms } from "@/modules/collab-editor/hooks/use-recent-rooms";
 import { useTextChange } from "@/modules/collab-editor/hooks/use-text-change";
+import "@/styles/guofeng.css";
 
 export const Route = createFileRoute("/demo/online-collab-editor")({
   component: OnlineCollabEditor,
@@ -117,14 +118,16 @@ function OnlineCollabEditor() {
   // Room creation/joining view
   if (!hasJoined) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center p-4">
-        <div className="max-w-4xl w-full">
-          <h1 className="text-4xl font-bold text-white text-center mb-2">
+      <div className="min-h-screen guofeng-paper guofeng-ink-wash relative flex items-center justify-center p-4">
+        <div className="max-w-4xl w-full relative z-10">
+          <h1 className="text-4xl font-bold guofeng-heading text-center mb-2 flex items-center justify-center gap-3">
+            <span className="guofeng-seal transform-none text-base">墨</span>
             Online Collaborative Editor
           </h1>
-          <p className="text-white/80 text-center mb-8">
+          <p className="guofeng-text text-center mb-8">
             Create a room to start collaborating or join an existing one
           </p>
+          <div className="guofeng-divider"></div>
 
           <div className="grid md:grid-cols-2 gap-6">
             <RoomCreationForm
@@ -158,7 +161,7 @@ function OnlineCollabEditor() {
 
   // Collaboration view
   return (
-    <div className="flex flex-col min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 text-white">
+    <div className="flex flex-col min-h-screen guofeng-paper guofeng-ink-wash relative">
       <div className="container mx-auto p-4 flex-1 flex flex-col">
         <RoomHeader
           currentRoom={currentRoom}

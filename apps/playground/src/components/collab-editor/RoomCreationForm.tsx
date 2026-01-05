@@ -30,13 +30,16 @@ export function RoomCreationForm({
 }: RoomCreationFormProps) {
   return (
     <Card
-      className="w-full max-w-md"
+      className="w-full max-w-md guofeng-scroll guofeng-corner"
       role="region"
       aria-label="Create a new room"
     >
       <CardHeader>
-        <CardTitle>Create a Room</CardTitle>
-        <CardDescription>
+        <CardTitle className="guofeng-heading flex items-center gap-2">
+          <span className="text-sm guofeng-seal inline-block">创</span>
+          Create a Room
+        </CardTitle>
+        <CardDescription className="guofeng-text">
           Start a new collaborative editing session
         </CardDescription>
       </CardHeader>
@@ -47,7 +50,12 @@ export function RoomCreationForm({
           aria-label="Room creation form"
         >
           <div className="space-y-2">
-            <Label htmlFor="create-username">Your Name</Label>
+            <Label
+              htmlFor="create-username"
+              className="guofeng-text font-medium"
+            >
+              Your Name
+            </Label>
             <Input
               id="create-username"
               type="text"
@@ -57,13 +65,16 @@ export function RoomCreationForm({
               required
               aria-required="true"
               aria-describedby="create-username-desc"
+              className="guofeng-input guofeng-hover guofeng-focus"
             />
             <span id="create-username-desc" className="sr-only">
               Enter your display name for this session
             </span>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="room-name">Room Name</Label>
+            <Label htmlFor="room-name" className="guofeng-text font-medium">
+              Room Name
+            </Label>
             <Input
               id="room-name"
               type="text"
@@ -73,6 +84,7 @@ export function RoomCreationForm({
               required
               aria-required="true"
               aria-describedby="room-name-desc"
+              className="guofeng-input guofeng-hover guofeng-focus"
             />
             <span id="room-name-desc" className="sr-only">
               Choose a name for your collaborative room
@@ -80,7 +92,7 @@ export function RoomCreationForm({
           </div>
           <Button
             type="submit"
-            className="w-full"
+            className="w-full guofeng-btn-primary guofeng-btn"
             disabled={isLoading}
             aria-busy={isLoading}
           >

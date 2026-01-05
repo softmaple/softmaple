@@ -138,9 +138,9 @@ function OnlineCollabEditor() {
           </div>
 
           <RecentRoomsList
-            recentRooms={recentRooms}
-            isLoadingRooms={isLoadingRooms}
-            onSelectRoom={setJoinRoomId}
+            rooms={recentRooms}
+            isLoading={isLoadingRooms}
+            onJoinRoom={setJoinRoomId}
           />
         </div>
       </div>

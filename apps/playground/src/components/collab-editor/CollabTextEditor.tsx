@@ -7,7 +7,7 @@ import type { User } from "../../modules/collab-editor/types";
 interface CollabTextEditorProps {
   text: string;
   participants: User[];
-  textareaRef: RefObject<HTMLTextAreaElement>;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 }
 

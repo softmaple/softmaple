@@ -34,7 +34,8 @@ function OnlineCollabEditor() {
   } = useCollabEditor();
 
   const { recentRooms, isLoadingRooms } = useRecentRooms();
-  const { handleTextChange } = useTextChange(roomManager, () => {});
+  // No need for a callback here - useCollabEditor already handles text updates
+  const { handleTextChange } = useTextChange(roomManager);
 
   // Check URL params for room ID
   useEffect(() => {
@@ -45,31 +46,39 @@ function OnlineCollabEditor() {
     }
   }, []);
 
-  const handleCreateRoom = useCallback(async () => {
-    const roomId = await createRoom(roomName, userName);
-    if (roomId) {
-      setHasJoined(true);
-      // Update URL with room ID
-      window.history.replaceState(
-        null,
-        "",
-        `${window.location.pathname}?room=${roomId}`,
-      );
-    }
-  }, [createRoom, roomName, userName]);
+  const handleCreateRoom = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const roomId = await createRoom(roomName, userName);
+      if (roomId) {
+        setHasJoined(true);
+        // Update URL with room ID
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}?room=${roomId}`,
+        );
+      }
+    },
+    [createRoom, roomName, userName],
+  );
 
-  const handleJoinRoom = useCallback(async () => {
-    const success = await joinRoom(joinRoomId, userName);
-    if (success) {
-      setHasJoined(true);
-      // Update URL with room ID
-      window.history.replaceState(
-        null,
-        "",
-        `${window.location.pathname}?room=${joinRoomId}`,
-      );
-    }
-  }, [joinRoom, joinRoomId, userName]);
+  const handleJoinRoom = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const success = await joinRoom(joinRoomId, userName);
+      if (success) {
+        setHasJoined(true);
+        // Update URL with room ID
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}?room=${joinRoomId}`,
+        );
+      }
+    },
+    [joinRoom, joinRoomId, userName],
+  );
 
   const handleLeaveRoom = useCallback(async () => {
     await leaveRoom();
@@ -123,7 +132,7 @@ function OnlineCollabEditor() {
               roomName={roomName}
               onUserNameChange={setUserName}
               onRoomNameChange={setRoomName}
-              onCreateRoom={handleCreateRoom}
+              onSubmit={handleCreateRoom}
               isLoading={isLoading}
             />
 
@@ -131,8 +140,8 @@ function OnlineCollabEditor() {
               userName={userName}
               joinRoomId={joinRoomId}
               onUserNameChange={setUserName}
-              onJoinRoomIdChange={setJoinRoomId}
-              onJoinRoom={handleJoinRoom}
+              onRoomIdChange={setJoinRoomId}
+              onSubmit={handleJoinRoom}
               isLoading={isLoading}
             />
           </div>
@@ -159,6 +168,7 @@ function OnlineCollabEditor() {
 
         <CollabTextEditor
           text={text}
+          participants={participants}
           textareaRef={textareaRef}
           onChange={handleTextAreaChange}
         />

@@ -95,6 +95,9 @@ export class RoomManager {
       timestamp: Date.now(),
     });
 
+    // Notify that participants have changed (current user joined)
+    this.notifyParticipantsChange();
+
     return true;
   }
 
@@ -255,7 +258,13 @@ export class RoomManager {
   }
 
   getParticipants(): User[] {
-    return Array.from(this.participants.values());
+    const allParticipants = Array.from(this.participants.values());
+    // Include current user if they exist
+    if (this.currentUser) {
+      // Add current user at the beginning (they should appear first)
+      return [this.currentUser, ...allParticipants];
+    }
+    return allParticipants;
   }
 
   getCurrentRoom(): Room | null {

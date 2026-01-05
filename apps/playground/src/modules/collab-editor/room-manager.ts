@@ -280,6 +280,7 @@ export class RoomManager {
     this.syncAdapter = null;
     this.api = null;
     this.currentRoom = null;
+    this.currentUser = null;
     this.participants.clear();
   }
 

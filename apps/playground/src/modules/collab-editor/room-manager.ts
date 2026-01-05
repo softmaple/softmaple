@@ -15,6 +15,7 @@ export class RoomManager {
   private lastSyncedVersion = 0;
   private disableSync: boolean;
   private contentChangeListeners = new Set<() => void>();
+  private participantsChangeListeners = new Set<() => void>();
 
   constructor(
     private wsUrl?: string,
@@ -100,13 +101,13 @@ export class RoomManager {
     this.syncAdapter.on("user-joined", (msg: SyncMessage) => {
       if (msg.userId !== user.id) {
         this.participants.set(msg.userId, msg.data as User);
-        this.onParticipantsChange();
+        this.notifyParticipantsChange();
       }
     });
 
     this.syncAdapter.on("user-left", (msg: SyncMessage) => {
       this.participants.delete(msg.userId);
-      this.onParticipantsChange();
+      this.notifyParticipantsChange();
     });
 
     this.syncAdapter.on("remote-event", async (msg: SyncMessage) => {
@@ -299,5 +300,23 @@ export class RoomManager {
     }
   }
 
-  onParticipantsChange(): void {}
+  /**
+   * Add a listener for participants changes
+   * @returns A function to unsubscribe the listener
+   */
+  addParticipantsChangeListener(listener: () => void): () => void {
+    this.participantsChangeListeners.add(listener);
+    return () => {
+      this.participantsChangeListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Notify all registered listeners of participants changes
+   */
+  notifyParticipantsChange(): void {
+    for (const listener of this.participantsChangeListeners) {
+      listener();
+    }
+  }
 }

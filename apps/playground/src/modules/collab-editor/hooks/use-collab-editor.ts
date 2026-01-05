@@ -23,12 +23,15 @@ export function useCollabEditor(wsUrl?: string) {
       setText(roomManager.getText());
     });
 
-    roomManager.onParticipantsChange = () => {
-      setParticipants(roomManager.getParticipants());
-    };
+    const unsubscribeParticipants = roomManager.addParticipantsChangeListener(
+      () => {
+        setParticipants(roomManager.getParticipants());
+      },
+    );
 
     return () => {
       unsubscribeContent();
+      unsubscribeParticipants();
       roomManager.leaveRoom();
     };
   }, [roomManager]);

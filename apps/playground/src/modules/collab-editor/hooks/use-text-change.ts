@@ -1,6 +1,5 @@
 import { useCallback, useEffect } from "react";
 import type { RoomManager } from "../room-manager";
-import { debounce } from "../utils";
 
 /**
  * Hook for handling text changes in the collaborative editor
@@ -9,40 +8,44 @@ export function useTextChange(
   roomManager: RoomManager | null,
   onTextUpdate?: (text: string) => void,
 ) {
-  // Debounced text change handler to reduce events
- const handleTextChange = useCallback(
-    debounce(async (value: string, source: "local" | "remote" = "local") => {
-     if (!roomManager || source === "remote") return;
+  // Handle text changes immediately for responsive UI
+  const handleTextChange = useCallback(
+    async (value: string, source: "local" | "remote" = "local") => {
+      if (!roomManager || source === "remote") return;
 
-     const currentText = roomManager.getText();
+      const currentText = roomManager.getText();
 
       if (value === currentText) return; // No change
 
       // Determine operation type
       if (value.length > currentText.length) {
         // Insert operation
-       const insertPos = findFirstDifference(currentText, value);
-       const insertedText = value.slice(
-         insertPos,
-         insertPos + (value.length - currentText.length),
-       );
+        const insertPos = findFirstDifference(currentText, value);
+        const insertedText = value.slice(
+          insertPos,
+          insertPos + (value.length - currentText.length),
+        );
         await roomManager.insert(insertPos, insertedText);
-     } else if (value.length < currentText.length) {
-       // Delete operation
-       const deletePos = findFirstDifference(value, currentText);
-       const deleteCount = currentText.length - value.length;
+      } else if (value.length < currentText.length) {
+        // Delete operation
+        const deletePos = findFirstDifference(value, currentText);
+        const deleteCount = currentText.length - value.length;
         await roomManager.delete(deletePos, deleteCount);
-     } else {
-       // Replace operation (same length, different content)
-       const replacePos = findFirstDifference(currentText, value);
-       if (replacePos !== -1) {
-         const endPos = findLastDifference(currentText, value) + 1;
-         const replacedText = value.slice(replacePos, endPos);
-          await roomManager.replace(replacePos, endPos - replacePos, replacedText);
-       }
-     }
-   }, 100),
-    [],
+      } else {
+        // Replace operation (same length, different content)
+        const replacePos = findFirstDifference(currentText, value);
+        if (replacePos !== -1) {
+          const endPos = findLastDifference(currentText, value) + 1;
+          const replacedText = value.slice(replacePos, endPos);
+          await roomManager.replace(
+            replacePos,
+            endPos - replacePos,
+            replacedText,
+          );
+        }
+      }
+    },
+    [roomManager],
   );
 
   // Subscribe to remote text changes

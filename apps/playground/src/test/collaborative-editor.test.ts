@@ -7,11 +7,11 @@ import {
 } from "../lib/text-diff";
 
 interface MockEgWalkerAPI {
-  insert: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-  getText: ReturnType<typeof vi.fn>;
-  exportEventGraph: ReturnType<typeof vi.fn>;
-  applyRemoteEvent: ReturnType<typeof vi.fn>;
+  insert: (position: number, text: string) => void;
+  delete: (position: number, count: number) => void;
+  getText: () => string;
+  exportEventGraph: () => unknown[];
+  applyRemoteEvent: (event: unknown) => void;
 }
 
 // Mock EgWalkerAPI
@@ -51,7 +51,7 @@ describe("Collaborative Editor Integration", () => {
 
       api.insert(position, insertedText);
 
-      expect(api.insert).toHaveBeenCalledWith(0, "hello ");
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(0, "hello ");
     });
 
     it("should call insert with correct position for text in the middle", () => {
@@ -65,7 +65,7 @@ describe("Collaborative Editor Integration", () => {
 
       api.insert(position, insertedText);
 
-      expect(api.insert).toHaveBeenCalledWith(6, "beautiful ");
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(6, "beautiful ");
     });
 
     it("should call insert with correct position for text at the end", () => {
@@ -79,7 +79,7 @@ describe("Collaborative Editor Integration", () => {
 
       api.insert(position, insertedText);
 
-      expect(api.insert).toHaveBeenCalledWith(5, " world");
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(5, " world");
     });
   });
 
@@ -92,7 +92,7 @@ describe("Collaborative Editor Integration", () => {
 
       api.delete(position, deleteCount);
 
-      expect(api.delete).toHaveBeenCalledWith(0, 6);
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(0, 6);
     });
 
     it("should call delete with correct position and count for deletion in the middle", () => {
@@ -103,7 +103,7 @@ describe("Collaborative Editor Integration", () => {
 
       api.delete(position, deleteCount);
 
-      expect(api.delete).toHaveBeenCalledWith(6, 10);
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(6, 10);
     });
 
     it("should call delete with correct position and count for deletion at the end", () => {
@@ -114,7 +114,7 @@ describe("Collaborative Editor Integration", () => {
 
       api.delete(position, deleteCount);
 
-      expect(api.delete).toHaveBeenCalledWith(5, 6);
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(5, 6);
     });
   });
 
@@ -129,8 +129,8 @@ describe("Collaborative Editor Integration", () => {
       api.delete(start, deleteCount);
       api.insert(start, replacementText);
 
-      expect(api.delete).toHaveBeenCalledWith(0, 5);
-      expect(api.insert).toHaveBeenCalledWith(0, "HELLO");
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(0, 5);
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(0, "HELLO");
     });
 
     it("should call delete and insert for replacement in the middle", () => {
@@ -143,8 +143,8 @@ describe("Collaborative Editor Integration", () => {
       api.delete(start, deleteCount);
       api.insert(start, replacementText);
 
-      expect(api.delete).toHaveBeenCalledWith(6, 5);
-      expect(api.insert).toHaveBeenCalledWith(6, "WORLD");
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(6, 5);
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(6, "WORLD");
     });
 
     it("should call delete and insert for single character replacement", () => {
@@ -157,8 +157,8 @@ describe("Collaborative Editor Integration", () => {
       api.delete(start, deleteCount);
       api.insert(start, replacementText);
 
-      expect(api.delete).toHaveBeenCalledWith(2, 1);
-      expect(api.insert).toHaveBeenCalledWith(2, "L");
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(2, 1);
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(2, "L");
     });
 
     it("should call delete and insert for complete text replacement", () => {
@@ -171,8 +171,8 @@ describe("Collaborative Editor Integration", () => {
       api.delete(start, deleteCount);
       api.insert(start, replacementText);
 
-      expect(api.delete).toHaveBeenCalledWith(0, 3);
-      expect(api.insert).toHaveBeenCalledWith(0, "xyz");
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(0, 3);
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(0, "xyz");
     });
   });
 
@@ -181,14 +181,14 @@ describe("Collaborative Editor Integration", () => {
       api.insert(0, "test");
       api.exportEventGraph();
 
-      expect(api.exportEventGraph).toHaveBeenCalled();
+      expect(vi.mocked(api.exportEventGraph)).toHaveBeenCalled();
     });
 
     it("should export event graph after delete operation", () => {
       api.delete(0, 4);
       api.exportEventGraph();
 
-      expect(api.exportEventGraph).toHaveBeenCalled();
+      expect(vi.mocked(api.exportEventGraph)).toHaveBeenCalled();
     });
 
     it("should apply remote events from other replicas", async () => {
@@ -199,7 +199,7 @@ describe("Collaborative Editor Integration", () => {
 
       await api.applyRemoteEvent(mockEvent);
 
-      expect(api.applyRemoteEvent).toHaveBeenCalledWith(mockEvent);
+      expect(vi.mocked(api.applyRemoteEvent)).toHaveBeenCalledWith(mockEvent);
     });
   });
 });

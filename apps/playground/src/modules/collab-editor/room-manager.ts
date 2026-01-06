@@ -303,7 +303,7 @@ export class RoomManager {
         type: "leave",
         roomId: this.currentRoom.id,
         userId: this.currentUser.id,
-        data: this.currentUser,
+        data: undefined,
         timestamp: Date.now(),
       };
 

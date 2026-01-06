@@ -29,7 +29,6 @@ export function JoinRoomForm({
   onSubmit,
 }: JoinRoomFormProps) {
   const userNameInputRef = useRef<HTMLInputElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -79,7 +78,6 @@ export function JoinRoomForm({
       </CardHeader>
       <CardContent>
         <form
-          ref={formRef}
           onSubmit={handleSubmit}
           onKeyDown={handleKeyDown}
           className="space-y-4"

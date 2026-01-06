@@ -29,7 +29,6 @@ export function RoomCreationForm({
   onSubmit,
 }: RoomCreationFormProps) {
   const userNameInputRef = useRef<HTMLInputElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -73,7 +72,6 @@ export function RoomCreationForm({
       </CardHeader>
       <CardContent>
         <form
-          ref={formRef}
           onSubmit={handleSubmit}
           onKeyDown={handleKeyDown}
           className="space-y-4"

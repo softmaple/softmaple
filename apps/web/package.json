@@ -50,7 +50,7 @@
     "@softmaple/eslint-config": "workspace:^",
     "@softmaple/typescript-config": "workspace:*",
     "@types/lodash": "^4.17.21",
-    "@types/node": "^24.10.4",
+    "@types/node": "^25.0.3",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "eslint": "^9.39.2",

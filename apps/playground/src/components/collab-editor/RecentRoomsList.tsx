@@ -8,6 +8,7 @@ import {
 } from "@softmaple/ui/components/card";
 import { ScrollArea } from "@softmaple/ui/components/scroll-area";
 import { Clock } from "lucide-react";
+import { useRef } from "react";
 import type { Room } from "../../modules/collab-editor/types";
 
 const ROOM_ID_PREVIEW_LENGTH = 8;
@@ -23,6 +24,49 @@ export function RecentRoomsList({
   isLoading,
   onJoinRoom,
 }: RecentRoomsListProps) {
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Handle keyboard navigation in the list
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    const target = e.target as HTMLElement;
+    const buttons = listRef.current?.querySelectorAll("button");
+
+    if (!buttons || buttons.length === 0) return;
+
+    const currentIndex = Array.from(buttons).indexOf(
+      target as HTMLButtonElement,
+    );
+
+    switch (e.key) {
+      case "ArrowDown":
+      case "ArrowRight":
+        e.preventDefault();
+        if (currentIndex < buttons.length - 1) {
+          (buttons[currentIndex + 1] as HTMLButtonElement).focus();
+        } else {
+          (buttons[0] as HTMLButtonElement).focus();
+        }
+        break;
+      case "ArrowUp":
+      case "ArrowLeft":
+        e.preventDefault();
+        if (currentIndex > 0) {
+          (buttons[currentIndex - 1] as HTMLButtonElement).focus();
+        } else {
+          (buttons[buttons.length - 1] as HTMLButtonElement).focus();
+        }
+        break;
+      case "Home":
+        e.preventDefault();
+        (buttons[0] as HTMLButtonElement).focus();
+        break;
+      case "End":
+        e.preventDefault();
+        (buttons[buttons.length - 1] as HTMLButtonElement).focus();
+        break;
+    }
+  };
+
   return (
     <Card
       className="w-full max-w-md guofeng-card guofeng-shadow-hover"
@@ -53,7 +97,12 @@ export function RecentRoomsList({
         ) : (
           <ScrollArea className="max-h-[200px]">
             <div className="guofeng-brush-divider-horizontal mb-2 opacity-30"></div>
-            <ul className="space-y-2" aria-label="List of recent rooms">
+            <ul
+              ref={listRef}
+              className="space-y-2"
+              aria-label="List of recent rooms"
+              onKeyDown={handleKeyDown}
+            >
               {rooms.map((room) => (
                 <li key={room.id}>
                   <Button
@@ -61,6 +110,7 @@ export function RecentRoomsList({
                     className="w-full justify-between text-left guofeng-button-ghost guofeng-hover-deepen"
                     onClick={() => onJoinRoom(room.id)}
                     aria-label={`Join room ${room.name}`}
+                    tabIndex={0}
                   >
                     <span className="truncate guofeng-text-ink">
                       {room.name}

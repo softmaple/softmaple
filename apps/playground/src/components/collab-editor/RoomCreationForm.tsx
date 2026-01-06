@@ -9,7 +9,7 @@ import {
 import { Input } from "@softmaple/ui/components/input";
 import { Label } from "@softmaple/ui/components/label";
 import { Loader2 } from "lucide-react";
-import type { FormEvent } from "react";
+import { type FormEvent, useEffect, useRef } from "react";
 
 interface RoomCreationFormProps {
   userName: string;
@@ -28,6 +28,34 @@ export function RoomCreationForm({
   onRoomNameChange,
   onSubmit,
 }: RoomCreationFormProps) {
+  const userNameInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    // Only submit if both fields have values
+    if (userName.trim() && roomName.trim()) {
+      onSubmit(e);
+    }
+  };
+
+  // Focus first input on mount
+  useEffect(() => {
+    userNameInputRef.current?.focus();
+  }, []);
+
+  // Handle Enter key globally for the form
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      const target = e.target as HTMLElement;
+      // If we're in an input field and the form is valid, submit
+      if (target.tagName === "INPUT" && userName.trim() && roomName.trim()) {
+        e.preventDefault();
+        handleSubmit(e as unknown as FormEvent);
+      }
+    }
+  };
+
   return (
     <Card
       className="w-full max-w-md guofeng-scroll guofeng-corner"
@@ -45,7 +73,9 @@ export function RoomCreationForm({
       </CardHeader>
       <CardContent>
         <form
-          onSubmit={onSubmit}
+          ref={formRef}
+          onSubmit={handleSubmit}
+          onKeyDown={handleKeyDown}
           className="space-y-4"
           aria-label="Room creation form"
         >
@@ -58,6 +88,7 @@ export function RoomCreationForm({
             </Label>
             <Input
               id="create-username"
+              ref={userNameInputRef}
               type="text"
               placeholder="Enter your name"
               value={userName}
@@ -65,7 +96,9 @@ export function RoomCreationForm({
               required
               aria-required="true"
               aria-describedby="create-username-desc"
+              aria-invalid={userName.length > 0 && !userName.trim()}
               className="guofeng-input guofeng-hover guofeng-focus"
+              autoComplete="name"
             />
             <span id="create-username-desc" className="sr-only">
               Enter your display name for this session
@@ -84,7 +117,9 @@ export function RoomCreationForm({
               required
               aria-required="true"
               aria-describedby="room-name-desc"
+              aria-invalid={roomName.length > 0 && !roomName.trim()}
               className="guofeng-input guofeng-hover guofeng-focus"
+              autoComplete="off"
             />
             <span id="room-name-desc" className="sr-only">
               Choose a name for your collaborative room
@@ -93,8 +128,9 @@ export function RoomCreationForm({
           <Button
             type="submit"
             className="w-full guofeng-btn-primary guofeng-btn"
-            disabled={isLoading}
+            disabled={isLoading || !userName.trim() || !roomName.trim()}
             aria-busy={isLoading}
+            aria-disabled={isLoading || !userName.trim() || !roomName.trim()}
           >
             {isLoading ? (
               <>

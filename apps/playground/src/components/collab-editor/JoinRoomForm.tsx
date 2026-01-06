@@ -9,7 +9,7 @@ import {
 import { Input } from "@softmaple/ui/components/input";
 import { Label } from "@softmaple/ui/components/label";
 import { Loader2 } from "lucide-react";
-import type { FormEvent } from "react";
+import { type FormEvent, useEffect, useRef } from "react";
 
 interface JoinRoomFormProps {
   userName: string;
@@ -28,6 +28,39 @@ export function JoinRoomForm({
   onRoomIdChange,
   onSubmit,
 }: JoinRoomFormProps) {
+  const userNameInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    // Only submit if both fields have values
+    if (userName.trim() && joinRoomId.trim()) {
+      onSubmit(e);
+    }
+  };
+
+  // Focus first input on mount
+  useEffect(() => {
+    // Only focus if the RoomCreationForm isn't visible (to avoid competing focus)
+    const roomCreationForm = document.querySelector(
+      '[aria-label="Room creation form"]',
+    );
+    if (!roomCreationForm) {
+      userNameInputRef.current?.focus();
+    }
+  }, []);
+
+  // Handle Enter key globally for the form
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      const target = e.target as HTMLElement;
+      // If we're in an input field and the form is valid, submit
+      if (target.tagName === "INPUT" && userName.trim() && joinRoomId.trim()) {
+        e.preventDefault();
+        handleSubmit(e as unknown as FormEvent);
+      }
+    }
+  };
+
   return (
     <Card
       className="w-full max-w-md guofeng-scroll guofeng-corner"
@@ -45,7 +78,8 @@ export function JoinRoomForm({
       </CardHeader>
       <CardContent>
         <form
-          onSubmit={onSubmit}
+          onSubmit={handleSubmit}
+          onKeyDown={handleKeyDown}
           className="space-y-4"
           aria-label="Join room form"
         >
@@ -55,6 +89,7 @@ export function JoinRoomForm({
             </Label>
             <Input
               id="join-username"
+              ref={userNameInputRef}
               type="text"
               placeholder="Enter your name"
               value={userName}
@@ -62,7 +97,9 @@ export function JoinRoomForm({
               required
               aria-required="true"
               aria-describedby="join-username-desc"
+              aria-invalid={userName.length > 0 && !userName.trim()}
               className="guofeng-input guofeng-hover guofeng-focus"
+              autoComplete="name"
             />
             <span id="join-username-desc" className="sr-only">
               Enter your display name for this session
@@ -81,7 +118,9 @@ export function JoinRoomForm({
               required
               aria-required="true"
               aria-describedby="room-id-desc"
+              aria-invalid={joinRoomId.length > 0 && !joinRoomId.trim()}
               className="guofeng-input guofeng-hover guofeng-focus"
+              autoComplete="off"
             />
             <span id="room-id-desc" className="sr-only">
               Enter the ID of the room you want to join
@@ -90,8 +129,9 @@ export function JoinRoomForm({
           <Button
             type="submit"
             className="w-full guofeng-btn-primary guofeng-btn"
-            disabled={isLoading}
+            disabled={isLoading || !userName.trim() || !joinRoomId.trim()}
             aria-busy={isLoading}
+            aria-disabled={isLoading || !userName.trim() || !joinRoomId.trim()}
           >
             {isLoading ? (
               <>

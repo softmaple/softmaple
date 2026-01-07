@@ -12,10 +12,11 @@
   "scripts": {
     "build": "prisma generate",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev --skip-generate",
-    "db:deploy": "prisma migrate deploy"
-  },
-  "exports": {
+   "db:migrate": "prisma migrate dev --skip-generate",
+   "db:deploy": "prisma migrate deploy",
+    "db:clean": "prisma db execute --file ./supabase/scripts/cleanup-test-data.sql --schema ./prisma/schema.prisma"
+ },
+ "exports": {
     ".": "./src/index.ts"
   },
   "packageManager": "pnpm@10.26.2",

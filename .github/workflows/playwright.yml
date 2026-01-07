@@ -117,8 +117,8 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Playwright tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
-        working-directory: apps/web
-        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --project=chromium
+       working-directory: apps/web
+       run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --project=chromium
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
@@ -127,6 +127,16 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_E2E_TEST_MODE: true
+
+      # Clean up database after tests to reduce storage consumption
+      - name: Clean database after tests
+        if: always()
+        working-directory: packages/db
+        run: pnpm run db:clean
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
       - name: Upload test results
         uses: actions/upload-artifact@v6

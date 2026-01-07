@@ -281,9 +281,9 @@ importers:
 
   packages/awareness:
     devDependencies:
-      '@softmaple/eslint-config':
-        specifier: workspace:*
-        version: link:../eslint-config
+      '@biomejs/biome':
+        specifier: 2.3.11
+        version: 2.3.11
       '@softmaple/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config

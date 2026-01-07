@@ -38,6 +38,12 @@
         ]
       },
       {
+        "group": "Design Documents",
+        "pages": [
+          "design/awareness-presence"
+        ]
+      },
+      {
         "group": "AI Tools",
         "pages": [
           "ai-tools/cursor",

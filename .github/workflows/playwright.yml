@@ -117,8 +117,8 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Playwright tests (Shard ${{ matrix.shard }}/${{ strategy.job-total }})
-       working-directory: apps/web
-       run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --project=chromium
+        working-directory: apps/web
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --project=chromium
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}

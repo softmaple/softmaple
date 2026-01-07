@@ -109,8 +109,8 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Smoke Tests
-       working-directory: apps/web
-       run: pnpm exec playwright test smoke.spec.ts --project=chromium
+        working-directory: apps/web
+        run: pnpm exec playwright test smoke.spec.ts --project=chromium
         env:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}

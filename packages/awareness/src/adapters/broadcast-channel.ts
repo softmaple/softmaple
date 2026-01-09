@@ -257,7 +257,9 @@ export const createBroadcastChannelAdapter = (
 
       if (payload.type === "presence:sync") {
         const syncPayload = payload as PresenceSyncPayload;
-        sendMessage("presence:sync-response", syncPayload.users[0]);
+        if (Array.isArray(syncPayload.users) && syncPayload.users.length > 0) {
+          sendMessage("presence:sync-response", syncPayload.users[0]);
+        }
       }
 
       subscriptions.notifyEvent(event);

@@ -36,6 +36,7 @@ export default defineConfig({
         "hooks/use-others": path.resolve(__dirname, "src/hooks/use-others.ts"),
         "hooks/use-connection": path.resolve(__dirname, "src/hooks/use-connection.ts"),
         "hooks/use-update-presence": path.resolve(__dirname, "src/hooks/use-update-presence.ts"),
+        "hooks/use-activity": path.resolve(__dirname, "src/hooks/use-activity.ts"),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,

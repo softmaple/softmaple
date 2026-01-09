@@ -57,6 +57,10 @@
     "./hooks/use-update-presence": {
       "types": "./dist/hooks/use-update-presence.d.ts",
       "import": "./dist/hooks/use-update-presence.js"
+    },
+    "./hooks/use-activity": {
+      "types": "./dist/hooks/use-activity.d.ts",
+      "import": "./dist/hooks/use-activity.js"
     }
   },
   "files": [

@@ -5,6 +5,7 @@
 
 import { createContext } from "react";
 import type { PresenceAdapter } from "../adapters/types";
+import type { ActivityEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 
 /**
@@ -24,6 +25,8 @@ export interface PresenceContextValue {
   readonly presence: ReadonlyMap<string, PresenceUser>;
   /** List of other users (excluding self) */
   readonly others: ReadonlyArray<PresenceUser>;
+  /** Recent activity events (bounded list, most recent first) */
+  readonly recentActivity: ReadonlyArray<ActivityEvent>;
   /** Update current user's presence */
   readonly updatePresence: (
     updates: Partial<Omit<PresenceUser, "userId">>,

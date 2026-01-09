@@ -15,8 +15,13 @@ import type {
   AdapterConnectionState,
   PresenceAdapter,
 } from "../adapters/types";
+import { PRESENCE_EVENT } from "../constants/presence-events";
+import type { ActivityEvent, PresenceEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
+
+/** Maximum number of recent activity events to track */
+const MAX_ACTIVITY_EVENTS = 50;
 
 /**
  * Props for PresenceProvider
@@ -48,6 +53,52 @@ const deriveOthers = (
 };
 
 /**
+ * Convert presence event to activity event (pure function)
+ */
+const presenceEventToActivity = (
+  event: PresenceEvent,
+): ActivityEvent | null => {
+  const { type, payload, timestamp } = event;
+  switch (type) {
+    case PRESENCE_EVENT.JOIN:
+      if (payload.type === PRESENCE_EVENT.JOIN) {
+        return {
+          userId: payload.user.userId,
+          timestamp,
+          type: "join",
+          data: { type: "join", user: payload.user },
+        };
+      }
+      return null;
+    case PRESENCE_EVENT.LEAVE:
+      if (payload.type === PRESENCE_EVENT.LEAVE) {
+        return {
+          userId: payload.userId,
+          timestamp,
+          type: "leave",
+          data: { type: "leave", userId: payload.userId },
+        };
+      }
+      return null;
+    default:
+      return null;
+  }
+};
+
+/**
+ * Add activity event to list (immutable, bounded)
+ */
+const addActivityEvent = (
+  events: ReadonlyArray<ActivityEvent>,
+  newEvent: ActivityEvent,
+): ReadonlyArray<ActivityEvent> => {
+  const updated = [newEvent, ...events];
+  return updated.length > MAX_ACTIVITY_EVENTS
+    ? updated.slice(0, MAX_ACTIVITY_EVENTS)
+    : updated;
+};
+
+/**
  * PresenceProvider component - manages adapter lifecycle and provides context
  */
 export const PresenceProvider = ({
@@ -64,6 +115,9 @@ export const PresenceProvider = ({
   const [presence, setPresence] = useState<ReadonlyMap<string, PresenceUser>>(
     () => new Map(adapter.getPresence()),
   );
+  const [recentActivity, setRecentActivity] = useState<
+    ReadonlyArray<ActivityEvent>
+  >([]);
 
   const mountedRef = useRef(true);
 
@@ -95,9 +149,19 @@ export const PresenceProvider = ({
       }
     });
 
+    const unsubscribeEvent = adapter.onEvent((event) => {
+      if (mountedRef.current) {
+        const activity = presenceEventToActivity(event);
+        if (activity) {
+          setRecentActivity((prev) => addActivityEvent(prev, activity));
+        }
+      }
+    });
+
     return () => {
       unsubscribeConnection();
       unsubscribePresence();
+      unsubscribeEvent();
     };
   }, [adapter]);
 
@@ -142,6 +206,7 @@ export const PresenceProvider = ({
       self,
       presence,
       others,
+      recentActivity,
       updatePresence,
       connect,
       disconnect,
@@ -152,6 +217,7 @@ export const PresenceProvider = ({
       self,
       presence,
       others,
+      recentActivity,
       updatePresence,
       connect,
       disconnect,

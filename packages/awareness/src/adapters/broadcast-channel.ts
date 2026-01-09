@@ -6,43 +6,34 @@
 import type {
   PresenceEvent,
   PresenceEventPayload,
-  PresenceJoinPayload,
   PresenceLeavePayload,
   PresenceSyncPayload,
-  PresenceUpdatePayload,
 } from "../types/events";
 import {
   createPresenceUser,
   type PresenceUser,
   updatePresenceUser,
 } from "../types/presence";
+import {
+  createInitialState,
+  isUserIdle,
+  isUserOffline,
+  removePresenceUser,
+  setPresenceUser,
+  updateState,
+} from "./adapter-state";
+import {
+  type BroadcastMessage,
+  createBroadcastMessage,
+  processBroadcastMessage,
+  sendBroadcastMessage,
+} from "./broadcast-message";
+import { createSubscriptionManager } from "./subscription-manager";
 import type {
   AdapterConfig,
   AdapterConnectionState,
-  ConnectionCallback,
-  ErrorCallback,
-  EventCallback,
   PresenceAdapter,
-  PresenceCallback,
-  Unsubscribe,
 } from "./types";
-
-/**
- * Internal message types for BroadcastChannel communication
- */
-type BroadcastMessageType =
-  | "presence:announce"
-  | "presence:sync-request"
-  | "presence:sync-response"
-  | "presence:update"
-  | "presence:leave";
-
-interface BroadcastMessage {
-  readonly type: BroadcastMessageType;
-  readonly senderId: string;
-  readonly timestamp: number;
-  readonly payload: unknown;
-}
 
 /**
  * Configuration specific to BroadcastChannel adapter
@@ -56,81 +47,12 @@ export interface BroadcastChannelAdapterConfig extends AdapterConfig {
   readonly idleTimeoutMs?: number;
 }
 
-/**
- * Default configuration values
- */
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5000;
 const DEFAULT_OFFLINE_TIMEOUT_MS = 15000;
 const DEFAULT_IDLE_TIMEOUT_MS = 30000;
 
 /**
- * Immutable state container for the adapter
- */
-interface AdapterState {
-  readonly connectionState: AdapterConnectionState;
-  readonly presence: ReadonlyMap<string, PresenceUser>;
-  readonly self: PresenceUser | null;
-}
-
-/**
- * Create initial adapter state
- */
-const createInitialState = (): AdapterState => ({
-  connectionState: "disconnected",
-  presence: new Map(),
-  self: null,
-});
-
-/**
- * Update state immutably
- */
-const updateState = (
-  state: AdapterState,
-  updates: Partial<AdapterState>,
-): AdapterState => ({
-  ...state,
-  ...updates,
-});
-
-/**
- * Add or update user in presence map immutably
- */
-const setPresenceUser = (
-  presence: ReadonlyMap<string, PresenceUser>,
-  user: PresenceUser,
-): ReadonlyMap<string, PresenceUser> => {
-  const newMap = new Map(presence);
-  newMap.set(user.userId, user);
-  return newMap;
-};
-
-/**
- * Remove user from presence map immutably
- */
-const removePresenceUser = (
-  presence: ReadonlyMap<string, PresenceUser>,
-  userId: string,
-): ReadonlyMap<string, PresenceUser> => {
-  const newMap = new Map(presence);
-  newMap.delete(userId);
-  return newMap;
-};
-
-/**
- * Check if user should be considered offline based on last activity
- */
-const isUserOffline = (user: PresenceUser, timeoutMs: number): boolean =>
-  Date.now() - user.lastActiveAt > timeoutMs;
-
-/**
- * Check if user should be considered idle
- */
-const isUserIdle = (user: PresenceUser, idleTimeoutMs: number): boolean =>
-  Date.now() - user.lastActiveAt > idleTimeoutMs;
-
-/**
- * BroadcastChannel adapter for local tab communication
- * Implements the PresenceAdapter interface
+ * Create a BroadcastChannel adapter instance
  */
 export const createBroadcastChannelAdapter = (
   config: BroadcastChannelAdapterConfig,
@@ -143,194 +65,38 @@ export const createBroadcastChannelAdapter = (
     idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
   } = config;
 
-  // Mutable internal state (encapsulated)
   let state = createInitialState();
   let channel: BroadcastChannel | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Callback subscriptions
-  const presenceCallbacks = new Set<PresenceCallback>();
-  const eventCallbacks = new Set<EventCallback>();
-  const connectionCallbacks = new Set<ConnectionCallback>();
-  const errorCallbacks = new Set<ErrorCallback>();
+  const subscriptions = createSubscriptionManager();
 
-  /**
-   * Notify all presence subscribers
-   */
-  const notifyPresenceChange = (): void => {
-    const presence = state.presence;
-    presenceCallbacks.forEach((callback) => {
-      callback(presence);
-    });
-  };
-
-  /**
-   * Notify all event subscribers
-   */
-  const notifyEvent = (event: PresenceEvent): void => {
-    eventCallbacks.forEach((callback) => {
-      callback(event);
-    });
-  };
-
-  /**
-   * Notify all connection subscribers
-   */
-  const notifyConnectionChange = (): void => {
-    const connectionState = state.connectionState;
-    connectionCallbacks.forEach((callback) => {
-      callback(connectionState);
-    });
-  };
-
-  /**
-   * Notify all error subscribers
-   */
-  const notifyError = (error: Error): void => {
-    errorCallbacks.forEach((callback) => {
-      callback(error);
-    });
-  };
-
-  /**
-   * Update connection state and notify
-   */
   const setConnectionState = (newState: AdapterConnectionState): void => {
     if (state.connectionState !== newState) {
       state = updateState(state, { connectionState: newState });
-      notifyConnectionChange();
+      subscriptions.notifyConnectionChange(newState);
     }
   };
 
-  /**
-   * Send a message through the BroadcastChannel
-   */
-  const sendMessage = (type: BroadcastMessageType, payload: unknown): void => {
-    if (channel === null || state.self === null) return;
-
-    const message: BroadcastMessage = {
-      type,
-      senderId: state.self.userId,
-      timestamp: Date.now(),
-      payload,
-    };
-
-    try {
-      channel.postMessage(message);
-    } catch (error) {
-      notifyError(
-        error instanceof Error
-          ? error
-          : new Error("Failed to send broadcast message"),
-      );
-    }
+  const sendMessage = (
+    type: BroadcastMessage["type"],
+    payload: unknown,
+  ): void => {
+    if (state.self === null) return;
+    const message = createBroadcastMessage(type, state.self.userId, payload);
+    sendBroadcastMessage(channel, message, subscriptions.notifyError);
   };
 
-  /**
-   * Handle incoming broadcast messages
-   */
   const handleMessage = (event: MessageEvent<BroadcastMessage>): void => {
     const message = event.data;
-
-    // Ignore messages from self
     if (message.senderId === state.self?.userId) return;
 
-    switch (message.type) {
-      case "presence:announce": {
-        const user = message.payload as PresenceUser;
-        state = updateState(state, {
-          presence: setPresenceUser(state.presence, user),
-        });
-        notifyPresenceChange();
-
-        const joinPayload: PresenceJoinPayload = {
-          type: "presence:join",
-          user,
-        };
-        notifyEvent({
-          type: "presence:join",
-          payload: joinPayload,
-          timestamp: message.timestamp,
-        });
-
-        // Respond with our presence
-        if (state.self !== null) {
-          sendMessage("presence:sync-response", state.self);
-        }
-        break;
-      }
-
-      case "presence:sync-request": {
-        // Respond with our presence
-        if (state.self !== null) {
-          sendMessage("presence:sync-response", state.self);
-        }
-        break;
-      }
-
-      case "presence:sync-response": {
-        const user = message.payload as PresenceUser;
-        state = updateState(state, {
-          presence: setPresenceUser(state.presence, user),
-        });
-        notifyPresenceChange();
-        break;
-      }
-
-      case "presence:update": {
-        const updates = message.payload as {
-          userId: string;
-          updates: Partial<PresenceUser>;
-        };
-        const existingUser = state.presence.get(updates.userId);
-        if (existingUser !== undefined) {
-          const updatedUser = updatePresenceUser(existingUser, updates.updates);
-          state = updateState(state, {
-            presence: setPresenceUser(state.presence, updatedUser),
-          });
-          notifyPresenceChange();
-
-          const updatePayload: PresenceUpdatePayload = {
-            type: "presence:update",
-            userId: updates.userId,
-            updates: updates.updates,
-          };
-          notifyEvent({
-            type: "presence:update",
-            payload: updatePayload,
-            timestamp: message.timestamp,
-          });
-        }
-        break;
-      }
-
-      case "presence:leave": {
-        const userId = message.payload as string;
-        if (state.presence.has(userId)) {
-          state = updateState(state, {
-            presence: removePresenceUser(state.presence, userId),
-          });
-          notifyPresenceChange();
-
-          const leavePayload: PresenceLeavePayload = {
-            type: "presence:leave",
-            userId,
-          };
-          notifyEvent({
-            type: "presence:leave",
-            payload: leavePayload,
-            timestamp: message.timestamp,
-          });
-        }
-        break;
-      }
-    }
+    state = processBroadcastMessage(message, state, subscriptions, (self) =>
+      sendMessage("presence:sync-response", self),
+    );
   };
 
-  /**
-   * Send heartbeat to keep presence alive
-   */
   const sendHeartbeat = (): void => {
     if (state.self === null) return;
 
@@ -345,9 +111,6 @@ export const createBroadcastChannelAdapter = (
     });
   };
 
-  /**
-   * Clean up stale/offline users
-   */
   const cleanupStaleUsers = (): void => {
     let hasChanges = false;
     let newPresence = state.presence;
@@ -361,7 +124,7 @@ export const createBroadcastChannelAdapter = (
           type: "presence:leave",
           userId,
         };
-        notifyEvent({
+        subscriptions.notifyEvent({
           type: "presence:leave",
           payload: leavePayload,
           timestamp: Date.now(),
@@ -375,20 +138,16 @@ export const createBroadcastChannelAdapter = (
 
     if (hasChanges) {
       state = updateState(state, { presence: newPresence });
-      notifyPresenceChange();
+      subscriptions.notifyPresenceChange(newPresence);
     }
   };
 
-  /**
-   * Handle page unload - notify others of leaving
-   */
   const handleBeforeUnload = (): void => {
     if (state.self !== null) {
       sendMessage("presence:leave", state.self.userId);
     }
   };
 
-  // Public API implementation
   const adapter: PresenceAdapter = {
     connect: async (): Promise<void> => {
       if (state.connectionState === "connected") return;
@@ -396,19 +155,15 @@ export const createBroadcastChannelAdapter = (
       setConnectionState("connecting");
 
       try {
-        // Check if BroadcastChannel is available
         if (typeof BroadcastChannel === "undefined") {
           throw new Error(
             "BroadcastChannel is not supported in this environment",
           );
         }
 
-        // Create channel
-        const channelName = `softmaple-presence:${roomId}`;
-        channel = new BroadcastChannel(channelName);
+        channel = new BroadcastChannel(`softmaple-presence:${roomId}`);
         channel.onmessage = handleMessage;
 
-        // Create self presence
         const self = createPresenceUser(
           userInfo.userId,
           userInfo.name,
@@ -420,19 +175,12 @@ export const createBroadcastChannelAdapter = (
           presence: setPresenceUser(state.presence, self),
         });
 
-        // Announce presence to other tabs
         sendMessage("presence:announce", self);
-
-        // Request sync from other tabs
         sendMessage("presence:sync-request", null);
 
-        // Start heartbeat
         heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
-
-        // Start cleanup timer
         cleanupTimer = setInterval(cleanupStaleUsers, offlineTimeoutMs / 2);
 
-        // Listen for page unload
         if (typeof window !== "undefined") {
           window.addEventListener("beforeunload", handleBeforeUnload);
         }
@@ -440,7 +188,7 @@ export const createBroadcastChannelAdapter = (
         setConnectionState("connected");
       } catch (error) {
         setConnectionState("error");
-        notifyError(
+        subscriptions.notifyError(
           error instanceof Error
             ? error
             : new Error("Failed to connect to BroadcastChannel"),
@@ -452,10 +200,8 @@ export const createBroadcastChannelAdapter = (
     disconnect: async (): Promise<void> => {
       if (state.connectionState === "disconnected") return;
 
-      // Notify others of leaving
       handleBeforeUnload();
 
-      // Clear timers
       if (heartbeatTimer !== null) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
@@ -465,18 +211,15 @@ export const createBroadcastChannelAdapter = (
         cleanupTimer = null;
       }
 
-      // Remove event listener
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeunload", handleBeforeUnload);
       }
 
-      // Close channel
       if (channel !== null) {
         channel.close();
         channel = null;
       }
 
-      // Reset state
       state = createInitialState();
       setConnectionState("disconnected");
     },
@@ -500,7 +243,7 @@ export const createBroadcastChannelAdapter = (
         updates: { ...updates, lastActiveAt: updatedSelf.lastActiveAt },
       });
 
-      notifyPresenceChange();
+      subscriptions.notifyPresenceChange(state.presence);
     },
 
     broadcast: (payload: PresenceEventPayload): void => {
@@ -512,38 +255,29 @@ export const createBroadcastChannelAdapter = (
         timestamp: Date.now(),
       };
 
-      // For sync events, broadcast to other tabs
       if (payload.type === "presence:sync") {
         const syncPayload = payload as PresenceSyncPayload;
         sendMessage("presence:sync-response", syncPayload.users[0]);
       }
 
-      notifyEvent(event);
+      subscriptions.notifyEvent(event);
     },
 
-    onPresenceChange: (callback: PresenceCallback): Unsubscribe => {
-      presenceCallbacks.add(callback);
-      // Immediately call with current state
+    onPresenceChange: (callback) => {
+      const unsubscribe = subscriptions.onPresenceChange(callback);
       callback(state.presence);
-      return () => presenceCallbacks.delete(callback);
+      return unsubscribe;
     },
 
-    onEvent: (callback: EventCallback): Unsubscribe => {
-      eventCallbacks.add(callback);
-      return () => eventCallbacks.delete(callback);
-    },
+    onEvent: subscriptions.onEvent,
 
-    onConnectionChange: (callback: ConnectionCallback): Unsubscribe => {
-      connectionCallbacks.add(callback);
-      // Immediately call with current state
+    onConnectionChange: (callback) => {
+      const unsubscribe = subscriptions.onConnectionChange(callback);
       callback(state.connectionState);
-      return () => connectionCallbacks.delete(callback);
+      return unsubscribe;
     },
 
-    onError: (callback: ErrorCallback): Unsubscribe => {
-      errorCallbacks.add(callback);
-      return () => errorCallbacks.delete(callback);
-    },
+    onError: subscriptions.onError,
 
     getPresence: (): ReadonlyMap<string, PresenceUser> => state.presence,
 

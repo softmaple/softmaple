@@ -20,8 +20,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "vite build",
+    "dev": "vite build --watch",
     "format": "biome format",
     "lint": "biome lint",
     "check": "biome check",
@@ -44,11 +44,13 @@
     "@types/node": "^24.10.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.0.16",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "tsup": "^8.5.1",
     "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.0.16"
   },
   "publishConfig": {

@@ -1,17 +1,12 @@
 /**
  * WebSocket adapter for presence system
- * Handles real-time presence synchronization over WebSocket connections
+ * Main adapter factory using modular connection management
  */
 
 import type { PresenceEvent, PresenceEventPayload } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { createPresenceUser, updatePresenceUser } from "../types/presence";
-import type { AdapterState } from "./adapter-state";
-import {
-  createInitialState,
-  setPresenceUser,
-  updateState,
-} from "./adapter-state";
+import { setPresenceUser, updateState } from "./adapter-state";
 import { createSubscriptionManager } from "./subscription-manager";
 import type {
   AdapterConnectionState,
@@ -20,29 +15,18 @@ import type {
 } from "./types";
 import { DEFAULT_RECONNECT_CONFIG } from "./types";
 import {
-  createMessage,
-  parseMessage,
-  processMessage,
-  serializeMessage,
-} from "./websocket-message";
-import type { ReconnectState, WebSocketAdapterConfig } from "./websocket-types";
-import {
-  calculateReconnectDelay,
-  createReconnectState,
-  DEFAULT_WS_CONFIG,
-  WS_MESSAGE_TYPE,
-} from "./websocket-types";
-
-/**
- * Internal mutable state for WebSocket adapter
- */
-interface InternalState {
-  socket: WebSocket | null;
-  state: AdapterState;
-  reconnect: ReconnectState;
-  heartbeatIntervalId: ReturnType<typeof setInterval> | null;
-  connectionTimeoutId: ReturnType<typeof setTimeout> | null;
-}
+  cleanupWebSocket,
+  clearConnectionTimeout,
+  resetReconnectState,
+  scheduleReconnect,
+  sendWebSocketMessage,
+  startHeartbeat,
+  stopHeartbeat,
+} from "./websocket-connection";
+import { parseMessage, processMessage } from "./websocket-message";
+import { createInternalState } from "./websocket-state";
+import type { WebSocketAdapterConfig } from "./websocket-types";
+import { DEFAULT_WS_CONFIG, WS_MESSAGE_TYPE } from "./websocket-types";
 
 /**
  * Create a WebSocket presence adapter
@@ -52,24 +36,13 @@ export const createWebSocketAdapter = (
 ): PresenceAdapter => {
   const subscriptions = createSubscriptionManager();
   const reconnectConfig = config.reconnect ?? DEFAULT_RECONNECT_CONFIG;
-  const heartbeatIntervalMs =
-    config.heartbeatIntervalMs ?? DEFAULT_WS_CONFIG.heartbeatIntervalMs;
   const connectionTimeoutMs =
     config.connectionTimeoutMs ?? DEFAULT_WS_CONFIG.connectionTimeoutMs;
 
-  const internal: InternalState = {
-    socket: null,
-    state: createInitialState(),
-    reconnect: createReconnectState(reconnectConfig),
-    heartbeatIntervalId: null,
-    connectionTimeoutId: null,
-  };
+  const internal = createInternalState(reconnectConfig);
 
-  /**
-   * Update internal state and notify if needed
-   */
   const setState = (
-    updates: Partial<AdapterState>,
+    updates: Parameters<typeof updateState>[1],
     notifyPresence = false,
   ): void => {
     internal.state = updateState(internal.state, updates);
@@ -81,66 +54,14 @@ export const createWebSocketAdapter = (
     }
   };
 
-  /**
-   * Send a message through WebSocket
-   */
-  const sendMessage = (
-    type: ReturnType<typeof createMessage>["type"],
-    payload?: unknown,
-  ): void => {
-    if (
-      internal.socket === null ||
-      internal.socket.readyState !== WebSocket.OPEN
-    ) {
-      return;
-    }
-    const message = createMessage(
-      type,
-      config.roomId,
-      config.userInfo.userId,
-      payload,
-    );
-    internal.socket.send(serializeMessage(message));
+  const sendMessage = (type: string, payload?: unknown): void => {
+    sendWebSocketMessage(internal, config, type, payload);
   };
 
-  /**
-   * Start heartbeat interval
-   */
-  const startHeartbeat = (): void => {
-    stopHeartbeat();
-    internal.heartbeatIntervalId = setInterval(() => {
-      sendMessage(WS_MESSAGE_TYPE.HEARTBEAT);
-    }, heartbeatIntervalMs);
-  };
-
-  /**
-   * Stop heartbeat interval
-   */
-  const stopHeartbeat = (): void => {
-    if (internal.heartbeatIntervalId !== null) {
-      clearInterval(internal.heartbeatIntervalId);
-      internal.heartbeatIntervalId = null;
-    }
-  };
-
-  /**
-   * Clear connection timeout
-   */
-  const clearConnectionTimeout = (): void => {
-    if (internal.connectionTimeoutId !== null) {
-      clearTimeout(internal.connectionTimeoutId);
-      internal.connectionTimeoutId = null;
-    }
-  };
-
-  /**
-   * Handle WebSocket open event
-   */
   const handleOpen = (): void => {
-    clearConnectionTimeout();
-    internal.reconnect = createReconnectState(reconnectConfig);
+    clearConnectionTimeout(internal);
+    resetReconnectState(internal);
 
-    // Create self user
     const self = createPresenceUser({
       userId: config.userInfo.userId,
       name: config.userInfo.name,
@@ -150,32 +71,18 @@ export const createWebSocketAdapter = (
 
     const newPresence = setPresenceUser(internal.state.presence, self);
     setState(
-      {
-        connectionState: "connected",
-        self,
-        presence: newPresence,
-      },
+      { connectionState: "connected", self, presence: newPresence },
       true,
     );
 
-    // Send join message
     sendMessage(WS_MESSAGE_TYPE.JOIN, { user: self });
-
-    // Request presence sync from server
-    sendMessage(WS_MESSAGE_TYPE.PRESENCE_SYNC);
-
-    // Start heartbeat
-    startHeartbeat();
+    sendMessage(WS_MESSAGE_TYPE.PRESENCE_SYNC_REQUEST);
+    startHeartbeat(internal, config, sendMessage);
   };
 
-  /**
-   * Handle WebSocket message event
-   */
   const handleMessage = (event: MessageEvent): void => {
     const message = parseMessage(event.data as string);
-    if (message === null || message.roomId !== config.roomId) {
-      return;
-    }
+    if (message === null) return;
 
     const result = processMessage(
       internal.state,
@@ -184,138 +91,48 @@ export const createWebSocketAdapter = (
     );
 
     internal.state = result.state;
-
     if (result.shouldNotifyPresence) {
-      subscriptions.notifyPresenceChange(internal.state.presence);
+      subscriptions.notifyPresenceChange(result.state.presence);
     }
-
     if (result.error !== undefined) {
       subscriptions.notifyError(result.error);
     }
-
-    // Notify event subscribers
-    const presenceEvent: PresenceEvent = {
-      type: message.type as PresenceEvent["type"],
-      payload: message.payload as PresenceEventPayload,
-      timestamp: message.timestamp,
-    };
-    subscriptions.notifyEvent(presenceEvent);
   };
 
-  /**
-   * Handle WebSocket close event
-   */
   const handleClose = (): void => {
-    stopHeartbeat();
-    clearConnectionTimeout();
-
-    if (
-      reconnectConfig.enabled &&
-      internal.reconnect.attempts < reconnectConfig.maxAttempts
-    ) {
-      setState({ connectionState: "reconnecting" });
-      scheduleReconnect();
-    } else {
-      setState({ connectionState: "disconnected" });
-    }
+    stopHeartbeat(internal);
+    setState({ connectionState: "disconnected" });
+    scheduleReconnect(internal, subscriptions, connectInternal);
   };
 
-  /**
-   * Handle WebSocket error event
-   */
-  const handleError = (event: Event): void => {
-    const error = new Error(
-      event instanceof ErrorEvent ? event.message : "WebSocket error",
-    );
-    subscriptions.notifyError(error);
-    setState({ connectionState: "error" });
+  const handleError = (): void => {
+    subscriptions.notifyError(new Error("WebSocket connection error"));
   };
 
-  /**
-   * Schedule reconnection attempt
-   */
-  const scheduleReconnect = (): void => {
-    const delay = calculateReconnectDelay(internal.reconnect);
-    internal.reconnect = {
-      ...internal.reconnect,
-      attempts: internal.reconnect.attempts + 1,
-      timeoutId: setTimeout(() => {
-        connectInternal();
-      }, delay),
-    };
+  const handlers = {
+    onOpen: handleOpen,
+    onMessage: handleMessage,
+    onClose: handleClose,
+    onError: handleError,
   };
 
-  /**
-   * Cancel scheduled reconnection
-   */
-  const cancelReconnect = (): void => {
-    if (internal.reconnect.timeoutId !== null) {
-      clearTimeout(internal.reconnect.timeoutId);
-      internal.reconnect = {
-        ...internal.reconnect,
-        timeoutId: null,
-      };
-    }
-  };
-
-  /**
-   * Build WebSocket URL with auth token
-   */
-  const buildUrl = (): string => {
-    const url = new URL(config.url);
-    url.searchParams.set("roomId", config.roomId);
-    if (config.authToken !== undefined) {
-      url.searchParams.set("token", config.authToken);
-    }
-    return url.toString();
-  };
-
-  /**
-   * Internal connect implementation
-   */
   const connectInternal = (): void => {
-    if (
-      internal.socket !== null &&
-      internal.socket.readyState === WebSocket.OPEN
-    ) {
-      return;
-    }
-
+    cleanupWebSocket(internal, handlers);
     setState({ connectionState: "connecting" });
 
-    // Set connection timeout
-    internal.connectionTimeoutId = setTimeout(() => {
-      if (internal.socket !== null) {
-        internal.socket.close();
-      }
-      const error = new Error("Connection timeout");
-      subscriptions.notifyError(error);
-      handleClose();
-    }, connectionTimeoutMs);
-
-    internal.socket = new WebSocket(buildUrl());
+    internal.socket = new WebSocket(config.url);
     internal.socket.addEventListener("open", handleOpen);
     internal.socket.addEventListener("message", handleMessage);
     internal.socket.addEventListener("close", handleClose);
     internal.socket.addEventListener("error", handleError);
-  };
 
-  /**
-   * Clean up WebSocket connection
-   */
-  const cleanup = (): void => {
-    stopHeartbeat();
-    clearConnectionTimeout();
-    cancelReconnect();
-
-    if (internal.socket !== null) {
-      internal.socket.removeEventListener("open", handleOpen);
-      internal.socket.removeEventListener("message", handleMessage);
-      internal.socket.removeEventListener("close", handleClose);
-      internal.socket.removeEventListener("error", handleError);
-      internal.socket.close();
-      internal.socket = null;
-    }
+    internal.connectionTimeoutId = setTimeout(() => {
+      if (internal.state.connectionState === "connecting") {
+        subscriptions.notifyError(new Error("Connection timeout"));
+        cleanupWebSocket(internal, handlers);
+        scheduleReconnect(internal, subscriptions, connectInternal);
+      }
+    }, connectionTimeoutMs);
   };
 
   return {
@@ -359,18 +176,10 @@ export const createWebSocketAdapter = (
           return;
         }
 
-        // Send leave message before disconnecting
-        sendMessage(WS_MESSAGE_TYPE.LEAVE, {
-          userId: config.userInfo.userId,
-        });
-
-        cleanup();
+        sendMessage(WS_MESSAGE_TYPE.LEAVE, { userId: config.userInfo.userId });
+        cleanupWebSocket(internal, handlers);
         setState(
-          {
-            connectionState: "disconnected",
-            self: null,
-            presence: new Map(),
-          },
+          { connectionState: "disconnected", self: null, presence: new Map() },
           true,
         );
         resolve();
@@ -389,7 +198,6 @@ export const createWebSocketAdapter = (
 
       const newPresence = setPresenceUser(internal.state.presence, updatedSelf);
       setState({ self: updatedSelf, presence: newPresence }, true);
-
       sendMessage(WS_MESSAGE_TYPE.PRESENCE_UPDATE, {
         userId: updatedSelf.userId,
         updates: { ...updates, lastActiveAt: updatedSelf.lastActiveAt },
@@ -405,9 +213,7 @@ export const createWebSocketAdapter = (
         timestamp: Date.now(),
       };
 
-      // Send through WebSocket
       sendMessage(payload.type, payload);
-
       subscriptions.notifyEvent(event);
     },
 

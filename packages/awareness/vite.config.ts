@@ -1,7 +1,10 @@
+import { fileURLToPath } from "url";
+import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import dts from "vite-plugin-dts";
-import path from "path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -20,6 +23,7 @@ export default defineConfig({
   build: {
     lib: {
       entry: {
+        index: path.resolve(__dirname, "src/index.ts"),
         "types/presence": path.resolve(__dirname, "src/types/presence.ts"),
         "types/events": path.resolve(__dirname, "src/types/events.ts"),
         "types/state": path.resolve(__dirname, "src/types/state.ts"),

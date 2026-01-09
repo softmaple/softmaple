@@ -31,14 +31,15 @@ export interface MessageProcessResult {
 
 /**
  * Create a WebSocket message
+ * Accepts WebSocketMessageType or custom string types (e.g., 'auth')
  */
 export const createMessage = (
-  type: WebSocketMessage["type"],
+  type: string,
   roomId: string,
   senderId: string,
   payload?: unknown,
 ): WebSocketMessage => ({
-  type,
+  type: type as WebSocketMessage["type"],
   roomId,
   senderId,
   timestamp: Date.now(),

@@ -6,6 +6,10 @@
   "draft": true,
   "description": "Awareness and presence UI components for real-time collaboration",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./types/presence": {
       "types": "./dist/types/presence.d.ts",
       "import": "./dist/types/presence.js"
@@ -57,8 +61,7 @@
     "./hooks/use-update-presence": {
       "types": "./dist/hooks/use-update-presence.d.ts",
       "import": "./dist/hooks/use-update-presence.js"
-    },
-    "./styles.css": "./dist/styles.css"
+    }
   },
   "files": [
     "dist"
@@ -100,14 +103,6 @@
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    }
   },
   "publishConfig": {
     "access": "public"

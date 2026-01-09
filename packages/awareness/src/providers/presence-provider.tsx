@@ -55,19 +55,17 @@ export const PresenceProvider = ({
   autoConnect = true,
   children,
 }: PresenceProviderProps): ReactNode => {
+  // Use lazy initializers to get real adapter state on first render
   const [connectionState, setConnectionState] =
-    useState<AdapterConnectionState>("disconnected");
-  const [self, setSelf] = useState<PresenceUser | null>(null);
+    useState<AdapterConnectionState>(() => adapter.getConnectionState());
+  const [self, setSelf] = useState<PresenceUser | null>(() =>
+    adapter.getSelf(),
+  );
   const [presence, setPresence] = useState<ReadonlyMap<string, PresenceUser>>(
-    new Map(),
+    () => new Map(adapter.getPresence()),
   );
 
-  const adapterRef = useRef<PresenceAdapter>(adapter);
   const mountedRef = useRef(true);
-
-  useEffect(() => {
-    adapterRef.current = adapter;
-  }, [adapter]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -83,7 +81,9 @@ export const PresenceProvider = ({
         if (state === "connected") {
           setSelf(adapter.getSelf());
         } else if (state === "disconnected") {
+          // Clear both self and presence atomically on disconnect
           setSelf(null);
+          setPresence(new Map());
         }
       }
     });
@@ -115,19 +115,20 @@ export const PresenceProvider = ({
     };
   }, [adapter, autoConnect]);
 
+  // Use adapter directly in callbacks (no ref needed)
   const connect = useCallback(async (): Promise<void> => {
-    await adapterRef.current.connect();
-  }, []);
+    await adapter.connect();
+  }, [adapter]);
 
   const disconnect = useCallback(async (): Promise<void> => {
-    await adapterRef.current.disconnect();
-  }, []);
+    await adapter.disconnect();
+  }, [adapter]);
 
   const updatePresence = useCallback(
     (updates: Partial<Omit<PresenceUser, "userId">>): void => {
-      adapterRef.current.updatePresence(updates);
+      adapter.updatePresence(updates);
     },
-    [],
+    [adapter],
   );
 
   const others = useMemo(
@@ -144,7 +145,7 @@ export const PresenceProvider = ({
       updatePresence,
       connect,
       disconnect,
-      adapter: adapterRef.current,
+      adapter,
     }),
     [
       connectionState,
@@ -154,6 +155,7 @@ export const PresenceProvider = ({
       updatePresence,
       connect,
       disconnect,
+      adapter,
     ],
   );
 

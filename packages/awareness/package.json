@@ -6,13 +6,21 @@
   "draft": true,
   "description": "Awareness and presence UI components for real-time collaboration",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+    "./types/presence": {
+      "types": "./dist/types/presence.d.ts",
+      "import": "./dist/types/presence.js"
     },
-    "./adapters": {
-      "types": "./dist/adapters/index.d.ts",
-      "import": "./dist/adapters/index.js"
+    "./types/events": {
+      "types": "./dist/types/events.d.ts",
+      "import": "./dist/types/events.js"
+    },
+    "./types/state": {
+      "types": "./dist/types/state.d.ts",
+      "import": "./dist/types/state.js"
+    },
+    "./adapters/types": {
+      "types": "./dist/adapters/types.d.ts",
+      "import": "./dist/adapters/types.js"
     },
     "./styles.css": "./dist/styles.css"
   },

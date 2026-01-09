@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [
     react(),
     dts({
-      insertTypesEntry: true,
+      insertTypesEntry: false,
       include: ["src"],
       exclude: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"],
     }),
@@ -20,8 +20,10 @@ export default defineConfig({
   build: {
     lib: {
       entry: {
-        index: path.resolve(__dirname, "src/index.ts"),
-        "adapters/index": path.resolve(__dirname, "src/adapters/index.ts"),
+        "types/presence": path.resolve(__dirname, "src/types/presence.ts"),
+        "types/events": path.resolve(__dirname, "src/types/events.ts"),
+        "types/state": path.resolve(__dirname, "src/types/state.ts"),
+        "adapters/types": path.resolve(__dirname, "src/adapters/types.ts"),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,
@@ -29,8 +31,7 @@ export default defineConfig({
     rollupOptions: {
       external: ["react", "react-dom", "react/jsx-runtime"],
       output: {
-        preserveModules: true,
-        preserveModulesRoot: "src",
+        preserveModules: false,
       },
     },
     sourcemap: true,

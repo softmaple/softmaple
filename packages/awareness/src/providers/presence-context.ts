@@ -37,35 +37,9 @@ export interface PresenceContextValue {
 }
 
 /**
- * Default context value for when provider is not present
- */
-const defaultContextValue: PresenceContextValue = {
-  connectionState: "disconnected",
-  self: null,
-  presence: new Map(),
-  others: [],
-  updatePresence: () => {
-    throw new Error(
-      "PresenceProvider not found. Wrap your component tree with <PresenceProvider>.",
-    );
-  },
-  connect: () => {
-    throw new Error(
-      "PresenceProvider not found. Wrap your component tree with <PresenceProvider>.",
-    );
-  },
-  disconnect: () => {
-    throw new Error(
-      "PresenceProvider not found. Wrap your component tree with <PresenceProvider>.",
-    );
-  },
-  adapter: null,
-};
-
-/**
  * React context for presence state
+ * Default is null to detect missing provider
  */
-export const PresenceContext =
-  createContext<PresenceContextValue>(defaultContextValue);
+export const PresenceContext = createContext<PresenceContextValue | null>(null);
 
 PresenceContext.displayName = "PresenceContext";

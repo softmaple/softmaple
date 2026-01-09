@@ -23,7 +23,6 @@ export default defineConfig({
   build: {
     lib: {
       entry: {
-        index: path.resolve(__dirname, "src/index.ts"),
         "types/presence": path.resolve(__dirname, "src/types/presence.ts"),
         "types/events": path.resolve(__dirname, "src/types/events.ts"),
         "types/state": path.resolve(__dirname, "src/types/state.ts"),

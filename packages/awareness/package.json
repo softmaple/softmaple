@@ -6,10 +6,6 @@
   "draft": true,
   "description": "Awareness and presence UI components for real-time collaboration",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
     "./types/presence": {
       "types": "./dist/types/presence.d.ts",
       "import": "./dist/types/presence.js"

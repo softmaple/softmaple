@@ -2,9 +2,24 @@
  * Export adapter interfaces and implementations
  */
 
-export type { PresenceAdapter, AdapterConfig } from "./types";
+// Adapter types
+export type {
+  AdapterConfig,
+  AdapterConnectionState,
+  AdapterFactory,
+  AdapterUserInfo,
+  ConnectionCallback,
+  ErrorCallback,
+  EventCallback,
+  PresenceAdapter,
+  PresenceCallback,
+  ReconnectConfig,
+  Unsubscribe,
+} from "./types";
 
-// Placeholder for future implementations
-// export { WebSocketAdapter } from "./WebSocketAdapter";
-// export { BroadcastAdapter } from "./BroadcastAdapter";
-// export { SupabaseAdapter } from "./SupabaseAdapter";
+export { DEFAULT_RECONNECT_CONFIG } from "./types";
+
+// Adapter implementations (to be added)
+// export { BroadcastChannelAdapter } from "./broadcast";
+// export { WebSocketAdapter } from "./websocket";
+// export { SupabaseAdapter } from "./supabase";

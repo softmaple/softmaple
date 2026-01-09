@@ -3,41 +3,49 @@
  * Based on docs/design/awareness-and-presence.md
  */
 
-export type PresenceStatus = "active" | "idle" | "offline";
+// Event types
+export type {
+  ActivityEvent,
+  ActivityEventData,
+  ActivityType,
+  CursorEventData,
+  JoinEventData,
+  LeaveEventData,
+  PresenceEvent,
+  PresenceEventPayload,
+  PresenceEventType,
+  PresenceJoinPayload,
+  PresenceLeavePayload,
+  PresenceSyncPayload,
+  PresenceUpdatePayload,
+  SelectionEventData,
+  TypingEventData,
+} from "./events";
+export { createActivityEvent, createPresenceEvent } from "./events";
+// Presence types
+export type {
+  CursorPosition,
+  PresenceMeta,
+  PresenceStatus,
+  PresenceUser,
+  SelectionRange,
+  SelfPresence,
+} from "./presence";
+export { createPresenceUser, updatePresenceUser } from "./presence";
 
-export interface PresenceUser {
-  userId: string;
-  name: string;
-  avatarUrl?: string;
-  color: string;
+// State types
+export type {
+  ConnectionStatus,
+  PresenceState,
+  PresenceStateConfig,
+} from "./state";
 
-  status: PresenceStatus;
-  lastActiveAt: number;
-
-  cursor?: {
-    blockId?: string;
-    offset?: number;
-  };
-
-  selection?: {
-    blockId: string;
-    from: number;
-    to: number;
-  };
-
-  meta?: {
-    isTyping?: boolean;
-  };
-}
-
-export interface ActivityEvent {
-  userId: string;
-  timestamp: number;
-  type: "edit" | "join" | "leave" | "cursor" | "selection";
-  data?: unknown;
-}
-
-export interface PresenceState {
-  users: Map<string, PresenceUser>;
-  activities: ActivityEvent[];
-}
+export {
+  createInitialPresenceState,
+  DEFAULT_PRESENCE_CONFIG,
+  getOnlineUsers,
+  getOtherUsers,
+  getSelfUser,
+  getUserById,
+  getUsersArray,
+} from "./state";

@@ -1,0 +1,119 @@
+{
+  "name": "@softmaple/awareness",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "draft": true,
+  "description": "Awareness and presence UI components for real-time collaboration",
+  "exports": {
+    "./types/presence": {
+      "types": "./dist/types/presence.d.ts",
+      "import": "./dist/types/presence.js"
+    },
+    "./types/events": {
+      "types": "./dist/types/events.d.ts",
+      "import": "./dist/types/events.js"
+    },
+    "./types/state": {
+      "types": "./dist/types/state.d.ts",
+      "import": "./dist/types/state.js"
+    },
+    "./adapters/types": {
+      "types": "./dist/adapters/types.d.ts",
+      "import": "./dist/adapters/types.js"
+    },
+    "./adapters/broadcast-channel": {
+      "types": "./dist/adapters/broadcast-channel.d.ts",
+      "import": "./dist/adapters/broadcast-channel.js"
+    },
+    "./adapters/websocket": {
+      "types": "./dist/adapters/websocket.d.ts",
+      "import": "./dist/adapters/websocket.js"
+    },
+    "./providers/presence-context": {
+      "types": "./dist/providers/presence-context.d.ts",
+      "import": "./dist/providers/presence-context.js"
+    },
+    "./providers/presence-provider": {
+      "types": "./dist/providers/presence-provider.d.ts",
+      "import": "./dist/providers/presence-provider.js"
+    },
+    "./hooks/use-presence": {
+      "types": "./dist/hooks/use-presence.d.ts",
+      "import": "./dist/hooks/use-presence.js"
+    },
+    "./hooks/use-self": {
+      "types": "./dist/hooks/use-self.d.ts",
+      "import": "./dist/hooks/use-self.js"
+    },
+    "./hooks/use-others": {
+      "types": "./dist/hooks/use-others.d.ts",
+      "import": "./dist/hooks/use-others.js"
+    },
+    "./hooks/use-connection": {
+      "types": "./dist/hooks/use-connection.d.ts",
+      "import": "./dist/hooks/use-connection.js"
+    },
+    "./hooks/use-update-presence": {
+      "types": "./dist/hooks/use-update-presence.d.ts",
+      "import": "./dist/hooks/use-update-presence.js"
+    },
+    "./hooks/use-activity": {
+      "types": "./dist/hooks/use-activity.d.ts",
+      "import": "./dist/hooks/use-activity.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "format": "biome format",
+    "lint": "biome lint",
+    "check": "biome check",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "collaboration",
+    "awareness",
+    "presence",
+    "real-time",
+    "ui-components"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "2.3.11",
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "@vitest/coverage-v8": "^4.0.16",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4.0.16"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "lint-staged": {
+    "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}": [
+      "biome check --files-ignore-unknown=true",
+      "biome check --write --no-errors-on-unmatched",
+      "biome check --write --unsafe --no-errors-on-unmatched",
+      "biome format --write --no-errors-on-unmatched",
+      "biome lint --write --no-errors-on-unmatched"
+    ]
+  }
+}

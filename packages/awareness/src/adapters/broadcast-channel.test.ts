@@ -267,24 +267,22 @@ describe("BroadcastChannelAdapter", () => {
   });
 
   describe("getPresence", () => {
-    it("should return immutable presence map", async () => {
+    it("should return defensive copy that does not affect internal state", async () => {
       const adapter = createBroadcastChannelAdapter(defaultConfig);
 
       await adapter.connect();
 
       const presence = adapter.getPresence();
 
-      expect(() => {
-        (presence as Map<string, PresenceUser>).set("new-user", {
-          userId: "new-user",
-          name: "New User",
-          color: "#0000FF",
-          status: "active",
-          lastActiveAt: Date.now(),
-        });
-      }).not.toThrow();
+      (presence as Map<string, PresenceUser>).set("new-user", {
+        userId: "new-user",
+        name: "New User",
+        color: "#0000FF",
+        status: "active",
+        lastActiveAt: Date.now(),
+      });
 
-      expect(adapter.getPresence().has("new-user")).toBe(true);
+      expect(adapter.getPresence().has("new-user")).toBe(false);
     });
   });
 });

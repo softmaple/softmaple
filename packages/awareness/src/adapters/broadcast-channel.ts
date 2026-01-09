@@ -282,7 +282,8 @@ export const createBroadcastChannelAdapter = (
 
     onError: subscriptions.onError,
 
-    getPresence: (): ReadonlyMap<string, PresenceUser> => state.presence,
+    getPresence: (): ReadonlyMap<string, PresenceUser> =>
+      new Map(state.presence),
 
     getSelf: (): PresenceUser | null => state.self,
   };

@@ -36,7 +36,8 @@ export type ActivityEventData =
   | LeaveEventData
   | CursorEventData
   | SelectionEventData
-  | TypingEventData;
+  | TypingEventData
+  | IdleEventData;
 
 export interface JoinEventData {
   readonly type: typeof ACTIVITY_TYPE.JOIN;
@@ -61,6 +62,13 @@ export interface SelectionEventData {
 export interface TypingEventData {
   readonly type: typeof ACTIVITY_TYPE.TYPING;
   readonly isTyping: boolean;
+}
+
+/**
+ * Idle event data - indicates user transitioned to idle state
+ */
+export interface IdleEventData {
+  readonly type: typeof ACTIVITY_TYPE.IDLE;
 }
 
 /**
@@ -91,10 +99,17 @@ export interface PresenceLeavePayload {
   readonly userId: string;
 }
 
+/**
+ * Updates for presence - excludes userId to prevent patching the authoritative ID
+ */
+export type PresenceUserUpdates = Partial<Omit<PresenceUser, "userId">>;
+
 export interface PresenceUpdatePayload {
   readonly type: typeof PRESENCE_EVENT.UPDATE;
+  /** Authoritative user ID - cannot be changed via updates */
   readonly userId: string;
-  readonly updates: Partial<PresenceUser>;
+  /** Partial updates excluding userId */
+  readonly updates: PresenceUserUpdates;
 }
 
 export interface PresenceSyncPayload {

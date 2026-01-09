@@ -12,6 +12,7 @@ import type {
   PresenceJoinPayload,
   PresenceLeavePayload,
   PresenceUpdatePayload,
+  PresenceUserUpdates,
 } from "../types/events";
 import { type PresenceUser, updatePresenceUser } from "../types/presence";
 import {
@@ -30,6 +31,44 @@ export interface BroadcastMessage {
   readonly timestamp: number;
   readonly payload: unknown;
 }
+
+/**
+ * Type guard for PresenceUser payload
+ */
+const isPresenceUser = (value: unknown): value is PresenceUser => {
+  if (value === null || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.userId === "string" &&
+    typeof obj.name === "string" &&
+    typeof obj.color === "string" &&
+    (obj.status === "active" ||
+      obj.status === "idle" ||
+      obj.status === "offline") &&
+    typeof obj.lastActiveAt === "number"
+  );
+};
+
+/**
+ * Type guard for update payload shape
+ */
+const isUpdatePayload = (
+  value: unknown,
+): value is { userId: string; updates: PresenceUserUpdates } => {
+  if (value === null || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.userId === "string" &&
+    typeof obj.updates === "object" &&
+    obj.updates !== null
+  );
+};
+
+/**
+ * Type guard for leave payload (userId string)
+ */
+const isLeavePayload = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
 
 /**
  * Create a broadcast message
@@ -75,7 +114,11 @@ const handleAnnounce = (
   subscriptions: SubscriptionManager,
   sendResponse: (self: PresenceUser) => void,
 ): AdapterState => {
-  const user = message.payload as PresenceUser;
+  if (!isPresenceUser(message.payload)) {
+    return state;
+  }
+
+  const user = message.payload;
   const newState = updateState(state, {
     presence: setPresenceUser(state.presence, user),
   });
@@ -108,7 +151,11 @@ const handleSyncResponse = (
   state: AdapterState,
   subscriptions: SubscriptionManager,
 ): AdapterState => {
-  const user = message.payload as PresenceUser;
+  if (!isPresenceUser(message.payload)) {
+    return state;
+  }
+
+  const user = message.payload;
   const newState = updateState(state, {
     presence: setPresenceUser(state.presence, user),
   });
@@ -124,10 +171,11 @@ const handleUpdate = (
   state: AdapterState,
   subscriptions: SubscriptionManager,
 ): AdapterState => {
-  const updates = message.payload as {
-    userId: string;
-    updates: Partial<PresenceUser>;
-  };
+  if (!isUpdatePayload(message.payload)) {
+    return state;
+  }
+
+  const updates = message.payload;
   const existingUser = state.presence.get(updates.userId);
 
   if (existingUser === undefined) {
@@ -164,7 +212,11 @@ const handleLeave = (
   state: AdapterState,
   subscriptions: SubscriptionManager,
 ): AdapterState => {
-  const userId = message.payload as string;
+  if (!isLeavePayload(message.payload)) {
+    return state;
+  }
+
+  const userId = message.payload;
 
   if (!state.presence.has(userId)) {
     return state;

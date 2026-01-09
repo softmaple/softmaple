@@ -164,12 +164,12 @@ export const createBroadcastChannelAdapter = (
         channel = new BroadcastChannel(`softmaple-presence:${roomId}`);
         channel.onmessage = handleMessage;
 
-        const self = createPresenceUser(
-          userInfo.userId,
-          userInfo.name,
-          userInfo.color,
-          { avatarUrl: userInfo.avatarUrl },
-        );
+        const self = createPresenceUser({
+          userId: userInfo.userId,
+          name: userInfo.name,
+          color: userInfo.color,
+          avatarUrl: userInfo.avatarUrl,
+        });
         state = updateState(state, {
           self,
           presence: setPresenceUser(state.presence, self),

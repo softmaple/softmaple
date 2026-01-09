@@ -90,18 +90,33 @@ export const updatePresenceUser = (
 });
 
 /**
- * Create a new PresenceUser
+ * Options for creating a new PresenceUser
+ */
+export interface CreatePresenceUserOptions {
+  readonly userId: string;
+  readonly name: string;
+  readonly color: string;
+  readonly status?: PresenceStatus;
+  readonly lastActiveAt?: number;
+  readonly avatarUrl?: string;
+  readonly cursor?: CursorPosition;
+  readonly selection?: SelectionRange;
+  readonly meta?: PresenceMeta;
+}
+
+/**
+ * Create a new PresenceUser from options object
  */
 export const createPresenceUser = (
-  userId: string,
-  name: string,
-  color: string,
-  options?: Partial<Omit<PresenceUser, "userId" | "name" | "color">>,
+  options: CreatePresenceUserOptions,
 ): PresenceUser => ({
-  userId,
-  name,
-  color,
-  status: "active",
-  lastActiveAt: Date.now(),
-  ...options,
+  userId: options.userId,
+  name: options.name,
+  color: options.color,
+  status: options.status ?? "active",
+  lastActiveAt: options.lastActiveAt ?? Date.now(),
+  avatarUrl: options.avatarUrl,
+  cursor: options.cursor,
+  selection: options.selection,
+  meta: options.meta,
 });

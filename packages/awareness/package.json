@@ -26,6 +26,38 @@
       "types": "./dist/adapters/broadcast-channel.d.ts",
       "import": "./dist/adapters/broadcast-channel.js"
     },
+    "./adapters/websocket": {
+      "types": "./dist/adapters/websocket.d.ts",
+      "import": "./dist/adapters/websocket.js"
+    },
+    "./providers/presence-context": {
+      "types": "./dist/providers/presence-context.d.ts",
+      "import": "./dist/providers/presence-context.js"
+    },
+    "./providers/presence-provider": {
+      "types": "./dist/providers/presence-provider.d.ts",
+      "import": "./dist/providers/presence-provider.js"
+    },
+    "./hooks/use-presence": {
+      "types": "./dist/hooks/use-presence.d.ts",
+      "import": "./dist/hooks/use-presence.js"
+    },
+    "./hooks/use-self": {
+      "types": "./dist/hooks/use-self.d.ts",
+      "import": "./dist/hooks/use-self.js"
+    },
+    "./hooks/use-others": {
+      "types": "./dist/hooks/use-others.d.ts",
+      "import": "./dist/hooks/use-others.js"
+    },
+    "./hooks/use-connection": {
+      "types": "./dist/hooks/use-connection.d.ts",
+      "import": "./dist/hooks/use-connection.js"
+    },
+    "./hooks/use-update-presence": {
+      "types": "./dist/hooks/use-update-presence.d.ts",
+      "import": "./dist/hooks/use-update-presence.js"
+    },
     "./styles.css": "./dist/styles.css"
   },
   "files": [
@@ -64,6 +96,18 @@
     "vite": "^7.3.0",
     "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.0.16"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

@@ -5,7 +5,8 @@
 import type { AdapterState } from "./adapter-state";
 import { createInitialState, updateState } from "./adapter-state";
 import type { SubscriptionManager } from "./subscription-manager";
-import type { ReconnectConfig, ReconnectState } from "./websocket-types";
+import type { ReconnectConfig } from "./types";
+import type { ReconnectState } from "./websocket-types";
 import { createReconnectState } from "./websocket-types";
 
 /**

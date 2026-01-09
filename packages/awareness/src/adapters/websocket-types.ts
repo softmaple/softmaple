@@ -89,6 +89,8 @@ export interface ReconnectState {
   readonly attempts: number;
   readonly config: ReconnectConfig;
   readonly timeoutId: ReturnType<typeof setTimeout> | null;
+  readonly lastAttemptAt: number | null;
+  readonly isReconnecting: boolean;
 }
 
 /**
@@ -100,6 +102,8 @@ export const createReconnectState = (
   attempts: 0,
   config,
   timeoutId: null,
+  lastAttemptAt: null,
+  isReconnecting: false,
 });
 
 /**

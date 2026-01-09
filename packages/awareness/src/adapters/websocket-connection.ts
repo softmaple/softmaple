@@ -2,6 +2,7 @@
  * WebSocket connection management utilities
  */
 
+import type { WebSocketMessageType } from "../constants/presence-events";
 import type { SubscriptionManager } from "./subscription-manager";
 import { createMessage, serializeMessage } from "./websocket-message";
 import type { InternalState } from "./websocket-state";
@@ -14,11 +15,12 @@ import {
 
 /**
  * Send a message through WebSocket
+ * Accepts WebSocketMessageType or custom string types (e.g., 'auth')
  */
 export const sendWebSocketMessage = (
   internal: InternalState,
   config: WebSocketAdapterConfig,
-  type: ReturnType<typeof createMessage>["type"],
+  type: WebSocketMessageType | string,
   payload?: unknown,
 ): void => {
   if (
@@ -28,7 +30,7 @@ export const sendWebSocketMessage = (
     return;
   }
   const message = createMessage(
-    type,
+    type as WebSocketMessageType,
     config.roomId,
     config.userInfo.userId,
     payload,
@@ -42,7 +44,7 @@ export const sendWebSocketMessage = (
 export const startHeartbeat = (
   internal: InternalState,
   config: WebSocketAdapterConfig,
-  sendMessage: (type: string, payload?: unknown) => void,
+  sendMessage: (type: WebSocketMessageType | string, payload?: unknown) => void,
 ): void => {
   stopHeartbeat(internal);
   const heartbeatIntervalMs =

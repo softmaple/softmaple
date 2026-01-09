@@ -9,7 +9,7 @@ import type { WebSocketAdapterConfig } from "./websocket-types";
 import {
   calculateReconnectDelay,
   DEFAULT_WS_CONFIG,
-  WS_MESSAGE_TYPE,
+  WS_MESSAGE,
 } from "./websocket-types";
 
 /**
@@ -48,7 +48,7 @@ export const startHeartbeat = (
   const heartbeatIntervalMs =
     config.heartbeatIntervalMs ?? DEFAULT_WS_CONFIG.heartbeatIntervalMs;
   internal.heartbeatIntervalId = setInterval(() => {
-    sendMessage(WS_MESSAGE_TYPE.HEARTBEAT);
+    sendMessage(WS_MESSAGE.HEARTBEAT);
   }, heartbeatIntervalMs);
 };
 

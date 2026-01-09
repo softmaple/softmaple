@@ -3,6 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PRESENCE_EVENT } from "../constants/presence-events";
 import type { PresenceUser } from "../types/presence";
 import {
   type BroadcastChannelAdapterConfig,
@@ -215,9 +216,9 @@ describe("BroadcastChannelAdapter", () => {
 
       expect(eventCallback).toHaveBeenCalledWith(
         expect.objectContaining({
-          type: "presence:join",
+          type: PRESENCE_EVENT.JOIN,
           payload: expect.objectContaining({
-            type: "presence:join",
+            type: PRESENCE_EVENT.JOIN,
             user: expect.objectContaining({ userId: "user-2" }),
           }),
         }),

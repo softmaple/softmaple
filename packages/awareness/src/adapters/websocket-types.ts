@@ -2,8 +2,15 @@
  * WebSocket-specific types for presence adapter
  */
 
+import {
+  type WebSocketMessageType,
+  WS_MESSAGE,
+} from "../constants/presence-events";
 import type { PresenceUser } from "../types/presence";
 import type { AdapterConfig, ReconnectConfig } from "./types";
+
+export { WS_MESSAGE };
+export type { WebSocketMessageType };
 
 /**
  * WebSocket adapter configuration
@@ -18,23 +25,6 @@ export interface WebSocketAdapterConfig extends AdapterConfig {
   /** Connection timeout in ms (default: 10000) */
   readonly connectionTimeoutMs?: number;
 }
-
-/**
- * WebSocket message types
- */
-export const WS_MESSAGE_TYPE = {
-  JOIN: "join",
-  LEAVE: "leave",
-  PRESENCE_UPDATE: "presence:update",
-  PRESENCE_SYNC: "presence:sync",
-  PRESENCE_SYNC_RESPONSE: "presence:sync-response",
-  HEARTBEAT: "heartbeat",
-  HEARTBEAT_ACK: "heartbeat:ack",
-  ERROR: "error",
-} as const;
-
-export type WebSocketMessageType =
-  (typeof WS_MESSAGE_TYPE)[keyof typeof WS_MESSAGE_TYPE];
 
 /**
  * WebSocket message structure

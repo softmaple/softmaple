@@ -3,18 +3,16 @@
  * Based on docs/design/awareness-and-presence.md
  */
 
+import {
+  ACTIVITY_TYPE,
+  type ActivityType,
+  PRESENCE_EVENT,
+  type PresenceEventType,
+} from "../constants/presence-events";
 import type { CursorPosition, PresenceUser, SelectionRange } from "./presence";
 
-/**
- * Types of user activity events
- */
-export type ActivityType =
-  | "join"
-  | "leave"
-  | "cursor"
-  | "selection"
-  | "typing"
-  | "idle";
+export { ACTIVITY_TYPE, PRESENCE_EVENT };
+export type { ActivityType, PresenceEventType };
 
 /**
  * Activity event representing a user action
@@ -41,38 +39,29 @@ export type ActivityEventData =
   | TypingEventData;
 
 export interface JoinEventData {
-  readonly type: "join";
+  readonly type: typeof ACTIVITY_TYPE.JOIN;
   readonly user: PresenceUser;
 }
 
 export interface LeaveEventData {
-  readonly type: "leave";
+  readonly type: typeof ACTIVITY_TYPE.LEAVE;
   readonly userId: string;
 }
 
 export interface CursorEventData {
-  readonly type: "cursor";
+  readonly type: typeof ACTIVITY_TYPE.CURSOR;
   readonly position: CursorPosition | null;
 }
 
 export interface SelectionEventData {
-  readonly type: "selection";
+  readonly type: typeof ACTIVITY_TYPE.SELECTION;
   readonly range: SelectionRange | null;
 }
 
 export interface TypingEventData {
-  readonly type: "typing";
+  readonly type: typeof ACTIVITY_TYPE.TYPING;
   readonly isTyping: boolean;
 }
-
-/**
- * Presence event types for pub/sub
- */
-export type PresenceEventType =
-  | "presence:join"
-  | "presence:leave"
-  | "presence:update"
-  | "presence:sync";
 
 /**
  * Presence event payload
@@ -93,23 +82,23 @@ export type PresenceEventPayload =
   | PresenceSyncPayload;
 
 export interface PresenceJoinPayload {
-  readonly type: "presence:join";
+  readonly type: typeof PRESENCE_EVENT.JOIN;
   readonly user: PresenceUser;
 }
 
 export interface PresenceLeavePayload {
-  readonly type: "presence:leave";
+  readonly type: typeof PRESENCE_EVENT.LEAVE;
   readonly userId: string;
 }
 
 export interface PresenceUpdatePayload {
-  readonly type: "presence:update";
+  readonly type: typeof PRESENCE_EVENT.UPDATE;
   readonly userId: string;
   readonly updates: Partial<PresenceUser>;
 }
 
 export interface PresenceSyncPayload {
-  readonly type: "presence:sync";
+  readonly type: typeof PRESENCE_EVENT.SYNC;
   readonly users: ReadonlyArray<PresenceUser>;
 }
 

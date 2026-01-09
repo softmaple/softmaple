@@ -15,17 +15,17 @@ import {
 import {
   calculateReconnectDelay,
   createReconnectState,
-  WS_MESSAGE_TYPE,
+  WS_MESSAGE,
 } from "./websocket-types";
 
 describe("WebSocket Message Utilities", () => {
   describe("createMessage", () => {
     it("should create a message with correct fields", () => {
-      const message = createMessage(WS_MESSAGE_TYPE.JOIN, "room-1", "user-1", {
+      const message = createMessage(WS_MESSAGE.JOIN, "room-1", "user-1", {
         user: {},
       });
 
-      expect(message.type).toBe(WS_MESSAGE_TYPE.JOIN);
+      expect(message.type).toBe(WS_MESSAGE.JOIN);
       expect(message.roomId).toBe("room-1");
       expect(message.senderId).toBe("user-1");
       expect(message.payload).toEqual({ user: {} });
@@ -36,7 +36,7 @@ describe("WebSocket Message Utilities", () => {
   describe("serializeMessage / parseMessage", () => {
     it("should round-trip messages correctly", () => {
       const original = createMessage(
-        WS_MESSAGE_TYPE.PRESENCE_UPDATE,
+        WS_MESSAGE.PRESENCE_UPDATE,
         "room-1",
         "user-1",
         { updates: { name: "New Name" } },
@@ -62,7 +62,7 @@ describe("WebSocket Message Utilities", () => {
     });
 
     it("should ignore messages from self", () => {
-      const message = createMessage(WS_MESSAGE_TYPE.JOIN, "room-1", selfId, {
+      const message = createMessage(WS_MESSAGE.JOIN, "room-1", selfId, {
         user: createPresenceUser({
           userId: selfId,
           name: "Self",
@@ -82,12 +82,9 @@ describe("WebSocket Message Utilities", () => {
         color: "#00FF00",
       });
 
-      const message = createMessage(
-        WS_MESSAGE_TYPE.JOIN,
-        "room-1",
-        "other-sender",
-        { user: newUser },
-      );
+      const message = createMessage(WS_MESSAGE.JOIN, "room-1", "other-sender", {
+        user: newUser,
+      });
 
       const result = processMessage(state, message, selfId);
       expect(result.shouldNotifyPresence).toBe(true);
@@ -106,7 +103,7 @@ describe("WebSocket Message Utilities", () => {
       };
 
       const message = createMessage(
-        WS_MESSAGE_TYPE.LEAVE,
+        WS_MESSAGE.LEAVE,
         "room-1",
         "other-sender",
         { userId: "user-2" },
@@ -129,7 +126,7 @@ describe("WebSocket Message Utilities", () => {
       };
 
       const message = createMessage(
-        WS_MESSAGE_TYPE.PRESENCE_UPDATE,
+        WS_MESSAGE.PRESENCE_UPDATE,
         "room-1",
         "other-sender",
         { userId: "user-2", updates: { name: "Updated Name" } },
@@ -147,7 +144,7 @@ describe("WebSocket Message Utilities", () => {
       ];
 
       const message = createMessage(
-        WS_MESSAGE_TYPE.PRESENCE_SYNC,
+        WS_MESSAGE.PRESENCE_SYNC,
         "room-1",
         "server",
         { users },
@@ -159,7 +156,7 @@ describe("WebSocket Message Utilities", () => {
     });
 
     it("should process ERROR message", () => {
-      const message = createMessage(WS_MESSAGE_TYPE.ERROR, "room-1", "server", {
+      const message = createMessage(WS_MESSAGE.ERROR, "room-1", "server", {
         code: "AUTH_FAILED",
         message: "Invalid token",
       });

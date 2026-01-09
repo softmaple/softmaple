@@ -2,6 +2,11 @@
  * BroadcastChannel message types and handlers
  */
 
+import {
+  BROADCAST_MESSAGE,
+  type BroadcastMessageType,
+  PRESENCE_EVENT,
+} from "../constants/presence-events";
 import type {
   PresenceEvent,
   PresenceJoinPayload,
@@ -17,15 +22,7 @@ import {
 } from "./adapter-state";
 import type { SubscriptionManager } from "./subscription-manager";
 
-/**
- * Internal message types for BroadcastChannel communication
- */
-export type BroadcastMessageType =
-  | "presence:announce"
-  | "presence:sync-request"
-  | "presence:sync-response"
-  | "presence:update"
-  | "presence:leave";
+export type { BroadcastMessageType };
 
 export interface BroadcastMessage {
   readonly type: BroadcastMessageType;
@@ -86,11 +83,11 @@ const handleAnnounce = (
   subscriptions.notifyPresenceChange(newState.presence);
 
   const joinPayload: PresenceJoinPayload = {
-    type: "presence:join",
+    type: PRESENCE_EVENT.JOIN,
     user,
   };
   const event: PresenceEvent = {
-    type: "presence:join",
+    type: PRESENCE_EVENT.JOIN,
     payload: joinPayload,
     timestamp: message.timestamp,
   };
@@ -145,12 +142,12 @@ const handleUpdate = (
   subscriptions.notifyPresenceChange(newState.presence);
 
   const updatePayload: PresenceUpdatePayload = {
-    type: "presence:update",
+    type: PRESENCE_EVENT.UPDATE,
     userId: updates.userId,
     updates: updates.updates,
   };
   const event: PresenceEvent = {
-    type: "presence:update",
+    type: PRESENCE_EVENT.UPDATE,
     payload: updatePayload,
     timestamp: message.timestamp,
   };
@@ -180,11 +177,11 @@ const handleLeave = (
   subscriptions.notifyPresenceChange(newState.presence);
 
   const leavePayload: PresenceLeavePayload = {
-    type: "presence:leave",
+    type: PRESENCE_EVENT.LEAVE,
     userId,
   };
   const event: PresenceEvent = {
-    type: "presence:leave",
+    type: PRESENCE_EVENT.LEAVE,
     payload: leavePayload,
     timestamp: message.timestamp,
   };
@@ -204,22 +201,22 @@ export const processBroadcastMessage = (
   sendSyncResponse: (self: PresenceUser) => void,
 ): AdapterState => {
   switch (message.type) {
-    case "presence:announce":
+    case BROADCAST_MESSAGE.ANNOUNCE:
       return handleAnnounce(message, state, subscriptions, sendSyncResponse);
 
-    case "presence:sync-request":
+    case BROADCAST_MESSAGE.SYNC_REQUEST:
       if (state.self !== null) {
         sendSyncResponse(state.self);
       }
       return state;
 
-    case "presence:sync-response":
+    case BROADCAST_MESSAGE.SYNC_RESPONSE:
       return handleSyncResponse(message, state, subscriptions);
 
-    case "presence:update":
+    case BROADCAST_MESSAGE.UPDATE:
       return handleUpdate(message, state, subscriptions);
 
-    case "presence:leave":
+    case BROADCAST_MESSAGE.LEAVE:
       return handleLeave(message, state, subscriptions);
 
     default:

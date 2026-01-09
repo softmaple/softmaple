@@ -3,6 +3,11 @@
  * Enables presence awareness between tabs in the same browser
  */
 
+import {
+  BROADCAST_MESSAGE,
+  createChannelName,
+  PRESENCE_EVENT,
+} from "../constants/presence-events";
 import type {
   PresenceEvent,
   PresenceEventPayload,
@@ -24,6 +29,7 @@ import {
 } from "./adapter-state";
 import {
   type BroadcastMessage,
+  type BroadcastMessageType,
   createBroadcastMessage,
   processBroadcastMessage,
   sendBroadcastMessage,
@@ -79,10 +85,7 @@ export const createBroadcastChannelAdapter = (
     }
   };
 
-  const sendMessage = (
-    type: BroadcastMessage["type"],
-    payload: unknown,
-  ): void => {
+  const sendMessage = (type: BroadcastMessageType, payload: unknown): void => {
     if (state.self === null) return;
     const message = createBroadcastMessage(type, state.self.userId, payload);
     sendBroadcastMessage(channel, message, subscriptions.notifyError);
@@ -93,7 +96,7 @@ export const createBroadcastChannelAdapter = (
     if (message.senderId === state.self?.userId) return;
 
     state = processBroadcastMessage(message, state, subscriptions, (self) =>
-      sendMessage("presence:sync-response", self),
+      sendMessage(BROADCAST_MESSAGE.SYNC_RESPONSE, self),
     );
   };
 
@@ -105,7 +108,7 @@ export const createBroadcastChannelAdapter = (
       lastActiveAt: Date.now(),
     });
     state = updateState(state, { self: updatedSelf });
-    sendMessage("presence:update", {
+    sendMessage(BROADCAST_MESSAGE.UPDATE, {
       userId: updatedSelf.userId,
       updates: { status: "active", lastActiveAt: updatedSelf.lastActiveAt },
     });
@@ -121,31 +124,30 @@ export const createBroadcastChannelAdapter = (
         hasChanges = true;
 
         const leavePayload: PresenceLeavePayload = {
-          type: "presence:leave",
+          type: PRESENCE_EVENT.LEAVE,
           userId,
         };
         subscriptions.notifyEvent({
-          type: "presence:leave",
+          type: PRESENCE_EVENT.LEAVE,
           payload: leavePayload,
           timestamp: Date.now(),
         });
-      } else if (isUserIdle(user, idleTimeoutMs) && user.status !== "idle") {
-        const updatedUser = updatePresenceUser(user, { status: "idle" });
-        newPresence = setPresenceUser(newPresence, updatedUser);
+      } else if (isUserIdle(user, idleTimeoutMs) && user.status === "active") {
+        const idleUser = updatePresenceUser(user, { status: "idle" });
+        newPresence = setPresenceUser(newPresence, idleUser);
         hasChanges = true;
       }
     }
 
     if (hasChanges) {
       state = updateState(state, { presence: newPresence });
-      subscriptions.notifyPresenceChange(newPresence);
+      subscriptions.notifyPresenceChange(state.presence);
     }
   };
 
   const handleBeforeUnload = (): void => {
-    if (state.self !== null) {
-      sendMessage("presence:leave", state.self.userId);
-    }
+    if (state.self === null) return;
+    sendMessage(BROADCAST_MESSAGE.LEAVE, state.self.userId);
   };
 
   const adapter: PresenceAdapter = {
@@ -160,8 +162,7 @@ export const createBroadcastChannelAdapter = (
             "BroadcastChannel is not supported in this environment",
           );
         }
-
-        channel = new BroadcastChannel(`softmaple-presence:${roomId}`);
+        channel = new BroadcastChannel(createChannelName(roomId));
         channel.onmessage = handleMessage;
 
         const self = createPresenceUser({
@@ -175,8 +176,8 @@ export const createBroadcastChannelAdapter = (
           presence: setPresenceUser(state.presence, self),
         });
 
-        sendMessage("presence:announce", self);
-        sendMessage("presence:sync-request", null);
+        sendMessage(BROADCAST_MESSAGE.ANNOUNCE, self);
+        sendMessage(BROADCAST_MESSAGE.SYNC_REQUEST, null);
 
         heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
         cleanupTimer = setInterval(cleanupStaleUsers, offlineTimeoutMs / 2);
@@ -238,7 +239,7 @@ export const createBroadcastChannelAdapter = (
         presence: setPresenceUser(state.presence, updatedSelf),
       });
 
-      sendMessage("presence:update", {
+      sendMessage(BROADCAST_MESSAGE.UPDATE, {
         userId: updatedSelf.userId,
         updates: { ...updates, lastActiveAt: updatedSelf.lastActiveAt },
       });
@@ -255,10 +256,10 @@ export const createBroadcastChannelAdapter = (
         timestamp: Date.now(),
       };
 
-      if (payload.type === "presence:sync") {
+      if (payload.type === PRESENCE_EVENT.SYNC) {
         const syncPayload = payload as PresenceSyncPayload;
         if (Array.isArray(syncPayload.users) && syncPayload.users.length > 0) {
-          sendMessage("presence:sync-response", syncPayload.users[0]);
+          sendMessage(BROADCAST_MESSAGE.SYNC_RESPONSE, syncPayload.users[0]);
         }
       }
 

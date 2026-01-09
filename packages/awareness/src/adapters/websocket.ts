@@ -3,6 +3,7 @@
  * Main adapter factory using modular connection management
  */
 
+import { WS_MESSAGE } from "../constants/presence-events";
 import type { PresenceEvent, PresenceEventPayload } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { createPresenceUser, updatePresenceUser } from "../types/presence";
@@ -26,7 +27,7 @@ import {
 import { parseMessage, processMessage } from "./websocket-message";
 import { createInternalState } from "./websocket-state";
 import type { WebSocketAdapterConfig } from "./websocket-types";
-import { DEFAULT_WS_CONFIG, WS_MESSAGE_TYPE } from "./websocket-types";
+import { DEFAULT_WS_CONFIG } from "./websocket-types";
 
 /**
  * Create a WebSocket presence adapter
@@ -75,8 +76,8 @@ export const createWebSocketAdapter = (
       true,
     );
 
-    sendMessage(WS_MESSAGE_TYPE.JOIN, { user: self });
-    sendMessage(WS_MESSAGE_TYPE.PRESENCE_SYNC_REQUEST);
+    sendMessage(WS_MESSAGE.JOIN, { user: self });
+    sendMessage(WS_MESSAGE.PRESENCE_SYNC);
     startHeartbeat(internal, config, sendMessage);
   };
 
@@ -176,7 +177,7 @@ export const createWebSocketAdapter = (
           return;
         }
 
-        sendMessage(WS_MESSAGE_TYPE.LEAVE, { userId: config.userInfo.userId });
+        sendMessage(WS_MESSAGE.LEAVE, { userId: config.userInfo.userId });
         cleanupWebSocket(internal, handlers);
         setState(
           { connectionState: "disconnected", self: null, presence: new Map() },
@@ -198,7 +199,7 @@ export const createWebSocketAdapter = (
 
       const newPresence = setPresenceUser(internal.state.presence, updatedSelf);
       setState({ self: updatedSelf, presence: newPresence }, true);
-      sendMessage(WS_MESSAGE_TYPE.PRESENCE_UPDATE, {
+      sendMessage(WS_MESSAGE.PRESENCE_UPDATE, {
         userId: updatedSelf.userId,
         updates: { ...updates, lastActiveAt: updatedSelf.lastActiveAt },
       });

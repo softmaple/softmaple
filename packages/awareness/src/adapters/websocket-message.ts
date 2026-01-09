@@ -2,6 +2,7 @@
  * WebSocket message handling utilities
  */
 
+import { WS_MESSAGE } from "../constants/presence-events";
 import type { PresenceUser } from "../types/presence";
 import { updatePresenceUser } from "../types/presence";
 import type { AdapterState } from "./adapter-state";
@@ -18,7 +19,6 @@ import type {
   PresenceUpdatePayload,
   WebSocketMessage,
 } from "./websocket-types";
-import { WS_MESSAGE_TYPE } from "./websocket-types";
 
 /**
  * Result of processing a message
@@ -157,26 +157,26 @@ export const processMessage = (
   }
 
   switch (message.type) {
-    case WS_MESSAGE_TYPE.JOIN:
+    case WS_MESSAGE.JOIN:
       return processJoin(state, message.payload as JoinPayload);
 
-    case WS_MESSAGE_TYPE.LEAVE:
+    case WS_MESSAGE.LEAVE:
       return processLeave(state, message.payload as LeavePayload);
 
-    case WS_MESSAGE_TYPE.PRESENCE_UPDATE:
+    case WS_MESSAGE.PRESENCE_UPDATE:
       return processPresenceUpdate(
         state,
         message.payload as PresenceUpdatePayload,
       );
 
-    case WS_MESSAGE_TYPE.PRESENCE_SYNC:
-    case WS_MESSAGE_TYPE.PRESENCE_SYNC_RESPONSE:
+    case WS_MESSAGE.PRESENCE_SYNC:
+    case WS_MESSAGE.PRESENCE_SYNC_RESPONSE:
       return processPresenceSync(state, message.payload as PresenceSyncPayload);
 
-    case WS_MESSAGE_TYPE.ERROR:
+    case WS_MESSAGE.ERROR:
       return processError(state, message.payload as ErrorPayload);
 
-    case WS_MESSAGE_TYPE.HEARTBEAT_ACK:
+    case WS_MESSAGE.HEARTBEAT_ACK:
       // Heartbeat ack is handled separately
       return { state, shouldNotifyPresence: false };
 

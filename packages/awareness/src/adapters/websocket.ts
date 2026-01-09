@@ -30,6 +30,55 @@ import type { WebSocketAdapterConfig } from "./websocket-types";
 import { DEFAULT_WS_CONFIG } from "./websocket-types";
 
 /**
+ * Authentication message type for secure token handshake
+ */
+const AUTH_MESSAGE_TYPE = "auth" as const;
+
+/**
+ * Default timeout for waiting for LEAVE message to flush (ms)
+ */
+const LEAVE_FLUSH_TIMEOUT_MS = 100;
+
+/**
+ * Build WebSocket URL with roomId only (no auth token in URL for security)
+ * Security Note: Auth tokens should never be passed in URLs as they may be
+ * logged in server access logs, browser history, and proxy logs.
+ */
+const buildUrl = (baseUrl: string, roomId: string): string => {
+  const url = new URL(baseUrl);
+  url.searchParams.set("roomId", roomId);
+  return url.toString();
+};
+
+/**
+ * Wait for WebSocket buffer to flush with timeout
+ */
+const waitForBufferFlush = (
+  socket: WebSocket | null,
+  timeoutMs: number,
+): Promise<void> =>
+  new Promise((resolve) => {
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+      resolve();
+      return;
+    }
+
+    const startTime = Date.now();
+    const checkBuffer = (): void => {
+      if (
+        socket.bufferedAmount === 0 ||
+        Date.now() - startTime >= timeoutMs ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
+        resolve();
+        return;
+      }
+      setTimeout(checkBuffer, 10);
+    };
+    checkBuffer();
+  });
+
+/**
  * Create a WebSocket presence adapter
  */
 export const createWebSocketAdapter = (
@@ -62,6 +111,12 @@ export const createWebSocketAdapter = (
   const handleOpen = (): void => {
     clearConnectionTimeout(internal);
     resetReconnectState(internal);
+
+    // Send auth token as first message after connection opens (secure handshake)
+    // This is more secure than passing token in URL query string
+    if (config.authToken !== undefined) {
+      sendMessage(AUTH_MESSAGE_TYPE, { token: config.authToken });
+    }
 
     const self = createPresenceUser({
       userId: config.userInfo.userId,
@@ -121,7 +176,9 @@ export const createWebSocketAdapter = (
     cleanupWebSocket(internal, handlers);
     setState({ connectionState: "connecting" });
 
-    internal.socket = new WebSocket(config.url);
+    // Build URL with roomId only (auth handled via message after connect)
+    const wsUrl = buildUrl(config.url, config.roomId);
+    internal.socket = new WebSocket(wsUrl);
     internal.socket.addEventListener("open", handleOpen);
     internal.socket.addEventListener("message", handleMessage);
     internal.socket.addEventListener("close", handleClose);
@@ -147,44 +204,50 @@ export const createWebSocketAdapter = (
           return;
         }
 
-        const onConnected: Unsubscribe = subscriptions.onConnectionChange(
-          (state) => {
-            if (state === "connected") {
-              onConnected();
-              onError();
-              resolve();
-            }
-          },
-        );
+        // Declare variables first to avoid TDZ (Temporal Dead Zone) issues
+        // Both callbacks reference each other for cleanup
+        let unsubscribeConnected: Unsubscribe;
+        let unsubscribeError: Unsubscribe;
 
-        const onError: Unsubscribe = subscriptions.onError((error) => {
-          onConnected();
-          onError();
+        unsubscribeConnected = subscriptions.onConnectionChange((state) => {
+          if (state === "connected") {
+            unsubscribeConnected();
+            unsubscribeError();
+            resolve();
+          }
+        });
+
+        unsubscribeError = subscriptions.onError((error) => {
+          unsubscribeConnected();
+          unsubscribeError();
           reject(error);
         });
 
         connectInternal();
       }),
 
-    disconnect: (): Promise<void> =>
-      new Promise((resolve) => {
-        if (
-          internal.socket === null ||
-          internal.socket.readyState === WebSocket.CLOSED
-        ) {
-          setState({ connectionState: "disconnected" });
-          resolve();
-          return;
-        }
+    disconnect: async (): Promise<void> => {
+      if (
+        internal.socket === null ||
+        internal.socket.readyState === WebSocket.CLOSED
+      ) {
+        setState({ connectionState: "disconnected" });
+        return;
+      }
 
-        sendMessage(WS_MESSAGE.LEAVE, { userId: config.userInfo.userId });
-        cleanupWebSocket(internal, handlers);
-        setState(
-          { connectionState: "disconnected", self: null, presence: new Map() },
-          true,
-        );
-        resolve();
-      }),
+      // Send LEAVE message
+      sendMessage(WS_MESSAGE.LEAVE, { userId: config.userInfo.userId });
+
+      // Wait for the message to be flushed before cleanup
+      // This ensures the LEAVE message is sent before socket closes
+      await waitForBufferFlush(internal.socket, LEAVE_FLUSH_TIMEOUT_MS);
+
+      cleanupWebSocket(internal, handlers);
+      setState(
+        { connectionState: "disconnected", self: null, presence: new Map() },
+        true,
+      );
+    },
 
     getConnectionState: (): AdapterConnectionState =>
       internal.state.connectionState,

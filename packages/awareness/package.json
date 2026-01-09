@@ -22,6 +22,10 @@
       "types": "./dist/adapters/types.d.ts",
       "import": "./dist/adapters/types.js"
     },
+    "./adapters/broadcast-channel": {
+      "types": "./dist/adapters/broadcast-channel.d.ts",
+      "import": "./dist/adapters/broadcast-channel.js"
+    },
     "./styles.css": "./dist/styles.css"
   },
   "files": [

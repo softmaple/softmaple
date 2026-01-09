@@ -24,6 +24,7 @@ export default defineConfig({
         "types/events": path.resolve(__dirname, "src/types/events.ts"),
         "types/state": path.resolve(__dirname, "src/types/state.ts"),
         "adapters/types": path.resolve(__dirname, "src/adapters/types.ts"),
+        "adapters/broadcast-channel": path.resolve(__dirname, "src/adapters/broadcast-channel.ts"),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,

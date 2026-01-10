@@ -1,0 +1,55 @@
+name: Awareness Package Tests
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - "packages/awareness/**"
+      - ".github/workflows/awareness-tests.yml"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches: [main, next]
+    paths:
+      - "packages/awareness/**"
+      - ".github/workflows/awareness-tests.yml"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests with coverage
+        run: pnpm --filter @softmaple/awareness test:coverage
+        env:
+          CI: true
+
+      - name: Report coverage to PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: packages/awareness

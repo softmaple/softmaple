@@ -43,9 +43,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build awareness package
-        run: pnpm --filter @softmaple/awareness build
-
       - name: Run unit tests with coverage
         run: pnpm --filter @softmaple/awareness test:coverage
         env:

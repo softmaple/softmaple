@@ -2,24 +2,6 @@ name: Playwright Tests
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, next ]
-    paths:
-      - 'apps/web/**'
-      - 'packages/**'
-      - '.github/workflows/playwright.yml'
-      - 'pnpm-lock.yaml'
-      - 'turbo.json'
-      - '!**/*.md'
-  pull_request:
-    branches: [ main, next ]
-    paths:
-      - 'apps/web/**'
-      - 'packages/**'
-      - '.github/workflows/playwright.yml'
-      - 'pnpm-lock.yaml'
-      - 'turbo.json'
-      - '!**/*.md'
 
 # Concurrency control - cancel old runs within the same PR when new commits arrive
 # Different PRs and branches can run in parallel

@@ -1,18 +1,7 @@
 name: E2E Tests "@softmaple/playground" app
 
 on:
-  pull_request:
-    paths:
-      - 'apps/playground/**/*.ts'
-      - 'apps/playground/**/*.tsx'
-      - 'apps/playground/e2e/**'
-      - 'apps/playground/package.json'
-      - 'apps/playground/vite.config.*'
-      - 'apps/playground/playwright.config.ts'
-      - 'packages/eg-walker/**'
-      - 'packages/ui/**'
-      - '.github/workflows/test-playground-e2e.yml'
-      - '!**/*.md'
+  workflow_dispatch:
 
 # Concurrency control - cancel old runs within the same PR when new commits arrive
 # Different PRs can run in parallel

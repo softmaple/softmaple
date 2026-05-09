@@ -292,7 +292,6 @@ export class IndexedSequence<T extends object> {
         remaining -= candidate.size;
         return false;
       });
-
       if (!child) {
         throw new Error(`Index ${index} out of bounds`);
       }
@@ -356,7 +355,6 @@ export class IndexedSequence<T extends object> {
         total += this.weightSum(candidate, kind);
         return false;
       });
-
       if (!child) {
         return total;
       }
@@ -407,7 +405,6 @@ export class IndexedSequence<T extends object> {
         position += candidate.size;
         return false;
       });
-
       if (!child) {
         throw new Error(`Index ${index} out of bounds`);
       }
@@ -421,7 +418,6 @@ export class IndexedSequence<T extends object> {
       }
       remaining -= weight;
     }
-
     throw new Error(`Index ${index} out of bounds`);
   }
 

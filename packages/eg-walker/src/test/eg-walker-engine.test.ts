@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
+import { EgWalker } from "../core/walker";
 import { EgWalkerAPI } from "../core/external-api";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { EventGraph } from "../graph/event-graph";
@@ -81,6 +82,126 @@ describe("EgWalkerEngine", () => {
     expect(generated.text).toBe("aef");
   });
 
+  it("handles empty inserts and deletes that run past visible prepare items", () => {
+    const generated = new EgWalkerEngine().generate(
+      [
+        {
+          id: "noop:0",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+          timestamp: 1,
+        },
+        {
+          id: "delete:0",
+          parentVersion: new Set(["noop:0"]),
+          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 4 },
+          timestamp: 2,
+        },
+      ],
+      "a",
+    );
+
+    expect(generated.text).toBe("");
+    expect(generated.transformedOperations).toEqual([
+      { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+    ]);
+  });
+
+  it("retreats and advances delete events while walking divergent versions", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "abc" },
+        timestamp: 1,
+      },
+      {
+        id: "delete:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        timestamp: 2,
+      },
+      {
+        id: "left:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "L" },
+        timestamp: 3,
+      },
+      {
+        id: "after-delete:0",
+        parentVersion: new Set(["delete:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "D" },
+        timestamp: 4,
+      },
+    ];
+
+    const generated = new EgWalkerEngine().generate(events);
+
+    expect(generated.stats.retreatCount).toBeGreaterThanOrEqual(2);
+    expect(generated.stats.advanceCount).toBeGreaterThanOrEqual(1);
+    expect(generated.text).toContain("D");
+  });
+
+  it("orders concurrent insertions through origin buckets", () => {
+    const generated = new EgWalkerEngine().generate([
+      {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+        timestamp: 0,
+      },
+      {
+        id: "z:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Z" },
+        timestamp: 1,
+      },
+      {
+        id: "a:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 2,
+      },
+    ]);
+
+    expect(generated.text).toBe("ZAX");
+  });
+
+  it("orders version diffs deterministically for multi-event retreats and advances", () => {
+    const graph = new EventGraph();
+    for (const id of ["a", "b", "c"]) {
+      graph.addEvent({
+        id,
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: id },
+        timestamp: id.charCodeAt(0),
+      });
+    }
+
+    const engine = new EgWalkerEngine();
+    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
+    engine.graph = graph;
+    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
+    engine.eventOrder.set("a", 0);
+    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
+    engine.eventOrder.set("b", 1);
+    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
+    engine.eventOrder.set("c", 2);
+
+    // @ts-expect-error - Private method coverage for deterministic retreat/advance ordering.
+    expect(engine.diffVersions(new Set(["b", "c"]), new Set(["a"]))).toEqual({
+      retreat: ["c", "b"],
+      advance: ["a"],
+    });
+    // @ts-expect-error - Private method coverage for deterministic retreat/advance ordering.
+    expect(engine.diffVersions(new Set(["c"]), new Set(["a", "b"]))).toEqual({
+      retreat: ["c"],
+      advance: ["a", "b"],
+    });
+    // @ts-expect-error - Private method coverage for ID tie fallback.
+    expect(engine.compareByTopologicalOrder("b", "a")).toBeGreaterThan(0);
+  });
+
   it("round-trips persisted event graph state through the public API", () => {
     const api = new EgWalkerAPI("alice", "Hello");
     api.insert(5, " world");
@@ -91,6 +212,57 @@ describe("EgWalkerEngine", () => {
 
     expect(restored.getText()).toBe("ello world!");
     expect(restored.exportEventGraph()).toHaveLength(3);
+  });
+});
+
+describe("EgWalker", () => {
+  it("walks events through the engine and exposes final versions", () => {
+    const walker = new EgWalker({ initialText: "Hi" });
+    const result = walker.walk([
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "!" },
+        timestamp: 1,
+      },
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        timestamp: 2,
+      },
+    ]);
+
+    expect(result.finalText).toBe("i!");
+    expect(result.eventsProcessed).toBe(2);
+    expect(walker.getPrepareVersion()).toEqual(new Set(["alice:1"]));
+    expect(walker.getEffectVersion()).toEqual(new Set(["alice:1"]));
+  });
+
+  it("walks an empty event list without changing initial text", () => {
+    const walker = new EgWalker({ initialText: "seed" });
+
+    expect(walker.walk([])).toEqual({
+      finalText: "seed",
+      eventsProcessed: 0,
+      retreatCount: 0,
+      advanceCount: 0,
+    });
+    expect(walker.getPrepareVersion()).toEqual(new Set());
+    expect(walker.getEffectVersion()).toEqual(new Set());
+  });
+
+  it("defaults walker initial text to an empty string", () => {
+    const result = new EgWalker().walk([
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+    ]);
+
+    expect(result.finalText).toBe("A");
   });
 });
 
@@ -248,6 +420,84 @@ describe("Full paper architecture utilities", () => {
     expect(sequence.toArray()).toEqual(model);
   });
 
+  it("covers ranked B-tree boundary behavior and bulk weight refresh", () => {
+    const items = [
+      { id: "a", prepare: 1, effect: 0 },
+      { id: "b", prepare: 0, effect: 1 },
+    ];
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => item.prepare,
+      (item: (typeof items)[number]) => item.effect,
+      items,
+    );
+
+    expect(sequence.at(-1)).toBeUndefined();
+    expect(sequence.at(2)).toBeUndefined();
+    expect(sequence.slice(1)).toEqual([items[1]]);
+    expect(sequence.indexOf((item) => item.id === "b")).toBe(1);
+    expect(sequence.indexOf((item) => item.id === "missing")).toBe(-1);
+    expect(sequence.positionOf({ id: "external", prepare: 1, effect: 1 })).toBe(
+      -1,
+    );
+    expect(sequence.nextPrepareVisiblePosition(-1)).toBeNull();
+    expect(sequence.nextPrepareVisiblePosition(3)).toBeNull();
+    expect(sequence.prepareIndexToPosition(1, true)).toBe(2);
+    expect(() => sequence.prepareIndexToPosition(-1, false)).toThrow(
+      "Index -1 out of bounds",
+    );
+    expect(() => sequence.prepareIndexToPosition(1, false)).toThrow(
+      "Index 1 out of bounds",
+    );
+    expect(() => sequence.insert(-1, items[0]!)).toThrow(
+      "Insert index -1 out of bounds",
+    );
+
+    items[0]!.prepare = 0;
+    items[0]!.effect = 1;
+    items[1]!.prepare = 1;
+    items[1]!.effect = 0;
+    sequence.updateWeights();
+
+    expect(sequence.prepareIndexToPosition(0, false)).toBe(1);
+    expect(sequence.effectIndexBeforePosition(2)).toBe(1);
+
+    sequence.clear();
+    expect(sequence.length).toBe(0);
+    expect(sequence.toArray()).toEqual([]);
+    expect(sequence.indexOf(() => true)).toBe(-1);
+    expect(sequence.effectIndexBeforePosition(10)).toBe(0);
+    expect(sequence.prepareIndexToPosition(0, true)).toBe(0);
+    expect(() => sequence.prepareIndexToPosition(0, false)).toThrow(
+      "Index 0 out of bounds",
+    );
+    expect(() => sequence.insert(1, items[0]!)).toThrow(
+      "Insert index 1 out of bounds",
+    );
+    expect(() => sequence.updateItem(items[0]!)).not.toThrow();
+  });
+
+  it("refreshes ranked B-tree weights across internal nodes", () => {
+    const items = Array.from({ length: 140 }, (_, index) => ({
+      id: `bulk-${index}`,
+      prepare: 1,
+      effect: 1,
+    }));
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => item.prepare,
+      (item: (typeof items)[number]) => item.effect,
+      items,
+    );
+
+    items.forEach((item, index) => {
+      item.prepare = index === 139 ? 1 : 0;
+      item.effect = index === 0 ? 1 : 0;
+    });
+    sequence.updateWeights();
+
+    expect(sequence.prepareIndexToPosition(0, false)).toBe(139);
+    expect(sequence.effectIndexBeforePosition(140)).toBe(1);
+  });
+
   it("partially replays from a critical checkpoint using the full graph", () => {
     const graph = new EventGraph();
     const events: GraphEvent[] = [
@@ -294,6 +544,29 @@ describe("Full paper architecture utilities", () => {
 
     expect(analyzer.isCritical(graph, new Set(["r:0"]))).toBe(true);
     expect(analyzer.latestCriticalVersion(graph)).toEqual(new Set(["r:1"]));
+  });
+
+  it("handles empty and non-critical versions in critical checkpoint analysis", () => {
+    const graph = new EventGraph();
+    const analyzer = new CriticalVersionAnalyzer();
+
+    expect(analyzer.isCritical(graph, new Set())).toBe(true);
+    expect(analyzer.latestCriticalVersion(graph)).toEqual(new Set());
+
+    graph.addEvent({
+      id: "left",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+      timestamp: 1,
+    });
+    graph.addEvent({
+      id: "right",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+      timestamp: 2,
+    });
+
+    expect(analyzer.isCritical(graph, new Set(["left"]))).toBe(false);
   });
 
   it("round-trips the event graph through the columnar codec", () => {
@@ -358,5 +631,80 @@ describe("Full paper architecture utilities", () => {
 
     expect(encoded.operationRuns).toHaveLength(800);
     expect(decoded.getTopologicalOrder()).toEqual(graph.getTopologicalOrder());
+  });
+
+  it("rejects malformed binary columnar payloads", () => {
+    const codec = new ColumnarEventGraphCodec();
+
+    expect(() => codec.decodeBinary(new Uint8Array())).toThrow(
+      "Unexpected end of varint",
+    );
+    expect(() => codec.decodeBinary(new Uint8Array([1, 0]))).toThrow(
+      "Invalid eg-walker columnar graph header",
+    );
+    expect(() => codec.decodeBinary(new Uint8Array([4, 0x45, 0x47]))).toThrow(
+      "Unexpected end of binary eg-walker graph",
+    );
+  });
+
+  it("covers columnar ID and malformed operation run edge cases", () => {
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "custom-id",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    graph.addEvent({
+      id: "replica:not-number",
+      parentVersion: new Set(["custom-id"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+      timestamp: 2,
+    });
+
+    const codec = new ColumnarEventGraphCodec();
+    const encoded = codec.encode(graph);
+
+    expect(codec.toSerializedGraph(encoded).events).toHaveLength(2);
+    expect(
+      codec.decodeBinary(codec.encodeBinary(graph)).getAllEvents(),
+    ).toHaveLength(2);
+    expect(() =>
+      codec.decode({
+        ...encoded,
+        operationRuns: [],
+      }),
+    ).toThrow("Missing operation run for event offset 0");
+    expect(() =>
+      codec.decode({
+        ...encoded,
+        operationRuns: [
+          {
+            type: OPERATION_TYPE.INSERT,
+            startIndex: 0,
+            startEventOffset: 1,
+            length: 1,
+            textLength: 1,
+          },
+        ],
+      }),
+    ).toThrow("Operation run 0 does not cover event offset 0");
+
+    expect(() =>
+      codec.decode({
+        ...encoded,
+        parentOverrides: [{ eventOffset: 1, parents: ["missing"] }],
+      }),
+    ).toThrow("Missing parent event: missing");
+
+    graph.addEvent({
+      id: "replica:2",
+      parentVersion: new Set(["replica:not-number"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+      timestamp: -1,
+    });
+    expect(() => codec.encodeBinary(graph)).toThrow(
+      "Cannot encode invalid varint value -1",
+    );
   });
 });

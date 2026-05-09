@@ -131,6 +131,23 @@ describe("EventGraph", () => {
         "Event event-1 already exists",
       );
     });
+
+    it("should reject events with missing parents", () => {
+      const graph = new EventGraph();
+
+      expect(() =>
+        graph.addEvent({
+          id: "event-2",
+          timestamp: 200,
+          parentVersion: new Set<EventId>(["missing-parent"]),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: "B",
+          },
+        }),
+      ).toThrow("Missing parent event: missing-parent");
+    });
   });
 
   describe("getTopologicalOrder", () => {
@@ -378,6 +395,29 @@ describe("EventGraph", () => {
 
       expect(reSerialized.metadata?.customField).toBe("test-value");
     });
+
+    it("should reject serialized graphs whose parents cannot be resolved", () => {
+      const invalidData: SerializedEventGraph = {
+        version: new Set<EventId>(["event-2"]),
+        events: [
+          {
+            id: "event-2",
+            timestamp: 200,
+            parentVersion: new Set<EventId>(["missing-parent"]),
+            operation: {
+              type: OPERATION_TYPE.INSERT,
+              index: 0,
+              text: "B",
+            },
+          },
+        ],
+        metadata: {},
+      };
+
+      expect(() => EventGraph.deserialize(invalidData)).toThrow(
+        "Cannot deserialize event graph with missing parents: missing-parent",
+      );
+    });
   });
 
   describe("branch coverage improvements", () => {
@@ -385,6 +425,47 @@ describe("EventGraph", () => {
       const graph = new EventGraph();
       const result = graph.getEvent("non-existent");
       expect(result).toBeUndefined();
+    });
+
+    it("should ignore duplicate and unknown IDs when expanding versions", () => {
+      const graph = new EventGraph();
+      graph.addEvent({
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      });
+
+      expect(
+        graph.expandVersion(
+          new Set<EventId>(["event-1", "event-1", "missing"]),
+        ),
+      ).toEqual(new Set<EventId>(["event-1"]));
+    });
+
+    it("should clear all graph state and metadata", () => {
+      const graph = new EventGraph();
+      graph.setMetadata({ key: "value" });
+      graph.addEvent({
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      });
+
+      graph.clear();
+
+      expect(graph.getAllEvents()).toEqual([]);
+      expect(graph.getFrontier()).toEqual(new Set());
+      expect(graph.getMetadata()).toEqual({});
     });
 
     it("should handle getChildren for event with no children", () => {

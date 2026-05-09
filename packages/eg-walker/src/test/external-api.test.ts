@@ -79,6 +79,11 @@ describe("EgWalkerAPI", () => {
       const api = new EgWalkerAPI("r1", "Hello");
       expect(api.getText()).toBe("Hello");
     });
+
+    it("should return README-compatible document state text", () => {
+      const api = new EgWalkerAPI("r1", "Hello");
+      expect(api.getDocumentState()).toBe("Hello");
+    });
   });
 
   describe("serialize/deserialize", () => {
@@ -100,12 +105,28 @@ describe("EgWalkerAPI", () => {
   });
 
   describe("duplicate event handling", () => {
-    it("should gracefully handle duplicate local events", async () => {
-      // Skip this test - duplicate local events are hard to trigger
-      // because generateEventId() always creates unique IDs
-      // The duplicate handling in applyLocalOperation is defensive code
-      // that's more relevant for manual event graph construction
-      expect(true).toBe(true);
+    it("should gracefully handle duplicate local events", () => {
+      const api = new EgWalkerAPI("r1", "");
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // @ts-expect-error - Mocking private eventGraph method for defensive duplicate branch.
+      const originalAddEvent = api.eventGraph.addEvent;
+      // @ts-expect-error - Mocking private eventGraph method for defensive duplicate branch.
+      api.eventGraph.addEvent = () => {
+        throw new Error("Event r1:0 already exists");
+      };
+
+      api.insert(0, "Hello");
+
+      expect(api.getText()).toBe("");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Duplicate event detected in applyLocalOperation",
+        ),
+      );
+
+      // @ts-expect-error - Restoring private eventGraph method
+      api.eventGraph.addEvent = originalAddEvent;
+      warnSpy.mockRestore();
     });
 
     it("should gracefully handle duplicate remote events", async () => {
@@ -273,5 +294,18 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     // Deserialize should handle eventGraph even though it's not fully implemented
     const deserialized = EgWalkerAPI.deserialize(serialized);
     expect(deserialized.getText()).toBe("Test");
+  });
+
+  it("should deserialize empty graph state without stored initial text metadata", () => {
+    const deserialized = EgWalkerAPI.deserialize({
+      text: "Fallback",
+      eventGraph: {
+        version: new Set(),
+        events: [],
+        metadata: {},
+      },
+    });
+
+    expect(deserialized.getText()).toBe("Fallback");
   });
 });

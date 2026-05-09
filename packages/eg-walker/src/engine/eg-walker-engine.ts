@@ -31,7 +31,6 @@ export interface GenerateOptions {
   readonly initialVersion?: ReadonlySet<EventId>;
   readonly eventGraph?: EventGraph;
 }
-
 const compareIds = (left: EventId, right: EventId): number =>
   left.localeCompare(right);
 
@@ -349,7 +348,6 @@ export class EgWalkerEngine {
         }
       }
     }
-
     return upperBound;
   }
 

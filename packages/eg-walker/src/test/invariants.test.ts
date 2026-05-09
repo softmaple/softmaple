@@ -483,4 +483,34 @@ describe("Section 3.1: StrongListInvariant class", () => {
 
     expect(invariant.verify(events)).toBe(true);
   });
+
+  it("should reject events with missing causal dependencies", () => {
+    const invariant = new StrongListInvariant();
+
+    expect(
+      invariant.verify([
+        {
+          id: "e2",
+          timestamp: Date.now(),
+          parentVersion: new Set(["missing"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "hello" },
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("should reject malformed delete operations", () => {
+    const invariant = new StrongListInvariant();
+
+    expect(
+      invariant.verify([
+        {
+          id: "e1",
+          timestamp: Date.now(),
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 0 },
+        },
+      ]),
+    ).toBe(false);
+  });
 });

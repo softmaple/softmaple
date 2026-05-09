@@ -12,6 +12,7 @@ export default defineConfig({
         "src/test/**",
         "src/**/*.test.ts",
         "src/**/*.spec.ts",
+        "src/**/*.d.ts",
         "src/**/index.ts",
       ],
       thresholds: {

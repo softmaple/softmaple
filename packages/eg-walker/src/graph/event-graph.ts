@@ -337,6 +337,15 @@ export class EventGraph {
   }
 
   /**
+   * Build an EventGraph from an unordered array of in-memory events.
+   * Topologically sorts via Kahn's algorithm so callers do not need to
+   * pre-sort. Throws if the input contains unresolvable parent references.
+   */
+  static fromEvents(events: ReadonlyArray<GraphEvent>): EventGraph {
+    return EventGraph.deserialize({ version: [], events });
+  }
+
+  /**
    * Deserialize event graph from persistence (Kahn's algorithm; O(n)).
    */
   static deserialize(data: SerializedGraphInput): EventGraph {

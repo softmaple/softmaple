@@ -821,7 +821,7 @@ describe("Full paper architecture utilities", () => {
     expect(text).toBe(blocks.join(""));
   });
 
-  it("passes a declared output bound to LZ4 binary decompression", () => {
+  it("caps lz4 destination allocation against the declared textLengths sum", () => {
     const graph = new EventGraph();
     graph.addEvent({
       id: "bounded:0",
@@ -836,10 +836,58 @@ describe("Full paper architecture utilities", () => {
 
     try {
       codec.decodeBinary(encoded);
+      // 2 UTF-16 code units * 4 + 64 = 72 bytes maxInsertedBytes.
       expect(decompressSpy).toHaveBeenCalledWith(expect.any(Uint8Array), 72);
     } finally {
       decompressSpy.mockRestore();
     }
+  });
+
+  it("rejects payloads whose decompressed content does not match declared textLengths", () => {
+    const codec = new ColumnarEventGraphCodec();
+    // Real, well-formed payload: one 5-char insert. textLengths sum = 5.
+    const realGraph = new EventGraph();
+    realGraph.addEvent({
+      id: "real:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "hello" },
+      timestamp: 1,
+    });
+    const realPayload = codec.encodeBinary(realGraph);
+
+    // Tampered payload: a 1-char insert (textLengths sum = 1) but the LZ4
+    // frame still carries the 5-byte original content. After decompression,
+    // insertedContent.length would be 5 even though textLengths declares 1.
+    // This is what a decompression-bomb / content-injection payload would
+    // produce, and we want the codec to reject it.
+    const tamperedGraph = new EventGraph();
+    tamperedGraph.addEvent({
+      id: "real:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+      timestamp: 1,
+    });
+    const tampered = codec.encodeBinary(tamperedGraph);
+
+    // Splice the real payload's LZ4 frame into the tampered payload by
+    // mocking lz4.decompress to return the larger content while textLengths
+    // remains 1. lz4js silently truncates to maxInsertedBytes; the codec's
+    // length-equality check is what catches the tampering.
+    const decompressSpy = vi
+      .spyOn(lz4, "decompress")
+      .mockReturnValue(new TextEncoder().encode("hello"));
+
+    try {
+      expect(() => codec.decodeBinary(tampered)).toThrow(
+        /Decompressed inserted-content size mismatch/,
+      );
+    } finally {
+      decompressSpy.mockRestore();
+    }
+    // Sanity-check the real payload still round-trips with the spy
+    // restored — confirms the tampering was the only thing the test
+    // depended on.
+    expect(codec.decodeBinary(realPayload).getAllEvents()).toHaveLength(1);
   });
 
   it("rejects binary payloads whose magic prefix is too short", () => {

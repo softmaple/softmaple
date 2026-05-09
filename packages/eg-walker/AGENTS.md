@@ -11,7 +11,6 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 - **Use immutable data structures** wherever possible
 - **Write pure functions** without side effects
 - **Compose smaller functions** for complex operations
-- **Prefer functional utilities** from `src/fp/utils/`
 
 ### Code Organization
 
@@ -58,7 +57,28 @@ Events are stored in compressed columnar format:
 - Run-length encoding for consecutive operations
 - LZ4-framed compression for inserted content
 
+### Binary Format
+
+- Magic prefix `EGW2` (`0x45 0x47 0x57 0x32`). Older `EGW1` payloads from
+  the pre-rewrite scaffolding are not compatible and are rejected at decode.
+- Each `IdRun` carries an explicit `custom` flag that distinguishes parsed
+  `replicaId:sequence` IDs from verbatim string IDs.
+- Inserted content is LZ4-framed. `decodeBinary` enforces a memory cap on
+  the destination buffer (4 UTF-8 bytes per declared UTF-16 code unit plus
+  64-byte slack) and verifies that the decoded string length matches the
+  declared `textLengths` sum, so a tampered payload that truncates or
+  inflates content is rejected.
+
 ### Known Limitations
 
-- Character-level CRDT will split multi-character strings
-- Out-of-order events require causal ordering
+- The CRDT layer stores one item per UTF-16 code unit, so a code point
+  represented as a surrogate pair (e.g. emoji) is materialised as two
+  CRDT items. The public API rejects insert/delete indexes that fall
+  between the two halves so concurrent edits cannot produce lone
+  surrogates; users must align operations to code-point boundaries.
+- Multi-character inserts are stored as a sequence of per-character
+  events under a single insert event.
+- Remote events with unknown parents are buffered by `EgWalkerAPI` and
+  flushed once their causal predecessors arrive; direct `EventGraph.addEvent`
+  callers still need to deliver in causal order (or use `EventGraph.deserialize`
+  for buffered topological loading).

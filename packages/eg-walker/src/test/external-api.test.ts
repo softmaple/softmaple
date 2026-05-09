@@ -414,6 +414,55 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     expect(api.getText().includes("C")).toBe(true);
   });
 
+  describe("surrogate pair boundaries", () => {
+    it("rejects inserts that land between surrogate halves", () => {
+      const api = new EgWalkerAPI("r1", "😀");
+      // "😀".length === 2 (high + low surrogate). Index 1 falls mid-pair.
+      expect(() => api.insert(1, "X")).toThrow(
+        /falls between surrogate halves/,
+      );
+      expect(() => api.delete(1, 0)).not.toThrow(); // length 0 short-circuits
+      expect(() => api.delete(0, 1)).toThrow(/falls between surrogate halves/);
+      // Valid boundaries still work.
+      expect(() => api.insert(0, "A")).not.toThrow();
+      expect(() => api.insert(api.getText().length, "Z")).not.toThrow();
+    });
+
+    it("keeps concurrent emoji operations from splitting surrogate pairs", () => {
+      const api = new EgWalkerAPI("alice", "ab");
+
+      // Insert emoji between a and b.
+      api.insert(1, "😀");
+      expect(api.getText()).toBe("a😀b");
+
+      // Concurrent remote insert at the same anchor (parents = root). Engine
+      // routes it through full replay; the resulting text must still be
+      // valid UTF-16 (no lone surrogates).
+      api.applyRemoteEvent({
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "Z" },
+        timestamp: Date.now(),
+      });
+
+      const text = api.getText();
+      // Each surrogate pair must remain adjacent.
+      for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          // High surrogate must be followed by a low surrogate.
+          const next = text.charCodeAt(i + 1);
+          expect(next).toBeGreaterThanOrEqual(0xdc00);
+          expect(next).toBeLessThanOrEqual(0xdfff);
+          i++;
+        } else {
+          // Lone low surrogate is a failure.
+          expect(code < 0xdc00 || code > 0xdfff).toBe(true);
+        }
+      }
+    });
+  });
+
   it("ignores already-buffered remote events on re-delivery", () => {
     // Hits the bufferedEventIds.has(event.id) early-return branch in
     // tryAcceptRemoteEvent.

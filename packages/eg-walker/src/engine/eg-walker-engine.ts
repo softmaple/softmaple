@@ -46,8 +46,13 @@ const spliceText = (text: string, index: number, insertText: string): string =>
 const deleteText = (text: string, index: number, length: number): string =>
   `${text.slice(0, index)}${text.slice(index + length)}`;
 
-const stringCodeUnits = (text: string): string[] =>
-  Array.from({ length: text.length }, (_, index) => text[index] ?? "");
+/**
+ * Split a string into JS UTF-16 code units, one per array slot. Unlike
+ * `Array.from(text)` (which iterates code points and would coalesce a
+ * surrogate pair into one entry), this preserves the public-API code-unit
+ * indexing on which the CRDT items are keyed.
+ */
+const stringCodeUnits = (text: string): string[] => text.split("");
 
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.

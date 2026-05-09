@@ -175,20 +175,24 @@ export class ColumnarEventGraphCodec {
       (total, length) => total + length,
       0,
     );
-    // Cap defends against malicious LZ4 payloads that decompress to far more
-    // than declared. textLengths are byte-counts of UTF-16 code units; allow up
-    // to 4 bytes per code unit (the maximum for UTF-8 surrogate pair encoding).
+    // Memory cap: LZ4 frames declare a per-block ceiling that's typically
+    // 4-8 MB regardless of actual payload, so the frame's decompressBound is
+    // not a useful bomb signal. Instead, bound the destination allocation
+    // (lz4js writes silently past a too-small dst, then truncates), and then
+    // verify the decoded string length matches the declared textLengths sum.
+    // textLengths are UTF-16 code units; allow up to 4 UTF-8 bytes per unit
+    // plus a small constant overhead for the destination buffer.
     const maxInsertedBytes = expectedInsertedSize * 4 + 64;
     const compressed = reader.readBytes(reader.readVarint());
     const decompressed = toUint8Array(
       lz4.decompress(compressed, maxInsertedBytes),
     );
-    if (decompressed.length > maxInsertedBytes) {
+    const insertedContent = textDecoder.decode(decompressed);
+    if (insertedContent.length !== expectedInsertedSize) {
       throw new Error(
-        `Decompressed inserted content exceeds expected bound (${decompressed.length} > ${maxInsertedBytes})`,
+        `Decompressed inserted-content size mismatch (expected ${expectedInsertedSize} UTF-16 code units, got ${insertedContent.length})`,
       );
     }
-    const insertedContent = textDecoder.decode(decompressed);
     const parentOverrides = this.readParentOverrides(reader);
     const idRuns = this.readIdRuns(reader);
     const timestamps = reader.readVarintArray();

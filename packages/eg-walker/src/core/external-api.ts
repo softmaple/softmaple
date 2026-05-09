@@ -198,27 +198,56 @@ export class EgWalkerAPI {
     }
   }
 
+  /**
+   * Reject indexes that fall between a high and low surrogate code unit.
+   *
+   * The engine stores one CRDT item per UTF-16 code unit, so concurrent
+   * operations between two halves of a surrogate pair could otherwise produce
+   * lone surrogates in the merged text. Rejecting at the public boundary keeps
+   * the CRDT layer free of mid-surrogate operations.
+   */
+  private assertNotMidSurrogate(index: number): void {
+    if (index <= 0 || index >= this.document.length) {
+      return;
+    }
+    const high = this.document.charCodeAt(index - 1);
+    if (high < 0xd800 || high > 0xdbff) {
+      return;
+    }
+    const low = this.document.charCodeAt(index);
+    if (low >= 0xdc00 && low <= 0xdfff) {
+      throw new Error(
+        `Index ${index} falls between surrogate halves of a single code point`,
+      );
+    }
+  }
+
   private validateLocalOperation(
     operation: ExternalOperation,
   ): ExternalOperation | null {
     if (operation.type === OPERATION_TYPE.INSERT) {
-      this.validateIndex(operation.index, true);
+      // Empty inserts are no-ops; skip index validation.
       if (operation.text.length === 0) {
         return null;
       }
+      this.validateIndex(operation.index, true);
+      this.assertNotMidSurrogate(operation.index);
       return operation;
     }
 
-    this.validateIndex(operation.index, false);
+    // Zero/negative-length deletes are no-ops; skip index validation.
     if (operation.length <= 0) {
       return null;
     }
+    this.validateIndex(operation.index, false);
+    this.assertNotMidSurrogate(operation.index);
 
     if (operation.index + operation.length > this.document.length) {
       throw new Error(
         `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.document.length}`,
       );
     }
+    this.assertNotMidSurrogate(operation.index + operation.length);
 
     return operation;
   }

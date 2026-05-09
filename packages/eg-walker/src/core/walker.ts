@@ -26,10 +26,7 @@ export class EgWalker {
   constructor(private readonly config: WalkerConfig = {}) {}
 
   walk(events: ReadonlyArray<GraphEvent>): WalkResult {
-    const graph = EventGraph.deserialize({
-      version: [],
-      events,
-    });
+    const graph = EventGraph.fromEvents(events);
 
     const orderedEvents = graph.getTopologicalOrder();
     const generated = new EgWalkerEngine().generate(

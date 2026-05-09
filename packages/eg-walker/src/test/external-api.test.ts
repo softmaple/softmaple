@@ -354,4 +354,90 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
     expect(deserialized.getText()).toBe("Fallback");
   });
+
+  it("ignores non-numeric sequence suffixes when inferring nextSequenceNumber", () => {
+    // Hits the Number.isInteger=false branch in inferNextSequenceNumber.
+    const api = new EgWalkerAPI("r1");
+    api.applyRemoteEvent({
+      id: "r1:notanumber",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+      timestamp: 1,
+    });
+
+    const restored = EgWalkerAPI.deserialize(
+      // Drop persisted nextSequenceNumber metadata so the API has to infer it.
+      {
+        ...api.serialize(),
+        eventGraph: {
+          ...api.serialize().eventGraph,
+          metadata: {},
+        },
+      },
+      "r1",
+    );
+
+    restored.insert(1, "Y");
+    // Inferred sequence number should be 0 because "notanumber" is skipped.
+    expect(restored.exportEventGraph().some((e) => e.id === "r1:0")).toBe(true);
+  });
+
+  it("falls back to full replay when concurrent remote parents differ from current", () => {
+    // Hits the parentsMatchCurrent !has branch (size matches, contents differ).
+    const api = new EgWalkerAPI("r1");
+    api.applyRemoteEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    // Concurrent event: same number of parents (0) as currentVersion.size (1).
+    // parentsMatchCurrent first short-circuits on size; here we want the
+    // member mismatch path. Apply a follow-up event whose parents are a
+    // single-element set that does not match currentVersion's element.
+    api.applyRemoteEvent({
+      id: "alice:1",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+      timestamp: 2,
+    });
+    // Now currentVersion = {alice:1}. Send a remote event whose parents are
+    // {alice:0} — same size, different content. Forces the !has branch.
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
+      timestamp: 3,
+    });
+    expect(api.getText().includes("A")).toBe(true);
+    expect(api.getText().includes("B")).toBe(true);
+    expect(api.getText().includes("C")).toBe(true);
+  });
+
+  it("ignores already-buffered remote events on re-delivery", () => {
+    // Hits the bufferedEventIds.has(event.id) early-return branch in
+    // tryAcceptRemoteEvent.
+    const api = new EgWalkerAPI("r1");
+    const child: GraphEvent = {
+      id: "alice:1",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      timestamp: 2,
+    };
+    api.applyRemoteEvent(child);
+    expect(api.getPendingRemoteCount()).toBe(1);
+    // Re-deliver the same buffered event — should be a no-op.
+    api.applyRemoteEvent(child);
+    expect(api.getPendingRemoteCount()).toBe(1);
+
+    // Then deliver the parent and verify both flush correctly.
+    api.applyRemoteEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    expect(api.getPendingRemoteCount()).toBe(0);
+    expect(api.getText()).toBe("BA");
+  });
 });

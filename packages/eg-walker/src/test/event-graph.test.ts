@@ -653,4 +653,68 @@ describe("EventGraph", () => {
       expect(order[0]?.id).toBe("event-1");
     });
   });
+
+  describe("normalizeEventIds tolerant input handling", () => {
+    const root = (): GraphEvent => ({
+      id: "root",
+      timestamp: 1,
+      parentVersion: new Set<EventId>(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+    });
+    const child = (parentVersion: unknown): unknown => ({
+      id: "child",
+      timestamp: 2,
+      parentVersion,
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+    });
+
+    it("accepts a Set instance for parentVersion (in-memory shape)", () => {
+      const graph = EventGraph.deserialize({
+        version: ["child"],
+        events: [root(), child(new Set<EventId>(["root"])) as never] as never,
+      });
+      expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
+    });
+
+    it("accepts a generic Iterable for parentVersion", () => {
+      const iterableParents: Iterable<EventId> = {
+        *[Symbol.iterator]() {
+          yield "root";
+        },
+      };
+      const graph = EventGraph.deserialize({
+        version: ["child"],
+        events: [root(), child(iterableParents) as never] as never,
+      });
+      expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
+    });
+
+    it("falls back to [] for legacy JSON.stringify(Set) → {} payloads", () => {
+      // Hits the Object.keys defensive branch: a non-iterable plain object
+      // cannot recover the original IDs, so the deserialized event ends up
+      // with no parents. Verifies the fallback does not crash.
+      const graph = EventGraph.deserialize({
+        version: [],
+        events: [root()] as never,
+        // Stand-alone root with parentVersion === {} (empty plain object).
+      });
+      const isolated = EventGraph.deserialize({
+        version: [],
+        events: [{ ...root(), parentVersion: {} } as never] as never,
+      });
+      expect(graph.getEvent("root")?.parentVersion).toEqual(new Set());
+      expect(isolated.getEvent("root")?.parentVersion).toEqual(new Set());
+    });
+
+    it("filters non-string entries out of array parentVersion", () => {
+      const graph = EventGraph.deserialize({
+        version: ["child"],
+        events: [
+          root(),
+          child([42, "root", null, "root"] as unknown as EventId[]) as never,
+        ] as never,
+      });
+      expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
+    });
+  });
 });

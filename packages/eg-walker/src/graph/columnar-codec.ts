@@ -5,7 +5,7 @@ import type {
   EventId,
   ExternalOperation,
   GraphEvent,
-  SerializedGraph,
+  SerializedGraphOutput,
 } from "../types";
 
 export interface OperationRun {
@@ -42,7 +42,10 @@ export interface ColumnarEventGraph {
   readonly metadata?: Record<string, unknown>;
 }
 
-const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x31]); // EGW1
+// EGW2: incompatible with the EGW1 prototype format. The current encoding adds
+// an explicit `custom` flag per IdRun (varint 0/1) and treats all serialized
+// versions as JSON-safe arrays rather than Set instances.
+const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x32]); // EGW2
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -128,7 +131,7 @@ export class ColumnarEventGraphCodec {
     return graph;
   }
 
-  toSerializedGraph(encoded: ColumnarEventGraph): SerializedGraph {
+  toSerializedGraph(encoded: ColumnarEventGraph): SerializedGraphOutput {
     return this.decode(encoded).serialize();
   }
 

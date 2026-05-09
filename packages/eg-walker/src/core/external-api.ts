@@ -14,7 +14,8 @@ import type {
   GraphEvent,
   EventId,
   Version,
-  SerializedGraph,
+  SerializedGraphInput,
+  SerializedGraphOutput,
 } from "../types";
 import { createDocumentState } from "./invariants";
 import {
@@ -55,13 +56,11 @@ export class EgWalkerAPI {
 
   /**
    * Insert text at index - public API
+   *
+   * Validation lives in {@link applyLocalOperation} so direct callers and
+   * `insert`/`delete` get the same guarantees without duplicating checks.
    */
   insert(index: number, text: string): void {
-    this.validateIndex(index, true);
-    if (text.length === 0) {
-      return;
-    }
-
     this.applyLocalOperation({
       type: OPERATION_TYPE.INSERT,
       index,
@@ -73,17 +72,6 @@ export class EgWalkerAPI {
    * Delete text at index - public API
    */
   delete(index: number, length: number): void {
-    this.validateIndex(index, false);
-    if (length <= 0) {
-      return;
-    }
-
-    if (index + length > this.document.length) {
-      throw new Error(
-        `Delete range [${index}, ${index + length}) exceeds document length ${this.document.length}`,
-      );
-    }
-
     this.applyLocalOperation({
       type: OPERATION_TYPE.DELETE,
       index,
@@ -106,7 +94,7 @@ export class EgWalkerAPI {
   /**
    * Serialize the document state (text + event graph)
    */
-  serialize(): { text: string; eventGraph: SerializedGraph } {
+  serialize(): { text: string; eventGraph: SerializedGraphOutput } {
     this.eventGraph.setMetadata({
       ...this.eventGraph.getMetadata(),
       initialText: this.initialText,
@@ -122,7 +110,7 @@ export class EgWalkerAPI {
   static deserialize(
     serialized: {
       text: string;
-      eventGraph: SerializedGraph | null;
+      eventGraph: SerializedGraphInput | null;
     },
     replicaId: string = "deserialized-replica",
   ): EgWalkerAPI {

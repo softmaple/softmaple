@@ -765,11 +765,20 @@ describe("Full paper architecture utilities", () => {
 
   it("rejects binary payloads whose magic prefix is too short", () => {
     const codec = new ColumnarEventGraphCodec();
-    // Length-prefix says 3 bytes of magic, but EGW1 is 4 bytes. Even though
+    // Length-prefix says 3 bytes of magic, but EGW2 is 4 bytes. Even though
     // the bytes that ARE present match, the length must equal the magic.
     expect(() =>
       codec.decodeBinary(new Uint8Array([3, 0x45, 0x47, 0x57])),
     ).toThrow("Invalid eg-walker columnar graph header");
+  });
+
+  it("rejects binary payloads from older incompatible versions (EGW1)", () => {
+    const codec = new ColumnarEventGraphCodec();
+    // 4-byte EGW1 prefix; current decoder expects EGW2.
+    const egw1Header = new Uint8Array([4, 0x45, 0x47, 0x57, 0x31]);
+    expect(() => codec.decodeBinary(egw1Header)).toThrow(
+      "Invalid eg-walker columnar graph header",
+    );
   });
 
   it("survives deep histories without recursion-stack overflow", () => {

@@ -306,6 +306,11 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
   it("should reject invalid direct local operations before committing", () => {
     const api = new EgWalkerAPI("r1", "Hello");
+    const readSeq = (): number =>
+      // @ts-expect-error - read private nextSequenceNumber for regression coverage
+      api.nextSequenceNumber as number;
+
+    expect(readSeq()).toBe(0);
 
     expect(() =>
       api.applyLocalOperation({
@@ -315,6 +320,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
       }),
     ).toThrow("Index 10 out of bounds");
     expect(api.exportEventGraph()).toHaveLength(0);
+    expect(readSeq()).toBe(0);
 
     expect(() =>
       api.applyLocalOperation({
@@ -324,6 +330,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
       }),
     ).toThrow("Delete range [3, 8) exceeds document length 5");
     expect(api.exportEventGraph()).toHaveLength(0);
+    expect(readSeq()).toBe(0);
 
     api.applyLocalOperation({
       type: OPERATION_TYPE.INSERT,
@@ -332,6 +339,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     });
     expect(api.exportEventGraph()[0]?.id).toBe("r1:0");
     expect(api.getText()).toBe("Hello!");
+    expect(readSeq()).toBe(1);
   });
 
   it("should deserialize empty graph state without stored initial text metadata", () => {

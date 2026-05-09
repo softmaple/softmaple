@@ -56,17 +56,46 @@ export interface GraphEvent {
   readonly timestamp: number; // For tie-breaking only
 }
 
-export type SerializedVersion =
+/**
+ * Serialized version output: the shape produced by `EventGraph.serialize()`
+ * and the columnar codec. Always a JSON-safe array of event IDs.
+ */
+export type SerializedVersionOutput = ReadonlyArray<EventId>;
+
+/**
+ * Serialized version input: tolerant shape accepted by `EventGraph.deserialize()`.
+ * Covers the JSON-safe array form, in-memory `Set` instances, generic
+ * iterables, and (defensively) plain objects produced by accidentally
+ * `JSON.stringify`ing a `Set` from older code.
+ */
+export type SerializedVersionInput =
   | ReadonlyArray<EventId>
   | ReadonlySet<EventId>
+  | Iterable<EventId>
   | Record<string, unknown>;
 
-export interface SerializedGraphEvent {
+/**
+ * @deprecated Use {@link SerializedVersionOutput} for serialize results and
+ * {@link SerializedVersionInput} for deserialize inputs.
+ */
+export type SerializedVersion = SerializedVersionInput;
+
+export interface SerializedGraphEventOutput {
   readonly id: EventId;
   readonly operation: ExternalOperation;
-  readonly parentVersion: SerializedVersion;
+  readonly parentVersion: SerializedVersionOutput;
   readonly timestamp: number;
 }
+
+export interface SerializedGraphEventInput {
+  readonly id: EventId;
+  readonly operation: ExternalOperation;
+  readonly parentVersion: SerializedVersionInput;
+  readonly timestamp: number;
+}
+
+/** @deprecated Use {@link SerializedGraphEventInput}. */
+export type SerializedGraphEvent = SerializedGraphEventInput;
 
 // ============================================================================
 // Invariant Types
@@ -92,9 +121,29 @@ export interface ListInvariant {
 // ============================================================================
 
 export type Event = GraphEvent;
-export type SerializedGraph = {
-  readonly version: SerializedVersion;
-  readonly events: ReadonlyArray<SerializedGraphEvent>;
+
+/**
+ * Shape produced by {@link EventGraph.serialize} — always JSON-safe.
+ */
+export interface SerializedGraphOutput {
+  readonly version: SerializedVersionOutput;
+  readonly events: ReadonlyArray<SerializedGraphEventOutput>;
   readonly metadata?: Record<string, unknown>;
-};
+}
+
+/**
+ * Shape accepted by {@link EventGraph.deserialize}. Tolerates both the
+ * JSON-safe output shape and in-memory `Set` instances.
+ */
+export interface SerializedGraphInput {
+  readonly version: SerializedVersionInput;
+  readonly events: ReadonlyArray<SerializedGraphEventInput>;
+  readonly metadata?: Record<string, unknown>;
+}
+
+/**
+ * Combined serialize/deserialize type. `serialize()` returns the narrow output
+ * shape; `deserialize()` accepts the wider input shape.
+ */
+export type SerializedGraph = SerializedGraphInput;
 export type SerializedEventGraph = SerializedGraph;

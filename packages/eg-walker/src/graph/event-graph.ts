@@ -5,8 +5,23 @@
  * No CRDT metadata is stored here.
  */
 
-import type { GraphEvent, EventId, SerializedGraph } from "../types";
+import type {
+  GraphEvent,
+  EventId,
+  SerializedGraphInput,
+  SerializedGraphOutput,
+} from "../types";
 
+/**
+ * Coerce a deserialized parent-version value into an array of event IDs.
+ *
+ * Tolerates the JSON-safe array form, in-memory `Set` instances, and generic
+ * iterables. The final `Object.keys` branch is a defensive landing zone for
+ * payloads produced by `JSON.stringify`ing a `Set` (which produces `{}`) — it
+ * cannot recover the original IDs in that case and returns `[]`, but it
+ * prevents a hard crash on malformed legacy data. Pre-1.0 callers that may
+ * still hold such payloads must re-serialize through the current code path.
+ */
 const normalizeEventIds = (value: unknown): EventId[] => {
   if (Array.isArray(value)) {
     return value.filter((id): id is EventId => typeof id === "string");
@@ -26,6 +41,9 @@ const normalizeEventIds = (value: unknown): EventId[] => {
       );
     }
 
+    // Last resort: payload shape is a non-iterable object. The most common
+    // source is JSON.stringify(new Set(...)) producing `{}`; recovery is
+    // impossible from this shape.
     return Object.keys(value);
   }
 
@@ -306,7 +324,7 @@ export class EventGraph {
    * Serialize event graph for persistence
    * Returns only the data that should be saved to disk
    */
-  serialize(): SerializedGraph {
+  serialize(): SerializedGraphOutput {
     const events = this.getAllEvents();
     return {
       version: Array.from(this.getFrontier()),
@@ -321,7 +339,7 @@ export class EventGraph {
   /**
    * Deserialize event graph from persistence (Kahn's algorithm; O(n)).
    */
-  static deserialize(data: SerializedGraph): EventGraph {
+  static deserialize(data: SerializedGraphInput): EventGraph {
     const graph = new EventGraph();
 
     if (data.metadata) {

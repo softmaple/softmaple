@@ -7,6 +7,31 @@
 
 import type { GraphEvent, EventId, SerializedGraph } from "../types";
 
+const normalizeEventIds = (value: unknown): EventId[] => {
+  if (Array.isArray(value)) {
+    return value.filter((id): id is EventId => typeof id === "string");
+  }
+
+  if (value instanceof Set) {
+    return Array.from(value).filter(
+      (id): id is EventId => typeof id === "string",
+    );
+  }
+
+  if (value && typeof value === "object") {
+    const maybeIterable = value as { [Symbol.iterator]?: unknown };
+    if (typeof maybeIterable[Symbol.iterator] === "function") {
+      return Array.from(value as Iterable<unknown>).filter(
+        (id): id is EventId => typeof id === "string",
+      );
+    }
+
+    return Object.keys(value);
+  }
+
+  return [];
+};
+
 export class EventAlreadyExistsError extends Error {
   readonly eventId: EventId;
 
@@ -284,10 +309,10 @@ export class EventGraph {
   serialize(): SerializedGraph {
     const events = this.getAllEvents();
     return {
-      version: this.getFrontier(),
+      version: Array.from(this.getFrontier()),
       events: events.map((e) => ({
         ...e,
-        parentVersion: new Set(Array.from(e.parentVersion)),
+        parentVersion: Array.from(e.parentVersion),
       })),
       metadata: this.metadata,
     };
@@ -311,7 +336,7 @@ export class EventGraph {
       const event: GraphEvent = {
         id: incoming.id,
         operation: incoming.operation,
-        parentVersion: new Set(incoming.parentVersion),
+        parentVersion: new Set(normalizeEventIds(incoming.parentVersion)),
         timestamp: incoming.timestamp,
       };
       eventsById.set(event.id, event);

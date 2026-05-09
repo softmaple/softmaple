@@ -344,7 +344,7 @@ describe("EventGraph", () => {
 
       const serialized = graph.serialize();
 
-      expect(serialized.version).toEqual(new Set(["event-2"]));
+      expect(serialized.version).toEqual(["event-2"]);
       expect(serialized.events).toHaveLength(2);
 
       const newGraph = EventGraph.deserialize(serialized);
@@ -353,6 +353,42 @@ describe("EventGraph", () => {
       expect(newGraph.hasEvent("event-2")).toBe(true);
       expect(newGraph.getEvent("event-2")?.parentVersion.has("event-1")).toBe(
         true,
+      );
+    });
+
+    it("serializes graph versions as JSON-safe arrays", () => {
+      const graph = new EventGraph();
+
+      graph.addEvent({
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello",
+        },
+      });
+      graph.addEvent({
+        id: "event-2",
+        timestamp: 200,
+        parentVersion: new Set<EventId>(["event-1"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 5,
+          text: "World",
+        },
+      });
+
+      const parsed = JSON.parse(
+        JSON.stringify(graph.serialize()),
+      ) as unknown as SerializedEventGraph;
+      const newGraph = EventGraph.deserialize(parsed);
+
+      expect(parsed.version).toEqual(["event-2"]);
+      expect(parsed.events[1]?.parentVersion).toEqual(["event-1"]);
+      expect(newGraph.getEvent("event-2")?.parentVersion).toEqual(
+        new Set(["event-1"]),
       );
     });
 

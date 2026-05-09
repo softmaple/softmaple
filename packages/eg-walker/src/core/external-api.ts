@@ -154,9 +154,14 @@ export class EgWalkerAPI {
    * the engine can advance incrementally rather than replay from scratch.
    */
   applyLocalOperation(operation: ExternalOperation): void {
+    const validatedOperation = this.validateLocalOperation(operation);
+    if (!validatedOperation) {
+      return;
+    }
+
     const event: GraphEvent = {
       id: this.generateEventId(),
-      operation,
+      operation: validatedOperation,
       parentVersion: this.currentVersion,
       timestamp: Date.now(),
     };
@@ -203,6 +208,31 @@ export class EgWalkerAPI {
         `Index ${index} out of bounds [0, ${max}] for document of length ${this.document.length}`,
       );
     }
+  }
+
+  private validateLocalOperation(
+    operation: ExternalOperation,
+  ): ExternalOperation | null {
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      this.validateIndex(operation.index, true);
+      if (operation.text.length === 0) {
+        return null;
+      }
+      return operation;
+    }
+
+    this.validateIndex(operation.index, false);
+    if (operation.length <= 0) {
+      return null;
+    }
+
+    if (operation.index + operation.length > this.document.length) {
+      throw new Error(
+        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.document.length}`,
+      );
+    }
+
+    return operation;
   }
 
   /**

@@ -56,6 +56,18 @@ export interface GraphEvent {
   readonly timestamp: number; // For tie-breaking only
 }
 
+export type SerializedVersion =
+  | ReadonlyArray<EventId>
+  | ReadonlySet<EventId>
+  | Record<string, unknown>;
+
+export interface SerializedGraphEvent {
+  readonly id: EventId;
+  readonly operation: ExternalOperation;
+  readonly parentVersion: SerializedVersion;
+  readonly timestamp: number;
+}
+
 // ============================================================================
 // Invariant Types
 // ============================================================================
@@ -81,8 +93,8 @@ export interface ListInvariant {
 
 export type Event = GraphEvent;
 export type SerializedGraph = {
-  readonly version: Version;
-  readonly events: ReadonlyArray<GraphEvent>;
+  readonly version: SerializedVersion;
+  readonly events: ReadonlyArray<SerializedGraphEvent>;
   readonly metadata?: Record<string, unknown>;
 };
 export type SerializedEventGraph = SerializedGraph;

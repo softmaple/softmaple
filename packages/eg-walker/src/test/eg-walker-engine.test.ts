@@ -611,6 +611,27 @@ describe("Full paper architecture utilities", () => {
     ).toBe("x".repeat(20));
   });
 
+  it("preserves a single sequence-zero generated ID through columnar codecs", () => {
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+
+    const codec = new ColumnarEventGraphCodec();
+    const decodedText = codec.decode(codec.encode(graph));
+    const decodedBinary = codec.decodeBinary(codec.encodeBinary(graph));
+
+    expect(decodedText.getTopologicalOrder().map((event) => event.id)).toEqual([
+      "alice:0",
+    ]);
+    expect(
+      decodedBinary.getTopologicalOrder().map((event) => event.id),
+    ).toEqual(["alice:0"]);
+  });
+
   it("decodes alternating columnar operation runs in linear run order", () => {
     const graph = new EventGraph();
     for (let i = 0; i < 800; i++) {

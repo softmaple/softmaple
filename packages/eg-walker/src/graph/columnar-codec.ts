@@ -21,6 +21,7 @@ export interface IdRun {
   readonly startSequence: number;
   readonly startEventOffset: number;
   readonly length: number;
+  readonly custom?: boolean;
 }
 
 export interface ParentOverride {
@@ -329,6 +330,7 @@ export class ColumnarEventGraphCodec {
           startSequence: 0,
           startEventOffset: eventOffset,
           length: 1,
+          custom: true,
         });
         continue;
       }
@@ -348,6 +350,7 @@ export class ColumnarEventGraphCodec {
           startSequence: parsed.sequence,
           startEventOffset: eventOffset,
           length: 1,
+          custom: false,
         });
       }
     }
@@ -362,6 +365,7 @@ export class ColumnarEventGraphCodec {
       writer.writeVarint(run.startSequence);
       writer.writeVarint(run.startEventOffset);
       writer.writeVarint(run.length);
+      writer.writeVarint(run.custom ? 1 : 0);
     }
   }
 
@@ -374,6 +378,7 @@ export class ColumnarEventGraphCodec {
         startSequence: reader.readVarint(),
         startEventOffset: reader.readVarint(),
         length: reader.readVarint(),
+        custom: reader.readVarint() === 1,
       });
     }
     return runs;
@@ -384,12 +389,9 @@ export class ColumnarEventGraphCodec {
 
     for (const run of runs) {
       for (let offset = 0; offset < run.length; offset++) {
-        ids[run.startEventOffset + offset] =
-          run.startSequence === 0 &&
-          run.length === 1 &&
-          !run.replicaId.includes(":")
-            ? run.replicaId
-            : `${run.replicaId}:${run.startSequence + offset}`;
+        ids[run.startEventOffset + offset] = run.custom
+          ? run.replicaId
+          : `${run.replicaId}:${run.startSequence + offset}`;
       }
     }
 

@@ -290,6 +290,50 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     expect(deserialized.getText()).toBe("Test");
   });
 
+  it("should deserialize JSON-persisted serialized API data", () => {
+    const api = new EgWalkerAPI("r1", "");
+    api.insert(0, "A");
+    api.insert(1, "B");
+
+    const parsed = JSON.parse(JSON.stringify(api.serialize())) as unknown as {
+      text: string;
+      eventGraph: SerializedGraph;
+    };
+    const deserialized = EgWalkerAPI.deserialize(parsed);
+
+    expect(deserialized.getText()).toBe("AB");
+  });
+
+  it("should reject invalid direct local operations before committing", () => {
+    const api = new EgWalkerAPI("r1", "Hello");
+
+    expect(() =>
+      api.applyLocalOperation({
+        type: OPERATION_TYPE.INSERT,
+        index: 10,
+        text: "!",
+      }),
+    ).toThrow("Index 10 out of bounds");
+    expect(api.exportEventGraph()).toHaveLength(0);
+
+    expect(() =>
+      api.applyLocalOperation({
+        type: OPERATION_TYPE.DELETE,
+        index: 3,
+        length: 5,
+      }),
+    ).toThrow("Delete range [3, 8) exceeds document length 5");
+    expect(api.exportEventGraph()).toHaveLength(0);
+
+    api.applyLocalOperation({
+      type: OPERATION_TYPE.INSERT,
+      index: 5,
+      text: "!",
+    });
+    expect(api.exportEventGraph()[0]?.id).toBe("r1:0");
+    expect(api.getText()).toBe("Hello!");
+  });
+
   it("should deserialize empty graph state without stored initial text metadata", () => {
     const deserialized = EgWalkerAPI.deserialize({
       text: "Fallback",

@@ -13,12 +13,6 @@ export default defineConfig({
         "src/**/*.test.ts",
         "src/**/*.spec.ts",
         "src/**/index.ts",
-        "src/types/compat.ts",
-        "src/constants/algorithm-config.ts",
-        "src/constants/error-codes.ts",
-        "src/constants/sentinels.ts",
-        "src/constants/version-relations.ts",
-        "src/constants/walker-states.ts",
       ],
       thresholds: {
         lines: 93.8,

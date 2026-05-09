@@ -7,8 +7,11 @@
 
 export { EventGraph } from "./event-graph";
 export {
-  DefaultEventGraphWalker,
-  type EventGraphWalker,
-} from "./topological-walker";
+  ColumnarEventGraphCodec,
+  type ColumnarEventGraph,
+  type IdRun,
+  type OperationRun,
+  type ParentOverride,
+} from "./columnar-codec";
 
 export type { EventId, Version, GraphEvent as Event } from "../types";

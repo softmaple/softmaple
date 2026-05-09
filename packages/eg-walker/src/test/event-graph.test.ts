@@ -327,7 +327,7 @@ describe("EventGraph", () => {
 
       const serialized = graph.serialize();
 
-      expect(serialized.version.size).toBe(2); // Should have 2 events
+      expect(serialized.version).toEqual(new Set(["event-2"]));
       expect(serialized.events).toHaveLength(2);
 
       const newGraph = EventGraph.deserialize(serialized);

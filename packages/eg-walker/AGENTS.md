@@ -15,11 +15,9 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 
 ### Code Organization
 
-- **Core algorithm**: `src/eg-walker.ts` and `src/crdt.ts`
-- **Functional utilities**: `src/fp/` module
-  - `utils/` - Array, composition, and helper functions
-  - `storage/` - Columnar storage implementation
-  - `core/` - Functional eg-walker implementation
+- **Public API**: `src/core/external-api.ts`
+- **Replay engine**: `src/engine/eg-walker-engine.ts`
+- **Graph and storage**: `src/graph/event-graph.ts`, `src/graph/columnar-codec.ts`
 - **Tests**: `src/test/` with corresponding `.test.ts` files
 
 ### Coding Style
@@ -34,12 +32,6 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 - Run tests: `pnpm --filter @softmaple/eg-walker test`
 - Run typecheck: `pnpm --filter @softmaple/eg-walker typecheck`
 - Run build: `pnpm --filter @softmaple/eg-walker build`
-
-### Performance Optimizations
-
-- Optimizations are enabled by default (`enableOptimizations = true`)
-- To disable optimizations: Call `setOptimizationsEnabled(false)` after instantiation
-- Benchmark tests in `src/test/benchmark.test.ts` exercise both enabled and disabled paths
 
 ### Commit Guidelines
 
@@ -64,10 +56,9 @@ Events are stored in compressed columnar format:
 - Topologically sorted events
 - Separate columns for type, position, content, parents, IDs
 - Run-length encoding for consecutive operations
-- Simple compression for content
+- LZ4-framed compression for inserted content
 
 ### Known Limitations
 
 - Character-level CRDT will split multi-character strings
-- Some tests expect behavior that conflicts with CRDT semantics
 - Out-of-order events require causal ordering

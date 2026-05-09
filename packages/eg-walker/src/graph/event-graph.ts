@@ -18,6 +18,16 @@ export class EventGraph {
   private metadata: Record<string, unknown> = {};
 
   /**
+   * Remove all events and metadata from the graph.
+   */
+  clear(): void {
+    this.events.clear();
+    this.childrenMap.clear();
+    this.parentsMap.clear();
+    this.metadata = {};
+  }
+
+  /**
    * Add an event to the graph
    */
   addEvent(event: GraphEvent): void {
@@ -68,6 +78,92 @@ export class EventGraph {
    */
   getAllEvents(): ReadonlyArray<GraphEvent> {
     return Array.from(this.events.values());
+  }
+
+  /**
+   * Store non-CRDT persistence metadata alongside the graph.
+   */
+  setMetadata(metadata: Record<string, unknown>): void {
+    this.metadata = { ...metadata };
+  }
+
+  /**
+   * Read persistence metadata without exposing mutable internal state.
+   */
+  getMetadata(): Record<string, unknown> {
+    return { ...this.metadata };
+  }
+
+  /**
+   * Get the frontier version: events with no known children.
+   */
+  getFrontier(): Set<EventId> {
+    const frontier = new Set<EventId>();
+
+    for (const eventId of this.events.keys()) {
+      const children = this.childrenMap.get(eventId);
+      if (!children || children.size === 0) {
+        frontier.add(eventId);
+      }
+    }
+
+    return frontier;
+  }
+
+  /**
+   * Expand a frontier version to the set of all events it causally includes.
+   */
+  expandVersion(version: ReadonlySet<EventId>): Set<EventId> {
+    const expanded = new Set<EventId>();
+
+    const visit = (eventId: EventId): void => {
+      if (expanded.has(eventId)) {
+        return;
+      }
+
+      const event = this.events.get(eventId);
+      if (!event) {
+        return;
+      }
+
+      expanded.add(eventId);
+      for (const parentId of event.parentVersion) {
+        visit(parentId);
+      }
+    };
+
+    for (const eventId of version) {
+      visit(eventId);
+    }
+
+    return expanded;
+  }
+
+  /**
+   * Compute Appendix B's transitive version diff.
+   */
+  diffVersions(
+    left: ReadonlySet<EventId>,
+    right: ReadonlySet<EventId>,
+  ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
+    const leftExpanded = this.expandVersion(left);
+    const rightExpanded = this.expandVersion(right);
+    const onlyInLeft = new Set<EventId>();
+    const onlyInRight = new Set<EventId>();
+
+    for (const eventId of leftExpanded) {
+      if (!rightExpanded.has(eventId)) {
+        onlyInLeft.add(eventId);
+      }
+    }
+
+    for (const eventId of rightExpanded) {
+      if (!leftExpanded.has(eventId)) {
+        onlyInRight.add(eventId);
+      }
+    }
+
+    return { onlyInLeft, onlyInRight };
   }
 
   /**
@@ -163,7 +259,7 @@ export class EventGraph {
   serialize(): SerializedGraph {
     const events = this.getAllEvents();
     return {
-      version: new Set<EventId>(Array.from(this.events.keys())),
+      version: this.getFrontier(),
       events: events.map((e) => ({
         ...e,
         parentVersion: new Set(Array.from(e.parentVersion)),
@@ -183,12 +279,43 @@ export class EventGraph {
       graph.metadata = data.metadata;
     }
 
-    for (const e of data.events) {
+    const pending = data.events.map((e) => ({
+      id: e.id,
+      operation: e.operation,
+      parentVersion: new Set(e.parentVersion),
+      timestamp: e.timestamp,
+    }));
+
+    while (pending.length > 0) {
+      const index = pending.findIndex((event) =>
+        Array.from(event.parentVersion).every((parentId) =>
+          graph.hasEvent(parentId),
+        ),
+      );
+
+      if (index === -1) {
+        const missingParents = pending.flatMap((event) =>
+          Array.from(event.parentVersion).filter(
+            (parentId) => !graph.hasEvent(parentId),
+          ),
+        );
+        throw new Error(
+          `Cannot deserialize event graph with missing parents: ${[
+            ...new Set(missingParents),
+          ].join(", ")}`,
+        );
+      }
+
+      const eventData = pending.splice(index, 1)[0];
+      if (!eventData) {
+        continue;
+      }
+
       const event: GraphEvent = {
-        id: e.id,
-        operation: e.operation,
-        parentVersion: new Set(e.parentVersion),
-        timestamp: e.timestamp,
+        id: eventData.id,
+        operation: eventData.operation,
+        parentVersion: eventData.parentVersion,
+        timestamp: eventData.timestamp,
       };
       graph.addEvent(event);
     }

@@ -154,7 +154,7 @@ export class StrongListInvariant implements ListInvariant {
     // Check for cycles using topological sort
     try {
       topologicalSort(events);
-    } catch (error) {
+    } catch {
       // Cycle detected in event graph
       return false;
     }

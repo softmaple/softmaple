@@ -16,9 +16,9 @@ import type {
   Version,
   SerializedGraph,
 } from "../types";
-import { createDocumentState, applyOperation } from "./invariants";
+import { createDocumentState } from "./invariants";
 import { EventGraph } from "../graph/event-graph";
-import { TemporaryCRDT } from "../crdt/temporary-state";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 /**
  * Public API for Eg-walker
@@ -26,6 +26,7 @@ import { TemporaryCRDT } from "../crdt/temporary-state";
  */
 export class EgWalkerAPI {
   private document: string = "";
+  private readonly initialText: string;
   private readonly eventGraph: EventGraph;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
@@ -33,9 +34,16 @@ export class EgWalkerAPI {
   constructor(
     private readonly replicaId: string,
     initialText: string = "",
+    eventGraph?: EventGraph,
   ) {
     this.document = initialText;
-    this.eventGraph = new EventGraph();
+    this.initialText = initialText;
+    this.eventGraph = eventGraph ?? new EventGraph();
+    this.currentVersion = this.eventGraph.getFrontier();
+    this.nextSequenceNumber = this.inferNextSequenceNumber();
+    if (this.eventGraph.getAllEvents().length > 0) {
+      this.replayEventGraph();
+    }
   }
 
   /**
@@ -103,6 +111,12 @@ export class EgWalkerAPI {
    * Serialize the document state (text + event graph)
    */
   serialize(): { text: string; eventGraph: SerializedGraph } {
+    this.eventGraph.setMetadata({
+      ...this.eventGraph.getMetadata(),
+      initialText: this.initialText,
+      nextSequenceNumber: this.nextSequenceNumber,
+    });
+
     return {
       text: this.document,
       eventGraph: this.eventGraph.serialize(),
@@ -112,24 +126,38 @@ export class EgWalkerAPI {
   /**
    * Deserialize from saved state
    */
-  static deserialize(serialized: {
-    text: string;
-    eventGraph: SerializedGraph;
-  }): EgWalkerAPI {
-    // Create new instance with the text
-    const api = new EgWalkerAPI("deserialized-replica", serialized.text);
-    // Restore event graph
-    if (serialized.eventGraph) {
-      // Note: EventGraph doesn't have deserialize yet, so this is a placeholder
-      // api.eventGraph = EventGraph.deserialize(serialized.eventGraph);
+  static deserialize(
+    serialized: {
+      text: string;
+      eventGraph: SerializedGraph | null;
+    },
+    replicaId: string = "deserialized-replica",
+  ): EgWalkerAPI {
+    if (!serialized.eventGraph) {
+      return new EgWalkerAPI(replicaId, serialized.text);
     }
+
+    const graph = EventGraph.deserialize(serialized.eventGraph);
+    const metadata = graph.getMetadata();
+    const initialText =
+      typeof metadata.initialText === "string"
+        ? metadata.initialText
+        : graph.getAllEvents().length === 0
+          ? serialized.text
+          : "";
+    const api = new EgWalkerAPI(replicaId, initialText, graph);
+
+    if (typeof metadata.nextSequenceNumber === "number") {
+      api.nextSequenceNumber = metadata.nextSequenceNumber;
+    }
+
     return api;
   }
 
   /**
    * Apply a local operation and add to event graph
    */
-  private applyLocalOperation(operation: ExternalOperation): void {
+  applyLocalOperation(operation: ExternalOperation): void {
     // Create event
     const eventId = this.generateEventId();
     const event: GraphEvent = {
@@ -138,9 +166,6 @@ export class EgWalkerAPI {
       parentVersion: this.currentVersion,
       timestamp: Date.now(),
     };
-
-    // Apply to local document
-    this.document = applyOperation(this.document, operation);
 
     // Add to event graph
     try {
@@ -156,8 +181,7 @@ export class EgWalkerAPI {
       throw error; // Re-throw other errors
     }
 
-    // Update version
-    this.currentVersion = new Set([...this.currentVersion, eventId]);
+    this.replayEventGraph();
   }
 
   /**
@@ -179,30 +203,7 @@ export class EgWalkerAPI {
       throw error; // Re-throw other errors
     }
 
-    // Use temporary CRDT for transformation
-    await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
-      // Get all events in topological order
-      const sortedEvents = this.eventGraph.getTopologicalOrder();
-
-      // Rebuild document from scratch by replaying all events
-      // This ensures deterministic ordering regardless of receipt order
-      this.document = "";
-
-      // Process each event with CRDT
-      for (const sortedEvent of sortedEvents) {
-        // Create CRDT items from event
-        const items = crdt.createItemsFromEvent(sortedEvent);
-        // Integrate items into CRDT
-        crdt.integrate(items);
-      }
-
-      // Get the final text from CRDT
-      const effectState = crdt.getEffectState();
-      this.document = effectState.visibleText;
-
-      // Update current version
-      this.currentVersion = new Set(sortedEvents.map((e) => e.id));
-    });
+    this.replayEventGraph();
   }
 
   /**
@@ -210,8 +211,9 @@ export class EgWalkerAPI {
    */
   private canApplyDirectly(event: GraphEvent): boolean {
     // Can apply directly if all parent events are in current version
+    const knownEvents = this.eventGraph.expandVersion(this.currentVersion);
     for (const parentId of event.parentVersion) {
-      if (!this.currentVersion.has(parentId)) {
+      if (!knownEvents.has(parentId)) {
         return false;
       }
     }
@@ -238,6 +240,13 @@ export class EgWalkerAPI {
   }
 
   /**
+   * Get current document text using the README-compatible API name.
+   */
+  getDocumentState(): string {
+    return this.document;
+  }
+
+  /**
    * Export event graph for persistence
    * This is what gets saved to disk - no CRDT metadata
    */
@@ -261,6 +270,32 @@ export class EgWalkerAPI {
     }
 
     return api;
+  }
+
+  private replayEventGraph(): void {
+    const sortedEvents = this.eventGraph.getTopologicalOrder();
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(sortedEvents, this.initialText);
+    this.document = generated.text;
+    this.currentVersion = this.eventGraph.getFrontier();
+  }
+
+  private inferNextSequenceNumber(): number {
+    let maxSequenceNumber = -1;
+    const prefix = `${this.replicaId}:`;
+
+    for (const event of this.eventGraph.getAllEvents()) {
+      if (!event.id.startsWith(prefix)) {
+        continue;
+      }
+
+      const sequenceNumber = Number(event.id.slice(prefix.length));
+      if (Number.isInteger(sequenceNumber)) {
+        maxSequenceNumber = Math.max(maxSequenceNumber, sequenceNumber);
+      }
+    }
+
+    return maxSequenceNumber + 1;
   }
 }
 

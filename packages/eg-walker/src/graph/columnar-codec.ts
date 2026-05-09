@@ -175,12 +175,14 @@ export class ColumnarEventGraphCodec {
       (total, length) => total + length,
       0,
     );
-    const compressed = reader.readBytes(reader.readVarint());
-    const decompressed = toUint8Array(lz4.decompress(compressed));
     // Cap defends against malicious LZ4 payloads that decompress to far more
     // than declared. textLengths are byte-counts of UTF-16 code units; allow up
     // to 4 bytes per code unit (the maximum for UTF-8 surrogate pair encoding).
     const maxInsertedBytes = expectedInsertedSize * 4 + 64;
+    const compressed = reader.readBytes(reader.readVarint());
+    const decompressed = toUint8Array(
+      lz4.decompress(compressed, maxInsertedBytes),
+    );
     if (decompressed.length > maxInsertedBytes) {
       throw new Error(
         `Decompressed inserted content exceeds expected bound (${decompressed.length} > ${maxInsertedBytes})`,

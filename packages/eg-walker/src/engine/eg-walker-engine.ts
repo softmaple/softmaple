@@ -46,6 +46,9 @@ const spliceText = (text: string, index: number, insertText: string): string =>
 const deleteText = (text: string, index: number, length: number): string =>
   `${text.slice(0, index)}${text.slice(index + length)}`;
 
+const stringCodeUnits = (text: string): string[] =>
+  Array.from({ length: text.length }, (_, index) => text[index] ?? "");
+
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
  *
@@ -168,7 +171,7 @@ export class EgWalkerEngine {
     });
 
     let originLeft: EventId | null = null;
-    Array.from(initialText).forEach((content, index) => {
+    stringCodeUnits(initialText).forEach((content, index) => {
       const id = `${BASE_EVENT_ID_PREFIX}${index}`;
       const item: AugmentedCRDTItem = {
         id,
@@ -221,7 +224,7 @@ export class EgWalkerEngine {
     const insertedIds: EventId[] = [];
     let left = originLeft;
 
-    for (const [offset, content] of Array.from(operation.text).entries()) {
+    for (const [offset, content] of stringCodeUnits(operation.text).entries()) {
       const item: AugmentedCRDTItem = {
         id: `${event.id}:${offset}`,
         eventId: event.id,

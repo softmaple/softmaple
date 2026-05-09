@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
+import lz4 from "lz4js";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { EgWalker } from "../core/walker";
 import { EgWalkerAPI } from "../core/external-api";
@@ -213,6 +214,15 @@ describe("EgWalkerEngine", () => {
     expect(restored.getText()).toBe("ello world!");
     expect(restored.exportEventGraph()).toHaveLength(3);
   });
+
+  it("keeps public string indexes aligned with JS code units", () => {
+    const api = new EgWalkerAPI("alice", "");
+
+    api.insert(0, "😀");
+    api.insert(api.getText().length, "!");
+
+    expect(api.getText()).toBe("😀!");
+  });
 });
 
 describe("EgWalker", () => {
@@ -237,6 +247,28 @@ describe("EgWalker", () => {
     expect(result.eventsProcessed).toBe(2);
     expect(walker.getPrepareVersion()).toEqual(new Set(["alice:1"]));
     expect(walker.getEffectVersion()).toEqual(new Set(["alice:1"]));
+  });
+
+  it("walks unordered complete event batches", () => {
+    const walker = new EgWalker();
+    const result = walker.walk([
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      },
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+    ]);
+
+    expect(result.finalText).toBe("AB");
+    expect(result.eventsProcessed).toBe(2);
+    expect(walker.getPrepareVersion()).toEqual(new Set(["alice:1"]));
   });
 
   it("walks an empty event list without changing initial text", () => {
@@ -569,6 +601,32 @@ describe("Full paper architecture utilities", () => {
     expect(analyzer.isCritical(graph, new Set(["left"]))).toBe(false);
   });
 
+  it("rejects multi-frontier checkpoints with partially descended events", () => {
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "a",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    graph.addEvent({
+      id: "b",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      timestamp: 2,
+    });
+    graph.addEvent({
+      id: "c",
+      parentVersion: new Set(["a"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
+      timestamp: 3,
+    });
+
+    const analyzer = new CriticalVersionAnalyzer();
+
+    expect(analyzer.isCritical(graph, new Set(["a", "b"]))).toBe(false);
+  });
+
   it("round-trips the event graph through the columnar codec", () => {
     const graph = new EventGraph();
     graph.addEvent({
@@ -761,6 +819,27 @@ describe("Full paper architecture utilities", () => {
       decoded.getTopologicalOrder(),
     ).text;
     expect(text).toBe(blocks.join(""));
+  });
+
+  it("passes a declared output bound to LZ4 binary decompression", () => {
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "bounded:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "😀" },
+      timestamp: 1,
+    });
+
+    const codec = new ColumnarEventGraphCodec();
+    const encoded = codec.encodeBinary(graph);
+    const decompressSpy = vi.spyOn(lz4, "decompress");
+
+    try {
+      codec.decodeBinary(encoded);
+      expect(decompressSpy).toHaveBeenCalledWith(expect.any(Uint8Array), 72);
+    } finally {
+      decompressSpy.mockRestore();
+    }
   });
 
   it("rejects binary payloads whose magic prefix is too short", () => {

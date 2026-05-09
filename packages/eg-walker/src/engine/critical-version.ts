@@ -27,7 +27,7 @@ export class CriticalVersionAnalyzer {
         continue;
       }
 
-      const hasBoundaryAncestor = Array.from(version).some((frontierId) =>
+      const hasBoundaryAncestor = Array.from(version).every((frontierId) =>
         graph.isAncestor(frontierId, event.id),
       );
       if (!hasBoundaryAncestor) {

@@ -17,7 +17,11 @@ import type {
   SerializedGraph,
 } from "../types";
 import { createDocumentState } from "./invariants";
-import { EventGraph } from "../graph/event-graph";
+import {
+  EventGraph,
+  EventAlreadyExistsError,
+  MissingParentError,
+} from "../graph/event-graph";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 /**
@@ -30,6 +34,9 @@ export class EgWalkerAPI {
   private readonly eventGraph: EventGraph;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
+  private engine: EgWalkerEngine | null = null;
+  private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
+  private readonly bufferedEventIds = new Set<EventId>();
 
   constructor(
     private readonly replicaId: string,
@@ -42,39 +49,33 @@ export class EgWalkerAPI {
     this.currentVersion = this.eventGraph.getFrontier();
     this.nextSequenceNumber = this.inferNextSequenceNumber();
     if (this.eventGraph.getAllEvents().length > 0) {
-      this.replayEventGraph();
+      this.fullReplay();
     }
   }
 
   /**
    * Insert text at index - public API
-   * @param index Position in the document (0-based)
-   * @param text Text to insert
    */
   insert(index: number, text: string): void {
     this.validateIndex(index, true);
     if (text.length === 0) {
-      return; // No-op for empty insert
+      return;
     }
 
-    const operation: ExternalOperation = {
+    this.applyLocalOperation({
       type: OPERATION_TYPE.INSERT,
       index,
       text,
-    };
-
-    this.applyLocalOperation(operation);
+    });
   }
 
   /**
    * Delete text at index - public API
-   * @param index Starting position (0-based)
-   * @param length Number of characters to delete
    */
   delete(index: number, length: number): void {
     this.validateIndex(index, false);
     if (length <= 0) {
-      return; // No-op for zero-length delete
+      return;
     }
 
     if (index + length > this.document.length) {
@@ -83,13 +84,11 @@ export class EgWalkerAPI {
       );
     }
 
-    const operation: ExternalOperation = {
+    this.applyLocalOperation({
       type: OPERATION_TYPE.DELETE,
       index,
       length,
-    };
-
-    this.applyLocalOperation(operation);
+    });
   }
 
   /**
@@ -100,9 +99,6 @@ export class EgWalkerAPI {
     return createDocumentState(this.document);
   }
 
-  /**
-   * Get current text content
-   */
   getText(): string {
     return this.document;
   }
@@ -123,9 +119,6 @@ export class EgWalkerAPI {
     };
   }
 
-  /**
-   * Deserialize from saved state
-   */
   static deserialize(
     serialized: {
       text: string;
@@ -155,81 +148,45 @@ export class EgWalkerAPI {
   }
 
   /**
-   * Apply a local operation and add to event graph
+   * Apply a local operation and add to event graph.
+   *
+   * Local operations are always causally rooted at {@link currentVersion}, so
+   * the engine can advance incrementally rather than replay from scratch.
    */
   applyLocalOperation(operation: ExternalOperation): void {
-    // Create event
-    const eventId = this.generateEventId();
     const event: GraphEvent = {
-      id: eventId,
+      id: this.generateEventId(),
       operation,
       parentVersion: this.currentVersion,
       timestamp: Date.now(),
     };
 
-    // Add to event graph
     try {
       this.eventGraph.addEvent(event);
     } catch (error) {
-      // Log duplicate event and continue gracefully
-      if (error instanceof Error && error.message.includes("already exists")) {
-        console.warn(
-          `Duplicate event detected in applyLocalOperation: id=${event.id}, source=local, timestamp=${event.timestamp}`,
-        );
-        return; // Ignore duplicate and continue
+      if (error instanceof EventAlreadyExistsError) {
+        return;
       }
-      throw error; // Re-throw other errors
+      throw error;
     }
 
-    this.replayEventGraph();
+    this.advanceWithEvent(event);
   }
 
   /**
-   * Apply a remote event
-   * This will use temporary CRDT for transformation
+   * Apply a remote event. Buffers events with unknown parents until they can
+   * be applied in causal order, so callers do not need to deliver in order.
    */
-  async applyRemoteEvent(event: GraphEvent): Promise<void> {
-    // Add to event graph
-    try {
-      this.eventGraph.addEvent(event);
-    } catch (error) {
-      // Log duplicate event and continue gracefully
-      if (error instanceof Error && error.message.includes("already exists")) {
-        console.warn(
-          `Duplicate event detected in applyRemoteEvent: id=${event.id}, source=remote, timestamp=${event.timestamp}`,
-        );
-        return; // Ignore duplicate and continue
-      }
-      throw error; // Re-throw other errors
-    }
-
-    this.replayEventGraph();
+  applyRemoteEvent(event: GraphEvent): void {
+    this.tryAcceptRemoteEvent(event);
   }
 
   /**
-   * Check if event can be applied directly without transformation
+   * Number of remote events currently buffered awaiting causal parents.
+   * Exposed primarily for tests and diagnostics.
    */
-  private canApplyDirectly(event: GraphEvent): boolean {
-    // Can apply directly if all parent events are in current version
-    const knownEvents = this.eventGraph.expandVersion(this.currentVersion);
-    for (const parentId of event.parentVersion) {
-      if (!knownEvents.has(parentId)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /**
-   * Validate index for operations
-   */
-  private validateIndex(index: number, allowEnd: boolean): void {
-    const max = allowEnd ? this.document.length : this.document.length - 1;
-    if (index < 0 || index > max) {
-      throw new Error(
-        `Index ${index} out of bounds [0, ${max}] for document of length ${this.document.length}`,
-      );
-    }
+  getPendingRemoteCount(): number {
+    return this.bufferedEventIds.size;
   }
 
   /**
@@ -237,6 +194,15 @@ export class EgWalkerAPI {
    */
   private generateEventId(): EventId {
     return `${this.replicaId}:${this.nextSequenceNumber++}`;
+  }
+
+  private validateIndex(index: number, allowEnd: boolean): void {
+    const max = allowEnd ? this.document.length : this.document.length - 1;
+    if (index < 0 || index > max) {
+      throw new Error(
+        `Index ${index} out of bounds [0, ${max}] for document of length ${this.document.length}`,
+      );
+    }
   }
 
   /**
@@ -257,27 +223,109 @@ export class EgWalkerAPI {
   /**
    * Import event graph from persistence
    */
-  static async fromEventGraph(
+  static fromEventGraph(
     replicaId: string,
     events: ReadonlyArray<GraphEvent>,
     initialText: string = "",
-  ): Promise<EgWalkerAPI> {
+  ): EgWalkerAPI {
     const api = new EgWalkerAPI(replicaId, initialText);
 
-    // Apply events in causal order
     for (const event of events) {
-      await api.applyRemoteEvent(event);
+      api.applyRemoteEvent(event);
     }
 
     return api;
   }
 
-  private replayEventGraph(): void {
+  private fullReplay(): void {
     const sortedEvents = this.eventGraph.getTopologicalOrder();
     const engine = new EgWalkerEngine();
-    const generated = engine.generate(sortedEvents, this.initialText);
+    const generated = engine.generate(sortedEvents, this.initialText, {
+      eventGraph: this.eventGraph,
+    });
     this.document = generated.text;
     this.currentVersion = this.eventGraph.getFrontier();
+    this.engine = engine;
+  }
+
+  private advanceWithEvent(event: GraphEvent): void {
+    if (!this.engine || !this.parentsMatchCurrent(event.parentVersion)) {
+      // Remote/concurrent events would be processed in arrival order on the
+      // incremental path, which diverges from the deterministic topological
+      // order each replica needs to converge. Replay from scratch instead.
+      this.fullReplay();
+      return;
+    }
+
+    this.engine.applyEvent(event, this.eventGraph);
+    this.document = this.engine.getText();
+    this.currentVersion = this.eventGraph.getFrontier();
+  }
+
+  private parentsMatchCurrent(parents: ReadonlySet<EventId>): boolean {
+    if (parents.size !== this.currentVersion.size) {
+      return false;
+    }
+    for (const id of parents) {
+      if (!this.currentVersion.has(id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private tryAcceptRemoteEvent(event: GraphEvent): void {
+    if (
+      this.eventGraph.hasEvent(event.id) ||
+      this.bufferedEventIds.has(event.id)
+    ) {
+      return;
+    }
+
+    const missingParent = this.findMissingParent(event);
+    if (missingParent !== null) {
+      const queue = this.pendingByMissingParent.get(missingParent) ?? [];
+      queue.push(event);
+      this.pendingByMissingParent.set(missingParent, queue);
+      this.bufferedEventIds.add(event.id);
+      return;
+    }
+
+    try {
+      this.eventGraph.addEvent(event);
+    } catch (error) {
+      if (
+        error instanceof EventAlreadyExistsError ||
+        error instanceof MissingParentError
+      ) {
+        return;
+      }
+      throw error;
+    }
+
+    this.advanceWithEvent(event);
+    this.flushPendingChildrenOf(event.id);
+  }
+
+  private findMissingParent(event: GraphEvent): EventId | null {
+    for (const parentId of event.parentVersion) {
+      if (!this.eventGraph.hasEvent(parentId)) {
+        return parentId;
+      }
+    }
+    return null;
+  }
+
+  private flushPendingChildrenOf(parentId: EventId): void {
+    const waiters = this.pendingByMissingParent.get(parentId);
+    if (!waiters) {
+      return;
+    }
+    this.pendingByMissingParent.delete(parentId);
+    for (const waiter of waiters) {
+      this.bufferedEventIds.delete(waiter.id);
+      this.tryAcceptRemoteEvent(waiter);
+    }
   }
 
   private inferNextSequenceNumber(): number {

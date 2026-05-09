@@ -155,7 +155,10 @@ export class ColumnarEventGraphCodec {
   decodeBinary(bytes: Uint8Array): EventGraph {
     const reader = new BinaryReader(bytes);
     const magic = reader.readBytes(reader.readVarint());
-    if (!BINARY_MAGIC.every((byte, index) => magic[index] === byte)) {
+    if (
+      magic.length !== BINARY_MAGIC.length ||
+      !BINARY_MAGIC.every((byte, index) => magic[index] === byte)
+    ) {
       throw new Error("Invalid eg-walker columnar graph header");
     }
 
@@ -164,9 +167,22 @@ export class ColumnarEventGraphCodec {
     const operationIndexes = reader.readVarintArray();
     const operationLengths = reader.readVarintArray();
     const textLengths = reader.readVarintArray();
-    const insertedContent = textDecoder.decode(
-      toUint8Array(lz4.decompress(reader.readBytes(reader.readVarint()))),
+    const expectedInsertedSize = textLengths.reduce(
+      (total, length) => total + length,
+      0,
     );
+    const compressed = reader.readBytes(reader.readVarint());
+    const decompressed = toUint8Array(lz4.decompress(compressed));
+    // Cap defends against malicious LZ4 payloads that decompress to far more
+    // than declared. textLengths are byte-counts of UTF-16 code units; allow up
+    // to 4 bytes per code unit (the maximum for UTF-8 surrogate pair encoding).
+    const maxInsertedBytes = expectedInsertedSize * 4 + 64;
+    if (decompressed.length > maxInsertedBytes) {
+      throw new Error(
+        `Decompressed inserted content exceeds expected bound (${decompressed.length} > ${maxInsertedBytes})`,
+      );
+    }
+    const insertedContent = textDecoder.decode(decompressed);
     const parentOverrides = this.readParentOverrides(reader);
     const idRuns = this.readIdRuns(reader);
     const timestamps = reader.readVarintArray();
@@ -458,7 +474,8 @@ export class ColumnarEventGraphCodec {
 }
 
 class BinaryWriter {
-  private readonly bytes: number[] = [];
+  private buffer = new Uint8Array(256);
+  private size = 0;
 
   writeVarint(value: number): void {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -467,10 +484,10 @@ class BinaryWriter {
 
     let remaining = value;
     while (remaining >= 0x80) {
-      this.bytes.push((remaining % 0x80) + 0x80);
+      this.writeByte((remaining % 0x80) + 0x80);
       remaining = Math.floor(remaining / 0x80);
     }
-    this.bytes.push(remaining);
+    this.writeByte(remaining);
   }
 
   writeVarintArray(values: ReadonlyArray<number>): void {
@@ -493,11 +510,31 @@ class BinaryWriter {
 
   writeBytes(bytes: Uint8Array): void {
     this.writeVarint(bytes.length);
-    this.bytes.push(...bytes);
+    this.ensureCapacity(this.size + bytes.length);
+    this.buffer.set(bytes, this.size);
+    this.size += bytes.length;
   }
 
   toUint8Array(): Uint8Array {
-    return new Uint8Array(this.bytes);
+    return this.buffer.slice(0, this.size);
+  }
+
+  private writeByte(byte: number): void {
+    this.ensureCapacity(this.size + 1);
+    this.buffer[this.size++] = byte;
+  }
+
+  private ensureCapacity(required: number): void {
+    if (required <= this.buffer.length) {
+      return;
+    }
+    let nextCapacity = this.buffer.length * 2;
+    while (nextCapacity < required) {
+      nextCapacity *= 2;
+    }
+    const next = new Uint8Array(nextCapacity);
+    next.set(this.buffer);
+    this.buffer = next;
   }
 }
 

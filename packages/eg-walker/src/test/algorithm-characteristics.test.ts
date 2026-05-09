@@ -65,11 +65,11 @@ describe("Eg-walker Algorithm Characteristics", () => {
       };
 
       // Apply in different orders
-      await api1.applyRemoteEvent(event1);
-      await api1.applyRemoteEvent(event2);
+      api1.applyRemoteEvent(event1);
+      api1.applyRemoteEvent(event2);
 
-      await api2.applyRemoteEvent(event2);
-      await api2.applyRemoteEvent(event1);
+      api2.applyRemoteEvent(event2);
+      api2.applyRemoteEvent(event1);
 
       // Must converge to same result
       expect(api1.getText()).toBe(api2.getText());
@@ -105,11 +105,10 @@ describe("Eg-walker Algorithm Characteristics", () => {
       };
 
       // Apply both events
-      await api.applyRemoteEvent(aliceEvent);
-      await api.applyRemoteEvent(bobEvent);
+      api.applyRemoteEvent(aliceEvent);
+      api.applyRemoteEvent(bobEvent);
 
       const result = api.getText();
-      console.log("Non-interleaving test result:", result);
 
       // Must be either 'HelloWorld' or 'WorldHello', never interleaved
       expect(result === "HelloWorld" || result === "WorldHello").toBe(true);
@@ -142,8 +141,8 @@ describe("Eg-walker Algorithm Characteristics", () => {
         },
       };
 
-      await api.applyRemoteEvent(aliceEvent);
-      await api.applyRemoteEvent(bobEvent);
+      api.applyRemoteEvent(aliceEvent);
+      api.applyRemoteEvent(bobEvent);
 
       const result = api.getText();
 

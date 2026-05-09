@@ -707,4 +707,109 @@ describe("Full paper architecture utilities", () => {
       "Cannot encode invalid varint value -1",
     );
   });
+
+  it("round-trips a large inserted-content payload through the binary codec", () => {
+    // Build distinct, mostly-incompressible blocks so LZ4 cannot dedupe across
+    // events. Exercises the BinaryWriter buffer growth that previously
+    // overflowed JS arg limits via push-spread of a Uint8Array.
+    let prng = 0x9e_37_79_b9 >>> 0;
+    const nextChar = (): string => {
+      prng = (prng * 1_103_515_245 + 12_345) >>> 0;
+      return String.fromCharCode(0x21 + (prng % 94));
+    };
+    const blocks = Array.from({ length: 32 }, () =>
+      Array.from({ length: 4_096 }, nextChar).join(""),
+    );
+
+    const graph = new EventGraph();
+    let cursor = 0;
+    blocks.forEach((block, i) => {
+      graph.addEvent({
+        id: `bulk:${i}`,
+        parentVersion: i === 0 ? new Set() : new Set([`bulk:${i - 1}`]),
+        operation: { type: OPERATION_TYPE.INSERT, index: cursor, text: block },
+        timestamp: 1_778_000_000_000 + i,
+      });
+      cursor += block.length;
+    });
+
+    const codec = new ColumnarEventGraphCodec();
+    const encoded = codec.encodeBinary(graph);
+    const decoded = codec.decodeBinary(encoded);
+    const text = new EgWalkerEngine().generate(
+      decoded.getTopologicalOrder(),
+    ).text;
+    expect(text).toBe(blocks.join(""));
+  });
+
+  it("rejects binary payloads whose magic prefix is too short", () => {
+    const codec = new ColumnarEventGraphCodec();
+    // Length-prefix says 3 bytes of magic, but EGW1 is 4 bytes. Even though
+    // the bytes that ARE present match, the length must equal the magic.
+    expect(() =>
+      codec.decodeBinary(new Uint8Array([3, 0x45, 0x47, 0x57])),
+    ).toThrow("Invalid eg-walker columnar graph header");
+  });
+
+  it("survives deep histories without recursion-stack overflow", () => {
+    const graph = new EventGraph();
+    const total = 25_000;
+    for (let i = 0; i < total; i++) {
+      graph.addEvent({
+        id: `deep:${i}`,
+        parentVersion: i === 0 ? new Set() : new Set([`deep:${i - 1}`]),
+        operation: { type: OPERATION_TYPE.INSERT, index: i, text: "a" },
+        timestamp: i,
+      });
+    }
+
+    const ordered = graph.getTopologicalOrder();
+    expect(ordered).toHaveLength(total);
+    expect(graph.expandVersion(graph.getFrontier()).size).toBe(total);
+
+    const reSerialized = EventGraph.deserialize(graph.serialize());
+    expect(reSerialized.getAllEvents()).toHaveLength(total);
+  });
+});
+
+describe("EgWalkerEngine transformed deletes", () => {
+  it("emits non-contiguous delete operations when concurrent inserts split the run", () => {
+    // Topological tie-breaking sorts by event id. Choose ids so the insert is
+    // applied before the concurrent delete, leaving X effect-visible while
+    // the delete walks per-character. The transformed delete op output then
+    // contains a gap at X's effect position.
+    const events: GraphEvent[] = [
+      {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "abcd" },
+        timestamp: 1,
+      },
+      {
+        id: "a-ins:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "X" },
+        timestamp: 2,
+      },
+      {
+        id: "z-del:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 4 },
+        timestamp: 3,
+      },
+    ];
+
+    const generated = new EgWalkerEngine().generate(events);
+
+    expect(generated.text).toBe("X");
+    const deletes = generated.transformedOperations.filter(
+      (op) => op.type === OPERATION_TYPE.DELETE,
+    );
+    expect(deletes.length).toBeGreaterThanOrEqual(2);
+    const totalDeleted = deletes.reduce(
+      (sum, op) => sum + (op.type === OPERATION_TYPE.DELETE ? op.length : 0),
+      0,
+    );
+    expect(totalDeleted).toBe(4);
+  });
 });

@@ -31,6 +31,12 @@ export interface GenerateOptions {
   readonly initialVersion?: ReadonlySet<EventId>;
   readonly eventGraph?: EventGraph;
 }
+
+export interface IncrementalApplyResult {
+  readonly text: string;
+  readonly transformedOperations: ReadonlyArray<ExternalOperation>;
+}
+
 const compareIds = (left: EventId, right: EventId): number =>
   left.localeCompare(right);
 
@@ -74,24 +80,8 @@ export class EgWalkerEngine {
     const transformedOperations: ExternalOperation[] = [];
 
     for (const event of events) {
-      const { retreat, advance } = this.diffVersions(
-        this.currentVersion,
-        event.parentVersion,
-      );
-
-      for (const eventId of retreat) {
-        this.retreat(eventId);
-      }
-      for (const eventId of advance) {
-        this.advance(eventId);
-      }
-
-      const transformed = this.apply(event);
-      if (transformed) {
-        transformedOperations.push(transformed);
-      }
-
-      this.currentVersion = new Set([event.id]);
+      const transformed = this.processEvent(event);
+      transformedOperations.push(...transformed);
     }
 
     return {
@@ -103,6 +93,51 @@ export class EgWalkerEngine {
         eventsProcessed: events.length,
       },
     };
+  }
+
+  /**
+   * Apply a single new event on top of the current engine state without
+   * resetting. The caller must ensure {@link graph} is the up-to-date event
+   * graph that already contains {@link event}.
+   */
+  applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
+    if (!this.eventsById.has(event.id)) {
+      this.eventsById.set(event.id, event);
+      this.eventOrder.set(event.id, this.eventOrder.size);
+    }
+    this.graph = graph;
+
+    const transformed = this.processEvent(event);
+    return {
+      text: this.resultingText,
+      transformedOperations: transformed,
+    };
+  }
+
+  getText(): string {
+    return this.resultingText;
+  }
+
+  getCurrentVersion(): ReadonlySet<EventId> {
+    return this.currentVersion;
+  }
+
+  private processEvent(event: GraphEvent): ExternalOperation[] {
+    const { retreat, advance } = this.diffVersions(
+      this.currentVersion,
+      event.parentVersion,
+    );
+
+    for (const eventId of retreat) {
+      this.retreat(eventId);
+    }
+    for (const eventId of advance) {
+      this.advance(eventId);
+    }
+
+    const transformed = this.apply(event);
+    this.currentVersion = new Set([event.id]);
+    return transformed;
   }
 
   private reset(
@@ -150,7 +185,7 @@ export class EgWalkerEngine {
     });
   }
 
-  private apply(event: GraphEvent): ExternalOperation | null {
+  private apply(event: GraphEvent): ExternalOperation[] {
     const operation = event.operation;
 
     if (operation.type === OPERATION_TYPE.INSERT) {
@@ -166,10 +201,10 @@ export class EgWalkerEngine {
       ExternalOperation,
       { type: typeof OPERATION_TYPE.INSERT }
     >,
-  ): ExternalOperation | null {
+  ): ExternalOperation[] {
     if (operation.text.length === 0) {
       this.eventItems.set(event.id, []);
-      return null;
+      return [];
     }
 
     const firstInsertPosition = this.prepareIndexToItemPosition(
@@ -212,11 +247,13 @@ export class EgWalkerEngine {
       operation.text,
     );
 
-    return {
-      type: OPERATION_TYPE.INSERT,
-      index: effectIndex,
-      text: operation.text,
-    };
+    return [
+      {
+        type: OPERATION_TYPE.INSERT,
+        index: effectIndex,
+        text: operation.text,
+      },
+    ];
   }
 
   private applyDelete(
@@ -225,7 +262,7 @@ export class EgWalkerEngine {
       ExternalOperation,
       { type: typeof OPERATION_TYPE.DELETE }
     >,
-  ): ExternalOperation | null {
+  ): ExternalOperation[] {
     const deletedItemIds: EventId[] = [];
     const outputDeleteIndexes: number[] = [];
 
@@ -250,15 +287,7 @@ export class EgWalkerEngine {
 
     this.deleteTargets.set(event.id, deletedItemIds);
 
-    if (outputDeleteIndexes.length === 0) {
-      return null;
-    }
-
-    return {
-      type: OPERATION_TYPE.DELETE,
-      index: outputDeleteIndexes[0] ?? operation.index,
-      length: outputDeleteIndexes.length,
-    };
+    return coalesceDeleteRuns(outputDeleteIndexes);
   }
 
   private retreat(eventId: EventId): void {
@@ -368,7 +397,8 @@ export class EgWalkerEngine {
   }
 
   private originKey(item: AugmentedCRDTItem): string {
-    return JSON.stringify([item.originLeft, item.originRight]);
+    // Event IDs are "<replicaId>:<n>" so they cannot contain NUL — safe delimiter.
+    return `${item.originLeft ?? ""} ${item.originRight ?? ""}`;
   }
 
   private prepareIndexToItemPosition(index: number, allowEnd: boolean): number {
@@ -428,3 +458,48 @@ export class EgWalkerEngine {
     return item;
   }
 }
+
+/**
+ * Coalesce a sequence of in-order effect-index deletes into the smallest list
+ * of {index, length} operations that, applied in order, produces the same
+ * deletes. Two consecutive deletes are contiguous when the second targets the
+ * same effect index as the first (the next character shifted into the slot).
+ */
+const coalesceDeleteRuns = (
+  effectIndexes: ReadonlyArray<number>,
+): ExternalOperation[] => {
+  const runs: ExternalOperation[] = [];
+  let runStart = -1;
+  let runLength = 0;
+
+  for (const index of effectIndexes) {
+    if (runLength === 0) {
+      runStart = index;
+      runLength = 1;
+      continue;
+    }
+
+    if (index === runStart) {
+      runLength += 1;
+      continue;
+    }
+
+    runs.push({
+      type: OPERATION_TYPE.DELETE,
+      index: runStart,
+      length: runLength,
+    });
+    runStart = index;
+    runLength = 1;
+  }
+
+  if (runLength > 0) {
+    runs.push({
+      type: OPERATION_TYPE.DELETE,
+      index: runStart,
+      length: runLength,
+    });
+  }
+
+  return runs;
+};

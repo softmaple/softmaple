@@ -221,7 +221,7 @@
     opacity 160ms ease,
     transform 160ms ease;
   box-shadow: var(--shadow-awareness);
-  @apply absolute -top-7 right-2 max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
+  @apply absolute bottom-full left-0 mb-[2px] max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
@@ -262,7 +262,7 @@
     var(--awareness-selection-label-y)
   );
   box-shadow: var(--shadow-awareness-close);
-  @apply absolute -top-6 left-0 max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
+  @apply absolute bottom-full left-0 mb-[2px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
 .awareness-selection-highlight--hoverable {

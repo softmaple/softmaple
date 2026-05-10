@@ -1,4 +1,4 @@
-name: "Chromatic (awareness)"
+name: "Chromatic (editor)"
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
       - main
       - next
     paths:
-      - 'packages/awareness/**'
-      - '.github/workflows/awareness-chromatic.yml'
+      - 'packages/editor/**'
+      - '.github/workflows/editor-chromatic.yml'
       - '.github/workflows/_chromatic-reusable.yml'
       - 'pnpm-lock.yaml'
   pull_request:
@@ -15,8 +15,8 @@ on:
       - main
       - next
     paths:
-      - 'packages/awareness/**'
-      - '.github/workflows/awareness-chromatic.yml'
+      - 'packages/editor/**'
+      - '.github/workflows/editor-chromatic.yml'
       - '.github/workflows/_chromatic-reusable.yml'
       - 'pnpm-lock.yaml'
 
@@ -25,9 +25,9 @@ permissions:
 
 jobs:
   chromatic:
-    # ⚠️ Requires the `CHROMATIC_PROJECT_TOKEN` repository secret
+    # ⚠️ Make sure to configure a `CHROMATIC_PROJECT_TOKEN` repository secret
     uses: ./.github/workflows/_chromatic-reusable.yml
     with:
-      working-dir: packages/awareness
+      working-dir: packages/editor
     secrets:
       project-token: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}

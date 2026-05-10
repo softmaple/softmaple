@@ -105,6 +105,10 @@ const presenceEventToActivity = (
           };
         }
         if (payload.updates.meta?.isTyping !== undefined) {
+          if (!payload.updates.meta.isTyping) {
+            return null;
+          }
+
           return {
             userId: payload.userId,
             timestamp,

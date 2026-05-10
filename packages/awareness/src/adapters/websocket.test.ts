@@ -2,10 +2,11 @@
  * Tests for WebSocket presence adapter
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPresenceUser } from "../types/presence";
 import type { AdapterState } from "./adapter-state";
 import { createInitialState, setPresenceUser } from "./adapter-state";
+import { createWebSocketAdapter } from "./websocket";
 import {
   createMessage,
   parseMessage,
@@ -17,6 +18,76 @@ import {
   createReconnectState,
   WS_MESSAGE,
 } from "./websocket-types";
+
+type FakeWebSocketEventType = "open" | "message" | "close" | "error";
+type FakeWebSocketListener = (event: Event | MessageEvent<string>) => void;
+
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+
+  readonly sentMessages: string[] = [];
+  readonly url: string;
+  bufferedAmount = 0;
+  readyState = FakeWebSocket.CONNECTING;
+
+  private readonly listeners = new Map<
+    FakeWebSocketEventType,
+    Set<FakeWebSocketListener>
+  >();
+
+  constructor(url: string) {
+    this.url = url;
+    fakeSockets.push(this);
+  }
+
+  addEventListener = (
+    type: FakeWebSocketEventType,
+    listener: FakeWebSocketListener,
+  ): void => {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  };
+
+  removeEventListener = (
+    type: FakeWebSocketEventType,
+    listener: FakeWebSocketListener,
+  ): void => {
+    this.listeners.get(type)?.delete(listener);
+  };
+
+  send = (data: string): void => {
+    this.sentMessages.push(data);
+  };
+
+  close = (): void => {
+    this.readyState = FakeWebSocket.CLOSED;
+  };
+
+  emitOpen = (): void => {
+    this.readyState = FakeWebSocket.OPEN;
+    this.emit("open", new Event("open"));
+  };
+
+  emitMessage = (data: string): void => {
+    this.emit("message", new MessageEvent("message", { data }));
+  };
+
+  private emit = (
+    type: FakeWebSocketEventType,
+    event: Event | MessageEvent<string>,
+  ): void => {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  };
+}
+
+const fakeSockets: FakeWebSocket[] = [];
+const originalWebSocket = globalThis.WebSocket;
 
 describe("WebSocket Message Utilities", () => {
   describe("createMessage", () => {
@@ -166,6 +237,54 @@ describe("WebSocket Message Utilities", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.message).toContain("AUTH_FAILED");
     });
+  });
+});
+
+describe("WebSocket adapter events", () => {
+  afterEach(() => {
+    fakeSockets.length = 0;
+    globalThis.WebSocket = originalWebSocket;
+  });
+
+  it("does not notify events for echoed self messages", async () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+    const adapter = createWebSocketAdapter({
+      roomId: "room-1",
+      url: "ws://localhost:1234",
+      userInfo: {
+        userId: "self-user",
+        name: "Self User",
+        color: "#2563eb",
+      },
+      connectionTimeoutMs: 1000,
+      heartbeatIntervalMs: 60_000,
+      reconnect: {
+        enabled: false,
+        maxAttempts: 0,
+        baseDelayMs: 1,
+        maxDelayMs: 1,
+      },
+    });
+    const events = vi.fn();
+
+    adapter.onEvent(events);
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    const echoedTyping = serializeMessage(
+      createMessage(WS_MESSAGE.PRESENCE_UPDATE, "room-1", "self-user", {
+        userId: "self-user",
+        updates: { meta: { isTyping: true } },
+      }),
+    );
+
+    fakeSockets[0]?.emitMessage(echoedTyping);
+
+    expect(events).not.toHaveBeenCalled();
+
+    await adapter.disconnect();
   });
 });
 

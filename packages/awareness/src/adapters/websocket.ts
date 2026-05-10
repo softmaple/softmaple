@@ -204,7 +204,7 @@ export const createWebSocketAdapter = (
       subscriptions.notifyPresenceChange(result.state.presence);
     }
     const presenceEvent = presenceEventFromMessage(message);
-    if (presenceEvent !== null) {
+    if (presenceEvent !== null && result.shouldNotifyPresence) {
       subscriptions.notifyEvent(presenceEvent);
     }
     if (result.error !== undefined) {

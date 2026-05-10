@@ -1,14 +1,19 @@
 import { ACTIVITY_TYPE } from "../constants/presence-events";
 import type { ActivityEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
+import bulbasaurSprite from "./assets/pokemon-1.png";
+import charmanderSprite from "./assets/pokemon-4.png";
+import squirtleSprite from "./assets/pokemon-7.png";
+import pikachuSprite from "./assets/pokemon-25.png";
+import psyduckSprite from "./assets/pokemon-54.png";
+import eeveeSprite from "./assets/pokemon-133.png";
 
 const baseTime = Date.UTC(2026, 4, 10, 9, 30);
 
 export const pikachu = {
   userId: "pikachu",
   name: "Pikachu",
-  avatarUrl:
-    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/25.png",
+  avatarUrl: pikachuSprite,
   color: "#854d0e",
   status: "active",
   lastActiveAt: baseTime + 4000,
@@ -20,8 +25,7 @@ export const pikachu = {
 export const bulbasaur = {
   userId: "bulbasaur",
   name: "Bulbasaur",
-  avatarUrl:
-    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/1.png",
+  avatarUrl: bulbasaurSprite,
   color: "#166534",
   status: "active",
   lastActiveAt: baseTime + 3000,
@@ -31,8 +35,7 @@ export const bulbasaur = {
 export const charmander = {
   userId: "charmander",
   name: "Charmander",
-  avatarUrl:
-    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/4.png",
+  avatarUrl: charmanderSprite,
   color: "#9a3412",
   status: "idle",
   lastActiveAt: baseTime + 2000,
@@ -42,8 +45,7 @@ export const charmander = {
 export const squirtle = {
   userId: "squirtle",
   name: "Squirtle",
-  avatarUrl:
-    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/7.png",
+  avatarUrl: squirtleSprite,
   color: "#0369a1",
   status: "idle",
   lastActiveAt: baseTime + 1000,
@@ -52,8 +54,7 @@ export const squirtle = {
 export const eevee = {
   userId: "eevee",
   name: "Eevee",
-  avatarUrl:
-    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/133.png",
+  avatarUrl: eeveeSprite,
   color: "#92400e",
   status: "offline",
   lastActiveAt: baseTime,
@@ -62,9 +63,8 @@ export const eevee = {
 export const psyduck = {
   userId: "psyduck",
   name: "Psyduck",
-  avatarUrl:
-    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/54.png",
-  color: "#854d0e",
+  avatarUrl: psyduckSprite,
+  color: "#0e7490",
   status: "active",
   lastActiveAt: baseTime + 5000,
 } satisfies PresenceUser;

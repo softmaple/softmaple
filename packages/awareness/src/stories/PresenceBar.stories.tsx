@@ -17,6 +17,7 @@ const meta = {
   },
   render: (args) => (
     <StoryShowcase
+      eyebrow="Pokédex · Roster"
       subtitle="Stacked avatars with overflow handling for the active editing party."
       title="Trainer roster"
     >

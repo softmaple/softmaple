@@ -189,7 +189,7 @@ export interface StoryShowcaseProps {
 }
 
 export const StoryShowcase = ({
-  eyebrow = "Pokédex · Awareness",
+  eyebrow,
   title,
   subtitle,
   children,
@@ -204,7 +204,7 @@ export const StoryShowcase = ({
               {eyebrow}
             </span>
           ) : null}
-          {title ? <h1 style={titleStyle}>{title}</h1> : null}
+          {title ? <h2 style={titleStyle}>{title}</h2> : null}
           {subtitle ? <p style={subtitleStyle}>{subtitle}</p> : null}
         </header>
       )}
@@ -234,7 +234,7 @@ export const CollaborationSurface = ({
       </div>
       <div style={pageContentStyle}>
         <p style={docMetaStyle}>Entry · Genus · Habitat</p>
-        <h2 style={docHeadingStyle}>Field guide: tracking wild encounters</h2>
+        <h3 style={docHeadingStyle}>Field guide: tracking wild encounters</h3>
         <p style={paragraphStyle}>
           Collaborative editing keeps each trainer visible without pulling focus
           from the page. Remote cursors anchor activity to the text.

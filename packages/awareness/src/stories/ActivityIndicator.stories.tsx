@@ -18,6 +18,7 @@ const meta = {
   },
   render: (args) => (
     <StoryShowcase
+      eyebrow="Pokédex · Activity"
       subtitle="Recent collaboration events with type-coded glyphs for typing, cursor, selection, and idle."
       title="Activity feed"
     >

@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { expect } from "storybook/test";
 
 import { PresenceAvatar } from "../components/presence-avatar";
+import type { PresenceUser } from "../types/presence";
 import {
   bulbasaur,
   charmander,
@@ -63,6 +64,7 @@ const meta = {
   },
   render: (args) => (
     <StoryShowcase
+      eyebrow="Pokédex · Avatar"
       subtitle="A single trainer's avatar with status ring, color tint, and animated active state."
       title="Trainer avatar"
     >
@@ -112,9 +114,32 @@ export const OfflineWithoutStatus: Story = {
   },
 };
 
+// Covers the initials fallback path when a user has no avatarUrl.
+const trainerWithoutSprite: PresenceUser = {
+  userId: "professor-oak",
+  name: "Professor Oak",
+  color: "#7c3aed",
+  status: "active",
+  lastActiveAt: Date.UTC(2026, 4, 10, 9, 30, 5),
+};
+
+export const InitialsFallback: Story = {
+  args: {
+    user: trainerWithoutSprite,
+  },
+  play: async ({ canvas }) => {
+    const avatar = canvas.getByRole("img", { name: "Professor Oak, active" });
+
+    await expect(avatar).toBeVisible();
+    await expect(canvas.getByText("PO")).toBeVisible();
+    await expect(avatar.querySelector(".awareness-avatar__image")).toBeNull();
+  },
+};
+
 export const Sizes: Story = {
   render: () => (
     <StoryShowcase
+      eyebrow="Pokédex · Avatar"
       subtitle="Sm, md, and lg sizes scale crisply against pixel-art and high-resolution sprites alike."
       title="Avatar size scale"
     >

@@ -29,6 +29,7 @@ const meta = {
   },
   render: (args) => (
     <StoryShowcase
+      eyebrow="Pokédex · Block"
       subtitle="Compact pill that shows who is currently editing a specific block."
       title="Per-block badge"
     >

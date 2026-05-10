@@ -22,9 +22,6 @@ export default mergeConfig(viteConfig, {
         "src/**/*.test.{ts,tsx}",
         "src/**/*.spec.{ts,tsx}",
         "src/**/index.ts",
-        "src/hooks/**",
-        "src/providers/**",
-        "src/state/**",
       ],
       thresholds: {
         lines: 45,

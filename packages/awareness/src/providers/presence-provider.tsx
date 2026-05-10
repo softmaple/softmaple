@@ -8,7 +8,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import type {
@@ -160,42 +159,27 @@ export const PresenceProvider = ({
     ReadonlyArray<ActivityEvent>
   >([]);
 
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   useEffect(() => {
     const unsubscribeConnection = adapter.onConnectionChange((state) => {
-      if (mountedRef.current) {
-        setConnectionState(state);
-        if (state === "connected") {
-          setSelf(adapter.getSelf());
-        } else if (state === "disconnected") {
-          // Clear both self and presence atomically on disconnect
-          setSelf(null);
-          setPresence(new Map());
-        }
+      setConnectionState(state);
+      if (state === "connected") {
+        setSelf(adapter.getSelf());
+      } else if (state === "disconnected") {
+        // Clear both self and presence atomically on disconnect
+        setSelf(null);
+        setPresence(new Map());
       }
     });
 
     const unsubscribePresence = adapter.onPresenceChange((newPresence) => {
-      if (mountedRef.current) {
-        setPresence(new Map(newPresence));
-        setSelf(adapter.getSelf());
-      }
+      setPresence(new Map(newPresence));
+      setSelf(adapter.getSelf());
     });
 
     const unsubscribeEvent = adapter.onEvent((event) => {
-      if (mountedRef.current) {
-        const activity = presenceEventToActivity(event);
-        if (activity) {
-          setRecentActivity((prev) => addActivityEvent(prev, activity));
-        }
+      const activity = presenceEventToActivity(event);
+      if (activity) {
+        setRecentActivity((prev) => addActivityEvent(prev, activity));
       }
     });
 

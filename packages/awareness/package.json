@@ -19,6 +19,10 @@
       "types": "./dist/components/activity-indicator.d.ts",
       "import": "./dist/components/activity-indicator.js"
     },
+    "./components/block-activity-indicator": {
+      "types": "./dist/components/block-activity-indicator.d.ts",
+      "import": "./dist/components/block-activity-indicator.js"
+    },
     "./components/live-cursor": {
       "types": "./dist/components/live-cursor.d.ts",
       "import": "./dist/components/live-cursor.js"

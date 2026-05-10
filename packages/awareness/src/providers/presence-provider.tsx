@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type {
@@ -15,12 +16,20 @@ import type {
   PresenceAdapter,
 } from "../adapters/types";
 import { ACTIVITY_TYPE, PRESENCE_EVENT } from "../constants/presence-events";
+import { determineUserStatus } from "../state/status-operations";
 import type { ActivityEvent, PresenceEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
+import {
+  DEFAULT_PRESENCE_CONFIG,
+  type PresenceStateConfig,
+} from "../types/state";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
 
 /** Maximum number of recent activity events to track */
 const MAX_ACTIVITY_EVENTS = 50;
+
+/** Default interval (ms) between idle/offline status sweeps */
+const DEFAULT_STATUS_SWEEP_MS = 5_000;
 
 /**
  * Props for PresenceProvider
@@ -30,6 +39,17 @@ export interface PresenceProviderProps {
   readonly adapter: PresenceAdapter;
   /** Whether to auto-connect on mount (default: true) */
   readonly autoConnect?: boolean;
+  /**
+   * Idle/offline thresholds used by the local status sweep. Defaults to
+   * `DEFAULT_PRESENCE_CONFIG`.
+   */
+  readonly statusConfig?: PresenceStateConfig;
+  /**
+   * Interval (ms) between local status sweeps that demote stale users to
+   * `idle`/`offline`. Pass `0` to disable sweeping entirely (e.g. if the
+   * adapter already authoritatively manages status). Defaults to 5000.
+   */
+  readonly statusSweepMs?: number;
   /** Children to render */
   readonly children: ReactNode;
 }
@@ -139,11 +159,33 @@ const addActivityEvent = (
 };
 
 /**
+ * Apply local status demotion (active → idle → offline) based on lastActiveAt.
+ * Returns the same map reference if no user's status changed (lets memoization
+ * short-circuit downstream).
+ */
+const applyStatusSweep = (
+  presence: ReadonlyMap<string, PresenceUser>,
+  config: PresenceStateConfig,
+): ReadonlyMap<string, PresenceUser> => {
+  let next: Map<string, PresenceUser> | null = null;
+  for (const [userId, user] of presence) {
+    const newStatus = determineUserStatus(user, config);
+    if (newStatus !== user.status) {
+      if (next === null) next = new Map(presence);
+      next.set(userId, { ...user, status: newStatus });
+    }
+  }
+  return next ?? presence;
+};
+
+/**
  * PresenceProvider component - manages adapter lifecycle and provides context
  */
 export const PresenceProvider = ({
   adapter,
   autoConnect = true,
+  statusConfig = DEFAULT_PRESENCE_CONFIG,
+  statusSweepMs = DEFAULT_STATUS_SWEEP_MS,
   children,
 }: PresenceProviderProps): ReactNode => {
   // Use lazy initializers to get real adapter state on first render
@@ -203,6 +245,48 @@ export const PresenceProvider = ({
       });
     };
   }, [adapter, autoConnect]);
+
+  // Local status sweep — demotes stale users to `idle`/`offline` so the
+  // displayed status reflects time since `lastActiveAt` even if the adapter
+  // hasn't pushed a status update. Stays a no-op if every user's status
+  // already matches the threshold-derived value.
+  const presenceRef = useRef(presence);
+  // Sync the ref in an effect (not during render) so concurrent-mode
+  // discarded renders cannot leave the ref pointing at unmounted state.
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
+
+  // Destructure to primitive deps so a consumer passing an inline
+  // `statusConfig` literal does not tear down/recreate the interval on
+  // every render.
+  const { idleTimeoutMs, offlineTimeoutMs } = statusConfig;
+
+  useEffect(() => {
+    if (statusSweepMs <= 0) return;
+
+    const sweepConfig: PresenceStateConfig = {
+      ...DEFAULT_PRESENCE_CONFIG,
+      idleTimeoutMs,
+      offlineTimeoutMs,
+    };
+
+    const tick = () => {
+      const current = presenceRef.current;
+      const swept = applyStatusSweep(current, sweepConfig);
+      if (swept !== current) {
+        setPresence(swept);
+        const selfId = adapter.getSelf()?.userId;
+        if (selfId !== undefined) {
+          const updated = swept.get(selfId);
+          if (updated !== undefined) setSelf(updated);
+        }
+      }
+    };
+
+    const id = setInterval(tick, statusSweepMs);
+    return () => clearInterval(id);
+  }, [adapter, idleTimeoutMs, offlineTimeoutMs, statusSweepMs]);
 
   // Use adapter directly in callbacks (no ref needed)
   const connect = useCallback(async (): Promise<void> => {

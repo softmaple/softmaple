@@ -89,6 +89,44 @@ export const InlineSelection: Story = {
   },
 };
 
+// Design §5.3: "Hover reveals user badge."
+// `showLabel="hover"` keeps the badge hidden until pointer hover or keyboard
+// focus — so the highlight stays low-noise while still letting collaborators
+// inspect attribution on demand.
+//
+// We assert the structural wiring (hoverable class, tabindex, label rendered
+// but hidden by default) rather than the post-:hover computed style: synthetic
+// hover events do not reliably trigger the CSS `:hover` pseudo-class across
+// test browsers, so this story serves as the visual reference for Chromatic.
+export const HoverableLabel: Story = {
+  args: {
+    showLabel: "hover",
+    user: ada,
+    selectedText: focusSelection.text,
+  },
+  play: async ({ canvas }) => {
+    const selection = canvas.getByRole("img", {
+      name: `Ada Lovelace selection: ${focusSelection.text}`,
+    });
+
+    await expect(selection).toHaveClass(
+      "awareness-selection-highlight--hoverable",
+    );
+    await expect(selection).toHaveAttribute("tabindex", "0");
+
+    // The label is rendered into the DOM but hidden (opacity:0) until the
+    // `:hover` / `:focus-visible` pseudo-class applies.
+    const label = canvas.getByText("Ada Lovelace");
+    await expect(label).toBeInTheDocument();
+    await expect(label).not.toBeVisible();
+
+    // The selection is keyboard-focusable so screen-reader / keyboard users
+    // can also surface the attribution.
+    selection.focus();
+    await expect(selection).toHaveFocus();
+  },
+};
+
 export const OverlappingSelections: Story = {
   render: () => (
     <CollaborationSurface>

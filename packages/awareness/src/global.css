@@ -221,7 +221,7 @@
     opacity 160ms ease,
     transform 160ms ease;
   box-shadow: var(--shadow-awareness);
-  @apply absolute -top-7 right-2 max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
+  @apply absolute bottom-full left-0 mb-[2px] max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
@@ -262,7 +262,26 @@
     var(--awareness-selection-label-y)
   );
   box-shadow: var(--shadow-awareness-close);
-  @apply absolute -top-6 left-0 max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
+  @apply absolute bottom-full left-0 mb-[2px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
+}
+
+.awareness-selection-highlight--hoverable {
+  pointer-events: auto;
+}
+
+.awareness-selection-highlight--hoverable
+  .awareness-selection-highlight__label {
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.awareness-selection-highlight--hoverable:hover
+  .awareness-selection-highlight__label,
+.awareness-selection-highlight--hoverable:focus-visible
+  .awareness-selection-highlight__label {
+  opacity: 1;
 }
 
 .awareness-activity-indicator {
@@ -335,6 +354,39 @@
   --awareness-activity-color: var(--color-awareness-activity-leave);
 }
 
+.awareness-block-activity-indicator {
+  background: color-mix(in srgb, Canvas 92%, transparent);
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--awareness-user-color, var(--color-awareness-border)) 32%,
+      transparent
+    );
+  box-shadow: var(--shadow-awareness-close);
+  max-width: 100%;
+  min-width: 0;
+  @apply inline-flex items-center gap-2 rounded-full px-2.5 py-[3px] text-awareness-text font-awareness text-[12px] leading-[1.2];
+}
+
+/*
+ * Static dot — design doc §6 says "No persistent animation", so the dot
+ * communicates liveness via color/halo rather than a continuous pulse.
+ */
+.awareness-block-activity-indicator__dot {
+  background: var(--awareness-user-color, var(--color-awareness-muted));
+  box-shadow: 0 0 0 3px
+    color-mix(
+      in srgb,
+      var(--awareness-user-color, var(--color-awareness-muted)) 18%,
+      transparent
+    );
+  @apply block h-1.5 w-1.5 rounded-full flex-none;
+}
+
+.awareness-block-activity-indicator__text {
+  @apply min-w-0 truncate;
+}
+
 @keyframes awareness-status-pulse {
   0%,
   100% {
@@ -355,7 +407,9 @@
   .awareness-avatar::after,
   .awareness-live-cursor,
   .awareness-live-cursor__label,
-  .awareness-presence-bar__item {
+  .awareness-presence-bar__item,
+  .awareness-selection-highlight--hoverable
+    .awareness-selection-highlight__label {
     transition: none;
   }
 

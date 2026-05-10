@@ -130,6 +130,45 @@ describe("presence components", () => {
     expect(html).not.toContain("awareness-avatar__status");
   });
 
+  it("falls back to a plain selection aria-label when selectedText is missing", () => {
+    const user = createUser("1", { name: "Grace" });
+
+    const undefinedHtml = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        user={user}
+      />,
+    );
+    const emptyHtml = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        selectedText=""
+        user={user}
+      />,
+    );
+
+    expect(undefinedHtml).toContain('aria-label="Grace selection"');
+    expect(undefinedHtml).not.toContain("Grace selection:");
+    expect(emptyHtml).toContain('aria-label="Grace selection"');
+    expect(emptyHtml).not.toContain("Grace selection:");
+  });
+
+  it("clamps long selectedText in the selection aria-label", () => {
+    const user = createUser("1", { name: "Grace" });
+    const longText = "a".repeat(200);
+
+    const html = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        selectedText={longText}
+        user={user}
+      />,
+    );
+
+    expect(html).toContain(`Grace selection: ${"a".repeat(120)}…`);
+    expect(html).not.toContain("a".repeat(121));
+  });
+
   it("hides the initial LiveCursor label after the configured timeout", async () => {
     vi.useFakeTimers();
 

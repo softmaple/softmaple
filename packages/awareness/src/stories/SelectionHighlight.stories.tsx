@@ -29,9 +29,15 @@ type Story = StoryObj<typeof meta>;
 
 export const LabeledSelection: Story = {
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Katherine Johnson selection" }),
-    ).toBeVisible();
+    const selection = canvas.getByRole("img", {
+      name: "Katherine Johnson selection",
+    });
+
+    await expect(selection).toBeVisible();
+    await expect(selection).toHaveStyle({ height: "28px", width: "368px" });
+    await expect(selection.getAttribute("style")).toContain(
+      "translate3d(34px, 76px, 0px)",
+    );
     await expect(canvas.getByText("Katherine Johnson")).toBeVisible();
   },
 };
@@ -43,9 +49,15 @@ export const InlineSelection: Story = {
     user: ada,
   },
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace selection" }),
-    ).toBeVisible();
+    const selection = canvas.getByRole("img", {
+      name: "Ada Lovelace selection",
+    });
+
+    await expect(selection).toBeVisible();
+    await expect(selection).toHaveStyle({ height: "24px", width: "214px" });
+    await expect(selection.getAttribute("style")).toContain(
+      "translate3d(176px, 146px, 0px)",
+    );
     await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
   },
 };
@@ -66,6 +78,12 @@ export const OverlappingSelections: Story = {
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
+    await expect(
+      canvas.getByRole("img", { name: "Katherine Johnson selection" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "Ada Lovelace selection" }),
+    ).toBeVisible();
     await expect(canvas.getByText("Katherine Johnson")).toBeVisible();
     await expect(canvas.getByText("Ada Lovelace")).toBeVisible();
   },

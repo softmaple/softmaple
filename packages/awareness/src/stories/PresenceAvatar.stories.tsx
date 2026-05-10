@@ -27,9 +27,11 @@ type Story = StoryObj<typeof meta>;
 
 export const Active: Story = {
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace, active" }),
-    ).toBeVisible();
+    const avatar = canvas.getByRole("img", { name: "Ada Lovelace, active" });
+
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toHaveClass("awareness-avatar--active");
+    await expect(avatar).toHaveStyle({ "--awareness-user-color": "#2563eb" });
     await expect(canvas.getByText("AL")).toBeVisible();
   },
 };
@@ -39,9 +41,12 @@ export const Idle: Story = {
     user: katherine,
   },
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Katherine Johnson, idle" }),
-    ).toBeVisible();
+    const avatar = canvas.getByRole("img", {
+      name: "Katherine Johnson, idle",
+    });
+
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toHaveClass("awareness-avatar--idle");
   },
 };
 
@@ -51,10 +56,11 @@ export const OfflineWithoutStatus: Story = {
     user: mary,
   },
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Mary Jackson, offline" }),
-    ).toBeVisible();
-    await expect(canvas.queryByTitle("Mary Jackson, offline")).toBeVisible();
+    const avatar = canvas.getByRole("img", { name: "Mary Jackson, offline" });
+
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toHaveClass("awareness-avatar--offline");
+    await expect(avatar.querySelector(".awareness-avatar__status")).toBeNull();
   },
 };
 
@@ -77,12 +83,12 @@ export const Sizes: Story = {
   play: async ({ canvas }) => {
     await expect(
       canvas.getByRole("img", { name: "Ada Lovelace, active" }),
-    ).toBeVisible();
+    ).toHaveClass("awareness-avatar--sm");
     await expect(
       canvas.getByRole("img", { name: "Grace Hopper, active" }),
-    ).toBeVisible();
+    ).toHaveClass("awareness-avatar--md");
     await expect(
       canvas.getByRole("img", { name: "Katherine Johnson, idle" }),
-    ).toBeVisible();
+    ).toHaveClass("awareness-avatar--lg");
   },
 };

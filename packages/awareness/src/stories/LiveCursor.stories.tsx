@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect } from "storybook/test";
+import { expect, waitFor } from "storybook/test";
 
 import { LiveCursor } from "../components/live-cursor";
 import { ada, grace, katherine } from "./awareness-fixtures";
@@ -29,9 +29,13 @@ type Story = StoryObj<typeof meta>;
 
 export const LabeledCursor: Story = {
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Grace Hopper cursor" }),
-    ).toBeVisible();
+    const cursor = canvas.getByRole("img", { name: "Grace Hopper cursor" });
+
+    await expect(cursor).toBeVisible();
+    await expect(cursor).toHaveClass("awareness-live-cursor--label-visible");
+    await expect(cursor.getAttribute("style")).toContain(
+      "translate3d(168px, 104px, 0px)",
+    );
     await expect(canvas.getByText("Grace Hopper")).toBeVisible();
   },
 };
@@ -43,10 +47,37 @@ export const CursorOnly: Story = {
     user: ada,
   },
   play: async ({ canvas }) => {
-    await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
-    ).toBeVisible();
+    const cursor = canvas.getByRole("img", { name: "Ada Lovelace cursor" });
+
+    await expect(cursor).toBeVisible();
+    await expect(cursor).not.toHaveClass(
+      "awareness-live-cursor--label-visible",
+    );
+    await expect(cursor.getAttribute("style")).toContain(
+      "translate3d(328px, 148px, 0px)",
+    );
     await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
+  },
+};
+
+export const AutoHiddenLabel: Story = {
+  args: {
+    labelVisibleMs: 60,
+    point: { x: 168, y: 104 },
+    user: grace,
+  },
+  play: async ({ canvas }) => {
+    const cursor = canvas.getByRole("img", { name: "Grace Hopper cursor" });
+
+    await expect(cursor).toHaveClass("awareness-live-cursor--label-visible");
+    await waitFor(
+      async () => {
+        await expect(cursor).not.toHaveClass(
+          "awareness-live-cursor--label-visible",
+        );
+      },
+      { timeout: 1000 },
+    );
   },
 };
 
@@ -66,6 +97,12 @@ export const MultipleCursors: Story = {
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
+    await expect(
+      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "Katherine Johnson cursor" }),
+    ).toBeVisible();
     await expect(canvas.getByText("Ada Lovelace")).toBeVisible();
     await expect(canvas.getByText("Katherine Johnson")).toBeVisible();
   },

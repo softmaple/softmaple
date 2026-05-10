@@ -31,6 +31,9 @@ export const RecentActivity: Story = {
     maxItems: 4,
   },
   play: async ({ canvas }) => {
+    await expect(
+      canvas.getByLabelText("Recent collaboration activity"),
+    ).toBeVisible();
     await expect(canvas.getByText("Ada Lovelace is typing")).toBeVisible();
     await expect(canvas.getByText("Grace Hopper moved cursor")).toBeVisible();
     await expect(
@@ -45,6 +48,9 @@ export const LimitedActivity: Story = {
     maxItems: 2,
   },
   play: async ({ canvas }) => {
+    await expect(
+      canvas.getByLabelText("Recent collaboration activity"),
+    ).toBeVisible();
     await expect(canvas.getByText("Ada Lovelace is typing")).toBeVisible();
     await expect(canvas.getByText("Grace Hopper moved cursor")).toBeVisible();
     await expect(
@@ -59,6 +65,9 @@ export const Empty: Story = {
     emptyLabel: "No collaboration activity yet",
   },
   play: async ({ canvas }) => {
+    await expect(
+      canvas.getByLabelText("Recent collaboration activity"),
+    ).toBeVisible();
     await expect(
       canvas.getByText("No collaboration activity yet"),
     ).toBeVisible();

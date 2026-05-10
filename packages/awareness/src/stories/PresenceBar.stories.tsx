@@ -30,10 +30,16 @@ export const OnlineCollaborators: Story = {
     maxVisible: 4,
   },
   play: async ({ canvas }) => {
+    const collaboratorsList = canvas.getByRole("list", {
+      name: "Collaborators",
+    });
+
+    await expect(collaboratorsList).toBeVisible();
     await expect(
-      canvas.getByRole("list", { name: "Collaborators" }),
+      canvas.getByRole("listitem", {
+        name: "1 more collaborators: Alan Turing",
+      }),
     ).toBeVisible();
-    await expect(canvas.getByText("+1")).toBeVisible();
     await expect(
       canvas.queryByRole("img", { name: "Mary Jackson, offline" }),
     ).not.toBeInTheDocument();
@@ -51,7 +57,9 @@ export const IncludeOffline: Story = {
         name: "1 more collaborators: Mary Jackson",
       }),
     ).toBeVisible();
-    await expect(canvas.getByText("+1")).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "Alan Turing, idle" }),
+    ).toBeVisible();
   },
 };
 
@@ -61,6 +69,9 @@ export const Empty: Story = {
     users: [],
   },
   play: async ({ canvas }) => {
+    await expect(
+      canvas.getByRole("list", { name: "Collaborators" }),
+    ).toBeVisible();
     await expect(canvas.getByText("No one else is editing")).toBeVisible();
   },
 };
@@ -73,6 +84,6 @@ export const LargeAvatars: Story = {
   play: async ({ canvas }) => {
     await expect(
       canvas.getByRole("img", { name: "Dorothy Vaughan, active" }),
-    ).toBeVisible();
+    ).toHaveClass("awareness-avatar--lg");
   },
 };

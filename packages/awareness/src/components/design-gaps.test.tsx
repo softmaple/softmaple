@@ -94,6 +94,55 @@ describe("LiveCursor off-screen culling (design §7)", () => {
     );
     expect(html).toContain("awareness-live-cursor");
   });
+
+  it("re-evaluates window-based culling on resize", async () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <LiveCursor
+          cullMargin={0}
+          point={{ x: 400, y: 400 }}
+          user={user("a")}
+        />,
+      );
+    });
+    expect(container.querySelector(".awareness-live-cursor")).not.toBeNull();
+
+    // Shrink the window and dispatch resize — cursor should re-evaluate
+    // and cull itself without any pointer movement.
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 100,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 100,
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(container.querySelector(".awareness-live-cursor")).toBeNull();
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: originalInnerWidth,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
 
 describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
@@ -177,6 +226,57 @@ describe("BlockActivityIndicator (design §5.4)", () => {
       />,
     );
     expect(html).toContain("Quiet here");
+  });
+
+  it("includes self when includeSelf=true and reads from context.presence", () => {
+    const self = user("self", {
+      name: "Self",
+      cursor: { blockId: "b1", offset: 0 },
+    });
+    const ctxValue = {
+      connectionState: "connected" as const,
+      self,
+      presence: new Map([
+        [self.userId, self],
+        [a.userId, a],
+      ]),
+      others: [a],
+      recentActivity: [],
+      updatePresence: vi.fn(),
+      connect: vi.fn(async () => {}),
+      disconnect: vi.fn(async () => {}),
+      adapter: null,
+    };
+
+    const html = renderToStaticMarkup(
+      <PresenceContext.Provider value={ctxValue}>
+        <BlockActivityIndicator blockId="b1" includeSelf />
+      </PresenceContext.Provider>,
+    );
+    // Both self + ada are in block b1.
+    expect(html).toContain("2 people editing here");
+  });
+
+  it("falls back to an empty list when context has no presence map", () => {
+    const ctxValue = {
+      connectionState: "connected" as const,
+      self: null,
+      // Force the `ctxPresence ? ... : []` else branch to exercise.
+      presence: undefined as unknown as ReadonlyMap<string, PresenceUser>,
+      others: [] as ReadonlyArray<PresenceUser>,
+      recentActivity: [],
+      updatePresence: vi.fn(),
+      connect: vi.fn(async () => {}),
+      disconnect: vi.fn(async () => {}),
+      adapter: null,
+    };
+
+    const html = renderToStaticMarkup(
+      <PresenceContext.Provider value={ctxValue}>
+        <BlockActivityIndicator blockId="b1" includeSelf />
+      </PresenceContext.Provider>,
+    );
+    expect(html).toBe("");
   });
 
   it("reads from PresenceContext when no users prop is provided", () => {
@@ -313,6 +413,60 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
       vi.advanceTimersByTime(1_500);
     });
     expect(observedStatus).toBe("offline");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("demotes self when self goes stale", async () => {
+    vi.useFakeTimers();
+    const adapter = new StatusSweepAdapter();
+    let observedSelfStatus: string | undefined;
+
+    const selfUser = user("self", {
+      name: "Self",
+      lastActiveAt: Date.now() - 1_500,
+      status: "active",
+    });
+    adapter.self = selfUser;
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          statusConfig={{
+            maxActivities: 10,
+            idleTimeoutMs: 1_000,
+            offlineTimeoutMs: 2_000,
+            cursorThrottleMs: 50,
+          }}
+          statusSweepMs={500}
+        >
+          <PresenceContext.Consumer>
+            {(value) => {
+              observedSelfStatus = value?.self?.status;
+              return null;
+            }}
+          </PresenceContext.Consumer>
+        </PresenceProvider>,
+      );
+    });
+
+    act(() => {
+      adapter.pushPresence(new Map([[selfUser.userId, selfUser]]));
+    });
+    expect(observedSelfStatus).toBe("active");
+
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(observedSelfStatus).toBe("idle");
 
     await act(async () => {
       root.unmount();

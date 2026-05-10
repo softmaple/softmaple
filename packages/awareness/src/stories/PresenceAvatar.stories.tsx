@@ -1,9 +1,56 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { CSSProperties } from "react";
 import { expect } from "storybook/test";
 
 import { PresenceAvatar } from "../components/presence-avatar";
-import { ada, grace, katherine, mary } from "./awareness-fixtures";
-import { StoryFrame } from "./story-layout";
+import type { PresenceUser } from "../types/presence";
+import {
+  bulbasaur,
+  charmander,
+  eevee,
+  pikachu,
+  pokemonFlavor,
+} from "./awareness-fixtures";
+import { StoryShowcase } from "./story-layout";
+
+const sizesRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-end",
+  gap: 32,
+  padding: "12px 4px",
+};
+
+const sizeCellStyle: CSSProperties = {
+  display: "grid",
+  justifyItems: "center",
+  gap: 8,
+};
+
+const sizeCaptionStyle: CSSProperties = {
+  fontFamily:
+    'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "color-mix(in srgb, CanvasText 56%, transparent)",
+};
+
+const typeChipStyle = (accent: string): CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: `color-mix(in srgb, ${accent} 18%, Canvas)`,
+  border: `1px solid color-mix(in srgb, ${accent} 48%, transparent)`,
+  color: `color-mix(in srgb, ${accent} 30%, CanvasText)`,
+  fontFamily:
+    'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+});
 
 const meta = {
   title: "Awareness/PresenceAvatar",
@@ -13,12 +60,16 @@ const meta = {
     layout: "fullscreen",
   },
   args: {
-    user: ada,
+    user: pikachu,
   },
   render: (args) => (
-    <StoryFrame>
+    <StoryShowcase
+      eyebrow="Pokédex · Avatar"
+      subtitle="A single trainer's avatar with status ring, color tint, and animated active state."
+      title="Trainer avatar"
+    >
       <PresenceAvatar {...args} />
-    </StoryFrame>
+    </StoryShowcase>
   ),
 } satisfies Meta<typeof PresenceAvatar>;
 
@@ -27,22 +78,21 @@ type Story = StoryObj<typeof meta>;
 
 export const Active: Story = {
   play: async ({ canvas }) => {
-    const avatar = canvas.getByRole("img", { name: "Ada Lovelace, active" });
+    const avatar = canvas.getByRole("img", { name: "Pikachu, active" });
 
     await expect(avatar).toBeVisible();
     await expect(avatar).toHaveClass("awareness-avatar--active");
-    await expect(avatar).toHaveStyle({ "--awareness-user-color": "#2563eb" });
-    await expect(canvas.getByText("AL")).toBeVisible();
+    await expect(avatar).toHaveStyle({ "--awareness-user-color": "#854d0e" });
   },
 };
 
 export const Idle: Story = {
   args: {
-    user: katherine,
+    user: charmander,
   },
   play: async ({ canvas }) => {
     const avatar = canvas.getByRole("img", {
-      name: "Katherine Johnson, idle",
+      name: "Charmander, idle",
     });
 
     await expect(avatar).toBeVisible();
@@ -53,10 +103,10 @@ export const Idle: Story = {
 export const OfflineWithoutStatus: Story = {
   args: {
     showStatus: false,
-    user: mary,
+    user: eevee,
   },
   play: async ({ canvas }) => {
-    const avatar = canvas.getByRole("img", { name: "Mary Jackson, offline" });
+    const avatar = canvas.getByRole("img", { name: "Eevee, offline" });
 
     await expect(avatar).toBeVisible();
     await expect(avatar).toHaveClass("awareness-avatar--offline");
@@ -64,31 +114,69 @@ export const OfflineWithoutStatus: Story = {
   },
 };
 
+// Covers the initials fallback path when a user has no avatarUrl.
+const trainerWithoutSprite: PresenceUser = {
+  userId: "professor-oak",
+  name: "Professor Oak",
+  color: "#7c3aed",
+  status: "active",
+  lastActiveAt: Date.UTC(2026, 4, 10, 9, 30, 5),
+};
+
+export const InitialsFallback: Story = {
+  args: {
+    user: trainerWithoutSprite,
+  },
+  play: async ({ canvas }) => {
+    const avatar = canvas.getByRole("img", { name: "Professor Oak, active" });
+
+    await expect(avatar).toBeVisible();
+    await expect(canvas.getByText("PO")).toBeVisible();
+    await expect(avatar.querySelector(".awareness-avatar__image")).toBeNull();
+  },
+};
+
 export const Sizes: Story = {
   render: () => (
-    <StoryFrame>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
-        <PresenceAvatar size="sm" user={ada} />
-        <PresenceAvatar size="md" user={grace} />
-        <PresenceAvatar size="lg" user={katherine} />
+    <StoryShowcase
+      eyebrow="Pokédex · Avatar"
+      subtitle="Sm, md, and lg sizes scale crisply against pixel-art and high-resolution sprites alike."
+      title="Avatar size scale"
+    >
+      <div style={sizesRowStyle}>
+        <div style={sizeCellStyle}>
+          <PresenceAvatar size="sm" user={pikachu} />
+          <span style={typeChipStyle(pokemonFlavor.pikachu.accent)}>
+            {pokemonFlavor.pikachu.type}
+          </span>
+          <span style={sizeCaptionStyle}>sm · 24</span>
+        </div>
+        <div style={sizeCellStyle}>
+          <PresenceAvatar size="md" user={bulbasaur} />
+          <span style={typeChipStyle(pokemonFlavor.bulbasaur.accent)}>
+            {pokemonFlavor.bulbasaur.type}
+          </span>
+          <span style={sizeCaptionStyle}>md · 32</span>
+        </div>
+        <div style={sizeCellStyle}>
+          <PresenceAvatar size="lg" user={charmander} />
+          <span style={typeChipStyle(pokemonFlavor.charmander.accent)}>
+            {pokemonFlavor.charmander.type}
+          </span>
+          <span style={sizeCaptionStyle}>lg · 40</span>
+        </div>
       </div>
-    </StoryFrame>
+    </StoryShowcase>
   ),
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace, active" }),
+      canvas.getByRole("img", { name: "Pikachu, active" }),
     ).toHaveClass("awareness-avatar--sm");
     await expect(
-      canvas.getByRole("img", { name: "Grace Hopper, active" }),
+      canvas.getByRole("img", { name: "Bulbasaur, active" }),
     ).toHaveClass("awareness-avatar--md");
     await expect(
-      canvas.getByRole("img", { name: "Katherine Johnson, idle" }),
+      canvas.getByRole("img", { name: "Charmander, idle" }),
     ).toHaveClass("awareness-avatar--lg");
   },
 };

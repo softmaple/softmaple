@@ -3,7 +3,7 @@ import { expect } from "storybook/test";
 
 import { ActivityIndicator } from "../components/activity-indicator";
 import { recentActivities, usersById } from "./awareness-fixtures";
-import { StoryFrame } from "./story-layout";
+import { StoryShowcase } from "./story-layout";
 
 const meta = {
   title: "Awareness/ActivityIndicator",
@@ -17,9 +17,13 @@ const meta = {
     users: usersById,
   },
   render: (args) => (
-    <StoryFrame>
+    <StoryShowcase
+      eyebrow="Pokédex · Activity"
+      subtitle="Recent collaboration events with type-coded glyphs for typing, cursor, selection, and idle."
+      title="Activity feed"
+    >
       <ActivityIndicator {...args} />
-    </StoryFrame>
+    </StoryShowcase>
   ),
 } satisfies Meta<typeof ActivityIndicator>;
 
@@ -34,12 +38,10 @@ export const RecentActivity: Story = {
     await expect(
       canvas.getByLabelText("Recent collaboration activity"),
     ).toBeVisible();
-    await expect(canvas.getByText("Ada Lovelace is typing")).toBeVisible();
-    await expect(canvas.getByText("Grace Hopper moved cursor")).toBeVisible();
-    await expect(
-      canvas.getByText("Katherine Johnson selected text"),
-    ).toBeVisible();
-    await expect(canvas.getByText("Alan Turing is idle")).toBeVisible();
+    await expect(canvas.getByText("Pikachu is typing")).toBeVisible();
+    await expect(canvas.getByText("Bulbasaur moved cursor")).toBeVisible();
+    await expect(canvas.getByText("Charmander selected text")).toBeVisible();
+    await expect(canvas.getByText("Squirtle is idle")).toBeVisible();
   },
 };
 
@@ -51,10 +53,10 @@ export const LimitedActivity: Story = {
     await expect(
       canvas.getByLabelText("Recent collaboration activity"),
     ).toBeVisible();
-    await expect(canvas.getByText("Ada Lovelace is typing")).toBeVisible();
-    await expect(canvas.getByText("Grace Hopper moved cursor")).toBeVisible();
+    await expect(canvas.getByText("Pikachu is typing")).toBeVisible();
+    await expect(canvas.getByText("Bulbasaur moved cursor")).toBeVisible();
     await expect(
-      canvas.queryByText("Katherine Johnson selected text"),
+      canvas.queryByText("Charmander selected text"),
     ).not.toBeInTheDocument();
   },
 };

@@ -3,7 +3,7 @@ import { expect } from "storybook/test";
 
 import { PresenceBar } from "../components/presence-bar";
 import { collaborators } from "./awareness-fixtures";
-import { StoryFrame } from "./story-layout";
+import { StoryShowcase } from "./story-layout";
 
 const meta = {
   title: "Awareness/PresenceBar",
@@ -16,9 +16,13 @@ const meta = {
     users: collaborators,
   },
   render: (args) => (
-    <StoryFrame>
+    <StoryShowcase
+      eyebrow="Pokédex · Roster"
+      subtitle="Stacked avatars with overflow handling for the active editing party."
+      title="Trainer roster"
+    >
       <PresenceBar {...args} />
-    </StoryFrame>
+    </StoryShowcase>
   ),
 } satisfies Meta<typeof PresenceBar>;
 
@@ -37,11 +41,11 @@ export const OnlineCollaborators: Story = {
     await expect(collaboratorsList).toBeVisible();
     await expect(
       canvas.getByRole("listitem", {
-        name: "1 more collaborators: Alan Turing",
+        name: "1 more collaborators: Squirtle",
       }),
     ).toBeVisible();
     await expect(
-      canvas.queryByRole("img", { name: "Mary Jackson, offline" }),
+      canvas.queryByRole("img", { name: "Eevee, offline" }),
     ).not.toBeInTheDocument();
   },
 };
@@ -54,11 +58,11 @@ export const IncludeOffline: Story = {
   play: async ({ canvas }) => {
     await expect(
       canvas.getByRole("listitem", {
-        name: "1 more collaborators: Mary Jackson",
+        name: "1 more collaborators: Eevee",
       }),
     ).toBeVisible();
     await expect(
-      canvas.getByRole("img", { name: "Alan Turing, idle" }),
+      canvas.getByRole("img", { name: "Squirtle, idle" }),
     ).toBeVisible();
   },
 };
@@ -83,7 +87,7 @@ export const LargeAvatars: Story = {
   },
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Dorothy Vaughan, active" }),
+      canvas.getByRole("img", { name: "Psyduck, active" }),
     ).toHaveClass("awareness-avatar--lg");
   },
 };

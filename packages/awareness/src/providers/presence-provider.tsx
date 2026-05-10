@@ -15,7 +15,7 @@ import type {
   AdapterConnectionState,
   PresenceAdapter,
 } from "../adapters/types";
-import { PRESENCE_EVENT } from "../constants/presence-events";
+import { ACTIVITY_TYPE, PRESENCE_EVENT } from "../constants/presence-events";
 import type { ActivityEvent, PresenceEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
@@ -78,6 +78,43 @@ const presenceEventToActivity = (
           type: "leave",
           data: { type: "leave", userId: payload.userId },
         };
+      }
+      return null;
+    case PRESENCE_EVENT.UPDATE:
+      if (payload.type === PRESENCE_EVENT.UPDATE) {
+        if (payload.updates.cursor !== undefined) {
+          return {
+            userId: payload.userId,
+            timestamp,
+            type: ACTIVITY_TYPE.CURSOR,
+            data: {
+              type: ACTIVITY_TYPE.CURSOR,
+              position: payload.updates.cursor ?? null,
+            },
+          };
+        }
+        if (payload.updates.selection !== undefined) {
+          return {
+            userId: payload.userId,
+            timestamp,
+            type: ACTIVITY_TYPE.SELECTION,
+            data: {
+              type: ACTIVITY_TYPE.SELECTION,
+              range: payload.updates.selection ?? null,
+            },
+          };
+        }
+        if (payload.updates.meta?.isTyping !== undefined) {
+          return {
+            userId: payload.userId,
+            timestamp,
+            type: ACTIVITY_TYPE.TYPING,
+            data: {
+              type: ACTIVITY_TYPE.TYPING,
+              isTyping: payload.updates.meta.isTyping,
+            },
+          };
+        }
       }
       return null;
     default:

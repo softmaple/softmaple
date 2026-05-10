@@ -107,7 +107,10 @@ export const createBroadcastChannelAdapter = (
       status: "active",
       lastActiveAt: Date.now(),
     });
-    state = updateState(state, { self: updatedSelf });
+    state = updateState(state, {
+      self: updatedSelf,
+      presence: setPresenceUser(state.presence, updatedSelf),
+    });
     sendMessage(BROADCAST_MESSAGE.UPDATE, {
       userId: updatedSelf.userId,
       updates: { status: "active", lastActiveAt: updatedSelf.lastActiveAt },
@@ -221,7 +224,11 @@ export const createBroadcastChannelAdapter = (
         channel = null;
       }
 
-      state = createInitialState();
+      state = updateState(state, {
+        self: null,
+        presence: new Map(),
+      });
+      subscriptions.notifyPresenceChange(state.presence);
       setConnectionState("disconnected");
     },
 
@@ -256,10 +263,25 @@ export const createBroadcastChannelAdapter = (
         timestamp: Date.now(),
       };
 
-      if (payload.type === PRESENCE_EVENT.SYNC) {
-        const syncPayload = payload as PresenceSyncPayload;
-        if (Array.isArray(syncPayload.users) && syncPayload.users.length > 0) {
-          sendMessage(BROADCAST_MESSAGE.SYNC_RESPONSE, syncPayload.users[0]);
+      switch (payload.type) {
+        case PRESENCE_EVENT.JOIN:
+          sendMessage(BROADCAST_MESSAGE.ANNOUNCE, payload.user);
+          break;
+        case PRESENCE_EVENT.LEAVE:
+          sendMessage(BROADCAST_MESSAGE.LEAVE, payload.userId);
+          break;
+        case PRESENCE_EVENT.UPDATE:
+          sendMessage(BROADCAST_MESSAGE.UPDATE, {
+            userId: payload.userId,
+            updates: payload.updates,
+          });
+          break;
+        case PRESENCE_EVENT.SYNC: {
+          const syncPayload = payload as PresenceSyncPayload;
+          for (const user of syncPayload.users) {
+            sendMessage(BROADCAST_MESSAGE.SYNC_RESPONSE, user);
+          }
+          break;
         }
       }
 

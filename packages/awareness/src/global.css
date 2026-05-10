@@ -1,1 +1,256 @@
 @import "tailwindcss";
+
+:root {
+  --awareness-font-family:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --awareness-surface: color-mix(in srgb, Canvas 94%, transparent);
+  --awareness-border: color-mix(in srgb, CanvasText 14%, transparent);
+  --awareness-muted: color-mix(in srgb, CanvasText 58%, transparent);
+  --awareness-shadow: 0 10px 24px
+    color-mix(in srgb, CanvasText 10%, transparent);
+}
+
+.awareness-avatar {
+  --awareness-avatar-size: 32px;
+  position: relative;
+  display: inline-flex;
+  width: var(--awareness-avatar-size);
+  height: var(--awareness-avatar-size);
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--awareness-avatar-size);
+  overflow: visible;
+  border: 2px solid var(--awareness-surface);
+  border-radius: 999px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--awareness-user-color) 92%, white),
+    color-mix(in srgb, var(--awareness-user-color) 72%, black)
+  );
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--awareness-user-color) 42%, transparent);
+  color: white;
+  font-family: var(--awareness-font-family);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  user-select: none;
+}
+
+.awareness-avatar--sm {
+  --awareness-avatar-size: 24px;
+  font-size: 10px;
+}
+
+.awareness-avatar--md {
+  --awareness-avatar-size: 32px;
+  font-size: 12px;
+}
+
+.awareness-avatar--lg {
+  --awareness-avatar-size: 40px;
+  font-size: 14px;
+}
+
+.awareness-avatar__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.awareness-avatar__initials {
+  transform: translateY(0.5px);
+}
+
+.awareness-avatar__status {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 30%;
+  min-width: 8px;
+  height: 30%;
+  min-height: 8px;
+  border: 2px solid var(--awareness-surface);
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+.awareness-avatar--idle .awareness-avatar__status {
+  background: #f59e0b;
+}
+
+.awareness-avatar--offline {
+  filter: grayscale(0.9);
+  opacity: 0.55;
+}
+
+.awareness-avatar--offline .awareness-avatar__status {
+  background: #94a3b8;
+}
+
+.awareness-presence-bar {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  font-family: var(--awareness-font-family);
+  list-style: none;
+}
+
+.awareness-presence-bar__item {
+  display: inline-flex;
+  margin-left: -8px;
+}
+
+.awareness-presence-bar__item:first-child {
+  margin-left: 0;
+}
+
+.awareness-presence-bar__overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -8px;
+  border: 2px solid var(--awareness-surface);
+  border-radius: 999px;
+  background: color-mix(in srgb, Canvas 86%, CanvasText 14%);
+  color: color-mix(in srgb, CanvasText 82%, transparent);
+  font-family: var(--awareness-font-family);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.awareness-presence-bar__overflow--sm {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.awareness-presence-bar__overflow--md {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.awareness-presence-bar__overflow--lg {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.awareness-presence-bar__empty,
+.awareness-activity-indicator__empty {
+  color: var(--awareness-muted);
+  font-family: var(--awareness-font-family);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.awareness-live-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  display: inline-flex;
+  align-items: flex-start;
+  pointer-events: none;
+  transition: transform 80ms linear;
+  will-change: transform;
+}
+
+.awareness-live-cursor__caret {
+  display: block;
+  width: 2px;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--awareness-user-color);
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--awareness-user-color) 34%, transparent);
+}
+
+.awareness-live-cursor__label {
+  position: absolute;
+  top: -1.65rem;
+  left: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--awareness-user-color);
+  box-shadow: var(--awareness-shadow);
+  color: white;
+  font-family: var(--awareness-font-family);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.2;
+  opacity: 0;
+  text-overflow: ellipsis;
+  transform: translateY(2px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  white-space: nowrap;
+}
+
+.awareness-live-cursor--label-visible .awareness-live-cursor__label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.awareness-selection-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  border-left: 2px solid var(--awareness-user-color);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--awareness-user-color) 18%, transparent);
+  pointer-events: none;
+}
+
+.awareness-selection-highlight__label {
+  position: absolute;
+  top: -1.45rem;
+  left: 0;
+  max-width: 14rem;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--awareness-user-color);
+  color: white;
+  font-family: var(--awareness-font-family);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.awareness-activity-indicator {
+  color: color-mix(in srgb, CanvasText 82%, transparent);
+  font-family: var(--awareness-font-family);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.awareness-activity-indicator__list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.awareness-activity-indicator__item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

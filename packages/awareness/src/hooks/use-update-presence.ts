@@ -62,3 +62,28 @@ export const useUpdateSelection = () => {
     [updatePresence],
   );
 };
+
+/**
+ * Hook to update typing status
+ * @returns Function to update typing status
+ * @throws Error if used outside of PresenceProvider
+ */
+export const useUpdateTyping = () => {
+  const context = useContext(PresenceContext);
+  if (!context) {
+    throw new Error(`useUpdateTyping ${PROVIDER_ERROR_MSG}`);
+  }
+  const { self, updatePresence } = context;
+
+  return useCallback(
+    (isTyping: boolean) => {
+      updatePresence({
+        meta: {
+          ...self?.meta,
+          isTyping,
+        },
+      });
+    },
+    [self?.meta, updatePresence],
+  );
+};

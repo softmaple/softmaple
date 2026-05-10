@@ -3,7 +3,7 @@
  * Main adapter factory using modular connection management
  */
 
-import { WS_MESSAGE } from "../constants/presence-events";
+import { PRESENCE_EVENT, WS_MESSAGE } from "../constants/presence-events";
 import type { PresenceEvent, PresenceEventPayload } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { createPresenceUser, updatePresenceUser } from "../types/presence";
@@ -27,7 +27,14 @@ import {
 import { parseMessage, processMessage } from "./websocket-message";
 import { createInternalState } from "./websocket-state";
 import type { WebSocketAdapterConfig } from "./websocket-types";
-import { DEFAULT_WS_CONFIG } from "./websocket-types";
+import {
+  DEFAULT_WS_CONFIG,
+  type JoinPayload,
+  type LeavePayload,
+  type PresenceSyncPayload,
+  type PresenceUpdatePayload,
+  type WebSocketMessage,
+} from "./websocket-types";
 
 /**
  * Authentication message type for secure token handshake
@@ -77,6 +84,52 @@ const waitForBufferFlush = (
     };
     checkBuffer();
   });
+
+const presenceEventFromMessage = (
+  message: WebSocketMessage,
+): PresenceEvent | null => {
+  switch (message.type) {
+    case WS_MESSAGE.JOIN: {
+      const payload = message.payload as JoinPayload;
+      return {
+        type: PRESENCE_EVENT.JOIN,
+        payload: { type: PRESENCE_EVENT.JOIN, user: payload.user },
+        timestamp: message.timestamp,
+      };
+    }
+    case WS_MESSAGE.LEAVE: {
+      const payload = message.payload as LeavePayload;
+      return {
+        type: PRESENCE_EVENT.LEAVE,
+        payload: { type: PRESENCE_EVENT.LEAVE, userId: payload.userId },
+        timestamp: message.timestamp,
+      };
+    }
+    case WS_MESSAGE.PRESENCE_UPDATE: {
+      const payload = message.payload as PresenceUpdatePayload;
+      return {
+        type: PRESENCE_EVENT.UPDATE,
+        payload: {
+          type: PRESENCE_EVENT.UPDATE,
+          userId: payload.userId,
+          updates: payload.updates,
+        },
+        timestamp: message.timestamp,
+      };
+    }
+    case WS_MESSAGE.PRESENCE_SYNC:
+    case WS_MESSAGE.PRESENCE_SYNC_RESPONSE: {
+      const payload = message.payload as PresenceSyncPayload;
+      return {
+        type: PRESENCE_EVENT.SYNC,
+        payload: { type: PRESENCE_EVENT.SYNC, users: payload.users },
+        timestamp: message.timestamp,
+      };
+    }
+    default:
+      return null;
+  }
+};
 
 /**
  * Create a WebSocket presence adapter
@@ -149,6 +202,10 @@ export const createWebSocketAdapter = (
     internal.state = result.state;
     if (result.shouldNotifyPresence) {
       subscriptions.notifyPresenceChange(result.state.presence);
+    }
+    const presenceEvent = presenceEventFromMessage(message);
+    if (presenceEvent !== null) {
+      subscriptions.notifyEvent(presenceEvent);
     }
     if (result.error !== undefined) {
       subscriptions.notifyError(result.error);
@@ -298,8 +355,15 @@ export const createWebSocketAdapter = (
     onError: subscriptions.onError,
 
     getPresence: (): ReadonlyMap<string, PresenceUser> =>
-      internal.state.presence,
+      new Map(internal.state.presence),
 
     getSelf: (): PresenceUser | null => internal.state.self,
   };
 };
+
+/**
+ * Factory function for creating WebSocket adapters
+ */
+export const webSocketAdapterFactory = (
+  config: WebSocketAdapterConfig,
+): PresenceAdapter => createWebSocketAdapter(config);

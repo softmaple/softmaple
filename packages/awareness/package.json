@@ -6,6 +6,47 @@
   "draft": true,
   "description": "Awareness and presence UI components for real-time collaboration",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./components/activity-indicator": {
+      "types": "./dist/components/activity-indicator.d.ts",
+      "import": "./dist/components/activity-indicator.js"
+    },
+    "./components/live-cursor": {
+      "types": "./dist/components/live-cursor.d.ts",
+      "import": "./dist/components/live-cursor.js"
+    },
+    "./components/presence-avatar": {
+      "types": "./dist/components/presence-avatar.d.ts",
+      "import": "./dist/components/presence-avatar.js"
+    },
+    "./components/presence-bar": {
+      "types": "./dist/components/presence-bar.d.ts",
+      "import": "./dist/components/presence-bar.js"
+    },
+    "./components/selection-highlight": {
+      "types": "./dist/components/selection-highlight.d.ts",
+      "import": "./dist/components/selection-highlight.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "import": "./dist/hooks/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
+    "./state": {
+      "types": "./dist/state/index.d.ts",
+      "import": "./dist/state/index.js"
+    },
     "./types/presence": {
       "types": "./dist/types/presence.d.ts",
       "import": "./dist/types/presence.js"
@@ -55,6 +96,10 @@
       "import": "./dist/hooks/use-connection.js"
     },
     "./hooks/use-update-presence": {
+      "types": "./dist/hooks/use-update-presence.d.ts",
+      "import": "./dist/hooks/use-update-presence.js"
+    },
+    "./hooks/use-update-typing": {
       "types": "./dist/hooks/use-update-presence.d.ts",
       "import": "./dist/hooks/use-update-presence.js"
     },

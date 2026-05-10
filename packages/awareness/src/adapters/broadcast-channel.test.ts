@@ -141,6 +141,24 @@ describe("BroadcastChannelAdapter", () => {
 
       expect(adapter.getSelf()).toBeNull();
     });
+
+    it("should notify subscribers when presence is cleared on disconnect", async () => {
+      const adapter = createBroadcastChannelAdapter(defaultConfig);
+      const presenceCallback = vi.fn();
+      const connectionCallback = vi.fn();
+
+      await adapter.connect();
+      adapter.onPresenceChange(presenceCallback);
+      adapter.onConnectionChange(connectionCallback);
+
+      presenceCallback.mockClear();
+      connectionCallback.mockClear();
+
+      await adapter.disconnect();
+
+      expect(presenceCallback).toHaveBeenCalledWith(new Map());
+      expect(connectionCallback).toHaveBeenCalledWith("disconnected");
+    });
   });
 
   describe("presence updates", () => {
@@ -223,6 +241,32 @@ describe("BroadcastChannelAdapter", () => {
           }),
         }),
       );
+    });
+
+    it("should broadcast explicit update payloads to other tabs", async () => {
+      const adapter1 = createBroadcastChannelAdapter(defaultConfig);
+      const adapter2 = createBroadcastChannelAdapter({
+        ...defaultConfig,
+        userInfo: {
+          userId: "user-2",
+          name: "User Two",
+          color: "#00FF00",
+        },
+      });
+
+      await adapter1.connect();
+      await adapter2.connect();
+
+      adapter1.broadcast({
+        type: PRESENCE_EVENT.UPDATE,
+        userId: "user-1",
+        updates: { cursor: { blockId: "block-2", offset: 8 } },
+      });
+
+      expect(adapter2.getPresence().get("user-1")?.cursor).toEqual({
+        blockId: "block-2",
+        offset: 8,
+      });
     });
   });
 

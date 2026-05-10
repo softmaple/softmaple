@@ -8,14 +8,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import type {
   AdapterConnectionState,
   PresenceAdapter,
 } from "../adapters/types";
-import { PRESENCE_EVENT } from "../constants/presence-events";
+import { ACTIVITY_TYPE, PRESENCE_EVENT } from "../constants/presence-events";
 import type { ActivityEvent, PresenceEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
@@ -80,6 +79,47 @@ const presenceEventToActivity = (
         };
       }
       return null;
+    case PRESENCE_EVENT.UPDATE:
+      if (payload.type === PRESENCE_EVENT.UPDATE) {
+        if (payload.updates.cursor !== undefined) {
+          return {
+            userId: payload.userId,
+            timestamp,
+            type: ACTIVITY_TYPE.CURSOR,
+            data: {
+              type: ACTIVITY_TYPE.CURSOR,
+              position: payload.updates.cursor ?? null,
+            },
+          };
+        }
+        if (payload.updates.selection !== undefined) {
+          return {
+            userId: payload.userId,
+            timestamp,
+            type: ACTIVITY_TYPE.SELECTION,
+            data: {
+              type: ACTIVITY_TYPE.SELECTION,
+              range: payload.updates.selection ?? null,
+            },
+          };
+        }
+        if (payload.updates.meta?.isTyping !== undefined) {
+          if (!payload.updates.meta.isTyping) {
+            return null;
+          }
+
+          return {
+            userId: payload.userId,
+            timestamp,
+            type: ACTIVITY_TYPE.TYPING,
+            data: {
+              type: ACTIVITY_TYPE.TYPING,
+              isTyping: payload.updates.meta.isTyping,
+            },
+          };
+        }
+      }
+      return null;
     default:
       return null;
   }
@@ -119,42 +159,27 @@ export const PresenceProvider = ({
     ReadonlyArray<ActivityEvent>
   >([]);
 
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   useEffect(() => {
     const unsubscribeConnection = adapter.onConnectionChange((state) => {
-      if (mountedRef.current) {
-        setConnectionState(state);
-        if (state === "connected") {
-          setSelf(adapter.getSelf());
-        } else if (state === "disconnected") {
-          // Clear both self and presence atomically on disconnect
-          setSelf(null);
-          setPresence(new Map());
-        }
+      setConnectionState(state);
+      if (state === "connected") {
+        setSelf(adapter.getSelf());
+      } else if (state === "disconnected") {
+        // Clear both self and presence atomically on disconnect
+        setSelf(null);
+        setPresence(new Map());
       }
     });
 
     const unsubscribePresence = adapter.onPresenceChange((newPresence) => {
-      if (mountedRef.current) {
-        setPresence(new Map(newPresence));
-        setSelf(adapter.getSelf());
-      }
+      setPresence(new Map(newPresence));
+      setSelf(adapter.getSelf());
     });
 
     const unsubscribeEvent = adapter.onEvent((event) => {
-      if (mountedRef.current) {
-        const activity = presenceEventToActivity(event);
-        if (activity) {
-          setRecentActivity((prev) => addActivityEvent(prev, activity));
-        }
+      const activity = presenceEventToActivity(event);
+      if (activity) {
+        setRecentActivity((prev) => addActivityEvent(prev, activity));
       }
     });
 

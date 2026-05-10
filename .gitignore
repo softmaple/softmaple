@@ -38,3 +38,6 @@ npm-debug.log*
 
 # TanStack Router generated files
 apps/playground/src/routeTree.gen.ts
+
+*storybook.log
+storybook-static

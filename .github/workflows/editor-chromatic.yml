@@ -1,0 +1,33 @@
+name: "Chromatic (editor)"
+
+on:
+  push:
+    branches:
+      - main
+      - next
+    paths:
+      - 'packages/editor/**'
+      - '.github/workflows/editor-chromatic.yml'
+      - '.github/workflows/_chromatic-reusable.yml'
+      - 'pnpm-lock.yaml'
+  pull_request:
+    branches:
+      - main
+      - next
+    paths:
+      - 'packages/editor/**'
+      - '.github/workflows/editor-chromatic.yml'
+      - '.github/workflows/_chromatic-reusable.yml'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  chromatic:
+    # ⚠️ Make sure to configure a `CHROMATIC_PROJECT_TOKEN` repository secret
+    uses: ./.github/workflows/_chromatic-reusable.yml
+    with:
+      working-dir: packages/editor
+    secrets:
+      project-token: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}

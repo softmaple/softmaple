@@ -1,0 +1,52 @@
+name: Awareness Storybook Tests
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - "packages/awareness/**"
+      - ".github/workflows/awareness-stories-tests.yml"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches: [main, next]
+    paths:
+      - "packages/awareness/**"
+      - ".github/workflows/awareness-stories-tests.yml"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Storybook Tests
+    runs-on: ubuntu-latest
+    container:
+      # Make sure to grab the latest version of the Playwright image
+      # https://playwright.dev/docs/docker#pull-the-image
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Storybook tests
+        run: pnpm --filter @softmaple/awareness test-storybook
+        env:
+          CI: true

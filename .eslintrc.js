@@ -2,7 +2,7 @@
 /** @type {import("eslint").Linter.Config} */
 module.exports = {
   ignorePatterns: ["apps/**", "packages/**", "docs/**"],
-  extends: ["@softmaple/eslint-config/library.js"],
+  extends: ["@softmaple/eslint-config/library.js", "plugin:storybook/recommended"],
   parser: "@typescript-eslint/parser",
   parserOptions: {
     project: true,

@@ -3,7 +3,7 @@
  * Main adapter factory using modular connection management
  */
 
-import { WS_MESSAGE } from "../constants/presence-events";
+import { PRESENCE_EVENT, WS_MESSAGE } from "../constants/presence-events";
 import type { PresenceEvent, PresenceEventPayload } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import { createPresenceUser, updatePresenceUser } from "../types/presence";
@@ -27,7 +27,14 @@ import {
 import { parseMessage, processMessage } from "./websocket-message";
 import { createInternalState } from "./websocket-state";
 import type { WebSocketAdapterConfig } from "./websocket-types";
-import { DEFAULT_WS_CONFIG } from "./websocket-types";
+import {
+  DEFAULT_WS_CONFIG,
+  type JoinPayload,
+  type LeavePayload,
+  type PresenceSyncPayload,
+  type PresenceUpdatePayload,
+  type WebSocketMessage,
+} from "./websocket-types";
 
 /**
  * Authentication message type for secure token handshake
@@ -77,6 +84,75 @@ const waitForBufferFlush = (
     };
     checkBuffer();
   });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const isJoinPayload = (payload: unknown): payload is JoinPayload =>
+  isRecord(payload) &&
+  isRecord(payload.user) &&
+  typeof payload.user.userId === "string";
+
+const isLeavePayload = (payload: unknown): payload is LeavePayload =>
+  isRecord(payload) && typeof payload.userId === "string";
+
+const isPresenceUpdatePayload = (
+  payload: unknown,
+): payload is PresenceUpdatePayload =>
+  isRecord(payload) &&
+  typeof payload.userId === "string" &&
+  isRecord(payload.updates);
+
+const isPresenceSyncPayload = (
+  payload: unknown,
+): payload is PresenceSyncPayload =>
+  isRecord(payload) && Array.isArray(payload.users);
+
+const presenceEventFromMessage = (
+  message: WebSocketMessage,
+): PresenceEvent | null => {
+  switch (message.type) {
+    case WS_MESSAGE.JOIN: {
+      if (!isJoinPayload(message.payload)) return null;
+      return {
+        type: PRESENCE_EVENT.JOIN,
+        payload: { type: PRESENCE_EVENT.JOIN, user: message.payload.user },
+        timestamp: message.timestamp,
+      };
+    }
+    case WS_MESSAGE.LEAVE: {
+      if (!isLeavePayload(message.payload)) return null;
+      return {
+        type: PRESENCE_EVENT.LEAVE,
+        payload: { type: PRESENCE_EVENT.LEAVE, userId: message.payload.userId },
+        timestamp: message.timestamp,
+      };
+    }
+    case WS_MESSAGE.PRESENCE_UPDATE: {
+      if (!isPresenceUpdatePayload(message.payload)) return null;
+      return {
+        type: PRESENCE_EVENT.UPDATE,
+        payload: {
+          type: PRESENCE_EVENT.UPDATE,
+          userId: message.payload.userId,
+          updates: message.payload.updates,
+        },
+        timestamp: message.timestamp,
+      };
+    }
+    case WS_MESSAGE.PRESENCE_SYNC:
+    case WS_MESSAGE.PRESENCE_SYNC_RESPONSE: {
+      if (!isPresenceSyncPayload(message.payload)) return null;
+      return {
+        type: PRESENCE_EVENT.SYNC,
+        payload: { type: PRESENCE_EVENT.SYNC, users: message.payload.users },
+        timestamp: message.timestamp,
+      };
+    }
+    default:
+      return null;
+  }
+};
 
 /**
  * Create a WebSocket presence adapter
@@ -149,6 +225,10 @@ export const createWebSocketAdapter = (
     internal.state = result.state;
     if (result.shouldNotifyPresence) {
       subscriptions.notifyPresenceChange(result.state.presence);
+    }
+    const presenceEvent = presenceEventFromMessage(message);
+    if (presenceEvent !== null && result.shouldNotifyPresence) {
+      subscriptions.notifyEvent(presenceEvent);
     }
     if (result.error !== undefined) {
       subscriptions.notifyError(result.error);
@@ -298,8 +378,15 @@ export const createWebSocketAdapter = (
     onError: subscriptions.onError,
 
     getPresence: (): ReadonlyMap<string, PresenceUser> =>
-      internal.state.presence,
+      new Map(internal.state.presence),
 
     getSelf: (): PresenceUser | null => internal.state.self,
   };
 };
+
+/**
+ * Factory function for creating WebSocket adapters
+ */
+export const webSocketAdapterFactory = (
+  config: WebSocketAdapterConfig,
+): PresenceAdapter => createWebSocketAdapter(config);

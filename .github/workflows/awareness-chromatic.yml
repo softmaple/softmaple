@@ -1,0 +1,34 @@
+name: "Chromatic (awareness)"
+
+on:
+  push:
+    branches:
+      - main
+      - next
+    paths:
+      - 'packages/awareness/**'
+      - '.github/workflows/awareness-chromatic.yml'
+      - '.github/workflows/_chromatic-reusable.yml'
+      - 'pnpm-lock.yaml'
+  pull_request:
+    branches:
+      - main
+      - next
+    paths:
+      - 'packages/awareness/**'
+      - '.github/workflows/awareness-chromatic.yml'
+      - '.github/workflows/_chromatic-reusable.yml'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  chromatic:
+    # ⚠️ Requires the `CHROMATIC_PROJECT_TOKEN_AWARENESS` repository secret
+    # (separate Chromatic project from packages/editor — one project per Storybook)
+    uses: ./.github/workflows/_chromatic-reusable.yml
+    with:
+      working-dir: packages/awareness
+    secrets:
+      project-token: ${{ secrets.CHROMATIC_PROJECT_TOKEN_AWARENESS }}

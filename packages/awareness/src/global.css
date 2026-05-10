@@ -1,0 +1,187 @@
+/*
+ * Tailwind v4 split imports — keep theme tokens and utilities, skip preflight.
+ * Preflight is a global reset (margin: 0 on *, list-style: none on ul/ol, etc.)
+ * that would clobber consumer apps' baseline styles when this stylesheet is
+ * imported as a library. By dropping it here, downstream apps can import
+ * `@softmaple/awareness/styles.css` without unexpected resets.
+ */
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+
+/*
+ * Register awareness design tokens with Tailwind v4 so they generate utilities
+ * (e.g. `--color-awareness-surface` → `bg-awareness-surface`, `border-awareness-surface`).
+ * The per-user color stays a runtime CSS variable (`--awareness-user-color`) set
+ * via inline style, since each user's tint is dynamic.
+ */
+@theme {
+  --font-awareness:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --color-awareness-surface: color-mix(in srgb, Canvas 94%, transparent);
+  --color-awareness-border: color-mix(in srgb, CanvasText 14%, transparent);
+  --color-awareness-muted: color-mix(in srgb, CanvasText 58%, transparent);
+  --color-awareness-text: color-mix(in srgb, CanvasText 82%, transparent);
+  --color-awareness-overflow-bg: color-mix(
+    in srgb,
+    Canvas 86%,
+    CanvasText 14%
+  );
+  --color-awareness-status-active: #22c55e;
+  --color-awareness-status-idle: #f59e0b;
+  --color-awareness-status-offline: #94a3b8;
+  --shadow-awareness: 0 10px 24px
+    color-mix(in srgb, CanvasText 10%, transparent);
+}
+
+.awareness-avatar {
+  --awareness-avatar-size: 32px;
+  width: var(--awareness-avatar-size);
+  height: var(--awareness-avatar-size);
+  flex: 0 0 var(--awareness-avatar-size);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--awareness-user-color) 92%, white),
+    color-mix(in srgb, var(--awareness-user-color) 72%, black)
+  );
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--awareness-user-color) 42%, transparent);
+
+  @apply relative inline-flex items-center justify-center overflow-visible
+    rounded-full border-2 border-awareness-surface text-white font-bold
+    tracking-normal leading-none select-none font-awareness;
+}
+
+.awareness-avatar--sm {
+  --awareness-avatar-size: 24px;
+  @apply text-[10px];
+}
+
+.awareness-avatar--md {
+  --awareness-avatar-size: 32px;
+  @apply text-xs;
+}
+
+.awareness-avatar--lg {
+  --awareness-avatar-size: 40px;
+  @apply text-sm;
+}
+
+.awareness-avatar__image {
+  border-radius: inherit;
+  @apply block w-full h-full object-cover;
+}
+
+.awareness-avatar__initials {
+  transform: translateY(0.5px);
+}
+
+.awareness-avatar__status {
+  @apply absolute right-[-1px] bottom-[-1px] w-[30%] min-w-2 h-[30%] min-h-2
+    border-2 border-awareness-surface rounded-full bg-awareness-status-active;
+}
+
+.awareness-avatar--idle .awareness-avatar__status {
+  @apply bg-awareness-status-idle;
+}
+
+.awareness-avatar--offline {
+  filter: grayscale(0.9);
+  @apply opacity-[0.55];
+}
+
+.awareness-avatar--offline .awareness-avatar__status {
+  @apply bg-awareness-status-offline;
+}
+
+.awareness-presence-bar {
+  @apply inline-flex min-h-8 items-center m-0 p-0 font-awareness list-none;
+}
+
+.awareness-presence-bar__item {
+  @apply inline-flex -ml-2;
+}
+
+.awareness-presence-bar__item:first-child {
+  @apply ml-0;
+}
+
+.awareness-presence-bar__overflow {
+  @apply inline-flex items-center justify-center -ml-2 border-2
+    border-awareness-surface rounded-full bg-awareness-overflow-bg
+    text-awareness-text font-awareness font-bold tracking-normal leading-none;
+}
+
+.awareness-presence-bar__overflow--sm {
+  @apply w-6 h-6 text-[10px];
+}
+
+.awareness-presence-bar__overflow--md {
+  @apply w-8 h-8 text-xs;
+}
+
+.awareness-presence-bar__overflow--lg {
+  @apply w-10 h-10 text-sm;
+}
+
+.awareness-presence-bar__empty,
+.awareness-activity-indicator__empty {
+  @apply text-awareness-muted font-awareness text-[13px] leading-[1.4];
+}
+
+.awareness-live-cursor {
+  transition: transform 80ms linear;
+  @apply absolute top-0 left-0 z-20 inline-flex items-start pointer-events-none
+    will-change-transform;
+}
+
+.awareness-live-cursor__caret {
+  background: var(--awareness-user-color);
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--awareness-user-color) 34%, transparent);
+  @apply block w-[2px] h-5 rounded-full;
+}
+
+.awareness-live-cursor__label {
+  background: var(--awareness-user-color);
+  font-weight: 650;
+  transform: translateY(2px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  @apply absolute -top-[1.65rem] left-0 max-w-64 overflow-hidden px-[7px]
+    py-[3px] rounded text-white font-awareness text-xs tracking-normal
+    leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
+}
+
+.awareness-live-cursor--label-visible .awareness-live-cursor__label {
+  transform: translateY(0);
+  @apply opacity-100;
+}
+
+.awareness-selection-highlight {
+  border-left-color: var(--awareness-user-color);
+  background: color-mix(in srgb, var(--awareness-user-color) 18%, transparent);
+  @apply absolute top-0 left-0 z-10 box-border border-l-2 rounded-[3px]
+    pointer-events-none;
+}
+
+.awareness-selection-highlight__label {
+  background: var(--awareness-user-color);
+  font-weight: 650;
+  @apply absolute -top-[1.45rem] left-0 max-w-56 overflow-hidden px-[6px]
+    py-[2px] rounded text-white font-awareness text-[11px] tracking-normal
+    leading-[1.2] text-ellipsis whitespace-nowrap;
+}
+
+.awareness-activity-indicator {
+  @apply text-awareness-text font-awareness text-[13px] leading-[1.4];
+}
+
+.awareness-activity-indicator__list {
+  @apply grid gap-1 m-0 p-0 list-none;
+}
+
+.awareness-activity-indicator__item {
+  @apply truncate;
+}

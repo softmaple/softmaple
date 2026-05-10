@@ -6,6 +6,47 @@
   "draft": true,
   "description": "Awareness and presence UI components for real-time collaboration",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./components/activity-indicator": {
+      "types": "./dist/components/activity-indicator.d.ts",
+      "import": "./dist/components/activity-indicator.js"
+    },
+    "./components/live-cursor": {
+      "types": "./dist/components/live-cursor.d.ts",
+      "import": "./dist/components/live-cursor.js"
+    },
+    "./components/presence-avatar": {
+      "types": "./dist/components/presence-avatar.d.ts",
+      "import": "./dist/components/presence-avatar.js"
+    },
+    "./components/presence-bar": {
+      "types": "./dist/components/presence-bar.d.ts",
+      "import": "./dist/components/presence-bar.js"
+    },
+    "./components/selection-highlight": {
+      "types": "./dist/components/selection-highlight.d.ts",
+      "import": "./dist/components/selection-highlight.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "import": "./dist/hooks/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
+    "./state": {
+      "types": "./dist/state/index.d.ts",
+      "import": "./dist/state/index.js"
+    },
     "./types/presence": {
       "types": "./dist/types/presence.d.ts",
       "import": "./dist/types/presence.js"
@@ -58,6 +99,10 @@
       "types": "./dist/hooks/use-update-presence.d.ts",
       "import": "./dist/hooks/use-update-presence.js"
     },
+    "./hooks/use-update-typing": {
+      "types": "./dist/hooks/use-update-presence.d.ts",
+      "import": "./dist/hooks/use-update-presence.js"
+    },
     "./hooks/use-activity": {
       "types": "./dist/hooks/use-activity.d.ts",
       "import": "./dist/hooks/use-activity.js"
@@ -75,7 +120,10 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "test-storybook": "vitest --project=storybook"
   },
   "keywords": [
     "collaboration",
@@ -87,14 +135,26 @@
   "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "2.3.11",
+    "@chromatic-com/storybook": "^4.1.3",
     "@softmaple/typescript-config": "workspace:*",
+    "@storybook/addon-docs": "^10.3.6",
+    "@storybook/addon-mcp": "^0.6.0",
+    "@storybook/addon-vitest": "^10.3.6",
+    "@storybook/react-vite": "^10.3.6",
+    "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^24.10.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
+    "@vitest/browser-playwright": "4.0.16",
     "@vitest/coverage-v8": "^4.0.16",
+    "chromatic": "^13.3.5",
+    "eslint-plugin-storybook": "^10.3.6",
+    "playwright": "^1.59.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "storybook": "^10.3.6",
+    "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
     "vite-plugin-dts": "^4.5.4",

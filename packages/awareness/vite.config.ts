@@ -3,6 +3,7 @@ import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import dts from "vite-plugin-dts";
+import tailwindcss from "@tailwindcss/vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,6 +15,7 @@ export default defineConfig({
       include: ["src"],
       exclude: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"],
     }),
+    tailwindcss(),
   ],
   resolve: {
     alias: {
@@ -21,8 +23,21 @@ export default defineConfig({
     },
   },
   build: {
+    cssCodeSplit: true,
     lib: {
+      cssFileName: "styles",
       entry: {
+        index: path.resolve(__dirname, "src/index.ts"),
+        styles: path.resolve(__dirname, "src/global.css"),
+        "components/index": path.resolve(__dirname, "src/components/index.ts"),
+        "components/activity-indicator": path.resolve(__dirname, "src/components/activity-indicator.tsx"),
+        "components/live-cursor": path.resolve(__dirname, "src/components/live-cursor.tsx"),
+        "components/presence-avatar": path.resolve(__dirname, "src/components/presence-avatar.tsx"),
+        "components/presence-bar": path.resolve(__dirname, "src/components/presence-bar.tsx"),
+        "components/selection-highlight": path.resolve(__dirname, "src/components/selection-highlight.tsx"),
+        "hooks/index": path.resolve(__dirname, "src/hooks/index.ts"),
+        "adapters/index": path.resolve(__dirname, "src/adapters/index.ts"),
+        "state/index": path.resolve(__dirname, "src/state/index.ts"),
         "types/presence": path.resolve(__dirname, "src/types/presence.ts"),
         "types/events": path.resolve(__dirname, "src/types/events.ts"),
         "types/state": path.resolve(__dirname, "src/types/state.ts"),

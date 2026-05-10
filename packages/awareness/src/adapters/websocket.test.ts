@@ -2,10 +2,12 @@
  * Tests for WebSocket presence adapter
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PRESENCE_EVENT } from "../constants/presence-events";
 import { createPresenceUser } from "../types/presence";
 import type { AdapterState } from "./adapter-state";
 import { createInitialState, setPresenceUser } from "./adapter-state";
+import { createWebSocketAdapter, webSocketAdapterFactory } from "./websocket";
 import {
   createMessage,
   parseMessage,
@@ -17,6 +19,76 @@ import {
   createReconnectState,
   WS_MESSAGE,
 } from "./websocket-types";
+
+type FakeWebSocketEventType = "open" | "message" | "close" | "error";
+type FakeWebSocketListener = (event: Event | MessageEvent<string>) => void;
+
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+
+  readonly sentMessages: string[] = [];
+  readonly url: string;
+  bufferedAmount = 0;
+  readyState = FakeWebSocket.CONNECTING;
+
+  private readonly listeners = new Map<
+    FakeWebSocketEventType,
+    Set<FakeWebSocketListener>
+  >();
+
+  constructor(url: string) {
+    this.url = url;
+    fakeSockets.push(this);
+  }
+
+  addEventListener = (
+    type: FakeWebSocketEventType,
+    listener: FakeWebSocketListener,
+  ): void => {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  };
+
+  removeEventListener = (
+    type: FakeWebSocketEventType,
+    listener: FakeWebSocketListener,
+  ): void => {
+    this.listeners.get(type)?.delete(listener);
+  };
+
+  send = (data: string): void => {
+    this.sentMessages.push(data);
+  };
+
+  close = (): void => {
+    this.readyState = FakeWebSocket.CLOSED;
+  };
+
+  emitOpen = (): void => {
+    this.readyState = FakeWebSocket.OPEN;
+    this.emit("open", new Event("open"));
+  };
+
+  emitMessage = (data: string): void => {
+    this.emit("message", new MessageEvent("message", { data }));
+  };
+
+  private emit = (
+    type: FakeWebSocketEventType,
+    event: Event | MessageEvent<string>,
+  ): void => {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  };
+}
+
+const fakeSockets: FakeWebSocket[] = [];
+const originalWebSocket = globalThis.WebSocket;
 
 describe("WebSocket Message Utilities", () => {
   describe("createMessage", () => {
@@ -166,6 +238,258 @@ describe("WebSocket Message Utilities", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.message).toContain("AUTH_FAILED");
     });
+  });
+});
+
+describe("WebSocket adapter events", () => {
+  afterEach(() => {
+    fakeSockets.length = 0;
+    globalThis.WebSocket = originalWebSocket;
+  });
+
+  it("does not notify events for echoed self messages", async () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+    const adapter = createWebSocketAdapter({
+      roomId: "room-1",
+      url: "ws://localhost:1234",
+      userInfo: {
+        userId: "self-user",
+        name: "Self User",
+        color: "#2563eb",
+      },
+      connectionTimeoutMs: 1000,
+      heartbeatIntervalMs: 60_000,
+      reconnect: {
+        enabled: false,
+        maxAttempts: 0,
+        baseDelayMs: 1,
+        maxDelayMs: 1,
+      },
+    });
+    const events = vi.fn();
+
+    adapter.onEvent(events);
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    const echoedTyping = serializeMessage(
+      createMessage(WS_MESSAGE.PRESENCE_UPDATE, "room-1", "self-user", {
+        userId: "self-user",
+        updates: { meta: { isTyping: true } },
+      }),
+    );
+
+    fakeSockets[0]?.emitMessage(echoedTyping);
+
+    expect(events).not.toHaveBeenCalled();
+
+    await adapter.disconnect();
+  });
+});
+
+describe("WebSocket adapter public API", () => {
+  const baseConfig = {
+    roomId: "room-1",
+    url: "ws://localhost:1234",
+    userInfo: { userId: "self-user", name: "Self User", color: "#2563eb" },
+    connectionTimeoutMs: 1000,
+    heartbeatIntervalMs: 60_000,
+    reconnect: {
+      enabled: false,
+      maxAttempts: 0,
+      baseDelayMs: 1,
+      maxDelayMs: 1,
+    },
+  };
+
+  beforeEach(() => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+
+  afterEach(() => {
+    fakeSockets.length = 0;
+    globalThis.WebSocket = originalWebSocket;
+  });
+
+  it("connect → handleOpen sends JOIN + PRESENCE_SYNC and notifies callbacks", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const presence = vi.fn();
+    const connection = vi.fn();
+
+    adapter.onPresenceChange(presence);
+    adapter.onConnectionChange(connection);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    const sent = fakeSockets[0]?.sentMessages.map(
+      (m) => JSON.parse(m).type as string,
+    );
+    expect(sent).toContain(WS_MESSAGE.JOIN);
+    expect(sent).toContain(WS_MESSAGE.PRESENCE_SYNC);
+
+    expect(connection).toHaveBeenCalledWith("connecting");
+    expect(connection).toHaveBeenCalledWith("connected");
+    expect(adapter.getConnectionState()).toBe("connected");
+    expect(adapter.getSelf()?.userId).toBe("self-user");
+    expect(adapter.getPresence().has("self-user")).toBe(true);
+
+    await adapter.disconnect();
+  });
+
+  it("updatePresence sends PRESENCE_UPDATE and notifies presence subscribers", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const presence = vi.fn();
+    adapter.onPresenceChange(presence);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+    presence.mockClear();
+    if (fakeSockets[0]) {
+      fakeSockets[0].sentMessages.length = 0;
+    }
+
+    adapter.updatePresence({ cursor: { blockId: "b1", offset: 5 } });
+
+    expect(presence).toHaveBeenCalledTimes(1);
+    const lastSent = JSON.parse(fakeSockets[0]?.sentMessages[0] ?? "{}");
+    expect(lastSent.type).toBe(WS_MESSAGE.PRESENCE_UPDATE);
+    expect(lastSent.payload.updates.cursor).toEqual({
+      blockId: "b1",
+      offset: 5,
+    });
+    expect(adapter.getSelf()?.cursor).toEqual({ blockId: "b1", offset: 5 });
+
+    await adapter.disconnect();
+  });
+
+  it("updatePresence is a no-op before connect", () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    expect(() =>
+      adapter.updatePresence({ cursor: { blockId: "b", offset: 0 } }),
+    ).not.toThrow();
+    expect(adapter.getSelf()).toBeNull();
+  });
+
+  it("broadcast emits an event and sends a wire message", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const events = vi.fn();
+    adapter.onEvent(events);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+    if (fakeSockets[0]) {
+      fakeSockets[0].sentMessages.length = 0;
+    }
+
+    adapter.broadcast({
+      type: PRESENCE_EVENT.UPDATE,
+      userId: "self-user",
+      updates: { meta: { isTyping: true } },
+    });
+
+    expect(events).toHaveBeenCalledWith(
+      expect.objectContaining({ type: PRESENCE_EVENT.UPDATE }),
+    );
+    const sent = JSON.parse(fakeSockets[0]?.sentMessages[0] ?? "{}");
+    expect(sent.type).toBe(PRESENCE_EVENT.UPDATE);
+
+    await adapter.disconnect();
+  });
+
+  it("broadcast is a no-op before connect", () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    expect(() =>
+      adapter.broadcast({
+        type: PRESENCE_EVENT.UPDATE,
+        userId: "self-user",
+        updates: {},
+      }),
+    ).not.toThrow();
+  });
+
+  it("incoming JOIN from peer adds them to presence", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const events = vi.fn();
+    const presence = vi.fn();
+    adapter.onEvent(events);
+    adapter.onPresenceChange(presence);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+    events.mockClear();
+    presence.mockClear();
+
+    const joiningUser = createPresenceUser({
+      userId: "peer",
+      name: "Peer",
+      color: "#fff",
+    });
+    fakeSockets[0]?.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.JOIN, "room-1", "peer", {
+          user: joiningUser,
+        }),
+      ),
+    );
+
+    expect(events).toHaveBeenCalledWith(
+      expect.objectContaining({ type: PRESENCE_EVENT.JOIN }),
+    );
+    expect(presence).toHaveBeenCalled();
+    expect(adapter.getPresence().has("peer")).toBe(true);
+
+    await adapter.disconnect();
+  });
+
+  it("disconnect closes the socket and resets connection state", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const connection = vi.fn();
+    adapter.onConnectionChange(connection);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    await adapter.disconnect();
+
+    expect(adapter.getConnectionState()).toBe("disconnected");
+    expect(connection).toHaveBeenCalledWith("disconnected");
+  });
+
+  it("onError subscribers receive errors emitted by the adapter", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const errors = vi.fn();
+    adapter.onError(errors);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    fakeSockets[0]?.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.ERROR, "room-1", "server", {
+          code: "AUTH_REJECTED",
+          message: "bad token",
+        }),
+      ),
+    );
+
+    expect(errors).toHaveBeenCalledWith(expect.any(Error));
+    await adapter.disconnect();
+  });
+
+  it("webSocketAdapterFactory returns a working adapter", () => {
+    const adapter = webSocketAdapterFactory(baseConfig);
+    expect(typeof adapter.connect).toBe("function");
+    expect(typeof adapter.disconnect).toBe("function");
+    expect(adapter.getConnectionState()).toBe("disconnected");
   });
 });
 

@@ -1,19 +1,24 @@
 import type { CSSProperties, ReactNode } from "react";
 
 const frameStyle: CSSProperties = {
+  boxSizing: "border-box",
   display: "grid",
-  minHeight: 180,
-  placeItems: "center",
-  padding: 24,
+  width: "100%",
+  minHeight: "100svh",
+  alignItems: "start",
+  justifyItems: "center",
+  padding:
+    "clamp(48px, 14svh, 88px) clamp(16px, 5vw, 24px) clamp(32px, 8svh, 64px)",
   background:
     "radial-gradient(circle at 18% 18%, color-mix(in srgb, #2563eb 10%, transparent), transparent 30%), radial-gradient(circle at 82% 24%, color-mix(in srgb, #16a34a 10%, transparent), transparent 28%), Canvas",
 };
 
 const surfaceStyle: CSSProperties = {
+  boxSizing: "border-box",
   position: "relative",
   width: "min(520px, calc(100vw - 48px))",
   minHeight: 240,
-  overflow: "hidden",
+  overflow: "visible",
   border: "1px solid color-mix(in srgb, CanvasText 14%, transparent)",
   borderRadius: 8,
   background:

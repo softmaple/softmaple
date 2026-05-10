@@ -10,7 +10,7 @@ const meta = {
   component: PresenceAvatar,
   tags: ["autodocs"],
   parameters: {
-    layout: "centered",
+    layout: "fullscreen",
   },
   args: {
     user: ada,

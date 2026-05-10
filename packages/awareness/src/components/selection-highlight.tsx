@@ -18,13 +18,21 @@ export interface SelectionHighlightProps {
   readonly style?: CSSProperties;
 }
 
+const ARIA_LABEL_MAX_TEXT = 120;
+
 const getSelectionLabel = (
   user: PresenceUser,
   selectedText: string | undefined,
-): string =>
-  selectedText === undefined || selectedText.length === 0
-    ? `${user.name} selection`
-    : `${user.name} selection: ${selectedText}`;
+): string => {
+  if (selectedText === undefined || selectedText.length === 0) {
+    return `${user.name} selection`;
+  }
+  const clamped =
+    selectedText.length > ARIA_LABEL_MAX_TEXT
+      ? `${selectedText.slice(0, ARIA_LABEL_MAX_TEXT)}…`
+      : selectedText;
+  return `${user.name} selection: ${clamped}`;
+};
 
 export const SelectionHighlight = ({
   user,

@@ -3,9 +3,14 @@ export {
   type ActivityIndicatorProps,
 } from "./activity-indicator";
 export {
+  BlockActivityIndicator,
+  type BlockActivityIndicatorProps,
+} from "./block-activity-indicator";
+export {
   LiveCursor,
   type LiveCursorPoint,
   type LiveCursorProps,
+  type LiveCursorViewport,
 } from "./live-cursor";
 export {
   PresenceAvatar,

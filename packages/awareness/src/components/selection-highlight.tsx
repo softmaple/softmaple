@@ -13,7 +13,13 @@ export interface SelectionHighlightProps {
   readonly user: PresenceUser;
   readonly rect: HighlightRect;
   readonly selectedText?: string;
-  readonly showLabel?: boolean;
+  /**
+   * When `true`, the user badge is always visible.
+   * When `false` (default), the badge is hidden.
+   * When `"hover"`, the badge is hidden until the highlight is hovered or
+   * keyboard-focused — matches design doc §5.3 ("Hover reveals user badge").
+   */
+  readonly showLabel?: boolean | "hover";
   readonly className?: string;
   readonly style?: CSSProperties;
 }
@@ -41,21 +47,33 @@ export const SelectionHighlight = ({
   showLabel = false,
   className,
   style,
-}: SelectionHighlightProps): ReactNode => (
-  <div
-    aria-label={getSelectionLabel(user, selectedText)}
-    className={cx("awareness-selection-highlight", className)}
-    role="img"
-    style={{
-      ...toUserColorStyle(user.color),
-      height: rect.height,
-      transform: `translate3d(${rect.x}px, ${rect.y}px, 0)`,
-      width: rect.width,
-      ...style,
-    }}
-  >
-    {showLabel ? (
-      <span className="awareness-selection-highlight__label">{user.name}</span>
-    ) : null}
-  </div>
-);
+}: SelectionHighlightProps): ReactNode => {
+  const isHoverLabel = showLabel === "hover";
+  const renderLabel = showLabel === true || isHoverLabel;
+
+  return (
+    <div
+      aria-label={getSelectionLabel(user, selectedText)}
+      className={cx(
+        "awareness-selection-highlight",
+        isHoverLabel && "awareness-selection-highlight--hoverable",
+        className,
+      )}
+      role="img"
+      style={{
+        ...toUserColorStyle(user.color),
+        height: rect.height,
+        transform: `translate3d(${rect.x}px, ${rect.y}px, 0)`,
+        width: rect.width,
+        ...style,
+      }}
+      tabIndex={isHoverLabel ? 0 : undefined}
+    >
+      {renderLabel ? (
+        <span className="awareness-selection-highlight__label">
+          {user.name}
+        </span>
+      ) : null}
+    </div>
+  );
+};

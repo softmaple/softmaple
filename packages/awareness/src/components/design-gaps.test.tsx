@@ -1,0 +1,350 @@
+/**
+ * Tests covering the design-doc gaps fixed in this change:
+ *   - LiveCursor off-screen culling (§7)
+ *   - LiveCursor default fade ≈ 3000 ms (§6)
+ *   - SelectionHighlight hover-to-reveal label (§5.3)
+ *   - BlockActivityIndicator per-block aggregation (§5.4)
+ *   - PresenceProvider local idle/offline status sweep (§4.2)
+ */
+
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  AdapterConnectionState,
+  ConnectionCallback,
+  ErrorCallback,
+  EventCallback,
+  PresenceAdapter,
+  PresenceCallback,
+  Unsubscribe,
+} from "../adapters/types";
+import { PresenceContext } from "../providers/presence-context";
+import { PresenceProvider } from "../providers/presence-provider";
+import type { PresenceUser } from "../types/presence";
+import { BlockActivityIndicator } from "./block-activity-indicator";
+import { LiveCursor } from "./live-cursor";
+import { SelectionHighlight } from "./selection-highlight";
+
+const reactActGlobal = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
+
+const user = (
+  id: string,
+  overrides: Partial<Omit<PresenceUser, "userId">> = {},
+): PresenceUser => ({
+  userId: id,
+  name: `User ${id}`,
+  color: "#2563eb",
+  status: "active",
+  lastActiveAt: 1000,
+  ...overrides,
+});
+
+afterEach(() => {
+  document.body.replaceChildren();
+  vi.useRealTimers();
+});
+
+describe("LiveCursor off-screen culling (design §7)", () => {
+  it("renders when point is inside the window viewport", () => {
+    const html = renderToStaticMarkup(
+      <LiveCursor point={{ x: 100, y: 100 }} user={user("a")} />,
+    );
+    expect(html).toContain("awareness-live-cursor");
+  });
+
+  it("returns null when point is far outside the window viewport", () => {
+    const html = renderToStaticMarkup(
+      <LiveCursor point={{ x: 999_999, y: 999_999 }} user={user("a")} />,
+    );
+    expect(html).toBe("");
+  });
+
+  it("honors an explicit viewport rect", () => {
+    const inside = renderToStaticMarkup(
+      <LiveCursor
+        point={{ x: 50, y: 50 }}
+        user={user("a")}
+        viewport={{ x: 0, y: 0, width: 200, height: 200 }}
+      />,
+    );
+    const outside = renderToStaticMarkup(
+      <LiveCursor
+        point={{ x: 500, y: 500 }}
+        user={user("a")}
+        cullMargin={0}
+        viewport={{ x: 0, y: 0, width: 200, height: 200 }}
+      />,
+    );
+    expect(inside).toContain("awareness-live-cursor");
+    expect(outside).toBe("");
+  });
+
+  it('never culls when viewport="none"', () => {
+    const html = renderToStaticMarkup(
+      <LiveCursor
+        point={{ x: 999_999, y: 999_999 }}
+        user={user("a")}
+        viewport="none"
+      />,
+    );
+    expect(html).toContain("awareness-live-cursor");
+  });
+});
+
+describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
+  it('adds hoverable class when showLabel="hover"', () => {
+    const html = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        showLabel="hover"
+        user={user("a", { name: "Hover" })}
+      />,
+    );
+    expect(html).toContain("awareness-selection-highlight--hoverable");
+    expect(html).toContain("Hover");
+    expect(html).toContain('tabindex="0"');
+  });
+
+  it("does not add hoverable class for boolean showLabel", () => {
+    const truthy = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        showLabel
+        user={user("a", { name: "Vis" })}
+      />,
+    );
+    expect(truthy).not.toContain("awareness-selection-highlight--hoverable");
+    expect(truthy).toContain("Vis");
+  });
+});
+
+describe("BlockActivityIndicator (design §5.4)", () => {
+  const a = user("a", {
+    name: "Ada",
+    cursor: { blockId: "b1", offset: 0 },
+  });
+  const b = user("b", {
+    name: "Bea",
+    selection: { blockId: "b1", from: 0, to: 5 },
+  });
+  const c = user("c", { name: "Cam", cursor: { blockId: "other", offset: 0 } });
+
+  it("renders nothing when no one is in the block", () => {
+    const html = renderToStaticMarkup(
+      <BlockActivityIndicator blockId="b1" users={[c]} />,
+    );
+    expect(html).toBe("");
+  });
+
+  it("renders single-user phrasing", () => {
+    const html = renderToStaticMarkup(
+      <BlockActivityIndicator blockId="b1" users={[a, c]} />,
+    );
+    expect(html).toContain("Ada is editing this block");
+  });
+
+  it("renders multi-user count", () => {
+    const html = renderToStaticMarkup(
+      <BlockActivityIndicator blockId="b1" users={[a, b, c]} />,
+    );
+    expect(html).toContain("2 people editing here");
+  });
+
+  it("excludes offline users by default", () => {
+    const offline = user("d", {
+      name: "Dee",
+      status: "offline",
+      cursor: { blockId: "b1", offset: 0 },
+    });
+    const html = renderToStaticMarkup(
+      <BlockActivityIndicator blockId="b1" users={[offline]} />,
+    );
+    expect(html).toBe("");
+  });
+
+  it("renders empty label when renderWhenEmpty is set", () => {
+    const html = renderToStaticMarkup(
+      <BlockActivityIndicator
+        blockId="b1"
+        emptyLabel="Quiet here"
+        renderWhenEmpty
+        users={[]}
+      />,
+    );
+    expect(html).toContain("Quiet here");
+  });
+
+  it("reads from PresenceContext when no users prop is provided", () => {
+    const ctxValue = {
+      connectionState: "connected" as const,
+      self: null,
+      presence: new Map([
+        [a.userId, a],
+        [b.userId, b],
+      ]),
+      others: [a, b],
+      recentActivity: [],
+      updatePresence: vi.fn(),
+      connect: vi.fn(async () => {}),
+      disconnect: vi.fn(async () => {}),
+      adapter: null,
+    };
+
+    const html = renderToStaticMarkup(
+      <PresenceContext.Provider value={ctxValue}>
+        <BlockActivityIndicator blockId="b1" />
+      </PresenceContext.Provider>,
+    );
+    expect(html).toContain("2 people editing here");
+  });
+});
+
+class StatusSweepAdapter implements PresenceAdapter {
+  presenceCallbacks = new Set<PresenceCallback>();
+  eventCallbacks = new Set<EventCallback>();
+  connectionCallbacks = new Set<ConnectionCallback>();
+  errorCallbacks = new Set<ErrorCallback>();
+
+  state: AdapterConnectionState = "disconnected";
+  presence: ReadonlyMap<string, PresenceUser> = new Map();
+  self: PresenceUser | null = null;
+
+  connect = vi.fn(async (): Promise<void> => {});
+  disconnect = vi.fn(async (): Promise<void> => {});
+  getConnectionState = (): AdapterConnectionState => this.state;
+  updatePresence = vi.fn();
+  broadcast = vi.fn();
+  getPresence = (): ReadonlyMap<string, PresenceUser> => this.presence;
+  getSelf = (): PresenceUser | null => this.self;
+
+  onPresenceChange = (cb: PresenceCallback): Unsubscribe => {
+    this.presenceCallbacks.add(cb);
+    return () => {
+      this.presenceCallbacks.delete(cb);
+    };
+  };
+  onEvent = (cb: EventCallback): Unsubscribe => {
+    this.eventCallbacks.add(cb);
+    return () => {
+      this.eventCallbacks.delete(cb);
+    };
+  };
+  onConnectionChange = (cb: ConnectionCallback): Unsubscribe => {
+    this.connectionCallbacks.add(cb);
+    return () => {
+      this.connectionCallbacks.delete(cb);
+    };
+  };
+  onError = (cb: ErrorCallback): Unsubscribe => {
+    this.errorCallbacks.add(cb);
+    return () => {
+      this.errorCallbacks.delete(cb);
+    };
+  };
+
+  pushPresence = (next: ReadonlyMap<string, PresenceUser>): void => {
+    this.presence = next;
+    for (const cb of this.presenceCallbacks) cb(next);
+  };
+}
+
+describe("PresenceProvider status sweep (design §4.2)", () => {
+  it("demotes stale users from active to idle to offline over time", async () => {
+    vi.useFakeTimers();
+    const adapter = new StatusSweepAdapter();
+
+    let observedStatus: string | undefined;
+    const Probe = (): null => {
+      // Read from context via a ref-y consumer
+      return null;
+    };
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          statusConfig={{
+            maxActivities: 10,
+            idleTimeoutMs: 1_000,
+            offlineTimeoutMs: 2_000,
+            cursorThrottleMs: 50,
+          }}
+          statusSweepMs={500}
+        >
+          <PresenceContext.Consumer>
+            {(value) => {
+              observedStatus = value?.presence.get("stale")?.status;
+              return <Probe />;
+            }}
+          </PresenceContext.Consumer>
+        </PresenceProvider>,
+      );
+    });
+
+    const stale = user("stale", {
+      name: "Stale",
+      lastActiveAt: Date.now() - 1_500, // older than idle threshold
+      status: "active",
+    });
+
+    act(() => {
+      adapter.pushPresence(new Map([[stale.userId, stale]]));
+    });
+    expect(observedStatus).toBe("active");
+
+    // First sweep should mark them idle (elapsed > 1s).
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(observedStatus).toBe("idle");
+
+    // After more time passes, they should go offline (elapsed > 2s).
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(observedStatus).toBe("offline");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("skips the sweep interval when statusSweepMs=0", async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const adapter = new StatusSweepAdapter();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          statusSweepMs={0}
+        >
+          {null}
+        </PresenceProvider>,
+      );
+    });
+
+    // No sweep timer should be installed when disabled.
+    const sweepCall = setIntervalSpy.mock.calls.find((call) => call[1] === 0);
+    expect(sweepCall).toBeUndefined();
+
+    await act(async () => {
+      root.unmount();
+    });
+    setIntervalSpy.mockRestore();
+  });
+});

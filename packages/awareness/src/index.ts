@@ -1,10 +1,13 @@
 export {
   ActivityIndicator,
   type ActivityIndicatorProps,
+  BlockActivityIndicator,
+  type BlockActivityIndicatorProps,
   type HighlightRect,
   LiveCursor,
   type LiveCursorPoint,
   type LiveCursorProps,
+  type LiveCursorViewport,
   PresenceAvatar,
   type PresenceAvatarProps,
   type PresenceAvatarSize,

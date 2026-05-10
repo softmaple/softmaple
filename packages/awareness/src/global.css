@@ -265,6 +265,25 @@
   @apply absolute -top-6 left-0 max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
+.awareness-selection-highlight--hoverable {
+  pointer-events: auto;
+}
+
+.awareness-selection-highlight--hoverable
+  .awareness-selection-highlight__label {
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.awareness-selection-highlight--hoverable:hover
+  .awareness-selection-highlight__label,
+.awareness-selection-highlight--hoverable:focus-visible
+  .awareness-selection-highlight__label {
+  opacity: 1;
+}
+
 .awareness-activity-indicator {
   box-sizing: border-box;
   inline-size: min(320px, 100%);
@@ -335,6 +354,56 @@
   --awareness-activity-color: var(--color-awareness-activity-leave);
 }
 
+.awareness-block-activity-indicator {
+  background: color-mix(in srgb, Canvas 92%, transparent);
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--awareness-user-color, var(--color-awareness-border)) 32%,
+      transparent
+    );
+  box-shadow: var(--shadow-awareness-close);
+  max-width: 100%;
+  min-width: 0;
+  @apply inline-flex items-center gap-2 rounded-full px-2.5 py-[3px] text-awareness-text font-awareness text-[12px] leading-[1.2];
+}
+
+.awareness-block-activity-indicator__dot {
+  background: var(--awareness-user-color, var(--color-awareness-muted));
+  box-shadow: 0 0 0 3px
+    color-mix(
+      in srgb,
+      var(--awareness-user-color, var(--color-awareness-muted)) 18%,
+      transparent
+    );
+  animation: awareness-block-activity-pulse 2.4s ease-in-out infinite;
+  @apply block h-1.5 w-1.5 rounded-full flex-none;
+}
+
+.awareness-block-activity-indicator__text {
+  @apply min-w-0 truncate;
+}
+
+@keyframes awareness-block-activity-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0
+      color-mix(
+        in srgb,
+        var(--awareness-user-color, var(--color-awareness-muted)) 20%,
+        transparent
+      );
+  }
+  50% {
+    box-shadow: 0 0 0 4px
+      color-mix(
+        in srgb,
+        var(--awareness-user-color, var(--color-awareness-muted)) 0%,
+        transparent
+      );
+  }
+}
+
 @keyframes awareness-status-pulse {
   0%,
   100% {
@@ -355,11 +424,14 @@
   .awareness-avatar::after,
   .awareness-live-cursor,
   .awareness-live-cursor__label,
-  .awareness-presence-bar__item {
+  .awareness-presence-bar__item,
+  .awareness-selection-highlight--hoverable
+    .awareness-selection-highlight__label {
     transition: none;
   }
 
-  .awareness-avatar--active .awareness-avatar__status {
+  .awareness-avatar--active .awareness-avatar__status,
+  .awareness-block-activity-indicator__dot {
     animation: none;
   }
 }

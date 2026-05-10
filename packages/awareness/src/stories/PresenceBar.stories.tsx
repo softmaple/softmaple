@@ -10,7 +10,7 @@ const meta = {
   component: PresenceBar,
   tags: ["autodocs"],
   parameters: {
-    layout: "centered",
+    layout: "fullscreen",
   },
   args: {
     users: collaborators,

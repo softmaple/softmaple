@@ -10,7 +10,7 @@ const meta = {
   component: ActivityIndicator,
   tags: ["autodocs"],
   parameters: {
-    layout: "centered",
+    layout: "fullscreen",
   },
   args: {
     activities: recentActivities,

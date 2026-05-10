@@ -1,9 +1,34 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { CSSProperties } from "react";
 import { expect } from "storybook/test";
 
 import { SelectionHighlight } from "../components/selection-highlight";
 import { ada, katherine } from "./awareness-fixtures";
 import { CollaborationSurface } from "./story-layout";
+
+const focusSelection = {
+  rect: { x: 36, y: 36, width: 172, height: 24 },
+  text: "Collaborative editing keeps",
+} as const;
+
+const inlineSelection = {
+  rect: { x: 36, y: 36, width: 96, height: 24 },
+  text: "Collaborative",
+} as const;
+
+const firstLineSelection = {
+  rect: { x: 36, y: 36, width: 172, height: 24 },
+  text: "Collaborative editing keeps",
+} as const;
+
+const overlappingFirstLineSelection = {
+  rect: { x: 126, y: 36, width: 82, height: 24 },
+  text: "editing keeps",
+} as const;
+
+const raisedSelectionLabelStyle = {
+  "--awareness-selection-label-y": "-22px",
+} as CSSProperties;
 
 const meta = {
   title: "Awareness/SelectionHighlight",
@@ -13,7 +38,8 @@ const meta = {
     layout: "fullscreen",
   },
   args: {
-    rect: { x: 34, y: 76, width: 368, height: 28 },
+    rect: focusSelection.rect,
+    selectedText: focusSelection.text,
     showLabel: true,
     user: katherine,
   },
@@ -30,13 +56,13 @@ type Story = StoryObj<typeof meta>;
 export const LabeledSelection: Story = {
   play: async ({ canvas }) => {
     const selection = canvas.getByRole("img", {
-      name: "Katherine Johnson selection",
+      name: `Katherine Johnson selection: ${focusSelection.text}`,
     });
 
     await expect(selection).toBeVisible();
-    await expect(selection).toHaveStyle({ height: "28px", width: "368px" });
+    await expect(selection).toHaveStyle({ height: "24px", width: "172px" });
     await expect(selection.getAttribute("style")).toContain(
-      "translate3d(34px, 76px, 0px)",
+      "translate3d(36px, 36px, 0px)",
     );
     await expect(canvas.getByText("Katherine Johnson")).toBeVisible();
   },
@@ -44,19 +70,20 @@ export const LabeledSelection: Story = {
 
 export const InlineSelection: Story = {
   args: {
-    rect: { x: 176, y: 146, width: 214, height: 24 },
+    rect: inlineSelection.rect,
+    selectedText: inlineSelection.text,
     showLabel: false,
     user: ada,
   },
   play: async ({ canvas }) => {
     const selection = canvas.getByRole("img", {
-      name: "Ada Lovelace selection",
+      name: `Ada Lovelace selection: ${inlineSelection.text}`,
     });
 
     await expect(selection).toBeVisible();
-    await expect(selection).toHaveStyle({ height: "24px", width: "214px" });
+    await expect(selection).toHaveStyle({ height: "24px", width: "96px" });
     await expect(selection.getAttribute("style")).toContain(
-      "translate3d(176px, 146px, 0px)",
+      "translate3d(36px, 36px, 0px)",
     );
     await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
   },
@@ -66,23 +93,30 @@ export const OverlappingSelections: Story = {
   render: () => (
     <CollaborationSurface>
       <SelectionHighlight
-        rect={{ x: 34, y: 76, width: 368, height: 28 }}
+        rect={firstLineSelection.rect}
+        selectedText={firstLineSelection.text}
         showLabel
         user={katherine}
       />
       <SelectionHighlight
-        rect={{ x: 146, y: 111, width: 292, height: 28 }}
+        rect={overlappingFirstLineSelection.rect}
+        selectedText={overlappingFirstLineSelection.text}
         showLabel
+        style={raisedSelectionLabelStyle}
         user={ada}
       />
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Katherine Johnson selection" }),
+      canvas.getByRole("img", {
+        name: `Katherine Johnson selection: ${firstLineSelection.text}`,
+      }),
     ).toBeVisible();
     await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace selection" }),
+      canvas.getByRole("img", {
+        name: `Ada Lovelace selection: ${overlappingFirstLineSelection.text}`,
+      }),
     ).toBeVisible();
     await expect(canvas.getByText("Katherine Johnson")).toBeVisible();
     await expect(canvas.getByText("Ada Lovelace")).toBeVisible();

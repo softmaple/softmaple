@@ -4,6 +4,9 @@ import "../src/global.css";
 
 const preview: Preview = {
   parameters: {
+    a11y: {
+      test: "error",
+    },
     controls: {
       matchers: {
         color: /(background|color)$/i,

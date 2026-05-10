@@ -14,7 +14,7 @@ const meta = {
   },
   args: {
     labelVisibleMs: 60_000,
-    point: { x: 168, y: 104 },
+    point: { x: 36, y: 94 },
     user: grace,
   },
   render: (args) => (
@@ -34,7 +34,7 @@ export const LabeledCursor: Story = {
     await expect(cursor).toBeVisible();
     await expect(cursor).toHaveClass("awareness-live-cursor--label-visible");
     await expect(cursor.getAttribute("style")).toContain(
-      "translate3d(168px, 104px, 0px)",
+      "translate3d(36px, 94px, 0px)",
     );
     await expect(canvas.getByText("Grace Hopper")).toBeVisible();
   },
@@ -42,7 +42,7 @@ export const LabeledCursor: Story = {
 
 export const CursorOnly: Story = {
   args: {
-    point: { x: 328, y: 148 },
+    point: { x: 184, y: 130 },
     showLabel: false,
     user: ada,
   },
@@ -54,7 +54,7 @@ export const CursorOnly: Story = {
       "awareness-live-cursor--label-visible",
     );
     await expect(cursor.getAttribute("style")).toContain(
-      "translate3d(328px, 148px, 0px)",
+      "translate3d(184px, 130px, 0px)",
     );
     await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
   },
@@ -63,7 +63,7 @@ export const CursorOnly: Story = {
 export const AutoHiddenLabel: Story = {
   args: {
     labelVisibleMs: 60,
-    point: { x: 168, y: 104 },
+    point: { x: 36, y: 94 },
     user: grace,
   },
   play: async ({ canvas }) => {
@@ -86,12 +86,14 @@ export const MultipleCursors: Story = {
     <CollaborationSurface>
       <LiveCursor
         labelVisibleMs={60_000}
-        point={{ x: 128, y: 76 }}
+        point={{ x: 160, y: 58 }}
+        showLabel={false}
         user={ada}
       />
       <LiveCursor
         labelVisibleMs={60_000}
-        point={{ x: 340, y: 154 }}
+        point={{ x: 176, y: 130 }}
+        showLabel={false}
         user={katherine}
       />
     </CollaborationSurface>
@@ -103,7 +105,9 @@ export const MultipleCursors: Story = {
     await expect(
       canvas.getByRole("img", { name: "Katherine Johnson cursor" }),
     ).toBeVisible();
-    await expect(canvas.getByText("Ada Lovelace")).toBeVisible();
-    await expect(canvas.getByText("Katherine Johnson")).toBeVisible();
+    await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByText("Katherine Johnson"),
+    ).not.toBeInTheDocument();
   },
 };

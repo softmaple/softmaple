@@ -12,20 +12,38 @@ export interface HighlightRect {
 export interface SelectionHighlightProps {
   readonly user: PresenceUser;
   readonly rect: HighlightRect;
+  readonly selectedText?: string;
   readonly showLabel?: boolean;
   readonly className?: string;
   readonly style?: CSSProperties;
 }
 
+const ARIA_LABEL_MAX_TEXT = 120;
+
+const getSelectionLabel = (
+  user: PresenceUser,
+  selectedText: string | undefined,
+): string => {
+  if (selectedText === undefined || selectedText.length === 0) {
+    return `${user.name} selection`;
+  }
+  const clamped =
+    selectedText.length > ARIA_LABEL_MAX_TEXT
+      ? `${selectedText.slice(0, ARIA_LABEL_MAX_TEXT)}…`
+      : selectedText;
+  return `${user.name} selection: ${clamped}`;
+};
+
 export const SelectionHighlight = ({
   user,
   rect,
+  selectedText,
   showLabel = false,
   className,
   style,
 }: SelectionHighlightProps): ReactNode => (
   <div
-    aria-label={`${user.name} selection`}
+    aria-label={getSelectionLabel(user, selectedText)}
     className={cx("awareness-selection-highlight", className)}
     role="img"
     style={{

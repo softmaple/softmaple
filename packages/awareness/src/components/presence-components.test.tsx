@@ -104,6 +104,7 @@ describe("presence components", () => {
     const selectionHtml = renderToStaticMarkup(
       <SelectionHighlight
         rect={{ x: 4, y: 8, width: 120, height: 20 }}
+        selectedText="shared note"
         showLabel
         user={user}
       />,
@@ -111,6 +112,7 @@ describe("presence components", () => {
 
     expect(cursorHtml).toContain("translate3d(12px, 24px, 0)");
     expect(selectionHtml).toContain("translate3d(4px, 8px, 0)");
+    expect(selectionHtml).toContain("Grace selection: shared note");
     expect(selectionHtml).toContain("Grace");
   });
 
@@ -126,6 +128,45 @@ describe("presence components", () => {
     );
     expect(html).toContain('src="https://example.com/a.png"');
     expect(html).not.toContain("awareness-avatar__status");
+  });
+
+  it("falls back to a plain selection aria-label when selectedText is missing", () => {
+    const user = createUser("1", { name: "Grace" });
+
+    const undefinedHtml = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        user={user}
+      />,
+    );
+    const emptyHtml = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        selectedText=""
+        user={user}
+      />,
+    );
+
+    expect(undefinedHtml).toContain('aria-label="Grace selection"');
+    expect(undefinedHtml).not.toContain("Grace selection:");
+    expect(emptyHtml).toContain('aria-label="Grace selection"');
+    expect(emptyHtml).not.toContain("Grace selection:");
+  });
+
+  it("clamps long selectedText in the selection aria-label", () => {
+    const user = createUser("1", { name: "Grace" });
+    const longText = "a".repeat(200);
+
+    const html = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        selectedText={longText}
+        user={user}
+      />,
+    );
+
+    expect(html).toContain(`Grace selection: ${"a".repeat(120)}…`);
+    expect(html).not.toContain("a".repeat(121));
   });
 
   it("hides the initial LiveCursor label after the configured timeout", async () => {

@@ -37,8 +37,12 @@ export interface IncrementalApplyResult {
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
 }
 
-const compareIds = (left: EventId, right: EventId): number =>
-  left.localeCompare(right);
+const compareIds = (left: EventId, right: EventId): number => {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+};
 
 const spliceText = (text: string, index: number, insertText: string): string =>
   `${text.slice(0, index)}${insertText}${text.slice(index)}`;

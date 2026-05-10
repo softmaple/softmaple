@@ -25,9 +25,10 @@ permissions:
 
 jobs:
   chromatic:
-    # ⚠️ Requires the `CHROMATIC_PROJECT_TOKEN` repository secret
+    # ⚠️ Requires the `CHROMATIC_PROJECT_TOKEN_AWARENESS` repository secret
+    # (separate Chromatic project from packages/editor — one project per Storybook)
     uses: ./.github/workflows/_chromatic-reusable.yml
     with:
       working-dir: packages/awareness
     secrets:
-      project-token: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+      project-token: ${{ secrets.CHROMATIC_PROJECT_TOKEN_AWARENESS }}

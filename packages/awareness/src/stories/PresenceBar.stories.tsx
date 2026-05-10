@@ -47,7 +47,9 @@ export const IncludeOffline: Story = {
   },
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Mary Jackson, offline" }),
+      canvas.getByRole("listitem", {
+        name: "1 more collaborators: Mary Jackson",
+      }),
     ).toBeVisible();
     await expect(canvas.getByText("+1")).toBeVisible();
   },

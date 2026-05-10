@@ -72,10 +72,17 @@ export const ActivityIndicator = ({
         <ol className="awareness-activity-indicator__list">
           {items.map(({ activity, text }) => (
             <li
-              className="awareness-activity-indicator__item"
+              className={cx(
+                "awareness-activity-indicator__item",
+                `awareness-activity-indicator__item--${activity.type}`,
+              )}
               key={`${activity.userId}-${activity.timestamp}-${activity.type}`}
             >
-              {text}
+              <span
+                aria-hidden="true"
+                className="awareness-activity-indicator__glyph"
+              />
+              <span className="awareness-activity-indicator__text">{text}</span>
             </li>
           ))}
         </ol>

@@ -5,6 +5,8 @@ const frameStyle: CSSProperties = {
   minHeight: 180,
   placeItems: "center",
   padding: 24,
+  background:
+    "radial-gradient(circle at 18% 18%, color-mix(in srgb, #2563eb 10%, transparent), transparent 30%), radial-gradient(circle at 82% 24%, color-mix(in srgb, #16a34a 10%, transparent), transparent 28%), Canvas",
 };
 
 const surfaceStyle: CSSProperties = {
@@ -12,11 +14,12 @@ const surfaceStyle: CSSProperties = {
   width: "min(520px, calc(100vw - 48px))",
   minHeight: 240,
   overflow: "hidden",
-  border: "1px solid color-mix(in srgb, CanvasText 12%, transparent)",
+  border: "1px solid color-mix(in srgb, CanvasText 14%, transparent)",
   borderRadius: 8,
-  background: "Canvas",
+  background:
+    "linear-gradient(180deg, color-mix(in srgb, Canvas 96%, CanvasText 4%), Canvas)",
   color: "CanvasText",
-  boxShadow: "0 12px 30px color-mix(in srgb, CanvasText 10%, transparent)",
+  boxShadow: "0 18px 48px color-mix(in srgb, CanvasText 14%, transparent)",
 };
 
 const pageContentStyle: CSSProperties = {

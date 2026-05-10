@@ -18,20 +18,25 @@
   --font-awareness:
     ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
-  --color-awareness-surface: color-mix(in srgb, Canvas 94%, transparent);
-  --color-awareness-border: color-mix(in srgb, CanvasText 14%, transparent);
-  --color-awareness-muted: color-mix(in srgb, CanvasText 58%, transparent);
-  --color-awareness-text: color-mix(in srgb, CanvasText 82%, transparent);
-  --color-awareness-overflow-bg: color-mix(
-    in srgb,
-    Canvas 86%,
-    CanvasText 14%
-  );
+  --color-awareness-surface: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+  --color-awareness-panel: color-mix(in srgb, Canvas 90%, CanvasText 10%);
+  --color-awareness-border: color-mix(in srgb, CanvasText 16%, transparent);
+  --color-awareness-muted: color-mix(in srgb, CanvasText 56%, transparent);
+  --color-awareness-text: color-mix(in srgb, CanvasText 86%, transparent);
+  --color-awareness-overflow-bg: color-mix(in srgb, Canvas 82%, CanvasText 18%);
   --color-awareness-status-active: #22c55e;
   --color-awareness-status-idle: #f59e0b;
   --color-awareness-status-offline: #94a3b8;
+  --color-awareness-activity-typing: #2563eb;
+  --color-awareness-activity-cursor: #dc2626;
+  --color-awareness-activity-selection: #16a34a;
+  --color-awareness-activity-idle: #f59e0b;
+  --color-awareness-activity-join: #0891b2;
+  --color-awareness-activity-leave: #64748b;
   --shadow-awareness: 0 10px 24px
-    color-mix(in srgb, CanvasText 10%, transparent);
+    color-mix(in srgb, CanvasText 12%, transparent);
+  --shadow-awareness-close: 0 2px 8px
+    color-mix(in srgb, CanvasText 14%, transparent);
 }
 
 .awareness-avatar {
@@ -41,15 +46,34 @@
   flex: 0 0 var(--awareness-avatar-size);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--awareness-user-color) 92%, white),
-    color-mix(in srgb, var(--awareness-user-color) 72%, black)
+    color-mix(in srgb, var(--awareness-user-color) 96%, white),
+    color-mix(in srgb, var(--awareness-user-color) 76%, black)
   );
-  box-shadow: 0 0 0 1px
-    color-mix(in srgb, var(--awareness-user-color) 42%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 38%, transparent),
+    0 3px 10px color-mix(in srgb, var(--awareness-user-color) 20%, transparent);
+  text-shadow: 0 1px 1px color-mix(in srgb, black 22%, transparent);
 
-  @apply relative inline-flex items-center justify-center overflow-visible
-    rounded-full border-2 border-awareness-surface text-white font-bold
-    tracking-normal leading-none select-none font-awareness;
+  @apply relative inline-flex items-center justify-center overflow-visible rounded-full border-2 border-awareness-surface text-white font-bold tracking-normal leading-none select-none font-awareness align-middle;
+}
+
+.awareness-avatar::after {
+  content: "";
+  inset: -4px;
+  border-radius: inherit;
+  opacity: 0;
+  transform: scale(0.92);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  @apply absolute pointer-events-none;
+}
+
+.awareness-avatar--active::after {
+  opacity: 1;
+  transform: scale(1);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--awareness-user-color) 14%, transparent);
 }
 
 .awareness-avatar--sm {
@@ -77,8 +101,14 @@
 }
 
 .awareness-avatar__status {
-  @apply absolute right-[-1px] bottom-[-1px] w-[30%] min-w-2 h-[30%] min-h-2
-    border-2 border-awareness-surface rounded-full bg-awareness-status-active;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
+    0 2px 5px color-mix(in srgb, CanvasText 22%, transparent);
+  @apply absolute right-[-1px] bottom-[-1px] w-[30%] min-w-2 h-[30%] min-h-2 border-2 border-awareness-surface rounded-full bg-awareness-status-active;
+}
+
+.awareness-avatar--active .awareness-avatar__status {
+  animation: awareness-status-pulse 2.6s ease-in-out infinite;
 }
 
 .awareness-avatar--idle .awareness-avatar__status {
@@ -86,8 +116,8 @@
 }
 
 .awareness-avatar--offline {
-  filter: grayscale(0.9);
-  @apply opacity-[0.55];
+  filter: grayscale(0.82) saturate(0.58);
+  @apply opacity-[0.62];
 }
 
 .awareness-avatar--offline .awareness-avatar__status {
@@ -95,11 +125,21 @@
 }
 
 .awareness-presence-bar {
+  isolation: isolate;
   @apply inline-flex min-h-8 items-center m-0 p-0 font-awareness list-none;
 }
 
 .awareness-presence-bar__item {
+  transition:
+    transform 140ms ease,
+    filter 140ms ease;
   @apply inline-flex -ml-2;
+}
+
+.awareness-presence-bar__item:hover {
+  filter: saturate(1.06);
+  transform: translateY(-1px);
+  @apply z-10;
 }
 
 .awareness-presence-bar__item:first-child {
@@ -107,9 +147,8 @@
 }
 
 .awareness-presence-bar__overflow {
-  @apply inline-flex items-center justify-center -ml-2 border-2
-    border-awareness-surface rounded-full bg-awareness-overflow-bg
-    text-awareness-text font-awareness font-bold tracking-normal leading-none;
+  box-shadow: var(--shadow-awareness-close);
+  @apply inline-flex items-center justify-center -ml-2 border-2 border-awareness-surface rounded-full bg-awareness-overflow-bg text-awareness-text font-awareness font-bold tracking-normal leading-none;
 }
 
 .awareness-presence-bar__overflow--sm {
@@ -130,16 +169,23 @@
 }
 
 .awareness-live-cursor {
-  transition: transform 80ms linear;
-  @apply absolute top-0 left-0 z-20 inline-flex items-start pointer-events-none
-    will-change-transform;
+  transition: transform 82ms linear;
+  @apply absolute top-0 left-0 z-20 inline-flex items-start pointer-events-none will-change-transform;
 }
 
 .awareness-live-cursor__caret {
   background: var(--awareness-user-color);
-  box-shadow: 0 0 0 1px
-    color-mix(in srgb, var(--awareness-user-color) 34%, transparent);
-  @apply block w-[2px] h-5 rounded-full;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 34%, transparent),
+    0 5px 14px color-mix(in srgb, var(--awareness-user-color) 30%, transparent);
+  @apply relative block w-[2px] h-5 rounded-full;
+}
+
+.awareness-live-cursor__caret::before {
+  content: "";
+  border-color: var(--awareness-user-color) transparent transparent
+    var(--awareness-user-color);
+  @apply absolute left-0 top-0 w-0 h-0 border-t-[9px] border-r-[6px] border-l-[2px] border-b-[2px];
 }
 
 .awareness-live-cursor__label {
@@ -149,9 +195,8 @@
   transition:
     opacity 160ms ease,
     transform 160ms ease;
-  @apply absolute -top-[1.65rem] left-0 max-w-64 overflow-hidden px-[7px]
-    py-[3px] rounded text-white font-awareness text-xs tracking-normal
-    leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
+  box-shadow: var(--shadow-awareness);
+  @apply absolute -top-[1.75rem] left-0 max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
@@ -161,27 +206,110 @@
 
 .awareness-selection-highlight {
   border-left-color: var(--awareness-user-color);
-  background: color-mix(in srgb, var(--awareness-user-color) 18%, transparent);
-  @apply absolute top-0 left-0 z-10 box-border border-l-2 rounded-[3px]
-    pointer-events-none;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--awareness-user-color) 24%, transparent),
+    color-mix(in srgb, var(--awareness-user-color) 11%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--awareness-user-color) 24%, transparent);
+  @apply absolute top-0 left-0 z-10 box-border border-l-2 rounded-[3px] pointer-events-none;
 }
 
 .awareness-selection-highlight__label {
   background: var(--awareness-user-color);
   font-weight: 650;
-  @apply absolute -top-[1.45rem] left-0 max-w-56 overflow-hidden px-[6px]
-    py-[2px] rounded text-white font-awareness text-[11px] tracking-normal
-    leading-[1.2] text-ellipsis whitespace-nowrap;
+  box-shadow: var(--shadow-awareness-close);
+  @apply absolute -top-[1.55rem] left-0 max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
 .awareness-activity-indicator {
+  min-width: min(320px, 100%);
   @apply text-awareness-text font-awareness text-[13px] leading-[1.4];
 }
 
 .awareness-activity-indicator__list {
-  @apply grid gap-1 m-0 p-0 list-none;
+  @apply grid gap-1.5 m-0 p-0 list-none;
 }
 
 .awareness-activity-indicator__item {
-  @apply truncate;
+  background: color-mix(in srgb, Canvas 88%, transparent);
+  border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  box-shadow: var(--shadow-awareness-close);
+  @apply grid grid-cols-[12px_minmax(0,1fr)] items-center gap-2 rounded-md px-2.5 py-2;
+}
+
+.awareness-activity-indicator__glyph {
+  background: var(--awareness-activity-color, var(--color-awareness-muted));
+  box-shadow: 0 0 0 3px
+    color-mix(
+      in srgb,
+      var(--awareness-activity-color, var(--color-awareness-muted)) 16%,
+      transparent
+    );
+  @apply block h-2 w-2 rounded-full;
+}
+
+.awareness-activity-indicator__text {
+  @apply min-w-0 truncate;
+}
+
+.awareness-activity-indicator__item--typing {
+  --awareness-activity-color: var(--color-awareness-activity-typing);
+}
+
+.awareness-activity-indicator__item--cursor {
+  --awareness-activity-color: var(--color-awareness-activity-cursor);
+}
+
+.awareness-activity-indicator__item--selection {
+  --awareness-activity-color: var(--color-awareness-activity-selection);
+}
+
+.awareness-activity-indicator__item--idle {
+  --awareness-activity-color: var(--color-awareness-activity-idle);
+}
+
+.awareness-activity-indicator__item--join {
+  --awareness-activity-color: var(--color-awareness-activity-join);
+}
+
+.awareness-activity-indicator__item--leave {
+  --awareness-activity-color: var(--color-awareness-activity-leave);
+}
+
+@keyframes awareness-status-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
+      0 0 0 4px color-mix(in srgb, var(--awareness-user-color) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .awareness-avatar::after,
+  .awareness-live-cursor,
+  .awareness-live-cursor__label,
+  .awareness-presence-bar__item {
+    transition: none;
+  }
+
+  .awareness-avatar--active .awareness-avatar__status {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .awareness-avatar,
+  .awareness-live-cursor__label,
+  .awareness-selection-highlight__label {
+    forced-color-adjust: none;
+  }
 }

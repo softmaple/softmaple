@@ -111,3 +111,53 @@ export const MultipleCursors: Story = {
     ).not.toBeInTheDocument();
   },
 };
+
+// Design §7: "Off-screen cursors not rendered."
+// Two cursors share the same viewport — one inside, one outside — to make the
+// culling decision visible side-by-side.
+export const OffScreenCulled: Story = {
+  render: () => (
+    <CollaborationSurface>
+      <LiveCursor
+        cullMargin={0}
+        labelVisibleMs={60_000}
+        point={{ x: 60, y: 80 }}
+        user={ada}
+        viewport={{ x: 0, y: 0, width: 240, height: 200 }}
+      />
+      <LiveCursor
+        cullMargin={0}
+        labelVisibleMs={60_000}
+        point={{ x: 9999, y: 9999 }}
+        user={katherine}
+        viewport={{ x: 0, y: 0, width: 240, height: 200 }}
+      />
+    </CollaborationSurface>
+  ),
+  play: async ({ canvas }) => {
+    await expect(
+      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
+    ).toBeVisible();
+    // The katherine cursor is well outside the bounded viewport and the
+    // component returns null — it should not be in the DOM at all.
+    await expect(
+      canvas.queryByRole("img", { name: "Katherine Johnson cursor" }),
+    ).not.toBeInTheDocument();
+  },
+};
+
+// Same component, opt-out of culling via `viewport="none"`. The point is far
+// outside the window but still rendered — useful for virtualized scrollers
+// that have already culled upstream.
+export const CullingDisabled: Story = {
+  args: {
+    point: { x: 4000, y: 4000 },
+    user: ada,
+    viewport: "none",
+  },
+  play: async ({ canvas }) => {
+    await expect(
+      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
+    ).toBeVisible();
+  },
+};

@@ -104,6 +104,7 @@ describe("presence components", () => {
     const selectionHtml = renderToStaticMarkup(
       <SelectionHighlight
         rect={{ x: 4, y: 8, width: 120, height: 20 }}
+        selectedText="shared note"
         showLabel
         user={user}
       />,
@@ -111,6 +112,7 @@ describe("presence components", () => {
 
     expect(cursorHtml).toContain("translate3d(12px, 24px, 0)");
     expect(selectionHtml).toContain("translate3d(4px, 8px, 0)");
+    expect(selectionHtml).toContain("Grace selection: shared note");
     expect(selectionHtml).toContain("Grace");
   });
 

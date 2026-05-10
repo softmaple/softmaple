@@ -41,6 +41,7 @@
 
 .awareness-avatar {
   --awareness-avatar-size: 32px;
+  box-sizing: border-box;
   width: var(--awareness-avatar-size);
   height: var(--awareness-avatar-size);
   flex: 0 0 var(--awareness-avatar-size);
@@ -53,6 +54,10 @@
     0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 38%, transparent),
     0 3px 10px color-mix(in srgb, var(--awareness-user-color) 20%, transparent);
   text-shadow: 0 1px 1px color-mix(in srgb, black 22%, transparent);
+  transition:
+    box-shadow 160ms ease,
+    filter 160ms ease,
+    transform 160ms ease;
 
   @apply relative inline-flex items-center justify-center overflow-visible rounded-full border-2 border-awareness-surface text-white font-bold tracking-normal leading-none select-none font-awareness align-middle;
 }
@@ -101,6 +106,7 @@
 }
 
 .awareness-avatar__status {
+  box-sizing: border-box;
   box-shadow:
     0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
     0 2px 5px color-mix(in srgb, CanvasText 22%, transparent);
@@ -117,7 +123,7 @@
 
 .awareness-avatar--offline {
   filter: grayscale(0.82) saturate(0.58);
-  @apply opacity-[0.62];
+  @apply opacity-[0.72];
 }
 
 .awareness-avatar--offline .awareness-avatar__status {
@@ -126,6 +132,7 @@
 
 .awareness-presence-bar {
   isolation: isolate;
+  row-gap: 0.375rem;
   @apply inline-flex min-h-8 items-center m-0 p-0 font-awareness list-none;
 }
 
@@ -142,25 +149,39 @@
   @apply z-10;
 }
 
+.awareness-presence-bar__item:hover .awareness-avatar {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 44%, transparent),
+    0 6px 16px color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
+}
+
 .awareness-presence-bar__item:first-child {
   @apply ml-0;
 }
 
 .awareness-presence-bar__overflow {
+  --awareness-overflow-size: 32px;
+  box-sizing: border-box;
+  min-width: var(--awareness-overflow-size);
+  height: var(--awareness-overflow-size);
+  padding-inline: 0.25rem;
   box-shadow: var(--shadow-awareness-close);
   @apply inline-flex items-center justify-center -ml-2 border-2 border-awareness-surface rounded-full bg-awareness-overflow-bg text-awareness-text font-awareness font-bold tracking-normal leading-none;
 }
 
 .awareness-presence-bar__overflow--sm {
-  @apply w-6 h-6 text-[10px];
+  --awareness-overflow-size: 24px;
+  @apply text-[10px];
 }
 
 .awareness-presence-bar__overflow--md {
-  @apply w-8 h-8 text-xs;
+  --awareness-overflow-size: 32px;
+  @apply text-xs;
 }
 
 .awareness-presence-bar__overflow--lg {
-  @apply w-10 h-10 text-sm;
+  --awareness-overflow-size: 40px;
+  @apply text-sm;
 }
 
 .awareness-presence-bar__empty,
@@ -178,7 +199,7 @@
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 34%, transparent),
     0 5px 14px color-mix(in srgb, var(--awareness-user-color) 30%, transparent);
-  @apply relative block w-[2px] h-5 rounded-full;
+  @apply relative block w-[2px] h-[1.7em] rounded-full;
 }
 
 .awareness-live-cursor__caret::before {
@@ -191,36 +212,45 @@
 .awareness-live-cursor__label {
   background: var(--awareness-user-color);
   font-weight: 650;
-  transform: translateY(2px);
+  transform: translate3d(0, 3px, 0);
   transition:
     opacity 160ms ease,
     transform 160ms ease;
   box-shadow: var(--shadow-awareness);
-  @apply absolute -top-[1.75rem] left-0 max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
+  @apply absolute -top-[1.9rem] left-2.5 max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
-  transform: translateY(0);
+  transform: translate3d(0, 0, 0);
   @apply opacity-100;
 }
 
 .awareness-selection-highlight {
-  border-left-color: var(--awareness-user-color);
+  box-sizing: border-box;
+  background: transparent;
+  @apply absolute top-0 left-0 z-10 box-border rounded-[3px] pointer-events-none;
+}
+
+.awareness-selection-highlight::before {
+  content: "";
+  inset: max(1px, 0.12em) 0 max(1px, 0.12em) 0;
+  border-left: 2px solid var(--awareness-user-color);
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--awareness-user-color) 24%, transparent),
-    color-mix(in srgb, var(--awareness-user-color) 11%, transparent)
+    color-mix(in srgb, var(--awareness-user-color) 26%, transparent),
+    color-mix(in srgb, var(--awareness-user-color) 13%, transparent)
   );
   box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--awareness-user-color) 24%, transparent);
-  @apply absolute top-0 left-0 z-10 box-border border-l-2 rounded-[3px] pointer-events-none;
+    color-mix(in srgb, var(--awareness-user-color) 22%, transparent);
+  @apply absolute rounded-[3px];
 }
 
 .awareness-selection-highlight__label {
   background: var(--awareness-user-color);
   font-weight: 650;
+  transform: translateY(-2px);
   box-shadow: var(--shadow-awareness-close);
-  @apply absolute -top-[1.55rem] left-0 max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
+  @apply absolute -top-[1.65rem] left-0 max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
 .awareness-activity-indicator {
@@ -236,7 +266,16 @@
   background: color-mix(in srgb, Canvas 88%, transparent);
   border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
   box-shadow: var(--shadow-awareness-close);
-  @apply grid grid-cols-[12px_minmax(0,1fr)] items-center gap-2 rounded-md px-2.5 py-2;
+  overflow: hidden;
+  position: relative;
+  @apply grid grid-cols-[10px_minmax(0,1fr)] items-center gap-2 rounded-md px-2.5 py-2;
+}
+
+.awareness-activity-indicator__item::before {
+  content: "";
+  background: var(--awareness-activity-color, var(--color-awareness-muted));
+  opacity: 0.84;
+  @apply absolute inset-y-0 left-0 w-1;
 }
 
 .awareness-activity-indicator__glyph {

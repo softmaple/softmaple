@@ -11,15 +11,12 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 - **Use immutable data structures** wherever possible
 - **Write pure functions** without side effects
 - **Compose smaller functions** for complex operations
-- **Prefer functional utilities** from `src/fp/utils/`
 
 ### Code Organization
 
-- **Core algorithm**: `src/eg-walker.ts` and `src/crdt.ts`
-- **Functional utilities**: `src/fp/` module
-  - `utils/` - Array, composition, and helper functions
-  - `storage/` - Columnar storage implementation
-  - `core/` - Functional eg-walker implementation
+- **Public API**: `src/core/external-api.ts`
+- **Replay engine**: `src/engine/eg-walker-engine.ts`
+- **Graph and storage**: `src/graph/event-graph.ts`, `src/graph/columnar-codec.ts`
 - **Tests**: `src/test/` with corresponding `.test.ts` files
 
 ### Coding Style
@@ -34,12 +31,6 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 - Run tests: `pnpm --filter @softmaple/eg-walker test`
 - Run typecheck: `pnpm --filter @softmaple/eg-walker typecheck`
 - Run build: `pnpm --filter @softmaple/eg-walker build`
-
-### Performance Optimizations
-
-- Optimizations are enabled by default (`enableOptimizations = true`)
-- To disable optimizations: Call `setOptimizationsEnabled(false)` after instantiation
-- Benchmark tests in `src/test/benchmark.test.ts` exercise both enabled and disabled paths
 
 ### Commit Guidelines
 
@@ -64,10 +55,30 @@ Events are stored in compressed columnar format:
 - Topologically sorted events
 - Separate columns for type, position, content, parents, IDs
 - Run-length encoding for consecutive operations
-- Simple compression for content
+- LZ4-framed compression for inserted content
+
+### Binary Format
+
+- Magic prefix `EGW2` (`0x45 0x47 0x57 0x32`). Older `EGW1` payloads from
+  the pre-rewrite scaffolding are not compatible and are rejected at decode.
+- Each `IdRun` carries an explicit `custom` flag that distinguishes parsed
+  `replicaId:sequence` IDs from verbatim string IDs.
+- Inserted content is LZ4-framed. `decodeBinary` enforces a memory cap on
+  the destination buffer (4 UTF-8 bytes per declared UTF-16 code unit plus
+  64-byte slack) and verifies that the decoded string length matches the
+  declared `textLengths` sum, so a tampered payload that truncates or
+  inflates content is rejected.
 
 ### Known Limitations
 
-- Character-level CRDT will split multi-character strings
-- Some tests expect behavior that conflicts with CRDT semantics
-- Out-of-order events require causal ordering
+- The CRDT layer stores one item per UTF-16 code unit, so a code point
+  represented as a surrogate pair (e.g. emoji) is materialised as two
+  CRDT items. The public API rejects insert/delete indexes that fall
+  between the two halves so concurrent edits cannot produce lone
+  surrogates; users must align operations to code-point boundaries.
+- Multi-character inserts are stored as a sequence of per-character
+  events under a single insert event.
+- Remote events with unknown parents are buffered by `EgWalkerAPI` and
+  flushed once their causal predecessors arrive; direct `EventGraph.addEvent`
+  callers still need to deliver in causal order (or use `EventGraph.deserialize`
+  for buffered topological loading).

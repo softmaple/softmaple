@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { EgWalkerAPI, createEgWalker } from "../core/external-api";
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { EventAlreadyExistsError } from "../graph/event-graph";
 import type { GraphEvent, SerializedGraph } from "../types";
 
 describe("EgWalkerAPI", () => {
@@ -79,6 +80,11 @@ describe("EgWalkerAPI", () => {
       const api = new EgWalkerAPI("r1", "Hello");
       expect(api.getText()).toBe("Hello");
     });
+
+    it("should return README-compatible document state text", () => {
+      const api = new EgWalkerAPI("r1", "Hello");
+      expect(api.getDocumentState()).toBe("Hello");
+    });
   });
 
   describe("serialize/deserialize", () => {
@@ -100,20 +106,24 @@ describe("EgWalkerAPI", () => {
   });
 
   describe("duplicate event handling", () => {
-    it("should gracefully handle duplicate local events", async () => {
-      // Skip this test - duplicate local events are hard to trigger
-      // because generateEventId() always creates unique IDs
-      // The duplicate handling in applyLocalOperation is defensive code
-      // that's more relevant for manual event graph construction
-      expect(true).toBe(true);
+    it("ignores duplicate local events without throwing", () => {
+      const api = new EgWalkerAPI("r1", "");
+      // @ts-expect-error - swap eventGraph.addEvent for the duplicate branch
+      const originalAddEvent = api.eventGraph.addEvent.bind(api.eventGraph);
+      // @ts-expect-error - same
+      api.eventGraph.addEvent = (event: GraphEvent) => {
+        throw new EventAlreadyExistsError(event.id);
+      };
+
+      expect(() => api.insert(0, "Hello")).not.toThrow();
+      expect(api.getText()).toBe("");
+
+      // @ts-expect-error - restore
+      api.eventGraph.addEvent = originalAddEvent;
     });
 
-    it("should gracefully handle duplicate remote events", async () => {
+    it("ignores duplicate remote events without throwing", () => {
       const api = new EgWalkerAPI("r1", "");
-
-      // Spy on console.warn
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
       const event: GraphEvent = {
         id: "remote:1",
         parentVersion: new Set(),
@@ -121,20 +131,11 @@ describe("EgWalkerAPI", () => {
         timestamp: Date.now(),
       };
 
-      // Apply event first time
-      await api.applyRemoteEvent(event);
+      api.applyRemoteEvent(event);
       expect(api.getText()).toBe("Hello");
 
-      // Apply same event again
-      await api.applyRemoteEvent(event);
-
-      // Should log warning and not crash
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Duplicate event detected"),
-      );
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("remote:1"));
-
-      warnSpy.mockRestore();
+      expect(() => api.applyRemoteEvent(event)).not.toThrow();
+      expect(api.getText()).toBe("Hello");
     });
   });
 
@@ -149,7 +150,7 @@ describe("EgWalkerAPI", () => {
   });
 
   describe("fromEventGraph", () => {
-    it("should create API from event graph", async () => {
+    it("should create API from event graph", () => {
       const events: GraphEvent[] = [
         {
           id: "r1:0",
@@ -165,8 +166,67 @@ describe("EgWalkerAPI", () => {
         },
       ];
 
-      const api = await EgWalkerAPI.fromEventGraph("r2", events);
+      const api = EgWalkerAPI.fromEventGraph("r2", events);
       expect(api.getText()).toBe("Hello World");
+    });
+  });
+
+  describe("out-of-order remote delivery", () => {
+    it("buffers events whose parents have not yet arrived", () => {
+      const api = new EgWalkerAPI("r1", "");
+      const root: GraphEvent = {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "AB" },
+        timestamp: 1,
+      };
+      const child: GraphEvent = {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        timestamp: 2,
+      };
+
+      api.applyRemoteEvent(child);
+      expect(api.getText()).toBe("");
+      expect(api.getPendingRemoteCount()).toBe(1);
+
+      api.applyRemoteEvent(root);
+      expect(api.getText()).toBe("ABC");
+      expect(api.getPendingRemoteCount()).toBe(0);
+    });
+
+    it("flushes a chain of pending events when the root finally arrives", () => {
+      const api = new EgWalkerAPI("r1", "");
+      const events: GraphEvent[] = [
+        {
+          id: "a:0",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+          timestamp: 1,
+        },
+        {
+          id: "a:1",
+          parentVersion: new Set(["a:0"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+          timestamp: 2,
+        },
+        {
+          id: "a:2",
+          parentVersion: new Set(["a:1"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+          timestamp: 3,
+        },
+      ];
+
+      api.applyRemoteEvent(events[2]!);
+      api.applyRemoteEvent(events[1]!);
+      expect(api.getText()).toBe("");
+      expect(api.getPendingRemoteCount()).toBe(2);
+
+      api.applyRemoteEvent(events[0]!);
+      expect(api.getText()).toBe("ABC");
+      expect(api.getPendingRemoteCount()).toBe(0);
     });
   });
 });
@@ -184,25 +244,22 @@ describe("createEgWalker", () => {
 });
 
 describe("EgWalkerAPI - Edge cases and error handling", () => {
-  it("should handle non-duplicate errors in applyLocalOperation", () => {
+  it("should propagate non-duplicate errors in applyLocalOperation", () => {
     const api = new EgWalkerAPI("r1");
-
-    // Mock eventGraph.addEvent to throw a non-duplicate error
-    // @ts-expect-error - Accessing private eventGraph for testing
-    const originalAddEvent = api.eventGraph.addEvent;
-    // @ts-expect-error - Mocking private eventGraph method for testing
+    // @ts-expect-error - swap eventGraph.addEvent for the failing branch
+    const originalAddEvent = api.eventGraph.addEvent.bind(api.eventGraph);
+    // @ts-expect-error - same
     api.eventGraph.addEvent = () => {
       throw new Error("Some other error");
     };
 
     expect(() => api.insert(0, "test")).toThrow("Some other error");
 
-    // Restore
-    // @ts-expect-error - Restoring private eventGraph method
+    // @ts-expect-error - restore
     api.eventGraph.addEvent = originalAddEvent;
   });
 
-  it("should handle non-duplicate errors in applyRemoteEvent", async () => {
+  it("should propagate non-duplicate errors in applyRemoteEvent", () => {
     const api = new EgWalkerAPI("r1");
 
     const event: GraphEvent = {
@@ -212,66 +269,224 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
       timestamp: Date.now(),
     };
 
-    // Mock eventGraph.addEvent to throw a non-duplicate error
-    // @ts-expect-error - Accessing private eventGraph for testing
-    const originalAddEvent = api.eventGraph.addEvent;
-    // @ts-expect-error - Mocking private eventGraph method for testing
+    // @ts-expect-error - swap eventGraph.addEvent for the failing branch
+    const originalAddEvent = api.eventGraph.addEvent.bind(api.eventGraph);
+    // @ts-expect-error - same
     api.eventGraph.addEvent = () => {
       throw new Error("Network error");
     };
 
-    await expect(api.applyRemoteEvent(event)).rejects.toThrow("Network error");
+    expect(() => api.applyRemoteEvent(event)).toThrow("Network error");
 
-    // Restore
-    // @ts-expect-error - Restoring private eventGraph method
+    // @ts-expect-error - restore
     api.eventGraph.addEvent = originalAddEvent;
-  });
-
-  it("should test canApplyDirectly with missing parents", async () => {
-    const api = new EgWalkerAPI("r1");
-
-    // Create an event with a parent that doesn't exist in currentVersion
-    const event: GraphEvent = {
-      id: "r2:1",
-      parentVersion: new Set(["r2:0"]), // This parent doesn't exist in current version
-      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "test" },
-      timestamp: Date.now(),
-    };
-
-    // Access private method using any cast
-    // @ts-expect-error - Accessing private method for testing
-    const canApply = api.canApplyDirectly(event);
-    expect(canApply).toBe(false);
-  });
-
-  it("should test canApplyDirectly with all parents in currentVersion", async () => {
-    const api = new EgWalkerAPI("r1");
-    api.insert(0, "Hello");
-
-    // Get the current version after first insert
-    // @ts-expect-error - Accessing private currentVersion for testing
-    const currentVersion = api.currentVersion;
-    const parentId = Array.from(currentVersion)[0] ?? "";
-
-    // Create an event that has parent in current version
-    const event: GraphEvent = {
-      id: "r1:1",
-      parentVersion: new Set([parentId]),
-      operation: { type: OPERATION_TYPE.INSERT, index: 5, text: " World" },
-      timestamp: Date.now(),
-    };
-
-    // @ts-expect-error - Accessing private method for testing
-    const canApply = api.canApplyDirectly(event);
-    expect(canApply).toBe(true);
   });
 
   it("should handle deserialize with eventGraph data", () => {
     const api = new EgWalkerAPI("r1", "Test");
     const serialized = api.serialize();
 
-    // Deserialize should handle eventGraph even though it's not fully implemented
     const deserialized = EgWalkerAPI.deserialize(serialized);
     expect(deserialized.getText()).toBe("Test");
+  });
+
+  it("should deserialize JSON-persisted serialized API data", () => {
+    const api = new EgWalkerAPI("r1", "");
+    api.insert(0, "A");
+    api.insert(1, "B");
+
+    const parsed = JSON.parse(JSON.stringify(api.serialize())) as unknown as {
+      text: string;
+      eventGraph: SerializedGraph;
+    };
+    const deserialized = EgWalkerAPI.deserialize(parsed);
+
+    expect(deserialized.getText()).toBe("AB");
+  });
+
+  it("should reject invalid direct local operations before committing", () => {
+    const api = new EgWalkerAPI("r1", "Hello");
+    const readSeq = (): number =>
+      // @ts-expect-error - read private nextSequenceNumber for regression coverage
+      api.nextSequenceNumber as number;
+
+    expect(readSeq()).toBe(0);
+
+    expect(() =>
+      api.applyLocalOperation({
+        type: OPERATION_TYPE.INSERT,
+        index: 10,
+        text: "!",
+      }),
+    ).toThrow("Index 10 out of bounds");
+    expect(api.exportEventGraph()).toHaveLength(0);
+    expect(readSeq()).toBe(0);
+
+    expect(() =>
+      api.applyLocalOperation({
+        type: OPERATION_TYPE.DELETE,
+        index: 3,
+        length: 5,
+      }),
+    ).toThrow("Delete range [3, 8) exceeds document length 5");
+    expect(api.exportEventGraph()).toHaveLength(0);
+    expect(readSeq()).toBe(0);
+
+    api.applyLocalOperation({
+      type: OPERATION_TYPE.INSERT,
+      index: 5,
+      text: "!",
+    });
+    expect(api.exportEventGraph()[0]?.id).toBe("r1:0");
+    expect(api.getText()).toBe("Hello!");
+    expect(readSeq()).toBe(1);
+  });
+
+  it("should deserialize empty graph state without stored initial text metadata", () => {
+    const deserialized = EgWalkerAPI.deserialize({
+      text: "Fallback",
+      eventGraph: {
+        version: new Set(),
+        events: [],
+        metadata: {},
+      },
+    });
+
+    expect(deserialized.getText()).toBe("Fallback");
+  });
+
+  it("ignores non-numeric sequence suffixes when inferring nextSequenceNumber", () => {
+    // Hits the Number.isInteger=false branch in inferNextSequenceNumber.
+    const api = new EgWalkerAPI("r1");
+    api.applyRemoteEvent({
+      id: "r1:notanumber",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+      timestamp: 1,
+    });
+
+    const restored = EgWalkerAPI.deserialize(
+      // Drop persisted nextSequenceNumber metadata so the API has to infer it.
+      {
+        ...api.serialize(),
+        eventGraph: {
+          ...api.serialize().eventGraph,
+          metadata: {},
+        },
+      },
+      "r1",
+    );
+
+    restored.insert(1, "Y");
+    // Inferred sequence number should be 0 because "notanumber" is skipped.
+    expect(restored.exportEventGraph().some((e) => e.id === "r1:0")).toBe(true);
+  });
+
+  it("falls back to full replay when concurrent remote parents differ from current", () => {
+    // Hits the parentsMatchCurrent !has branch (size matches, contents differ).
+    const api = new EgWalkerAPI("r1");
+    api.applyRemoteEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    // Concurrent event: same number of parents (0) as currentVersion.size (1).
+    // parentsMatchCurrent first short-circuits on size; here we want the
+    // member mismatch path. Apply a follow-up event whose parents are a
+    // single-element set that does not match currentVersion's element.
+    api.applyRemoteEvent({
+      id: "alice:1",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+      timestamp: 2,
+    });
+    // Now currentVersion = {alice:1}. Send a remote event whose parents are
+    // {alice:0} — same size, different content. Forces the !has branch.
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
+      timestamp: 3,
+    });
+    expect(api.getText().includes("A")).toBe(true);
+    expect(api.getText().includes("B")).toBe(true);
+    expect(api.getText().includes("C")).toBe(true);
+  });
+
+  describe("surrogate pair boundaries", () => {
+    it("rejects inserts that land between surrogate halves", () => {
+      const api = new EgWalkerAPI("r1", "😀");
+      // "😀".length === 2 (high + low surrogate). Index 1 falls mid-pair.
+      expect(() => api.insert(1, "X")).toThrow(
+        /falls between surrogate halves/,
+      );
+      expect(() => api.delete(1, 0)).not.toThrow(); // length 0 short-circuits
+      expect(() => api.delete(0, 1)).toThrow(/falls between surrogate halves/);
+      // Valid boundaries still work.
+      expect(() => api.insert(0, "A")).not.toThrow();
+      expect(() => api.insert(api.getText().length, "Z")).not.toThrow();
+    });
+
+    it("keeps concurrent emoji operations from splitting surrogate pairs", () => {
+      const api = new EgWalkerAPI("alice", "ab");
+
+      // Insert emoji between a and b.
+      api.insert(1, "😀");
+      expect(api.getText()).toBe("a😀b");
+
+      // Concurrent remote insert at the same anchor (parents = root). Engine
+      // routes it through full replay; the resulting text must still be
+      // valid UTF-16 (no lone surrogates).
+      api.applyRemoteEvent({
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "Z" },
+        timestamp: Date.now(),
+      });
+
+      const text = api.getText();
+      // Each surrogate pair must remain adjacent.
+      for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          // High surrogate must be followed by a low surrogate.
+          const next = text.charCodeAt(i + 1);
+          expect(next).toBeGreaterThanOrEqual(0xdc00);
+          expect(next).toBeLessThanOrEqual(0xdfff);
+          i++;
+        } else {
+          // Lone low surrogate is a failure.
+          expect(code < 0xdc00 || code > 0xdfff).toBe(true);
+        }
+      }
+    });
+  });
+
+  it("ignores already-buffered remote events on re-delivery", () => {
+    // Hits the bufferedEventIds.has(event.id) early-return branch in
+    // tryAcceptRemoteEvent.
+    const api = new EgWalkerAPI("r1");
+    const child: GraphEvent = {
+      id: "alice:1",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      timestamp: 2,
+    };
+    api.applyRemoteEvent(child);
+    expect(api.getPendingRemoteCount()).toBe(1);
+    // Re-deliver the same buffered event — should be a no-op.
+    api.applyRemoteEvent(child);
+    expect(api.getPendingRemoteCount()).toBe(1);
+
+    // Then deliver the parent and verify both flush correctly.
+    api.applyRemoteEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    expect(api.getPendingRemoteCount()).toBe(0);
+    expect(api.getText()).toBe("BA");
   });
 });

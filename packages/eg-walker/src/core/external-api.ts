@@ -14,11 +14,16 @@ import type {
   GraphEvent,
   EventId,
   Version,
-  SerializedGraph,
+  SerializedGraphInput,
+  SerializedGraphOutput,
 } from "../types";
-import { createDocumentState, applyOperation } from "./invariants";
-import { EventGraph } from "../graph/event-graph";
-import { TemporaryCRDT } from "../crdt/temporary-state";
+import { createDocumentState } from "./invariants";
+import {
+  EventGraph,
+  EventAlreadyExistsError,
+  MissingParentError,
+} from "../graph/event-graph";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 /**
  * Public API for Eg-walker
@@ -26,62 +31,52 @@ import { TemporaryCRDT } from "../crdt/temporary-state";
  */
 export class EgWalkerAPI {
   private document: string = "";
+  private readonly initialText: string;
   private readonly eventGraph: EventGraph;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
+  private engine: EgWalkerEngine | null = null;
+  private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
+  private readonly bufferedEventIds = new Set<EventId>();
 
   constructor(
     private readonly replicaId: string,
     initialText: string = "",
+    eventGraph?: EventGraph,
   ) {
     this.document = initialText;
-    this.eventGraph = new EventGraph();
+    this.initialText = initialText;
+    this.eventGraph = eventGraph ?? new EventGraph();
+    this.currentVersion = this.eventGraph.getFrontier();
+    this.nextSequenceNumber = this.inferNextSequenceNumber();
+    if (this.eventGraph.getAllEvents().length > 0) {
+      this.fullReplay();
+    }
   }
 
   /**
    * Insert text at index - public API
-   * @param index Position in the document (0-based)
-   * @param text Text to insert
+   *
+   * Validation lives in {@link applyLocalOperation} so direct callers and
+   * `insert`/`delete` get the same guarantees without duplicating checks.
    */
   insert(index: number, text: string): void {
-    this.validateIndex(index, true);
-    if (text.length === 0) {
-      return; // No-op for empty insert
-    }
-
-    const operation: ExternalOperation = {
+    this.applyLocalOperation({
       type: OPERATION_TYPE.INSERT,
       index,
       text,
-    };
-
-    this.applyLocalOperation(operation);
+    });
   }
 
   /**
    * Delete text at index - public API
-   * @param index Starting position (0-based)
-   * @param length Number of characters to delete
    */
   delete(index: number, length: number): void {
-    this.validateIndex(index, false);
-    if (length <= 0) {
-      return; // No-op for zero-length delete
-    }
-
-    if (index + length > this.document.length) {
-      throw new Error(
-        `Delete range [${index}, ${index + length}) exceeds document length ${this.document.length}`,
-      );
-    }
-
-    const operation: ExternalOperation = {
+    this.applyLocalOperation({
       type: OPERATION_TYPE.DELETE,
       index,
       length,
-    };
-
-    this.applyLocalOperation(operation);
+    });
   }
 
   /**
@@ -92,9 +87,6 @@ export class EgWalkerAPI {
     return createDocumentState(this.document);
   }
 
-  /**
-   * Get current text content
-   */
   getText(): string {
     return this.document;
   }
@@ -102,125 +94,101 @@ export class EgWalkerAPI {
   /**
    * Serialize the document state (text + event graph)
    */
-  serialize(): { text: string; eventGraph: SerializedGraph } {
+  serialize(): { text: string; eventGraph: SerializedGraphOutput } {
+    this.eventGraph.setMetadata({
+      ...this.eventGraph.getMetadata(),
+      initialText: this.initialText,
+      nextSequenceNumber: this.nextSequenceNumber,
+    });
+
     return {
       text: this.document,
       eventGraph: this.eventGraph.serialize(),
     };
   }
 
-  /**
-   * Deserialize from saved state
-   */
-  static deserialize(serialized: {
-    text: string;
-    eventGraph: SerializedGraph;
-  }): EgWalkerAPI {
-    // Create new instance with the text
-    const api = new EgWalkerAPI("deserialized-replica", serialized.text);
-    // Restore event graph
-    if (serialized.eventGraph) {
-      // Note: EventGraph doesn't have deserialize yet, so this is a placeholder
-      // api.eventGraph = EventGraph.deserialize(serialized.eventGraph);
+  static deserialize(
+    serialized: {
+      text: string;
+      eventGraph: SerializedGraphInput | null;
+    },
+    replicaId: string = "deserialized-replica",
+  ): EgWalkerAPI {
+    if (!serialized.eventGraph) {
+      return new EgWalkerAPI(replicaId, serialized.text);
     }
+
+    const graph = EventGraph.deserialize(serialized.eventGraph);
+    const metadata = graph.getMetadata();
+    const initialText =
+      typeof metadata.initialText === "string"
+        ? metadata.initialText
+        : graph.getAllEvents().length === 0
+          ? serialized.text
+          : "";
+    const api = new EgWalkerAPI(replicaId, initialText, graph);
+
+    if (typeof metadata.nextSequenceNumber === "number") {
+      api.nextSequenceNumber = metadata.nextSequenceNumber;
+    }
+
     return api;
   }
 
   /**
-   * Apply a local operation and add to event graph
+   * Apply a local operation and add to event graph.
+   *
+   * Local operations are always causally rooted at {@link currentVersion}, so
+   * the engine can advance incrementally rather than replay from scratch.
    */
-  private applyLocalOperation(operation: ExternalOperation): void {
-    // Create event
-    const eventId = this.generateEventId();
+  applyLocalOperation(operation: ExternalOperation): void {
+    const validatedOperation = this.validateLocalOperation(operation);
+    if (!validatedOperation) {
+      return;
+    }
+
     const event: GraphEvent = {
-      id: eventId,
-      operation,
+      id: this.generateEventId(),
+      operation: validatedOperation,
       parentVersion: this.currentVersion,
       timestamp: Date.now(),
     };
 
-    // Apply to local document
-    this.document = applyOperation(this.document, operation);
-
-    // Add to event graph
     try {
       this.eventGraph.addEvent(event);
     } catch (error) {
-      // Log duplicate event and continue gracefully
-      if (error instanceof Error && error.message.includes("already exists")) {
-        console.warn(
-          `Duplicate event detected in applyLocalOperation: id=${event.id}, source=local, timestamp=${event.timestamp}`,
-        );
-        return; // Ignore duplicate and continue
+      if (error instanceof EventAlreadyExistsError) {
+        return;
       }
-      throw error; // Re-throw other errors
+      throw error;
     }
 
-    // Update version
-    this.currentVersion = new Set([...this.currentVersion, eventId]);
+    this.advanceWithEvent(event);
   }
 
   /**
-   * Apply a remote event
-   * This will use temporary CRDT for transformation
+   * Apply a remote event. Buffers events with unknown parents until they can
+   * be applied in causal order, so callers do not need to deliver in order.
    */
-  async applyRemoteEvent(event: GraphEvent): Promise<void> {
-    // Add to event graph
-    try {
-      this.eventGraph.addEvent(event);
-    } catch (error) {
-      // Log duplicate event and continue gracefully
-      if (error instanceof Error && error.message.includes("already exists")) {
-        console.warn(
-          `Duplicate event detected in applyRemoteEvent: id=${event.id}, source=remote, timestamp=${event.timestamp}`,
-        );
-        return; // Ignore duplicate and continue
-      }
-      throw error; // Re-throw other errors
-    }
-
-    // Use temporary CRDT for transformation
-    await TemporaryCRDT.withTemporaryCRDT(async (crdt) => {
-      // Get all events in topological order
-      const sortedEvents = this.eventGraph.getTopologicalOrder();
-
-      // Rebuild document from scratch by replaying all events
-      // This ensures deterministic ordering regardless of receipt order
-      this.document = "";
-
-      // Process each event with CRDT
-      for (const sortedEvent of sortedEvents) {
-        // Create CRDT items from event
-        const items = crdt.createItemsFromEvent(sortedEvent);
-        // Integrate items into CRDT
-        crdt.integrate(items);
-      }
-
-      // Get the final text from CRDT
-      const effectState = crdt.getEffectState();
-      this.document = effectState.visibleText;
-
-      // Update current version
-      this.currentVersion = new Set(sortedEvents.map((e) => e.id));
-    });
+  applyRemoteEvent(event: GraphEvent): void {
+    this.tryAcceptRemoteEvent(event);
   }
 
   /**
-   * Check if event can be applied directly without transformation
+   * Number of remote events currently buffered awaiting causal parents.
+   * Exposed primarily for tests and diagnostics.
    */
-  private canApplyDirectly(event: GraphEvent): boolean {
-    // Can apply directly if all parent events are in current version
-    for (const parentId of event.parentVersion) {
-      if (!this.currentVersion.has(parentId)) {
-        return false;
-      }
-    }
-    return true;
+  getPendingRemoteCount(): number {
+    return this.bufferedEventIds.size;
   }
 
   /**
-   * Validate index for operations
+   * Generate unique event ID
    */
+  private generateEventId(): EventId {
+    return `${this.replicaId}:${this.nextSequenceNumber++}`;
+  }
+
   private validateIndex(index: number, allowEnd: boolean): void {
     const max = allowEnd ? this.document.length : this.document.length - 1;
     if (index < 0 || index > max) {
@@ -231,10 +199,64 @@ export class EgWalkerAPI {
   }
 
   /**
-   * Generate unique event ID
+   * Reject indexes that fall between a high and low surrogate code unit.
+   *
+   * The engine stores one CRDT item per UTF-16 code unit, so concurrent
+   * operations between two halves of a surrogate pair could otherwise produce
+   * lone surrogates in the merged text. Rejecting at the public boundary keeps
+   * the CRDT layer free of mid-surrogate operations.
    */
-  private generateEventId(): EventId {
-    return `${this.replicaId}:${this.nextSequenceNumber++}`;
+  private assertNotMidSurrogate(index: number): void {
+    if (index <= 0 || index >= this.document.length) {
+      return;
+    }
+    const high = this.document.charCodeAt(index - 1);
+    if (high < 0xd800 || high > 0xdbff) {
+      return;
+    }
+    const low = this.document.charCodeAt(index);
+    if (low >= 0xdc00 && low <= 0xdfff) {
+      throw new Error(
+        `Index ${index} falls between surrogate halves of a single code point`,
+      );
+    }
+  }
+
+  private validateLocalOperation(
+    operation: ExternalOperation,
+  ): ExternalOperation | null {
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      // Empty inserts are no-ops; skip index validation.
+      if (operation.text.length === 0) {
+        return null;
+      }
+      this.validateIndex(operation.index, true);
+      this.assertNotMidSurrogate(operation.index);
+      return operation;
+    }
+
+    // Zero/negative-length deletes are no-ops; skip index validation.
+    if (operation.length <= 0) {
+      return null;
+    }
+    this.validateIndex(operation.index, false);
+    this.assertNotMidSurrogate(operation.index);
+
+    if (operation.index + operation.length > this.document.length) {
+      throw new Error(
+        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.document.length}`,
+      );
+    }
+    this.assertNotMidSurrogate(operation.index + operation.length);
+
+    return operation;
+  }
+
+  /**
+   * Get current document text using the README-compatible API name.
+   */
+  getDocumentState(): string {
+    return this.document;
   }
 
   /**
@@ -248,19 +270,127 @@ export class EgWalkerAPI {
   /**
    * Import event graph from persistence
    */
-  static async fromEventGraph(
+  static fromEventGraph(
     replicaId: string,
     events: ReadonlyArray<GraphEvent>,
     initialText: string = "",
-  ): Promise<EgWalkerAPI> {
+  ): EgWalkerAPI {
     const api = new EgWalkerAPI(replicaId, initialText);
 
-    // Apply events in causal order
     for (const event of events) {
-      await api.applyRemoteEvent(event);
+      api.applyRemoteEvent(event);
     }
 
     return api;
+  }
+
+  private fullReplay(): void {
+    const sortedEvents = this.eventGraph.getTopologicalOrder();
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(sortedEvents, this.initialText, {
+      eventGraph: this.eventGraph,
+    });
+    this.document = generated.text;
+    this.currentVersion = this.eventGraph.getFrontier();
+    this.engine = engine;
+  }
+
+  private advanceWithEvent(event: GraphEvent): void {
+    if (!this.engine || !this.parentsMatchCurrent(event.parentVersion)) {
+      // Remote/concurrent events would be processed in arrival order on the
+      // incremental path, which diverges from the deterministic topological
+      // order each replica needs to converge. Replay from scratch instead.
+      this.fullReplay();
+      return;
+    }
+
+    this.engine.applyEvent(event, this.eventGraph);
+    this.document = this.engine.getText();
+    this.currentVersion = this.eventGraph.getFrontier();
+  }
+
+  private parentsMatchCurrent(parents: ReadonlySet<EventId>): boolean {
+    if (parents.size !== this.currentVersion.size) {
+      return false;
+    }
+    for (const id of parents) {
+      if (!this.currentVersion.has(id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private tryAcceptRemoteEvent(event: GraphEvent): void {
+    if (
+      this.eventGraph.hasEvent(event.id) ||
+      this.bufferedEventIds.has(event.id)
+    ) {
+      return;
+    }
+
+    const missingParent = this.findMissingParent(event);
+    if (missingParent !== null) {
+      const queue = this.pendingByMissingParent.get(missingParent) ?? [];
+      queue.push(event);
+      this.pendingByMissingParent.set(missingParent, queue);
+      this.bufferedEventIds.add(event.id);
+      return;
+    }
+
+    try {
+      this.eventGraph.addEvent(event);
+    } catch (error) {
+      if (
+        error instanceof EventAlreadyExistsError ||
+        error instanceof MissingParentError
+      ) {
+        return;
+      }
+      throw error;
+    }
+
+    this.advanceWithEvent(event);
+    this.flushPendingChildrenOf(event.id);
+  }
+
+  private findMissingParent(event: GraphEvent): EventId | null {
+    for (const parentId of event.parentVersion) {
+      if (!this.eventGraph.hasEvent(parentId)) {
+        return parentId;
+      }
+    }
+    return null;
+  }
+
+  private flushPendingChildrenOf(parentId: EventId): void {
+    const waiters = this.pendingByMissingParent.get(parentId);
+    if (!waiters) {
+      return;
+    }
+    this.pendingByMissingParent.delete(parentId);
+    for (const waiter of waiters) {
+      this.bufferedEventIds.delete(waiter.id);
+      this.tryAcceptRemoteEvent(waiter);
+    }
+  }
+
+  private inferNextSequenceNumber(): number {
+    let maxSequenceNumber = -1;
+    const prefix = `${this.replicaId}:`;
+
+    for (const event of this.eventGraph.getAllEvents()) {
+      if (!event.id.startsWith(prefix)) {
+        continue;
+      }
+
+      const sequenceNumber = Number(event.id.slice(prefix.length));
+      if (Number.isInteger(sequenceNumber)) {
+        maxSequenceNumber = Math.max(maxSequenceNumber, sequenceNumber);
+      }
+    }
+
+    return maxSequenceNumber + 1;
   }
 }
 

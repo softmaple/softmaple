@@ -131,6 +131,23 @@ describe("EventGraph", () => {
         "Event event-1 already exists",
       );
     });
+
+    it("should reject events with missing parents", () => {
+      const graph = new EventGraph();
+
+      expect(() =>
+        graph.addEvent({
+          id: "event-2",
+          timestamp: 200,
+          parentVersion: new Set<EventId>(["missing-parent"]),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: "B",
+          },
+        }),
+      ).toThrow("Missing parent event: missing-parent");
+    });
   });
 
   describe("getTopologicalOrder", () => {
@@ -327,7 +344,7 @@ describe("EventGraph", () => {
 
       const serialized = graph.serialize();
 
-      expect(serialized.version.size).toBe(2); // Should have 2 events
+      expect(serialized.version).toEqual(["event-2"]);
       expect(serialized.events).toHaveLength(2);
 
       const newGraph = EventGraph.deserialize(serialized);
@@ -336,6 +353,42 @@ describe("EventGraph", () => {
       expect(newGraph.hasEvent("event-2")).toBe(true);
       expect(newGraph.getEvent("event-2")?.parentVersion.has("event-1")).toBe(
         true,
+      );
+    });
+
+    it("serializes graph versions as JSON-safe arrays", () => {
+      const graph = new EventGraph();
+
+      graph.addEvent({
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Hello",
+        },
+      });
+      graph.addEvent({
+        id: "event-2",
+        timestamp: 200,
+        parentVersion: new Set<EventId>(["event-1"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 5,
+          text: "World",
+        },
+      });
+
+      const parsed = JSON.parse(
+        JSON.stringify(graph.serialize()),
+      ) as unknown as SerializedEventGraph;
+      const newGraph = EventGraph.deserialize(parsed);
+
+      expect(parsed.version).toEqual(["event-2"]);
+      expect(parsed.events[1]?.parentVersion).toEqual(["event-1"]);
+      expect(newGraph.getEvent("event-2")?.parentVersion).toEqual(
+        new Set(["event-1"]),
       );
     });
 
@@ -378,6 +431,29 @@ describe("EventGraph", () => {
 
       expect(reSerialized.metadata?.customField).toBe("test-value");
     });
+
+    it("should reject serialized graphs whose parents cannot be resolved", () => {
+      const invalidData: SerializedEventGraph = {
+        version: new Set<EventId>(["event-2"]),
+        events: [
+          {
+            id: "event-2",
+            timestamp: 200,
+            parentVersion: new Set<EventId>(["missing-parent"]),
+            operation: {
+              type: OPERATION_TYPE.INSERT,
+              index: 0,
+              text: "B",
+            },
+          },
+        ],
+        metadata: {},
+      };
+
+      expect(() => EventGraph.deserialize(invalidData)).toThrow(
+        "Cannot deserialize event graph with missing parents: missing-parent",
+      );
+    });
   });
 
   describe("branch coverage improvements", () => {
@@ -385,6 +461,47 @@ describe("EventGraph", () => {
       const graph = new EventGraph();
       const result = graph.getEvent("non-existent");
       expect(result).toBeUndefined();
+    });
+
+    it("should ignore duplicate and unknown IDs when expanding versions", () => {
+      const graph = new EventGraph();
+      graph.addEvent({
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      });
+
+      expect(
+        graph.expandVersion(
+          new Set<EventId>(["event-1", "event-1", "missing"]),
+        ),
+      ).toEqual(new Set<EventId>(["event-1"]));
+    });
+
+    it("should clear all graph state and metadata", () => {
+      const graph = new EventGraph();
+      graph.setMetadata({ key: "value" });
+      graph.addEvent({
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "Test",
+        },
+      });
+
+      graph.clear();
+
+      expect(graph.getAllEvents()).toEqual([]);
+      expect(graph.getFrontier()).toEqual(new Set());
+      expect(graph.getMetadata()).toEqual({});
     });
 
     it("should handle getChildren for event with no children", () => {
@@ -534,6 +651,70 @@ describe("EventGraph", () => {
       const order = graph.getTopologicalOrder();
       expect(order).toHaveLength(1);
       expect(order[0]?.id).toBe("event-1");
+    });
+  });
+
+  describe("normalizeEventIds tolerant input handling", () => {
+    const root = (): GraphEvent => ({
+      id: "root",
+      timestamp: 1,
+      parentVersion: new Set<EventId>(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+    });
+    const child = (parentVersion: unknown): unknown => ({
+      id: "child",
+      timestamp: 2,
+      parentVersion,
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+    });
+
+    it("accepts a Set instance for parentVersion (in-memory shape)", () => {
+      const graph = EventGraph.deserialize({
+        version: ["child"],
+        events: [root(), child(new Set<EventId>(["root"])) as never] as never,
+      });
+      expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
+    });
+
+    it("accepts a generic Iterable for parentVersion", () => {
+      const iterableParents: Iterable<EventId> = {
+        *[Symbol.iterator]() {
+          yield "root";
+        },
+      };
+      const graph = EventGraph.deserialize({
+        version: ["child"],
+        events: [root(), child(iterableParents) as never] as never,
+      });
+      expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
+    });
+
+    it("falls back to [] for legacy JSON.stringify(Set) → {} payloads", () => {
+      // Hits the Object.keys defensive branch: a non-iterable plain object
+      // cannot recover the original IDs, so the deserialized event ends up
+      // with no parents. Verifies the fallback does not crash.
+      const graph = EventGraph.deserialize({
+        version: [],
+        events: [root()] as never,
+        // Stand-alone root with parentVersion === {} (empty plain object).
+      });
+      const isolated = EventGraph.deserialize({
+        version: [],
+        events: [{ ...root(), parentVersion: {} } as never] as never,
+      });
+      expect(graph.getEvent("root")?.parentVersion).toEqual(new Set());
+      expect(isolated.getEvent("root")?.parentVersion).toEqual(new Set());
+    });
+
+    it("filters non-string entries out of array parentVersion", () => {
+      const graph = EventGraph.deserialize({
+        version: ["child"],
+        events: [
+          root(),
+          child([42, "root", null, "root"] as unknown as EventId[]) as never,
+        ] as never,
+      });
+      expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
     });
   });
 });

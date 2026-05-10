@@ -13,7 +13,6 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 
 import { describe, it, expect } from "vitest";
 import { EgWalkerAPI } from "../core/external-api";
-import { withTemporaryCRDT } from "../crdt/temporary-state";
 import { EventGraph } from "../graph/event-graph";
 import type { Event } from "../types";
 
@@ -66,11 +65,11 @@ describe("Eg-walker Algorithm Characteristics", () => {
       };
 
       // Apply in different orders
-      await api1.applyRemoteEvent(event1);
-      await api1.applyRemoteEvent(event2);
+      api1.applyRemoteEvent(event1);
+      api1.applyRemoteEvent(event2);
 
-      await api2.applyRemoteEvent(event2);
-      await api2.applyRemoteEvent(event1);
+      api2.applyRemoteEvent(event2);
+      api2.applyRemoteEvent(event1);
 
       // Must converge to same result
       expect(api1.getText()).toBe(api2.getText());
@@ -106,11 +105,10 @@ describe("Eg-walker Algorithm Characteristics", () => {
       };
 
       // Apply both events
-      await api.applyRemoteEvent(aliceEvent);
-      await api.applyRemoteEvent(bobEvent);
+      api.applyRemoteEvent(aliceEvent);
+      api.applyRemoteEvent(bobEvent);
 
       const result = api.getText();
-      console.log("Non-interleaving test result:", result);
 
       // Must be either 'HelloWorld' or 'WorldHello', never interleaved
       expect(result === "HelloWorld" || result === "WorldHello").toBe(true);
@@ -143,8 +141,8 @@ describe("Eg-walker Algorithm Characteristics", () => {
         },
       };
 
-      await api.applyRemoteEvent(aliceEvent);
-      await api.applyRemoteEvent(bobEvent);
+      api.applyRemoteEvent(aliceEvent);
+      api.applyRemoteEvent(bobEvent);
 
       const result = api.getText();
 
@@ -158,24 +156,6 @@ describe("Eg-walker Algorithm Characteristics", () => {
   });
 
   describe("Characteristic 3: Minimal and temporary internal metadata", () => {
-    it("should automatically clean up CRDT state", async () => {
-      let crdtDestroyed = false;
-
-      await withTemporaryCRDT(async (crdt) => {
-        // Set up check for destruction
-        const originalDestroy = crdt.destroy.bind(crdt);
-        crdt.destroy = () => {
-          crdtDestroyed = true;
-          return originalDestroy();
-        };
-
-        return [];
-      });
-
-      // CRDT should be destroyed after use
-      expect(crdtDestroyed).toBe(true);
-    });
-
     it("should not expose CRDT internals through public API", () => {
       const api = new EgWalkerAPI("replica1");
 
@@ -275,10 +255,12 @@ describe("Eg-walker Algorithm Characteristics", () => {
       api2.insert(3, " Text");
       expect(api2.getText()).toBe("New Text");
 
-      // Should not have any tombstones from deleted "Original"
+      // Should persist the immutable event graph, but not CRDT tombstones.
       const serialized2 = api2.serialize();
-      expect(JSON.stringify(serialized2)).not.toContain("Original");
+      expect(serialized2.text).toBe("New Text");
+      expect(serialized2.eventGraph.events).toHaveLength(4);
       expect(JSON.stringify(serialized2)).not.toContain("tombstone");
+      expect(JSON.stringify(serialized2)).not.toContain("characterIds");
     });
 
     it("should handle event graph without per-character tracking", () => {

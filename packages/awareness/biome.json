@@ -43,5 +43,11 @@
       "quoteStyle": "double"
     }
   },
+  "css": {
+    "parser": {
+      "cssModules": false,
+      "tailwindDirectives": true
+    }
+  },
   "overrides": []
 }

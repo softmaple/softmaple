@@ -26,14 +26,14 @@ export const LiveCursor = ({
   const previousPointRef = useRef(point);
 
   useEffect(() => {
-    const previousPoint = previousPointRef.current;
-    const moved = previousPoint.x !== point.x || previousPoint.y !== point.y;
-    previousPointRef.current = point;
-
     if (!showLabel) {
       setIsLabelVisible(false);
       return;
     }
+
+    const previousPoint = previousPointRef.current;
+    const moved = previousPoint.x !== point.x || previousPoint.y !== point.y;
+    previousPointRef.current = { x: point.x, y: point.y };
 
     if (moved) {
       setIsLabelVisible(true);
@@ -46,7 +46,7 @@ export const LiveCursor = ({
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [labelVisibleMs, point, showLabel]);
+  }, [labelVisibleMs, point.x, point.y, showLabel]);
 
   return (
     <div

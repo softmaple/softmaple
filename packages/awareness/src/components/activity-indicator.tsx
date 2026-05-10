@@ -62,10 +62,11 @@ export const ActivityIndicator = ({
   );
 
   return (
-    <output
+    <div
       aria-label={ariaLabel}
       aria-live="polite"
       className={cx("awareness-activity-indicator", className)}
+      role="log"
     >
       {items.length > 0 ? (
         <ol className="awareness-activity-indicator__list">
@@ -83,6 +84,6 @@ export const ActivityIndicator = ({
           {emptyLabel}
         </span>
       )}
-    </output>
+    </div>
   );
 };

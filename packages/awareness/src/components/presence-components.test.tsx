@@ -1,5 +1,7 @@
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACTIVITY_TYPE } from "../constants/presence-events";
 import type { ActivityEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
@@ -8,6 +10,12 @@ import { LiveCursor } from "./live-cursor";
 import { PresenceAvatar } from "./presence-avatar";
 import { PresenceBar } from "./presence-bar";
 import { SelectionHighlight } from "./selection-highlight";
+
+const reactActGlobal = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+
+reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
 
 const createUser = (
   userId: string,
@@ -19,6 +27,11 @@ const createUser = (
   status: "active",
   lastActiveAt: 1000,
   ...overrides,
+});
+
+afterEach(() => {
+  document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 describe("presence components", () => {
@@ -99,5 +112,38 @@ describe("presence components", () => {
     expect(cursorHtml).toContain("translate3d(12px, 24px, 0)");
     expect(selectionHtml).toContain("translate3d(4px, 8px, 0)");
     expect(selectionHtml).toContain("Grace");
+  });
+
+  it("hides the initial LiveCursor label after the configured timeout", async () => {
+    vi.useFakeTimers();
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const user = createUser("1", { name: "Grace" });
+
+    await act(async () => {
+      root.render(
+        <LiveCursor
+          labelVisibleMs={100}
+          point={{ x: 12, y: 24 }}
+          user={user}
+        />,
+      );
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    expect(cursor?.className).toContain("awareness-live-cursor--label-visible");
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(cursor?.className).not.toContain(
+      "awareness-live-cursor--label-visible",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
   });
 });

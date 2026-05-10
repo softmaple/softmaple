@@ -85,44 +85,67 @@ const waitForBufferFlush = (
     checkBuffer();
   });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const isJoinPayload = (payload: unknown): payload is JoinPayload =>
+  isRecord(payload) &&
+  isRecord(payload.user) &&
+  typeof payload.user.userId === "string";
+
+const isLeavePayload = (payload: unknown): payload is LeavePayload =>
+  isRecord(payload) && typeof payload.userId === "string";
+
+const isPresenceUpdatePayload = (
+  payload: unknown,
+): payload is PresenceUpdatePayload =>
+  isRecord(payload) &&
+  typeof payload.userId === "string" &&
+  isRecord(payload.updates);
+
+const isPresenceSyncPayload = (
+  payload: unknown,
+): payload is PresenceSyncPayload =>
+  isRecord(payload) && Array.isArray(payload.users);
+
 const presenceEventFromMessage = (
   message: WebSocketMessage,
 ): PresenceEvent | null => {
   switch (message.type) {
     case WS_MESSAGE.JOIN: {
-      const payload = message.payload as JoinPayload;
+      if (!isJoinPayload(message.payload)) return null;
       return {
         type: PRESENCE_EVENT.JOIN,
-        payload: { type: PRESENCE_EVENT.JOIN, user: payload.user },
+        payload: { type: PRESENCE_EVENT.JOIN, user: message.payload.user },
         timestamp: message.timestamp,
       };
     }
     case WS_MESSAGE.LEAVE: {
-      const payload = message.payload as LeavePayload;
+      if (!isLeavePayload(message.payload)) return null;
       return {
         type: PRESENCE_EVENT.LEAVE,
-        payload: { type: PRESENCE_EVENT.LEAVE, userId: payload.userId },
+        payload: { type: PRESENCE_EVENT.LEAVE, userId: message.payload.userId },
         timestamp: message.timestamp,
       };
     }
     case WS_MESSAGE.PRESENCE_UPDATE: {
-      const payload = message.payload as PresenceUpdatePayload;
+      if (!isPresenceUpdatePayload(message.payload)) return null;
       return {
         type: PRESENCE_EVENT.UPDATE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
-          userId: payload.userId,
-          updates: payload.updates,
+          userId: message.payload.userId,
+          updates: message.payload.updates,
         },
         timestamp: message.timestamp,
       };
     }
     case WS_MESSAGE.PRESENCE_SYNC:
     case WS_MESSAGE.PRESENCE_SYNC_RESPONSE: {
-      const payload = message.payload as PresenceSyncPayload;
+      if (!isPresenceSyncPayload(message.payload)) return null;
       return {
         type: PRESENCE_EVENT.SYNC,
-        payload: { type: PRESENCE_EVENT.SYNC, users: payload.users },
+        payload: { type: PRESENCE_EVENT.SYNC, users: message.payload.users },
         timestamp: message.timestamp,
       };
     }

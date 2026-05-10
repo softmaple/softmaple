@@ -137,6 +137,7 @@
     "@softmaple/typescript-config": "workspace:*",
     "@storybook/addon-mcp": "^0.6.0",
     "@storybook/react-vite": "^10.3.6",
+    "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^24.10.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -146,6 +147,7 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "storybook": "^10.3.6",
+    "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
     "vite-plugin-dts": "^4.5.4",
@@ -166,9 +168,5 @@
       "biome format --write --no-errors-on-unmatched",
       "biome lint --write --no-errors-on-unmatched"
     ]
-  },
-  "dependencies": {
-    "@tailwindcss/vite": "^4.1.18",
-    "tailwindcss": "^4.1.18"
   }
 }

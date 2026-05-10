@@ -114,6 +114,20 @@ describe("presence components", () => {
     expect(selectionHtml).toContain("Grace");
   });
 
+  it("renders avatarUrl image and skips status dot when showStatus=false", () => {
+    const html = renderToStaticMarkup(
+      <PresenceAvatar
+        showStatus={false}
+        user={createUser("1", {
+          name: "Ada",
+          avatarUrl: "https://example.com/a.png",
+        })}
+      />,
+    );
+    expect(html).toContain('src="https://example.com/a.png"');
+    expect(html).not.toContain("awareness-avatar__status");
+  });
+
   it("hides the initial LiveCursor label after the configured timeout", async () => {
     vi.useFakeTimers();
 

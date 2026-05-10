@@ -24,10 +24,10 @@ export default mergeConfig(viteConfig, {
         "src/**/index.ts",
       ],
       thresholds: {
-        lines: 45,
-        functions: 45,
-        branches: 30,
-        statements: 45,
+        lines: 90,
+        functions: 90,
+        branches: 90,
+        statements: 90,
       },
     },
     projects: [

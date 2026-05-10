@@ -5,8 +5,17 @@ import {
   PresenceContext,
   type PresenceContextValue,
 } from "../providers/presence-context";
-import type { CursorPosition, PresenceUser } from "../types/presence";
-import { useUpdateCursor, useUpdateTyping } from "./use-update-presence";
+import type {
+  CursorPosition,
+  PresenceUser,
+  SelectionRange,
+} from "../types/presence";
+import {
+  useUpdateCursor,
+  useUpdatePresence,
+  useUpdateSelection,
+  useUpdateTyping,
+} from "./use-update-presence";
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -377,5 +386,145 @@ describe("useUpdateCursor", () => {
     expect(updatePresence).toHaveBeenCalledTimes(3);
 
     unmount();
+  });
+
+  it("throws when used outside PresenceProvider", () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const Capture = (): null => {
+      useUpdateCursor();
+      return null;
+    };
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    expect(() => {
+      act(() => {
+        root.render(<Capture />);
+      });
+    }).toThrow(/useUpdateCursor/);
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    consoleError.mockRestore();
+  });
+});
+
+describe("useUpdatePresence and useUpdateSelection", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("useUpdatePresence returns context.updatePresence", () => {
+    const updatePresence = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    let captured: PresenceContextValue["updatePresence"] | null = null;
+    const Capture = (): null => {
+      captured = useUpdatePresence();
+      return null;
+    };
+    act(() => {
+      root.render(
+        <PresenceContext.Provider
+          value={createContextValue(createSelf(), updatePresence)}
+        >
+          <Capture />
+        </PresenceContext.Provider>,
+      );
+    });
+    expect(captured).toBe(updatePresence);
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("useUpdatePresence throws outside provider", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const Capture = (): null => {
+      useUpdatePresence();
+      return null;
+    };
+    expect(() => {
+      act(() => {
+        root.render(<Capture />);
+      });
+    }).toThrow(/useUpdatePresence/);
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    consoleError.mockRestore();
+  });
+
+  it("useUpdateSelection forwards selection updates", () => {
+    const updatePresence = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    let captured: ((selection: SelectionRange | undefined) => void) | null =
+      null;
+    const Capture = (): null => {
+      captured = useUpdateSelection();
+      return null;
+    };
+    act(() => {
+      root.render(
+        <PresenceContext.Provider
+          value={createContextValue(createSelf(), updatePresence)}
+        >
+          <Capture />
+        </PresenceContext.Provider>,
+      );
+    });
+
+    act(() => {
+      captured?.({ blockId: "b1", from: 0, to: 5 });
+    });
+    expect(updatePresence).toHaveBeenCalledWith({
+      selection: { blockId: "b1", from: 0, to: 5 },
+    });
+
+    act(() => {
+      captured?.(undefined);
+    });
+    expect(updatePresence).toHaveBeenCalledWith({ selection: undefined });
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("useUpdateSelection throws outside provider", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const Capture = (): null => {
+      useUpdateSelection();
+      return null;
+    };
+    expect(() => {
+      act(() => {
+        root.render(<Capture />);
+      });
+    }).toThrow(/useUpdateSelection/);
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    consoleError.mockRestore();
   });
 });

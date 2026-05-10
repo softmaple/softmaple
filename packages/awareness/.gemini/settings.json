@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "softmaple-storybook-mcp": {
+      "httpUrl": "http://localhost:6006/mcp"
+    }
+  }
+}

@@ -3,17 +3,17 @@ import { expect } from "storybook/test";
 
 import { BlockActivityIndicator } from "../components/block-activity-indicator";
 import type { PresenceUser } from "../types/presence";
-import { ada, grace, katherine } from "./awareness-fixtures";
-import { StoryFrame } from "./story-layout";
+import { bulbasaur, charmander, pikachu } from "./awareness-fixtures";
+import { StoryShowcase } from "./story-layout";
 
-// `ada.cursor.blockId === "abstract"` — single user in this block.
+// `pikachu.cursor.blockId === "abstract"` — single user in this block.
 const SINGLE_BLOCK_ID = "abstract";
 
 // Two users sharing the same block, derived from fixtures so colors stay on-brand.
 const SHARED_BLOCK_ID = "shared-paragraph";
 const sharedBlockUsers: ReadonlyArray<PresenceUser> = [
-  { ...grace, cursor: { blockId: SHARED_BLOCK_ID, offset: 0 } },
-  { ...katherine, selection: { blockId: SHARED_BLOCK_ID, from: 0, to: 12 } },
+  { ...bulbasaur, cursor: { blockId: SHARED_BLOCK_ID, offset: 0 } },
+  { ...charmander, selection: { blockId: SHARED_BLOCK_ID, from: 0, to: 12 } },
 ];
 
 const meta = {
@@ -25,12 +25,15 @@ const meta = {
   },
   args: {
     blockId: SINGLE_BLOCK_ID,
-    users: [ada],
+    users: [pikachu],
   },
   render: (args) => (
-    <StoryFrame>
+    <StoryShowcase
+      subtitle="Compact pill that shows who is currently editing a specific block."
+      title="Per-block badge"
+    >
       <BlockActivityIndicator {...args} />
-    </StoryFrame>
+    </StoryShowcase>
   ),
 } satisfies Meta<typeof BlockActivityIndicator>;
 
@@ -39,13 +42,9 @@ type Story = StoryObj<typeof meta>;
 
 export const SingleEditor: Story = {
   play: async ({ canvas }) => {
-    const indicator = canvas.getByLabelText(
-      "Ada Lovelace is editing this block",
-    );
+    const indicator = canvas.getByLabelText("Pikachu is editing this block");
     await expect(indicator).toBeVisible();
-    await expect(indicator).toHaveTextContent(
-      "Ada Lovelace is editing this block",
-    );
+    await expect(indicator).toHaveTextContent("Pikachu is editing this block");
   },
 };
 
@@ -66,7 +65,7 @@ export const ExcludesOfflineUsers: Story = {
     blockId: SINGLE_BLOCK_ID,
     users: [
       {
-        ...ada,
+        ...pikachu,
         status: "offline",
       },
     ],
@@ -80,7 +79,7 @@ export const ExcludesOfflineUsers: Story = {
 export const EmptyWithFallback: Story = {
   args: {
     blockId: "no-one-here",
-    users: [ada, grace, katherine],
+    users: [pikachu, bulbasaur, charmander],
     renderWhenEmpty: true,
     emptyLabel: "No one editing here",
   },

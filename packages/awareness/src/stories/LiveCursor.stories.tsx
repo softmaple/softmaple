@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, waitFor } from "storybook/test";
 
 import { LiveCursor } from "../components/live-cursor";
-import { ada, grace, katherine } from "./awareness-fixtures";
+import { bulbasaur, charmander, pikachu } from "./awareness-fixtures";
 import { CollaborationSurface } from "./story-layout";
 
 const meta = {
@@ -15,7 +15,7 @@ const meta = {
   args: {
     labelVisibleMs: 60_000,
     point: { x: 36, y: 94 },
-    user: grace,
+    user: bulbasaur,
   },
   render: (args) => (
     <CollaborationSurface>
@@ -29,14 +29,14 @@ type Story = StoryObj<typeof meta>;
 
 export const LabeledCursor: Story = {
   play: async ({ canvas }) => {
-    const cursor = canvas.getByRole("img", { name: "Grace Hopper cursor" });
+    const cursor = canvas.getByRole("img", { name: "Bulbasaur cursor" });
 
     await expect(cursor).toBeVisible();
     await expect(cursor).toHaveClass("awareness-live-cursor--label-visible");
     await expect(cursor.getAttribute("style")).toContain(
       "translate3d(36px, 94px, 0px)",
     );
-    await expect(canvas.getByText("Grace Hopper")).toBeVisible();
+    await expect(canvas.getByText("Bulbasaur")).toBeVisible();
   },
 };
 
@@ -44,10 +44,10 @@ export const CursorOnly: Story = {
   args: {
     point: { x: 184, y: 130 },
     showLabel: false,
-    user: ada,
+    user: pikachu,
   },
   play: async ({ canvas }) => {
-    const cursor = canvas.getByRole("img", { name: "Ada Lovelace cursor" });
+    const cursor = canvas.getByRole("img", { name: "Pikachu cursor" });
 
     await expect(cursor).toBeVisible();
     await expect(cursor).not.toHaveClass(
@@ -56,7 +56,7 @@ export const CursorOnly: Story = {
     await expect(cursor.getAttribute("style")).toContain(
       "translate3d(184px, 130px, 0px)",
     );
-    await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Pikachu")).not.toBeInTheDocument();
   },
 };
 
@@ -64,10 +64,10 @@ export const AutoHiddenLabel: Story = {
   args: {
     labelVisibleMs: 60,
     point: { x: 36, y: 94 },
-    user: grace,
+    user: bulbasaur,
   },
   play: async ({ canvas }) => {
-    const cursor = canvas.getByRole("img", { name: "Grace Hopper cursor" });
+    const cursor = canvas.getByRole("img", { name: "Bulbasaur cursor" });
 
     await expect(cursor).toHaveClass("awareness-live-cursor--label-visible");
     await waitFor(
@@ -88,27 +88,25 @@ export const MultipleCursors: Story = {
         labelVisibleMs={60_000}
         point={{ x: 160, y: 58 }}
         showLabel={false}
-        user={ada}
+        user={pikachu}
       />
       <LiveCursor
         labelVisibleMs={60_000}
         point={{ x: 176, y: 130 }}
         showLabel={false}
-        user={katherine}
+        user={charmander}
       />
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
+      canvas.getByRole("img", { name: "Pikachu cursor" }),
     ).toBeVisible();
     await expect(
-      canvas.getByRole("img", { name: "Katherine Johnson cursor" }),
+      canvas.getByRole("img", { name: "Charmander cursor" }),
     ).toBeVisible();
-    await expect(canvas.queryByText("Ada Lovelace")).not.toBeInTheDocument();
-    await expect(
-      canvas.queryByText("Katherine Johnson"),
-    ).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Pikachu")).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Charmander")).not.toBeInTheDocument();
   },
 };
 
@@ -122,26 +120,26 @@ export const OffScreenCulled: Story = {
         cullMargin={0}
         labelVisibleMs={60_000}
         point={{ x: 60, y: 80 }}
-        user={ada}
+        user={pikachu}
         viewport={{ x: 0, y: 0, width: 240, height: 200 }}
       />
       <LiveCursor
         cullMargin={0}
         labelVisibleMs={60_000}
         point={{ x: 9999, y: 9999 }}
-        user={katherine}
+        user={charmander}
         viewport={{ x: 0, y: 0, width: 240, height: 200 }}
       />
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
+      canvas.getByRole("img", { name: "Pikachu cursor" }),
     ).toBeVisible();
-    // The katherine cursor is well outside the bounded viewport and the
+    // The charmander cursor is well outside the bounded viewport and the
     // component returns null — it should not be in the DOM at all.
     await expect(
-      canvas.queryByRole("img", { name: "Katherine Johnson cursor" }),
+      canvas.queryByRole("img", { name: "Charmander cursor" }),
     ).not.toBeInTheDocument();
   },
 };
@@ -152,12 +150,12 @@ export const OffScreenCulled: Story = {
 export const CullingDisabled: Story = {
   args: {
     point: { x: 4000, y: 4000 },
-    user: ada,
+    user: pikachu,
     viewport: "none",
   },
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", { name: "Ada Lovelace cursor" }),
+      canvas.getByRole("img", { name: "Pikachu cursor" }),
     ).toBeVisible();
   },
 };

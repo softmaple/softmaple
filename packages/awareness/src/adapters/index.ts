@@ -17,10 +17,7 @@ export {
   type ReconnectConfig,
   type Unsubscribe,
 } from "./types";
-export {
-  createWebSocketAdapter,
-  webSocketAdapterFactory,
-} from "./websocket";
+export { createWebSocketAdapter, webSocketAdapterFactory } from "./websocket";
 export {
   DEFAULT_WS_CONFIG,
   type WebSocketAdapterConfig,

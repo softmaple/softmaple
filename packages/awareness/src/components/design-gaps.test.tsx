@@ -319,9 +319,11 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
     });
   });
 
-  it("skips the sweep interval when statusSweepMs=0", async () => {
-    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+  it("does not demote stale users when statusSweepMs=0", async () => {
+    vi.useFakeTimers();
     const adapter = new StatusSweepAdapter();
+    let observedStatus: string | undefined;
+
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -331,20 +333,43 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
         <PresenceProvider
           adapter={adapter}
           autoConnect={false}
+          statusConfig={{
+            maxActivities: 10,
+            idleTimeoutMs: 1_000,
+            offlineTimeoutMs: 2_000,
+            cursorThrottleMs: 50,
+          }}
           statusSweepMs={0}
         >
-          {null}
+          <PresenceContext.Consumer>
+            {(value) => {
+              observedStatus = value?.presence.get("stale")?.status;
+              return null;
+            }}
+          </PresenceContext.Consumer>
         </PresenceProvider>,
       );
     });
 
-    // No sweep timer should be installed when disabled.
-    const sweepCall = setIntervalSpy.mock.calls.find((call) => call[1] === 0);
-    expect(sweepCall).toBeUndefined();
+    const stale = user("stale", {
+      name: "Stale",
+      lastActiveAt: Date.now() - 10_000,
+      status: "active",
+    });
+
+    act(() => {
+      adapter.pushPresence(new Map([[stale.userId, stale]]));
+    });
+
+    // Advance well past both thresholds — without a sweep timer, the
+    // status should remain "active" because no sweep ever runs.
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(observedStatus).toBe("active");
 
     await act(async () => {
       root.unmount();
     });
-    setIntervalSpy.mockRestore();
   });
 });

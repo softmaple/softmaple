@@ -10,7 +10,7 @@
  * whose cursor or selection lives in the given `blockId`.
  */
 
-import { type ContextType, type ReactNode, useContext, useMemo } from "react";
+import { type ReactNode, useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
 import { cx } from "./utils";
@@ -19,8 +19,9 @@ export interface BlockActivityIndicatorProps {
   /** The block this indicator is anchored to. */
   readonly blockId: string;
   /**
-   * Override the user list. Defaults to the users provided by
-   * `PresenceContext` (excluding `self`).
+   * Override the user list. Defaults to `PresenceContext.others` when
+   * `includeSelf` is false (the default), or `PresenceContext.presence`
+   * otherwise.
    */
   readonly users?: ReadonlyArray<PresenceUser>;
   /** Whether to count the current user. Defaults to `false`. */
@@ -35,7 +36,10 @@ export interface BlockActivityIndicatorProps {
    * `false` (component renders `null`).
    */
   readonly renderWhenEmpty?: boolean;
-  /** Label when nobody is in the block (only used with `renderWhenEmpty`). */
+  /**
+   * Label rendered when `renderWhenEmpty` is true and nobody is currently
+   * editing the block.
+   */
   readonly emptyLabel?: string;
   /**
    * Custom label formatter. Receives users currently in the block.
@@ -45,15 +49,6 @@ export interface BlockActivityIndicatorProps {
   readonly className?: string;
   readonly "aria-label"?: string;
 }
-
-const getUsersFromContext = (
-  context: ContextType<typeof PresenceContext>,
-  includeSelf: boolean,
-): ReadonlyArray<PresenceUser> => {
-  if (context === null) return [];
-  if (includeSelf) return Array.from(context.presence.values());
-  return context.others;
-};
 
 const isUserInBlock = (user: PresenceUser, blockId: string): boolean =>
   user.cursor?.blockId === blockId || user.selection?.blockId === blockId;
@@ -79,14 +74,25 @@ export const BlockActivityIndicator = ({
   "aria-label": ariaLabel,
 }: BlockActivityIndicatorProps): ReactNode => {
   const context = useContext(PresenceContext);
+  // Narrow the memo deps so unrelated context churn (e.g. a new
+  // `recentActivity` entry) does not re-filter the users list.
+  const ctxOthers = context?.others;
+  const ctxPresence = context?.presence;
 
   const activeUsers = useMemo(() => {
-    const source = users ?? getUsersFromContext(context, includeSelf);
+    let source: ReadonlyArray<PresenceUser>;
+    if (users !== undefined) {
+      source = users;
+    } else if (includeSelf) {
+      source = ctxPresence ? Array.from(ctxPresence.values()) : [];
+    } else {
+      source = ctxOthers ?? [];
+    }
     return source.filter((user) => {
       if (!includeOffline && user.status === "offline") return false;
       return isUserInBlock(user, blockId);
     });
-  }, [blockId, context, includeOffline, includeSelf, users]);
+  }, [blockId, ctxOthers, ctxPresence, includeOffline, includeSelf, users]);
 
   if (activeUsers.length === 0 && !renderWhenEmpty) return null;
 
@@ -95,10 +101,12 @@ export const BlockActivityIndicator = ({
   const primaryColor = activeUsers[0]?.color;
 
   return (
-    <output
+    // biome-ignore lint/a11y/useSemanticElements: <output> is for form-calculated values; this is presence telemetry, so a div with role="status" is the semantically appropriate live region.
+    <div
       aria-label={ariaLabel ?? label}
       aria-live="polite"
       className={cx("awareness-block-activity-indicator", className)}
+      role="status"
       style={
         primaryColor
           ? ({ "--awareness-user-color": primaryColor } as Record<
@@ -113,6 +121,6 @@ export const BlockActivityIndicator = ({
         className="awareness-block-activity-indicator__dot"
       />
       <span className="awareness-block-activity-indicator__text">{label}</span>
-    </output>
+    </div>
   );
 };

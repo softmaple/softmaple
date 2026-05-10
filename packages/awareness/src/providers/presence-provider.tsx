@@ -251,14 +251,29 @@ export const PresenceProvider = ({
   // hasn't pushed a status update. Stays a no-op if every user's status
   // already matches the threshold-derived value.
   const presenceRef = useRef(presence);
-  presenceRef.current = presence;
+  // Sync the ref in an effect (not during render) so concurrent-mode
+  // discarded renders cannot leave the ref pointing at unmounted state.
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
+
+  // Destructure to primitive deps so a consumer passing an inline
+  // `statusConfig` literal does not tear down/recreate the interval on
+  // every render.
+  const { idleTimeoutMs, offlineTimeoutMs } = statusConfig;
 
   useEffect(() => {
     if (statusSweepMs <= 0) return;
 
+    const sweepConfig: PresenceStateConfig = {
+      ...DEFAULT_PRESENCE_CONFIG,
+      idleTimeoutMs,
+      offlineTimeoutMs,
+    };
+
     const tick = () => {
       const current = presenceRef.current;
-      const swept = applyStatusSweep(current, statusConfig);
+      const swept = applyStatusSweep(current, sweepConfig);
       if (swept !== current) {
         setPresence(swept);
         const selfId = adapter.getSelf()?.userId;
@@ -271,7 +286,7 @@ export const PresenceProvider = ({
 
     const id = setInterval(tick, statusSweepMs);
     return () => clearInterval(id);
-  }, [adapter, statusConfig, statusSweepMs]);
+  }, [adapter, idleTimeoutMs, offlineTimeoutMs, statusSweepMs]);
 
   // Use adapter directly in callbacks (no ref needed)
   const connect = useCallback(async (): Promise<void> => {

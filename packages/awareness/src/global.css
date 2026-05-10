@@ -368,6 +368,10 @@
   @apply inline-flex items-center gap-2 rounded-full px-2.5 py-[3px] text-awareness-text font-awareness text-[12px] leading-[1.2];
 }
 
+/*
+ * Static dot — design doc §6 says "No persistent animation", so the dot
+ * communicates liveness via color/halo rather than a continuous pulse.
+ */
 .awareness-block-activity-indicator__dot {
   background: var(--awareness-user-color, var(--color-awareness-muted));
   box-shadow: 0 0 0 3px
@@ -376,32 +380,11 @@
       var(--awareness-user-color, var(--color-awareness-muted)) 18%,
       transparent
     );
-  animation: awareness-block-activity-pulse 2.4s ease-in-out infinite;
   @apply block h-1.5 w-1.5 rounded-full flex-none;
 }
 
 .awareness-block-activity-indicator__text {
   @apply min-w-0 truncate;
-}
-
-@keyframes awareness-block-activity-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0
-      color-mix(
-        in srgb,
-        var(--awareness-user-color, var(--color-awareness-muted)) 20%,
-        transparent
-      );
-  }
-  50% {
-    box-shadow: 0 0 0 4px
-      color-mix(
-        in srgb,
-        var(--awareness-user-color, var(--color-awareness-muted)) 0%,
-        transparent
-      );
-  }
 }
 
 @keyframes awareness-status-pulse {
@@ -430,8 +413,7 @@
     transition: none;
   }
 
-  .awareness-avatar--active .awareness-avatar__status,
-  .awareness-block-activity-indicator__dot {
+  .awareness-avatar--active .awareness-avatar__status {
     animation: none;
   }
 }

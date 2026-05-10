@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, toUserColorStyle } from "./utils";
 
@@ -11,8 +11,10 @@ export interface LiveCursorPoint {
  * Rectangle the cursor must intersect to be rendered. Cursors fully outside
  * are culled per design doc §7 ("Off-screen cursors not rendered").
  *
- * `"window"` (default) uses `window.innerWidth`/`innerHeight` at the time the
- * point updates; `"none"` disables culling; or pass an explicit rect.
+ * `"window"` (default) reads `window.innerWidth`/`innerHeight` and re-evaluates
+ * on `resize` so cursors at the edge cull/uncull correctly. `"none"` disables
+ * culling (useful inside virtualized scrollers that cull upstream); or pass an
+ * explicit rect.
  */
 export type LiveCursorViewport =
   | "window"
@@ -83,6 +85,20 @@ export const LiveCursor = ({
 }: LiveCursorProps): ReactNode => {
   const [isLabelVisible, setIsLabelVisible] = useState(showLabel);
   const previousPointRef = useRef(point);
+
+  // Re-evaluate window-based culling on resize so cursors near the edge
+  // cull/uncull correctly without waiting for the next pointer move.
+  const [, bumpResize] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (viewport !== "window" || typeof window === "undefined") return;
+    const handler = (): void => {
+      bumpResize();
+    };
+    window.addEventListener("resize", handler, { passive: true });
+    return () => {
+      window.removeEventListener("resize", handler);
+    };
+  }, [viewport]);
 
   useEffect(() => {
     if (!showLabel) {

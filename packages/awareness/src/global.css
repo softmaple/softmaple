@@ -1,4 +1,12 @@
-@import "tailwindcss";
+/*
+ * Tailwind v4 split imports — keep theme tokens and utilities, skip preflight.
+ * Preflight is a global reset (margin: 0 on *, list-style: none on ul/ol, etc.)
+ * that would clobber consumer apps' baseline styles when this stylesheet is
+ * imported as a library. By dropping it here, downstream apps can import
+ * `@softmaple/awareness/styles.css` without unexpected resets.
+ */
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
 
 :root {
   --awareness-font-family:

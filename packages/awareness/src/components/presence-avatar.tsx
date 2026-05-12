@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { PresenceUser } from "../types/presence";
-import { cx, getInitials, toUserColorStyle } from "./utils";
+import { cx, getInitials, toUserColorStyle } from "./internal-utils";
 
 export type PresenceAvatarSize = "sm" | "md" | "lg";
 

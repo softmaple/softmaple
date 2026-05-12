@@ -3,18 +3,21 @@
  * Main adapter factory using modular connection management
  */
 
-import { PRESENCE_EVENT, WS_MESSAGE } from "../constants/presence-events";
-import type { PresenceEvent, PresenceEventPayload } from "../types/events";
-import type { PresenceUser } from "../types/presence";
-import { createPresenceUser, updatePresenceUser } from "../types/presence";
-import { setPresenceUser, updateState } from "./adapter-state";
-import { createSubscriptionManager } from "./subscription-manager";
+import {
+  PRESENCE_EVENT,
+  type PresenceEvent,
+  type PresenceEventPayload,
+} from "../../types/events";
+import type { PresenceUser } from "../../types/presence";
+import { createPresenceUser, updatePresenceUser } from "../../types/presence";
+import { setPresenceUser, updateState } from "../adapter-state";
+import { createSubscriptionManager } from "../subscription-manager";
 import type {
   AdapterConnectionState,
   PresenceAdapter,
   Unsubscribe,
-} from "./types";
-import { DEFAULT_RECONNECT_CONFIG } from "./types";
+} from "../types";
+import { DEFAULT_RECONNECT_CONFIG } from "../types";
 import {
   cleanupWebSocket,
   clearConnectionTimeout,
@@ -23,18 +26,19 @@ import {
   sendWebSocketMessage,
   startHeartbeat,
   stopHeartbeat,
-} from "./websocket-connection";
-import { parseMessage, processMessage } from "./websocket-message";
-import { createInternalState } from "./websocket-state";
-import type { WebSocketAdapterConfig } from "./websocket-types";
+} from "./connection";
+import { parseMessage, processMessage } from "./message";
+import { createInternalState } from "./state";
 import {
   DEFAULT_WS_CONFIG,
   type JoinPayload,
   type LeavePayload,
   type PresenceSyncPayload,
   type PresenceUpdatePayload,
+  type WebSocketAdapterConfig,
   type WebSocketMessage,
-} from "./websocket-types";
+  WS_MESSAGE,
+} from "./types";
 
 /**
  * Authentication message type for secure token handshake

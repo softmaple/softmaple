@@ -25,6 +25,15 @@ export {
   updateUserSelection,
 } from "./cursor-operations";
 export {
+  createInitialPresenceState,
+  DEFAULT_PRESENCE_CONFIG,
+  getOnlineUsers,
+  getOtherUsers,
+  getSelfUser,
+  getUserById,
+  getUsersArray,
+} from "./selectors";
+export {
   countUsersByStatus,
   determineUserStatus,
   getUsersByStatus,

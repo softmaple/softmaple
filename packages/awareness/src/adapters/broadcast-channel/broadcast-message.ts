@@ -3,27 +3,32 @@
  */
 
 import {
-  BROADCAST_MESSAGE,
-  type BroadcastMessageType,
   PRESENCE_EVENT,
-} from "../constants/presence-events";
-import type {
-  PresenceEvent,
-  PresenceJoinPayload,
-  PresenceLeavePayload,
-  PresenceUpdatePayload,
-  PresenceUserUpdates,
-} from "../types/events";
-import { type PresenceUser, updatePresenceUser } from "../types/presence";
+  type PresenceEvent,
+  type PresenceJoinPayload,
+  type PresenceLeavePayload,
+  type PresenceUpdatePayload,
+  type PresenceUserUpdates,
+} from "../../types/events";
+import { type PresenceUser, updatePresenceUser } from "../../types/presence";
 import {
   type AdapterState,
   removePresenceUser,
   setPresenceUser,
   updateState,
-} from "./adapter-state";
-import type { SubscriptionManager } from "./subscription-manager";
+} from "../adapter-state";
+import type { SubscriptionManager } from "../subscription-manager";
 
-export type { BroadcastMessageType };
+export const BROADCAST_MESSAGE = {
+  ANNOUNCE: "presence:announce",
+  SYNC_REQUEST: "presence:sync-request",
+  SYNC_RESPONSE: "presence:sync-response",
+  UPDATE: "presence:update",
+  LEAVE: "presence:leave",
+} as const;
+
+export type BroadcastMessageType =
+  (typeof BROADCAST_MESSAGE)[keyof typeof BROADCAST_MESSAGE];
 
 export interface BroadcastMessage {
   readonly type: BroadcastMessageType;

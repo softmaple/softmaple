@@ -10,11 +10,11 @@ export {
   useOthersCount,
   useOthersFiltered,
 } from "./use-others";
-export { usePresence, usePresence as useAwareness } from "./use-presence";
+export { usePresence } from "./use-presence";
 export { useSelf, useSelfSelector } from "./use-self";
 export {
   useUpdateCursor,
   useUpdatePresence,
   useUpdateSelection,
-  useUpdateTyping,
 } from "./use-update-presence";
+export { useUpdateTyping } from "./use-update-typing";

@@ -68,12 +68,16 @@
       "import": "./dist/adapters/types.js"
     },
     "./adapters/broadcast-channel": {
-      "types": "./dist/adapters/broadcast-channel.d.ts",
-      "import": "./dist/adapters/broadcast-channel.js"
+      "types": "./dist/adapters/broadcast-channel/index.d.ts",
+      "import": "./dist/adapters/broadcast-channel/index.js"
     },
     "./adapters/websocket": {
-      "types": "./dist/adapters/websocket.d.ts",
-      "import": "./dist/adapters/websocket.js"
+      "types": "./dist/adapters/websocket/index.d.ts",
+      "import": "./dist/adapters/websocket/index.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "import": "./dist/providers/index.js"
     },
     "./providers/presence-context": {
       "types": "./dist/providers/presence-context.d.ts",
@@ -104,8 +108,8 @@
       "import": "./dist/hooks/use-update-presence.js"
     },
     "./hooks/use-update-typing": {
-      "types": "./dist/hooks/use-update-presence.d.ts",
-      "import": "./dist/hooks/use-update-presence.js"
+      "types": "./dist/hooks/use-update-typing.d.ts",
+      "import": "./dist/hooks/use-update-typing.js"
     },
     "./hooks/use-activity": {
       "types": "./dist/hooks/use-activity.d.ts",
@@ -116,7 +120,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node scripts/validate-exports.mjs",
     "dev": "vite build --watch",
     "format": "biome format",
     "lint": "biome lint",

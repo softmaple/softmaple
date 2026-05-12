@@ -15,14 +15,16 @@ import type {
   AdapterConnectionState,
   PresenceAdapter,
 } from "../adapters/types";
-import { ACTIVITY_TYPE, PRESENCE_EVENT } from "../constants/presence-events";
+import { DEFAULT_PRESENCE_CONFIG } from "../state/selectors";
 import { determineUserStatus } from "../state/status-operations";
-import type { ActivityEvent, PresenceEvent } from "../types/events";
-import type { PresenceUser } from "../types/presence";
 import {
-  DEFAULT_PRESENCE_CONFIG,
-  type PresenceStateConfig,
-} from "../types/state";
+  ACTIVITY_TYPE,
+  type ActivityEvent,
+  PRESENCE_EVENT,
+  type PresenceEvent,
+} from "../types/events";
+import type { PresenceUser } from "../types/presence";
+import type { PresenceStateConfig } from "../types/state";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
 
 /** Maximum number of recent activity events to track */

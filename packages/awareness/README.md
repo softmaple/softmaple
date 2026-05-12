@@ -28,7 +28,7 @@ pnpm add @softmaple/awareness
 
 ```tsx
 import {
-  AwarenessProvider,
+  PresenceProvider,
   PresenceBar,
   useUpdateCursor,
 } from "@softmaple/awareness";
@@ -63,9 +63,9 @@ function EditorPresence() {
 
 export function App() {
   return (
-    <AwarenessProvider adapter={adapter}>
+    <PresenceProvider adapter={adapter}>
       <EditorPresence />
-    </AwarenessProvider>
+    </PresenceProvider>
   );
 }
 ```

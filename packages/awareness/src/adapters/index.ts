@@ -1,5 +1,7 @@
 export {
+  BROADCAST_MESSAGE,
   type BroadcastChannelAdapterConfig,
+  type BroadcastMessageType,
   broadcastChannelAdapterFactory,
   createBroadcastChannelAdapter,
 } from "./broadcast-channel";
@@ -17,11 +19,12 @@ export {
   type ReconnectConfig,
   type Unsubscribe,
 } from "./types";
-export { createWebSocketAdapter, webSocketAdapterFactory } from "./websocket";
 export {
+  createWebSocketAdapter,
   DEFAULT_WS_CONFIG,
   type WebSocketAdapterConfig,
   type WebSocketMessage,
   type WebSocketMessageType,
   WS_MESSAGE,
-} from "./websocket-types";
+  webSocketAdapterFactory,
+} from "./websocket";

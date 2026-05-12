@@ -2,8 +2,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createInitialState } from "./adapters/adapter-state";
-import { createSubscriptionManager } from "./adapters/subscription-manager";
+import { createInitialState } from "../adapters/adapter-state";
+import { createSubscriptionManager } from "../adapters/subscription-manager";
 import type {
   AdapterConnectionState,
   ConnectionCallback,
@@ -12,23 +12,27 @@ import type {
   PresenceAdapter,
   PresenceCallback,
   Unsubscribe,
-} from "./adapters/types";
+} from "../adapters/types";
 import {
   createInternalState,
   resetInternalState,
   updateInternalState,
-} from "./adapters/websocket-state";
-import { ActivityIndicator } from "./components/activity-indicator";
-import { PresenceBar } from "./components/presence-bar";
-import { cx, getInitials, sortPresenceUsers } from "./components/utils";
-import { ACTIVITY_TYPE, PRESENCE_EVENT } from "./constants/presence-events";
+} from "../adapters/websocket/state";
+import { ActivityIndicator } from "../components/activity-indicator";
+import {
+  cx,
+  getInitials,
+  sortPresenceUsers,
+} from "../components/internal-utils";
+import { PresenceBar } from "../components/presence-bar";
 import {
   PresenceContext,
   type PresenceContextValue,
-} from "./providers/presence-context";
-import { PresenceProvider } from "./providers/presence-provider";
-import type { ActivityEvent } from "./types/events";
-import { createPresenceUser, type PresenceUser } from "./types/presence";
+} from "../providers/presence-context";
+import { PresenceProvider } from "../providers/presence-provider";
+import type { ActivityEvent } from "../types/events";
+import { ACTIVITY_TYPE, PRESENCE_EVENT } from "../types/events";
+import { createPresenceUser, type PresenceUser } from "../types/presence";
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -99,7 +103,7 @@ describe("websocket-state internals", () => {
   });
 });
 
-describe("components/utils", () => {
+describe("components/internal-utils", () => {
   it("cx filters falsy entries", () => {
     expect(cx("a", false, null, undefined, "b")).toBe("a b");
     expect(cx()).toBe("");

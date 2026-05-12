@@ -1,23 +1,25 @@
 /**
- * Targeted branch-coverage tests for low-branch modules.
- * Focus: invalid type guards, early-returns, default cases, and edge paths
- * not covered by the higher-level integration tests.
+ * Edge-case tests for adapter message parsing, validation, and transport
+ * lifecycle helpers.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createInitialState } from "./adapters/adapter-state";
+import { PRESENCE_EVENT } from "../types/events";
+import { createPresenceUser } from "../types/presence";
+import { createInitialState } from "./adapter-state";
 import {
   type BroadcastChannelAdapterConfig,
   broadcastChannelAdapterFactory,
   createBroadcastChannelAdapter,
-} from "./adapters/broadcast-channel";
+} from "./broadcast-channel/broadcast-channel";
 import {
+  BROADCAST_MESSAGE,
   createBroadcastMessage,
   processBroadcastMessage,
   sendBroadcastMessage,
-} from "./adapters/broadcast-message";
-import { createSubscriptionManager } from "./adapters/subscription-manager";
-import { DEFAULT_RECONNECT_CONFIG } from "./adapters/types";
+} from "./broadcast-channel/broadcast-message";
+import { createSubscriptionManager } from "./subscription-manager";
+import { DEFAULT_RECONNECT_CONFIG } from "./types";
 import {
   cancelReconnect,
   cleanupWebSocket,
@@ -25,19 +27,11 @@ import {
   sendWebSocketMessage,
   startHeartbeat,
   stopHeartbeat,
-} from "./adapters/websocket-connection";
-import { parseMessage, processMessage } from "./adapters/websocket-message";
-import {
-  createInternalState,
-  updateInternalState,
-} from "./adapters/websocket-state";
-import type { WebSocketAdapterConfig } from "./adapters/websocket-types";
-import {
-  BROADCAST_MESSAGE,
-  PRESENCE_EVENT,
-  WS_MESSAGE,
-} from "./constants/presence-events";
-import { createPresenceUser } from "./types/presence";
+} from "./websocket/connection";
+import { parseMessage, processMessage } from "./websocket/message";
+import { createInternalState, updateInternalState } from "./websocket/state";
+import type { WebSocketAdapterConfig } from "./websocket/types";
+import { WS_MESSAGE } from "./websocket/types";
 
 const wsConfig: WebSocketAdapterConfig = {
   url: "ws://localhost:1234",
@@ -662,7 +656,7 @@ describe("WebSocket adapter extra branches", () => {
 
   it("disconnect early-returns when never connected (socket null)", async () => {
     // dynamic import of websocket adapter to avoid hoisting complications
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const connection = vi.fn();
     const adapter = createWebSocketAdapter({
       ...wsConfig,
@@ -681,7 +675,7 @@ describe("WebSocket adapter extra branches", () => {
   });
 
   it("connect rejects when connection timeout fires before open", async () => {
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const adapter = createWebSocketAdapter({
       ...wsConfig,
       connectionTimeoutMs: 50,
@@ -698,7 +692,7 @@ describe("WebSocket adapter extra branches", () => {
   });
 
   it("close event after open transitions to disconnected and schedules reconnect when enabled", async () => {
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const connection = vi.fn();
     const adapter = createWebSocketAdapter({
       ...wsConfig,
@@ -723,7 +717,7 @@ describe("WebSocket adapter extra branches", () => {
   });
 
   it("emits errors when the underlying socket fires error", async () => {
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const adapter = createWebSocketAdapter({
       ...wsConfig,
       reconnect: {
@@ -750,7 +744,7 @@ describe("WebSocket adapter extra branches", () => {
   });
 
   it("connect resolves immediately when socket already OPEN", async () => {
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const adapter = createWebSocketAdapter({
       ...wsConfig,
       reconnect: {
@@ -770,7 +764,7 @@ describe("WebSocket adapter extra branches", () => {
   });
 
   it("connect with authToken sends auth message before JOIN", async () => {
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const adapter = createWebSocketAdapter({
       ...wsConfig,
       authToken: "secret",
@@ -793,7 +787,7 @@ describe("WebSocket adapter extra branches", () => {
   });
 
   it("malformed peer messages do not surface as presence events", async () => {
-    const { createWebSocketAdapter } = await import("./adapters/websocket");
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
     const adapter = createWebSocketAdapter({
       ...wsConfig,
       reconnect: {

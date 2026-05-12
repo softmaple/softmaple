@@ -3,8 +3,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PRESENCE_EVENT } from "../constants/presence-events";
-import type { PresenceUser } from "../types/presence";
+import { PRESENCE_EVENT } from "../../types/events";
+import type { PresenceUser } from "../../types/presence";
 import {
   type BroadcastChannelAdapterConfig,
   createBroadcastChannelAdapter,

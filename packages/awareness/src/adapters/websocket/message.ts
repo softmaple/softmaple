@@ -2,23 +2,23 @@
  * WebSocket message handling utilities
  */
 
-import { WS_MESSAGE } from "../constants/presence-events";
-import type { PresenceUser } from "../types/presence";
-import { updatePresenceUser } from "../types/presence";
-import type { AdapterState } from "./adapter-state";
+import type { PresenceUser } from "../../types/presence";
+import { updatePresenceUser } from "../../types/presence";
+import type { AdapterState } from "../adapter-state";
 import {
   removePresenceUser,
   setPresenceUser,
   updateState,
-} from "./adapter-state";
-import type {
-  ErrorPayload,
-  JoinPayload,
-  LeavePayload,
-  PresenceSyncPayload,
-  PresenceUpdatePayload,
-  WebSocketMessage,
-} from "./websocket-types";
+} from "../adapter-state";
+import {
+  type ErrorPayload,
+  type JoinPayload,
+  type LeavePayload,
+  type PresenceSyncPayload,
+  type PresenceUpdatePayload,
+  type WebSocketMessage,
+  WS_MESSAGE,
+} from "./types";
 
 /**
  * Result of processing a message

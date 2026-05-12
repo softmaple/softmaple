@@ -4,21 +4,17 @@
  */
 
 import {
-  BROADCAST_MESSAGE,
-  createChannelName,
   PRESENCE_EVENT,
-} from "../constants/presence-events";
-import type {
-  PresenceEvent,
-  PresenceEventPayload,
-  PresenceLeavePayload,
-  PresenceSyncPayload,
-} from "../types/events";
+  type PresenceEvent,
+  type PresenceEventPayload,
+  type PresenceLeavePayload,
+  type PresenceSyncPayload,
+} from "../../types/events";
 import {
   createPresenceUser,
   type PresenceUser,
   updatePresenceUser,
-} from "../types/presence";
+} from "../../types/presence";
 import {
   createInitialState,
   isUserIdle,
@@ -26,20 +22,26 @@ import {
   removePresenceUser,
   setPresenceUser,
   updateState,
-} from "./adapter-state";
+} from "../adapter-state";
+import { createSubscriptionManager } from "../subscription-manager";
+import type {
+  AdapterConfig,
+  AdapterConnectionState,
+  PresenceAdapter,
+} from "../types";
 import {
+  BROADCAST_MESSAGE,
   type BroadcastMessage,
   type BroadcastMessageType,
   createBroadcastMessage,
   processBroadcastMessage,
   sendBroadcastMessage,
 } from "./broadcast-message";
-import { createSubscriptionManager } from "./subscription-manager";
-import type {
-  AdapterConfig,
-  AdapterConnectionState,
-  PresenceAdapter,
-} from "./types";
+
+const BROADCAST_CHANNEL_PREFIX = "softmaple-presence";
+
+const createChannelName = (roomId: string): string =>
+  `${BROADCAST_CHANNEL_PREFIX}:${roomId}`;
 
 /**
  * Configuration specific to BroadcastChannel adapter

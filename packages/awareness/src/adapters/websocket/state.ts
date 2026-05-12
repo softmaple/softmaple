@@ -2,12 +2,12 @@
  * WebSocket adapter internal state management
  */
 
-import type { AdapterState } from "./adapter-state";
-import { createInitialState, updateState } from "./adapter-state";
-import type { SubscriptionManager } from "./subscription-manager";
-import type { ReconnectConfig } from "./types";
-import type { ReconnectState } from "./websocket-types";
-import { createReconnectState } from "./websocket-types";
+import type { AdapterState } from "../adapter-state";
+import { createInitialState, updateState } from "../adapter-state";
+import type { SubscriptionManager } from "../subscription-manager";
+import type { ReconnectConfig } from "../types";
+import type { ReconnectState } from "./types";
+import { createReconnectState } from "./types";
 
 /**
  * Internal mutable state for WebSocket adapter

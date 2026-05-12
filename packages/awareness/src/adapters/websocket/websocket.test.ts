@@ -3,22 +3,22 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PRESENCE_EVENT } from "../constants/presence-events";
-import { createPresenceUser } from "../types/presence";
-import type { AdapterState } from "./adapter-state";
-import { createInitialState, setPresenceUser } from "./adapter-state";
-import { createWebSocketAdapter, webSocketAdapterFactory } from "./websocket";
+import { PRESENCE_EVENT } from "../../types/events";
+import { createPresenceUser } from "../../types/presence";
+import type { AdapterState } from "../adapter-state";
+import { createInitialState, setPresenceUser } from "../adapter-state";
 import {
   createMessage,
   parseMessage,
   processMessage,
   serializeMessage,
-} from "./websocket-message";
+} from "./message";
 import {
   calculateReconnectDelay,
   createReconnectState,
   WS_MESSAGE,
-} from "./websocket-types";
+} from "./types";
+import { createWebSocketAdapter, webSocketAdapterFactory } from "./websocket";
 
 type FakeWebSocketEventType = "open" | "message" | "close" | "error";
 type FakeWebSocketListener = (event: Event | MessageEvent<string>) => void;

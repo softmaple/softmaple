@@ -16,10 +16,8 @@ export {
   SelectionHighlight,
   type SelectionHighlightProps,
 } from "./components";
-export { ACTIVITY_TYPE, PRESENCE_EVENT } from "./constants/presence-events";
 export {
   useActivityByType,
-  useAwareness,
   useConnectionState,
   useIsConnected,
   useOther,
@@ -39,30 +37,38 @@ export {
 export {
   PresenceContext,
   type PresenceContextValue,
-} from "./providers/presence-context";
-export {
-  PresenceProvider as AwarenessProvider,
   PresenceProvider,
   type PresenceProviderProps,
-} from "./providers/presence-provider";
-export type {
-  ActivityEvent,
-  ActivityEventData,
-  ActivityType,
-  CursorEventData,
-  IdleEventData,
-  JoinEventData,
-  LeaveEventData,
-  PresenceEvent,
-  PresenceEventPayload,
-  PresenceEventType,
-  PresenceJoinPayload,
-  PresenceLeavePayload,
-  PresenceSyncPayload,
-  PresenceUpdatePayload,
-  PresenceUserUpdates,
-  SelectionEventData,
-  TypingEventData,
+} from "./providers";
+export {
+  createInitialPresenceState,
+  DEFAULT_PRESENCE_CONFIG,
+  getOnlineUsers,
+  getOtherUsers,
+  getSelfUser,
+  getUserById,
+  getUsersArray,
+} from "./state/selectors";
+export {
+  ACTIVITY_TYPE,
+  type ActivityEvent,
+  type ActivityEventData,
+  type ActivityType,
+  type CursorEventData,
+  type IdleEventData,
+  type JoinEventData,
+  type LeaveEventData,
+  PRESENCE_EVENT,
+  type PresenceEvent,
+  type PresenceEventPayload,
+  type PresenceEventType,
+  type PresenceJoinPayload,
+  type PresenceLeavePayload,
+  type PresenceSyncPayload,
+  type PresenceUpdatePayload,
+  type PresenceUserUpdates,
+  type SelectionEventData,
+  type TypingEventData,
 } from "./types/events";
 export {
   type CreatePresenceUserOptions,
@@ -75,15 +81,8 @@ export {
   type SelfPresence,
   updatePresenceUser,
 } from "./types/presence";
-export {
-  type ConnectionStatus,
-  createInitialPresenceState,
-  DEFAULT_PRESENCE_CONFIG,
-  getOnlineUsers,
-  getOtherUsers,
-  getSelfUser,
-  getUserById,
-  getUsersArray,
-  type PresenceState,
-  type PresenceStateConfig,
+export type {
+  ConnectionStatus,
+  PresenceState,
+  PresenceStateConfig,
 } from "./types/state";

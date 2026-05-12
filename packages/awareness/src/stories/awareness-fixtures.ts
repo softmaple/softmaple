@@ -1,5 +1,4 @@
-import { ACTIVITY_TYPE } from "../constants/presence-events";
-import type { ActivityEvent } from "../types/events";
+import { ACTIVITY_TYPE, type ActivityEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import bulbasaurSprite from "./assets/pokemon-1.png";
 import charmanderSprite from "./assets/pokemon-4.png";

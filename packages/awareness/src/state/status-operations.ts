@@ -5,7 +5,7 @@
 import type { PresenceStatus, PresenceUser } from "../types/presence";
 import { updatePresenceUser } from "../types/presence";
 import type { PresenceState, PresenceStateConfig } from "../types/state";
-import { DEFAULT_PRESENCE_CONFIG } from "../types/state";
+import { DEFAULT_PRESENCE_CONFIG } from "./selectors";
 
 /**
  * Determine user status based on last activity time (pure function)

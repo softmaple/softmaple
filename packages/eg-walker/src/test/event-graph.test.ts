@@ -1,6 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { describe, it, expect } from "vitest";
-import type { GraphEvent, EventId, SerializedEventGraph } from "../types";
+import type { GraphEvent, EventId, SerializedGraphInput } from "../types";
 import { EventGraph } from "../graph/event-graph";
 
 describe("EventGraph", () => {
@@ -382,7 +382,7 @@ describe("EventGraph", () => {
 
       const parsed = JSON.parse(
         JSON.stringify(graph.serialize()),
-      ) as unknown as SerializedEventGraph;
+      ) as unknown as SerializedGraphInput;
       const newGraph = EventGraph.deserialize(parsed);
 
       expect(parsed.version).toEqual(["event-2"]);
@@ -393,7 +393,7 @@ describe("EventGraph", () => {
     });
 
     it("should validate version during deserialization", () => {
-      const invalidData: SerializedEventGraph = {
+      const invalidData: SerializedGraphInput = {
         version: new Set<EventId>(), // Empty version
         events: [],
         metadata: {},
@@ -433,7 +433,7 @@ describe("EventGraph", () => {
     });
 
     it("should reject serialized graphs whose parents cannot be resolved", () => {
-      const invalidData: SerializedEventGraph = {
+      const invalidData: SerializedGraphInput = {
         version: new Set<EventId>(["event-2"]),
         events: [
           {

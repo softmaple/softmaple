@@ -1,66 +1,66 @@
 import { describe, it, expect } from "vitest";
-import { EgWalkerAPI, createEgWalker } from "../core/external-api";
+import { EgWalkerReplica, createEgWalkerReplica } from "../core/replica";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventAlreadyExistsError } from "../graph/event-graph";
-import type { GraphEvent, SerializedGraph } from "../types";
+import type { GraphEvent, SerializedGraphInput } from "../types";
 
-describe("EgWalkerAPI", () => {
+describe("EgWalkerReplica", () => {
   describe("insert", () => {
     it("should insert text at valid index", () => {
-      const api = new EgWalkerAPI("r1", "");
+      const api = new EgWalkerReplica("r1", "");
       api.insert(0, "Hello");
       expect(api.getText()).toBe("Hello");
     });
 
     it("should insert text in middle of document", () => {
-      const api = new EgWalkerAPI("r1", "Hello World");
+      const api = new EgWalkerReplica("r1", "Hello World");
       api.insert(5, " Beautiful");
       expect(api.getText()).toBe("Hello Beautiful World");
     });
 
     it("should handle empty insert as no-op", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       api.insert(2, "");
       expect(api.getText()).toBe("Hello");
     });
 
     it("should throw error for negative index", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       expect(() => api.insert(-1, "x")).toThrow("Index -1 out of bounds");
     });
 
     it("should throw error for index beyond document length", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       expect(() => api.insert(10, "x")).toThrow("Index 10 out of bounds");
     });
   });
 
   describe("delete", () => {
     it("should delete text at valid index", () => {
-      const api = new EgWalkerAPI("r1", "Hello World");
+      const api = new EgWalkerReplica("r1", "Hello World");
       api.delete(5, 6);
       expect(api.getText()).toBe("Hello");
     });
 
     it("should handle zero-length delete as no-op", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       api.delete(2, 0);
       expect(api.getText()).toBe("Hello");
     });
 
     it("should handle negative length delete as no-op", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       api.delete(2, -1);
       expect(api.getText()).toBe("Hello");
     });
 
     it("should throw error for negative index", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       expect(() => api.delete(-1, 2)).toThrow("Index -1 out of bounds");
     });
 
     it("should throw error when delete range exceeds document length", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       expect(() => api.delete(3, 5)).toThrow(
         "Delete range [3, 8) exceeds document length 5",
       );
@@ -69,7 +69,7 @@ describe("EgWalkerAPI", () => {
 
   describe("getDocument", () => {
     it("should return document state with text", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       const state = api.getDocument();
       expect(state.text).toBe("Hello");
     });
@@ -77,19 +77,14 @@ describe("EgWalkerAPI", () => {
 
   describe("getText", () => {
     it("should return current text", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       expect(api.getText()).toBe("Hello");
-    });
-
-    it("should return README-compatible document state text", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
-      expect(api.getDocumentState()).toBe("Hello");
     });
   });
 
   describe("serialize/deserialize", () => {
     it("should serialize document state", () => {
-      const api = new EgWalkerAPI("r1", "Hello");
+      const api = new EgWalkerReplica("r1", "Hello");
       api.insert(5, " World");
       const serialized = api.serialize();
       expect(serialized.text).toBe("Hello World");
@@ -97,9 +92,9 @@ describe("EgWalkerAPI", () => {
     });
 
     it("should deserialize document state", () => {
-      const api = EgWalkerAPI.deserialize({
+      const api = EgWalkerReplica.deserialize({
         text: "Hello",
-        eventGraph: null as unknown as SerializedGraph,
+        eventGraph: null as unknown as SerializedGraphInput,
       });
       expect(api.getText()).toBe("Hello");
     });
@@ -107,7 +102,7 @@ describe("EgWalkerAPI", () => {
 
   describe("duplicate event handling", () => {
     it("ignores duplicate local events without throwing", () => {
-      const api = new EgWalkerAPI("r1", "");
+      const api = new EgWalkerReplica("r1", "");
       // @ts-expect-error - swap eventGraph.addEvent for the duplicate branch
       const originalAddEvent = api.eventGraph.addEvent.bind(api.eventGraph);
       // @ts-expect-error - same
@@ -123,7 +118,7 @@ describe("EgWalkerAPI", () => {
     });
 
     it("ignores duplicate remote events without throwing", () => {
-      const api = new EgWalkerAPI("r1", "");
+      const api = new EgWalkerReplica("r1", "");
       const event: GraphEvent = {
         id: "remote:1",
         parentVersion: new Set(),
@@ -141,7 +136,7 @@ describe("EgWalkerAPI", () => {
 
   describe("exportEventGraph", () => {
     it("should export all events", () => {
-      const api = new EgWalkerAPI("r1", "");
+      const api = new EgWalkerReplica("r1", "");
       api.insert(0, "Hello");
       api.insert(5, " World");
       const events = api.exportEventGraph();
@@ -166,14 +161,14 @@ describe("EgWalkerAPI", () => {
         },
       ];
 
-      const api = EgWalkerAPI.fromEventGraph("r2", events);
+      const api = EgWalkerReplica.fromEventGraph("r2", events);
       expect(api.getText()).toBe("Hello World");
     });
   });
 
   describe("out-of-order remote delivery", () => {
     it("buffers events whose parents have not yet arrived", () => {
-      const api = new EgWalkerAPI("r1", "");
+      const api = new EgWalkerReplica("r1", "");
       const root: GraphEvent = {
         id: "alice:0",
         parentVersion: new Set(),
@@ -197,7 +192,7 @@ describe("EgWalkerAPI", () => {
     });
 
     it("flushes a chain of pending events when the root finally arrives", () => {
-      const api = new EgWalkerAPI("r1", "");
+      const api = new EgWalkerReplica("r1", "");
       const events: GraphEvent[] = [
         {
           id: "a:0",
@@ -231,21 +226,21 @@ describe("EgWalkerAPI", () => {
   });
 });
 
-describe("createEgWalker", () => {
+describe("createEgWalkerReplica", () => {
   it("should create API instance", () => {
-    const api = createEgWalker("r1", "Hello");
+    const api = createEgWalkerReplica("r1", "Hello");
     expect(api.getText()).toBe("Hello");
   });
 
   it("should create API with empty text by default", () => {
-    const api = createEgWalker("r1");
+    const api = createEgWalkerReplica("r1");
     expect(api.getText()).toBe("");
   });
 });
 
-describe("EgWalkerAPI - Edge cases and error handling", () => {
+describe("EgWalkerReplica - Edge cases and error handling", () => {
   it("should propagate non-duplicate errors in applyLocalOperation", () => {
-    const api = new EgWalkerAPI("r1");
+    const api = new EgWalkerReplica("r1");
     // @ts-expect-error - swap eventGraph.addEvent for the failing branch
     const originalAddEvent = api.eventGraph.addEvent.bind(api.eventGraph);
     // @ts-expect-error - same
@@ -260,7 +255,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
   });
 
   it("should propagate non-duplicate errors in applyRemoteEvent", () => {
-    const api = new EgWalkerAPI("r1");
+    const api = new EgWalkerReplica("r1");
 
     const event: GraphEvent = {
       id: "r2:0",
@@ -283,29 +278,29 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
   });
 
   it("should handle deserialize with eventGraph data", () => {
-    const api = new EgWalkerAPI("r1", "Test");
+    const api = new EgWalkerReplica("r1", "Test");
     const serialized = api.serialize();
 
-    const deserialized = EgWalkerAPI.deserialize(serialized);
+    const deserialized = EgWalkerReplica.deserialize(serialized);
     expect(deserialized.getText()).toBe("Test");
   });
 
   it("should deserialize JSON-persisted serialized API data", () => {
-    const api = new EgWalkerAPI("r1", "");
+    const api = new EgWalkerReplica("r1", "");
     api.insert(0, "A");
     api.insert(1, "B");
 
     const parsed = JSON.parse(JSON.stringify(api.serialize())) as unknown as {
       text: string;
-      eventGraph: SerializedGraph;
+      eventGraph: SerializedGraphInput;
     };
-    const deserialized = EgWalkerAPI.deserialize(parsed);
+    const deserialized = EgWalkerReplica.deserialize(parsed);
 
     expect(deserialized.getText()).toBe("AB");
   });
 
   it("should reject invalid direct local operations before committing", () => {
-    const api = new EgWalkerAPI("r1", "Hello");
+    const api = new EgWalkerReplica("r1", "Hello");
     const readSeq = (): number =>
       // @ts-expect-error - read private nextSequenceNumber for regression coverage
       api.nextSequenceNumber as number;
@@ -343,7 +338,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
   });
 
   it("should deserialize empty graph state without stored initial text metadata", () => {
-    const deserialized = EgWalkerAPI.deserialize({
+    const deserialized = EgWalkerReplica.deserialize({
       text: "Fallback",
       eventGraph: {
         version: new Set(),
@@ -357,7 +352,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
   it("ignores non-numeric sequence suffixes when inferring nextSequenceNumber", () => {
     // Hits the Number.isInteger=false branch in inferNextSequenceNumber.
-    const api = new EgWalkerAPI("r1");
+    const api = new EgWalkerReplica("r1");
     api.applyRemoteEvent({
       id: "r1:notanumber",
       parentVersion: new Set(),
@@ -365,7 +360,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
       timestamp: 1,
     });
 
-    const restored = EgWalkerAPI.deserialize(
+    const restored = EgWalkerReplica.deserialize(
       // Drop persisted nextSequenceNumber metadata so the API has to infer it.
       {
         ...api.serialize(),
@@ -384,7 +379,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
   it("falls back to full replay when concurrent remote parents differ from current", () => {
     // Hits the parentsMatchCurrent !has branch (size matches, contents differ).
-    const api = new EgWalkerAPI("r1");
+    const api = new EgWalkerReplica("r1");
     api.applyRemoteEvent({
       id: "alice:0",
       parentVersion: new Set(),
@@ -416,7 +411,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
 
   describe("surrogate pair boundaries", () => {
     it("rejects inserts that land between surrogate halves", () => {
-      const api = new EgWalkerAPI("r1", "😀");
+      const api = new EgWalkerReplica("r1", "😀");
       // "😀".length === 2 (high + low surrogate). Index 1 falls mid-pair.
       expect(() => api.insert(1, "X")).toThrow(
         /falls between surrogate halves/,
@@ -429,7 +424,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
     });
 
     it("keeps concurrent emoji operations from splitting surrogate pairs", () => {
-      const api = new EgWalkerAPI("alice", "ab");
+      const api = new EgWalkerReplica("alice", "ab");
 
       // Insert emoji between a and b.
       api.insert(1, "😀");
@@ -466,7 +461,7 @@ describe("EgWalkerAPI - Edge cases and error handling", () => {
   it("ignores already-buffered remote events on re-delivery", () => {
     // Hits the bufferedEventIds.has(event.id) early-return branch in
     // tryAcceptRemoteEvent.
-    const api = new EgWalkerAPI("r1");
+    const api = new EgWalkerReplica("r1");
     const child: GraphEvent = {
       id: "alice:1",
       parentVersion: new Set(["alice:0"]),

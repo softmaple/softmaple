@@ -12,7 +12,7 @@ export {
   PartialReplayManager,
 } from "./engine";
 export { ColumnarEventGraphCodec } from "./graph";
-export { EgWalkerAPI, createEgWalker } from "./core/external-api";
+export { EgWalkerReplica, createEgWalkerReplica } from "./core/replica";
 export { EventGraph } from "./graph/event-graph";
 
 // Constants exports

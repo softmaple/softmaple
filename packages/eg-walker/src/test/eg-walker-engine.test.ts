@@ -3,7 +3,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import lz4 from "lz4js";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { EgWalker } from "../core/walker";
-import { EgWalkerAPI } from "../core/external-api";
+import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { EventGraph } from "../graph/event-graph";
 import { PartialReplayManager } from "../engine/partial-replay";
@@ -206,11 +206,11 @@ describe("EgWalkerEngine", () => {
   });
 
   it("round-trips persisted event graph state through the public API", () => {
-    const api = new EgWalkerAPI("alice", "Hello");
+    const api = new EgWalkerReplica("alice", "Hello");
     api.insert(5, " world");
     api.delete(0, 1);
 
-    const restored = EgWalkerAPI.deserialize(api.serialize(), "alice");
+    const restored = EgWalkerReplica.deserialize(api.serialize(), "alice");
     restored.insert(10, "!");
 
     expect(restored.getText()).toBe("ello world!");
@@ -218,7 +218,7 @@ describe("EgWalkerEngine", () => {
   });
 
   it("keeps public string indexes aligned with JS code units", () => {
-    const api = new EgWalkerAPI("alice", "");
+    const api = new EgWalkerReplica("alice", "");
 
     api.insert(0, "😀");
     api.insert(api.getText().length, "!");

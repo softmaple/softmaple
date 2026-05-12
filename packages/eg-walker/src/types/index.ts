@@ -74,12 +74,6 @@ export type SerializedVersionInput =
   | Iterable<EventId>
   | Record<string, unknown>;
 
-/**
- * @deprecated Use {@link SerializedVersionOutput} for serialize results and
- * {@link SerializedVersionInput} for deserialize inputs.
- */
-export type SerializedVersion = SerializedVersionInput;
-
 export interface SerializedGraphEventOutput {
   readonly id: EventId;
   readonly operation: ExternalOperation;
@@ -93,9 +87,6 @@ export interface SerializedGraphEventInput {
   readonly parentVersion: SerializedVersionInput;
   readonly timestamp: number;
 }
-
-/** @deprecated Use {@link SerializedGraphEventInput}. */
-export type SerializedGraphEvent = SerializedGraphEventInput;
 
 // ============================================================================
 // Invariant Types
@@ -116,12 +107,6 @@ export interface ListInvariant {
   equivalent(state1: DocumentState, state2: DocumentState): boolean;
 }
 
-// ============================================================================
-// Type Aliases
-// ============================================================================
-
-export type Event = GraphEvent;
-
 /**
  * Shape produced by {@link EventGraph.serialize} — always JSON-safe.
  */
@@ -140,10 +125,3 @@ export interface SerializedGraphInput {
   readonly events: ReadonlyArray<SerializedGraphEventInput>;
   readonly metadata?: Record<string, unknown>;
 }
-
-/**
- * Combined serialize/deserialize type. `serialize()` returns the narrow output
- * shape; `deserialize()` accepts the wider input shape.
- */
-export type SerializedGraph = SerializedGraphInput;
-export type SerializedEventGraph = SerializedGraph;

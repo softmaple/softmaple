@@ -78,7 +78,7 @@ Events are stored in compressed columnar format:
   surrogates; users must align operations to code-point boundaries.
 - Multi-character inserts are stored as a sequence of per-character
   events under a single insert event.
-- Remote events with unknown parents are buffered by `EgWalkerAPI` and
+- Remote events with unknown parents are buffered by `EgWalkerReplica` and
   flushed once their causal predecessors arrive; direct `EventGraph.addEvent`
   callers still need to deliver in causal order (or use `EventGraph.deserialize`
   for buffered topological loading).

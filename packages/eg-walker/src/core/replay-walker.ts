@@ -14,12 +14,14 @@ export interface WalkResult {
 }
 
 /**
- * High-level event graph walker.
+ * One-shot event-graph replay coordinator.
  *
- * This is intentionally thin: graph ordering and causal diffs live in
- * EventGraph, while prepare/effect replay lives in EgWalkerEngine.
+ * Intentionally thin: graph ordering and causal diffs live in EventGraph,
+ * prepare/effect replay lives in EgWalkerEngine, and the stateful editing
+ * surface lives in EgWalkerReplica. Use this for batch "given these events,
+ * what's the resulting text" computations.
  */
-export class EgWalker {
+export class ReplayWalker {
   private prepareVersion: Version = new Set();
   private effectVersion: Version = new Set();
 

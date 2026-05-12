@@ -18,6 +18,10 @@ export {
   StrongListInvariant,
 } from "./invariants";
 
-export { EgWalker, type WalkerConfig, type WalkResult } from "./walker";
+export {
+  ReplayWalker,
+  type WalkerConfig,
+  type WalkResult,
+} from "./replay-walker";
 
 export type { ExternalOperation, DocumentState } from "../types";

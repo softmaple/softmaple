@@ -40,13 +40,20 @@ const serialized = replica.serialize();
 
 ## Main APIs
 
-- `EgWalkerReplica`: public index-based editing API.
-- `EgWalker`: graph replay coordinator.
-- `EgWalkerEngine`: prepare/effect replay engine.
+Stable surface (`@softmaple/eg-walker`):
+
+- `EgWalkerReplica` / `createEgWalkerReplica`: public index-based editing API.
+- `ReplayWalker`: one-shot graph replay coordinator.
 - `EventGraph`: persistent event DAG.
+- `OPERATION_TYPE` and TypeScript types.
+
+Internal replay primitives (`@softmaple/eg-walker/internal`, not covered by semver):
+
+- `EgWalkerEngine`: prepare/effect replay engine.
 - `ColumnarEventGraphCodec`: run-length encoded columns with varints and LZ4-compressed inserted content.
 - `CriticalVersionAnalyzer`: critical checkpoint detection.
 - `PartialReplayManager`: replay from checkpoint text/version.
+- `IndexedSequence`: ranked B-tree backing the engine.
 
 ## Development
 

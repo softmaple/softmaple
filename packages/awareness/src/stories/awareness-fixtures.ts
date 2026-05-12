@@ -11,23 +11,27 @@ const baseTime = Date.UTC(2026, 4, 10, 9, 30);
 
 export interface PokemonFlavor {
   readonly type: string;
+  // Bright tint for chips/badges; mixed down with Canvas before rendering.
   readonly accent: string;
+  // Darker tint used as the PresenceUser color — drives the avatar gradient,
+  // caret, and selection at high opacity, so it needs contrast on light bgs.
+  readonly userColor: string;
 }
 
 export const pokemonFlavor = {
-  pikachu: { type: "Electric", accent: "#facc15" },
-  bulbasaur: { type: "Grass", accent: "#22c55e" },
-  charmander: { type: "Fire", accent: "#f97316" },
-  squirtle: { type: "Water", accent: "#38bdf8" },
-  eevee: { type: "Normal", accent: "#a78bfa" },
-  psyduck: { type: "Water", accent: "#fcd34d" },
+  pikachu: { type: "Electric", accent: "#facc15", userColor: "#854d0e" },
+  bulbasaur: { type: "Grass", accent: "#22c55e", userColor: "#166534" },
+  charmander: { type: "Fire", accent: "#f97316", userColor: "#9a3412" },
+  squirtle: { type: "Water", accent: "#38bdf8", userColor: "#0369a1" },
+  eevee: { type: "Normal", accent: "#a78bfa", userColor: "#92400e" },
+  psyduck: { type: "Water", accent: "#fcd34d", userColor: "#0e7490" },
 } as const satisfies Record<string, PokemonFlavor>;
 
 export const pikachu = {
   userId: "pikachu",
   name: "Pikachu",
   avatarUrl: pikachuSprite,
-  color: pokemonFlavor.pikachu.accent,
+  color: pokemonFlavor.pikachu.userColor,
   status: "active",
   lastActiveAt: baseTime + 4000,
   cursor: { blockId: "abstract", offset: 42 },
@@ -39,7 +43,7 @@ export const bulbasaur = {
   userId: "bulbasaur",
   name: "Bulbasaur",
   avatarUrl: bulbasaurSprite,
-  color: pokemonFlavor.bulbasaur.accent,
+  color: pokemonFlavor.bulbasaur.userColor,
   status: "active",
   lastActiveAt: baseTime + 3000,
   cursor: { blockId: "methods", offset: 18 },
@@ -49,7 +53,7 @@ export const charmander = {
   userId: "charmander",
   name: "Charmander",
   avatarUrl: charmanderSprite,
-  color: pokemonFlavor.charmander.accent,
+  color: pokemonFlavor.charmander.userColor,
   status: "idle",
   lastActiveAt: baseTime + 2000,
   selection: { blockId: "results", from: 4, to: 27 },
@@ -59,7 +63,7 @@ export const squirtle = {
   userId: "squirtle",
   name: "Squirtle",
   avatarUrl: squirtleSprite,
-  color: pokemonFlavor.squirtle.accent,
+  color: pokemonFlavor.squirtle.userColor,
   status: "idle",
   lastActiveAt: baseTime + 1000,
 } satisfies PresenceUser;
@@ -68,7 +72,7 @@ export const eevee = {
   userId: "eevee",
   name: "Eevee",
   avatarUrl: eeveeSprite,
-  color: pokemonFlavor.eevee.accent,
+  color: pokemonFlavor.eevee.userColor,
   status: "offline",
   lastActiveAt: baseTime,
 } satisfies PresenceUser;
@@ -77,7 +81,7 @@ export const psyduck = {
   userId: "psyduck",
   name: "Psyduck",
   avatarUrl: psyduckSprite,
-  color: pokemonFlavor.psyduck.accent,
+  color: pokemonFlavor.psyduck.userColor,
   status: "active",
   lastActiveAt: baseTime + 5000,
 } satisfies PresenceUser;

@@ -38,7 +38,7 @@
   "devDependencies": {
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
-    "@types/node": "^24.10.4",
+    "@types/node": "^24.10.15",
     "@vitest/coverage-v8": "^4.0.16",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",

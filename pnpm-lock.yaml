@@ -103,10 +103,10 @@ importers:
         specifier: latest
         version: 3.0.260429-beta(chokidar@4.0.3)(dotenv@16.6.1)(giget@2.0.0)(jiti@2.6.1)(rollup@4.60.3)(vite@7.3.2(@types/node@24.10.4)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.1))
       react:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6
       react-dom:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6(react@19.2.6)
       sonner:
         specifier: ^2.0.7
@@ -336,10 +336,10 @@ importers:
         specifier: ^1.59.1
         version: 1.59.1
       react:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6
       react-dom:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6(react@19.2.6)
       storybook:
         specifier: ^10.3.6
@@ -436,10 +436,10 @@ importers:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.6)
       react:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6
       react-dom:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6(react@19.2.6)
       tailwind-merge:
         specifier: ^3.4.0
@@ -665,10 +665,10 @@ importers:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       react:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6
       react-dom:
-        specifier: ^19.2.3
+        specifier: ^19.2.6
         version: 19.2.6(react@19.2.6)
       sonner:
         specifier: ^2.0.7

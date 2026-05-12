@@ -159,7 +159,7 @@
     "@vitest/coverage-v8": "^4.0.16",
     "chromatic": "^16.10.0",
     "eslint-plugin-storybook": "^10.3.6",
-    "playwright": "^1.59.1",
+    "playwright": "^1.60.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "storybook": "^10.3.6",

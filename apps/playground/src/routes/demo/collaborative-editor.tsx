@@ -1,4 +1,4 @@
-import { EgWalkerAPI } from "@softmaple/eg-walker";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
 import {
   Card,
   CardContent,
@@ -21,8 +21,8 @@ export const Route = createFileRoute("/demo/collaborative-editor")({
 function CollaborativeEditor() {
   const [replica1Text, setReplica1Text] = useState("");
   const [replica2Text, setReplica2Text] = useState("");
-  const [api1] = useState(() => new EgWalkerAPI("replica-1"));
-  const [api2] = useState(() => new EgWalkerAPI("replica-2"));
+  const [api1] = useState(() => new EgWalkerReplica("replica-1"));
+  const [api2] = useState(() => new EgWalkerReplica("replica-2"));
   const replica1Ref = useRef<HTMLTextAreaElement>(null);
   const replica2Ref = useRef<HTMLTextAreaElement>(null);
 

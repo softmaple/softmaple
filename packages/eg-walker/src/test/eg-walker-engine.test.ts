@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import lz4 from "lz4js";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
-import { EgWalker } from "../core/walker";
-import { EgWalkerAPI } from "../core/external-api";
+import { ReplayWalker } from "../core/replay-walker";
+import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { EventGraph } from "../graph/event-graph";
 import { PartialReplayManager } from "../engine/partial-replay";
@@ -206,11 +206,11 @@ describe("EgWalkerEngine", () => {
   });
 
   it("round-trips persisted event graph state through the public API", () => {
-    const api = new EgWalkerAPI("alice", "Hello");
+    const api = new EgWalkerReplica("alice", "Hello");
     api.insert(5, " world");
     api.delete(0, 1);
 
-    const restored = EgWalkerAPI.deserialize(api.serialize(), "alice");
+    const restored = EgWalkerReplica.deserialize(api.serialize(), "alice");
     restored.insert(10, "!");
 
     expect(restored.getText()).toBe("ello world!");
@@ -218,7 +218,7 @@ describe("EgWalkerEngine", () => {
   });
 
   it("keeps public string indexes aligned with JS code units", () => {
-    const api = new EgWalkerAPI("alice", "");
+    const api = new EgWalkerReplica("alice", "");
 
     api.insert(0, "😀");
     api.insert(api.getText().length, "!");
@@ -227,9 +227,9 @@ describe("EgWalkerEngine", () => {
   });
 });
 
-describe("EgWalker", () => {
+describe("ReplayWalker", () => {
   it("walks events through the engine and exposes final versions", () => {
-    const walker = new EgWalker({ initialText: "Hi" });
+    const walker = new ReplayWalker({ initialText: "Hi" });
     const result = walker.walk([
       {
         id: "alice:0",
@@ -252,7 +252,7 @@ describe("EgWalker", () => {
   });
 
   it("walks unordered complete event batches", () => {
-    const walker = new EgWalker();
+    const walker = new ReplayWalker();
     const result = walker.walk([
       {
         id: "alice:1",
@@ -274,7 +274,7 @@ describe("EgWalker", () => {
   });
 
   it("walks an empty event list without changing initial text", () => {
-    const walker = new EgWalker({ initialText: "seed" });
+    const walker = new ReplayWalker({ initialText: "seed" });
 
     expect(walker.walk([])).toEqual({
       finalText: "seed",
@@ -287,7 +287,7 @@ describe("EgWalker", () => {
   });
 
   it("defaults walker initial text to an empty string", () => {
-    const result = new EgWalker().walk([
+    const result = new ReplayWalker().walk([
       {
         id: "alice:0",
         parentVersion: new Set(),

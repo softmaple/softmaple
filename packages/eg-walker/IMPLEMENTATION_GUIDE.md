@@ -51,7 +51,7 @@ Temporary state:
 - Ranked B-tree leaves with prepare/effect/count aggregates for index mapping.
 
 The temporary replay state is not exported, serialized, or retained by
-`EgWalkerAPI`.
+`EgWalkerReplica`.
 
 ## Storage Model
 

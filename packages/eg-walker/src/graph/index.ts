@@ -14,4 +14,4 @@ export {
   type ParentOverride,
 } from "./columnar-codec";
 
-export type { EventId, Version, GraphEvent as Event } from "../types";
+export type { EventId, Version, GraphEvent } from "../types";

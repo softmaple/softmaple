@@ -1,11 +1,11 @@
 /**
- * Core module - External API and invariants
+ * Core module - Public replica and invariants
  *
  * This module provides the public-facing API that maintains
  * index-based operations and enforces strong list specification.
  */
 
-export { EgWalkerAPI, createEgWalker } from "./external-api";
+export { EgWalkerReplica, createEgWalkerReplica } from "./replica";
 
 export {
   verifyStrongListSpecification,
@@ -18,6 +18,10 @@ export {
   StrongListInvariant,
 } from "./invariants";
 
-export { EgWalker, type WalkerConfig, type WalkResult } from "./walker";
+export {
+  ReplayWalker,
+  type WalkerConfig,
+  type WalkResult,
+} from "./replay-walker";
 
 export type { ExternalOperation, DocumentState } from "../types";

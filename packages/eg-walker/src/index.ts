@@ -1,25 +1,16 @@
 /**
  * @softmaple/eg-walker - Eg-walker algorithm for collaborative editing
  *
- * Implementation of the Eg-walker algorithm for collaborative text editing
+ * Public, stable surface. For internal replay primitives
+ * (engine, codec, ranked B-tree, critical-version, partial-replay) import
+ * from `@softmaple/eg-walker/internal` — those names are not covered by
+ * semver guarantees.
  */
 
-export { EgWalker } from "./core/walker";
-export { EgWalkerEngine } from "./engine/eg-walker-engine";
-export {
-  IndexedSequence,
-  CriticalVersionAnalyzer,
-  PartialReplayManager,
-} from "./engine";
-export { ColumnarEventGraphCodec } from "./graph";
-export { EgWalkerAPI, createEgWalker } from "./core/external-api";
+export { EgWalkerReplica, createEgWalkerReplica } from "./core/replica";
+export { ReplayWalker } from "./core/replay-walker";
+export type { WalkerConfig, WalkResult } from "./core/replay-walker";
 export { EventGraph } from "./graph/event-graph";
-
-// Constants exports
 export { OPERATION_TYPE } from "./constants/operation-types";
 
-// Type exports
 export * from "./types";
-
-// Default export
-export { EgWalker as default } from "./core/walker";

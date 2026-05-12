@@ -12,15 +12,15 @@ import { OPERATION_TYPE } from "../constants/operation-types";
  */
 
 import { describe, it, expect } from "vitest";
-import { EgWalkerAPI } from "../core/external-api";
+import { EgWalkerReplica } from "../core/replica";
 import { EventGraph } from "../graph/event-graph";
-import type { Event } from "../types";
+import type { GraphEvent } from "../types";
 
 describe("Eg-walker Algorithm Characteristics", () => {
   describe("Characteristic 1: Strong list specification", () => {
     it("should preserve sequential semantics of text editing", () => {
-      const api1 = new EgWalkerAPI("replica1");
-      const api2 = new EgWalkerAPI("replica2");
+      const api1 = new EgWalkerReplica("replica1");
+      const api2 = new EgWalkerReplica("replica2");
 
       // Apply same operations to both replicas
       api1.insert(0, "Hello");
@@ -38,11 +38,11 @@ describe("Eg-walker Algorithm Characteristics", () => {
     });
 
     it("should produce deterministic output independent of delivery order", async () => {
-      const api1 = new EgWalkerAPI("replica1");
-      const api2 = new EgWalkerAPI("replica2");
+      const api1 = new EgWalkerReplica("replica1");
+      const api2 = new EgWalkerReplica("replica2");
 
       // Simulate concurrent edits with different delivery orders
-      const event1: Event = {
+      const event1: GraphEvent = {
         id: "alice-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -53,7 +53,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
         },
       };
 
-      const event2: Event = {
+      const event2: GraphEvent = {
         id: "bob-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -78,10 +78,10 @@ describe("Eg-walker Algorithm Characteristics", () => {
 
   describe("Characteristic 2: Maximally non-interleaving behavior", () => {
     it("should never produce character-by-character interleaving", async () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       // Alice inserts "Hello" as a single operation
-      const aliceEvent: Event = {
+      const aliceEvent: GraphEvent = {
         id: "alice-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -93,7 +93,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
       };
 
       // Bob concurrently inserts "World" as a single operation
-      const bobEvent: Event = {
+      const bobEvent: GraphEvent = {
         id: "bob-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -115,10 +115,10 @@ describe("Eg-walker Algorithm Characteristics", () => {
     });
 
     it("should group multi-character insertions as blocks", async () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       // Alice inserts "Hello" as one operation
-      const aliceEvent: Event = {
+      const aliceEvent: GraphEvent = {
         id: "alice-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -130,7 +130,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
       };
 
       // Bob inserts "World" as one operation
-      const bobEvent: Event = {
+      const bobEvent: GraphEvent = {
         id: "bob-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),
@@ -157,7 +157,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
 
   describe("Characteristic 3: Minimal and temporary internal metadata", () => {
     it("should not expose CRDT internals through public API", () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       api.insert(0, "Test");
 
@@ -172,7 +172,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
 
   describe("Characteristic 4: Index-based external API", () => {
     it("should only accept numeric indices in public API", () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       // These should work with numeric indices
       expect(() => api.insert(0, "Hello")).not.toThrow();
@@ -186,7 +186,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
     });
 
     it("should validate index bounds", () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       api.insert(0, "Hello");
 
@@ -202,7 +202,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
     });
 
     it("should provide simple text-based getters", () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       api.insert(0, "Hello World");
 
@@ -218,7 +218,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
 
   describe("Characteristic 5: No persistent CRDT tombstones or per-character IDs", () => {
     it("should serialize only text and event graph", () => {
-      const api = new EgWalkerAPI("replica1");
+      const api = new EgWalkerReplica("replica1");
 
       api.insert(0, "Hello");
       api.delete(2, 2); // Delete 'll'
@@ -239,14 +239,14 @@ describe("Eg-walker Algorithm Characteristics", () => {
     });
 
     it("should deserialize without restoring CRDT state", () => {
-      const api1 = new EgWalkerAPI("replica1");
+      const api1 = new EgWalkerReplica("replica1");
 
       api1.insert(0, "Original");
       api1.delete(0, 8);
       api1.insert(0, "New");
 
       const serialized = api1.serialize();
-      const api2 = EgWalkerAPI.deserialize(serialized);
+      const api2 = EgWalkerReplica.deserialize(serialized);
 
       // Should restore text correctly
       expect(api2.getText()).toBe("New");
@@ -267,7 +267,7 @@ describe("Eg-walker Algorithm Characteristics", () => {
       const graph = new EventGraph();
 
       // Add multi-character insertion as single event
-      const event: Event = {
+      const event: GraphEvent = {
         id: "event-1",
         parentVersion: new Set<string>(),
         timestamp: Date.now(),

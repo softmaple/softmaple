@@ -1,5 +1,5 @@
 /**
- * External API for Section 3.1 - Index-based operations only
+ * Public replica for Section 3.1 - Index-based operations only
  *
  * This module provides the public interface that:
  * - Only accepts index-based operations
@@ -26,10 +26,10 @@ import {
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 /**
- * Public API for Eg-walker
- * Strictly index-based, no CRDT exposure
+ * Public replica for Eg-walker.
+ * Strictly index-based, no CRDT exposure.
  */
-export class EgWalkerAPI {
+export class EgWalkerReplica {
   private document: string = "";
   private readonly initialText: string;
   private readonly eventGraph: EventGraph;
@@ -113,9 +113,9 @@ export class EgWalkerAPI {
       eventGraph: SerializedGraphInput | null;
     },
     replicaId: string = "deserialized-replica",
-  ): EgWalkerAPI {
+  ): EgWalkerReplica {
     if (!serialized.eventGraph) {
-      return new EgWalkerAPI(replicaId, serialized.text);
+      return new EgWalkerReplica(replicaId, serialized.text);
     }
 
     const graph = EventGraph.deserialize(serialized.eventGraph);
@@ -126,13 +126,13 @@ export class EgWalkerAPI {
         : graph.getAllEvents().length === 0
           ? serialized.text
           : "";
-    const api = new EgWalkerAPI(replicaId, initialText, graph);
+    const replica = new EgWalkerReplica(replicaId, initialText, graph);
 
     if (typeof metadata.nextSequenceNumber === "number") {
-      api.nextSequenceNumber = metadata.nextSequenceNumber;
+      replica.nextSequenceNumber = metadata.nextSequenceNumber;
     }
 
-    return api;
+    return replica;
   }
 
   /**
@@ -253,13 +253,6 @@ export class EgWalkerAPI {
   }
 
   /**
-   * Get current document text using the README-compatible API name.
-   */
-  getDocumentState(): string {
-    return this.document;
-  }
-
-  /**
    * Export event graph for persistence
    * This is what gets saved to disk - no CRDT metadata
    */
@@ -274,14 +267,14 @@ export class EgWalkerAPI {
     replicaId: string,
     events: ReadonlyArray<GraphEvent>,
     initialText: string = "",
-  ): EgWalkerAPI {
-    const api = new EgWalkerAPI(replicaId, initialText);
+  ): EgWalkerReplica {
+    const replica = new EgWalkerReplica(replicaId, initialText);
 
     for (const event of events) {
-      api.applyRemoteEvent(event);
+      replica.applyRemoteEvent(event);
     }
 
-    return api;
+    return replica;
   }
 
   private fullReplay(): void {
@@ -395,11 +388,11 @@ export class EgWalkerAPI {
 }
 
 /**
- * Factory function for creating API instances
+ * Factory function for creating replica instances.
  */
-export function createEgWalker(
+export function createEgWalkerReplica(
   replicaId: string,
   initialText?: string,
-): EgWalkerAPI {
-  return new EgWalkerAPI(replicaId, initialText);
+): EgWalkerReplica {
+  return new EgWalkerReplica(replicaId, initialText);
 }

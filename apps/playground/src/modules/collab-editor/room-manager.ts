@@ -1,4 +1,4 @@
-import { EgWalkerAPI } from "@softmaple/eg-walker";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
 import { storage } from "./storage";
 import { SyncAdapter } from "./sync-adapter";
 import type { Document, Room, SyncMessage, User } from "./types";
@@ -7,7 +7,7 @@ import type { Document, Room, SyncMessage, User } from "./types";
  * Manages room state and synchronization
  */
 export class RoomManager {
-  private api: EgWalkerAPI | null = null;
+  private api: EgWalkerReplica | null = null;
   private syncAdapter: SyncAdapter | null = null;
   private currentRoom: Room | null = null;
   private currentUser: User | null = null;
@@ -58,7 +58,7 @@ export class RoomManager {
     this.currentUser = user;
 
     // Initialize CRDT
-    this.api = new EgWalkerAPI(user.id);
+    this.api = new EgWalkerReplica(user.id);
 
     // Load existing document
     const doc = await storage.getDocument(roomId);

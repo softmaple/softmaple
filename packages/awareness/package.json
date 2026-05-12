@@ -154,7 +154,7 @@
     "@types/node": "^24.10.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.2",
+    "@vitejs/plugin-react": "^5.1.4",
     "@vitest/browser-playwright": "4.0.16",
     "@vitest/coverage-v8": "^4.0.16",
     "chromatic": "^16.10.0",
@@ -165,7 +165,7 @@
     "storybook": "^10.3.6",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
-    "vite": "^7.3.2",
+    "vite": "^7.3.3",
     "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.0.16"
   },

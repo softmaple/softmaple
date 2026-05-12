@@ -82,7 +82,7 @@ export const Active: Story = {
 
     await expect(avatar).toBeVisible();
     await expect(avatar).toHaveClass("awareness-avatar--active");
-    await expect(avatar).toHaveStyle({ "--awareness-user-color": "#854d0e" });
+    await expect(avatar).toHaveStyle({ "--awareness-user-color": "#facc15" });
   },
 };
 

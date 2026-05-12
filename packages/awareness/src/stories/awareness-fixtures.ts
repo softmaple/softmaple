@@ -9,11 +9,25 @@ import eeveeSprite from "./assets/pokemon-133.png";
 
 const baseTime = Date.UTC(2026, 4, 10, 9, 30);
 
+export interface PokemonFlavor {
+  readonly type: string;
+  readonly accent: string;
+}
+
+export const pokemonFlavor = {
+  pikachu: { type: "Electric", accent: "#facc15" },
+  bulbasaur: { type: "Grass", accent: "#22c55e" },
+  charmander: { type: "Fire", accent: "#f97316" },
+  squirtle: { type: "Water", accent: "#38bdf8" },
+  eevee: { type: "Normal", accent: "#a78bfa" },
+  psyduck: { type: "Water", accent: "#fcd34d" },
+} as const satisfies Record<string, PokemonFlavor>;
+
 export const pikachu = {
   userId: "pikachu",
   name: "Pikachu",
   avatarUrl: pikachuSprite,
-  color: "#854d0e",
+  color: pokemonFlavor.pikachu.accent,
   status: "active",
   lastActiveAt: baseTime + 4000,
   cursor: { blockId: "abstract", offset: 42 },
@@ -25,7 +39,7 @@ export const bulbasaur = {
   userId: "bulbasaur",
   name: "Bulbasaur",
   avatarUrl: bulbasaurSprite,
-  color: "#166534",
+  color: pokemonFlavor.bulbasaur.accent,
   status: "active",
   lastActiveAt: baseTime + 3000,
   cursor: { blockId: "methods", offset: 18 },
@@ -35,7 +49,7 @@ export const charmander = {
   userId: "charmander",
   name: "Charmander",
   avatarUrl: charmanderSprite,
-  color: "#9a3412",
+  color: pokemonFlavor.charmander.accent,
   status: "idle",
   lastActiveAt: baseTime + 2000,
   selection: { blockId: "results", from: 4, to: 27 },
@@ -45,7 +59,7 @@ export const squirtle = {
   userId: "squirtle",
   name: "Squirtle",
   avatarUrl: squirtleSprite,
-  color: "#0369a1",
+  color: pokemonFlavor.squirtle.accent,
   status: "idle",
   lastActiveAt: baseTime + 1000,
 } satisfies PresenceUser;
@@ -54,7 +68,7 @@ export const eevee = {
   userId: "eevee",
   name: "Eevee",
   avatarUrl: eeveeSprite,
-  color: "#92400e",
+  color: pokemonFlavor.eevee.accent,
   status: "offline",
   lastActiveAt: baseTime,
 } satisfies PresenceUser;
@@ -63,7 +77,7 @@ export const psyduck = {
   userId: "psyduck",
   name: "Psyduck",
   avatarUrl: psyduckSprite,
-  color: "#0e7490",
+  color: pokemonFlavor.psyduck.accent,
   status: "active",
   lastActiveAt: baseTime + 5000,
 } satisfies PresenceUser;
@@ -80,20 +94,6 @@ export const collaborators = [
 export const usersById = new Map(
   collaborators.map((user) => [user.userId, user]),
 ) satisfies ReadonlyMap<string, PresenceUser>;
-
-export interface PokemonFlavor {
-  readonly type: string;
-  readonly accent: string;
-}
-
-export const pokemonFlavor = {
-  pikachu: { type: "Electric", accent: "#facc15" },
-  bulbasaur: { type: "Grass", accent: "#22c55e" },
-  charmander: { type: "Fire", accent: "#f97316" },
-  squirtle: { type: "Water", accent: "#38bdf8" },
-  eevee: { type: "Normal", accent: "#a78bfa" },
-  psyduck: { type: "Water", accent: "#fcd34d" },
-} as const satisfies Record<string, PokemonFlavor>;
 
 export const recentActivities = [
   {

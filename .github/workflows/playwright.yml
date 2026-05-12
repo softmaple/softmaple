@@ -121,7 +121,7 @@ jobs:
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
       - name: Upload test results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: playwright-report-shard-${{ matrix.shard }}
@@ -129,7 +129,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test artifacts on failure
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-traces-shard-${{ matrix.shard }}
@@ -144,14 +144,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all test reports
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: playwright-report-shard-*
           merge-multiple: true
           path: all-reports/
 
       - name: Upload merged report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-merged
           path: all-reports/

@@ -113,7 +113,7 @@ jobs:
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
 
       - name: Upload test results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: playwright-smoke-report
@@ -121,7 +121,7 @@ jobs:
           retention-days: 7
 
       - name: Upload test artifacts on failure
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-smoke-traces

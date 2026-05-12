@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { PresenceUser } from "../types/presence";
-import { cx, toUserColorStyle } from "./utils";
+import { cx, toUserColorStyle } from "./internal-utils";
 
 export interface LiveCursorPoint {
   readonly x: number;

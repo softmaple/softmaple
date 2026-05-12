@@ -1,9 +1,8 @@
 import { type ReactNode, useContext, useMemo } from "react";
-import { ACTIVITY_TYPE } from "../constants/presence-events";
 import { PresenceContext } from "../providers/presence-context";
-import type { ActivityEvent } from "../types/events";
+import { ACTIVITY_TYPE, type ActivityEvent } from "../types/events";
 import type { PresenceUser } from "../types/presence";
-import { cx } from "./utils";
+import { cx } from "./internal-utils";
 
 export interface ActivityIndicatorProps {
   readonly activities?: ReadonlyArray<ActivityEvent>;

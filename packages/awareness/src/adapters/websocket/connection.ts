@@ -2,15 +2,15 @@
  * WebSocket connection management utilities
  */
 
-import type { SubscriptionManager } from "./subscription-manager";
-import { createMessage, serializeMessage } from "./websocket-message";
-import type { InternalState } from "./websocket-state";
-import type { WebSocketAdapterConfig } from "./websocket-types";
+import type { SubscriptionManager } from "../subscription-manager";
+import { createMessage, serializeMessage } from "./message";
+import type { InternalState } from "./state";
+import type { WebSocketAdapterConfig } from "./types";
 import {
   calculateReconnectDelay,
   DEFAULT_WS_CONFIG,
   WS_MESSAGE,
-} from "./websocket-types";
+} from "./types";
 
 /**
  * Send a message through WebSocket

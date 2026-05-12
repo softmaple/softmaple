@@ -5,7 +5,7 @@
 import type { ActivityEvent, ActivityType } from "../types/events";
 import { createActivityEvent } from "../types/events";
 import type { PresenceState, PresenceStateConfig } from "../types/state";
-import { DEFAULT_PRESENCE_CONFIG } from "../types/state";
+import { DEFAULT_PRESENCE_CONFIG } from "./selectors";
 
 /**
  * Add an activity event to state (pure function)

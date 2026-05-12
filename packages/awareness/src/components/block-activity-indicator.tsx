@@ -13,7 +13,7 @@
 import { type ReactNode, useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
-import { cx } from "./utils";
+import { cx } from "./internal-utils";
 
 export interface BlockActivityIndicatorProps {
   /** The block this indicator is anchored to. */

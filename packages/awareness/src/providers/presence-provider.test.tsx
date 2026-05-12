@@ -10,7 +10,7 @@ import type {
   PresenceCallback,
   Unsubscribe,
 } from "../adapters/types";
-import { PRESENCE_EVENT } from "../constants/presence-events";
+import { PRESENCE_EVENT } from "../types/events";
 import type { PresenceUser } from "../types/presence";
 import type { PresenceContextValue } from "./presence-context";
 import { PresenceContext } from "./presence-context";

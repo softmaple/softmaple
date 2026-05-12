@@ -1,5 +1,5 @@
 /**
- * Tests covering the design-doc gaps fixed in this change:
+ * Interaction behavior from the awareness and presence design model:
  *   - LiveCursor off-screen culling (§7)
  *   - LiveCursor default fade ≈ 3000 ms (§6)
  *   - SelectionHighlight hover-to-reveal label (§5.3)

@@ -3,16 +3,28 @@
  * Based on docs/design/awareness-and-presence.md
  */
 
-import {
-  ACTIVITY_TYPE,
-  type ActivityType,
-  PRESENCE_EVENT,
-  type PresenceEventType,
-} from "../constants/presence-events";
 import type { CursorPosition, PresenceUser, SelectionRange } from "./presence";
 
-export { ACTIVITY_TYPE, PRESENCE_EVENT };
-export type { ActivityType, PresenceEventType };
+export const PRESENCE_EVENT = {
+  JOIN: "presence:join",
+  LEAVE: "presence:leave",
+  UPDATE: "presence:update",
+  SYNC: "presence:sync",
+} as const;
+
+export type PresenceEventType =
+  (typeof PRESENCE_EVENT)[keyof typeof PRESENCE_EVENT];
+
+export const ACTIVITY_TYPE = {
+  JOIN: "join",
+  LEAVE: "leave",
+  CURSOR: "cursor",
+  SELECTION: "selection",
+  TYPING: "typing",
+  IDLE: "idle",
+} as const;
+
+export type ActivityType = (typeof ACTIVITY_TYPE)[keyof typeof ACTIVITY_TYPE];
 
 /**
  * Activity event representing a user action

@@ -1,8 +1,8 @@
 import { type ContextType, type ReactNode, useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
+import { cx, sortPresenceUsers } from "./internal-utils";
 import { PresenceAvatar, type PresenceAvatarSize } from "./presence-avatar";
-import { cx, sortPresenceUsers } from "./utils";
 
 export interface PresenceBarProps {
   readonly users?: ReadonlyArray<PresenceUser>;

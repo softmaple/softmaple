@@ -1,17 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTIVITY_TYPE, type ActivityType } from "../constants/presence-events";
-import { createActivityEvent, createPresenceEvent } from "../types/events";
-import { createPresenceUser } from "../types/presence";
 import {
-  createInitialPresenceState,
-  DEFAULT_PRESENCE_CONFIG,
-  getOnlineUsers,
-  getOtherUsers,
-  getSelfUser,
-  getUserById,
-  getUsersArray,
-  type PresenceState,
-} from "../types/state";
+  ACTIVITY_TYPE,
+  type ActivityType,
+  createActivityEvent,
+  createPresenceEvent,
+} from "../types/events";
+import { createPresenceUser } from "../types/presence";
+import type { PresenceState } from "../types/state";
 import {
   addActivity,
   clearActivities,
@@ -38,6 +33,15 @@ import {
   updateUserCursor,
   updateUserSelection,
 } from "./cursor-operations";
+import {
+  createInitialPresenceState,
+  DEFAULT_PRESENCE_CONFIG,
+  getOnlineUsers,
+  getOtherUsers,
+  getSelfUser,
+  getUserById,
+  getUsersArray,
+} from "./selectors";
 import {
   countUsersByStatus,
   determineUserStatus,

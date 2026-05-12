@@ -21,7 +21,6 @@
     "url": "https://github.com/zhyd1997"
   },
   "license": "MIT",
-  "packageManager": "pnpm@10.33.0",
   "devDependencies": {
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",

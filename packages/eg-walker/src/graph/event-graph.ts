@@ -71,6 +71,19 @@ export class MissingParentError extends Error {
 }
 
 /**
+ * Lexicographic comparator used as the tie-breaker for
+ * `getTopologicalOrder`. Kept as a module-level helper so the rule is
+ * consistent across roots and sibling branches and easy to swap if the
+ * engine ever standardises on numeric-aware ordering (see sub-issue 5).
+ */
+const compareEventIds = (left: EventId, right: EventId): number => {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+};
+
+/**
  * Bit flags used by `diffVersions` to colour events while running the
  * priority-queue diff. `LEFT` means "reachable from the left frontier",
  * `RIGHT` means "reachable from the right frontier", and `COMMON = LEFT | RIGHT`
@@ -392,44 +405,79 @@ export class EventGraph {
   }
 
   /**
-   * Get events in topological order (Kahn's algorithm; iterative).
+   * Get events in topological order using a deterministic
+   * branch-preserving DFS traversal (Section 5.2 of the paper).
    *
-   * Sorts ties by event ID for deterministic output.
+   * Kahn's algorithm with a sorted ready queue interleaves concurrent
+   * branches by event id, which forces the replay engine to retreat
+   * and re-advance whenever the traversal hops between branches. The
+   * DFS variant below walks one branch as far as possible before
+   * starting another, so two consecutive events in the output usually
+   * share a parent relationship (`next.parentVersion === {prev.id}`)
+   * and the engine's `diffVersions(currentVersion, next.parentVersion)`
+   * collapses to an empty retreat/advance pair.
+   *
+   * The output is still a fully deterministic function of the graph:
+   * roots and sibling branches are ordered by lexicographic event id,
+   * matching the previous tie-break rule so existing snapshots and
+   * round-trip tests remain stable for linear histories.
    */
   getTopologicalOrder(): ReadonlyArray<GraphEvent> {
     const remainingParents = new Map<EventId, number>();
-    const ready: EventId[] = [];
+    const roots: EventId[] = [];
 
     for (const [id, event] of this.events) {
       remainingParents.set(id, event.parentVersion.size);
       if (event.parentVersion.size === 0) {
-        ready.push(id);
+        roots.push(id);
       }
     }
-    ready.sort();
+    roots.sort(compareEventIds);
+
+    // The stack is the deferred set: events that became ready but are
+    // not the natural continuation of the branch we're currently
+    // walking. We push children in descending order so the smallest
+    // (by `compareEventIds`) is on top and is popped next, which keeps
+    // the traversal deterministic across input shapes.
+    const stack: EventId[] = [];
+    for (let i = roots.length - 1; i >= 0; i--) {
+      stack.push(roots[i]!);
+    }
 
     const result: GraphEvent[] = [];
-    while (ready.length > 0) {
-      const id = ready.shift()!;
+    const visited = new Set<EventId>();
+
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (visited.has(id)) {
+        continue;
+      }
       const event = this.events.get(id);
       if (!event) {
         continue;
       }
+      visited.add(id);
       result.push(event);
 
-      const children = Array.from(this.childrenMap.get(id) ?? []).sort();
+      const children = this.childrenMap.get(id);
+      if (!children || children.size === 0) {
+        continue;
+      }
+
+      const newlyReady: EventId[] = [];
       for (const childId of children) {
         const remaining = (remainingParents.get(childId) ?? 0) - 1;
         remainingParents.set(childId, remaining);
         if (remaining === 0) {
-          // Insertion-sort into ready to keep deterministic order without
-          // re-sorting the whole queue.
-          let insertionIndex = ready.findIndex((pending) => pending > childId);
-          if (insertionIndex === -1) {
-            insertionIndex = ready.length;
-          }
-          ready.splice(insertionIndex, 0, childId);
+          newlyReady.push(childId);
         }
+      }
+      if (newlyReady.length === 0) {
+        continue;
+      }
+      newlyReady.sort(compareEventIds);
+      for (let i = newlyReady.length - 1; i >= 0; i--) {
+        stack.push(newlyReady[i]!);
       }
     }
 

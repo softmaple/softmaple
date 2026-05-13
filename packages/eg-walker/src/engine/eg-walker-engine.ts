@@ -358,15 +358,22 @@ export class EgWalkerEngine {
         );
 
         deletedItemIds.push(middle.id);
-        const effectIndex = this.itemToEffectIndex(middle);
-        for (let k = 0; k < toDelete; k++) {
-          outputDeleteIndexes.push(effectIndex);
+        // Mirror the non-placeholder guard: a concurrent delete that lands on
+        // an already-effect-deleted placeholder segment (e.g. after retreating
+        // an overlapping sibling) must NOT remove characters from the text
+        // again. Without this, two concurrent deletes of the same checkpoint
+        // region replay to a shorter string than full replay produces.
+        if (!middle.everDeleted) {
+          const effectIndex = this.itemToEffectIndex(middle);
+          for (let k = 0; k < toDelete; k++) {
+            outputDeleteIndexes.push(effectIndex);
+          }
+          this.resultingText = deleteText(
+            this.resultingText,
+            effectIndex,
+            toDelete,
+          );
         }
-        this.resultingText = deleteText(
-          this.resultingText,
-          effectIndex,
-          toDelete,
-        );
 
         middle.everDeleted = true;
         middle.prepareState += 1;

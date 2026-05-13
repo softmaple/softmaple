@@ -682,6 +682,67 @@ describe("Full paper architecture utilities", () => {
     expect(partial.text).toBe(full.text);
   });
 
+  it("converges with full replay for overlapping concurrent deletes inside placeholder text", () => {
+    // Regression: two concurrent multi-character deletes targeting the same
+    // checkpoint-era region used to mangle the document because the
+    // placeholder branch removed text again after a sibling delete had
+    // already retired the same segment. Partial replay must match full
+    // replay for both exact and partial overlaps.
+    const buildGraph = (
+      e2: GraphEvent["operation"],
+    ): { graph: EventGraph; events: GraphEvent[] } => {
+      const graph = new EventGraph();
+      const events: GraphEvent[] = [
+        {
+          id: "r:0",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: "abcdef",
+          },
+          timestamp: 1,
+        },
+        {
+          id: "alice:0",
+          parentVersion: new Set(["r:0"]),
+          operation: { type: OPERATION_TYPE.DELETE, index: 2, length: 2 },
+          timestamp: 2,
+        },
+        {
+          id: "bob:0",
+          parentVersion: new Set(["r:0"]),
+          operation: e2,
+          timestamp: 3,
+        },
+      ];
+      events.forEach((event) => graph.addEvent(event));
+      return { graph, events };
+    };
+
+    const exact = buildGraph({
+      type: OPERATION_TYPE.DELETE,
+      index: 2,
+      length: 2,
+    });
+    const partial = buildGraph({
+      type: OPERATION_TYPE.DELETE,
+      index: 1,
+      length: 4,
+    });
+
+    for (const { graph } of [exact, partial]) {
+      const fullText = new EgWalkerEngine().generate(
+        graph.getTopologicalOrder(),
+      ).text;
+      const partialText = new PartialReplayManager().replayFromCheckpoint(
+        graph,
+        { version: new Set(["r:0"]), text: "abcdef" },
+      ).text;
+      expect(partialText).toBe(fullText);
+    }
+  });
+
   it("does not materialize per-character CRDT items for the checkpoint text", () => {
     // Acceptance criterion for issue #665: partial replay must avoid the
     // O(checkpoint.length) item cost. We use a long pre-checkpoint string and

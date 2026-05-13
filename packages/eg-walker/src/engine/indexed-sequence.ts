@@ -201,6 +201,18 @@ export class IndexedSequence<T extends object> {
     return this.weightIndexToPosition(index, allowEnd, "prepare");
   }
 
+  /**
+   * Variant of {@link prepareIndexToPosition} that also reports how far into the
+   * landing record the requested prepare-index falls. Used by partial replay to
+   * split multi-character placeholder records at the right offset.
+   */
+  prepareIndexToPositionAndOffset(
+    index: number,
+    allowEnd: boolean,
+  ): { readonly position: number; readonly offsetInRecord: number } {
+    return this.weightIndexToPositionAndOffset(index, allowEnd, "prepare");
+  }
+
   effectIndexBeforePosition(position: number): number {
     return this.prefixSum(position, "effect");
   }
@@ -373,19 +385,27 @@ export class IndexedSequence<T extends object> {
     allowEnd: boolean,
     kind: "prepare" | "effect",
   ): number {
+    return this.weightIndexToPositionAndOffset(index, allowEnd, kind).position;
+  }
+
+  private weightIndexToPositionAndOffset(
+    index: number,
+    allowEnd: boolean,
+    kind: "prepare" | "effect",
+  ): { readonly position: number; readonly offsetInRecord: number } {
     if (index < 0) {
       throw new Error(`Index ${index} out of bounds`);
     }
     if (!this.root) {
       if (allowEnd && index === 0) {
-        return 0;
+        return { position: 0, offsetInRecord: 0 };
       }
       throw new Error(`Index ${index} out of bounds`);
     }
 
     const total = this.weightSum(this.root, kind);
     if (allowEnd && index === total) {
-      return this.root.size;
+      return { position: this.root.size, offsetInRecord: 0 };
     }
     if (index >= total) {
       throw new Error(`Index ${index} out of bounds`);
@@ -414,7 +434,7 @@ export class IndexedSequence<T extends object> {
     for (let offset = 0; offset < node.items.length; offset++) {
       const weight = this.leafWeight(node, offset, kind);
       if (remaining < weight) {
-        return position + offset;
+        return { position: position + offset, offsetInRecord: remaining };
       }
       remaining -= weight;
     }

@@ -444,23 +444,13 @@ export class EgWalkerReplica {
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
     const frontier = this.eventGraph.getFrontier();
-    const replayIds = new Set(
-      this.partialReplayer.getReplayEventIds(
-        this.eventGraph,
-        checkpoint.version,
-        frontier,
-      ),
+    const result = this.partialReplayer.replayFromCheckpoint(
+      this.eventGraph,
+      checkpoint,
+      frontier,
     );
-    const events = this.eventGraph
-      .getTopologicalOrder()
-      .filter((candidate) => replayIds.has(candidate.id));
-    const engine = new EgWalkerEngine();
-    engine.generate(events, checkpoint.text, {
-      initialVersion: checkpoint.version,
-      eventGraph: this.eventGraph,
-    });
-    this.engine = engine;
-    this.document = engine.getText();
+    this.engine = result.engine;
+    this.document = result.text;
     this.currentVersion = frontier;
     this.partialReplayCount++;
   }

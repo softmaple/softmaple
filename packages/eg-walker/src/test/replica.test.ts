@@ -377,8 +377,10 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(restored.exportEventGraph().some((e) => e.id === "r1:0")).toBe(true);
   });
 
-  it("falls back to full replay when concurrent remote parents differ from current", () => {
-    // Hits the parentsMatchCurrent !has branch (size matches, contents differ).
+  it("falls back to full replay when concurrent remote parents require retreat", () => {
+    // Concurrent remote events with parents not ⊆ engine's current version
+    // still trigger a replay so the bucket integration sees events in
+    // topological order (see issue #668 for the order-independence work).
     const api = new EgWalkerReplica("r1");
     api.applyRemoteEvent({
       id: "alice:0",
@@ -386,27 +388,59 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
       operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
       timestamp: 1,
     });
-    // Concurrent event: same number of parents (0) as currentVersion.size (1).
-    // parentsMatchCurrent first short-circuits on size; here we want the
-    // member mismatch path. Apply a follow-up event whose parents are a
-    // single-element set that does not match currentVersion's element.
     api.applyRemoteEvent({
       id: "alice:1",
       parentVersion: new Set(["alice:0"]),
       operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
       timestamp: 2,
     });
-    // Now currentVersion = {alice:1}. Send a remote event whose parents are
-    // {alice:0} — same size, different content. Forces the !has branch.
+    const replaysBeforeConcurrent = api.getReplayStats().fullReplays;
+    // Concurrent branch: parent is {alice:0}, engine current is {alice:1}.
+    // alice:1 is not in expand({alice:0}), so a retreat is needed → replay.
     api.applyRemoteEvent({
       id: "bob:0",
       parentVersion: new Set(["alice:0"]),
       operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
       timestamp: 3,
     });
+    expect(api.getReplayStats().fullReplays).toBe(replaysBeforeConcurrent + 1);
     expect(api.getText().includes("A")).toBe(true);
     expect(api.getText().includes("B")).toBe(true);
     expect(api.getText().includes("C")).toBe(true);
+  });
+
+  it("applies sequential remote events incrementally without replaying history", () => {
+    // Long linear history followed by remote events whose parents always
+    // extend the engine's current version → only the new event needs to be
+    // processed each time. Proves replay scope is bounded to the divergent
+    // suffix (here: just the new event).
+    const api = new EgWalkerReplica("r1");
+    const history: GraphEvent[] = [];
+    let parent: Set<string> = new Set();
+    for (let i = 0; i < 50; i++) {
+      const event: GraphEvent = {
+        id: `alice:${i}`,
+        parentVersion: parent,
+        operation: { type: OPERATION_TYPE.INSERT, index: i, text: "x" },
+        timestamp: i,
+      };
+      history.push(event);
+      parent = new Set([event.id]);
+    }
+
+    for (const event of history) {
+      api.applyRemoteEvent(event);
+    }
+
+    const stats = api.getReplayStats();
+    // Only the very first event cold-starts the engine via fullReplay; every
+    // subsequent event extends the current frontier and applies incrementally.
+    expect(stats.fullReplays).toBe(1);
+    expect(stats.incrementalApplies).toBe(history.length - 1);
+    // The engine should never have to retreat any event when applying a
+    // strictly-forward linear history.
+    expect(stats.engineRetreats).toBe(0);
+    expect(api.getText()).toBe("x".repeat(history.length));
   });
 
   describe("surrogate pair boundaries", () => {

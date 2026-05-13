@@ -134,6 +134,14 @@ export class EgWalkerEngine {
     return this.currentVersion;
   }
 
+  getStats(): EngineStats {
+    return {
+      retreatCount: this.retreatCount,
+      advanceCount: this.advanceCount,
+      eventsProcessed: this.eventsById.size,
+    };
+  }
+
   private processEvent(event: GraphEvent): ExternalOperation[] {
     const { retreat, advance } = this.diffVersions(
       this.currentVersion,

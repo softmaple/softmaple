@@ -38,6 +38,8 @@ export class EgWalkerReplica {
   private engine: EgWalkerEngine | null = null;
   private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
   private readonly bufferedEventIds = new Set<EventId>();
+  private fullReplayCount = 0;
+  private incrementalApplyCount = 0;
 
   constructor(
     private readonly replicaId: string,
@@ -183,6 +185,32 @@ export class EgWalkerReplica {
   }
 
   /**
+   * Replay scope counters. Exposed for tests and diagnostics to verify the
+   * incremental retreat/advance path is taken instead of full replay.
+   *
+   * - `fullReplays` increments each time the entire event graph is replayed
+   *   from scratch (engine cold-start or recovery path).
+   * - `incrementalApplies` increments each time a single event is applied on
+   *   top of existing engine state via retreat/advance.
+   * - `engineRetreats` / `engineAdvances` are the cumulative engine counters,
+   *   useful for proving replay work stays bounded to the divergent suffix.
+   */
+  getReplayStats(): {
+    readonly fullReplays: number;
+    readonly incrementalApplies: number;
+    readonly engineRetreats: number;
+    readonly engineAdvances: number;
+  } {
+    const engineStats = this.engine?.getStats();
+    return {
+      fullReplays: this.fullReplayCount,
+      incrementalApplies: this.incrementalApplyCount,
+      engineRetreats: engineStats?.retreatCount ?? 0,
+      engineAdvances: engineStats?.advanceCount ?? 0,
+    };
+  }
+
+  /**
    * Generate unique event ID
    */
   private generateEventId(): EventId {
@@ -286,13 +314,32 @@ export class EgWalkerReplica {
     this.document = generated.text;
     this.currentVersion = this.eventGraph.getFrontier();
     this.engine = engine;
+    this.fullReplayCount++;
   }
 
+  /**
+   * Apply a single event on top of existing engine state.
+   *
+   * For events that only advance the engine forward (no retreat needed) we
+   * take the cheap incremental path through {@link EgWalkerEngine.applyEvent}.
+   * That covers local edits and remote events that descend from the engine's
+   * current version — including the long-tail of sequential collaboration
+   * where every new event extends the latest frontier.
+   *
+   * Events that would require retreating already-applied events (concurrent
+   * merges) still go through a replay. The current implementation replays
+   * from initial state because the bucket-based integration in
+   * {@link EgWalkerEngine} is sensitive to apply order for concurrent items;
+   * see issues #665 and #668 for the path to bounded partial replay from a
+   * critical-version checkpoint without losing per-replica convergence.
+   */
   private advanceWithEvent(event: GraphEvent): void {
-    if (!this.engine || !this.parentsMatchCurrent(event.parentVersion)) {
-      // Remote/concurrent events would be processed in arrival order on the
-      // incremental path, which diverges from the deterministic topological
-      // order each replica needs to converge. Replay from scratch instead.
+    if (!this.engine) {
+      this.fullReplay();
+      return;
+    }
+
+    if (!this.canIncrementallyAdvance(event)) {
       this.fullReplay();
       return;
     }
@@ -300,14 +347,25 @@ export class EgWalkerReplica {
     this.engine.applyEvent(event, this.eventGraph);
     this.document = this.engine.getText();
     this.currentVersion = this.eventGraph.getFrontier();
+    this.incrementalApplyCount++;
   }
 
-  private parentsMatchCurrent(parents: ReadonlySet<EventId>): boolean {
-    if (parents.size !== this.currentVersion.size) {
-      return false;
+  /**
+   * Incremental apply is safe iff the engine's current version is causally
+   * ≤ the new event's parent version — i.e. the engine only needs to advance
+   * (no retreat). When retreat would be needed, the new event is concurrent
+   * with state already applied and the engine cannot deterministically
+   * re-integrate concurrent inserts yet (#668), so we fall back to a full
+   * replay in topological order.
+   */
+  private canIncrementallyAdvance(event: GraphEvent): boolean {
+    const engineVersion = this.engine?.getCurrentVersion();
+    if (!engineVersion || engineVersion.size === 0) {
+      return true;
     }
-    for (const id of parents) {
-      if (!this.currentVersion.has(id)) {
+    const parentExpansion = this.eventGraph.expandVersion(event.parentVersion);
+    for (const id of engineVersion) {
+      if (!parentExpansion.has(id)) {
         return false;
       }
     }

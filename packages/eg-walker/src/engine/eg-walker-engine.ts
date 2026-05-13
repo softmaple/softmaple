@@ -4,16 +4,32 @@ import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 
 const BASE_EVENT_ID_PREFIX = "__base__:";
+const PLACEHOLDER_EVENT_ID = "__placeholder__";
+const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
 
+/**
+ * Augmented CRDT item used during replay.
+ *
+ * Regular items represent a single UTF-16 code unit (`content.length === 1`).
+ * Placeholder items represent a contiguous run of pre-checkpoint content for
+ * Section 3.6 partial replay — they can carry `content.length > 1` and are
+ * split on demand when an insert or delete lands inside them.
+ *
+ * `content` is mutable to support in-place placeholder splits without
+ * invalidating the `WeakMap` location index in {@link IndexedSequence}.
+ */
 interface AugmentedCRDTItem {
   readonly id: EventId;
   readonly eventId: EventId;
-  readonly content: string;
-  readonly originLeft: EventId | null;
+  content: string;
+  originLeft: EventId | null;
   readonly originRight: EventId | null;
   everDeleted: boolean;
   prepareState: number;
 }
+
+const isPlaceholder = (item: AugmentedCRDTItem): boolean =>
+  item.eventId === PLACEHOLDER_EVENT_ID;
 
 interface EngineStats {
   readonly retreatCount: number;
@@ -74,13 +90,14 @@ export class EgWalkerEngine {
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
   private readonly insertionBuckets = new Map<string, EventId[]>();
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
-    (item) => (item.prepareState === 1 ? 1 : 0),
-    (item) => (item.everDeleted ? 0 : 1),
+    (item) => (item.prepareState === 1 ? item.content.length : 0),
+    (item) => (item.everDeleted ? 0 : item.content.length),
   );
   private currentVersion = new Set<EventId>();
   private resultingText = "";
   private retreatCount = 0;
   private advanceCount = 0;
+  private placeholderCounter = 0;
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -177,6 +194,7 @@ export class EgWalkerEngine {
     this.resultingText = initialText;
     this.retreatCount = 0;
     this.advanceCount = 0;
+    this.placeholderCounter = 0;
 
     const graphEvents = options.eventGraph?.getTopologicalOrder() ?? events;
     graphEvents.forEach((event, index) => {
@@ -186,6 +204,30 @@ export class EgWalkerEngine {
         this.graph.addEvent(event);
       }
     });
+
+    if (initialText.length === 0) {
+      return;
+    }
+
+    // Section 3.6 partial replay: when a checkpoint version is supplied, the
+    // pre-checkpoint text is collapsed into a single placeholder record. Inserts
+    // and deletes split the placeholder on demand, so this stays O(replayed
+    // events) in memory rather than O(checkpoint length).
+    const startFromCheckpoint = (options.initialVersion?.size ?? 0) > 0;
+    if (startFromCheckpoint) {
+      const placeholder: AugmentedCRDTItem = {
+        id: this.nextPlaceholderId(),
+        eventId: PLACEHOLDER_EVENT_ID,
+        content: initialText,
+        originLeft: null,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+      };
+      this.sequence.push(placeholder);
+      this.itemsById.set(placeholder.id, placeholder);
+      return;
+    }
 
     let originLeft: EventId | null = null;
     stringCodeUnits(initialText).forEach((content, index) => {
@@ -203,6 +245,10 @@ export class EgWalkerEngine {
       this.itemsById.set(id, item);
       originLeft = id;
     });
+  }
+
+  private nextPlaceholderId(): EventId {
+    return `${PLACEHOLDER_ID_PREFIX}${this.placeholderCounter++}`;
   }
 
   private apply(event: GraphEvent): ExternalOperation[] {
@@ -227,10 +273,14 @@ export class EgWalkerEngine {
       return [];
     }
 
-    const firstInsertPosition = this.prepareIndexToItemPosition(
+    const landing = this.sequence.prepareIndexToPositionAndOffset(
       operation.index,
       true,
     );
+    const firstInsertPosition =
+      landing.offsetInRecord > 0
+        ? this.splitRecordAt(landing.position, landing.offsetInRecord)
+        : landing.position;
     const originLeft = this.sequence.at(firstInsertPosition - 1)?.id ?? null;
     const originRightPosition =
       this.sequence.nextPrepareVisiblePosition(firstInsertPosition);
@@ -285,29 +335,133 @@ export class EgWalkerEngine {
   ): ExternalOperation[] {
     const deletedItemIds: EventId[] = [];
     const outputDeleteIndexes: number[] = [];
+    let remaining = operation.length;
 
-    for (let i = 0; i < operation.length; i++) {
-      const target = this.findVisiblePrepareItem(operation.index);
-      if (!target) {
+    while (remaining > 0) {
+      const landing = this.prepareIndexLanding(operation.index, false);
+      if (!landing) {
+        break;
+      }
+      const candidate = this.sequence.at(landing.position);
+      if (!candidate) {
         break;
       }
 
-      deletedItemIds.push(target.id);
+      if (isPlaceholder(candidate) && candidate.content.length > 1) {
+        const availableInRecord =
+          candidate.content.length - landing.offsetInRecord;
+        const toDelete = Math.min(remaining, availableInRecord);
+        const middle = this.splitPlaceholderForDelete(
+          landing.position,
+          landing.offsetInRecord,
+          toDelete,
+        );
 
-      if (!target.everDeleted) {
-        const effectIndex = this.itemToEffectIndex(target);
+        deletedItemIds.push(middle.id);
+        const effectIndex = this.itemToEffectIndex(middle);
+        for (let k = 0; k < toDelete; k++) {
+          outputDeleteIndexes.push(effectIndex);
+        }
+        this.resultingText = deleteText(
+          this.resultingText,
+          effectIndex,
+          toDelete,
+        );
+
+        middle.everDeleted = true;
+        middle.prepareState += 1;
+        this.sequence.updateItem(middle);
+        remaining -= toDelete;
+        continue;
+      }
+
+      deletedItemIds.push(candidate.id);
+      if (!candidate.everDeleted) {
+        const effectIndex = this.itemToEffectIndex(candidate);
         outputDeleteIndexes.push(effectIndex);
         this.resultingText = deleteText(this.resultingText, effectIndex, 1);
       }
-
-      target.everDeleted = true;
-      target.prepareState += 1;
-      this.sequence.updateItem(target);
+      candidate.everDeleted = true;
+      candidate.prepareState += 1;
+      this.sequence.updateItem(candidate);
+      remaining -= 1;
     }
 
     this.deleteTargets.set(event.id, deletedItemIds);
 
     return coalesceDeleteRuns(outputDeleteIndexes);
+  }
+
+  /**
+   * Split a multi-character placeholder so that `offsetInRecord` code units
+   * remain in place and the rest become a new record at `position + 1`.
+   * Returns the position of the new right-hand record — i.e. where neighbours
+   * sandwiched between the two halves should be inserted. Single-character
+   * records and offset-0 calls are no-ops.
+   */
+  private splitRecordAt(position: number, offsetInRecord: number): number {
+    const left = this.sequence.at(position);
+    if (!left || offsetInRecord <= 0 || offsetInRecord >= left.content.length) {
+      return position + (offsetInRecord > 0 ? 1 : 0);
+    }
+
+    const rightContent = left.content.slice(offsetInRecord);
+    left.content = left.content.slice(0, offsetInRecord);
+    this.sequence.updateItem(left);
+
+    const right: AugmentedCRDTItem = {
+      id: this.nextPlaceholderId(),
+      eventId: PLACEHOLDER_EVENT_ID,
+      content: rightContent,
+      originLeft: null,
+      originRight: null,
+      everDeleted: left.everDeleted,
+      prepareState: left.prepareState,
+    };
+    this.sequence.insert(position + 1, right);
+    this.itemsById.set(right.id, right);
+    return position + 1;
+  }
+
+  /**
+   * Split a placeholder so that the `length` code units starting at
+   * `offsetInRecord` become an isolated record that the caller can mark as
+   * deleted. Returns that middle record. Surrounding prefix/suffix halves
+   * (if any) remain as undeleted placeholders so future events can still
+   * reference the pre-checkpoint region.
+   */
+  private splitPlaceholderForDelete(
+    position: number,
+    offsetInRecord: number,
+    length: number,
+  ): AugmentedCRDTItem {
+    if (offsetInRecord > 0) {
+      const afterPrefix = this.splitRecordAt(position, offsetInRecord);
+      position = afterPrefix;
+    }
+    const middle = this.sequence.at(position);
+    if (!middle) {
+      throw new Error(
+        `Placeholder split missing record at position ${position}`,
+      );
+    }
+    if (length < middle.content.length) {
+      this.splitRecordAt(position, length);
+    }
+    return middle;
+  }
+
+  private prepareIndexLanding(
+    index: number,
+    allowEnd: boolean,
+  ):
+    | { readonly position: number; readonly offsetInRecord: number }
+    | undefined {
+    try {
+      return this.sequence.prepareIndexToPositionAndOffset(index, allowEnd);
+    } catch {
+      return undefined;
+    }
   }
 
   private retreat(eventId: EventId): void {
@@ -419,19 +573,6 @@ export class EgWalkerEngine {
   private originKey(item: AugmentedCRDTItem): string {
     // Event IDs are "<replicaId>:<n>" so they cannot contain NUL — safe delimiter.
     return `${item.originLeft ?? ""} ${item.originRight ?? ""}`;
-  }
-
-  private prepareIndexToItemPosition(index: number, allowEnd: boolean): number {
-    return this.sequence.prepareIndexToPosition(index, allowEnd);
-  }
-
-  private findVisiblePrepareItem(index: number): AugmentedCRDTItem | undefined {
-    try {
-      const position = this.prepareIndexToItemPosition(index, false);
-      return this.sequence.at(position);
-    } catch {
-      return undefined;
-    }
   }
 
   private itemToEffectIndex(target: AugmentedCRDTItem): number {

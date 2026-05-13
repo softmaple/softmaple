@@ -9,6 +9,13 @@ export interface ReplayCheckpoint {
 
 export interface PartialReplayResult extends GeneratedDocument {
   readonly replayedEventIds: ReadonlyArray<EventId>;
+  /**
+   * The engine that produced this result. Callers that need to keep applying
+   * subsequent events incrementally (e.g. {@link EgWalkerReplica}) adopt this
+   * engine instead of starting a fresh one, preserving the placeholder state
+   * built up during partial replay.
+   */
+  readonly engine: EgWalkerEngine;
 }
 
 /**
@@ -17,6 +24,10 @@ export interface PartialReplayResult extends GeneratedDocument {
  * A checkpoint represents a critical version whose document text is already
  * known. Replaying from it only walks events in targetVersion \ checkpoint,
  * while using the full event graph to interpret transitive version diffs.
+ *
+ * Pre-checkpoint content is fed to the engine as initial text alongside
+ * `initialVersion`, which triggers the engine's placeholder-seeded reset so the
+ * CRDT state is O(replayed events) rather than O(checkpoint length).
  */
 export class PartialReplayManager {
   replayFromCheckpoint(
@@ -37,7 +48,8 @@ export class PartialReplayManager {
       .filter(
         (event): event is NonNullable<typeof event> => event !== undefined,
       );
-    const generated = new EgWalkerEngine().generate(events, checkpoint.text, {
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(events, checkpoint.text, {
       initialVersion: checkpoint.version,
       eventGraph: graph,
     });
@@ -45,6 +57,7 @@ export class PartialReplayManager {
     return {
       ...generated,
       replayedEventIds,
+      engine,
     };
   }
 

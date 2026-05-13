@@ -21,11 +21,13 @@ import { BlockFormatDropdown } from "@softmaple/editor/components/core/plugins/T
 import { useToolbarState } from "@softmaple/editor/context/ToolbarContext";
 import { $isTableNode, $isTableSelection } from "@lexical/table";
 import { getSelectedNode } from "@softmaple/editor/utils/getSelectedNode";
-// import { $isLinkNode } from "@lexical/link";
+import { $isLinkNode } from "@lexical/link";
 import { $isListNode, ListNode } from "@lexical/list";
 import { $isHeadingNode } from "@lexical/rich-text";
+import { $isCodeNode } from "@lexical/code";
 import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/FormatButtonGroup";
 import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup";
+import { LinkButton } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/LinkButton";
 import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
 type ToolbarPluginProps = {
@@ -77,9 +79,9 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
 
       // Update links
       const node = getSelectedNode(selection);
-      // const parent = node.getParent();
-      // const isLink = $isLinkNode(parent) || $isLinkNode(node);
-      // updateToolbarState('isLink', isLink);
+      const parent = node.getParent();
+      const isLink = $isLinkNode(parent) || $isLinkNode(node);
+      updateToolbarState("isLink", isLink);
 
       const tableNode = $findMatchingParent(node, $isTableNode);
       if ($isTableNode(tableNode)) {
@@ -103,22 +105,15 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
         } else {
           const type = $isHeadingNode(element)
             ? element.getTag()
-            : element.getType();
+            : $isCodeNode(element)
+              ? "code"
+              : element.getType();
           if (type in blockTypeToBlockName) {
             updateToolbarState(
               "blockType",
               type as keyof typeof blockTypeToBlockName,
             );
           }
-          // if ($isCodeNode(element)) {
-          // const language =
-          //   element.getLanguage() as keyof typeof CODE_LANGUAGE_MAP;
-          // updateToolbarState(
-          //   "codeLanguage",
-          //   language ? CODE_LANGUAGE_MAP[language] || language : ""
-          // );
-          //   return;
-          // }
         }
       }
       // Handle buttons
@@ -228,6 +223,9 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
         )}
 
       <FormatButtonGroup editor={activeEditor} toolbarState={toolbarState} />
+      <Separator orientation="vertical" className="h-6" />
+
+      <LinkButton editor={activeEditor} toolbarState={toolbarState} />
       <Separator orientation="vertical" className="h-6" />
     </div>
   );

@@ -17,7 +17,7 @@ import {
   // clearFormatting,
   formatBulletList,
   formatCheckList,
-  // formatCode,
+  formatCode,
   formatHeading,
   formatNumberedList,
   formatParagraph,
@@ -76,7 +76,7 @@ export const ShortcutsPlugin = ({
       } else if (isFormatCheckList(event)) {
         formatCheckList(editor, toolbarState.blockType);
       } else if (isFormatCode(event)) {
-        // formatCode(editor, toolbarState.blockType);
+        formatCode(editor, toolbarState.blockType);
       } else if (isFormatQuote(event)) {
         formatQuote(editor, toolbarState.blockType);
       } else if (isStrikeThrough(event)) {

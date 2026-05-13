@@ -16,6 +16,7 @@ import {
   List,
   ListTodo,
   Quote,
+  Code,
 } from "lucide-react";
 import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts";
 import type { LexicalEditor } from "lexical";
@@ -26,6 +27,7 @@ import {
   formatBulletList,
   formatCheckList,
   formatQuote,
+  formatCode,
 } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
 import type { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
@@ -94,6 +96,13 @@ const ITEMS: BlockFormatType[] = [
     icon: <Quote className="size-4 md:size-4.5" />,
     shortcut: SHORTCUTS.QUOTE,
   },
+  {
+    key: "code",
+    value: "code",
+    label: "Code Block",
+    icon: <Code className="size-4 md:size-4.5" />,
+    shortcut: SHORTCUTS.CODE_BLOCK,
+  },
 ];
 
 type BlockFormatDropdownProps = {
@@ -129,6 +138,9 @@ export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
         break;
       case "quote":
         formatQuote(editor, blockType);
+        break;
+      case "code":
+        formatCode(editor, blockType);
         break;
       default:
         break;

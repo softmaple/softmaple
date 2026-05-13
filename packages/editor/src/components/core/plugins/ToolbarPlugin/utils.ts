@@ -1,9 +1,10 @@
 import { $createHeadingNode, $createQuoteNode } from "@lexical/rich-text";
 import type { HeadingTagType } from "@lexical/rich-text";
+import { $createCodeNode } from "@lexical/code";
 import {
   $createParagraphNode,
   $getSelection,
-  // $isRangeSelection,
+  $isRangeSelection,
   FORMAT_TEXT_COMMAND,
   REDO_COMMAND,
   UNDO_COMMAND,
@@ -81,27 +82,29 @@ export const formatQuote = (editor: LexicalEditor, blockType: string) => {
   }
 };
 
-// export const formatCode = (editor: LexicalEditor, blockType: string) => {
-//   if (blockType !== 'code') {
-//     editor.update(() => {
-//       let selection = $getSelection();
-//       if (!selection) {
-//         return;
-//       }
-//       if (!$isRangeSelection(selection) || selection.isCollapsed()) {
-//         $setBlocksType(selection, () => $createCodeNode());
-//       } else {
-//         const textContent = selection.getTextContent();
-//         const codeNode = $createCodeNode();
-//         selection.insertNodes([codeNode]);
-//         selection = $getSelection();
-//         if ($isRangeSelection(selection)) {
-//           selection.insertRawText(textContent);
-//         }
-//       }
-//     });
-//   }
-// };
+export const formatCode = (editor: LexicalEditor, blockType: string) => {
+  if (blockType === "code") {
+    formatParagraph(editor);
+    return;
+  }
+  editor.update(() => {
+    let selection = $getSelection();
+    if (!selection) {
+      return;
+    }
+    if (!$isRangeSelection(selection) || selection.isCollapsed()) {
+      $setBlocksType(selection, () => $createCodeNode());
+      return;
+    }
+    const textContent = selection.getTextContent();
+    const codeNode = $createCodeNode();
+    selection.insertNodes([codeNode]);
+    selection = $getSelection();
+    if ($isRangeSelection(selection)) {
+      selection.insertRawText(textContent);
+    }
+  });
+};
 
 export const formatText = (
   editor: LexicalEditor,

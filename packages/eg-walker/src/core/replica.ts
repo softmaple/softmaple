@@ -24,6 +24,13 @@ import {
   MissingParentError,
 } from "../graph/event-graph";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { CriticalVersionAnalyzer } from "../engine/critical-version";
+import { PartialReplayManager } from "../engine/partial-replay";
+
+interface CriticalCheckpoint {
+  readonly version: Version;
+  readonly text: string;
+}
 
 /**
  * Public replica for Eg-walker.
@@ -39,7 +46,11 @@ export class EgWalkerReplica {
   private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
   private readonly bufferedEventIds = new Set<EventId>();
   private fullReplayCount = 0;
+  private partialReplayCount = 0;
   private incrementalApplyCount = 0;
+  private readonly criticalAnalyzer = new CriticalVersionAnalyzer();
+  private readonly partialReplayer = new PartialReplayManager();
+  private readonly criticalCheckpoints: CriticalCheckpoint[] = [];
 
   constructor(
     private readonly replicaId: string,
@@ -54,6 +65,7 @@ export class EgWalkerReplica {
     if (this.eventGraph.getAllEvents().length > 0) {
       this.fullReplay();
     }
+    this.maybeAdvanceCheckpoint();
   }
 
   /**
@@ -197,16 +209,20 @@ export class EgWalkerReplica {
    */
   getReplayStats(): {
     readonly fullReplays: number;
+    readonly partialReplays: number;
     readonly incrementalApplies: number;
     readonly engineRetreats: number;
     readonly engineAdvances: number;
+    readonly checkpointCount: number;
   } {
     const engineStats = this.engine?.getStats();
     return {
       fullReplays: this.fullReplayCount,
+      partialReplays: this.partialReplayCount,
       incrementalApplies: this.incrementalApplyCount,
       engineRetreats: engineStats?.retreatCount ?? 0,
       engineAdvances: engineStats?.advanceCount ?? 0,
+      checkpointCount: this.criticalCheckpoints.length,
     };
   }
 
@@ -320,43 +336,50 @@ export class EgWalkerReplica {
   /**
    * Apply a single event on top of existing engine state.
    *
-   * For events that only advance the engine forward (no retreat needed) we
-   * take the cheap incremental path through {@link EgWalkerEngine.applyEvent}.
-   * That covers local edits and remote events that descend from the engine's
-   * current version — including the long-tail of sequential collaboration
-   * where every new event extends the latest frontier.
-   *
-   * Events that would require retreating already-applied events (concurrent
-   * merges) still go through a replay. The current implementation replays
-   * from initial state because the bucket-based integration in
-   * {@link EgWalkerEngine} is sensitive to apply order for concurrent items;
-   * see issues #665 and #668 for the path to bounded partial replay from a
-   * critical-version checkpoint without losing per-replica convergence.
+   * Three paths, cheapest first:
+   *   1. Incremental — when the engine's current version is causally ≤ the
+   *      new event's parent version, the engine only needs to advance, no
+   *      retreat. Covers local edits and remote events that extend the
+   *      current frontier (the common case for sequential collaboration).
+   *   2. Partial replay from a critical-version checkpoint — when retreat
+   *      is needed but the divergent suffix is dominated by a previously
+   *      observed critical version (Section 3.5 / 3.6 of the paper).
+   *      Replays only events in `expand(frontier) \ expand(checkpoint)`.
+   *   3. Full replay — only when no checkpoint dominates the divergent
+   *      region (e.g. concurrent root inserts with no critical ancestor).
    */
   private advanceWithEvent(event: GraphEvent): void {
     if (!this.engine) {
       this.fullReplay();
+      this.maybeAdvanceCheckpoint();
       return;
     }
 
-    if (!this.canIncrementallyAdvance(event)) {
+    if (this.canIncrementallyAdvance(event)) {
+      this.engine.applyEvent(event, this.eventGraph);
+      this.document = this.engine.getText();
+      this.currentVersion = this.eventGraph.getFrontier();
+      this.incrementalApplyCount++;
+      this.maybeAdvanceCheckpoint();
+      return;
+    }
+
+    const checkpoint = this.pickCheckpoint();
+    if (checkpoint) {
+      this.partialReplayFromCheckpoint(checkpoint);
+    } else {
       this.fullReplay();
-      return;
     }
-
-    this.engine.applyEvent(event, this.eventGraph);
-    this.document = this.engine.getText();
-    this.currentVersion = this.eventGraph.getFrontier();
-    this.incrementalApplyCount++;
+    this.maybeAdvanceCheckpoint();
   }
 
   /**
    * Incremental apply is safe iff the engine's current version is causally
    * ≤ the new event's parent version — i.e. the engine only needs to advance
    * (no retreat). When retreat would be needed, the new event is concurrent
-   * with state already applied and the engine cannot deterministically
-   * re-integrate concurrent inserts yet (#668), so we fall back to a full
-   * replay in topological order.
+   * with state already applied; the engine's bucket-based integration is
+   * order-sensitive for concurrent items (#668), so we re-process the
+   * divergent suffix in topological order via partial replay instead.
    */
   private canIncrementallyAdvance(event: GraphEvent): boolean {
     const engineVersion = this.engine?.getCurrentVersion();
@@ -366,6 +389,91 @@ export class EgWalkerReplica {
     const parentExpansion = this.eventGraph.expandVersion(event.parentVersion);
     for (const id of engineVersion) {
       if (!parentExpansion.has(id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Snapshot the current (version, text) pair when the graph's frontier is a
+   * single-element critical version. These checkpoints let later concurrent
+   * branches partial-replay only the post-checkpoint suffix instead of the
+   * whole graph.
+   *
+   * Checkpoints are never pruned in this revision; a long linear history
+   * grows the list by O(N). Pruning is tracked under #670.
+   */
+  private maybeAdvanceCheckpoint(): void {
+    const frontier = this.eventGraph.getFrontier();
+    if (frontier.size !== 1) {
+      return;
+    }
+    if (!this.criticalAnalyzer.isCritical(this.eventGraph, frontier)) {
+      return;
+    }
+    const last = this.criticalCheckpoints[this.criticalCheckpoints.length - 1];
+    if (last && this.versionsEqual(last.version, frontier)) {
+      return;
+    }
+    this.criticalCheckpoints.push({
+      version: new Set(frontier),
+      text: this.document,
+    });
+  }
+
+  /**
+   * Latest checkpoint that is still a critical version of the current graph.
+   * Critical versions are causally ordered, so scanning newest-first returns
+   * the deepest dominating checkpoint.
+   */
+  private pickCheckpoint(): CriticalCheckpoint | null {
+    for (let i = this.criticalCheckpoints.length - 1; i >= 0; i--) {
+      const candidate = this.criticalCheckpoints[i];
+      if (!candidate) {
+        continue;
+      }
+      if (
+        this.criticalAnalyzer.isCritical(this.eventGraph, candidate.version)
+      ) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
+    const frontier = this.eventGraph.getFrontier();
+    const replayIds = new Set(
+      this.partialReplayer.getReplayEventIds(
+        this.eventGraph,
+        checkpoint.version,
+        frontier,
+      ),
+    );
+    const events = this.eventGraph
+      .getTopologicalOrder()
+      .filter((candidate) => replayIds.has(candidate.id));
+    const engine = new EgWalkerEngine();
+    engine.generate(events, checkpoint.text, {
+      initialVersion: checkpoint.version,
+      eventGraph: this.eventGraph,
+    });
+    this.engine = engine;
+    this.document = engine.getText();
+    this.currentVersion = frontier;
+    this.partialReplayCount++;
+  }
+
+  private versionsEqual(
+    left: ReadonlySet<EventId>,
+    right: ReadonlySet<EventId>,
+  ): boolean {
+    if (left.size !== right.size) {
+      return false;
+    }
+    for (const id of left) {
+      if (!right.has(id)) {
         return false;
       }
     }

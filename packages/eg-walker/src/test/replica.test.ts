@@ -377,43 +377,10 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(restored.exportEventGraph().some((e) => e.id === "r1:0")).toBe(true);
   });
 
-  it("falls back to full replay when concurrent remote parents require retreat", () => {
-    // Concurrent remote events with parents not ⊆ engine's current version
-    // still trigger a replay so the bucket integration sees events in
-    // topological order (see issue #668 for the order-independence work).
-    const api = new EgWalkerReplica("r1");
-    api.applyRemoteEvent({
-      id: "alice:0",
-      parentVersion: new Set(),
-      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
-      timestamp: 1,
-    });
-    api.applyRemoteEvent({
-      id: "alice:1",
-      parentVersion: new Set(["alice:0"]),
-      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
-      timestamp: 2,
-    });
-    const replaysBeforeConcurrent = api.getReplayStats().fullReplays;
-    // Concurrent branch: parent is {alice:0}, engine current is {alice:1}.
-    // alice:1 is not in expand({alice:0}), so a retreat is needed → replay.
-    api.applyRemoteEvent({
-      id: "bob:0",
-      parentVersion: new Set(["alice:0"]),
-      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
-      timestamp: 3,
-    });
-    expect(api.getReplayStats().fullReplays).toBe(replaysBeforeConcurrent + 1);
-    expect(api.getText().includes("A")).toBe(true);
-    expect(api.getText().includes("B")).toBe(true);
-    expect(api.getText().includes("C")).toBe(true);
-  });
-
   it("applies sequential remote events incrementally without replaying history", () => {
-    // Long linear history followed by remote events whose parents always
-    // extend the engine's current version → only the new event needs to be
-    // processed each time. Proves replay scope is bounded to the divergent
-    // suffix (here: just the new event).
+    // Sequential remote events whose parents always extend the engine's
+    // current version take the cheap incremental path — only the new event
+    // is processed each time.
     const api = new EgWalkerReplica("r1");
     const history: GraphEvent[] = [];
     let parent: Set<string> = new Set();
@@ -437,10 +404,89 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     // subsequent event extends the current frontier and applies incrementally.
     expect(stats.fullReplays).toBe(1);
     expect(stats.incrementalApplies).toBe(history.length - 1);
-    // The engine should never have to retreat any event when applying a
-    // strictly-forward linear history.
+    // No retreats on a strictly-forward linear history.
     expect(stats.engineRetreats).toBe(0);
     expect(api.getText()).toBe("x".repeat(history.length));
+  });
+
+  it("replays only the post-checkpoint suffix when a concurrent branch arrives off a long linear history", () => {
+    // Acceptance criterion for issue #664: build a long linear history, then
+    // deliver a concurrent branch rooted at the latest critical version. The
+    // replica must replay just the divergent suffix from a critical-version
+    // checkpoint instead of re-walking the whole graph.
+    const api = new EgWalkerReplica("r1");
+    const linear: GraphEvent[] = [];
+    let parent: Set<string> = new Set();
+    for (let i = 0; i < 50; i++) {
+      const event: GraphEvent = {
+        id: `alice:${i}`,
+        parentVersion: parent,
+        operation: { type: OPERATION_TYPE.INSERT, index: i, text: "x" },
+        timestamp: i,
+      };
+      linear.push(event);
+      parent = new Set([event.id]);
+    }
+    for (const event of linear) {
+      api.applyRemoteEvent(event);
+    }
+    const tail: GraphEvent = linear[linear.length - 1]!;
+
+    // Local edit on top of the linear tail. Sibling concurrent edit below.
+    api.insert(api.getText().length, "L");
+    const statsBeforeMerge = api.getReplayStats();
+
+    // Concurrent remote event rooted at the same parent as the local edit —
+    // engine.currentVersion is the local event but the remote's parents
+    // point at the linear tail, so a retreat is required.
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set([tail.id]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: linear.length,
+        text: "R",
+      },
+      timestamp: linear.length + 1,
+    });
+
+    const stats = api.getReplayStats();
+    // Bounded replay: no new full replay was triggered for the merge.
+    expect(stats.fullReplays).toBe(statsBeforeMerge.fullReplays);
+    // Exactly one partial replay covered the merge.
+    expect(stats.partialReplays).toBe(statsBeforeMerge.partialReplays + 1);
+    // Scope check: the engine seeded by the partial replay processes only
+    // the two post-checkpoint events (local "L" + remote "R"), not all 52.
+    expect(stats.engineRetreats + stats.engineAdvances).toBeLessThanOrEqual(2);
+    // Convergence sanity: both inserts present, linear prefix intact.
+    expect(api.getText().startsWith("x".repeat(linear.length))).toBe(true);
+    expect(api.getText().includes("L")).toBe(true);
+    expect(api.getText().includes("R")).toBe(true);
+  });
+
+  it("falls back to full replay only when no critical checkpoint dominates the merge", () => {
+    // Two concurrent root inserts share no critical-version ancestor (the
+    // empty version isn't critical once any event exists), so the replica
+    // legitimately falls back to a full replay in topological order.
+    const api = new EgWalkerReplica("r1");
+    api.applyRemoteEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    const before = api.getReplayStats();
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      timestamp: 2,
+    });
+    const after = api.getReplayStats();
+    expect(after.fullReplays).toBe(before.fullReplays + 1);
+    expect(after.partialReplays).toBe(before.partialReplays);
+    expect(api.getText().includes("A")).toBe(true);
+    expect(api.getText().includes("B")).toBe(true);
   });
 
   describe("surrogate pair boundaries", () => {

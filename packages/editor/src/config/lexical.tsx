@@ -44,7 +44,7 @@ const onError = (error: Error) => {
   throw error;
 };
 
-export const LEXIAL_PLAYGROUND_CONFIG: InitialConfigType = {
+export const LEXICAL_PLAYGROUND_CONFIG: InitialConfigType = {
   namespace: "Playground",
   theme: LEXICAL_PLAYGROUND_THEME,
   onError,

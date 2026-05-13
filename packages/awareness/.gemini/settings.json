@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "softmaple-storybook-mcp": {
+    "softmaple-awareness-storybook-mcp": {
       "httpUrl": "http://localhost:6006/mcp"
     }
   }

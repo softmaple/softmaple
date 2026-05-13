@@ -11,6 +11,7 @@ import {
 import { Button } from "@softmaple/ui/components/button";
 import { SHORTCUTS } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/shortcuts";
 import type { ToolbarState } from "@softmaple/editor/context/ToolbarContext";
+import { isSafeUrl } from "@softmaple/editor/utils/sanitizeUrl";
 
 type LinkButtonProps = {
   editor: LexicalEditor;
@@ -33,7 +34,11 @@ export const LinkButton: FC<LinkButtonProps> = ({ editor, toolbarState }) => {
     if (trimmed === "") {
       return;
     }
-    editor.dispatchCommand(TOGGLE_LINK_COMMAND, formatUrl(trimmed));
+    const formatted = formatUrl(trimmed);
+    if (!isSafeUrl(formatted)) {
+      return;
+    }
+    editor.dispatchCommand(TOGGLE_LINK_COMMAND, formatted);
   };
 
   return (

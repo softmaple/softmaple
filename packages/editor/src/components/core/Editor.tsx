@@ -13,6 +13,7 @@ import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistory
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin";
 import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
+import { isSafeUrl } from "@softmaple/editor/utils/sanitizeUrl";
 import type { LexicalEditor } from "lexical";
 
 export type EditorProps = {
@@ -97,7 +98,7 @@ export const Editor: FC<EditorProps> = (props) => {
         <MarkdownPlugin />
         <ListPlugin hasStrictIndent />
         <CheckListPlugin />
-        <LinkPlugin />
+        <LinkPlugin validateUrl={isSafeUrl} />
       </div>
     </>
   );

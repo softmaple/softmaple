@@ -1,4 +1,4 @@
-When working on UI components, always use the `softmaple-storybook-mcp` MCP tools to access Storybook's component and documentation knowledge before answering or taking any action.
+When working on UI components, always use the `softmaple-awareness-storybook-mcp` MCP tools to access Storybook's component and documentation knowledge before answering or taking any action.
 
 - **CRITICAL: Never hallucinate component properties!** Before using ANY property on a component from a design system (including common-sounding ones like `shadow`, etc.), you MUST use the MCP tools to check if the property is actually documented for that component.
 - Query `list-all-documentation` to get a list of all components

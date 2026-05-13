@@ -67,7 +67,7 @@ export const FormatButtonGroup: FC<FormatButtonGroupProps> = (props) => {
       key: "code",
       icon: Code,
       label: "Inline Code",
-      shortcut: SHORTCUTS.INSERT_CODE_BLOCK,
+      shortcut: SHORTCUTS.INLINE_CODE,
       isActive: toolbarState.isCode,
     },
   ];

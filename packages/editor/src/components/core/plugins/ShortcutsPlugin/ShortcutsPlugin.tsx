@@ -17,7 +17,7 @@ import {
   // clearFormatting,
   formatBulletList,
   formatCheckList,
-  // formatCode,
+  formatCode,
   formatHeading,
   formatNumberedList,
   formatParagraph,
@@ -35,7 +35,7 @@ import {
   isFormatParagraph,
   isFormatQuote,
   isIndent,
-  isInsertCodeBlock,
+  isInlineCode,
   isInsertLink,
   isJustifyAlign,
   isLeftAlign,
@@ -76,7 +76,7 @@ export const ShortcutsPlugin = ({
       } else if (isFormatCheckList(event)) {
         formatCheckList(editor, toolbarState.blockType);
       } else if (isFormatCode(event)) {
-        // formatCode(editor, toolbarState.blockType);
+        formatCode(editor, toolbarState.blockType);
       } else if (isFormatQuote(event)) {
         formatQuote(editor, toolbarState.blockType);
       } else if (isStrikeThrough(event)) {
@@ -103,7 +103,7 @@ export const ShortcutsPlugin = ({
         editor.dispatchCommand(FORMAT_TEXT_COMMAND, "subscript");
       } else if (isSuperscript(event)) {
         editor.dispatchCommand(FORMAT_TEXT_COMMAND, "superscript");
-      } else if (isInsertCodeBlock(event)) {
+      } else if (isInlineCode(event)) {
         editor.dispatchCommand(FORMAT_TEXT_COMMAND, "code");
       } else if (isClearFormatting(event)) {
         // clearFormatting(editor);

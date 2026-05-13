@@ -17,7 +17,7 @@ export const SHORTCUTS = Object.freeze({
   // (Ctrl|⌘) + Shift + <key> shortcuts
   INCREASE_FONT_SIZE: IS_APPLE ? "⌘+Shift+." : "Ctrl+Shift+.",
   DECREASE_FONT_SIZE: IS_APPLE ? "⌘+Shift+," : "Ctrl+Shift+,",
-  INSERT_CODE_BLOCK: IS_APPLE ? "⌘+Shift+C" : "Ctrl+Shift+C",
+  INLINE_CODE: IS_APPLE ? "⌘+Shift+C" : "Ctrl+Shift+C",
   STRIKETHROUGH: IS_APPLE ? "⌘+Shift+X" : "Ctrl+Shift+X",
   LOWERCASE: IS_APPLE ? "⌃+Shift+1" : "Ctrl+Shift+1",
   UPPERCASE: IS_APPLE ? "⌃+Shift+2" : "Ctrl+Shift+2",
@@ -197,7 +197,7 @@ export const isSuperscript = (event: KeyboardEvent): boolean => {
   return code === "Period" && isModifierMatch(event, CONTROL_OR_META);
 };
 
-export const isInsertCodeBlock = (event: KeyboardEvent): boolean => {
+export const isInlineCode = (event: KeyboardEvent): boolean => {
   const { code } = event;
   return (
     code === "KeyC" &&

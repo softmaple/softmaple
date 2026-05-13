@@ -3,7 +3,7 @@ import type { InitialConfigType } from "@lexical/react/LexicalComposer";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { Providers } from "@softmaple/editor/components/core/Providers";
 import { Editor } from "@softmaple/editor/components/core/Editor";
-import { LEXIAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
+import { LEXICAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
 import type { EditorProps } from "@softmaple/editor/components/core/Editor";
 
 export type CoreEditorProps = Pick<
@@ -16,7 +16,7 @@ export type CoreEditorProps = Pick<
 
 export const CoreEditor: FC<CoreEditorProps> = (props) => {
   const {
-    lexicalConfig = LEXIAL_PLAYGROUND_CONFIG,
+    lexicalConfig = LEXICAL_PLAYGROUND_CONFIG,
     children,
     activeEditor,
     setActiveEditor,

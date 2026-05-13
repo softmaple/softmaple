@@ -8,10 +8,12 @@ import { ToolbarPlugin } from "@softmaple/editor/components/core/plugins/Toolbar
 import { LexicalContentEditable } from "@softmaple/editor/components/core/LexicalContentEditable";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
+import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { useSharedHistoryContext } from "@softmaple/editor/context/SharedHistoryContext";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/ShortcutsPlugin/ShortcutsPlugin";
 import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
+import { isSafeUrl } from "@softmaple/editor/utils/sanitizeUrl";
 import type { LexicalEditor } from "lexical";
 
 export type EditorProps = {
@@ -96,6 +98,7 @@ export const Editor: FC<EditorProps> = (props) => {
         <MarkdownPlugin />
         <ListPlugin hasStrictIndent />
         <CheckListPlugin />
+        <LinkPlugin validateUrl={isSafeUrl} />
       </div>
     </>
   );

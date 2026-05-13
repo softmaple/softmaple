@@ -4,7 +4,7 @@ import type { FC } from "react";
 
 import { memo, useState, useEffect } from "react";
 
-import { LEXIAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
+import { LEXICAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
 import { useEditorState } from "@/contexts/EditorStateContext";
 
 import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
@@ -38,7 +38,7 @@ const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
   }
 
   const commonConfig: CollabDocEditorProps["commonEditorConfig"] = {
-    ...LEXIAL_PLAYGROUND_CONFIG,
+    ...LEXICAL_PLAYGROUND_CONFIG,
     namespace: "DocEditor",
     onError: (error: unknown) => {
       console.error(error);

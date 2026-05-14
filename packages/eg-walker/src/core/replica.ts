@@ -311,6 +311,7 @@ export class EgWalkerReplica {
     readonly engineRetreats: number;
     readonly engineAdvances: number;
     readonly checkpointCount: number;
+    readonly sequenceRecordCount: number;
   } {
     const engineStats = this.engine?.getStats();
     return {
@@ -320,6 +321,7 @@ export class EgWalkerReplica {
       engineRetreats: engineStats?.retreatCount ?? 0,
       engineAdvances: engineStats?.advanceCount ?? 0,
       checkpointCount: this.criticalCheckpoints.length,
+      sequenceRecordCount: engineStats?.sequenceRecordCount ?? 0,
     };
   }
 

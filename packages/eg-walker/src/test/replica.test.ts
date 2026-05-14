@@ -464,6 +464,37 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(api.getText().includes("R")).toBe(true);
   });
 
+  it("stores initial document text as a single run-length record", () => {
+    // Section 3.4 of the paper: a long seeded document should live as one
+    // run-length record in the prepare/effect ranked B-tree, not one record
+    // per UTF-16 code unit. Inserts and deletes split the run on demand, so
+    // steady-state memory tracks divergent edits — not seed length.
+    //
+    // The engine is constructed lazily on the first event, so prime it with
+    // a concurrent remote insert at the start of the document. The single
+    // user-visible insert plus the seed should produce a small constant
+    // number of run records — not a record per code unit of the seed.
+    const SEED_LENGTH = 2000;
+    const seed = "a".repeat(SEED_LENGTH);
+    const api = new EgWalkerReplica("r1", seed);
+    expect(api.getText()).toBe(seed);
+
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1000, text: "X" },
+      timestamp: 1,
+    });
+    expect(api.getText().length).toBe(SEED_LENGTH + 1);
+    // After splitting once we expect ~3 records (left half, inserted item,
+    // right half); the bound is generous to absorb future small refactors
+    // that adjust split granularity, but stays well clear of SEED_LENGTH.
+    expect(api.getReplayStats().sequenceRecordCount).toBeLessThanOrEqual(10);
+    expect(api.getReplayStats().sequenceRecordCount).toBeLessThan(
+      SEED_LENGTH / 10,
+    );
+  });
+
   it("caps retained critical checkpoints so long linear histories do not grow O(N) state", () => {
     // Section 3.5/3.6: each event whose parent frontier is a single-element
     // critical version produces a checkpoint. On a purely linear history

@@ -4,7 +4,6 @@ import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 
-const BASE_EVENT_ID_PREFIX = "__base__:";
 const PLACEHOLDER_EVENT_ID = "__placeholder__";
 const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
 
@@ -52,6 +51,18 @@ interface EngineStats {
    * still contained concurrent siblings.
    */
   readonly fullReplayCount: number;
+  /**
+   * Number of CRDT records currently held in the underlying ranked B-tree.
+   *
+   * The paper's "Smaller" lever (Section 3.4) is run-length leaves — a
+   * single record covering many code units instead of one record per code
+   * unit. Initial document text and pre-checkpoint placeholders are stored
+   * as run-length records; concurrent inserts and deletes split records on
+   * demand. Tracking the count lets tests prove the coalescing happened
+   * and lets memory regressions surface as a quantitative jump rather than
+   * a slowdown.
+   */
+  readonly sequenceRecordCount: number;
 }
 
 export interface GeneratedDocument {
@@ -149,6 +160,7 @@ export class EgWalkerEngine {
         eventsProcessed: events.length,
         nonConflictingRunCount: this.nonConflictingRunCount,
         fullReplayCount: this.fullReplayCount,
+        sequenceRecordCount: this.itemsById.size,
       },
     };
   }
@@ -187,6 +199,7 @@ export class EgWalkerEngine {
       eventsProcessed: this.eventsById.size,
       nonConflictingRunCount: this.nonConflictingRunCount,
       fullReplayCount: this.fullReplayCount,
+      sequenceRecordCount: this.itemsById.size,
     };
   }
 
@@ -287,43 +300,32 @@ export class EgWalkerEngine {
       return;
     }
 
-    // Section 3.6 partial replay: when a checkpoint version is supplied, the
-    // pre-checkpoint text is collapsed into a single placeholder record. Inserts
-    // and deletes split the placeholder on demand, so this stays O(replayed
-    // events) in memory rather than O(checkpoint length).
-    const startFromCheckpoint = (options.initialVersion?.size ?? 0) > 0;
-    if (startFromCheckpoint) {
-      const placeholder: AugmentedCRDTItem = {
-        id: this.nextPlaceholderId(),
-        eventId: PLACEHOLDER_EVENT_ID,
-        content: initialText,
-        originLeft: null,
-        originRight: null,
-        everDeleted: false,
-        prepareState: 1,
-      };
-      this.sequence.push(placeholder);
-      this.itemsById.set(placeholder.id, placeholder);
-      return;
-    }
-
-    let originLeft: EventId | null = null;
-    stringCodeUnits(initialText).forEach((content, index) => {
-      const id = `${BASE_EVENT_ID_PREFIX}${index}`;
-      const item: AugmentedCRDTItem = {
-        id,
-        eventId: BASE_EVENT_ID_PREFIX,
-        content,
-        originLeft,
-        originRight: null,
-        everDeleted: false,
-        prepareState: 1,
-      };
-      this.sequence.push(item);
-      this.itemsById.set(id, item);
-      this.trackOriginLeft(id, item.originLeft);
-      originLeft = id;
-    });
+    // Sections 3.4 / 3.6 of the paper: store the seeded text as a single
+    // run-length record instead of one CRDT item per UTF-16 code unit. The
+    // partial-replay path already did this for the pre-checkpoint suffix
+    // (one placeholder record split on demand by intervening inserts and
+    // deletes); doing the same for the full-replay seed makes the
+    // steady-state memory of a non-empty document independent of the seed
+    // length — a long initial document is a single record until concurrent
+    // edits land inside it.
+    //
+    // The placeholder eventId is engine-internal and never persisted, so
+    // collapsing all initial text into a placeholder doesn't change any
+    // user-observable id. `splitRecordAt` carves placeholders into smaller
+    // records when later concurrent inserts/deletes anchor inside them,
+    // matching the partial-replay path that has been exercising this code
+    // since Section 3.6 landed.
+    const placeholder: AugmentedCRDTItem = {
+      id: this.nextPlaceholderId(),
+      eventId: PLACEHOLDER_EVENT_ID,
+      content: initialText,
+      originLeft: null,
+      originRight: null,
+      everDeleted: false,
+      prepareState: 1,
+    };
+    this.sequence.push(placeholder);
+    this.itemsById.set(placeholder.id, placeholder);
   }
 
   private nextPlaceholderId(): EventId {

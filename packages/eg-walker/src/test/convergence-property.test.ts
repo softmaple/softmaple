@@ -42,21 +42,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { EventGraph } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
-
-const createPrng = (seed: number): (() => number) => {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-};
-
-const cloneEvent = (event: GraphEvent): GraphEvent => ({
-  id: event.id,
-  operation: { ...event.operation },
-  parentVersion: new Set(event.parentVersion),
-  timestamp: event.timestamp,
-});
+import { cloneEvent, createPrng } from "./test-helpers";
 
 /**
  * Return a Fisher–Yates-shuffled copy of `items`. The input is not

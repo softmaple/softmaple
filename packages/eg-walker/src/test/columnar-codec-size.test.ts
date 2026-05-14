@@ -42,6 +42,7 @@ import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
 import type { EventId } from "../types";
+import { createPrng } from "./test-helpers";
 
 interface TraceMetrics {
   readonly traceName: string;
@@ -65,14 +66,6 @@ const measure = (
 
 const expectedTextFromTrace = (graph: EventGraph): string =>
   new EgWalkerEngine().generate(graph.getTopologicalOrder()).text;
-
-const createPrng = (seed: number): (() => number) => {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-};
 
 const buildLinearInsertTrace = (eventCount: number): EventGraph => {
   const graph = new EventGraph();

@@ -22,20 +22,13 @@
 import { describe, expect, it } from "vitest";
 
 import { IndexedSequence } from "../engine/indexed-sequence";
+import { createPrng } from "./test-helpers";
 
 interface PerfItem {
   id: number;
   prepare: number;
   effect: number;
 }
-
-const createPrng = (seed: number): (() => number) => {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-};
 
 const buildSequence = (
   size: number,

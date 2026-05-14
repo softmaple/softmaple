@@ -7,6 +7,11 @@ on:
       - next
     paths:
       - 'packages/editor/**'
+      - '!packages/editor/**/*.test.ts'
+      - '!packages/editor/**/*.test.tsx'
+      - '!packages/editor/**/*.bench.ts'
+      - '!packages/editor/coverage/**'
+      - '!packages/editor/**/*.md'
       - '.github/workflows/editor-chromatic.yml'
       - '.github/workflows/_chromatic-reusable.yml'
       - 'pnpm-lock.yaml'
@@ -16,6 +21,11 @@ on:
       - next
     paths:
       - 'packages/editor/**'
+      - '!packages/editor/**/*.test.ts'
+      - '!packages/editor/**/*.test.tsx'
+      - '!packages/editor/**/*.bench.ts'
+      - '!packages/editor/coverage/**'
+      - '!packages/editor/**/*.md'
       - '.github/workflows/editor-chromatic.yml'
       - '.github/workflows/_chromatic-reusable.yml'
       - 'pnpm-lock.yaml'

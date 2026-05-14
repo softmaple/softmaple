@@ -5,12 +5,16 @@ on:
     branches: [ main, next ]
     paths:
       - 'packages/eg-walker/**'
+      - '!packages/eg-walker/**/*.md'
+      - '!packages/eg-walker/coverage/**'
       - '.github/workflows/eg-walker-tests.yml'
       - 'pnpm-lock.yaml'
   pull_request:
     branches: [ main, next ]
     paths:
       - 'packages/eg-walker/**'
+      - '!packages/eg-walker/**/*.md'
+      - '!packages/eg-walker/coverage/**'
       - '.github/workflows/eg-walker-tests.yml'
       - 'pnpm-lock.yaml'
 

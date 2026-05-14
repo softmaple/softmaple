@@ -7,6 +7,12 @@ on:
       - next
     paths:
       - 'packages/awareness/**'
+      - '!packages/awareness/**/*.test.ts'
+      - '!packages/awareness/**/*.test.tsx'
+      - '!packages/awareness/**/*.bench.ts'
+      - '!packages/awareness/src/__tests__/**'
+      - '!packages/awareness/coverage/**'
+      - '!packages/awareness/**/*.md'
       - '.github/workflows/awareness-chromatic.yml'
       - '.github/workflows/_chromatic-reusable.yml'
       - 'pnpm-lock.yaml'
@@ -16,6 +22,12 @@ on:
       - next
     paths:
       - 'packages/awareness/**'
+      - '!packages/awareness/**/*.test.ts'
+      - '!packages/awareness/**/*.test.tsx'
+      - '!packages/awareness/**/*.bench.ts'
+      - '!packages/awareness/src/__tests__/**'
+      - '!packages/awareness/coverage/**'
+      - '!packages/awareness/**/*.md'
       - '.github/workflows/awareness-chromatic.yml'
       - '.github/workflows/_chromatic-reusable.yml'
       - 'pnpm-lock.yaml'

@@ -5,12 +5,16 @@ on:
     branches: [main, next]
     paths:
       - "packages/awareness/**"
+      - "!packages/awareness/**/*.md"
+      - "!packages/awareness/coverage/**"
       - ".github/workflows/awareness-tests.yml"
       - "pnpm-lock.yaml"
   pull_request:
     branches: [main, next]
     paths:
       - "packages/awareness/**"
+      - "!packages/awareness/**/*.md"
+      - "!packages/awareness/coverage/**"
       - ".github/workflows/awareness-tests.yml"
       - "pnpm-lock.yaml"
 

@@ -1,5 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
+import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 
@@ -53,13 +54,6 @@ export interface IncrementalApplyResult {
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
 }
 
-const compareIds = (left: EventId, right: EventId): number => {
-  if (left === right) {
-    return 0;
-  }
-  return left < right ? -1 : 1;
-};
-
 const spliceText = (text: string, index: number, insertText: string): string =>
   `${text.slice(0, index)}${insertText}${text.slice(index)}`;
 
@@ -88,7 +82,14 @@ export class EgWalkerEngine {
   private readonly eventItems = new Map<EventId, EventId[]>();
   private readonly deleteTargets = new Map<EventId, EventId[]>();
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
-  private readonly insertionBuckets = new Map<string, EventId[]>();
+  // Reverse index: `target item id` -> set of item ids whose `originLeft`
+  // points at it. Maintained alongside {@link itemsById} so that
+  // {@link splitRecordAt} can cheaply rewrite the `originLeft` references
+  // when it carves a placeholder in two. Without this rewrite the YATA
+  // integration scan would see siblings anchored to the same logical
+  // boundary as if they had different origins, which breaks partial
+  // replay convergence.
+  private readonly originLeftRefs = new Map<EventId, Set<EventId>>();
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
     (item) => (item.prepareState === 1 ? item.content.length : 0),
     (item) => (item.everDeleted ? 0 : item.content.length),
@@ -188,7 +189,7 @@ export class EgWalkerEngine {
     this.eventItems.clear();
     this.deleteTargets.clear();
     this.itemsById.clear();
-    this.insertionBuckets.clear();
+    this.originLeftRefs.clear();
     this.sequence.clear();
     this.currentVersion = new Set(options.initialVersion ?? []);
     this.resultingText = initialText;
@@ -243,6 +244,7 @@ export class EgWalkerEngine {
       };
       this.sequence.push(item);
       this.itemsById.set(id, item);
+      this.trackOriginLeft(id, item.originLeft);
       originLeft = id;
     });
   }
@@ -281,7 +283,19 @@ export class EgWalkerEngine {
       landing.offsetInRecord > 0
         ? this.splitRecordAt(landing.position, landing.offsetInRecord)
         : landing.position;
-    const originLeft = this.sequence.at(firstInsertPosition - 1)?.id ?? null;
+    // YATA-style origins: anchor against the records visible in the
+    // event's parent version (prepare-state >= 1), NOT against whichever
+    // concurrent records happen to be sitting in the sequence right now.
+    // Without this filter the engine would assign different origins to
+    // the same event depending on which concurrent siblings were
+    // integrated first, which is the traversal-order dependence that
+    // sub-issue 5 closes.
+    const originLeftPosition =
+      this.sequence.previousPrepareVisiblePosition(firstInsertPosition);
+    const originLeft =
+      originLeftPosition === null
+        ? null
+        : (this.sequence.at(originLeftPosition)?.id ?? null);
     const originRightPosition =
       this.sequence.nextPrepareVisiblePosition(firstInsertPosition);
     const originRight =
@@ -303,6 +317,7 @@ export class EgWalkerEngine {
       };
       this.integrate(item);
       this.itemsById.set(item.id, item);
+      this.trackOriginLeft(item.id, item.originLeft);
       insertedIds.push(item.id);
       left = item.id;
     }
@@ -427,7 +442,46 @@ export class EgWalkerEngine {
     };
     this.sequence.insert(position + 1, right);
     this.itemsById.set(right.id, right);
+
+    // Existing items with `originLeft = left.id` were anchored to the
+    // right boundary of the pre-split record; that boundary now lives
+    // at the end of {@link right}, so transfer their `originLeft`
+    // references over. `originRight = left.id` references still point
+    // at the left edge of the original record, which is unchanged.
+    this.rewriteOriginLeftReferences(left.id, right.id);
     return position + 1;
+  }
+
+  private trackOriginLeft(itemId: EventId, originLeft: EventId | null): void {
+    if (originLeft === null) {
+      return;
+    }
+    const set = this.originLeftRefs.get(originLeft) ?? new Set<EventId>();
+    set.add(itemId);
+    this.originLeftRefs.set(originLeft, set);
+  }
+
+  private rewriteOriginLeftReferences(
+    oldOriginLeft: EventId,
+    newOriginLeft: EventId,
+  ): void {
+    const refs = this.originLeftRefs.get(oldOriginLeft);
+    if (!refs || refs.size === 0) {
+      return;
+    }
+    this.originLeftRefs.delete(oldOriginLeft);
+    const merged = this.originLeftRefs.get(newOriginLeft) ?? new Set<EventId>();
+    for (const itemId of refs) {
+      const item = this.itemsById.get(itemId);
+      if (!item || item.originLeft !== oldOriginLeft) {
+        continue;
+      }
+      item.originLeft = newOriginLeft;
+      merged.add(itemId);
+    }
+    if (merged.size > 0) {
+      this.originLeftRefs.set(newOriginLeft, merged);
+    }
   }
 
   /**
@@ -524,62 +578,79 @@ export class EgWalkerEngine {
 
     const position = this.findIntegrationPosition(item);
     this.sequence.insert(position, item);
-    this.addToInsertionBucket(item);
   }
 
+  /**
+   * YATA-style integration scan (Nicolaescu et al., 2016; Yjs `Item.integrate`).
+   *
+   * The destination range is the slice of the sequence strictly between
+   * `originLeft` and `originRight`. Walk it left-to-right and decide,
+   * for each concurrent neighbour, whether the new item belongs before
+   * or after it. The decision depends only on the two items' origins and
+   * event IDs, never on the order in which concurrent siblings were
+   * integrated, so the engine converges to the same sequence regardless
+   * of which valid topological order the caller hands it.
+   *
+   * Two concurrent items with identical origins are ordered by
+   * {@link compareEventIds}: the smaller event ID wins and is placed
+   * first, matching Yjs's `id.client` tie-break.
+   */
   private findIntegrationPosition(item: AugmentedCRDTItem): number {
     const leftItem = item.originLeft
       ? this.itemsById.get(item.originLeft)
-      : undefined;
+      : null;
     const rightItem = item.originRight
       ? this.itemsById.get(item.originRight)
-      : undefined;
-    const leftIndex = leftItem ? this.sequence.positionOf(leftItem) : -1;
-    const rightIndex = rightItem
+      : null;
+    const leftPos = leftItem ? this.sequence.positionOf(leftItem) : -1;
+    const rightPos = rightItem
       ? this.sequence.positionOf(rightItem)
       : this.sequence.length;
-    const lowerBound = leftIndex + 1;
-    const upperBound = rightIndex === -1 ? this.sequence.length : rightIndex;
-    const bucket = this.insertionBuckets.get(this.originKey(item));
-    if (bucket) {
-      for (const itemId of bucket) {
-        const current = this.itemsById.get(itemId);
-        if (!current) {
-          continue;
-        }
 
-        const currentPosition = this.sequence.positionOf(current);
-        if (currentPosition < lowerBound || currentPosition >= upperBound) {
-          continue;
-        }
+    let insertPos = leftPos + 1;
+    let scanPos = leftPos + 1;
+    const scanned = new Set<EventId>();
+    let conflicting = new Set<EventId>();
 
-        if (compareIds(item.eventId, current.eventId) < 0) {
-          return currentPosition;
-        }
+    while (scanPos < rightPos) {
+      const other = this.sequence.at(scanPos);
+      if (!other) {
+        break;
       }
+      scanned.add(other.id);
+      conflicting.add(other.id);
+
+      if (other.originLeft === item.originLeft) {
+        // Same left anchor: tie-break by event ID (smaller wins, goes
+        // first). If `other` has a larger event ID and shares our right
+        // anchor, the new item is placed immediately before it. If the
+        // right anchors differ, fall through and continue scanning.
+        if (compareEventIds(other.eventId, item.eventId) < 0) {
+          insertPos = scanPos + 1;
+          conflicting = new Set();
+        } else if (other.originRight === item.originRight) {
+          break;
+        }
+      } else if (
+        other.originLeft !== null &&
+        scanned.has(other.originLeft) &&
+        !conflicting.has(other.originLeft)
+      ) {
+        // `other`'s left anchor is a record we have already accepted as
+        // belonging to the left of the new item, so the new item must
+        // continue past `other` too.
+        insertPos = scanPos + 1;
+        conflicting = new Set();
+      } else if (other.originLeft === null || !scanned.has(other.originLeft)) {
+        // `other`'s left anchor sits outside the conflict region (either
+        // null or a record we have not passed yet), so `other` dominates
+        // the remaining slice and the new item stays before it.
+        break;
+      }
+      scanPos++;
     }
-    return upperBound;
-  }
 
-  private addToInsertionBucket(item: AugmentedCRDTItem): void {
-    const key = this.originKey(item);
-    const bucket = this.insertionBuckets.get(key) ?? [];
-    const insertionIndex = bucket.findIndex((itemId) => {
-      const current = this.itemsById.get(itemId);
-      return current ? compareIds(item.eventId, current.eventId) < 0 : false;
-    });
-
-    if (insertionIndex === -1) {
-      bucket.push(item.id);
-    } else {
-      bucket.splice(insertionIndex, 0, item.id);
-    }
-    this.insertionBuckets.set(key, bucket);
-  }
-
-  private originKey(item: AugmentedCRDTItem): string {
-    // Event IDs are "<replicaId>:<n>" so they cannot contain NUL — safe delimiter.
-    return `${item.originLeft ?? ""} ${item.originRight ?? ""}`;
+    return insertPos;
   }
 
   private itemToEffectIndex(target: AugmentedCRDTItem): number {
@@ -615,7 +686,7 @@ export class EgWalkerEngine {
     if (leftOrder !== rightOrder) {
       return leftOrder - rightOrder;
     }
-    return compareIds(left, right);
+    return compareEventIds(left, right);
   }
 
   private requireItem(itemId: EventId): AugmentedCRDTItem {

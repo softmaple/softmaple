@@ -143,7 +143,18 @@ describe("EgWalkerEngine", () => {
     expect(generated.text).toContain("D");
   });
 
-  it("orders concurrent insertions through origin buckets", () => {
+  it("orders concurrent inserts at the same origin by event id (YATA tie-break)", () => {
+    // Two concurrent inserts (`z:0` and `a:0`) share the same parent
+    // version `{root:0}` and target the same logical position. The
+    // engine now anchors them against their parent-version view
+    // (originLeft=null, originRight=root char) instead of the current
+    // sequence, so both end up in the same conflict region and are
+    // ordered by event id: `a:0` < `z:0`, so A is placed before Z.
+    //
+    // This is the YATA / Yjs tie-break (lower client id wins) and the
+    // engine produces the same text regardless of which order Kahn /
+    // branch-preserving / random topological traversals deliver the
+    // events in — see the property tests below.
     const generated = new EgWalkerEngine().generate([
       {
         id: "root:0",
@@ -165,7 +176,7 @@ describe("EgWalkerEngine", () => {
       },
     ]);
 
-    expect(generated.text).toBe("ZAX");
+    expect(generated.text).toBe("AZX");
   });
 
   it("orders version diffs deterministically for multi-event retreats and advances", () => {
@@ -743,6 +754,59 @@ describe("Full paper architecture utilities", () => {
     }
   });
 
+  it("converges with full replay when concurrent inserts split the same placeholder at different offsets", () => {
+    // Sub-issue 5 regression: when partial replay starts from a
+    // checkpoint, pre-checkpoint text is collapsed into a single
+    // placeholder record. Two concurrent inserts inside that
+    // placeholder split it at different offsets, and a descendant of
+    // one of those inserts is later integrated into the conflict
+    // region created by the other. The YATA integration scan compares
+    // origin ids by identity, so the engine has to rewrite the
+    // existing items' `originLeft` references when a placeholder
+    // splits — otherwise siblings anchored to the same logical
+    // boundary look as if they have different origins and partial
+    // replay diverges from full replay.
+    const graph = new EventGraph();
+    const events: GraphEvent[] = [
+      {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "abcdef" },
+        timestamp: 1,
+      },
+      {
+        id: "b:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "B" },
+        timestamp: 2,
+      },
+      {
+        id: "c:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
+        timestamp: 3,
+      },
+      {
+        id: "f:0",
+        parentVersion: new Set(["c:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "F" },
+        timestamp: 4,
+      },
+    ];
+    events.forEach((event) => graph.addEvent(event));
+
+    const fullText = new EgWalkerEngine().generate(
+      graph.getTopologicalOrder(),
+    ).text;
+    const partialText = new PartialReplayManager().replayFromCheckpoint(graph, {
+      version: new Set(["root:0"]),
+      text: "abcdef",
+    }).text;
+
+    expect(partialText).toBe(fullText);
+    expect(partialText).toBe("aCbBFcdef");
+  });
+
   it("does not materialize per-character CRDT items for the checkpoint text", () => {
     // Acceptance criterion for issue #665: partial replay must avoid the
     // O(checkpoint.length) item cost. We use a long pre-checkpoint string and
@@ -1256,13 +1320,13 @@ describe("branch-preserving topological traversal", () => {
     expect(branchStats.advanceCount).toBe(0);
   });
 
-  it("documents the engine's order-sensitivity for concurrent inserts", () => {
-    // Pinned regression test: two concurrent root inserts plus a
-    // descendant of one of them produce different document text
-    // depending on traversal order. This is the gap that sub-issue 5
-    // closes; until then the default `getTopologicalOrder` must keep
-    // emitting the Kahn-lex order so on-disk columnar bytes and
-    // replica replays stay stable.
+  it("produces the same text across Kahn and branch-preserving traversals", () => {
+    // Two concurrent root inserts (a:0, b:0) plus a descendant of one
+    // of them (c:0 under a:0). Sub-issue 5 closes the engine's
+    // traversal-order dependence: the YATA-style integration scan
+    // anchors items against their parent-version view, so the same
+    // event graph produces the same text regardless of which valid
+    // topological order the caller hands the engine.
     const graph = new EventGraph();
     graph.addEvent({
       id: "a:0",
@@ -1283,14 +1347,11 @@ describe("branch-preserving topological traversal", () => {
       timestamp: 3,
     });
 
-    // Kahn-lex visits a, b, c in that order: the engine retreats a
-    // before applying b, then applies c (parent={a}) which retreats b
-    // and advances a, integrating C after AB.
+    // Kahn-lex visits a, b, c (lexicographic tie-break on ready set).
     const kahnOrderIds = graph.getTopologicalOrder().map((event) => event.id);
     expect(kahnOrderIds).toEqual(["a:0", "b:0", "c:0"]);
-    // The branch-preserving DFS visits a, c, b: c is integrated while
-    // b has not been seen yet, then b is integrated against a sequence
-    // that already contains C.
+    // The branch-preserving DFS visits a, c, b (continues down a's
+    // branch before popping b from the roots).
     const branchOrderIds = graph
       .getBranchPreservingTopologicalOrder()
       .map((event) => event.id);
@@ -1306,10 +1367,9 @@ describe("branch-preserving topological traversal", () => {
       "",
       { eventGraph: graph },
     ).text;
-    // Both are valid CRDT outputs of the same DAG, but they are NOT
-    // equal, which is why this PR keeps `getTopologicalOrder` as the
-    // default replay order.
-    expect(kahnText).not.toBe(branchText);
+    // Both traversals are valid topological orders of the same DAG and
+    // must agree on the final text.
+    expect(kahnText).toBe(branchText);
   });
 });
 

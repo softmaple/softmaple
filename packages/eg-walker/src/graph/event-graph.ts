@@ -11,6 +11,7 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
+import { compareEventIds } from "./event-id";
 
 /**
  * Coerce a deserialized parent-version value into an array of event IDs.
@@ -69,20 +70,6 @@ export class MissingParentError extends Error {
     this.parentId = parentId;
   }
 }
-
-/**
- * Lexicographic comparator used as the tie-breaker for both
- * `getTopologicalOrder` and `getBranchPreservingTopologicalOrder`. Kept
- * as a module-level helper so the rule is consistent across roots and
- * sibling branches and easy to swap if the engine ever standardises on
- * numeric-aware ordering (see sub-issue 5).
- */
-const compareEventIds = (left: EventId, right: EventId): number => {
-  if (left === right) {
-    return 0;
-  }
-  return left < right ? -1 : 1;
-};
 
 /**
  * Bit flags used by `diffVersions` to colour events while running the
@@ -408,13 +395,17 @@ export class EventGraph {
   /**
    * Get events in topological order (Kahn's algorithm; iterative).
    *
-   * Sorts ties by event ID for deterministic output. This is the
-   * default order consumed by `EgWalkerEngine`, `ReplayWalker`,
-   * `PartialReplayManager`, `EgWalkerReplica.fullReplay`, and the
-   * columnar codec, so its byte-for-byte output is part of the
-   * package's public contract until the engine becomes
-   * traversal-order independent (sub-issue 5). For a layout that
-   * minimises retreat/advance churn, see
+   * Sorts ties by numeric-aware event id via {@link compareEventIds}
+   * for deterministic output. This is the default order consumed by
+   * `EgWalkerEngine`, `ReplayWalker`, `PartialReplayManager`,
+   * `EgWalkerReplica.fullReplay`, and the columnar codec; its
+   * byte-for-byte output is part of the package's public contract.
+   *
+   * The engine is now traversal-order independent
+   * ({@link getBranchPreservingTopologicalOrder} yields the same
+   * document text), but this Kahn ordering is kept as the default
+   * so existing on-disk columnar bytes do not change. For a layout
+   * that minimises retreat/advance churn, see
    * {@link getBranchPreservingTopologicalOrder}.
    */
   getTopologicalOrder(): ReadonlyArray<GraphEvent> {
@@ -480,20 +471,22 @@ export class EventGraph {
    * an empty retreat/advance pair.
    *
    * The output is still a fully deterministic function of the graph:
-   * roots and sibling branches are ordered by lexicographic event id
+   * roots and sibling branches are ordered by numeric-aware event id
    * via {@link compareEventIds}.
    *
-   * Note: this order is NOT yet wired into the default replay path.
-   * `EgWalkerEngine.generate` is currently order-sensitive for
-   * concurrent inserts, so swapping orders mid-flight would change
-   * user-visible document text and on-disk columnar bytes. Once
-   * sub-issue 5 lands and the engine becomes traversal-order
-   * independent, this method will replace `getTopologicalOrder` at
-   * the call sites that care about replay performance.
+   * Sub-issue 5 made `EgWalkerEngine.generate` traversal-order
+   * independent for concurrent inserts (YATA-style integration scan
+   * anchored against the parent-version view), so either this order
+   * or {@link getTopologicalOrder} now produces the same document
+   * text. {@link getTopologicalOrder} remains the default at the
+   * call sites that persist on-disk columnar bytes to avoid
+   * gratuitously reshuffling existing files; new performance-
+   * sensitive call sites can pick this order to minimise
+   * retreat/advance churn.
    *
-   * TODO(sub-issue 5): consider weighting sibling branches by
-   * estimated subtree size (the paper's optional heuristic) instead
-   * of pure lex tie-break to reduce churn further on skewed graphs.
+   * TODO: consider weighting sibling branches by estimated subtree
+   * size (the paper's optional heuristic) instead of pure lex
+   * tie-break to reduce churn further on skewed graphs.
    */
   getBranchPreservingTopologicalOrder(): ReadonlyArray<GraphEvent> {
     const remainingParents = new Map<EventId, number>();

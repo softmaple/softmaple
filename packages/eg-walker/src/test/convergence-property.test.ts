@@ -65,13 +65,20 @@ const shuffled = <T>(items: ReadonlyArray<T>, rand: () => number): T[] => {
  * {@link EventGraph}, build a replica from that order, and read its
  * text. The replica path is the algorithm under test, so all the
  * randomized delivery-order replicas must converge on the same string.
+ *
+ * `initialText` lets the caller exercise the non-empty seed path
+ * (commit-E placeholder coalescing); it defaults to "" so existing
+ * callers do not change behaviour.
  */
-const canonicalText = (events: ReadonlyArray<GraphEvent>): string => {
+const canonicalText = (
+  events: ReadonlyArray<GraphEvent>,
+  initialText: string = "",
+): string => {
   const graph = new EventGraph();
   for (const event of events.map(cloneEvent)) {
     graph.addEvent(event);
   }
-  const replica = new EgWalkerReplica("canonical");
+  const replica = new EgWalkerReplica("canonical", initialText);
   for (const event of graph.getTopologicalOrder()) {
     replica.applyRemoteEvent(cloneEvent(event));
   }
@@ -83,13 +90,17 @@ const canonicalText = (events: ReadonlyArray<GraphEvent>): string => {
  * `rand`. The replica's own buffering handles out-of-causal-order
  * arrivals, so the order doesn't have to respect the DAG — it just
  * has to deliver every event eventually.
+ *
+ * `initialText` mirrors {@link canonicalText} and lets the caller
+ * exercise the non-empty seed path.
  */
 const applyInRandomDeliveryOrder = (
   replicaId: string,
   events: ReadonlyArray<GraphEvent>,
   rand: () => number,
+  initialText: string = "",
 ): EgWalkerReplica => {
-  const replica = new EgWalkerReplica(replicaId);
+  const replica = new EgWalkerReplica(replicaId, initialText);
   // Clone each event before delivery so a replica that mutates the
   // parentVersion set of an applied event can't bleed back into the
   // shared canonical event list owned by the caller.
@@ -130,6 +141,7 @@ const runRandomizedMultiReplicaTrace = (params: {
   readonly maxInsertLen: number;
   readonly deleteProbability: number;
   readonly syncEveryN: number;
+  readonly initialText?: string;
 }): {
   readonly events: GraphEvent[];
   readonly finalText: string;
@@ -141,13 +153,14 @@ const runRandomizedMultiReplicaTrace = (params: {
     maxInsertLen,
     deleteProbability,
     syncEveryN,
+    initialText = "",
   } = params;
   const rand = createPrng(seed);
   const simReplicas: ReplicaSim[] = Array.from(
     { length: replicaCount },
     (_, idx) => ({
       id: `r${idx}`,
-      replica: new EgWalkerReplica(`r${idx}`),
+      replica: new EgWalkerReplica(`r${idx}`, initialText),
     }),
   );
 
@@ -299,6 +312,67 @@ describe("EgWalkerReplica randomized convergence", () => {
       expect(replica.getText(), `seed=${seed}`).toBe(finalText);
     }
   });
+
+  it("converges across a wide seed sweep with non-empty initial text and concurrent splits", () => {
+    // Targets the commit-E change that collapses the initial
+    // document text into a single placeholder record (split on
+    // demand by concurrent inserts and deletes). The previous
+    // full-replay path emitted one CRDT item per code unit of the
+    // seed, so each concurrent insert anchored to a distinct
+    // `__base__:K` id. With the new path *every* concurrent insert
+    // anchored inside the seed resolves to the same single
+    // placeholder record, and the engine's `originLeftRefs` +
+    // `splitRecordAt` machinery must produce the same final text
+    // across every valid delivery order and across runtime +
+    // topological-order variations.
+    //
+    // The randomized 5-seed sweep above only exercises empty
+    // initial text. This sweep runs many seeds with a non-empty
+    // seed and a higher concurrency factor (`syncEveryN=7`) so
+    // every replica accumulates several local edits anchored
+    // inside the seed text before broadcasting, producing
+    // genuinely concurrent splits. Each seed is also re-validated
+    // under a fully randomized delivery order — different
+    // topological permutations of the same event set must produce
+    // the same final text.
+    const SEED_COUNT = 150;
+    const initialText = "the quick brown fox jumps over the lazy dog";
+    const failures: string[] = [];
+    for (let i = 0; i < SEED_COUNT; i++) {
+      // Mix `i` with a large prime so consecutive seeds explore
+      // distinct PRNG trajectories rather than nearby ones.
+      const seed = (i * 2654435761) | 0;
+      const trace = runRandomizedMultiReplicaTrace({
+        replicaCount: 3,
+        eventBudget: 40,
+        seed,
+        maxInsertLen: 4,
+        deleteProbability: 0.3,
+        syncEveryN: 7,
+        initialText,
+      });
+      const canonical = canonicalText(trace.events, initialText);
+      if (canonical !== trace.finalText) {
+        failures.push(
+          `seed=${seed} (i=${i}): canonical="${canonical}" vs final="${trace.finalText}"`,
+        );
+        continue;
+      }
+      const rand = createPrng(seed ^ 0x5a5a_5a5a);
+      const replica = applyInRandomDeliveryOrder(
+        "rand",
+        trace.events,
+        rand,
+        initialText,
+      );
+      if (replica.getText() !== trace.finalText) {
+        failures.push(
+          `seed=${seed} (i=${i}): random-delivery="${replica.getText()}" vs final="${trace.finalText}"`,
+        );
+      }
+    }
+    expect(failures, failures.slice(0, 3).join("\n")).toEqual([]);
+  }, 60_000);
 });
 
 describe("EgWalkerReplica overlapping concurrent deletes", () => {

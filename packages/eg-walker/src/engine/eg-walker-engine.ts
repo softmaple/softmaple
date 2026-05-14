@@ -4,7 +4,6 @@ import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 
-const BASE_EVENT_ID_PREFIX = "__base__:";
 const PLACEHOLDER_EVENT_ID = "__placeholder__";
 const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
 
@@ -52,6 +51,18 @@ interface EngineStats {
    * still contained concurrent siblings.
    */
   readonly fullReplayCount: number;
+  /**
+   * Number of CRDT records currently held in the underlying ranked B-tree.
+   *
+   * The paper's "Smaller" lever (Section 3.4) is run-length leaves — a
+   * single record covering many code units instead of one record per code
+   * unit. Initial document text and pre-checkpoint placeholders are stored
+   * as run-length records; concurrent inserts and deletes split records on
+   * demand. Tracking the count lets tests prove the coalescing happened
+   * and lets memory regressions surface as a quantitative jump rather than
+   * a slowdown.
+   */
+  readonly sequenceRecordCount: number;
 }
 
 export interface GeneratedDocument {
@@ -81,6 +92,14 @@ const deleteText = (text: string, index: number, length: number): string =>
  * `Array.from(text)` (which iterates code points and would coalesce a
  * surrogate pair into one entry), this preserves the public-API code-unit
  * indexing on which the CRDT items are keyed.
+ *
+ * Lone surrogates are intentionally **not** rejected here: by the time a
+ * string reaches this helper it has already been validated at the public
+ * boundary (`EgWalkerReplica.assertWellFormedUtf16` for local inserts and
+ * `assertRemoteEventWellFormed` for remote events). Bypassing the engine
+ * directly with an ill-formed string would still materialise lone
+ * surrogates as standalone CRDT items, but the public API never reaches
+ * this path with such input.
  */
 const stringCodeUnits = (text: string): string[] => text.split("");
 
@@ -106,6 +125,16 @@ export class EgWalkerEngine {
   // boundary as if they had different origins, which breaks partial
   // replay convergence.
   private readonly originLeftRefs = new Map<EventId, Set<EventId>>();
+  // Reverse index: `target item id` -> set of delete event ids whose
+  // {@link deleteTargets} list contains it. Maintained so that
+  // {@link splitRecordAt} can extend the membership to the new right
+  // half when it carves a previously-deleted record in two: without
+  // this, retreating/advancing the delete only flips the prepare-state
+  // of the left half and the right half stays prepare-visible even
+  // though it is effect-deleted, which shifts later prepare-index
+  // lookups (e.g. local inserts anchored at the document end) into
+  // the middle of the deleted range.
+  private readonly deleteTargetsByItem = new Map<EventId, Set<EventId>>();
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
     (item) => (item.prepareState === 1 ? item.content.length : 0),
     (item) => (item.everDeleted ? 0 : item.content.length),
@@ -141,6 +170,7 @@ export class EgWalkerEngine {
         eventsProcessed: events.length,
         nonConflictingRunCount: this.nonConflictingRunCount,
         fullReplayCount: this.fullReplayCount,
+        sequenceRecordCount: this.itemsById.size,
       },
     };
   }
@@ -179,6 +209,7 @@ export class EgWalkerEngine {
       eventsProcessed: this.eventsById.size,
       nonConflictingRunCount: this.nonConflictingRunCount,
       fullReplayCount: this.fullReplayCount,
+      sequenceRecordCount: this.itemsById.size,
     };
   }
 
@@ -255,6 +286,7 @@ export class EgWalkerEngine {
     this.graph = options.eventGraph ?? new EventGraph();
     this.eventItems.clear();
     this.deleteTargets.clear();
+    this.deleteTargetsByItem.clear();
     this.itemsById.clear();
     this.originLeftRefs.clear();
     this.sequence.clear();
@@ -279,43 +311,32 @@ export class EgWalkerEngine {
       return;
     }
 
-    // Section 3.6 partial replay: when a checkpoint version is supplied, the
-    // pre-checkpoint text is collapsed into a single placeholder record. Inserts
-    // and deletes split the placeholder on demand, so this stays O(replayed
-    // events) in memory rather than O(checkpoint length).
-    const startFromCheckpoint = (options.initialVersion?.size ?? 0) > 0;
-    if (startFromCheckpoint) {
-      const placeholder: AugmentedCRDTItem = {
-        id: this.nextPlaceholderId(),
-        eventId: PLACEHOLDER_EVENT_ID,
-        content: initialText,
-        originLeft: null,
-        originRight: null,
-        everDeleted: false,
-        prepareState: 1,
-      };
-      this.sequence.push(placeholder);
-      this.itemsById.set(placeholder.id, placeholder);
-      return;
-    }
-
-    let originLeft: EventId | null = null;
-    stringCodeUnits(initialText).forEach((content, index) => {
-      const id = `${BASE_EVENT_ID_PREFIX}${index}`;
-      const item: AugmentedCRDTItem = {
-        id,
-        eventId: BASE_EVENT_ID_PREFIX,
-        content,
-        originLeft,
-        originRight: null,
-        everDeleted: false,
-        prepareState: 1,
-      };
-      this.sequence.push(item);
-      this.itemsById.set(id, item);
-      this.trackOriginLeft(id, item.originLeft);
-      originLeft = id;
-    });
+    // Sections 3.4 / 3.6 of the paper: store the seeded text as a single
+    // run-length record instead of one CRDT item per UTF-16 code unit. The
+    // partial-replay path already did this for the pre-checkpoint suffix
+    // (one placeholder record split on demand by intervening inserts and
+    // deletes); doing the same for the full-replay seed makes the
+    // steady-state memory of a non-empty document independent of the seed
+    // length — a long initial document is a single record until concurrent
+    // edits land inside it.
+    //
+    // The placeholder eventId is engine-internal and never persisted, so
+    // collapsing all initial text into a placeholder doesn't change any
+    // user-observable id. `splitRecordAt` carves placeholders into smaller
+    // records when later concurrent inserts/deletes anchor inside them,
+    // matching the partial-replay path that has been exercising this code
+    // since Section 3.6 landed.
+    const placeholder: AugmentedCRDTItem = {
+      id: this.nextPlaceholderId(),
+      eventId: PLACEHOLDER_EVENT_ID,
+      content: initialText,
+      originLeft: null,
+      originRight: null,
+      everDeleted: false,
+      prepareState: 1,
+    };
+    this.sequence.push(placeholder);
+    this.itemsById.set(placeholder.id, placeholder);
   }
 
   private nextPlaceholderId(): EventId {
@@ -469,13 +490,31 @@ export class EgWalkerEngine {
     let remaining = operation.length;
 
     while (remaining > 0) {
-      const landing = this.prepareIndexLanding(operation.index, false);
+      // A delete event whose `length` runs past the prepare-visible items at
+      // the engine's current parent version legitimately stops short — this
+      // is exercised by the "deletes that run past visible prepare items"
+      // test. The previous implementation wrapped the throwing
+      // `prepareIndexToPositionAndOffset` in a catch-all try/catch, which
+      // also swallowed real bugs (e.g. ranked-B-tree aggregate corruption).
+      // Use the explicit non-throwing variant for the expected end-of-text
+      // case, and let other errors surface.
+      const landing = this.sequence.tryPrepareIndexToPositionAndOffset(
+        operation.index,
+        false,
+      );
       if (!landing) {
         break;
       }
       const candidate = this.sequence.at(landing.position);
       if (!candidate) {
-        break;
+        // The ranked B-tree just told us the prepare-weight prefix sum lands
+        // on `landing.position`, so a missing record there means the tree's
+        // aggregates disagree with its children — a structural bug we want
+        // to surface, not silently truncate the delete around.
+        throw new Error(
+          `Engine bug: prepare-index ${operation.index} landed at sequence position ` +
+            `${landing.position} but no record exists there (remaining=${remaining}).`,
+        );
       }
 
       if (isPlaceholder(candidate) && candidate.content.length > 1) {
@@ -525,7 +564,7 @@ export class EgWalkerEngine {
       remaining -= 1;
     }
 
-    this.deleteTargets.set(event.id, deletedItemIds);
+    this.recordDeleteTargets(event.id, deletedItemIds);
 
     return coalesceDeleteRuns(outputDeleteIndexes);
   }
@@ -565,7 +604,59 @@ export class EgWalkerEngine {
     // references over. `originRight = left.id` references still point
     // at the left edge of the original record, which is unchanged.
     this.rewriteOriginLeftReferences(left.id, right.id);
+    // Extend any prior delete-target memberships to cover {@link right}
+    // as well. The pre-split record was already part of `deleteTargets`
+    // for every event in this set; both halves now share the same
+    // `everDeleted` and `prepareState` and must move together under
+    // future retreat / advance calls for those events.
+    this.extendDeleteTargetMembership(left.id, right.id);
     return position + 1;
+  }
+
+  private recordDeleteTargets(
+    deleteEventId: EventId,
+    itemIds: ReadonlyArray<EventId>,
+  ): void {
+    this.deleteTargets.set(deleteEventId, [...itemIds]);
+    for (const itemId of itemIds) {
+      let owners = this.deleteTargetsByItem.get(itemId);
+      if (!owners) {
+        owners = new Set<EventId>();
+        this.deleteTargetsByItem.set(itemId, owners);
+      }
+      owners.add(deleteEventId);
+    }
+  }
+
+  private extendDeleteTargetMembership(
+    fromItemId: EventId,
+    toItemId: EventId,
+  ): void {
+    const owners = this.deleteTargetsByItem.get(fromItemId);
+    if (!owners || owners.size === 0) {
+      return;
+    }
+    let mirrored = this.deleteTargetsByItem.get(toItemId);
+    for (const deleteEventId of owners) {
+      // Invariant: `toItemId` is a freshly minted `nextPlaceholderId()`,
+      // so it cannot already appear in this delete event's target list.
+      // Guard defensively so a future call site that breaks the freshness
+      // assumption doesn't silently produce duplicate entries (which would
+      // double-toggle prepare-state on retreat/advance).
+      if (mirrored?.has(deleteEventId)) {
+        continue;
+      }
+      const targets = this.deleteTargets.get(deleteEventId);
+      if (!targets) {
+        continue;
+      }
+      targets.push(toItemId);
+      if (!mirrored) {
+        mirrored = new Set<EventId>();
+        this.deleteTargetsByItem.set(toItemId, mirrored);
+      }
+      mirrored.add(deleteEventId);
+    }
   }
 
   private trackOriginLeft(itemId: EventId, originLeft: EventId | null): void {
@@ -626,19 +717,6 @@ export class EgWalkerEngine {
       this.splitRecordAt(position, length);
     }
     return middle;
-  }
-
-  private prepareIndexLanding(
-    index: number,
-    allowEnd: boolean,
-  ):
-    | { readonly position: number; readonly offsetInRecord: number }
-    | undefined {
-    try {
-      return this.sequence.prepareIndexToPositionAndOffset(index, allowEnd);
-    } catch {
-      return undefined;
-    }
   }
 
   private retreat(eventId: EventId): void {

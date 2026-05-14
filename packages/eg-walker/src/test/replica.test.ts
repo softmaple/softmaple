@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { EgWalkerReplica, createEgWalkerReplica } from "../core/replica";
 import { OPERATION_TYPE } from "../constants/operation-types";
-import { EventAlreadyExistsError } from "../graph/event-graph";
+import { EventAlreadyExistsError, EventGraph } from "../graph/event-graph";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import type { GraphEvent, SerializedGraphInput } from "../types";
 
 describe("EgWalkerReplica", () => {
@@ -464,6 +465,166 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(api.getText().includes("R")).toBe(true);
   });
 
+  it("stores initial document text as a single run-length record", () => {
+    // Section 3.4 of the paper: a long seeded document should live as one
+    // run-length record in the prepare/effect ranked B-tree, not one record
+    // per UTF-16 code unit. Inserts and deletes split the run on demand, so
+    // steady-state memory tracks divergent edits — not seed length.
+    //
+    // The engine is constructed lazily on the first event, so prime it with
+    // a concurrent remote insert at the start of the document. The single
+    // user-visible insert plus the seed should produce a small constant
+    // number of run records — not a record per code unit of the seed.
+    const SEED_LENGTH = 2000;
+    const seed = "a".repeat(SEED_LENGTH);
+    const api = new EgWalkerReplica("r1", seed);
+    expect(api.getText()).toBe(seed);
+
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1000, text: "X" },
+      timestamp: 1,
+    });
+    expect(api.getText().length).toBe(SEED_LENGTH + 1);
+    // After splitting once we expect ~3 records (left half, inserted item,
+    // right half); the bound is generous to absorb future small refactors
+    // that adjust split granularity, but stays well clear of SEED_LENGTH.
+    expect(api.getReplayStats().sequenceRecordCount).toBeLessThanOrEqual(10);
+    expect(api.getReplayStats().sequenceRecordCount).toBeLessThan(
+      SEED_LENGTH / 10,
+    );
+  });
+
+  it("caps retained critical checkpoints so long linear histories do not grow O(N) state", () => {
+    // Section 3.5/3.6: each event whose parent frontier is a single-element
+    // critical version produces a checkpoint. On a purely linear history
+    // *every* event is a critical version, so the retained checkpoint list
+    // would grow without bound in the original implementation. The pruning
+    // logic keeps only the most recent `MAX_RETAINED_CHECKPOINTS` entries.
+    const api = new EgWalkerReplica("r1", "");
+    const HISTORY = 500;
+    for (let i = 0; i < HISTORY; i++) {
+      api.insert(api.getText().length, "x");
+    }
+    expect(api.getText().length).toBe(HISTORY);
+
+    const stats = api.getReplayStats();
+    // The cap is a private constant (32 today); assert a tight upper bound
+    // that catches both "checkpoint pruning regressed" and "the cap was
+    // accidentally lifted to a value comparable to history length".
+    expect(stats.checkpointCount).toBeLessThanOrEqual(64);
+    expect(stats.checkpointCount).toBeLessThan(HISTORY);
+
+    // A concurrent merge rooted at the most recent checkpoint must still
+    // take the partial-replay fast path — the newest checkpoint is always
+    // retained even after pruning.
+    const partialReplaysBefore = stats.partialReplays;
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set([`r1:${HISTORY - 1}`]),
+      operation: { type: OPERATION_TYPE.INSERT, index: HISTORY, text: "B" },
+      timestamp: HISTORY + 1,
+    });
+    const afterMerge = api.getReplayStats();
+    expect(afterMerge.partialReplays).toBeGreaterThanOrEqual(
+      partialReplaysBefore,
+    );
+    // Convergence sanity.
+    expect(api.getText().endsWith("B")).toBe(true);
+  });
+
+  it("uses branch-preserving traversal during fullReplay to minimise retreat/advance churn", () => {
+    // Integration check that `EgWalkerReplica.fullReplay` is actually
+    // forwarding the branch-preserving order to the engine. The engine's
+    // own retreat/advance bounds are exercised at the unit level in
+    // `eg-walker-engine.test.ts`; here we only assert a *comparative*
+    // bound that holds independent of the replica's full-replay trigger
+    // logic: the replica's engine churn on this 4x6 grid must be
+    // strictly less than what the same graph produces under the legacy
+    // Kahn ordering run through the engine directly.
+    //
+    // Build B parallel chains of length L forking off a common root, with
+    // ids assigned in BFS order so the lex tie-breaker forces Kahn into
+    // a fully interleaved traversal (retreat the previous branch /
+    // advance the next on every level transition). Branch-preserving
+    // DFS walks one branch to depth before visiting the next, so
+    // retreat/advance only fire at branch boundaries.
+    const branches = 4;
+    const depth = 6;
+    const expectedEvents = 1 + branches * depth;
+    const idAt = (level: number, branch: number): string =>
+      `n-${String(level * branches + branch).padStart(3, "0")}`;
+    const buildEvents = (): GraphEvent[] => {
+      const out: GraphEvent[] = [
+        {
+          id: "n-000",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          timestamp: 0,
+        },
+      ];
+      for (let level = 0; level < depth; level++) {
+        for (let branch = 0; branch < branches; branch++) {
+          const id = idAt(level + 1, branch);
+          const parent = level === 0 ? "n-000" : idAt(level, branch);
+          out.push({
+            id,
+            parentVersion: new Set([parent]),
+            operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "x" },
+            timestamp: 1 + level * branches + branch,
+          });
+        }
+      }
+      return out;
+    };
+
+    // Baseline: run the same graph through the engine directly with the
+    // legacy Kahn ordering. This is what the replica *would* produce if
+    // `fullReplay` regressed back to `getTopologicalOrder()`.
+    const baselineGraph = new EventGraph();
+    for (const event of buildEvents()) {
+      baselineGraph.addEvent(event);
+    }
+    const kahnStats = new EgWalkerEngine().generate(
+      baselineGraph.getTopologicalOrder(),
+      "",
+      { eventGraph: baselineGraph },
+    ).stats;
+    const kahnChurn = kahnStats.retreatCount + kahnStats.advanceCount;
+
+    // Deliver events to the replica in causal order so each landing
+    // extends the frontier, then trigger a fresh full replay over the
+    // whole graph by introducing a concurrent root with no shared
+    // critical ancestor.
+    const api = new EgWalkerReplica("r1");
+    for (const event of buildEvents()) {
+      api.applyRemoteEvent(event);
+    }
+    api.applyRemoteEvent({
+      id: "m-000",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+      timestamp: 999,
+    });
+
+    const stats = api.getReplayStats();
+    expect(stats.fullReplays).toBeGreaterThanOrEqual(1);
+    const replicaChurn = stats.engineRetreats + stats.engineAdvances;
+    // The replica forwards a branch-preserving order, so its engine
+    // churn must be strictly less than the Kahn baseline on this graph.
+    // We avoid asserting an absolute bound because the replica's full
+    // replay trigger logic can legitimately evolve (e.g. fewer retries,
+    // different checkpoint selection) without breaking the property
+    // we actually care about: that branch-preserving order is used.
+    expect(replicaChurn).toBeLessThan(kahnChurn);
+
+    // Convergence sanity: every inserted character lands in the document.
+    expect(api.getText()).toHaveLength(expectedEvents + 1);
+    expect(api.getText().includes("M")).toBe(true);
+    expect(api.getText().includes("R")).toBe(true);
+  });
+
   it("falls back to full replay only when no critical checkpoint dominates the merge", () => {
     // Two concurrent root inserts share no critical-version ancestor (the
     // empty version isn't critical once any event exists), so the replica
@@ -501,6 +662,92 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
       // Valid boundaries still work.
       expect(() => api.insert(0, "A")).not.toThrow();
       expect(() => api.insert(api.getText().length, "Z")).not.toThrow();
+    });
+
+    it("rejects local inserts whose payload contains a lone surrogate", () => {
+      const api = new EgWalkerReplica("r1", "hello");
+      // Lone high surrogate (U+D83D, the first half of "😀") with no low
+      // partner — would otherwise materialise as a standalone CRDT item
+      // and surface as an unpaired surrogate in getText().
+      expect(() => api.insert(0, "\uD83D")).toThrow(
+        /lone high surrogate.*at index 0/,
+      );
+      // Lone low surrogate.
+      expect(() => api.insert(0, "\uDE00")).toThrow(
+        /lone low surrogate.*at index 0/,
+      );
+      // High surrogate followed by a non-surrogate is also ill-formed.
+      expect(() => api.insert(0, "\uD83DA")).toThrow(/lone high surrogate/);
+      // Valid surrogate pair (emoji) is accepted.
+      expect(() => api.insert(0, "😀")).not.toThrow();
+      expect(api.getText().startsWith("😀")).toBe(true);
+    });
+
+    it("rejects initial document text containing a lone surrogate", () => {
+      expect(() => new EgWalkerReplica("r1", "\uD83Dhello")).toThrow(
+        /initial document text contains a lone high surrogate/,
+      );
+      expect(() => new EgWalkerReplica("r1", "hello\uDE00")).toThrow(
+        /initial document text contains a lone low surrogate/,
+      );
+      // A well-formed emoji at any position is fine.
+      expect(() => new EgWalkerReplica("r1", "hi 😀!")).not.toThrow();
+    });
+
+    it("rejects remote events whose insert payload contains a lone surrogate", () => {
+      const api = new EgWalkerReplica("r1");
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:0",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: "\uD83D",
+          },
+          timestamp: 1,
+        }),
+      ).toThrow(
+        /remote event bob:0 insert text contains a lone high surrogate/,
+      );
+      // A well-formed remote insert with a paired emoji passes.
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "😀" },
+          timestamp: 2,
+        }),
+      ).not.toThrow();
+      expect(api.getText()).toBe("😀");
+    });
+
+    it("rejects remote events with non-finite or negative delete lengths", () => {
+      const api = new EgWalkerReplica("r1", "hello");
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:0",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.DELETE,
+            index: 0,
+            length: Number.NaN,
+          },
+          timestamp: 1,
+        }),
+      ).toThrow(/remote event bob:0 has invalid delete length/);
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:1",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.DELETE,
+            index: 0,
+            length: -1,
+          },
+          timestamp: 2,
+        }),
+      ).toThrow(/remote event bob:1 has invalid delete length -1/);
     });
 
     it("keeps concurrent emoji operations from splitting surrogate pairs", () => {

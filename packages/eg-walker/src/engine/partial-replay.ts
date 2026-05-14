@@ -40,8 +40,14 @@ export class PartialReplayManager {
       checkpoint.version,
       targetVersion,
     );
+    // We only need a hash-set membership view of every event in the
+    // graph; building it from {@link EventGraph.getAllEvents} skips a
+    // Kahn pass over events we discard anyway. `getAllEvents` returns
+    // every event the graph holds (i.e. the same set as
+    // {@link EventGraph.getTopologicalOrder}); the order is irrelevant
+    // here because `replayedEventIds` already encodes the replay order.
     const eventById = new Map(
-      graph.getTopologicalOrder().map((event) => [event.id, event]),
+      graph.getAllEvents().map((event) => [event.id, event]),
     );
     const events = replayedEventIds
       .map((eventId) => eventById.get(eventId))
@@ -67,8 +73,14 @@ export class PartialReplayManager {
     to: Version,
   ): ReadonlyArray<EventId> {
     const { onlyInRight } = graph.diffVersions(from, to);
+    // Section 3.4: walk the divergent suffix in branch-preserving order so
+    // each event lands on a parent version matching the engine's current
+    // version where possible, keeping the replay on the non-conflicting-run
+    // fast path and minimising retreat/advance churn. The columnar codec
+    // keeps using {@link EventGraph.getTopologicalOrder} (Kahn) for byte
+    // stability of persisted graphs.
     return graph
-      .getTopologicalOrder()
+      .getBranchPreservingTopologicalOrder()
       .map((event) => event.id)
       .filter((eventId) => onlyInRight.has(eventId));
   }

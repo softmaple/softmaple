@@ -17,7 +17,11 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
-import { createDocumentState } from "./invariants";
+import {
+  assertRemoteEventWellFormed,
+  assertWellFormedUtf16,
+  createDocumentState,
+} from "./invariants";
 import {
   EventGraph,
   EventAlreadyExistsError,
@@ -31,6 +35,28 @@ interface CriticalCheckpoint {
   readonly version: Version;
   readonly text: string;
 }
+
+/**
+ * Upper bound on retained critical checkpoints.
+ *
+ * Section 3.5/3.6 of the Eg-walker paper requires *some* critical-version
+ * snapshot in scope to skip the full-replay path when a concurrent branch
+ * arrives; the latest dominating checkpoint is always the cheapest one to
+ * replay from, and any older checkpoint is only useful when a concurrent
+ * branch is rooted earlier than every retained checkpoint. Capping the
+ * retained list at this many newest entries keeps replica memory O(1) in
+ * history length without sacrificing the common-case partial-replay path
+ * (the worst case — a concurrent branch rooted before the oldest retained
+ * checkpoint — falls back to {@link fullReplay}, which is already the
+ * pre-checkpoint behaviour).
+ *
+ * The value is empirical: 32 is comfortably above the number of distinct
+ * critical versions any single editing session is expected to materialise
+ * between concurrent merges, while bounding each checkpoint's per-replica
+ * cost (a frontier `Set` plus a snapshot text string) at a few KB worst
+ * case for ordinary documents.
+ */
+const MAX_RETAINED_CHECKPOINTS = 32;
 
 /**
  * Public replica for Eg-walker.
@@ -57,12 +83,22 @@ export class EgWalkerReplica {
     initialText: string = "",
     eventGraph?: EventGraph,
   ) {
+    assertWellFormedUtf16(initialText, "initial document text");
     this.document = initialText;
     this.initialText = initialText;
     this.eventGraph = eventGraph ?? new EventGraph();
     this.currentVersion = this.eventGraph.getFrontier();
     this.nextSequenceNumber = this.inferNextSequenceNumber();
     if (this.eventGraph.getAllEvents().length > 0) {
+      // A prebuilt graph bypasses {@link applyRemoteEvent}, so its event
+      // payloads have never been screened by
+      // {@link assertRemoteEventWellFormed}. Validate them here before
+      // {@link fullReplay} so a tampered persisted payload (lone
+      // surrogate, negative delete length) cannot produce malformed
+      // {@link getText} output.
+      for (const event of this.eventGraph.getAllEvents()) {
+        assertRemoteEventWellFormed(event);
+      }
       this.fullReplay();
     }
     this.maybeAdvanceCheckpoint();
@@ -185,6 +221,7 @@ export class EgWalkerReplica {
    * be applied in causal order, so callers do not need to deliver in order.
    */
   applyRemoteEvent(event: GraphEvent): void {
+    assertRemoteEventWellFormed(event);
     this.tryAcceptRemoteEvent(event);
   }
 
@@ -214,6 +251,7 @@ export class EgWalkerReplica {
     readonly engineRetreats: number;
     readonly engineAdvances: number;
     readonly checkpointCount: number;
+    readonly sequenceRecordCount: number;
   } {
     const engineStats = this.engine?.getStats();
     return {
@@ -223,6 +261,7 @@ export class EgWalkerReplica {
       engineRetreats: engineStats?.retreatCount ?? 0,
       engineAdvances: engineStats?.advanceCount ?? 0,
       checkpointCount: this.criticalCheckpoints.length,
+      sequenceRecordCount: engineStats?.sequenceRecordCount ?? 0,
     };
   }
 
@@ -274,6 +313,7 @@ export class EgWalkerReplica {
       if (operation.text.length === 0) {
         return null;
       }
+      assertWellFormedUtf16(operation.text, "insert text");
       this.validateIndex(operation.index, true);
       this.assertNotMidSurrogate(operation.index);
       return operation;
@@ -322,7 +362,13 @@ export class EgWalkerReplica {
   }
 
   private fullReplay(): void {
-    const sortedEvents = this.eventGraph.getTopologicalOrder();
+    // Section 3.4 of the paper: walk the event graph in branch-preserving
+    // order so each parent transition matches the engine's current version
+    // and triggers the non-conflicting-run fast path instead of forcing a
+    // retreat/advance round-trip across an interleaved Kahn order. The
+    // columnar codec keeps using {@link EventGraph.getTopologicalOrder}
+    // (Kahn) so persisted on-disk bytes stay stable.
+    const sortedEvents = this.eventGraph.getBranchPreservingTopologicalOrder();
     const engine = new EgWalkerEngine();
     const generated = engine.generate(sortedEvents, this.initialText, {
       eventGraph: this.eventGraph,
@@ -401,8 +447,11 @@ export class EgWalkerReplica {
    * branches partial-replay only the post-checkpoint suffix instead of the
    * whole graph.
    *
-   * Checkpoints are never pruned in this revision; a long linear history
-   * grows the list by O(N). Pruning is tracked under #670.
+   * The retained list is capped at {@link MAX_RETAINED_CHECKPOINTS} entries —
+   * a long linear history evicts the oldest checkpoints, keeping replica
+   * memory O(1) in history length. A concurrent branch rooted before every
+   * retained checkpoint falls back to {@link fullReplay}, the same path the
+   * replica took before checkpoints existed at all.
    */
   private maybeAdvanceCheckpoint(): void {
     const frontier = this.eventGraph.getFrontier();
@@ -420,6 +469,11 @@ export class EgWalkerReplica {
       version: new Set(frontier),
       text: this.document,
     });
+    // Evict the oldest entries one at a time so a future change that pushes
+    // multiple checkpoints in a single tick still ends the call bounded.
+    while (this.criticalCheckpoints.length > MAX_RETAINED_CHECKPOINTS) {
+      this.criticalCheckpoints.shift();
+    }
   }
 
   /**

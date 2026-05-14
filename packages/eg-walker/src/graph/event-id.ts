@@ -67,3 +67,24 @@ const splitTrailingSequence = (id: EventId): ParsedEventId | null => {
   }
   return { prefix: id.slice(0, colonIndex), sequence };
 };
+
+/**
+ * Split an event ID into `{ replicaId, sequence }` when it matches the
+ * canonical `replicaId:sequence` shape produced by
+ * {@link EgWalkerReplica.generateEventId}. Returns `null` for custom or
+ * placeholder IDs that do not parse.
+ *
+ * Used by the engine's typed-run coalescing path (Section 3.4 "smaller"
+ * lever) and the columnar codec's id-run encoder to decide whether two
+ * adjacent events belong to the same author and have contiguous sequence
+ * numbers.
+ */
+export const parseEventId = (
+  id: EventId,
+): { readonly replicaId: string; readonly sequence: number } | null => {
+  const parsed = splitTrailingSequence(id);
+  if (!parsed) {
+    return null;
+  }
+  return { replicaId: parsed.prefix, sequence: parsed.sequence };
+};

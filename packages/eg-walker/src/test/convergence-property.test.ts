@@ -373,6 +373,54 @@ describe("EgWalkerReplica randomized convergence", () => {
     }
     expect(failures, failures.slice(0, 3).join("\n")).toEqual([]);
   }, 60_000);
+
+  it("converges across a wide seed sweep with concurrent edits inside typed runs", () => {
+    // Targets the §3.4 "smaller" typed-run coalescing path: when
+    // every local insert is a single character with a canonical
+    // `replicaId:sequence` id, contiguous events from one author land
+    // in the same ranked-B-tree leaf. A concurrent insert or delete
+    // from a sibling replica that anchors *inside* that leaf must
+    // split the typed run on demand, and the post-split right half
+    // gets a deterministic `${replicaId}:${startSequence}:0` id so
+    // every replica can converge on the same anchor identity.
+    //
+    // With `maxInsertLen = 1` every local edit grows the originating
+    // replica's typed run, and `syncEveryN = 5` lets each replica
+    // accumulate enough characters to form a multi-code-unit run
+    // before broadcasting. The other replicas then deliver their
+    // own typed-run extensions and split-on-demand edits inside the
+    // accumulated runs. Each seed is also re-validated under a fully
+    // randomized delivery order so different topological orders of
+    // the same event set must produce the same final text.
+    const SEED_COUNT = 150;
+    const failures: string[] = [];
+    for (let i = 0; i < SEED_COUNT; i++) {
+      const seed = (i * 1140671485 + 12820163) | 0;
+      const trace = runRandomizedMultiReplicaTrace({
+        replicaCount: 3,
+        eventBudget: 50,
+        seed,
+        maxInsertLen: 1,
+        deleteProbability: 0.35,
+        syncEveryN: 5,
+      });
+      const canonical = canonicalText(trace.events);
+      if (canonical !== trace.finalText) {
+        failures.push(
+          `seed=${seed} (i=${i}): canonical="${canonical}" vs final="${trace.finalText}"`,
+        );
+        continue;
+      }
+      const rand = createPrng(seed ^ 0x9e37_79b9);
+      const replica = applyInRandomDeliveryOrder("rand", trace.events, rand);
+      if (replica.getText() !== trace.finalText) {
+        failures.push(
+          `seed=${seed} (i=${i}): random-delivery="${replica.getText()}" vs final="${trace.finalText}"`,
+        );
+      }
+    }
+    expect(failures, failures.slice(0, 3).join("\n")).toEqual([]);
+  }, 60_000);
 });
 
 describe("EgWalkerReplica overlapping concurrent deletes", () => {

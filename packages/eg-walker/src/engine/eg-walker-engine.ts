@@ -1,6 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
-import { compareEventIds } from "../graph/event-id";
+import { compareEventIds, parseEventId } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 
@@ -8,15 +8,42 @@ const PLACEHOLDER_EVENT_ID = "__placeholder__";
 const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
 
 /**
+ * Identity of a {@link AugmentedCRDTItem} that represents a coalesced run
+ * of contiguous single-character INSERT events from one author. The record
+ * spans `content.length` events whose IDs are
+ * `${replicaId}:${startSequence + offsetInRecord}` for
+ * `offsetInRecord ∈ [0, content.length)`.
+ *
+ * Records produced by multi-character paste events and the initial-text
+ * placeholder do **not** carry a {@link TypedRun}; for those, the
+ * `eventId` field alone identifies the owning event.
+ */
+interface TypedRun {
+  readonly replicaId: string;
+  readonly startSequence: number;
+}
+
+/**
  * Augmented CRDT item used during replay.
  *
- * Regular items represent a single UTF-16 code unit (`content.length === 1`).
- * Placeholder items represent a contiguous run of pre-checkpoint content for
- * Section 3.6 partial replay — they can carry `content.length > 1` and are
- * split on demand when an insert or delete lands inside them.
+ * A record can take two coalesced shapes (or be a single-event item):
  *
- * `content` is mutable to support in-place placeholder splits without
- * invalidating the `WeakMap` location index in {@link IndexedSequence}.
+ * - **Placeholder** (`eventId === PLACEHOLDER_EVENT_ID`, `run === null`):
+ *   contiguous run of pre-checkpoint / initial-text content, split on
+ *   demand by concurrent inserts and deletes. Splits assign fresh
+ *   placeholder IDs to the right half.
+ * - **Typed-run record** (`run !== null`): coalesced run of contiguous
+ *   single-character INSERT events from one author (Section 3.4 "smaller"
+ *   lever). Splits move whole-event slices to new records with IDs
+ *   `${replicaId}:${startSequence + offsetInRecord}:0`.
+ *
+ * Multi-character INSERT events stay one record per code unit (each with
+ * `run === null` and a real `eventId`); we do not coalesce them, since the
+ * per-code-unit IDs already serve as anchors for concurrent siblings.
+ *
+ * `content` is mutable to support in-place run extension and splits
+ * without invalidating the `WeakMap` location index in
+ * {@link IndexedSequence}.
  */
 interface AugmentedCRDTItem {
   readonly id: EventId;
@@ -26,6 +53,7 @@ interface AugmentedCRDTItem {
   readonly originRight: EventId | null;
   everDeleted: boolean;
   prepareState: number;
+  run: TypedRun | null;
 }
 
 const isPlaceholder = (item: AugmentedCRDTItem): boolean =>
@@ -334,6 +362,7 @@ export class EgWalkerEngine {
       originRight: null,
       everDeleted: false,
       prepareState: 1,
+      run: null,
     };
     this.sequence.push(placeholder);
     this.itemsById.set(placeholder.id, placeholder);
@@ -409,10 +438,76 @@ export class EgWalkerEngine {
       leftBound + 1 === firstInsertPosition &&
       firstInsertPosition === rightBound;
 
+    // Section 3.4 "smaller" lever: typed-run coalescing.
+    //
+    // When a single-character INSERT lands at the right boundary of an
+    // adjacent typed-run record from the same author whose run extends by
+    // exactly one sequence number, append to that record's content
+    // instead of allocating a new CRDT item. The columnar codec already
+    // groups events into id-runs by (replicaId, contiguous sequence) for
+    // wire encoding; mirroring that grouping in the ranked B-tree
+    // collapses a 20k-character linear single-author trace to ~1 record
+    // (down from one per code unit) while leaving multi-author / multi-event
+    // ordering unchanged \u2014 split-on-demand carves the run when a
+    // concurrent insert or delete anchors inside it.
+    const parsed = parseEventId(event.id);
+    if (
+      conflictRegionEmpty &&
+      operation.text.length === 1 &&
+      parsed !== null &&
+      originLeftPosition !== null &&
+      originLeftPosition === firstInsertPosition - 1
+    ) {
+      const leftRecord = this.sequence.at(originLeftPosition);
+      if (
+        leftRecord !== undefined &&
+        leftRecord.run !== null &&
+        leftRecord.run.replicaId === parsed.replicaId &&
+        leftRecord.run.startSequence + leftRecord.content.length ===
+          parsed.sequence &&
+        leftRecord.prepareState === 1 &&
+        !leftRecord.everDeleted &&
+        // Don't extend a run that already has items anchored to its right
+        // boundary \u2014 those items chose this id as their `originLeft` at a
+        // moment when the record ended one code unit earlier, and stretching
+        // the content would shift the boundary they were anchored to.
+        !this.hasOriginLeftRefs(leftRecord.id)
+      ) {
+        const effectIndex =
+          this.itemToEffectIndex(leftRecord) + leftRecord.content.length;
+        leftRecord.content += operation.text;
+        this.sequence.updateItem(leftRecord);
+        this.eventItems.set(event.id, [leftRecord.id]);
+        this.resultingText = spliceText(
+          this.resultingText,
+          effectIndex,
+          operation.text,
+        );
+
+        return [
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: effectIndex,
+            text: operation.text,
+          },
+        ];
+      }
+    }
+
     const codeUnits = stringCodeUnits(operation.text);
     const insertedIds: EventId[] = [];
     let left = originLeft;
 
+    // First code unit: pay the full integration scan if the conflict region
+    // isn't empty. Single-character INSERTs from a canonical
+    // `replicaId:sequence` author seed a typed-run record so that later
+    // contiguous events from the same author can extend it in-place (the
+    // coalescing branch above). Multi-character INSERTs and IDs that don't
+    // parse keep `run = null` and behave like the pre-coalescing engine.
+    const firstRun: TypedRun | null =
+      parsed !== null && operation.text.length === 1
+        ? { replicaId: parsed.replicaId, startSequence: parsed.sequence }
+        : null;
     const firstItem: AugmentedCRDTItem = {
       id: `${event.id}:0`,
       eventId: event.id,
@@ -421,6 +516,7 @@ export class EgWalkerEngine {
       originRight,
       everDeleted: false,
       prepareState: 1,
+      run: firstRun,
     };
     let actualFirstPosition: number;
     if (conflictRegionEmpty) {
@@ -441,7 +537,10 @@ export class EgWalkerEngine {
     // 1..N terminates on its first iteration and the integration
     // position is unconditionally `previous + 1`. We bypass the scan
     // and place them at sequential positions instead of paying
-    // `findIntegrationPosition`'s setup cost per character.
+    // `findIntegrationPosition`'s setup cost per character. The items
+    // stay `run = null` because typed-run coalescing operates on
+    // single-character events from contiguous sequence numbers, not on
+    // the per-code-unit fragments of one multi-character INSERT.
     for (let offset = 1; offset < codeUnits.length; offset++) {
       const item: AugmentedCRDTItem = {
         id: `${event.id}:${offset}`,
@@ -451,6 +550,7 @@ export class EgWalkerEngine {
         originRight,
         everDeleted: false,
         prepareState: 1,
+        run: null,
       };
       this.sequence.insert(actualFirstPosition + offset, item);
       this.itemsById.set(item.id, item);
@@ -517,22 +617,29 @@ export class EgWalkerEngine {
         );
       }
 
-      if (isPlaceholder(candidate) && candidate.content.length > 1) {
+      // Multi-character records (placeholders and typed-run leaves coalesced
+      // by Section 3.4) are split on demand so the deleted slice is its own
+      // record. Single-character records and per-code-unit paste fragments
+      // skip the split entirely and are marked in place.
+      const isMultiCharRecord =
+        (isPlaceholder(candidate) || candidate.run !== null) &&
+        candidate.content.length > 1;
+      if (isMultiCharRecord) {
         const availableInRecord =
           candidate.content.length - landing.offsetInRecord;
         const toDelete = Math.min(remaining, availableInRecord);
-        const middle = this.splitPlaceholderForDelete(
+        const middle = this.splitRecordForDelete(
           landing.position,
           landing.offsetInRecord,
           toDelete,
         );
 
         deletedItemIds.push(middle.id);
-        // Mirror the non-placeholder guard: a concurrent delete that lands on
-        // an already-effect-deleted placeholder segment (e.g. after retreating
-        // an overlapping sibling) must NOT remove characters from the text
-        // again. Without this, two concurrent deletes of the same checkpoint
-        // region replay to a shorter string than full replay produces.
+        // A concurrent delete that lands on an already-effect-deleted slice
+        // (e.g. after retreating an overlapping sibling) must NOT remove
+        // characters from the text again. Without this, two concurrent
+        // deletes of the same region replay to a shorter string than full
+        // replay produces.
         if (!middle.everDeleted) {
           const effectIndex = this.itemToEffectIndex(middle);
           for (let k = 0; k < toDelete; k++) {
@@ -570,11 +677,21 @@ export class EgWalkerEngine {
   }
 
   /**
-   * Split a multi-character placeholder so that `offsetInRecord` code units
+   * Split a multi-character record so that `offsetInRecord` code units
    * remain in place and the rest become a new record at `position + 1`.
    * Returns the position of the new right-hand record — i.e. where neighbours
    * sandwiched between the two halves should be inserted. Single-character
    * records and offset-0 calls are no-ops.
+   *
+   * Two record shapes carry multi-character content and can be split:
+   *
+   * - **Placeholder:** right gets a fresh placeholder id; both halves stay
+   *   anonymous, owned by the engine-internal `PLACEHOLDER_EVENT_ID`.
+   * - **Typed-run record:** right inherits the run's replicaId with
+   *   `startSequence` advanced by `offsetInRecord`, and the `eventItems`
+   *   entry for every event whose sequence moved to the right half is
+   *   repointed from `left.id` to `right.id` so retreat / advance still
+   *   land on the right slice.
    */
   private splitRecordAt(position: number, offsetInRecord: number): number {
     const left = this.sequence.at(position);
@@ -582,19 +699,12 @@ export class EgWalkerEngine {
       return position + (offsetInRecord > 0 ? 1 : 0);
     }
 
+    const leftOriginalLength = left.content.length;
     const rightContent = left.content.slice(offsetInRecord);
     left.content = left.content.slice(0, offsetInRecord);
     this.sequence.updateItem(left);
 
-    const right: AugmentedCRDTItem = {
-      id: this.nextPlaceholderId(),
-      eventId: PLACEHOLDER_EVENT_ID,
-      content: rightContent,
-      originLeft: null,
-      originRight: null,
-      everDeleted: left.everDeleted,
-      prepareState: left.prepareState,
-    };
+    const right = this.buildSplitRightHalf(left, offsetInRecord, rightContent);
     this.sequence.insert(position + 1, right);
     this.itemsById.set(right.id, right);
 
@@ -610,7 +720,81 @@ export class EgWalkerEngine {
     // `everDeleted` and `prepareState` and must move together under
     // future retreat / advance calls for those events.
     this.extendDeleteTargetMembership(left.id, right.id);
+    this.rewriteEventItemsForRunSplit(
+      left,
+      right,
+      offsetInRecord,
+      leftOriginalLength,
+    );
     return position + 1;
+  }
+
+  private buildSplitRightHalf(
+    left: AugmentedCRDTItem,
+    offsetInRecord: number,
+    rightContent: string,
+  ): AugmentedCRDTItem {
+    if (left.run !== null) {
+      const startSequence = left.run.startSequence + offsetInRecord;
+      return {
+        id: `${left.run.replicaId}:${startSequence}:0`,
+        eventId: `${left.run.replicaId}:${startSequence}`,
+        content: rightContent,
+        originLeft: null,
+        originRight: null,
+        everDeleted: left.everDeleted,
+        prepareState: left.prepareState,
+        run: {
+          replicaId: left.run.replicaId,
+          startSequence,
+        },
+      };
+    }
+    return {
+      id: this.nextPlaceholderId(),
+      eventId: PLACEHOLDER_EVENT_ID,
+      content: rightContent,
+      originLeft: null,
+      originRight: null,
+      everDeleted: left.everDeleted,
+      prepareState: left.prepareState,
+      run: null,
+    };
+  }
+
+  private rewriteEventItemsForRunSplit(
+    left: AugmentedCRDTItem,
+    right: AugmentedCRDTItem,
+    offsetInRecord: number,
+    leftOriginalLength: number,
+  ): void {
+    if (left.run === null) {
+      return;
+    }
+    // Each sequence in `[startSequence + offsetInRecord, startSequence + N)`
+    // is a single-character INSERT whose `eventItems` entry currently lists
+    // `left.id`. Repoint those entries to `right.id` so retreat / advance
+    // visit the half that actually holds the slice.
+    const runStart = left.run.startSequence + offsetInRecord;
+    const runEnd = left.run.startSequence + leftOriginalLength;
+    for (let sequence = runStart; sequence < runEnd; sequence++) {
+      const eventId: EventId = `${left.run.replicaId}:${sequence}`;
+      const items = this.eventItems.get(eventId);
+      if (!items) {
+        continue;
+      }
+      let mutated = false;
+      const next = items.map((id) => {
+        if (id === left.id) {
+          mutated = true;
+          return right.id;
+        }
+        return id;
+      });
+      if (mutated) {
+        this.eventItems.set(eventId, next);
+      }
+    }
   }
 
   private recordDeleteTargets(
@@ -668,6 +852,11 @@ export class EgWalkerEngine {
     this.originLeftRefs.set(originLeft, set);
   }
 
+  private hasOriginLeftRefs(itemId: EventId): boolean {
+    const refs = this.originLeftRefs.get(itemId);
+    return refs !== undefined && refs.size > 0;
+  }
+
   private rewriteOriginLeftReferences(
     oldOriginLeft: EventId,
     newOriginLeft: EventId,
@@ -692,13 +881,15 @@ export class EgWalkerEngine {
   }
 
   /**
-   * Split a placeholder so that the `length` code units starting at
-   * `offsetInRecord` become an isolated record that the caller can mark as
-   * deleted. Returns that middle record. Surrounding prefix/suffix halves
-   * (if any) remain as undeleted placeholders so future events can still
-   * reference the pre-checkpoint region.
+   * Split a multi-character record so that the `length` code units starting
+   * at `offsetInRecord` become an isolated record that the caller can mark
+   * as deleted. Returns that middle record. Surrounding prefix/suffix halves
+   * remain undeleted so future events can still reference the original
+   * region. Used for placeholder, typed-run, and multi-character paste
+   * records alike — the {@link splitRecordAt} dispatch picks the right
+   * shape for each side.
    */
-  private splitPlaceholderForDelete(
+  private splitRecordForDelete(
     position: number,
     offsetInRecord: number,
     length: number,
@@ -709,14 +900,81 @@ export class EgWalkerEngine {
     }
     const middle = this.sequence.at(position);
     if (!middle) {
-      throw new Error(
-        `Placeholder split missing record at position ${position}`,
-      );
+      throw new Error(`Record split missing record at position ${position}`);
     }
     if (length < middle.content.length) {
       this.splitRecordAt(position, length);
     }
     return middle;
+  }
+
+  /**
+   * Ensure the slice owned by `eventId` is a single record before
+   * retreat / advance toggle its `prepareState`. A typed-run leaf that
+   * still holds more than this one event's code unit is carved into prefix /
+   * slice / suffix records via {@link splitRecordAt}, which also remaps the
+   * other events' `eventItems` entries to point at the new neighbours.
+   * After the call, `eventItems.get(eventId)` references exactly the slice
+   * to toggle.
+   */
+  private isolateRunSliceForEvent(eventId: EventId): void {
+    const items = this.eventItems.get(eventId);
+    if (!items || items.length === 0) {
+      // Event hasn't been integrated yet (e.g. a delete-only or pre-effect
+      // retreat). Nothing to toggle.
+      return;
+    }
+    if (items.length > 1) {
+      // Multi-character INSERT events stay one record per code unit, each with
+      // its own id and `run === null`. The retreat / advance loop already
+      // toggles every slice in order; no isolation is needed.
+      return;
+    }
+    const itemId = items[0];
+    if (itemId === undefined) {
+      return;
+    }
+    const record = this.itemsById.get(itemId);
+    if (!record) {
+      throw new Error(
+        `eventItems pointed at unknown item ${itemId} for event ${eventId}`,
+      );
+    }
+    if (record.run === null) {
+      // Placeholder or per-code-unit paste record — nothing to coalesce, so
+      // the slice is already this event's whole contribution.
+      return;
+    }
+    const parsed = parseEventId(eventId);
+    if (parsed === null || parsed.replicaId !== record.run.replicaId) {
+      // A non-canonical event id ended up pointing at a typed-run record.
+      // The run-extension guard in `applyInsert` only seeds runs from
+      // canonical `replicaId:sequence` ids, so this should be unreachable;
+      // bail out conservatively rather than splitting at a wrong offset.
+      return;
+    }
+    const offsetInRecord = parsed.sequence - record.run.startSequence;
+    if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
+      // Same defensive bail-out: the eventItems entry should never point at
+      // a record whose run no longer covers this event's sequence.
+      return;
+    }
+    if (offsetInRecord === 0 && record.content.length === 1) {
+      // Slice is already its own record.
+      return;
+    }
+
+    let position = this.sequence.positionOf(record);
+    if (position === -1) {
+      throw new Error(`Record ${record.id} missing from sequence index`);
+    }
+    if (offsetInRecord > 0) {
+      position = this.splitRecordAt(position, offsetInRecord);
+    }
+    const middle = this.sequence.at(position);
+    if (middle && middle.content.length > 1) {
+      this.splitRecordAt(position, 1);
+    }
   }
 
   private retreat(eventId: EventId): void {
@@ -726,6 +984,7 @@ export class EgWalkerEngine {
     }
 
     if (event.operation.type === OPERATION_TYPE.INSERT) {
+      this.isolateRunSliceForEvent(eventId);
       for (const itemId of this.eventItems.get(eventId) ?? []) {
         const item = this.requireItem(itemId);
         item.prepareState -= 1;
@@ -749,6 +1008,7 @@ export class EgWalkerEngine {
     }
 
     if (event.operation.type === OPERATION_TYPE.INSERT) {
+      this.isolateRunSliceForEvent(eventId);
       for (const itemId of this.eventItems.get(eventId) ?? []) {
         const item = this.requireItem(itemId);
         item.prepareState += 1;

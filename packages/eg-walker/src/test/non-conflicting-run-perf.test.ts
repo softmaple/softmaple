@@ -252,5 +252,34 @@ describe("Section 3.4 non-conflicting-run fast path", () => {
     expect(generated.stats.nonConflictingRunCount).toBe(EVENT_COUNT);
     expect(generated.stats.fullReplayCount).toBe(0);
     expect(elapsed).toBeLessThan(BUDGET_MS);
+    // Section 3.4 "smaller" lever: typed-run coalescing collapses
+    // contiguous single-character INSERTs from one author into one
+    // ranked-B-tree record. A 20 000-event linear single-author trace
+    // is one big typed run from `n`, so the engine should hold a tiny
+    // constant number of records instead of one per code unit. The
+    // budget is intentionally loose so a future regression (e.g. a
+    // boundary case that prevents extension) is caught quantitatively
+    // without making the test brittle to harmless changes in the
+    // coalescing branch's guard set.
+    expect(generated.stats.sequenceRecordCount).toBeLessThan(8);
+  });
+
+  it("coalesces a single-author linear trace into one record", () => {
+    // Tight invariant for the typed-run fast path: with no concurrent
+    // siblings, no deletes, and a canonical `replicaId:sequence` author,
+    // every event after the first extends the same ranked-B-tree leaf.
+    // The final state is exactly one record holding all `EVENT_COUNT`
+    // code units, regardless of trace length.
+    const EVENT_COUNT = 5_000;
+
+    const events = buildLinearInsertTrace(EVENT_COUNT);
+    const graph = EventGraph.fromEvents(events);
+
+    const generated = new EgWalkerEngine().generate(events, "", {
+      eventGraph: graph,
+    });
+
+    expect(generated.text.length).toBe(EVENT_COUNT);
+    expect(generated.stats.sequenceRecordCount).toBe(1);
   });
 });

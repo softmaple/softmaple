@@ -1,5 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "./event-graph";
+import { parseEventId } from "./event-id";
 import lz4 from "lz4js";
 import type {
   EventId,
@@ -67,25 +68,6 @@ const textDecoder = new TextDecoder();
 
 const toUint8Array = (bytes: ReadonlyArray<number> | Uint8Array): Uint8Array =>
   bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-
-const parseEventId = (
-  id: EventId,
-): { readonly replicaId: string; readonly sequence: number } | null => {
-  const separator = id.lastIndexOf(":");
-  if (separator === -1) {
-    return null;
-  }
-
-  const sequence = Number(id.slice(separator + 1));
-  if (!Number.isInteger(sequence)) {
-    return null;
-  }
-
-  return {
-    replicaId: id.slice(0, separator),
-    sequence,
-  };
-};
 
 const operationTextLength = (operation: ExternalOperation): number =>
   operation.type === OPERATION_TYPE.INSERT ? operation.text.length : 0;

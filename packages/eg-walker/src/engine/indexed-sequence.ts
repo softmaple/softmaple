@@ -1,6 +1,21 @@
 const LEAF_CAPACITY = 64;
 const BRANCH_FACTOR = 32;
 
+/**
+ * Sentinel thrown by the ranked B-tree's prepare/effect index lookups when
+ * the requested index falls outside the visible weight range. Distinct from
+ * a generic `Error` so callers like {@link IndexedSequence.tryPrepareIndexToPositionAndOffset}
+ * can catch *only* the legitimate "ran past the end" case and re-raise any
+ * structural-invariant violation (e.g. an inconsistent aggregate sum) that
+ * the same code path would surface as an opaque `Error`.
+ */
+export class IndexOutOfRangeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IndexOutOfRangeError";
+  }
+}
+
 type IndexedNode<T extends object> = LeafNode<T> | InternalNode<T>;
 
 interface NodeBase<T extends object> {
@@ -264,6 +279,13 @@ export class IndexedSequence<T extends object> {
    * whose `length` exceeds the visible prepare items at the parent
    * version) should use this method instead of wrapping the throwing
    * variant in a try/catch that swallows every error indiscriminately.
+   *
+   * The implementation delegates to the throwing variant and only
+   * catches {@link IndexOutOfRangeError} — any other thrown error
+   * (e.g. an aggregate-sum inconsistency in the ranked B-tree) is
+   * propagated to the caller. This is preferred over a precheck that
+   * duplicates the throwing variant's range checks, because the two
+   * paths would otherwise have to be kept in lockstep.
    */
   tryPrepareIndexToPositionAndOffset(
     index: number,
@@ -271,20 +293,14 @@ export class IndexedSequence<T extends object> {
   ):
     | { readonly position: number; readonly offsetInRecord: number }
     | undefined {
-    if (index < 0) {
-      return undefined;
-    }
-    if (!this.root) {
-      if (allowEnd && index === 0) {
-        return { position: 0, offsetInRecord: 0 };
+    try {
+      return this.weightIndexToPositionAndOffset(index, allowEnd, "prepare");
+    } catch (error) {
+      if (error instanceof IndexOutOfRangeError) {
+        return undefined;
       }
-      return undefined;
+      throw error;
     }
-    const total = allowEnd ? this.root.prepareSum + 1 : this.root.prepareSum;
-    if (index >= total) {
-      return undefined;
-    }
-    return this.weightIndexToPositionAndOffset(index, allowEnd, "prepare");
   }
 
   effectIndexBeforePosition(position: number): number {
@@ -551,13 +567,13 @@ export class IndexedSequence<T extends object> {
     kind: "prepare" | "effect",
   ): { readonly position: number; readonly offsetInRecord: number } {
     if (index < 0) {
-      throw new Error(`Index ${index} out of bounds`);
+      throw new IndexOutOfRangeError(`Index ${index} out of bounds`);
     }
     if (!this.root) {
       if (allowEnd && index === 0) {
         return { position: 0, offsetInRecord: 0 };
       }
-      throw new Error(`Index ${index} out of bounds`);
+      throw new IndexOutOfRangeError(`Index ${index} out of bounds`);
     }
 
     const total = this.weightSum(this.root, kind);
@@ -565,7 +581,7 @@ export class IndexedSequence<T extends object> {
       return { position: this.root.size, offsetInRecord: 0 };
     }
     if (index >= total) {
-      throw new Error(`Index ${index} out of bounds`);
+      throw new IndexOutOfRangeError(`Index ${index} out of bounds`);
     }
 
     let remaining = index;
@@ -583,7 +599,13 @@ export class IndexedSequence<T extends object> {
         return false;
       });
       if (!child) {
-        throw new Error(`Index ${index} out of bounds`);
+        // Structural-invariant violation: the prepareSum/effectSum
+        // aggregate said `index` was reachable, but no child claimed
+        // it. This is a B-tree bug, not an out-of-range index, so we
+        // throw a generic `Error` that the try-helper does NOT swallow.
+        throw new Error(
+          `IndexedSequence aggregate inconsistency: weight ${kind} index ${index} resolved past all children`,
+        );
       }
       node = child;
     }
@@ -595,7 +617,11 @@ export class IndexedSequence<T extends object> {
       }
       remaining -= weight;
     }
-    throw new Error(`Index ${index} out of bounds`);
+    // Same as above: the leaf was reached but no slot claimed the
+    // remaining weight. Generic `Error` so the try-helper re-raises.
+    throw new Error(
+      `IndexedSequence aggregate inconsistency: weight ${kind} index ${index} resolved past leaf items`,
+    );
   }
 
   private weightSum(node: IndexedNode<T>, kind: "prepare" | "effect"): number {

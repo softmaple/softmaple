@@ -40,6 +40,12 @@ export class PartialReplayManager {
       checkpoint.version,
       targetVersion,
     );
+    // We only need a hash-set membership view of every event in the
+    // graph; building it from {@link EventGraph.getAllEvents} skips a
+    // Kahn pass over events we discard anyway. `getAllEvents` returns
+    // every event the graph holds (i.e. the same set as
+    // {@link EventGraph.getTopologicalOrder}); the order is irrelevant
+    // here because `replayedEventIds` already encodes the replay order.
     const eventById = new Map(
       graph.getAllEvents().map((event) => [event.id, event]),
     );

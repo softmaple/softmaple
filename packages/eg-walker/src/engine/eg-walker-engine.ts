@@ -222,10 +222,10 @@ export class EgWalkerEngine {
 
     // The typed-run coalescing path may have left an open buffer of
     // appended text. The returned document is observable, so materialise
-    // it before handing back the snapshot.
-    if (this.pendingInsertText.length > 0) {
-      this.flushPendingInsert();
-    }
+    // it before handing back the snapshot. This is the load-bearing flush
+    // for batch (non-incremental) callers of `generate`; the per-event
+    // `applyEvent` return flush below is what `EgWalkerReplica` relies on.
+    this.flushPendingInsert();
 
     return {
       text: this.resultingText,
@@ -254,16 +254,13 @@ export class EgWalkerEngine {
     this.graph = graph;
 
     const transformed = this.processEvent(event);
-    // {@link EgWalkerReplica.applyRemoteEvent} reads `getText()` immediately
-    // after this call, so the incremental return value must reflect the
-    // post-event document. Flush any open coalesced typed-run before we
-    // hand the text out. Hoist the empty-buffer check so the common case
-    // (event did not touch the coalescing path, or its buffer was already
-    // flushed by a downstream applyDelete / non-coalesced splice) skips
-    // the function call entirely.
-    if (this.pendingInsertText.length > 0) {
-      this.flushPendingInsert();
-    }
+    // {@link EgWalkerReplica.applyRemoteEvent} reads the returned `text`
+    // (and then `getText()`) immediately after this call, so the
+    // incremental return value must reflect the post-event document. This
+    // is the load-bearing flush for the incremental path; a subsequent
+    // `getText` call will see an empty buffer and short-circuit on the
+    // function's internal early-out.
+    this.flushPendingInsert();
     return {
       text: this.resultingText,
       transformedOperations: transformed,
@@ -272,13 +269,13 @@ export class EgWalkerEngine {
 
   getText(): string {
     // Materialise any deferred typed-run appends before exposing the
-    // text. Callers (replicas, tests, serializers) treat `getText` as the
-    // canonical document snapshot. The buffer is empty on the common
-    // path (callers usually read `getText` after `applyEvent` has already
-    // flushed), so the hoisted check keeps this a cheap field read.
-    if (this.pendingInsertText.length > 0) {
-      this.flushPendingInsert();
-    }
+    // text. Most callers (`EgWalkerReplica`) read `getText` immediately
+    // after `applyEvent`, which has already flushed, so the function's
+    // internal early-out keeps this branch effectively free in the
+    // incremental hot path. The flush is load-bearing for direct callers
+    // that drive `apply*` themselves without going through `applyEvent`
+    // (tests, serializers, ad-hoc inspection between `generate` calls).
+    this.flushPendingInsert();
     return this.resultingText;
   }
 
@@ -625,7 +622,9 @@ export class EgWalkerEngine {
     // A non-coalesced insert (multi-character event, new typed-run seed,
     // or non-empty conflict region) must observe the current document so
     // {@link effectIndex} aligns with {@link resultingText}. Drain any
-    // open typed-run buffer before splicing.
+    // open typed-run buffer before splicing. Hoist the empty-buffer check
+    // inline because this is the per-event hot path for non-coalescing
+    // inserts and the buffer is empty on every full-replay event.
     if (this.pendingInsertText.length > 0) {
       this.flushPendingInsert();
     }
@@ -655,8 +654,10 @@ export class EgWalkerEngine {
     // been coalescing into {@link pendingInsertText}. Flush before we
     // start carving records and slicing the document text so the per-slot
     // {@link effectIndex} arithmetic below operates on the materialised
-    // document. Hoist the empty-buffer check inline so the common case
-    // (delete on a non-coalescing trace) doesn't pay the call overhead.
+    // document. Hoist the empty-buffer check inline because `applyDelete`
+    // is on the per-event hot path and the buffer is empty on every
+    // non-coalescing trace, so the inline check saves a function call on
+    // the common case.
     if (this.pendingInsertText.length > 0) {
       this.flushPendingInsert();
     }
@@ -1200,6 +1201,16 @@ export class EgWalkerEngine {
    * buffer first and starts a fresh span at the new index. The buffer
    * is later drained by {@link flushPendingInsert} before any
    * non-coalesced read or write of the document text.
+   *
+   * The flush-and-restart branch below is defensive given the current
+   * engine invariants: any event that would land at a non-contiguous
+   * effect index goes through the non-coalescing path in
+   * {@link applyInsert} (different replica, split origin, or non-empty
+   * conflict region), which flushes the buffer before this method is
+   * called again. We still handle it explicitly so a future change that
+   * widens the coalescing branch (e.g. extending across a split-on-demand
+   * boundary) can't silently corrupt the document by stranding bytes at
+   * the previous offset.
    */
   private appendPendingInsert(effectIndex: number, text: string): void {
     const buffered = this.pendingInsertText;
@@ -1219,6 +1230,13 @@ export class EgWalkerEngine {
 
   /**
    * Drain any buffered typed-run append into {@link resultingText}.
+   *
+   * Safe to call unconditionally: the empty-buffer early-out makes the
+   * call cheap when there is nothing pending, so cold call sites
+   * (`generate` return, `applyEvent` return, `getText`, `reset`) don't
+   * need to repeat the check inline. Hot per-event call sites
+   * (`applyInsert` non-coalesced, top of `applyDelete`) do hoist the
+   * check to skip even the function call when the buffer is empty.
    *
    * After this call the stored {@link resultingText} matches the
    * logical document the rest of the engine reasons about (the

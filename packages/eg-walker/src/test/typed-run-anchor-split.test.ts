@@ -150,11 +150,12 @@ describe("typed-run coalescing — anchor + split convergence", () => {
     // every per-event branch) it lands around 4.9 s on `ubuntu-latest`
     // CI runners — close enough to the 5 s vitest default that any
     // small overhead (e.g. the extra branch added for the typed-run
-    // pending-insert buffer in #693) flips it into a timeout. Match
-    // the explicit timeout used by the sibling property-sweep tests
-    // in `convergence-property.test.ts` so the budget covers the
-    // worst case with margin rather than tracking the default by
-    // luck.
+    // pending-insert buffer in #693) flips it into a timeout. Set an
+    // explicit 15 s ceiling: ~3× the observed worst case on shared CI
+    // is enough margin to absorb runner variance and the new buffer
+    // overhead without masking a real regression (a true O(n^2)
+    // reintroduction would blow this budget by an order of magnitude,
+    // not 30 %).
     const events: GraphEvent[] = [
       ...linearTypedRun("A", "abcde"),
       {
@@ -179,7 +180,7 @@ describe("typed-run coalescing — anchor + split convergence", () => {
     const outputs = replayUnderEveryDeliveryOrder(events);
     expect(outputs.size).toBe(1);
     expect([...outputs][0]).toBe("abPcdQeX");
-  }, 30_000);
+  }, 15_000);
 
   it("converges when a multi-char paste anchors at the right edge of a typed run", () => {
     // A types "abcde" (typed run). B pastes "WXYZ" at index 5. C inserts

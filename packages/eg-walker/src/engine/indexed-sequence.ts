@@ -32,7 +32,7 @@ interface ItemLocation<T extends object> {
   // Cached offset of the item within `leaf.items`. Maintained by every
   // splice on `leaf.items` so {@link IndexedSequence.positionOf} and
   // {@link IndexedSequence.updateItem} can skip the O(leaf capacity)
-  // `Array.indexOf` scan called out in sub-issue 6.
+  // `Array.indexOf` scan.
   offsetInLeaf: number;
 }
 
@@ -87,8 +87,8 @@ const createInternal = <T extends object>(
  * This mirrors the paper's B-tree indexes while the separate WeakMap provides
  * O(log n) event-ID-to-record mapping after the caller resolves the event ID.
  *
- * Sub-issue 6 reshaped the maintenance paths so the hot ones — single-item
- * inserts, weight updates, and `positionOf` lookups — run in O(log n):
+ * The hot maintenance paths — single-item inserts, weight updates, and
+ * `positionOf` lookups — all run in O(log n):
  *   - Inserts and weight updates propagate `(size, prepareSum, effectSum)`
  *     deltas to ancestors instead of recomputing every internal node's
  *     sums from its children.

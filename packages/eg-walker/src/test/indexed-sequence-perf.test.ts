@@ -1,7 +1,8 @@
 /**
- * Focused performance tests for sub-issue 6.
+ * Focused performance tests for the IndexedSequence ranked B-tree hot
+ * paths.
  *
- * The IndexedSequence ranked B-tree had three observable hot paths:
+ * The ranked B-tree had three observable hot paths:
  *   - `refresh` recomputed an internal node's sums by mapping every
  *     child to its sum and reducing the result.
  *   - `updateItem` triggered `refreshUp`, which re-ran the above sum
@@ -56,7 +57,7 @@ const buildSequence = (
   return { sequence, items };
 };
 
-describe("IndexedSequence focused performance (sub-issue 6)", () => {
+describe("IndexedSequence focused performance", () => {
   it("repeated updateItem on a 10k-item tree finishes well under an O(n) budget", () => {
     const ITEM_COUNT = 10_000;
     const UPDATE_COUNT = 20_000;

@@ -433,27 +433,9 @@ describe("PresenceProvider", () => {
     expect(adapter.eventCallbacks.size).toBe(initialEventSubs);
     expect(adapter.connectionCallbacks.size).toBe(initialConnectionSubs);
 
-    // And the new cap is observed — emit 30 joins; only 25 should survive.
-    act(() => {
-      adapter.emitConnected({
-        userId: "self",
-        name: "Self",
-        color: "#000",
-        status: "active",
-        lastActiveAt: 0,
-      });
-    });
-    for (let i = 0; i < 30; i++) {
-      act(() => {
-        adapter.emitJoin({
-          userId: `peer-${i}`,
-          name: `Peer ${i}`,
-          color: "#111",
-          status: "active",
-          lastActiveAt: i,
-        });
-      });
-    }
+    // Cap enforcement under a changed value is covered by the
+    // `caps recentActivity at maxRecentActivity (FIFO)` test above; this
+    // test stays focused on subscription stability.
 
     await act(async () => {
       root.unmount();

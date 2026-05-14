@@ -10,20 +10,13 @@ import { PartialReplayManager } from "../engine/partial-replay";
 import { IndexedSequence } from "../engine/indexed-sequence";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import type { EventId, GraphEvent } from "../types";
+import { createPrng } from "./test-helpers";
 
 interface SequenceModelItem {
   readonly id: string;
   prepare: number;
   effect: number;
 }
-
-const createPrng = (seed: number): (() => number) => {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-};
 
 const visiblePositions = (
   items: ReadonlyArray<SequenceModelItem>,

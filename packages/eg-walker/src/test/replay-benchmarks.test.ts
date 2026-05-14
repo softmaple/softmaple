@@ -51,6 +51,7 @@ import { EgWalkerReplica } from "../core/replica";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
+import { cloneEvent, createPrng } from "./test-helpers";
 
 interface BenchmarkResult {
   readonly traceName: string;
@@ -64,21 +65,6 @@ interface BenchmarkResult {
   readonly jsonBytes: number;
   readonly binaryBytes: number;
 }
-
-const createPrng = (seed: number): (() => number) => {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-};
-
-const cloneEvent = (event: GraphEvent): GraphEvent => ({
-  id: event.id,
-  operation: { ...event.operation },
-  parentVersion: new Set(event.parentVersion),
-  timestamp: event.timestamp,
-});
 
 const utf8Bytes = (text: string): number =>
   new TextEncoder().encode(text).length;

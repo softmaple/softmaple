@@ -71,10 +71,11 @@ export class MissingParentError extends Error {
 }
 
 /**
- * Lexicographic comparator used as the tie-breaker for
- * `getTopologicalOrder`. Kept as a module-level helper so the rule is
- * consistent across roots and sibling branches and easy to swap if the
- * engine ever standardises on numeric-aware ordering (see sub-issue 5).
+ * Lexicographic comparator used as the tie-breaker for both
+ * `getTopologicalOrder` and `getBranchPreservingTopologicalOrder`. Kept
+ * as a module-level helper so the rule is consistent across roots and
+ * sibling branches and easy to swap if the engine ever standardises on
+ * numeric-aware ordering (see sub-issue 5).
  */
 const compareEventIds = (left: EventId, right: EventId): number => {
   if (left === right) {
@@ -405,24 +406,96 @@ export class EventGraph {
   }
 
   /**
-   * Get events in topological order using a deterministic
-   * branch-preserving DFS traversal (Section 5.2 of the paper).
+   * Get events in topological order (Kahn's algorithm; iterative).
    *
-   * Kahn's algorithm with a sorted ready queue interleaves concurrent
-   * branches by event id, which forces the replay engine to retreat
-   * and re-advance whenever the traversal hops between branches. The
-   * DFS variant below walks one branch as far as possible before
-   * starting another, so two consecutive events in the output usually
-   * share a parent relationship (`next.parentVersion === {prev.id}`)
-   * and the engine's `diffVersions(currentVersion, next.parentVersion)`
-   * collapses to an empty retreat/advance pair.
-   *
-   * The output is still a fully deterministic function of the graph:
-   * roots and sibling branches are ordered by lexicographic event id,
-   * matching the previous tie-break rule so existing snapshots and
-   * round-trip tests remain stable for linear histories.
+   * Sorts ties by event ID for deterministic output. This is the
+   * default order consumed by `EgWalkerEngine`, `ReplayWalker`,
+   * `PartialReplayManager`, `EgWalkerReplica.fullReplay`, and the
+   * columnar codec, so its byte-for-byte output is part of the
+   * package's public contract until the engine becomes
+   * traversal-order independent (sub-issue 5). For a layout that
+   * minimises retreat/advance churn, see
+   * {@link getBranchPreservingTopologicalOrder}.
    */
   getTopologicalOrder(): ReadonlyArray<GraphEvent> {
+    const remainingParents = new Map<EventId, number>();
+    const ready: EventId[] = [];
+
+    for (const [id, event] of this.events) {
+      remainingParents.set(id, event.parentVersion.size);
+      if (event.parentVersion.size === 0) {
+        ready.push(id);
+      }
+    }
+    ready.sort(compareEventIds);
+
+    const result: GraphEvent[] = [];
+    while (ready.length > 0) {
+      const id = ready.shift()!;
+      const event = this.events.get(id);
+      if (!event) {
+        continue;
+      }
+      result.push(event);
+
+      const children = Array.from(this.childrenMap.get(id) ?? []).sort(
+        compareEventIds,
+      );
+      for (const childId of children) {
+        const remaining = (remainingParents.get(childId) ?? 0) - 1;
+        remainingParents.set(childId, remaining);
+        if (remaining === 0) {
+          // Insertion-sort into ready to keep deterministic order
+          // without re-sorting the whole queue.
+          let insertionIndex = ready.findIndex(
+            (pending) => compareEventIds(pending, childId) > 0,
+          );
+          if (insertionIndex === -1) {
+            insertionIndex = ready.length;
+          }
+          ready.splice(insertionIndex, 0, childId);
+        }
+      }
+    }
+
+    if (result.length !== this.events.size) {
+      throw new Error("Cycle detected in event graph");
+    }
+
+    return result;
+  }
+
+  /**
+   * Branch-preserving topological order (Section 5.2 of the
+   * Eg-walker paper).
+   *
+   * Kahn's algorithm with a sorted ready queue interleaves concurrent
+   * branches whenever a child event lex-sorts after a deferred sibling
+   * root, which forces the replay engine to retreat and re-advance on
+   * every transition. This DFS variant walks one branch as far as
+   * possible before starting another, so two consecutive events in
+   * the output usually share a parent relationship
+   * (`next.parentVersion === {prev.id}`) and
+   * `diffVersions(currentVersion, next.parentVersion)` collapses to
+   * an empty retreat/advance pair.
+   *
+   * The output is still a fully deterministic function of the graph:
+   * roots and sibling branches are ordered by lexicographic event id
+   * via {@link compareEventIds}.
+   *
+   * Note: this order is NOT yet wired into the default replay path.
+   * `EgWalkerEngine.generate` is currently order-sensitive for
+   * concurrent inserts, so swapping orders mid-flight would change
+   * user-visible document text and on-disk columnar bytes. Once
+   * sub-issue 5 lands and the engine becomes traversal-order
+   * independent, this method will replace `getTopologicalOrder` at
+   * the call sites that care about replay performance.
+   *
+   * TODO(sub-issue 5): consider weighting sibling branches by
+   * estimated subtree size (the paper's optional heuristic) instead
+   * of pure lex tie-break to reduce churn further on skewed graphs.
+   */
+  getBranchPreservingTopologicalOrder(): ReadonlyArray<GraphEvent> {
     const remainingParents = new Map<EventId, number>();
     const roots: EventId[] = [];
 

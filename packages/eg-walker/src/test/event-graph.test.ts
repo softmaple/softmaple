@@ -277,7 +277,9 @@ describe("EventGraph", () => {
       expect(ordered.slice(1).map((e) => e.id)).toContain("concurrent-1");
       expect(ordered.slice(1).map((e) => e.id)).toContain("concurrent-2");
     });
+  });
 
+  describe("getBranchPreservingTopologicalOrder", () => {
     it("keeps sibling branches consecutive instead of interleaving by id", () => {
       // Two parallel chains forking off a shared root. A Kahn traversal
       // with a sorted ready queue would interleave the two branches
@@ -307,7 +309,9 @@ describe("EventGraph", () => {
         });
       }
 
-      const ids = graph.getTopologicalOrder().map((event) => event.id);
+      const ids = graph
+        .getBranchPreservingTopologicalOrder()
+        .map((event) => event.id);
       const aStart = ids.indexOf("a-0");
       const bStart = ids.indexOf("b-0");
       // Whichever branch starts first must run to completion before the
@@ -354,7 +358,9 @@ describe("EventGraph", () => {
         operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
       });
 
-      const ids = graph.getTopologicalOrder().map((event) => event.id);
+      const ids = graph
+        .getBranchPreservingTopologicalOrder()
+        .map((event) => event.id);
       expect(ids).toEqual(["root", "a-0", "a-1", "a-2", "b-0"]);
     });
 
@@ -385,7 +391,9 @@ describe("EventGraph", () => {
         operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "M" },
       });
 
-      const ids = graph.getTopologicalOrder().map((event) => event.id);
+      const ids = graph
+        .getBranchPreservingTopologicalOrder()
+        .map((event) => event.id);
       expect(ids).toEqual(["root", "L", "R", "merge"]);
     });
 
@@ -435,13 +443,13 @@ describe("EventGraph", () => {
       // branch-preserving DFS is a pure function of the underlying DAG,
       // not of how the events were appended.
       const orderA = buildGraph(["root", "a-0", "a-1", "b-0", "b-1"])
-        .getTopologicalOrder()
+        .getBranchPreservingTopologicalOrder()
         .map((event) => event.id);
       const orderB = buildGraph(["root", "b-0", "b-1", "a-0", "a-1"])
-        .getTopologicalOrder()
+        .getBranchPreservingTopologicalOrder()
         .map((event) => event.id);
       const orderC = buildGraph(["root", "a-0", "b-0", "a-1", "b-1"])
-        .getTopologicalOrder()
+        .getBranchPreservingTopologicalOrder()
         .map((event) => event.id);
 
       expect(orderA).toEqual(["root", "a-0", "a-1", "b-0", "b-1"]);
@@ -465,8 +473,33 @@ describe("EventGraph", () => {
         operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
       });
 
-      const ids = graph.getTopologicalOrder().map((event) => event.id);
+      const ids = graph
+        .getBranchPreservingTopologicalOrder()
+        .map((event) => event.id);
       expect(ids).toEqual(["alpha", "zeta"]);
+    });
+
+    it("matches Kahn-lex on linear chains and respects causal order", () => {
+      // For a single linear chain there is only one valid topological
+      // order, so DFS and Kahn must agree byte-for-byte. This guards
+      // against accidental divergence on the most common shape.
+      const graph = new EventGraph();
+      const length = 10;
+      for (let i = 0; i < length; i++) {
+        graph.addEvent({
+          id: `n-${i}`,
+          timestamp: i,
+          parentVersion:
+            i === 0 ? new Set<EventId>() : new Set<EventId>([`n-${i - 1}`]),
+          operation: { type: OPERATION_TYPE.INSERT, index: i, text: "x" },
+        });
+      }
+
+      const dfs = graph
+        .getBranchPreservingTopologicalOrder()
+        .map((event) => event.id);
+      const kahn = graph.getTopologicalOrder().map((event) => event.id);
+      expect(dfs).toEqual(kahn);
     });
   });
 

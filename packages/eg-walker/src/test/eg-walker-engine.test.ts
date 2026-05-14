@@ -1149,47 +1149,6 @@ describe("Full paper architecture utilities", () => {
   });
 });
 
-/**
- * Reference implementation of the previous Kahn-with-lex-sort topological
- * traversal. Used to measure the retreat/advance churn the engine would
- * have produced before the branch-preserving DFS landed, so the tests can
- * assert that the new traversal is strictly cheaper on high-concurrency
- * graphs without having to import the legacy code path.
- */
-const kahnLexOrder = (graph: EventGraph): GraphEvent[] => {
-  const remaining = new Map<EventId, number>();
-  const eventById = new Map<EventId, GraphEvent>();
-  const ready: EventId[] = [];
-  for (const event of graph.getAllEvents()) {
-    eventById.set(event.id, event);
-    remaining.set(event.id, event.parentVersion.size);
-    if (event.parentVersion.size === 0) {
-      ready.push(event.id);
-    }
-  }
-  ready.sort();
-
-  const result: GraphEvent[] = [];
-  while (ready.length > 0) {
-    const id = ready.shift()!;
-    const event = eventById.get(id);
-    if (!event) continue;
-    result.push(event);
-
-    const children = Array.from(graph.getChildren(id)).sort();
-    for (const childId of children) {
-      const next = (remaining.get(childId) ?? 0) - 1;
-      remaining.set(childId, next);
-      if (next === 0) {
-        let insertAt = ready.findIndex((pending) => pending > childId);
-        if (insertAt === -1) insertAt = ready.length;
-        ready.splice(insertAt, 0, childId);
-      }
-    }
-  }
-  return result;
-};
-
 describe("branch-preserving topological traversal", () => {
   it("reduces retreat/advance churn versus Kahn on parallel branches", () => {
     // Build B parallel chains of length L forking off a common root,
@@ -1227,20 +1186,22 @@ describe("branch-preserving topological traversal", () => {
       }
     }
 
-    const newOrder = graph.getTopologicalOrder();
-    const oldOrder = kahnLexOrder(graph);
+    const branchPreservingOrder = graph.getBranchPreservingTopologicalOrder();
+    const kahnOrder = graph.getTopologicalOrder();
 
     // Sanity-check that the legacy ordering really did interleave the
     // branches: the first four post-root entries are the level-1
     // events from each branch.
-    expect(oldOrder.slice(1, 1 + branches).map((event) => event.id)).toEqual([
+    expect(kahnOrder.slice(1, 1 + branches).map((event) => event.id)).toEqual([
       idAt(1, 0),
       idAt(1, 1),
       idAt(1, 2),
       idAt(1, 3),
     ]);
     // And the branch-preserving DFS keeps the first branch contiguous.
-    expect(newOrder.slice(1, 1 + depth).map((event) => event.id)).toEqual([
+    expect(
+      branchPreservingOrder.slice(1, 1 + depth).map((event) => event.id),
+    ).toEqual([
       idAt(1, 0),
       idAt(2, 0),
       idAt(3, 0),
@@ -1249,22 +1210,26 @@ describe("branch-preserving topological traversal", () => {
       idAt(6, 0),
     ]);
 
-    const newStats = new EgWalkerEngine().generate(newOrder, "", {
-      eventGraph: graph,
-    }).stats;
-    const oldStats = new EgWalkerEngine().generate(oldOrder, "", {
+    const branchStats = new EgWalkerEngine().generate(
+      branchPreservingOrder,
+      "",
+      { eventGraph: graph },
+    ).stats;
+    const kahnStats = new EgWalkerEngine().generate(kahnOrder, "", {
       eventGraph: graph,
     }).stats;
 
-    const newChurn = newStats.retreatCount + newStats.advanceCount;
-    const oldChurn = oldStats.retreatCount + oldStats.advanceCount;
-    expect(newChurn).toBeLessThan(oldChurn);
+    const branchChurn = branchStats.retreatCount + branchStats.advanceCount;
+    const kahnChurn = kahnStats.retreatCount + kahnStats.advanceCount;
+    expect(branchChurn).toBeLessThan(kahnChurn);
   });
 
   it("eliminates retreats entirely on a single deep chain", () => {
     // A purely linear history has exactly one valid topological order,
     // and the engine must never retreat because each event's
-    // parentVersion already matches the current version.
+    // parentVersion already matches the current version. Both methods
+    // return the same order in this case, so the assertion holds for
+    // each.
     const graph = new EventGraph();
     for (let i = 0; i < 50; i++) {
       graph.addEvent({
@@ -1275,64 +1240,76 @@ describe("branch-preserving topological traversal", () => {
       });
     }
 
-    const stats = new EgWalkerEngine().generate(
+    const kahnStats = new EgWalkerEngine().generate(
       graph.getTopologicalOrder(),
       "",
-      {
-        eventGraph: graph,
-      },
+      { eventGraph: graph },
     ).stats;
-    expect(stats.retreatCount).toBe(0);
-    expect(stats.advanceCount).toBe(0);
+    const branchStats = new EgWalkerEngine().generate(
+      graph.getBranchPreservingTopologicalOrder(),
+      "",
+      { eventGraph: graph },
+    ).stats;
+    expect(kahnStats.retreatCount).toBe(0);
+    expect(kahnStats.advanceCount).toBe(0);
+    expect(branchStats.retreatCount).toBe(0);
+    expect(branchStats.advanceCount).toBe(0);
   });
 
-  it("matches Kahn-lex output text on randomised concurrent graphs", () => {
-    // Different valid topological orders of the same DAG should
-    // produce the same document text (engine-level convergence). This
-    // is a soft check that the DFS reordering does not regress
-    // correctness even when it changes the visit sequence.
-    let seed = 0xfeed_1234;
-    const next = (): number => {
-      seed = (seed + 0x6d2b79f5) >>> 0;
-      let t = seed;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) % 0x7fffffff;
-    };
-
+  it("documents the engine's order-sensitivity for concurrent inserts", () => {
+    // Pinned regression test: two concurrent root inserts plus a
+    // descendant of one of them produce different document text
+    // depending on traversal order. This is the gap that sub-issue 5
+    // closes; until then the default `getTopologicalOrder` must keep
+    // emitting the Kahn-lex order so on-disk columnar bytes and
+    // replica replays stay stable.
     const graph = new EventGraph();
     graph.addEvent({
-      id: "root",
+      id: "a:0",
       parentVersion: new Set(),
-      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "0" },
-      timestamp: 0,
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
     });
-    const ids: EventId[] = ["root"];
-    for (let i = 1; i < 40; i++) {
-      const parents = new Set<EventId>();
-      const parentCount = (next() % 2) + 1;
-      for (let p = 0; p < parentCount; p++) {
-        parents.add(ids[next() % ids.length]!);
-      }
-      const id = `n-${i}`;
-      graph.addEvent({
-        id,
-        parentVersion: parents,
-        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
-        timestamp: i,
-      });
-      ids.push(id);
-    }
+    graph.addEvent({
+      id: "b:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      timestamp: 2,
+    });
+    graph.addEvent({
+      id: "c:0",
+      parentVersion: new Set(["a:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
+      timestamp: 3,
+    });
 
-    const newText = new EgWalkerEngine().generate(
+    // Kahn-lex visits a, b, c in that order: the engine retreats a
+    // before applying b, then applies c (parent={a}) which retreats b
+    // and advances a, integrating C after AB.
+    const kahnOrderIds = graph.getTopologicalOrder().map((event) => event.id);
+    expect(kahnOrderIds).toEqual(["a:0", "b:0", "c:0"]);
+    // The branch-preserving DFS visits a, c, b: c is integrated while
+    // b has not been seen yet, then b is integrated against a sequence
+    // that already contains C.
+    const branchOrderIds = graph
+      .getBranchPreservingTopologicalOrder()
+      .map((event) => event.id);
+    expect(branchOrderIds).toEqual(["a:0", "c:0", "b:0"]);
+
+    const kahnText = new EgWalkerEngine().generate(
       graph.getTopologicalOrder(),
       "",
       { eventGraph: graph },
     ).text;
-    const oldText = new EgWalkerEngine().generate(kahnLexOrder(graph), "", {
-      eventGraph: graph,
-    }).text;
-    expect(newText).toBe(oldText);
+    const branchText = new EgWalkerEngine().generate(
+      graph.getBranchPreservingTopologicalOrder(),
+      "",
+      { eventGraph: graph },
+    ).text;
+    // Both are valid CRDT outputs of the same DAG, but they are NOT
+    // equal, which is why this PR keeps `getTopologicalOrder` as the
+    // default replay order.
+    expect(kahnText).not.toBe(branchText);
   });
 });
 

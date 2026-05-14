@@ -19,6 +19,14 @@ import {
   type WebSocketMessage,
   WS_MESSAGE,
 } from "./types";
+import {
+  isErrorPayload,
+  isJoinPayload,
+  isLeavePayload,
+  isPresenceSyncPayload,
+  isPresenceUpdatePayload,
+  isRecord,
+} from "./validation";
 
 /**
  * Result of processing a message
@@ -47,20 +55,74 @@ export const createMessage = (
 });
 
 /**
- * Serialize message for sending
+ * Serialize message for sending.
+ *
+ * For `PRESENCE_UPDATE`, JSON would silently drop `cursor: undefined` /
+ * `selection: undefined` keys, which makes a "clear cursor" update
+ * indistinguishable from "no change to cursor" on peers. We rewrite those
+ * fields to `null` so the intent survives the wire. The receiver
+ * (`processPresenceUpdate`) normalizes `null` back to `undefined`.
  */
-export const serializeMessage = (message: WebSocketMessage): string =>
-  JSON.stringify(message);
+export const serializeMessage = (message: WebSocketMessage): string => {
+  if (
+    message.type === WS_MESSAGE.PRESENCE_UPDATE &&
+    isRecord(message.payload) &&
+    isRecord(message.payload.updates)
+  ) {
+    const updates = message.payload.updates as Record<string, unknown>;
+    const normalizedUpdates: Record<string, unknown> = { ...updates };
+    if ("cursor" in updates && updates.cursor === undefined) {
+      normalizedUpdates.cursor = null;
+    }
+    if ("selection" in updates && updates.selection === undefined) {
+      normalizedUpdates.selection = null;
+    }
+    return JSON.stringify({
+      ...message,
+      payload: { ...message.payload, updates: normalizedUpdates },
+    });
+  }
+  return JSON.stringify(message);
+};
 
 /**
  * Parse incoming WebSocket message
  */
 export const parseMessage = (data: string): WebSocketMessage | null => {
   try {
-    return JSON.parse(data) as WebSocketMessage;
+    const parsed: unknown = JSON.parse(data);
+    if (!isRecord(parsed)) return null;
+    if (typeof parsed.type !== "string") return null;
+    if (typeof parsed.roomId !== "string") return null;
+    if (typeof parsed.senderId !== "string") return null;
+    if (typeof parsed.timestamp !== "number") return null;
+    return parsed as unknown as WebSocketMessage;
   } catch {
     return null;
   }
+};
+
+/**
+ * Map `null` cursor/selection (wire-level clear) back to `undefined` so
+ * downstream state code, which treats `undefined` as "field absent", stays
+ * the source of truth.
+ */
+const normalizeReceivedUpdates = (
+  updates: PresenceUpdatePayload["updates"],
+): PresenceUpdatePayload["updates"] => {
+  // The wire shape may contain explicit `null` for cursor/selection; in the
+  // in-memory model these are `undefined`. `PresenceUpdatePayload["updates"]`
+  // has readonly fields, so we rebuild a fresh mutable object and then return
+  // it as the readonly type.
+  const wireUpdates = updates as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...wireUpdates };
+  if (wireUpdates.cursor === null) {
+    out.cursor = undefined;
+  }
+  if (wireUpdates.selection === null) {
+    out.selection = undefined;
+  }
+  return out as unknown as PresenceUpdatePayload["updates"];
 };
 
 /**
@@ -103,7 +165,8 @@ const processPresenceUpdate = (
     return { state, shouldNotifyPresence: false };
   }
 
-  const updatedUser = updatePresenceUser(existingUser, payload.updates);
+  const normalizedUpdates = normalizeReceivedUpdates(payload.updates);
+  const updatedUser = updatePresenceUser(existingUser, normalizedUpdates);
   const newPresence = setPresenceUser(state.presence, updatedUser);
   return {
     state: updateState(state, { presence: newPresence }),
@@ -145,7 +208,11 @@ const processError = (
 });
 
 /**
- * Process incoming WebSocket message
+ * Process incoming WebSocket message.
+ *
+ * Every payload is validated against a runtime type guard. If validation
+ * fails, the state is returned unchanged and an `error` is surfaced so
+ * subscribers can log/telemetry-record the bad frame without crashing.
  */
 export const processMessage = (
   state: AdapterState,
@@ -158,24 +225,61 @@ export const processMessage = (
   }
 
   switch (message.type) {
-    case WS_MESSAGE.JOIN:
-      return processJoin(state, message.payload as JoinPayload);
+    case WS_MESSAGE.JOIN: {
+      if (!isJoinPayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid JOIN payload"),
+        };
+      }
+      return processJoin(state, message.payload);
+    }
 
-    case WS_MESSAGE.LEAVE:
-      return processLeave(state, message.payload as LeavePayload);
+    case WS_MESSAGE.LEAVE: {
+      if (!isLeavePayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid LEAVE payload"),
+        };
+      }
+      return processLeave(state, message.payload);
+    }
 
-    case WS_MESSAGE.PRESENCE_UPDATE:
-      return processPresenceUpdate(
-        state,
-        message.payload as PresenceUpdatePayload,
-      );
+    case WS_MESSAGE.PRESENCE_UPDATE: {
+      if (!isPresenceUpdatePayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid PRESENCE_UPDATE payload"),
+        };
+      }
+      return processPresenceUpdate(state, message.payload);
+    }
 
     case WS_MESSAGE.PRESENCE_SYNC:
-    case WS_MESSAGE.PRESENCE_SYNC_RESPONSE:
-      return processPresenceSync(state, message.payload as PresenceSyncPayload);
+    case WS_MESSAGE.PRESENCE_SYNC_RESPONSE: {
+      if (!isPresenceSyncPayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid PRESENCE_SYNC payload"),
+        };
+      }
+      return processPresenceSync(state, message.payload);
+    }
 
-    case WS_MESSAGE.ERROR:
-      return processError(state, message.payload as ErrorPayload);
+    case WS_MESSAGE.ERROR: {
+      if (!isErrorPayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid ERROR payload"),
+        };
+      }
+      return processError(state, message.payload);
+    }
 
     case WS_MESSAGE.HEARTBEAT_ACK:
       // Heartbeat ack is handled separately

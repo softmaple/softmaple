@@ -75,6 +75,10 @@
       "types": "./dist/adapters/websocket/index.d.ts",
       "import": "./dist/adapters/websocket/index.js"
     },
+    "./adapters/noop": {
+      "types": "./dist/adapters/noop/index.d.ts",
+      "import": "./dist/adapters/noop/index.js"
+    },
     "./providers": {
       "types": "./dist/providers/index.d.ts",
       "import": "./dist/providers/index.js"

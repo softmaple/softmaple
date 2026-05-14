@@ -82,7 +82,9 @@ const renderWithContext = (
 
 const renderCursorWithContext = (
   contextValue: PresenceContextValue,
-  capture: (update: (cursor: CursorPosition | undefined) => void) => void,
+  capture: (
+    update: (cursor: CursorPosition | null | undefined) => void,
+  ) => void,
   throttleMs?: number,
 ): { unmount: () => void } => {
   const container = document.createElement("div");
@@ -365,6 +367,28 @@ describe("useUpdateCursor", () => {
     unmount();
   });
 
+  it("normalizes null clear to undefined", () => {
+    const updatePresence = vi.fn();
+    let updateCursor: ((c: CursorPosition | null | undefined) => void) | null =
+      null;
+
+    const { unmount } = renderCursorWithContext(
+      createContextValue(createSelf(), updatePresence),
+      (fn) => {
+        updateCursor = fn;
+      },
+      0,
+    );
+
+    act(() => {
+      updateCursor?.(null);
+    });
+
+    expect(updatePresence).toHaveBeenCalledWith({ cursor: undefined });
+
+    unmount();
+  });
+
   it("opts out of throttling when throttleMs=0", () => {
     const updatePresence = vi.fn();
     let updateCursor: ((c: CursorPosition | undefined) => void) | null = null;
@@ -466,15 +490,16 @@ describe("useUpdatePresence and useUpdateSelection", () => {
     consoleError.mockRestore();
   });
 
-  it("useUpdateSelection forwards selection updates", () => {
+  it("useUpdateSelection forwards selection updates (throttle bypassed)", () => {
     const updatePresence = vi.fn();
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    let captured: ((selection: SelectionRange | undefined) => void) | null =
-      null;
+    let captured:
+      | ((selection: SelectionRange | null | undefined) => void)
+      | null = null;
     const Capture = (): null => {
-      captured = useUpdateSelection();
+      captured = useUpdateSelection(0);
       return null;
     };
     act(() => {
@@ -500,9 +525,67 @@ describe("useUpdatePresence and useUpdateSelection", () => {
     expect(updatePresence).toHaveBeenCalledWith({ selection: undefined });
 
     act(() => {
+      captured?.(null);
+    });
+    // null is normalized to undefined on the wire so peers see an explicit
+    // "no selection" rather than "key omitted".
+    expect(updatePresence).toHaveBeenLastCalledWith({ selection: undefined });
+
+    act(() => {
       root.unmount();
     });
     container.remove();
+  });
+
+  it("useUpdateSelection collapses drag-select calls into a single trailing send", () => {
+    vi.useFakeTimers();
+    const updatePresence = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    let captured:
+      | ((selection: SelectionRange | null | undefined) => void)
+      | null = null;
+    const Capture = (): null => {
+      captured = useUpdateSelection(50);
+      return null;
+    };
+    act(() => {
+      root.render(
+        <PresenceContext.Provider
+          value={createContextValue(createSelf(), updatePresence)}
+        >
+          <Capture />
+        </PresenceContext.Provider>,
+      );
+    });
+
+    act(() => {
+      captured?.({ blockId: "b1", from: 0, to: 1 });
+    });
+    expect(updatePresence).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      captured?.({ blockId: "b1", from: 0, to: 2 });
+      captured?.({ blockId: "b1", from: 0, to: 3 });
+      captured?.({ blockId: "b1", from: 0, to: 4 });
+    });
+    expect(updatePresence).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(60);
+    });
+
+    expect(updatePresence).toHaveBeenCalledTimes(2);
+    expect(updatePresence).toHaveBeenLastCalledWith({
+      selection: { blockId: "b1", from: 0, to: 4 },
+    });
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    vi.useRealTimers();
   });
 
   it("useUpdateSelection throws outside provider", () => {

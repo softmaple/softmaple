@@ -6,6 +6,11 @@ export {
   createBroadcastChannelAdapter,
 } from "./broadcast-channel";
 export {
+  createNoopAdapter,
+  type NoopAdapterConfig,
+  noopAdapterFactory,
+} from "./noop";
+export {
   type AdapterConfig,
   type AdapterConnectionState,
   type AdapterFactory,

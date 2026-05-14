@@ -76,10 +76,60 @@ The package supports multiple transport adapters:
 
 - **createWebSocketAdapter**: Standard WebSocket implementation
 - **createBroadcastChannelAdapter**: Local BroadcastChannel for same-origin tabs
+- **createNoopAdapter**: No-op implementation safe for Next.js SSR, unit
+  tests, and Storybook environments where `BroadcastChannel` / `WebSocket`
+  are unavailable. It maintains the full state machine and subscriber
+  contracts but never touches the network, so a `PresenceProvider` wrapped
+  around it renders deterministically and never throws.
 
 The adapter contract is transport-agnostic, so additional providers such as
 Supabase Realtime or Liveblocks can be implemented without changing the React
 components.
+
+## WebSocket server contract
+
+`createWebSocketAdapter` exchanges JSON frames of shape:
+
+```ts
+{
+  type: "join" | "leave" | "presence_update" | "presence_sync"
+      | "presence_sync_response" | "heartbeat" | "heartbeat_ack" | "error",
+  roomId: string,
+  senderId: string,
+  timestamp: number,
+  payload?: unknown,
+}
+```
+
+Payload shapes per message type:
+
+| Type | Payload |
+| --- | --- |
+| `join` | `{ user: PresenceUser }` |
+| `leave` | `{ userId: string }` |
+| `presence_update` | `{ userId: string, updates: Partial<Omit<PresenceUser, "userId">> }` |
+| `presence_sync` / `presence_sync_response` | `{ users: PresenceUser[] }` |
+| `error` | `{ code: string, message: string }` |
+
+Every inbound payload is validated by a runtime type guard
+(`src/adapters/websocket/validation.ts`). Malformed frames are dropped and
+surfaced via `adapter.onError` instead of crashing consumers.
+
+### Clear-cursor wire semantics
+
+`cursor` and `selection` are optional fields on `PresenceUser`. In the
+in-memory model, "no cursor" is represented as `undefined`. JSON serialization
+silently drops `undefined`, which would make a `useUpdateCursor(undefined)`
+indistinguishable from "no change". To preserve intent on the wire, the
+WebSocket adapter:
+
+- **On send:** rewrites `cursor: undefined` / `selection: undefined` to
+  `cursor: null` / `selection: null` inside `presence_update` payloads.
+- **On receive:** normalizes `cursor: null` / `selection: null` back to
+  `undefined` before applying to local state.
+
+Server implementations should mirror this convention — emit `null` (not an
+absent key) when a peer clears their cursor.
 
 ## Public API
 
@@ -87,6 +137,8 @@ components.
 - `@softmaple/awareness/components`: UI components
 - `@softmaple/awareness/hooks`: React hooks
 - `@softmaple/awareness/adapters`: Adapter factories and adapter types
+- `@softmaple/awareness/adapters/noop`: SSR/test-safe no-op adapter (also
+  re-exported from `/adapters`)
 - `@softmaple/awareness/state`: Pure state helpers
 - `@softmaple/awareness/styles.css`: Component styles
 

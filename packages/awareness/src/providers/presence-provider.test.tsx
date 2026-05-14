@@ -331,6 +331,146 @@ describe("PresenceProvider", () => {
     });
   });
 
+  it("caps recentActivity at maxRecentActivity (FIFO)", async () => {
+    const adapter = new FullMockAdapter();
+    const contextRef: { current: PresenceContextValue | null } = {
+      current: null,
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          maxRecentActivity={3}
+        >
+          <PresenceContext.Consumer>
+            {(value) => {
+              contextRef.current = value;
+              return null;
+            }}
+          </PresenceContext.Consumer>
+        </PresenceProvider>,
+      );
+    });
+
+    const self: PresenceUser = {
+      userId: "self",
+      name: "Self",
+      color: "#000",
+      status: "active",
+      lastActiveAt: 0,
+    };
+    act(() => {
+      adapter.emitConnected(self);
+    });
+
+    // Fire five joins; the cap of 3 should evict the two oldest.
+    for (let i = 0; i < 5; i++) {
+      const peer: PresenceUser = {
+        userId: `peer-${i}`,
+        name: `Peer ${i}`,
+        color: "#111",
+        status: "active",
+        lastActiveAt: i,
+      };
+      act(() => {
+        adapter.emitJoin(peer);
+      });
+    }
+
+    expect(contextRef.current?.recentActivity).toHaveLength(3);
+    // Newest first
+    expect(contextRef.current?.recentActivity[0]?.userId).toBe("peer-4");
+    expect(contextRef.current?.recentActivity[2]?.userId).toBe("peer-2");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("emits an IDLE activity event when status sweep demotes a user", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(1_700_000_000_000));
+
+    const adapter = new FullMockAdapter();
+    const contextRef: { current: PresenceContextValue | null } = {
+      current: null,
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          statusConfig={{
+            maxActivities: 100,
+            idleTimeoutMs: 1_000,
+            offlineTimeoutMs: 60_000,
+            cursorThrottleMs: 50,
+          }}
+          statusSweepMs={500}
+        >
+          <PresenceContext.Consumer>
+            {(value) => {
+              contextRef.current = value;
+              return null;
+            }}
+          </PresenceContext.Consumer>
+        </PresenceProvider>,
+      );
+    });
+
+    const self: PresenceUser = {
+      userId: "self",
+      name: "Self",
+      color: "#000",
+      status: "active",
+      lastActiveAt: Date.now(),
+    };
+    const peer: PresenceUser = {
+      userId: "peer-idle",
+      name: "Peer",
+      color: "#111",
+      status: "active",
+      lastActiveAt: Date.now(),
+    };
+    act(() => {
+      adapter.emitConnected(self);
+      adapter.emitJoin(peer);
+    });
+
+    // Advance past the idle threshold so the next sweep tick demotes peer.
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+    });
+
+    const idleEvents = (contextRef.current?.recentActivity ?? []).filter(
+      (e) => e.type === "idle",
+    );
+    // Both self and peer have stale lastActiveAt by t=1500, so both should
+    // be demoted exactly once.
+    expect(idleEvents).toHaveLength(2);
+    expect(idleEvents.map((e) => e.userId).sort()).toEqual([
+      "peer-idle",
+      "self",
+    ]);
+    expect(contextRef.current?.presence.get("peer-idle")?.status).toBe("idle");
+    expect(contextRef.current?.self?.status).toBe("idle");
+
+    await act(async () => {
+      root.unmount();
+    });
+    vi.useRealTimers();
+  });
+
   it("does not record stop-typing updates as typing activity", async () => {
     const adapter = new MockPresenceAdapter();
     const contextRef: { current: PresenceContextValue | null } = {

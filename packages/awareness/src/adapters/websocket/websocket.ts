@@ -31,14 +31,16 @@ import { parseMessage, processMessage } from "./message";
 import { createInternalState } from "./state";
 import {
   DEFAULT_WS_CONFIG,
-  type JoinPayload,
-  type LeavePayload,
-  type PresenceSyncPayload,
-  type PresenceUpdatePayload,
   type WebSocketAdapterConfig,
   type WebSocketMessage,
   WS_MESSAGE,
 } from "./types";
+import {
+  isJoinPayload,
+  isLeavePayload,
+  isPresenceSyncPayload,
+  isPresenceUpdatePayload,
+} from "./validation";
 
 /**
  * Authentication message type for secure token handshake
@@ -88,29 +90,6 @@ const waitForBufferFlush = (
     };
     checkBuffer();
   });
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-
-const isJoinPayload = (payload: unknown): payload is JoinPayload =>
-  isRecord(payload) &&
-  isRecord(payload.user) &&
-  typeof payload.user.userId === "string";
-
-const isLeavePayload = (payload: unknown): payload is LeavePayload =>
-  isRecord(payload) && typeof payload.userId === "string";
-
-const isPresenceUpdatePayload = (
-  payload: unknown,
-): payload is PresenceUpdatePayload =>
-  isRecord(payload) &&
-  typeof payload.userId === "string" &&
-  isRecord(payload.updates);
-
-const isPresenceSyncPayload = (
-  payload: unknown,
-): payload is PresenceSyncPayload =>
-  isRecord(payload) && Array.isArray(payload.users);
 
 const presenceEventFromMessage = (
   message: WebSocketMessage,

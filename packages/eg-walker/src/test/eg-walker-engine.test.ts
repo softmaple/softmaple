@@ -754,6 +754,59 @@ describe("Full paper architecture utilities", () => {
     }
   });
 
+  it("converges with full replay when concurrent inserts split the same placeholder at different offsets", () => {
+    // Sub-issue 5 regression: when partial replay starts from a
+    // checkpoint, pre-checkpoint text is collapsed into a single
+    // placeholder record. Two concurrent inserts inside that
+    // placeholder split it at different offsets, and a descendant of
+    // one of those inserts is later integrated into the conflict
+    // region created by the other. The YATA integration scan compares
+    // origin ids by identity, so the engine has to rewrite the
+    // existing items' `originLeft` references when a placeholder
+    // splits — otherwise siblings anchored to the same logical
+    // boundary look as if they have different origins and partial
+    // replay diverges from full replay.
+    const graph = new EventGraph();
+    const events: GraphEvent[] = [
+      {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "abcdef" },
+        timestamp: 1,
+      },
+      {
+        id: "b:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "B" },
+        timestamp: 2,
+      },
+      {
+        id: "c:0",
+        parentVersion: new Set(["root:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "C" },
+        timestamp: 3,
+      },
+      {
+        id: "f:0",
+        parentVersion: new Set(["c:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "F" },
+        timestamp: 4,
+      },
+    ];
+    events.forEach((event) => graph.addEvent(event));
+
+    const fullText = new EgWalkerEngine().generate(
+      graph.getTopologicalOrder(),
+    ).text;
+    const partialText = new PartialReplayManager().replayFromCheckpoint(graph, {
+      version: new Set(["root:0"]),
+      text: "abcdef",
+    }).text;
+
+    expect(partialText).toBe(fullText);
+    expect(partialText).toBe("aCbBFcdef");
+  });
+
   it("does not materialize per-character CRDT items for the checkpoint text", () => {
     // Acceptance criterion for issue #665: partial replay must avoid the
     // O(checkpoint.length) item cost. We use a long pre-checkpoint string and

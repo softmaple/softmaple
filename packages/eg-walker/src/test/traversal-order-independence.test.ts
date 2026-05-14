@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { PartialReplayManager } from "../engine/partial-replay";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, GraphEvent, Version } from "../types";
@@ -317,6 +318,80 @@ describe("EgWalkerEngine traversal-order independence", () => {
         observed.add(generateFromShuffledOrder(events, rand));
       }
       expect(observed.size).toBe(1);
+    }
+  });
+
+  it("partial replay from a placeholder checkpoint matches full replay across many concurrent-insert scenarios", () => {
+    // Two concurrent inserts inside the same checkpoint placeholder
+    // (split it at different offsets) plus a descendant of one of
+    // them. The YATA scan compares origin ids by identity, so the
+    // engine must keep `originLeft` references in sync when a
+    // placeholder splits — otherwise partial replay diverges from
+    // full replay. Exercise the property across a sweep of insert
+    // positions to cover left-edge, right-edge, and interior splits.
+    const checkpoint = "abcdefgh";
+    const cases: Array<[number, number, number]> = [];
+    for (let bIdx = 1; bIdx < checkpoint.length; bIdx++) {
+      for (let cIdx = 1; cIdx < checkpoint.length; cIdx++) {
+        if (bIdx === cIdx) {
+          continue;
+        }
+        for (const fOffset of [0, 1, 2]) {
+          cases.push([bIdx, cIdx, fOffset]);
+        }
+      }
+    }
+
+    for (const [bIdx, cIdx, fOffset] of cases) {
+      const graph = new EventGraph();
+      const events: GraphEvent[] = [
+        {
+          id: "root:0",
+          parentVersion: new Set<EventId>(),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: checkpoint,
+          },
+          timestamp: 1,
+        },
+        {
+          id: "b:0",
+          parentVersion: new Set(["root:0"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: bIdx, text: "B" },
+          timestamp: 2,
+        },
+        {
+          id: "c:0",
+          parentVersion: new Set(["root:0"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: cIdx, text: "C" },
+          timestamp: 3,
+        },
+        {
+          id: "f:0",
+          parentVersion: new Set(["c:0"]),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: Math.min(cIdx + fOffset, checkpoint.length + 1),
+            text: "F",
+          },
+          timestamp: 4,
+        },
+      ];
+      events.forEach((event) => graph.addEvent(event));
+
+      const fullText = new EgWalkerEngine().generate(
+        graph.getTopologicalOrder(),
+      ).text;
+      const partialText = new PartialReplayManager().replayFromCheckpoint(
+        graph,
+        { version: new Set(["root:0"]), text: checkpoint },
+      ).text;
+
+      expect(
+        partialText,
+        `case bIdx=${bIdx} cIdx=${cIdx} fOff=${fOffset}`,
+      ).toBe(fullText);
     }
   });
 });

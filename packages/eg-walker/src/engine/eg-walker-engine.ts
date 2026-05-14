@@ -82,6 +82,14 @@ export class EgWalkerEngine {
   private readonly eventItems = new Map<EventId, EventId[]>();
   private readonly deleteTargets = new Map<EventId, EventId[]>();
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
+  // Reverse index: `target item id` -> set of item ids whose `originLeft`
+  // points at it. Maintained alongside {@link itemsById} so that
+  // {@link splitRecordAt} can cheaply rewrite the `originLeft` references
+  // when it carves a placeholder in two. Without this rewrite the YATA
+  // integration scan would see siblings anchored to the same logical
+  // boundary as if they had different origins, which breaks partial
+  // replay convergence.
+  private readonly originLeftRefs = new Map<EventId, Set<EventId>>();
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
     (item) => (item.prepareState === 1 ? item.content.length : 0),
     (item) => (item.everDeleted ? 0 : item.content.length),
@@ -181,6 +189,7 @@ export class EgWalkerEngine {
     this.eventItems.clear();
     this.deleteTargets.clear();
     this.itemsById.clear();
+    this.originLeftRefs.clear();
     this.sequence.clear();
     this.currentVersion = new Set(options.initialVersion ?? []);
     this.resultingText = initialText;
@@ -235,6 +244,7 @@ export class EgWalkerEngine {
       };
       this.sequence.push(item);
       this.itemsById.set(id, item);
+      this.trackOriginLeft(id, item.originLeft);
       originLeft = id;
     });
   }
@@ -307,6 +317,7 @@ export class EgWalkerEngine {
       };
       this.integrate(item);
       this.itemsById.set(item.id, item);
+      this.trackOriginLeft(item.id, item.originLeft);
       insertedIds.push(item.id);
       left = item.id;
     }
@@ -431,7 +442,46 @@ export class EgWalkerEngine {
     };
     this.sequence.insert(position + 1, right);
     this.itemsById.set(right.id, right);
+
+    // Existing items with `originLeft = left.id` were anchored to the
+    // right boundary of the pre-split record; that boundary now lives
+    // at the end of {@link right}, so transfer their `originLeft`
+    // references over. `originRight = left.id` references still point
+    // at the left edge of the original record, which is unchanged.
+    this.rewriteOriginLeftReferences(left.id, right.id);
     return position + 1;
+  }
+
+  private trackOriginLeft(itemId: EventId, originLeft: EventId | null): void {
+    if (originLeft === null) {
+      return;
+    }
+    const set = this.originLeftRefs.get(originLeft) ?? new Set<EventId>();
+    set.add(itemId);
+    this.originLeftRefs.set(originLeft, set);
+  }
+
+  private rewriteOriginLeftReferences(
+    oldOriginLeft: EventId,
+    newOriginLeft: EventId,
+  ): void {
+    const refs = this.originLeftRefs.get(oldOriginLeft);
+    if (!refs || refs.size === 0) {
+      return;
+    }
+    this.originLeftRefs.delete(oldOriginLeft);
+    const merged = this.originLeftRefs.get(newOriginLeft) ?? new Set<EventId>();
+    for (const itemId of refs) {
+      const item = this.itemsById.get(itemId);
+      if (!item || item.originLeft !== oldOriginLeft) {
+        continue;
+      }
+      item.originLeft = newOriginLeft;
+      merged.add(itemId);
+    }
+    if (merged.size > 0) {
+      this.originLeftRefs.set(newOriginLeft, merged);
+    }
   }
 
   /**

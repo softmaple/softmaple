@@ -53,6 +53,30 @@ Temporary state:
 The temporary replay state is not exported, serialized, or retained by
 `EgWalkerReplica`.
 
+## Section 3.4 Internal-Document Fast Path
+
+`EgWalkerEngine.processEvent` short-circuits the diff/retreat/advance
+machinery when an event's `parentVersion` matches the engine's current
+version as a set. In that case the prepare-state of the sequence already
+matches the event's parent view, so the operation reduces to a linear edit
+on top of the current state. The fast path is taken on:
+
+- Single-author traces (every event's parent is the previous event).
+- Remote events that extend the shared frontier without divergence.
+- The non-divergent tail of an otherwise concurrent history.
+
+For inserts, `applyInsert` additionally skips the YATA integration scan
+when the destination range strictly between `originLeft` and `originRight`
+is empty (the dominant case under a non-conflicting run), and batches
+multi-character inserts at sequential positions because every code unit
+after the first is chained off a brand-new id that no existing item can
+reference. Concurrent or divergent events still fall back to the full
+prepare/effect replay path; both paths produce identical output.
+
+Stats exposed on `GeneratedDocument.stats.nonConflictingRunCount` and
+`fullReplayCount` (also surfaced through `ReplayWalker.walk`) let callers
+and tests verify which path was taken.
+
 ## Storage Model
 
 The binary columnar codec stores topologically sorted graph data in separate
@@ -69,3 +93,4 @@ The test suite is architecture-focused:
 - `external-api.test.ts`: public API and persistence round-trip.
 - `algorithm-characteristics.test.ts`: convergence, non-interleaving, no persistent CRDT metadata.
 - `invariants.test.ts`: strong-list helper behavior.
+- `non-conflicting-run-perf.test.ts`: Section 3.4 fast-path activation, fallback correctness, and a 20k-event linear-trace benchmark.

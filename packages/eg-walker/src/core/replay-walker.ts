@@ -11,6 +11,18 @@ export interface WalkResult {
   readonly eventsProcessed: number;
   readonly retreatCount: number;
   readonly advanceCount: number;
+  /**
+   * Section 3.4 internal-document fast path: events whose parent version
+   * already matched the engine's current version and skipped the
+   * diff/retreat/advance machinery entirely. Useful for verifying that
+   * mostly linear traces hit the fast path.
+   */
+  readonly nonConflictingRunCount: number;
+  /**
+   * Counterpart to {@link nonConflictingRunCount}: events that fell through
+   * to the full prepare/effect replay path.
+   */
+  readonly fullReplayCount: number;
 }
 
 /**
@@ -45,6 +57,8 @@ export class ReplayWalker {
       eventsProcessed: generated.stats.eventsProcessed,
       retreatCount: generated.stats.retreatCount,
       advanceCount: generated.stats.advanceCount,
+      nonConflictingRunCount: generated.stats.nonConflictingRunCount,
+      fullReplayCount: generated.stats.fullReplayCount,
     };
   }
 

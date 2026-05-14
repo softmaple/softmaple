@@ -36,6 +36,22 @@ interface EngineStats {
   readonly retreatCount: number;
   readonly advanceCount: number;
   readonly eventsProcessed: number;
+  /**
+   * Section 3.4 internal-document fast path: number of events whose
+   * `parentVersion` already matched the engine's current version, so they
+   * skipped the diff/retreat/advance machinery entirely and applied through
+   * a direct integration position (no YATA scan when the destination range
+   * is empty, no per-character scan for multi-character inserts after the
+   * first).
+   */
+  readonly nonConflictingRunCount: number;
+  /**
+   * Counterpart to {@link nonConflictingRunCount}: events that fell through
+   * to the full prepare/effect replay path because either their parent
+   * version diverged from the current version or the destination range
+   * still contained concurrent siblings.
+   */
+  readonly fullReplayCount: number;
 }
 
 export interface GeneratedDocument {
@@ -98,6 +114,8 @@ export class EgWalkerEngine {
   private resultingText = "";
   private retreatCount = 0;
   private advanceCount = 0;
+  private nonConflictingRunCount = 0;
+  private fullReplayCount = 0;
   private placeholderCounter = 0;
 
   generate(
@@ -121,6 +139,8 @@ export class EgWalkerEngine {
         retreatCount: this.retreatCount,
         advanceCount: this.advanceCount,
         eventsProcessed: events.length,
+        nonConflictingRunCount: this.nonConflictingRunCount,
+        fullReplayCount: this.fullReplayCount,
       },
     };
   }
@@ -157,10 +177,32 @@ export class EgWalkerEngine {
       retreatCount: this.retreatCount,
       advanceCount: this.advanceCount,
       eventsProcessed: this.eventsById.size,
+      nonConflictingRunCount: this.nonConflictingRunCount,
+      fullReplayCount: this.fullReplayCount,
     };
   }
 
   private processEvent(event: GraphEvent): ExternalOperation[] {
+    // Section 3.4 "internal-document" fast path.
+    //
+    // When the event's parent version already equals the engine's current
+    // version, the diff between them is empty by construction — there are
+    // no events to retreat or advance — and the operation reduces to a
+    // linear edit on top of the current state. We can therefore skip the
+    // full diff/retreat/advance machinery, which is the dominant cost on
+    // single-author traces and on remote events that simply extend the
+    // shared frontier.
+    //
+    // Concurrent / divergent events still fall through to the full path
+    // below, which retreats overlapping inserts/deletes back to the
+    // event's prepare-view and re-advances after applying.
+    if (this.isNonConflictingRun(event)) {
+      const transformed = this.apply(event);
+      this.currentVersion = new Set([event.id]);
+      this.nonConflictingRunCount++;
+      return transformed;
+    }
+
     const { retreat, advance } = this.diffVersions(
       this.currentVersion,
       event.parentVersion,
@@ -175,7 +217,32 @@ export class EgWalkerEngine {
 
     const transformed = this.apply(event);
     this.currentVersion = new Set([event.id]);
+    this.fullReplayCount++;
     return transformed;
+  }
+
+  /**
+   * Section 3.4 non-conflicting-run detection.
+   *
+   * Returns true iff {@link event.parentVersion} matches
+   * {@link currentVersion} exactly. Set equality is enough: each event's
+   * parent version is already a frontier of the causal graph, so two
+   * frontiers compare equal as sets iff they expand to the same ancestor
+   * closure. When this holds, `diffVersions(currentVersion, parent)`
+   * returns two empty sets and the retreat/advance loops are no-ops, so
+   * the caller can skip them outright.
+   */
+  private isNonConflictingRun(event: GraphEvent): boolean {
+    const parent = event.parentVersion;
+    if (parent.size !== this.currentVersion.size) {
+      return false;
+    }
+    for (const id of parent) {
+      if (!this.currentVersion.has(id)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private reset(
@@ -195,6 +262,8 @@ export class EgWalkerEngine {
     this.resultingText = initialText;
     this.retreatCount = 0;
     this.advanceCount = 0;
+    this.nonConflictingRunCount = 0;
+    this.fullReplayCount = 0;
     this.placeholderCounter = 0;
 
     const graphEvents = options.eventGraph?.getTopologicalOrder() ?? events;
@@ -301,20 +370,68 @@ export class EgWalkerEngine {
       originRightPosition === null
         ? null
         : (this.sequence.at(originRightPosition)?.id ?? null);
+
+    // Section 3.4 internal-document fast path for the first item.
+    //
+    // The YATA integration scan walks the sequence positions strictly
+    // between `originLeft` and `originRight`. When that range is empty
+    // (no retreated, deleted, or otherwise non-prepare-visible records
+    // sit in it) the scan is provably a no-op, so we can place the
+    // first item at `firstInsertPosition` without invoking it. The
+    // dominant case for this is a non-conflicting run: no concurrent
+    // siblings have been integrated near the insertion point, so the
+    // previous-prepare-visible record is the literal neighbour of
+    // `firstInsertPosition`.
+    const leftBound = originLeftPosition ?? -1;
+    const rightBound = originRightPosition ?? this.sequence.length;
+    const conflictRegionEmpty =
+      leftBound + 1 === firstInsertPosition &&
+      firstInsertPosition === rightBound;
+
+    const codeUnits = stringCodeUnits(operation.text);
     const insertedIds: EventId[] = [];
     let left = originLeft;
 
-    for (const [offset, content] of stringCodeUnits(operation.text).entries()) {
+    const firstItem: AugmentedCRDTItem = {
+      id: `${event.id}:0`,
+      eventId: event.id,
+      content: codeUnits[0] ?? "",
+      originLeft: left,
+      originRight,
+      everDeleted: false,
+      prepareState: 1,
+    };
+    let actualFirstPosition: number;
+    if (conflictRegionEmpty) {
+      actualFirstPosition = firstInsertPosition;
+      this.sequence.insert(actualFirstPosition, firstItem);
+    } else {
+      actualFirstPosition = this.findIntegrationPosition(firstItem);
+      this.sequence.insert(actualFirstPosition, firstItem);
+    }
+    this.itemsById.set(firstItem.id, firstItem);
+    this.trackOriginLeft(firstItem.id, firstItem.originLeft);
+    insertedIds.push(firstItem.id);
+    left = firstItem.id;
+
+    // Multi-character inserts: every subsequent item is chained off the
+    // previous item via `originLeft`. No record that existed before this
+    // event can reference that brand-new id, so the YATA scan for chars
+    // 1..N terminates on its first iteration and the integration
+    // position is unconditionally `previous + 1`. We bypass the scan
+    // and place them at sequential positions instead of paying
+    // `findIntegrationPosition`'s setup cost per character.
+    for (let offset = 1; offset < codeUnits.length; offset++) {
       const item: AugmentedCRDTItem = {
         id: `${event.id}:${offset}`,
         eventId: event.id,
-        content,
+        content: codeUnits[offset] ?? "",
         originLeft: left,
         originRight,
         everDeleted: false,
         prepareState: 1,
       };
-      this.integrate(item);
+      this.sequence.insert(actualFirstPosition + offset, item);
       this.itemsById.set(item.id, item);
       this.trackOriginLeft(item.id, item.originLeft);
       insertedIds.push(item.id);

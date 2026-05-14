@@ -96,10 +96,22 @@ const operationLength = (operation: ExternalOperation): number =>
     : operation.length;
 
 /**
+ * Partial operation run as read from the binary wire: only `type`,
+ * `startEventOffset` (the prefix sum of run lengths), and `length` are
+ * available. `startIndex` and `textLength` are filled in by
+ * {@link finalizeOperationRuns} once `operationIndexes` and
+ * `operationLengths` have been read.
+ */
+type PartialOperationRun = Omit<OperationRun, "startIndex" | "textLength">;
+
+/**
  * Reconstruct the per-event `textLengths` column from `operationRuns` (which
  * carry the per-run type) and `operationLengths` (which equal text length for
  * INSERTs and delete length for DELETEs). EGW3 omits `textLengths` from the
- * binary wire because it's fully derivable from those two columns.
+ * binary wire because it's fully derivable from those two columns. Internal
+ * helper invoked only from {@link ColumnarEventGraphCodec.decodeBinary},
+ * where `operationLengths.length` is the total event count and every
+ * `startEventOffset + offset` index is guaranteed to be in range.
  */
 const reconstructTextLengths = (
   operationRuns: ReadonlyArray<OperationRun>,
@@ -114,31 +126,31 @@ const reconstructTextLengths = (
     }
     for (let offset = 0; offset < run.length; offset++) {
       textLengths[run.startEventOffset + offset] =
-        operationLengths[run.startEventOffset + offset] ?? 0;
+        operationLengths[run.startEventOffset + offset]!;
     }
   }
   return textLengths;
 };
 
 /**
- * Backfill the `startIndex` and `textLength` fields on operation runs whose
- * binary form only carried `(type, length)`. `startIndex` is taken from
+ * Promote the partial runs from {@link ColumnarEventGraphCodec.readOperationRuns}
+ * into full {@link OperationRun} values. `startIndex` is taken from
  * `operationIndexes` at the run's first event offset; `textLength` is the
  * sum of `operationLengths` over the run's events (for INSERT runs only).
  */
 const finalizeOperationRuns = (
-  runs: ReadonlyArray<OperationRun>,
+  runs: ReadonlyArray<PartialOperationRun>,
   operationIndexes: ReadonlyArray<number>,
   operationLengths: ReadonlyArray<number>,
 ): OperationRun[] =>
   runs.map((run) => {
-    const startIndex = operationIndexes[run.startEventOffset] ?? 0;
+    const startIndex = operationIndexes[run.startEventOffset]!;
     if (run.type !== OPERATION_TYPE.INSERT) {
       return { ...run, startIndex, textLength: undefined };
     }
     let textLength = 0;
     for (let offset = 0; offset < run.length; offset++) {
-      textLength += operationLengths[run.startEventOffset + offset] ?? 0;
+      textLength += operationLengths[run.startEventOffset + offset]!;
     }
     return { ...run, startIndex, textLength };
   });
@@ -350,14 +362,9 @@ export class ColumnarEventGraphCodec {
     }
   }
 
-  /**
-   * Inverse of {@link writeOperationRuns}. Reads `(type, length)` and defers
-   * `startEventOffset` / `startIndex` / `textLength` until {@link decodeBinary}
-   * has read `operationIndexes` and `operationLengths`.
-   */
-  private readOperationRuns(reader: BinaryReader): OperationRun[] {
+  private readOperationRuns(reader: BinaryReader): PartialOperationRun[] {
     const length = reader.readVarint();
-    const runs: OperationRun[] = [];
+    const runs: PartialOperationRun[] = [];
     let cursor = 0;
 
     for (let i = 0; i < length; i++) {
@@ -368,11 +375,8 @@ export class ColumnarEventGraphCodec {
       const runLength = reader.readVarint();
       runs.push({
         type,
-        startIndex: 0,
         startEventOffset: cursor,
         length: runLength,
-        // textLength is filled in later, once operationLengths is known.
-        textLength: type === OPERATION_TYPE.INSERT ? 0 : undefined,
       });
       cursor += runLength;
     }
@@ -473,15 +477,17 @@ export class ColumnarEventGraphCodec {
   /**
    * Id runs are written in topological order, so `startEventOffset` is the
    * prefix sum of run lengths and never needs to be on the wire. The
-   * `custom` flag is packed into the high bit of the length-prefix to save a
-   * byte per run on the common (non-custom) case.
+   * `custom` flag is packed into the low bit of the length-prefix to save a
+   * byte per run on the common (non-custom) case. Uses safe-integer
+   * arithmetic rather than 32-bit bitwise ops so the encoding stays correct
+   * for run lengths up to 2^52.
    */
   private writeIdRuns(writer: BinaryWriter, runs: ReadonlyArray<IdRun>): void {
     writer.writeVarint(runs.length);
     for (const run of runs) {
       writer.writeString(run.replicaId);
       writer.writeVarint(run.startSequence);
-      writer.writeVarint((run.length << 1) | (run.custom ? 1 : 0));
+      writer.writeVarint(run.length * 2 + (run.custom ? 1 : 0));
     }
   }
 
@@ -493,8 +499,15 @@ export class ColumnarEventGraphCodec {
       const replicaId = reader.readString();
       const startSequence = reader.readVarint();
       const packed = reader.readVarint();
-      const custom = (packed & 1) === 1;
-      const runLength = packed >>> 1;
+      const custom = packed % 2 === 1;
+      const runLength = Math.floor(packed / 2);
+      // {@link encodeIdRuns} only emits custom runs with `length: 1`
+      // (verbatim string IDs are never coalesced). Encoder bugs that
+      // violate this invariant would shift every subsequent event ID
+      // silently, so guard it at the decode boundary.
+      if (custom && runLength !== 1) {
+        throw new Error(`Custom id run must have length 1, got ${runLength}`);
+      }
       runs.push({
         replicaId,
         startSequence,
@@ -719,12 +732,10 @@ class BinaryReader {
     return Array.from({ length }, () => this.readVarint());
   }
 
-  /** Inverse of {@link BinaryWriter.writeZigZagVarint}. */
   readZigZagVarint(): number {
     return zigzagDecode(this.readVarint());
   }
 
-  /** Inverse of {@link BinaryWriter.writeZigZagDeltaArray}. */
   readZigZagDeltaArray(): number[] {
     const length = this.readVarint();
     const values: number[] = new Array<number>(length);

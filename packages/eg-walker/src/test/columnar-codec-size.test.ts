@@ -35,7 +35,7 @@
  *      assertion fires.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
@@ -269,10 +269,23 @@ const buildConcurrentMergeTrace = (
 describe("columnar codec size benchmarks (issue #672)", () => {
   const results: TraceMetrics[] = [];
 
+  interface BenchmarkBounds {
+    /** Hard upper bound on `binaryBytes / jsonBytes`. */
+    readonly maxRatio: number;
+    /**
+     * Inclusive absolute byte range `[min, max]` for `binaryBytes`. Lower
+     * bound catches regressions that quietly grow the binary while still
+     * staying under {@link maxRatio} (e.g. re-introducing a redundant
+     * column); upper bound is loose enough to absorb LZ4 build-to-build
+     * variance.
+     */
+    readonly binaryBytesRange: readonly [number, number];
+  }
+
   const benchmark = (
     traceName: string,
     graph: EventGraph,
-    maxRatio: number,
+    bounds: BenchmarkBounds,
   ): void => {
     const codec = new ColumnarEventGraphCodec();
 
@@ -293,8 +306,14 @@ describe("columnar codec size benchmarks (issue #672)", () => {
       ratio,
     });
 
+    const [minBinaryBytes, maxBinaryBytes] = bounds.binaryBytesRange;
     expect(binaryBytes).toBeLessThan(jsonBytes);
-    expect(ratio).toBeLessThan(maxRatio);
+    expect(ratio).toBeLessThan(bounds.maxRatio);
+    // Absolute byte-range assertions catch regressions in both directions
+    // (a re-introduced redundant column would still pass the ratio bound
+    // for some traces, but would breach the upper byte bound).
+    expect(binaryBytes).toBeGreaterThanOrEqual(minBinaryBytes);
+    expect(binaryBytes).toBeLessThanOrEqual(maxBinaryBytes);
   };
 
   it("compresses a single-author linear insert trace well below the JSON baseline", () => {
@@ -303,7 +322,10 @@ describe("columnar codec size benchmarks (issue #672)", () => {
     // (operationRuns/idRuns), or compresses very densely (LZ4 on a
     // pseudo-random ASCII stream). The JSON form, by contrast, carries the
     // full ms-since-epoch timestamps and absolute indexes per event.
-    benchmark("linear-1k", buildLinearInsertTrace(1_000), 0.1);
+    benchmark("linear-1k", buildLinearInsertTrace(1_000), {
+      maxRatio: 0.1,
+      binaryBytesRange: [3_500, 4_500],
+    });
   });
 
   it("compresses a single-author mixed-edit trace well below the JSON baseline", () => {
@@ -311,17 +333,21 @@ describe("columnar codec size benchmarks (issue #672)", () => {
     // are small (~+/-5) but no longer constant; operationRuns flip between
     // INSERT and DELETE every few events. Still expected to be well under
     // half of the JSON size.
-    benchmark("editing-2k", buildEditingTrace(2_000), 0.15);
+    benchmark("editing-2k", buildEditingTrace(2_000), {
+      maxRatio: 0.15,
+      binaryBytesRange: [10_000, 13_000],
+    });
   });
 
   it("compresses a bulk-paste-then-edit trace well below the JSON baseline", () => {
     // One large LZ4-friendly insert dominates the payload. The JSON form
     // pays for the full text twice (once as `text`, once as JSON-encoded
-    // string overhead) plus per-event scaffolding.
+    // string overhead) plus per-event scaffolding. LZ4 has the most
+    // build-to-build variance here, so the byte-range window is wider.
     benchmark(
       "bulk-paste-4k+200-edits",
       buildBulkPasteThenEditTrace(4_096, 200),
-      0.25,
+      { maxRatio: 0.25, binaryBytesRange: [4_500, 5_800] },
     );
   });
 
@@ -330,14 +356,19 @@ describe("columnar codec size benchmarks (issue #672)", () => {
     // for alice+bob+merge triples). The monotonic-delta encoding keeps
     // override offsets small and idRuns RLE collapses each author's
     // sequence into one run.
-    benchmark("concurrent-merge-2x500", buildConcurrentMergeTrace(500, 5), 0.2);
+    benchmark("concurrent-merge-2x500", buildConcurrentMergeTrace(500, 5), {
+      maxRatio: 0.2,
+      binaryBytesRange: [8_000, 10_000],
+    });
   });
 
-  it("logs a summary table so the size numbers show up in CI logs", () => {
-    // The summary log is deliberately last so it captures every prior
-    // benchmark. It's informational only - the hard assertions live on
-    // each individual case.
-    expect(results.length).toBeGreaterThanOrEqual(4);
+  afterAll(() => {
+    // Informational summary; assertions live on each individual benchmark.
+    // afterAll runs after every `it` regardless of order, so this is robust
+    // against vitest reordering / parallel-within-file execution.
+    if (results.length === 0) {
+      return;
+    }
     const summary = results
       .map(
         ({ traceName, events, jsonBytes, binaryBytes, ratio }) =>

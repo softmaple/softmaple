@@ -230,6 +230,28 @@ export class IndexedSequence<T extends object> {
     return this.weightIndexToPosition(before, false, "prepare");
   }
 
+  /**
+   * Position of the prepare-visible record immediately to the left of
+   * {@link end}, or `null` when no such record exists.
+   *
+   * Counterpart to {@link nextPrepareVisiblePosition}: callers that need
+   * the previous record visible at the current prepare-state (e.g. when
+   * computing an integration `originLeft`) should use this method
+   * instead of walking the sequence linearly.
+   */
+  previousPrepareVisiblePosition(end: number): number | null {
+    if (!this.root || end <= 0) {
+      return null;
+    }
+
+    const clampedEnd = Math.min(end, this.root.size);
+    const before = this.prefixSum(clampedEnd, "prepare");
+    if (before === 0) {
+      return null;
+    }
+    return this.weightIndexToPosition(before - 1, false, "prepare");
+  }
+
   private insertIntoLeaf(leaf: LeafNode<T>, offset: number, item: T): void {
     leaf.items.splice(offset, 0, item);
     leaf.prepareWeights.splice(offset, 0, this.prepareWeight(item));

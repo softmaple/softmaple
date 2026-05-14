@@ -11,6 +11,7 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
+import { compareEventIds } from "./event-id";
 
 /**
  * Coerce a deserialized parent-version value into an array of event IDs.
@@ -69,20 +70,6 @@ export class MissingParentError extends Error {
     this.parentId = parentId;
   }
 }
-
-/**
- * Lexicographic comparator used as the tie-breaker for both
- * `getTopologicalOrder` and `getBranchPreservingTopologicalOrder`. Kept
- * as a module-level helper so the rule is consistent across roots and
- * sibling branches and easy to swap if the engine ever standardises on
- * numeric-aware ordering (see sub-issue 5).
- */
-const compareEventIds = (left: EventId, right: EventId): number => {
-  if (left === right) {
-    return 0;
-  }
-  return left < right ? -1 : 1;
-};
 
 /**
  * Bit flags used by `diffVersions` to colour events while running the

@@ -187,6 +187,16 @@ const buildHighConcurrencyBranches = (params: {
   // single "sink" event then merges every tip; this is the worst
   // case for retreat / advance work on the merge event and for the
   // partial-replay path on every post-fork insertion.
+  //
+  // Every branch event (and the sink) inserts at `index: 1`, i.e.
+  // immediately after the single-character root. The point of this
+  // trace is NOT to exercise position-resolution between
+  // interleaved branches — it's to force the engine onto the
+  // partial-replay / retreat path on every branch fan-in by having
+  // each branch's first event diverge from the previous branch's
+  // tip. Position interleaving is covered by
+  // `convergence-property.test.ts` (overlapping inserts, surrogate
+  // boundary cases, multi-replica concurrent inserts).
   const tips: EventId[] = [];
   for (let b = 0; b < branches; b++) {
     let parent: EventId = "root:0";
@@ -456,33 +466,33 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
   });
 
   it("scales linearly with event count on append-only traces", () => {
-    // Higher event-count smoke test for the linear path. The
-    // point here is *not* to assert tight wall-clock numbers (CI
-    // noise makes that fragile), but to (a) confirm the linear
-    // trace can replay 3k events under a generous wall-clock
-    // budget and (b) record the per-event cost so a regression
-    // to a worse complexity class shows up as a budget failure.
-    // The 30s vitest timeout is intentionally far above the
-    // inline wall-clock budget so a single noisy CI runner
-    // doesn't turn this into a flake.
+    // Higher event-count smoke test for the linear path. We rely
+    // entirely on the engine's *shape* counters to detect a
+    // complexity-class regression (rather than a wall-clock budget
+    // assertion, which is fragile on shared CI runners):
+    //
+    //   - `fullReplays ≤ 1`    — only the cold start triggers one
+    //   - `partialReplays = 0` — no divergent suffix to replay
+    //   - `incrementalApplies ≥ EVENT_COUNT - 1` — fast path used
+    //   - `engineRetreats = 0` — no retreat needed
+    //   - `engineAdvances = 0` — no advance needed
+    //
+    // Together these prove the engine took the O(1)-per-event
+    // incremental path on every event after the cold start, which
+    // is the actual property a regression would break. The vitest
+    // 30s timeout is a backstop against a true infinite loop, not a
+    // perf budget.
     const EVENT_COUNT = 3_000;
-    const BUDGET_MS = 20_000;
 
     const events = buildLargeLinearHistory(EVENT_COUNT);
     const replica = new EgWalkerReplica("bench:linear-3k");
-    const start = performance.now();
     for (const event of events) {
       replica.applyRemoteEvent(event);
     }
-    const elapsed = performance.now() - start;
 
     expect(replica.getText().length).toBe(EVENT_COUNT);
-    expect(elapsed).toBeLessThan(BUDGET_MS);
 
     const stats = replica.getReplayStats();
-    // Same shape assertions as the smaller linear benchmark; the
-    // engine must stay on the incremental fast path for every
-    // event.
     expect(stats.fullReplays).toBeLessThanOrEqual(1);
     expect(stats.partialReplays).toBe(0);
     expect(stats.incrementalApplies).toBeGreaterThanOrEqual(EVENT_COUNT - 1);

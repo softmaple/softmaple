@@ -742,6 +742,12 @@ describe("EgWalkerReplica realistic editing traces", () => {
         ...alice.exportEventGraph().map(cloneEvent),
         ...bob.exportEventGraph().map(cloneEvent),
       ];
+      // `createPrng` is intentionally re-seeded with the *same*
+      // constant on every call so each sync round shuffles the
+      // event list in the same order. We want this test to assert
+      // that two authors converge under a specific (reproducible)
+      // delivery order; the dedicated "randomized convergence"
+      // tests above exercise the cross-seed delivery-order space.
       const rand = createPrng(0x9999_9999);
       for (const event of shuffled(events, rand)) {
         alice.applyRemoteEvent(cloneEvent(event));

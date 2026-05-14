@@ -9,32 +9,40 @@ legacy scaffolded `crdt/` implementation has been removed.
 ```text
 src/
   core/
-    external-api.ts   Public index-based API
-    walker.ts         Thin graph replay coordinator
-    invariants.ts     Strong-list helpers used by tests and callers
+    replica.ts            Public index-based API (EgWalkerReplica)
+    replay-walker.ts      Thin graph replay coordinator
+    invariants.ts         Strong-list helpers used by tests and callers
   engine/
-    eg-walker-engine.ts  Prepare/effect replay algorithm
-    indexed-sequence.ts  Ranked B-tree index mapping
-    critical-version.ts  Critical checkpoint detection
-    partial-replay.ts    Replay from checkpoint text/version
+    eg-walker-engine.ts   Prepare/effect replay orchestrator
+    indexed-sequence.ts   Ranked B-tree index mapping
+    critical-version.ts   Critical checkpoint detection
+    partial-replay.ts     Replay from checkpoint text/version
+    internals/            Engine-private helpers (no semver)
+      engine-types.ts        AugmentedCRDTItem, TypedRun, placeholder constants, result types
+      text-utils.ts          spliceText, deleteText, stringCodeUnits, coalesceDeleteRuns
+      pending-insert-buffer.ts  Typed-run coalescing buffer for the Section 3.4 fast path
+      origin-left-index.ts   Reverse index: target id -> items anchored as originLeft
+      delete-target-index.ts Bidirectional index of delete events and the items they targeted
+      yata-integration.ts    findIntegrationPosition (YATA scan)
+      record-splitter.ts     Split-on-demand for placeholder and typed-run records
   graph/
-    event-graph.ts       Persistent DAG, frontiers, causal diff
-    columnar-codec.ts    Columnar event graph encode/decode
+    event-graph.ts        Persistent DAG, frontiers, causal diff
+    columnar-codec.ts     Columnar event graph encode/decode
   types/
-    index.ts          Public package types
+    index.ts              Public package types
 ```
 
 ## Paper Mapping
 
-| Paper section               | Implementation                                                             |
-| --------------------------- | -------------------------------------------------------------------------- |
-| 3.1 Characteristics         | `core/external-api.ts`, `core/invariants.ts`, `engine/eg-walker-engine.ts` |
-| 3.2 Walking the event graph | `core/walker.ts`, `graph/event-graph.ts`, `engine/eg-walker-engine.ts`     |
-| 3.3 Prepare/effect versions | `engine/eg-walker-engine.ts`                                               |
-| 3.4 Index mapping           | `engine/indexed-sequence.ts`                                               |
-| 3.5 Critical versions       | `engine/critical-version.ts`                                               |
-| 3.6 Partial replay          | `engine/partial-replay.ts`                                                 |
-| 3.8 Event graph storage     | `graph/columnar-codec.ts`                                                  |
+| Paper section               | Implementation                                                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.1 Characteristics         | `core/replica.ts`, `core/invariants.ts`, `engine/eg-walker-engine.ts`                                                                     |
+| 3.2 Walking the event graph | `core/replay-walker.ts`, `graph/event-graph.ts`, `engine/eg-walker-engine.ts`                                                             |
+| 3.3 Prepare/effect versions | `engine/eg-walker-engine.ts`, `engine/internals/yata-integration.ts`                                                                      |
+| 3.4 Index mapping           | `engine/indexed-sequence.ts`, `engine/internals/record-splitter.ts`, `engine/internals/pending-insert-buffer.ts`                          |
+| 3.5 Critical versions       | `engine/critical-version.ts`                                                                                                              |
+| 3.6 Partial replay          | `engine/partial-replay.ts`                                                                                                                |
+| 3.8 Event graph storage     | `graph/columnar-codec.ts`                                                                                                                 |
 
 ## Runtime Model
 
@@ -114,7 +122,8 @@ The test suite is architecture-focused:
 
 - `eg-walker-engine.test.ts`: replay, deletes, critical checkpoints, partial replay, columnar codec.
 - `event-graph.test.ts`: DAG, frontier, causal expansion/diff, serialization.
-- `external-api.test.ts`: public API and persistence round-trip.
+- `replica.test.ts`: public API and persistence round-trip.
 - `algorithm-characteristics.test.ts`: convergence, non-interleaving, no persistent CRDT metadata.
 - `invariants.test.ts`: strong-list helper behavior.
 - `non-conflicting-run-perf.test.ts`: Section 3.4 fast-path activation, fallback correctness, and a 20k-event linear-trace benchmark.
+- `pending-insert-buffer.test.ts`, `origin-left-index.test.ts`, `delete-target-index.test.ts`: focused unit tests for the `engine/internals/` helpers.

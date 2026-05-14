@@ -9,14 +9,22 @@ There is no legacy `crdt/` runtime layer.
 src/
   constants/operation-types.ts
   core/
-    external-api.ts
+    replica.ts
     invariants.ts
-    walker.ts
+    replay-walker.ts
   engine/
     eg-walker-engine.ts
     indexed-sequence.ts
     critical-version.ts
     partial-replay.ts
+    internals/
+      engine-types.ts
+      text-utils.ts
+      pending-insert-buffer.ts
+      origin-left-index.ts
+      delete-target-index.ts
+      yata-integration.ts
+      record-splitter.ts
   graph/
     event-graph.ts
     columnar-codec.ts
@@ -29,6 +37,7 @@ src/
 - Do not persist or export temporary replay metadata.
 - Put causal graph logic in `graph/`.
 - Put prepare/effect replay logic in `engine/`.
+- Put engine-private helpers (no semver) under `engine/internals/`.
 - Keep `core/` thin and user-facing.
 - Avoid adding compatibility modules for removed legacy files.
 

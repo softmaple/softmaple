@@ -263,10 +263,13 @@ describe("EgWalkerReplica randomized convergence", () => {
 
   it("converges with many replicas and high concurrency", () => {
     // 8 replicas with a less frequent sync cadence means each
-    // replica accumulates several local edits between syncs, so the
-    // graph develops genuine concurrent branches. The convergence
-    // assertion is the algorithm's strong list-spec property under
-    // random branching.
+    // replica accumulates several local edits between syncs, so
+    // the graph develops genuine concurrent branches. The
+    // convergence assertion is the algorithm's strong list-spec
+    // property under random branching. The workload is real work
+    // (random delivery + random topological order on each
+    // replica), so we give it a 30s timeout to absorb slow CI
+    // runners; locally it completes in ~3s.
     const { events, finalText } = runRandomizedMultiReplicaTrace({
       replicaCount: 8,
       eventBudget: 240,
@@ -284,7 +287,7 @@ describe("EgWalkerReplica randomized convergence", () => {
       observed.add(replica.getText());
     }
     expect(observed.size).toBe(1);
-  });
+  }, 30_000);
 
   it("converges across many random seeds (property sweep)", () => {
     // Sweep several seeds to make sure we're not pinning convergence

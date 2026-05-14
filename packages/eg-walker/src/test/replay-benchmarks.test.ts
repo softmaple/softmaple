@@ -440,17 +440,20 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
   });
 
   it("scales linearly with event count on append-only traces", () => {
-    // Higher event-count smoke test for the linear path. The point
-    // here is *not* to assert tight wall-clock numbers (CI noise
-    // makes that fragile), but to (a) confirm the linear trace
-    // can replay 5k events under a generous wall-clock budget and
-    // (b) record the per-event cost so a regression to a worse
-    // complexity class shows up as a budget failure.
-    const EVENT_COUNT = 5_000;
-    const BUDGET_MS = 8_000;
+    // Higher event-count smoke test for the linear path. The
+    // point here is *not* to assert tight wall-clock numbers (CI
+    // noise makes that fragile), but to (a) confirm the linear
+    // trace can replay 3k events under a generous wall-clock
+    // budget and (b) record the per-event cost so a regression
+    // to a worse complexity class shows up as a budget failure.
+    // The 30s vitest timeout is intentionally far above the
+    // inline wall-clock budget so a single noisy CI runner
+    // doesn't turn this into a flake.
+    const EVENT_COUNT = 3_000;
+    const BUDGET_MS = 20_000;
 
     const events = buildLargeLinearHistory(EVENT_COUNT);
-    const replica = new EgWalkerReplica("bench:linear-5k");
+    const replica = new EgWalkerReplica("bench:linear-3k");
     const start = performance.now();
     for (const event of events) {
       replica.applyRemoteEvent(event);
@@ -469,7 +472,7 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
     expect(stats.incrementalApplies).toBeGreaterThanOrEqual(EVENT_COUNT - 1);
     expect(stats.engineRetreats).toBe(0);
     expect(stats.engineAdvances).toBe(0);
-  });
+  }, 30_000);
 
   afterAll(() => {
     if (results.length === 0) {

@@ -288,8 +288,7 @@ export class EgWalkerEngine {
     // concurrent records happen to be sitting in the sequence right now.
     // Without this filter the engine would assign different origins to
     // the same event depending on which concurrent siblings were
-    // integrated first, which is the traversal-order dependence that
-    // sub-issue 5 closes.
+    // integrated first, breaking traversal-order independence.
     const originLeftPosition =
       this.sequence.previousPrepareVisiblePosition(firstInsertPosition);
     const originLeft =

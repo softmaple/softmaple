@@ -53,9 +53,6 @@ export interface AugmentedCRDTItem {
   run: TypedRun | null;
 }
 
-export const isPlaceholder = (item: AugmentedCRDTItem): boolean =>
-  item.eventId === PLACEHOLDER_EVENT_ID;
-
 export interface EngineStats {
   readonly retreatCount: number;
   readonly advanceCount: number;

@@ -8,6 +8,7 @@ import {
   PLACEHOLDER_EVENT_ID,
   PLACEHOLDER_ID_PREFIX,
   type AugmentedCRDTItem,
+  type EngineStats,
   type GeneratedDocument,
   type GenerateOptions,
   type IncrementalApplyResult,
@@ -25,6 +26,7 @@ import {
 import { findIntegrationPosition } from "./internals/yata-integration";
 
 export type {
+  EngineStats,
   GeneratedDocument,
   GenerateOptions,
   IncrementalApplyResult,
@@ -143,7 +145,7 @@ export class EgWalkerEngine {
     return this.currentVersion;
   }
 
-  getStats() {
+  getStats(): EngineStats {
     return {
       retreatCount: this.retreatCount,
       advanceCount: this.advanceCount,
@@ -394,15 +396,15 @@ export class EgWalkerEngine {
         leftRecord.content += operation.text;
         this.sequence.updateItem(leftRecord);
         this.eventItems.set(event.id, [leftRecord.id]);
-        // Defer the {@link spliceText} on {@link resultingText} into the
+        // Defer the splice on {@link resultingText} into the
         // pending-insert buffer so a long single-author typed run doesn't
         // pay an O(document length) string realloc per keystroke.
         // {@link flushPendingInsert} materialises the buffer before any
         // non-coalesced read or write of the document text.
-        this.resultingText = this.pendingInsert.append(
-          this.resultingText,
+        this.pendingInsert.append(
           effectIndex,
           operation.text,
+          this.applyPendingSplice,
         );
 
         return [
@@ -678,8 +680,25 @@ export class EgWalkerEngine {
     return this.sequence.effectIndexBeforePosition(position);
   }
 
+  /**
+   * Splice the deferred typed-run span into {@link resultingText}.
+   *
+   * Arrow-field instead of a method so the buffer can store the
+   * reference once and call back into the engine without `this`
+   * rebinding. The buffer is the only caller — never invoke this
+   * directly; go through {@link flushPendingInsert} (or pass it to
+   * {@link PendingInsertBuffer.append}) so the buffer first clears its
+   * own state and we don't double-apply on a reentrant flush.
+   */
+  private readonly applyPendingSplice = (
+    effectIndex: number,
+    text: string,
+  ): void => {
+    this.resultingText = spliceText(this.resultingText, effectIndex, text);
+  };
+
   private flushPendingInsert(): void {
-    this.resultingText = this.pendingInsert.flushInto(this.resultingText);
+    this.pendingInsert.flush(this.applyPendingSplice);
   }
 
   private diffVersions(

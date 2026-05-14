@@ -11,6 +11,12 @@ on:
       - 'apps/playground/vite.config.*'
       - 'apps/playground/src/**'
       - 'packages/eg-walker/**'
+      - '!packages/eg-walker/src/test/**'
+      - '!packages/eg-walker/**/*.test.ts'
+      - '!packages/eg-walker/**/*.test.tsx'
+      - '!packages/eg-walker/**/*.bench.ts'
+      - '!packages/eg-walker/coverage/**'
+      - '!packages/eg-walker/**/*.md'
   pull_request:
     paths:
       - 'apps/playground/**/*.ts'
@@ -21,6 +27,12 @@ on:
       - 'apps/playground/vite.config.*'
       - 'apps/playground/src/**'
       - 'packages/eg-walker/**'
+      - '!packages/eg-walker/src/test/**'
+      - '!packages/eg-walker/**/*.test.ts'
+      - '!packages/eg-walker/**/*.test.tsx'
+      - '!packages/eg-walker/**/*.bench.ts'
+      - '!packages/eg-walker/coverage/**'
+      - '!packages/eg-walker/**/*.md'
 
 permissions:
   contents: read

@@ -1066,10 +1066,12 @@ describe("Full paper architecture utilities", () => {
       id: "replica:2",
       parentVersion: new Set(["replica:not-number"]),
       operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
-      timestamp: -1,
+      timestamp: Number.NaN,
     });
+    // EGW3 zigzag-delta encodes timestamps so negative values are valid; the
+    // varint guard still rejects non-safe integers like NaN/Infinity.
     expect(() => codec.encodeBinary(graph)).toThrow(
-      "Cannot encode invalid varint value -1",
+      "Cannot encode invalid zigzag varint value NaN",
     );
   });
 
@@ -1178,18 +1180,23 @@ describe("Full paper architecture utilities", () => {
 
   it("rejects binary payloads whose magic prefix is too short", () => {
     const codec = new ColumnarEventGraphCodec();
-    // Length-prefix says 3 bytes of magic, but EGW2 is 4 bytes. Even though
+    // Length-prefix says 3 bytes of magic, but EGW3 is 4 bytes. Even though
     // the bytes that ARE present match, the length must equal the magic.
     expect(() =>
       codec.decodeBinary(new Uint8Array([3, 0x45, 0x47, 0x57])),
     ).toThrow("Invalid eg-walker columnar graph header");
   });
 
-  it("rejects binary payloads from older incompatible versions (EGW1)", () => {
+  it("rejects binary payloads from older incompatible versions (EGW1, EGW2)", () => {
     const codec = new ColumnarEventGraphCodec();
-    // 4-byte EGW1 prefix; current decoder expects EGW2.
+    // 4-byte EGW1 prefix; current decoder expects EGW3.
     const egw1Header = new Uint8Array([4, 0x45, 0x47, 0x57, 0x31]);
     expect(() => codec.decodeBinary(egw1Header)).toThrow(
+      "Invalid eg-walker columnar graph header",
+    );
+    // 4-byte EGW2 prefix; also rejected after the EGW3 layout change.
+    const egw2Header = new Uint8Array([4, 0x45, 0x47, 0x57, 0x32]);
+    expect(() => codec.decodeBinary(egw2Header)).toThrow(
       "Invalid eg-walker columnar graph header",
     );
   });

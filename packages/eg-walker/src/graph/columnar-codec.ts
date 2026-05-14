@@ -42,10 +42,26 @@ export interface ColumnarEventGraph {
   readonly metadata?: Record<string, unknown>;
 }
 
-// EGW2: incompatible with the EGW1 prototype format. The current encoding adds
-// an explicit `custom` flag per IdRun (varint 0/1) and treats all serialized
-// versions as JSON-safe arrays rather than Set instances.
-const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x32]); // EGW2
+// EGW3: incompatible with the EGW2 columnar layout. Compared to EGW2 the wire
+// format drops every column that is derivable from the others and switches the
+// two near-monotonic per-event columns to zigzag-delta varints:
+//
+//   - operationRuns: `(type, length)` only — `startEventOffset` is the prefix
+//     sum of run lengths, `startIndex` is `operationIndexes[startEventOffset]`,
+//     and a run's `textLength` is the sum of `operationLengths` over the run
+//     (for INSERT runs; undefined for DELETE).
+//   - operationIndexes: zigzag-delta varint per event (linear single-author
+//     traces collapse to ~1 byte per event regardless of document size).
+//   - textLengths: dropped entirely — `textLength[i]` equals
+//     `operationLengths[i]` when the covering run is INSERT, else `0`.
+//   - parentOverrides: monotonic-delta varint on `eventOffset`.
+//   - idRuns: drops `startEventOffset` (also the prefix sum of run lengths).
+//   - timestamps: zigzag-delta varint per event.
+//
+// The in-memory `ColumnarEventGraph` / `OperationRun` / `IdRun` shapes are
+// unchanged; only the binary wire format is more compact. EGW2 and EGW1
+// payloads are rejected at decode.
+const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x33]); // EGW3
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -78,6 +94,66 @@ const operationLength = (operation: ExternalOperation): number =>
   operation.type === OPERATION_TYPE.INSERT
     ? operation.text.length
     : operation.length;
+
+/**
+ * Reconstruct the per-event `textLengths` column from `operationRuns` (which
+ * carry the per-run type) and `operationLengths` (which equal text length for
+ * INSERTs and delete length for DELETEs). EGW3 omits `textLengths` from the
+ * binary wire because it's fully derivable from those two columns.
+ */
+const reconstructTextLengths = (
+  operationRuns: ReadonlyArray<OperationRun>,
+  operationLengths: ReadonlyArray<number>,
+): number[] => {
+  const textLengths: number[] = new Array<number>(operationLengths.length).fill(
+    0,
+  );
+  for (const run of operationRuns) {
+    if (run.type !== OPERATION_TYPE.INSERT) {
+      continue;
+    }
+    for (let offset = 0; offset < run.length; offset++) {
+      textLengths[run.startEventOffset + offset] =
+        operationLengths[run.startEventOffset + offset] ?? 0;
+    }
+  }
+  return textLengths;
+};
+
+/**
+ * Backfill the `startIndex` and `textLength` fields on operation runs whose
+ * binary form only carried `(type, length)`. `startIndex` is taken from
+ * `operationIndexes` at the run's first event offset; `textLength` is the
+ * sum of `operationLengths` over the run's events (for INSERT runs only).
+ */
+const finalizeOperationRuns = (
+  runs: ReadonlyArray<OperationRun>,
+  operationIndexes: ReadonlyArray<number>,
+  operationLengths: ReadonlyArray<number>,
+): OperationRun[] =>
+  runs.map((run) => {
+    const startIndex = operationIndexes[run.startEventOffset] ?? 0;
+    if (run.type !== OPERATION_TYPE.INSERT) {
+      return { ...run, startIndex, textLength: undefined };
+    }
+    let textLength = 0;
+    for (let offset = 0; offset < run.length; offset++) {
+      textLength += operationLengths[run.startEventOffset + offset] ?? 0;
+    }
+    return { ...run, startIndex, textLength };
+  });
+
+/**
+ * Zigzag encoding maps signed integers to non-negative integers:
+ * `0 → 0, -1 → 1, 1 → 2, -2 → 3, 2 → 4, ...`. Uses safe-integer arithmetic
+ * rather than bitwise ops so values beyond ±2^31 (timestamps in ms since epoch
+ * are ~1.7×10^12) round-trip correctly.
+ */
+const zigzagEncode = (value: number): number =>
+  value >= 0 ? value * 2 : value * -2 - 1;
+
+const zigzagDecode = (value: number): number =>
+  value % 2 === 0 ? value / 2 : -((value + 1) / 2);
 
 export class ColumnarEventGraphCodec {
   encode(graph: EventGraph): ColumnarEventGraph {
@@ -142,15 +218,15 @@ export class ColumnarEventGraphCodec {
     writer.writeBytes(BINARY_MAGIC);
     writer.writeStringArray(encoded.version);
     this.writeOperationRuns(writer, encoded.operationRuns);
-    writer.writeVarintArray(encoded.operationIndexes);
+    writer.writeZigZagDeltaArray(encoded.operationIndexes);
     writer.writeVarintArray(encoded.operationLengths);
-    writer.writeVarintArray(encoded.textLengths);
+    // textLengths intentionally omitted: derivable from operationRuns + operationLengths.
     writer.writeBytes(
       lz4.compress(textEncoder.encode(encoded.insertedContent)),
     );
     this.writeParentOverrides(writer, encoded.parentOverrides);
     this.writeIdRuns(writer, encoded.idRuns);
-    writer.writeVarintArray(encoded.timestamps);
+    writer.writeZigZagDeltaArray(encoded.timestamps);
     writer.writeString(JSON.stringify(encoded.metadata ?? {}));
 
     return writer.toUint8Array();
@@ -167,10 +243,15 @@ export class ColumnarEventGraphCodec {
     }
 
     const version = reader.readStringArray();
-    const operationRuns = this.readOperationRuns(reader);
-    const operationIndexes = reader.readVarintArray();
+    const partialOperationRuns = this.readOperationRuns(reader);
+    const operationIndexes = reader.readZigZagDeltaArray();
     const operationLengths = reader.readVarintArray();
-    const textLengths = reader.readVarintArray();
+    const operationRuns = finalizeOperationRuns(
+      partialOperationRuns,
+      operationIndexes,
+      operationLengths,
+    );
+    const textLengths = reconstructTextLengths(operationRuns, operationLengths);
     const expectedInsertedSize = textLengths.reduce(
       (total, length) => total + length,
       0,
@@ -195,7 +276,7 @@ export class ColumnarEventGraphCodec {
     }
     const parentOverrides = this.readParentOverrides(reader);
     const idRuns = this.readIdRuns(reader);
-    const timestamps = reader.readVarintArray();
+    const timestamps = reader.readZigZagDeltaArray();
     const metadata = JSON.parse(reader.readString()) as Record<string, unknown>;
 
     return this.decode({
@@ -251,6 +332,13 @@ export class ColumnarEventGraphCodec {
     return runs;
   }
 
+  /**
+   * Binary form of an operation run is just `(type, length)`. The other
+   * fields on the in-memory `OperationRun` (`startIndex`, `startEventOffset`,
+   * `textLength`) are all derivable from the other columns and are
+   * reconstructed by {@link readOperationRuns} using `operationIndexes` and
+   * `operationLengths`.
+   */
   private writeOperationRuns(
     writer: BinaryWriter,
     runs: ReadonlyArray<OperationRun>,
@@ -258,33 +346,35 @@ export class ColumnarEventGraphCodec {
     writer.writeVarint(runs.length);
     for (const run of runs) {
       writer.writeVarint(run.type === OPERATION_TYPE.INSERT ? 1 : 2);
-      writer.writeVarint(run.startIndex);
-      writer.writeVarint(run.startEventOffset);
       writer.writeVarint(run.length);
-      writer.writeVarint(run.textLength ?? 0);
     }
   }
 
+  /**
+   * Inverse of {@link writeOperationRuns}. Reads `(type, length)` and defers
+   * `startEventOffset` / `startIndex` / `textLength` until {@link decodeBinary}
+   * has read `operationIndexes` and `operationLengths`.
+   */
   private readOperationRuns(reader: BinaryReader): OperationRun[] {
     const length = reader.readVarint();
     const runs: OperationRun[] = [];
+    let cursor = 0;
 
     for (let i = 0; i < length; i++) {
       const type =
         reader.readVarint() === 1
           ? OPERATION_TYPE.INSERT
           : OPERATION_TYPE.DELETE;
-      const startIndex = reader.readVarint();
-      const startEventOffset = reader.readVarint();
       const runLength = reader.readVarint();
-      const textLength = reader.readVarint();
       runs.push({
         type,
-        startIndex,
-        startEventOffset,
+        startIndex: 0,
+        startEventOffset: cursor,
         length: runLength,
-        textLength: type === OPERATION_TYPE.INSERT ? textLength : undefined,
+        // textLength is filled in later, once operationLengths is known.
+        textLength: type === OPERATION_TYPE.INSERT ? 0 : undefined,
       });
+      cursor += runLength;
     }
 
     return runs;
@@ -305,25 +395,38 @@ export class ColumnarEventGraphCodec {
     });
   }
 
+  /**
+   * Parent overrides are emitted in topological order, so `eventOffset` is
+   * strictly increasing. We write the delta from the previous offset (the
+   * first delta is from `-1`, so it's always non-negative) as an unsigned
+   * varint, which is one byte for offsets that are tightly clustered.
+   */
   private writeParentOverrides(
     writer: BinaryWriter,
     overrides: ReadonlyArray<ParentOverride>,
   ): void {
     writer.writeVarint(overrides.length);
+    let previous = -1;
     for (const override of overrides) {
-      writer.writeVarint(override.eventOffset);
+      const delta = override.eventOffset - previous - 1;
+      writer.writeVarint(delta);
       writer.writeStringArray(override.parents);
+      previous = override.eventOffset;
     }
   }
 
   private readParentOverrides(reader: BinaryReader): ParentOverride[] {
     const length = reader.readVarint();
     const overrides: ParentOverride[] = [];
+    let previous = -1;
     for (let i = 0; i < length; i++) {
+      const delta = reader.readVarint();
+      const eventOffset = previous + 1 + delta;
       overrides.push({
-        eventOffset: reader.readVarint(),
+        eventOffset,
         parents: reader.readStringArray(),
       });
+      previous = eventOffset;
     }
     return overrides;
   }
@@ -367,28 +470,39 @@ export class ColumnarEventGraphCodec {
     return runs;
   }
 
+  /**
+   * Id runs are written in topological order, so `startEventOffset` is the
+   * prefix sum of run lengths and never needs to be on the wire. The
+   * `custom` flag is packed into the high bit of the length-prefix to save a
+   * byte per run on the common (non-custom) case.
+   */
   private writeIdRuns(writer: BinaryWriter, runs: ReadonlyArray<IdRun>): void {
     writer.writeVarint(runs.length);
     for (const run of runs) {
       writer.writeString(run.replicaId);
       writer.writeVarint(run.startSequence);
-      writer.writeVarint(run.startEventOffset);
-      writer.writeVarint(run.length);
-      writer.writeVarint(run.custom ? 1 : 0);
+      writer.writeVarint((run.length << 1) | (run.custom ? 1 : 0));
     }
   }
 
   private readIdRuns(reader: BinaryReader): IdRun[] {
     const length = reader.readVarint();
     const runs: IdRun[] = [];
+    let cursor = 0;
     for (let i = 0; i < length; i++) {
+      const replicaId = reader.readString();
+      const startSequence = reader.readVarint();
+      const packed = reader.readVarint();
+      const custom = (packed & 1) === 1;
+      const runLength = packed >>> 1;
       runs.push({
-        replicaId: reader.readString(),
-        startSequence: reader.readVarint(),
-        startEventOffset: reader.readVarint(),
-        length: reader.readVarint(),
-        custom: reader.readVarint() === 1,
+        replicaId,
+        startSequence,
+        startEventOffset: cursor,
+        length: runLength,
+        custom,
       });
+      cursor += runLength;
     }
     return runs;
   }
@@ -508,6 +622,34 @@ class BinaryWriter {
     }
   }
 
+  /**
+   * Write a signed integer using zigzag varint encoding. Allows negative
+   * deltas (e.g. document positions that move backwards on delete) while
+   * keeping the common small-delta case at one byte.
+   */
+  writeZigZagVarint(value: number): void {
+    if (!Number.isSafeInteger(value)) {
+      throw new Error(`Cannot encode invalid zigzag varint value ${value}`);
+    }
+    this.writeVarint(zigzagEncode(value));
+  }
+
+  /**
+   * Write a numeric array as a zigzag-delta varint array: a count followed by
+   * `zigzag(values[i] - values[i-1])` for each entry (the first entry is
+   * relative to `0`). For monotonically increasing or near-stationary columns
+   * (timestamps, document positions in a linear trace) this compresses to
+   * ~1 byte per value.
+   */
+  writeZigZagDeltaArray(values: ReadonlyArray<number>): void {
+    this.writeVarint(values.length);
+    let previous = 0;
+    for (const value of values) {
+      this.writeZigZagVarint(value - previous);
+      previous = value;
+    }
+  }
+
   writeString(value: string): void {
     this.writeBytes(textEncoder.encode(value));
   }
@@ -575,6 +717,24 @@ class BinaryReader {
   readVarintArray(): number[] {
     const length = this.readVarint();
     return Array.from({ length }, () => this.readVarint());
+  }
+
+  /** Inverse of {@link BinaryWriter.writeZigZagVarint}. */
+  readZigZagVarint(): number {
+    return zigzagDecode(this.readVarint());
+  }
+
+  /** Inverse of {@link BinaryWriter.writeZigZagDeltaArray}. */
+  readZigZagDeltaArray(): number[] {
+    const length = this.readVarint();
+    const values: number[] = new Array<number>(length);
+    let previous = 0;
+    for (let i = 0; i < length; i++) {
+      const value = previous + this.readZigZagVarint();
+      values[i] = value;
+      previous = value;
+    }
+    return values;
   }
 
   readString(): string {

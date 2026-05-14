@@ -72,7 +72,7 @@ export class PendingInsertBuffer {
    * boundary) can't silently corrupt the document by stranding bytes at
    * the previous offset.
    */
-  append(effectIndex: number, text: string, flush: FlushFn): void {
+  append(effectIndex: number, text: string, onFlush: FlushFn): void {
     const buffered = this.pendingText;
     if (
       buffered.length > 0 &&
@@ -85,11 +85,11 @@ export class PendingInsertBuffer {
       const flushIndex = this.pendingEffectIndex;
       const flushText = this.pendingText;
       // Clear the buffer *before* invoking the callback so that a
-      // reentrant `isEmpty` / `flush` from inside `flush` itself sees
-      // a clean buffer and short-circuits instead of double-applying.
+      // reentrant `isEmpty` / `flush` from inside the callback sees a
+      // clean buffer and short-circuits instead of double-applying.
       this.pendingText = "";
       this.pendingEffectIndex = 0;
-      flush(flushIndex, flushText);
+      onFlush(flushIndex, flushText);
     }
     this.pendingText = text;
     this.pendingEffectIndex = effectIndex;
@@ -112,7 +112,7 @@ export class PendingInsertBuffer {
    * readers can splice / slice it without correcting for the deferred
    * span.
    */
-  flush(flush: FlushFn): void {
+  flush(onFlush: FlushFn): void {
     if (this.pendingText.length === 0) {
       return;
     }
@@ -120,6 +120,6 @@ export class PendingInsertBuffer {
     const text = this.pendingText;
     this.pendingText = "";
     this.pendingEffectIndex = 0;
-    flush(index, text);
+    onFlush(index, text);
   }
 }

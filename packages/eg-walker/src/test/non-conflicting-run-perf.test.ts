@@ -282,4 +282,125 @@ describe("Section 3.4 non-conflicting-run fast path", () => {
     expect(generated.text.length).toBe(EVENT_COUNT);
     expect(generated.stats.sequenceRecordCount).toBe(1);
   });
+
+  it("scales near-linearly on long typed runs (no per-event spliceText)", () => {
+    // Pre-#693 the typed-run coalescing path called `spliceText` on
+    // `resultingText` for every coalesced single-character INSERT, so a
+    // linear single-author trace of length N paid O(N^2) string-allocation
+    // work even though the CRDT side (ranked B-tree + typed-run leaf) was
+    // already O(1) per event. The pending-insert buffer replaces those
+    // per-event splices with a single splice when the run is broken (or at
+    // the end of `generate`), bringing total string work down to O(N) for
+    // a pure typed run.
+    //
+    // Wall-clock budgets are noisy on shared CI, but the quadratic-vs-linear
+    // gap is large enough that even a generous budget catches a regression:
+    // an O(N^2) implementation on 50 000 events allocates ~1.25 GiB of
+    // string bytes (sum from 1..50_000 of 8 B/char), which exceeds a couple
+    // of seconds on any realistic runner. The post-fix path comfortably
+    // stays well under the budget locally (~150 ms) and doesn't crowd out
+    // other parallel test files under the coverage workflow.
+    const EVENT_COUNT = 50_000;
+    const BUDGET_MS = 3_000;
+
+    const events = buildLinearInsertTrace(EVENT_COUNT);
+    const graph = EventGraph.fromEvents(events);
+
+    const engine = new EgWalkerEngine();
+    const start = performance.now();
+    const generated = engine.generate(events, "", { eventGraph: graph });
+    const elapsed = performance.now() - start;
+
+    expect(generated.text.length).toBe(EVENT_COUNT);
+    expect(generated.stats.nonConflictingRunCount).toBe(EVENT_COUNT);
+    expect(generated.stats.fullReplayCount).toBe(0);
+    expect(generated.stats.sequenceRecordCount).toBe(1);
+    expect(elapsed).toBeLessThan(BUDGET_MS);
+  });
+
+  it("flushes the typed-run buffer when a concurrent insert breaks the run", () => {
+    // Drive the engine through the boundary where the deferred typed-run
+    // append must be materialised: a single-author run anchored by `n:*`
+    // builds up the buffer, and then a concurrent `m:0` event arrives whose
+    // parent version (`{}`) does not match the engine's frontier so it
+    // takes the full-replay path. The non-coalescing branch of `applyInsert`
+    // flushes the buffer before splicing its own text in. The final
+    // document must be the same as the slow-path replay (a separate engine
+    // is fed the same events and compared).
+    const linearPrefix = buildLinearInsertTrace(2_000);
+    const concurrent: GraphEvent = {
+      id: "m:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Z" },
+      timestamp: 9_999,
+    };
+    const events = [...linearPrefix, concurrent];
+    const graph = EventGraph.fromEvents(events);
+    const ordered = graph.getTopologicalOrder();
+
+    const fastPath = new EgWalkerEngine().generate(ordered, "", {
+      eventGraph: graph,
+    });
+    const slowPath = new EgWalkerEngine().generate(ordered, "", {
+      eventGraph: graph,
+    });
+
+    expect(fastPath.text).toBe(slowPath.text);
+    // `m:0` is concurrent to every linear event, so it lands at index 0 by
+    // the YATA tie-break (smaller event id `m` < `n`). The 2 000 typed-run
+    // chars follow.
+    expect(fastPath.text).toBe(`Z${"x".repeat(2_000)}`);
+  });
+
+  it("flushes the typed-run buffer before a concurrent delete reads the document", () => {
+    // The delete path slices `resultingText` directly with the effect
+    // indices it computes from the sequence. If the typed-run buffer has
+    // not been flushed, those slices would operate on a document missing
+    // the deferred text. The fix flushes at the top of `applyDelete` so
+    // the slice positions match the logical document.
+    const linearPrefix = buildLinearInsertTrace(1_000);
+    const concurrentDelete: GraphEvent = {
+      id: "m:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+      timestamp: 9_999,
+    };
+    const events = [...linearPrefix, concurrentDelete];
+    const graph = EventGraph.fromEvents(events);
+    const ordered = graph.getTopologicalOrder();
+
+    const generated = new EgWalkerEngine().generate(ordered, "", {
+      eventGraph: graph,
+    });
+
+    // The delete event is concurrent to the typed-run prefix; its parent
+    // version is empty, so when the engine retreats the run-events back to
+    // that parent the document the delete observes is empty. The delete
+    // therefore produces no characters removed (the slot it targets is
+    // entirely retreated), and the final text is just the typed run.
+    expect(generated.text).toBe("x".repeat(1_000));
+  });
+
+  it("returns the post-event document from incremental applyEvent calls", () => {
+    // `EgWalkerReplica` calls `engine.applyEvent(...)` per remote event and
+    // then reads `engine.getText()` to update its visible document. The
+    // pending-insert buffer would silently drop deferred text from those
+    // reads if `applyEvent` / `getText` did not flush before returning.
+    // This test pins the contract: after every coalesced single-character
+    // INSERT the live document reflects the new state.
+    const events = buildLinearInsertTrace(64);
+    const graph = EventGraph.fromEvents(events);
+    const engine = new EgWalkerEngine();
+    // Seed the engine with the topological order so each applyEvent
+    // call drives one step of the typed run.
+    engine.generate([], "", { eventGraph: graph });
+
+    let observed = "";
+    for (const event of events) {
+      const { text } = engine.applyEvent(event, graph);
+      observed = text;
+      expect(engine.getText()).toBe(text);
+    }
+    expect(observed).toBe("x".repeat(events.length));
+  });
 });

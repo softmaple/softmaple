@@ -169,6 +169,37 @@ export class EgWalkerEngine {
   );
   private currentVersion = new Set<EventId>();
   private resultingText = "";
+  // Buffered append for the typed-run coalescing path.
+  //
+  // The coalescing branch in {@link applyInsert} fires once per
+  // single-character INSERT that extends an existing typed-run record.
+  // The CRDT side is already O(1) (the record's `content` grows in place
+  // and the ranked B-tree only re-weights one leaf), but the previous
+  // implementation also called {@link spliceText} on {@link resultingText}
+  // for every coalesced keystroke. That allocates the entire document
+  // string on each event, so a 20 000-event single-author linear trace
+  // paid O(n^2) string work even after #691.
+  //
+  // Instead, we hold the appended text in {@link pendingInsertText} and
+  // record where it logically lives in the resulting document as
+  // {@link pendingInsertEffectIndex}. Consecutive coalesced events on the
+  // same record extend `pendingInsertText` by their single code unit, so
+  // a run of N keystrokes costs O(N) in string work (V8 cons-string
+  // append) plus one O(document length) splice at the end of the run.
+  //
+  // Invariant: when `pendingInsertText.length > 0`, the conceptual
+  // resulting text is
+  //
+  //   resultingText.slice(0, pendingInsertEffectIndex)
+  //     + pendingInsertText
+  //     + resultingText.slice(pendingInsertEffectIndex)
+  //
+  // {@link flushPendingInsert} materialises this into `resultingText` and
+  // is called eagerly before any non-coalesced read or write of the
+  // document text (other inserts, deletes, `getText`, and the
+  // `generate` / `applyEvent` return paths).
+  private pendingInsertText = "";
+  private pendingInsertEffectIndex = 0;
   private retreatCount = 0;
   private advanceCount = 0;
   private nonConflictingRunCount = 0;
@@ -188,6 +219,13 @@ export class EgWalkerEngine {
       const transformed = this.processEvent(event);
       transformedOperations.push(...transformed);
     }
+
+    // The typed-run coalescing path may have left an open buffer of
+    // appended text. The returned document is observable, so materialise
+    // it before handing back the snapshot. This is the load-bearing flush
+    // for batch (non-incremental) callers of `generate`; the per-event
+    // `applyEvent` return flush below is what `EgWalkerReplica` relies on.
+    this.flushPendingInsert();
 
     return {
       text: this.resultingText,
@@ -216,6 +254,13 @@ export class EgWalkerEngine {
     this.graph = graph;
 
     const transformed = this.processEvent(event);
+    // {@link EgWalkerReplica.applyRemoteEvent} reads the returned `text`
+    // (and then `getText()`) immediately after this call, so the
+    // incremental return value must reflect the post-event document. This
+    // is the load-bearing flush for the incremental path; a subsequent
+    // `getText` call will see an empty buffer and short-circuit on the
+    // function's internal early-out.
+    this.flushPendingInsert();
     return {
       text: this.resultingText,
       transformedOperations: transformed,
@@ -223,6 +268,14 @@ export class EgWalkerEngine {
   }
 
   getText(): string {
+    // Materialise any deferred typed-run appends before exposing the
+    // text. Most callers (`EgWalkerReplica`) read `getText` immediately
+    // after `applyEvent`, which has already flushed, so the function's
+    // internal early-out keeps this branch effectively free in the
+    // incremental hot path. The flush is load-bearing for direct callers
+    // that drive `apply*` themselves without going through `applyEvent`
+    // (tests, serializers, ad-hoc inspection between `generate` calls).
+    this.flushPendingInsert();
     return this.resultingText;
   }
 
@@ -320,6 +373,8 @@ export class EgWalkerEngine {
     this.sequence.clear();
     this.currentVersion = new Set(options.initialVersion ?? []);
     this.resultingText = initialText;
+    this.pendingInsertText = "";
+    this.pendingInsertEffectIndex = 0;
     this.retreatCount = 0;
     this.advanceCount = 0;
     this.nonConflictingRunCount = 0;
@@ -478,11 +533,12 @@ export class EgWalkerEngine {
         leftRecord.content += operation.text;
         this.sequence.updateItem(leftRecord);
         this.eventItems.set(event.id, [leftRecord.id]);
-        this.resultingText = spliceText(
-          this.resultingText,
-          effectIndex,
-          operation.text,
-        );
+        // Defer the {@link spliceText} on {@link resultingText} into
+        // {@link pendingInsertText} so a long single-author typed run
+        // doesn't pay an O(document length) string realloc per
+        // keystroke. {@link flushPendingInsert} materialises the buffer
+        // before any non-coalesced read or write of the document text.
+        this.appendPendingInsert(effectIndex, operation.text);
 
         return [
           {
@@ -563,6 +619,15 @@ export class EgWalkerEngine {
 
     const firstInserted = this.requireItem(insertedIds[0] ?? event.id);
     const effectIndex = this.itemToEffectIndex(firstInserted);
+    // A non-coalesced insert (multi-character event, new typed-run seed,
+    // or non-empty conflict region) must observe the current document so
+    // {@link effectIndex} aligns with {@link resultingText}. Drain any
+    // open typed-run buffer before splicing. Hoist the empty-buffer check
+    // inline because this is the per-event hot path for non-coalescing
+    // inserts and the buffer is empty on every full-replay event.
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
     this.resultingText = spliceText(
       this.resultingText,
       effectIndex,
@@ -585,6 +650,17 @@ export class EgWalkerEngine {
       { type: typeof OPERATION_TYPE.DELETE }
     >,
   ): ExternalOperation[] {
+    // Any concurrent insert or delete breaks the typed-run we may have
+    // been coalescing into {@link pendingInsertText}. Flush before we
+    // start carving records and slicing the document text so the per-slot
+    // {@link effectIndex} arithmetic below operates on the materialised
+    // document. Hoist the empty-buffer check inline because `applyDelete`
+    // is on the per-event hot path and the buffer is empty on every
+    // non-coalescing trace, so the inline check saves a function call on
+    // the common case.
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
     const deletedItemIds: EventId[] = [];
     const outputDeleteIndexes: number[] = [];
     let remaining = operation.length;
@@ -1113,6 +1189,73 @@ export class EgWalkerEngine {
       throw new Error(`Item ${target.id} not found`);
     }
     return this.sequence.effectIndexBeforePosition(position);
+  }
+
+  /**
+   * Record a coalesced single-character insert in the typed-run buffer.
+   *
+   * Consecutive calls whose {@link effectIndex} sits immediately after
+   * the buffer's current span (i.e. the next code unit of the same
+   * extending typed-run record) just extend
+   * {@link pendingInsertText}. Anything that lands elsewhere flushes the
+   * buffer first and starts a fresh span at the new index. The buffer
+   * is later drained by {@link flushPendingInsert} before any
+   * non-coalesced read or write of the document text.
+   *
+   * The flush-and-restart branch below is defensive given the current
+   * engine invariants: any event that would land at a non-contiguous
+   * effect index goes through the non-coalescing path in
+   * {@link applyInsert} (different replica, split origin, or non-empty
+   * conflict region), which flushes the buffer before this method is
+   * called again. We still handle it explicitly so a future change that
+   * widens the coalescing branch (e.g. extending across a split-on-demand
+   * boundary) can't silently corrupt the document by stranding bytes at
+   * the previous offset.
+   */
+  private appendPendingInsert(effectIndex: number, text: string): void {
+    const buffered = this.pendingInsertText;
+    if (
+      buffered.length > 0 &&
+      effectIndex === this.pendingInsertEffectIndex + buffered.length
+    ) {
+      this.pendingInsertText = buffered + text;
+      return;
+    }
+    if (buffered.length > 0) {
+      this.flushPendingInsert();
+    }
+    this.pendingInsertText = text;
+    this.pendingInsertEffectIndex = effectIndex;
+  }
+
+  /**
+   * Drain any buffered typed-run append into {@link resultingText}.
+   *
+   * Safe to call unconditionally: the empty-buffer early-out makes the
+   * call cheap when there is nothing pending, so cold call sites
+   * (`generate` return, `applyEvent` return, `getText`, `reset`) don't
+   * need to repeat the check inline. Hot per-event call sites
+   * (`applyInsert` non-coalesced, top of `applyDelete`) do hoist the
+   * check to skip even the function call when the buffer is empty.
+   *
+   * After this call the stored {@link resultingText} matches the
+   * logical document the rest of the engine reasons about (the
+   * concatenation of every effect-visible CRDT record's `content` in
+   * sequence order), so concurrent inserts, deletes, and external
+   * readers can splice / slice it without correcting for the deferred
+   * span.
+   */
+  private flushPendingInsert(): void {
+    if (this.pendingInsertText.length === 0) {
+      return;
+    }
+    this.resultingText = spliceText(
+      this.resultingText,
+      this.pendingInsertEffectIndex,
+      this.pendingInsertText,
+    );
+    this.pendingInsertText = "";
+    this.pendingInsertEffectIndex = 0;
   }
 
   private diffVersions(

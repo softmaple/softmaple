@@ -122,12 +122,6 @@ const applyInRandomDeliveryOrder = (
 interface ReplicaSim {
   readonly id: string;
   replica: EgWalkerReplica;
-  /**
-   * Synthetic monotonic clock per replica. Real systems would pull
-   * `Date.now()`, but we want deterministic, reproducible timestamps
-   * keyed off the trace seed.
-   */
-  clock: number;
 }
 
 /**
@@ -168,7 +162,6 @@ const runRandomizedMultiReplicaTrace = (params: {
     (_, idx) => ({
       id: `r${idx}`,
       replica: new EgWalkerReplica(`r${idx}`),
-      clock: 0,
     }),
   );
 
@@ -212,7 +205,6 @@ const runRandomizedMultiReplicaTrace = (params: {
   for (let step = 0; step < eventBudget; step++) {
     const sim = simReplicas[Math.floor(rand() * replicaCount)]!;
     const text = sim.replica.getText();
-    sim.clock += 1;
     if (text.length > 0 && rand() < deleteProbability) {
       const start = Math.floor(rand() * text.length);
       const maxLen = Math.min(text.length - start, 1 + Math.floor(rand() * 6));

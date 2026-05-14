@@ -107,8 +107,15 @@ const runReplicaBenchmark = (
     );
   }
 
+  // We compare JSON vs columnar binary at the event-graph layer
+  // only. `replica.serialize()` additionally embeds the rendered
+  // `text`, while `encodeBinary` encodes only the graph; including
+  // the rendered text on the JSON side would inflate the ratio by
+  // the document size and make the comparison structurally unfair.
+  // Encoding just `serialized.eventGraph` keeps the two sides
+  // measuring the same thing.
   const serialized = replica.serialize();
-  const jsonBytes = utf8Bytes(JSON.stringify(serialized));
+  const jsonBytes = utf8Bytes(JSON.stringify(serialized.eventGraph));
 
   // The columnar codec needs the live event graph. Rebuild it via
   // the public `exportEventGraph` instead of reaching into the
@@ -292,7 +299,6 @@ const buildMostlyLinearEditingSession = (params: {
       // ancestor and descendant of each other.
       const forkRoot: EventId = parent;
       let forkTip: EventId = forkRoot;
-      const forkIds: EventId[] = [];
       for (let f = 0; f < forkEvents; f++) {
         const forkId = `fork-${i}-${f}`;
         // `prng()` is in [0, 1), so `Math.floor(prng() * length)` is
@@ -305,7 +311,6 @@ const buildMostlyLinearEditingSession = (params: {
           timestamp: 1_778_000_000_000 + i + f + 1,
         });
         forkTip = forkId;
-        forkIds.push(forkId);
         length += 1;
       }
       // Extend the main author by one event AFTER the fork started.
@@ -440,18 +445,26 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
 
   it("mostly-linear editing session: incremental path dominates, small partial-replay tail", () => {
     const MAIN = 600;
-    const { result, replica } = runReplicaBenchmark("mostly-linear", () =>
+    const FORK_EVENTS = 3;
+    const FORK_EVERY_N = 25;
+    const { result } = runReplicaBenchmark("mostly-linear", () =>
       buildMostlyLinearEditingSession({
         mainEvents: MAIN,
-        forkEvents: 3,
-        forkEveryN: 25,
+        forkEvents: FORK_EVENTS,
+        forkEveryN: FORK_EVERY_N,
       }),
     );
     results.push(result);
 
-    // Functional sanity: the replica accepted every event.
-    expect(result.events).toBe(replica.exportEventGraph().length);
-    expect(result.events).toBeGreaterThan(MAIN);
+    // Exact event count derived from the trace structure: every
+    // main iteration emits one event, and every `FORK_EVERY_N`-th
+    // step appends a fork chain (`FORK_EVENTS` events), a post-fork
+    // main-chain event, and a merge event — i.e. `FORK_EVENTS + 2`
+    // extra events per fork section. The bound below is intentionally
+    // tight; it can only change if the trace builder itself changes.
+    const forkSections = Math.floor(MAIN / FORK_EVERY_N);
+    const expectedEvents = MAIN + forkSections * (FORK_EVENTS + 2);
+    expect(result.events).toBe(expectedEvents);
 
     // Incremental path must carry the bulk of the events; the few
     // fork+merge points contribute a small partial-replay tail.
@@ -462,13 +475,13 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
     // Each merge event has two genuinely concurrent parents (the
     // post-fork main-chain event and the fork tip), so it must
     // trigger a partial replay from a checkpoint. With one
-    // fork+merge group every `forkEveryN` main events we expect
-    // ~`MAIN / forkEveryN` partial replays; require a strictly
+    // fork+merge group every `FORK_EVERY_N` main events we expect
+    // ~`MAIN / FORK_EVERY_N` partial replays; require a strictly
     // positive count plus a sensible lower bound so a future
     // change that quietly turns the fork into a no-op linear chain
     // also fails.
     expect(result.partialReplays).toBeGreaterThanOrEqual(
-      Math.floor(MAIN / 25 / 2),
+      Math.floor(forkSections / 2),
     );
 
     // Storage signal still well under JSON.

@@ -69,6 +69,10 @@ export default defineConfig({
           __dirname,
           "src/adapters/websocket/index.ts",
         ),
+        "adapters/noop/index": path.resolve(
+          __dirname,
+          "src/adapters/noop/index.ts",
+        ),
         "providers/index": path.resolve(__dirname, "src/providers/index.ts"),
         "providers/presence-context": path.resolve(
           __dirname,

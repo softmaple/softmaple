@@ -2,9 +2,10 @@
  * useUpdatePresence hook - Update current user's presence
  */
 
-import { useCallback, useContext, useEffect, useRef } from "react";
+import { useContext } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { CursorPosition, SelectionRange } from "../types/presence";
+import { useTrailingEdgeThrottle } from "./internal/use-trailing-throttle";
 
 export { useUpdateTyping } from "./use-update-typing";
 
@@ -12,7 +13,27 @@ const PROVIDER_ERROR_MSG =
   "must be used within a PresenceProvider. " +
   "Wrap your component tree with <PresenceProvider adapter={adapter}>.";
 
+/**
+ * Default cursor throttle window. ~60fps — matches the design doc's "Cursor
+ * updates throttled (50-100ms)" budget while staying snappy for fast-moving
+ * pointers.
+ */
 const DEFAULT_CURSOR_THROTTLE_MS = 16;
+
+/**
+ * Default selection throttle window. Per design doc §7 ("Cursor updates
+ * throttled (50-100ms)") — selections fire on every `selectionchange` during
+ * a drag, so a coarser default than cursor is appropriate.
+ */
+const DEFAULT_SELECTION_THROTTLE_MS = 50;
+
+/**
+ * "Clear" sentinel accepted by `useUpdateCursor` / `useUpdateSelection`. Both
+ * `null` and `undefined` mean "I have no cursor / selection right now". The
+ * adapter normalizes the wire representation so peers receive an unambiguous
+ * clear signal.
+ */
+type Clear = null | undefined;
 
 /**
  * Hook to get the updatePresence function
@@ -30,7 +51,9 @@ export const useUpdatePresence = () => {
 /**
  * Hook to update cursor position. Trailing-edge throttle so high-frequency
  * mousemove streams collapse to one network update per `throttleMs` window.
- * Pass `throttleMs: 0` to opt out.
+ * Pass `throttleMs: 0` to opt out. Pass `null` or `undefined` to clear the
+ * cursor.
+ *
  * @throws Error if used outside of PresenceProvider
  */
 export const useUpdateCursor = (
@@ -42,69 +65,29 @@ export const useUpdateCursor = (
   }
   const { updatePresence } = context;
 
-  const lastSentAtRef = useRef(0);
-  const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const trailingValueRef = useRef<CursorPosition | undefined>(undefined);
-
-  useEffect(
-    () => () => {
-      if (trailingTimerRef.current !== null) {
-        clearTimeout(trailingTimerRef.current);
-        trailingTimerRef.current = null;
-      }
-    },
-    [],
-  );
-
-  return useCallback(
-    (cursor: CursorPosition | undefined) => {
-      if (throttleMs <= 0) {
-        updatePresence({ cursor });
-        return;
-      }
-
-      const now = Date.now();
-      const elapsed = now - lastSentAtRef.current;
-
-      if (elapsed >= throttleMs) {
-        lastSentAtRef.current = now;
-        if (trailingTimerRef.current !== null) {
-          clearTimeout(trailingTimerRef.current);
-          trailingTimerRef.current = null;
-        }
-        updatePresence({ cursor });
-        return;
-      }
-
-      trailingValueRef.current = cursor;
-      if (trailingTimerRef.current === null) {
-        trailingTimerRef.current = setTimeout(() => {
-          trailingTimerRef.current = null;
-          lastSentAtRef.current = Date.now();
-          updatePresence({ cursor: trailingValueRef.current });
-        }, throttleMs - elapsed);
-      }
-    },
-    [throttleMs, updatePresence],
-  );
+  return useTrailingEdgeThrottle<CursorPosition | Clear>((cursor) => {
+    updatePresence({ cursor: cursor ?? undefined });
+  }, throttleMs);
 };
 
 /**
- * Hook to update selection range
- * @returns Function to update selection range
+ * Hook to update selection range. Trailing-edge throttle so a long drag-select
+ * (which fires `selectionchange` every frame) only sends one network update
+ * per `throttleMs` window. Pass `throttleMs: 0` to opt out. Pass `null` or
+ * `undefined` to clear the selection.
+ *
  * @throws Error if used outside of PresenceProvider
  */
-export const useUpdateSelection = () => {
+export const useUpdateSelection = (
+  throttleMs: number = DEFAULT_SELECTION_THROTTLE_MS,
+) => {
   const context = useContext(PresenceContext);
   if (!context) {
     throw new Error(`useUpdateSelection ${PROVIDER_ERROR_MSG}`);
   }
   const { updatePresence } = context;
 
-  return useCallback(
-    (selection: SelectionRange | undefined) => {
-      updatePresence({ selection });
-    },
-    [updatePresence],
-  );
+  return useTrailingEdgeThrottle<SelectionRange | Clear>((selection) => {
+    updatePresence({ selection: selection ?? undefined });
+  }, throttleMs);
 };

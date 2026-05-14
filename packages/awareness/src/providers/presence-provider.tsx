@@ -27,8 +27,8 @@ import type { PresenceUser } from "../types/presence";
 import type { PresenceStateConfig } from "../types/state";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
 
-/** Maximum number of recent activity events to track */
-const MAX_ACTIVITY_EVENTS = 50;
+/** Default cap on the bounded recent-activity buffer */
+const DEFAULT_MAX_RECENT_ACTIVITY = 50;
 
 /** Default interval (ms) between idle/offline status sweeps */
 const DEFAULT_STATUS_SWEEP_MS = 5_000;
@@ -52,6 +52,11 @@ export interface PresenceProviderProps {
    * adapter already authoritatively manages status). Defaults to 5000.
    */
   readonly statusSweepMs?: number;
+  /**
+   * Maximum number of recent activity events to retain. Older events are
+   * dropped FIFO. Defaults to 50.
+   */
+  readonly maxRecentActivity?: number;
   /** Children to render */
   readonly children: ReactNode;
 }
@@ -148,36 +153,89 @@ const presenceEventToActivity = (
 };
 
 /**
- * Add activity event to list (immutable, bounded)
+ * Add activity event to list (immutable, bounded).
+ *
+ * Caller passes the cap so it can be tuned per-provider via the
+ * `maxRecentActivity` prop.
  */
 const addActivityEvent = (
   events: ReadonlyArray<ActivityEvent>,
   newEvent: ActivityEvent,
+  maxEvents: number,
 ): ReadonlyArray<ActivityEvent> => {
   const updated = [newEvent, ...events];
-  return updated.length > MAX_ACTIVITY_EVENTS
-    ? updated.slice(0, MAX_ACTIVITY_EVENTS)
-    : updated;
+  return updated.length > maxEvents ? updated.slice(0, maxEvents) : updated;
 };
 
 /**
- * Apply local status demotion (active → idle → offline) based on lastActiveAt.
- * Returns the same map reference if no user's status changed (lets memoization
- * short-circuit downstream).
+ * Append multiple new events at once. Preserves "newest first" ordering and
+ * applies the cap a single time.
+ */
+const addActivityEvents = (
+  events: ReadonlyArray<ActivityEvent>,
+  newEvents: ReadonlyArray<ActivityEvent>,
+  maxEvents: number,
+): ReadonlyArray<ActivityEvent> => {
+  if (newEvents.length === 0) return events;
+  const updated = [...newEvents, ...events];
+  return updated.length > maxEvents ? updated.slice(0, maxEvents) : updated;
+};
+
+/**
+ * Result of a single status sweep: the (possibly new) presence map and the
+ * list of users whose status transitioned this tick. Activities are emitted
+ * for transitions to `idle` and `offline` so consumers can render "X went
+ * idle" / "X went offline" notifications.
+ */
+interface StatusSweepResult {
+  readonly presence: ReadonlyMap<string, PresenceUser>;
+  readonly transitions: ReadonlyArray<PresenceUser>;
+}
+
+/**
+ * Apply local status demotion (active → idle → offline) based on
+ * `lastActiveAt`. Returns the same map reference when no user transitioned
+ * so React can short-circuit downstream memoization.
  */
 const applyStatusSweep = (
   presence: ReadonlyMap<string, PresenceUser>,
   config: PresenceStateConfig,
-): ReadonlyMap<string, PresenceUser> => {
+): StatusSweepResult => {
   let next: Map<string, PresenceUser> | null = null;
+  const transitions: PresenceUser[] = [];
   for (const [userId, user] of presence) {
     const newStatus = determineUserStatus(user, config);
     if (newStatus !== user.status) {
       if (next === null) next = new Map(presence);
-      next.set(userId, { ...user, status: newStatus });
+      const updated = { ...user, status: newStatus };
+      next.set(userId, updated);
+      transitions.push(updated);
     }
   }
-  return next ?? presence;
+  return { presence: next ?? presence, transitions };
+};
+
+/**
+ * Build the activity events emitted by a status sweep transition. Only
+ * idle demotions produce activity — promotions back to `active` are implicit
+ * in cursor/typing/selection updates, and `offline` already has no
+ * dedicated activity type (consumers can derive it from `presence`).
+ */
+const sweepTransitionsToActivities = (
+  transitions: ReadonlyArray<PresenceUser>,
+): ReadonlyArray<ActivityEvent> => {
+  const events: ActivityEvent[] = [];
+  for (const user of transitions) {
+    if (user.status === "idle") {
+      events.push({
+        userId: user.userId,
+        timestamp: Date.now(),
+        type: ACTIVITY_TYPE.IDLE,
+        data: { type: ACTIVITY_TYPE.IDLE },
+      });
+    }
+  }
+  return events;
 };
 
 /**
@@ -188,6 +246,7 @@ export const PresenceProvider = ({
   autoConnect = true,
   statusConfig = DEFAULT_PRESENCE_CONFIG,
   statusSweepMs = DEFAULT_STATUS_SWEEP_MS,
+  maxRecentActivity = DEFAULT_MAX_RECENT_ACTIVITY,
   children,
 }: PresenceProviderProps): ReactNode => {
   // Use lazy initializers to get real adapter state on first render
@@ -202,6 +261,15 @@ export const PresenceProvider = ({
   const [recentActivity, setRecentActivity] = useState<
     ReadonlyArray<ActivityEvent>
   >([]);
+
+  // `maxRecentActivity` is a tuning knob, not a structural dependency. Read
+  // it from a ref inside subscription / interval closures so changing it
+  // doesn't tear down adapter subscriptions or the sweep interval (which
+  // would force a resubscribe/reconnect cycle).
+  const maxRecentActivityRef = useRef(maxRecentActivity);
+  useEffect(() => {
+    maxRecentActivityRef.current = maxRecentActivity;
+  }, [maxRecentActivity]);
 
   useEffect(() => {
     const unsubscribeConnection = adapter.onConnectionChange((state) => {
@@ -223,7 +291,9 @@ export const PresenceProvider = ({
     const unsubscribeEvent = adapter.onEvent((event) => {
       const activity = presenceEventToActivity(event);
       if (activity) {
-        setRecentActivity((prev) => addActivityEvent(prev, activity));
+        setRecentActivity((prev) =>
+          addActivityEvent(prev, activity, maxRecentActivityRef.current),
+        );
       }
     });
 
@@ -275,13 +345,31 @@ export const PresenceProvider = ({
 
     const tick = () => {
       const current = presenceRef.current;
-      const swept = applyStatusSweep(current, sweepConfig);
+      const { presence: swept, transitions } = applyStatusSweep(
+        current,
+        sweepConfig,
+      );
       if (swept !== current) {
+        // Keep the ref in lockstep with the sweep result so subsequent ticks
+        // see the post-sweep statuses immediately, before React commits the
+        // `setPresence` state update. Otherwise two ticks back-to-back can
+        // re-emit the same idle transition.
+        presenceRef.current = swept;
         setPresence(swept);
         const selfId = adapter.getSelf()?.userId;
         if (selfId !== undefined) {
           const updated = swept.get(selfId);
           if (updated !== undefined) setSelf(updated);
+        }
+        const newActivities = sweepTransitionsToActivities(transitions);
+        if (newActivities.length > 0) {
+          setRecentActivity((prev) =>
+            addActivityEvents(
+              prev,
+              newActivities,
+              maxRecentActivityRef.current,
+            ),
+          );
         }
       }
     };

@@ -163,11 +163,13 @@
  * Pointer-coarse devices get an invisible hit-area pad so stacked
  * 24-40px avatars meet WCAG 2.5.5 minimums (~44×44). The pad only
  * applies to interactive items — decorative bars stay tight.
+ * 8px on every side gives an md (32px) avatar a 48×48 hit area,
+ * comfortably above the 44 floor.
  */
 @media (pointer: coarse) {
   .awareness-presence-bar__item--interactive::before {
     content: "";
-    inset: -10px -4px;
+    inset: -8px;
     @apply absolute;
   }
 }
@@ -604,5 +606,15 @@
   .awareness-live-cursor__label,
   .awareness-selection-highlight__label {
     forced-color-adjust: none;
+  }
+
+  /*
+   * In forced-colors mode the user-color glow + custom focus ring above
+   * are stripped, leaving `outline: none` with nothing in its place.
+   * Restore a system-color outline so keyboard focus stays visible.
+   */
+  .awareness-presence-bar__item--interactive:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
   }
 }

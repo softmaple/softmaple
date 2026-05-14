@@ -48,6 +48,11 @@ const DAY_MS = 24 * HOUR_MS;
  * Format an absolute timestamp as a short relative phrase ("3m ago",
  * "just now"). Bounds at ~30s for "just now" so it doesn't tick visibly
  * while the user reads it.
+ *
+ * Uses `Math.floor` so each bucket transitions cleanly:
+ * 59m → 1h, never 30m → 60m. Rounding would let a value display its
+ * "rounded-up" form while still inside the smaller bucket, which feels
+ * jumpy at boundaries.
  */
 export const formatRelativeTime = (
   timestamp: number,
@@ -55,10 +60,10 @@ export const formatRelativeTime = (
 ): string => {
   const elapsed = Math.max(0, now - timestamp);
   if (elapsed < 30 * SECOND_MS) return "just now";
-  if (elapsed < MINUTE_MS) return `${Math.round(elapsed / SECOND_MS)}s ago`;
-  if (elapsed < HOUR_MS) return `${Math.round(elapsed / MINUTE_MS)}m ago`;
-  if (elapsed < DAY_MS) return `${Math.round(elapsed / HOUR_MS)}h ago`;
-  return `${Math.round(elapsed / DAY_MS)}d ago`;
+  if (elapsed < MINUTE_MS) return `${Math.floor(elapsed / SECOND_MS)}s ago`;
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m ago`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`;
+  return `${Math.floor(elapsed / DAY_MS)}d ago`;
 };
 
 /**

@@ -131,6 +131,17 @@ describe("components/internal-utils", () => {
     expect(formatRelativeTime(now + 5_000, now)).toBe("just now");
   });
 
+  it("formatRelativeTime floors at bucket boundaries (no jump from 30m to 1h)", () => {
+    const now = 10_000_000;
+    // 59m59s: still in the minutes bucket, displayed as 59m (floor),
+    // not 60m (round would do that).
+    expect(formatRelativeTime(now - (60 * 60_000 - 1_000), now)).toBe(
+      "59m ago",
+    );
+    // Exactly one hour switches to the hours bucket.
+    expect(formatRelativeTime(now - 60 * 60_000, now)).toBe("1h ago");
+  });
+
   it("formatPresenceSummary varies copy by status and typing meta", () => {
     const base = (overrides: Partial<PresenceUser> = {}): PresenceUser => ({
       userId: "u",

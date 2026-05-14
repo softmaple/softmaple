@@ -33,6 +33,28 @@ interface CriticalCheckpoint {
 }
 
 /**
+ * Upper bound on retained critical checkpoints.
+ *
+ * Section 3.5/3.6 of the Eg-walker paper requires *some* critical-version
+ * snapshot in scope to skip the full-replay path when a concurrent branch
+ * arrives; the latest dominating checkpoint is always the cheapest one to
+ * replay from, and any older checkpoint is only useful when a concurrent
+ * branch is rooted earlier than every retained checkpoint. Capping the
+ * retained list at this many newest entries keeps replica memory O(1) in
+ * history length without sacrificing the common-case partial-replay path
+ * (the worst case — a concurrent branch rooted before the oldest retained
+ * checkpoint — falls back to {@link fullReplay}, which is already the
+ * pre-checkpoint behaviour).
+ *
+ * The value is empirical: 32 is comfortably above the number of distinct
+ * critical versions any single editing session is expected to materialise
+ * between concurrent merges, while bounding each checkpoint's per-replica
+ * cost (a frontier `Set` plus a snapshot text string) at a few KB worst
+ * case for ordinary documents.
+ */
+const MAX_RETAINED_CHECKPOINTS = 32;
+
+/**
  * Reject strings whose UTF-16 code-unit sequence contains a lone surrogate.
  *
  * The CRDT layer stores one item per UTF-16 code unit, so a lone high or low
@@ -483,8 +505,11 @@ export class EgWalkerReplica {
    * branches partial-replay only the post-checkpoint suffix instead of the
    * whole graph.
    *
-   * Checkpoints are never pruned in this revision; a long linear history
-   * grows the list by O(N). Pruning is tracked under #670.
+   * The retained list is capped at {@link MAX_RETAINED_CHECKPOINTS} entries —
+   * a long linear history evicts the oldest checkpoints, keeping replica
+   * memory O(1) in history length. A concurrent branch rooted before every
+   * retained checkpoint falls back to {@link fullReplay}, the same path the
+   * replica took before checkpoints existed at all.
    */
   private maybeAdvanceCheckpoint(): void {
     const frontier = this.eventGraph.getFrontier();
@@ -502,6 +527,11 @@ export class EgWalkerReplica {
       version: new Set(frontier),
       text: this.document,
     });
+    // Evict the oldest entries one at a time so a future change that pushes
+    // multiple checkpoints in a single tick still ends the call bounded.
+    while (this.criticalCheckpoints.length > MAX_RETAINED_CHECKPOINTS) {
+      this.criticalCheckpoints.shift();
+    }
   }
 
   /**

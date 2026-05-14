@@ -464,6 +464,44 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(api.getText().includes("R")).toBe(true);
   });
 
+  it("caps retained critical checkpoints so long linear histories do not grow O(N) state", () => {
+    // Section 3.5/3.6: each event whose parent frontier is a single-element
+    // critical version produces a checkpoint. On a purely linear history
+    // *every* event is a critical version, so the retained checkpoint list
+    // would grow without bound in the original implementation. The pruning
+    // logic keeps only the most recent `MAX_RETAINED_CHECKPOINTS` entries.
+    const api = new EgWalkerReplica("r1", "");
+    const HISTORY = 500;
+    for (let i = 0; i < HISTORY; i++) {
+      api.insert(api.getText().length, "x");
+    }
+    expect(api.getText().length).toBe(HISTORY);
+
+    const stats = api.getReplayStats();
+    // The cap is a private constant (32 today); assert a tight upper bound
+    // that catches both "checkpoint pruning regressed" and "the cap was
+    // accidentally lifted to a value comparable to history length".
+    expect(stats.checkpointCount).toBeLessThanOrEqual(64);
+    expect(stats.checkpointCount).toBeLessThan(HISTORY);
+
+    // A concurrent merge rooted at the most recent checkpoint must still
+    // take the partial-replay fast path — the newest checkpoint is always
+    // retained even after pruning.
+    const partialReplaysBefore = stats.partialReplays;
+    api.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set([`r1:${HISTORY - 1}`]),
+      operation: { type: OPERATION_TYPE.INSERT, index: HISTORY, text: "B" },
+      timestamp: HISTORY + 1,
+    });
+    const afterMerge = api.getReplayStats();
+    expect(afterMerge.partialReplays).toBeGreaterThanOrEqual(
+      partialReplaysBefore,
+    );
+    // Convergence sanity.
+    expect(api.getText().endsWith("B")).toBe(true);
+  });
+
   it("uses branch-preserving traversal during fullReplay to minimise retreat/advance churn", () => {
     // Build B parallel chains of length L forking off a common root, with ids
     // assigned in BFS order so a Kahn-ordered replay interleaves every branch

@@ -261,12 +261,16 @@ const buildMostlyLinearEditingSession = (params: {
     // re-merge. Models a second author typing alongside the primary.
     if ((i + 1) % forkEveryN === 0) {
       // `parent` is always non-null here because we just appended an
-      // event in this iteration and set `parent = id` above. Capture
-      // it into a non-nullable local so the fork/merge code can stay
-      // free of non-null assertions even after the inner loop
-      // reassigns its own parent pointer.
-      const mainTip: EventId = parent;
-      let forkTip: EventId = mainTip;
+      // event in this iteration and set `parent = id` above.
+      // `forkRoot` is the shared ancestor of both the fork chain and
+      // the post-fork main-chain event we add below; keeping the
+      // two chains rooted at the *same* event (rather than chaining
+      // the fork off of the post-fork main event) is what makes the
+      // eventual merge a genuine fork/merge with two concurrent
+      // tips, instead of a degenerate merge whose parents are an
+      // ancestor and descendant of each other.
+      const forkRoot: EventId = parent;
+      let forkTip: EventId = forkRoot;
       const forkIds: EventId[] = [];
       for (let f = 0; f < forkEvents; f++) {
         const forkId = `fork-${i}-${f}`;
@@ -283,17 +287,32 @@ const buildMostlyLinearEditingSession = (params: {
         forkIds.push(forkId);
         length += 1;
       }
-      // Merge back into the main chain.
-      const mergeId = `merge:${i}`;
+      // Extend the main author by one event AFTER the fork started.
+      // Its only parent is `forkRoot`, so it's concurrent with every
+      // fork event — neither side is an ancestor of the other.
+      const postForkMainId: EventId = `main-post-${i}`;
+      events.push({
+        id: postForkMainId,
+        parentVersion: new Set<EventId>([forkRoot]),
+        operation: { type: OPERATION_TYPE.INSERT, index: cursor, text: "." },
+        timestamp: 1_778_000_000_000 + i + forkEvents + 1,
+      });
+      length += 1;
+      cursor += 1;
+
+      // Merge: `postForkMainId` and `forkTip` are now genuinely
+      // concurrent tips, so this event triggers a real fork/merge
+      // partial-replay tail in the engine.
+      const mergeId: EventId = `merge:${i}`;
       events.push({
         id: mergeId,
-        parentVersion: new Set<EventId>([mainTip, forkTip]),
+        parentVersion: new Set<EventId>([postForkMainId, forkTip]),
         operation: {
           type: OPERATION_TYPE.INSERT,
           index: cursor,
           text: "|",
         },
-        timestamp: 1_778_000_000_000 + i + forkEvents + 1,
+        timestamp: 1_778_000_000_000 + i + forkEvents + 2,
       });
       parent = mergeId;
       length += 1;
@@ -375,13 +394,15 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
     // single event.
     expect(result.frontierSize).toBe(1);
 
-    // Replay shape: every branch event after the first concurrent
-    // sibling must take either the partial-replay or full-replay
-    // path because retreat is needed. The exact split depends on
-    // whether a critical checkpoint dominates the divergent suffix,
-    // so we assert on the union instead of the breakdown.
+    // Replay shape: the first event cold-starts the replica (so
+    // `fullReplays >= 1` is trivially true for any non-empty
+    // trace). To actually witness divergent-suffix replay work,
+    // require at least one *partial* replay on top of the cold
+    // start, plus a strictly-greater-than-1 sum so a future change
+    // that quietly collapses to a single full replay also fails.
+    expect(result.partialReplays).toBeGreaterThanOrEqual(1);
     expect(result.partialReplays + result.fullReplays).toBeGreaterThanOrEqual(
-      1,
+      2,
     );
     // Engine retreat/advance churn must scale linearly with the
     // concurrent suffix, not quadratically. A conservative upper
@@ -412,11 +433,21 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
     expect(result.events).toBeGreaterThan(MAIN);
 
     // Incremental path must carry the bulk of the events; the few
-    // fork+merge points contribute a small partial/full-replay
-    // tail.
+    // fork+merge points contribute a small partial-replay tail.
     expect(result.incrementalApplies).toBeGreaterThan(MAIN);
     expect(result.partialReplays + result.fullReplays).toBeLessThan(
       result.events / 4,
+    );
+    // Each merge event has two genuinely concurrent parents (the
+    // post-fork main-chain event and the fork tip), so it must
+    // trigger a partial replay from a checkpoint. With one
+    // fork+merge group every `forkEveryN` main events we expect
+    // ~`MAIN / forkEveryN` partial replays; require a strictly
+    // positive count plus a sensible lower bound so a future
+    // change that quietly turns the fork into a no-op linear chain
+    // also fails.
+    expect(result.partialReplays).toBeGreaterThanOrEqual(
+      Math.floor(MAIN / 25 / 2),
     );
 
     // Storage signal still well under JSON.

@@ -782,10 +782,14 @@ describe("EgWalkerReplica realistic editing traces", () => {
   });
 
   it("converges replicas that observe disjoint subsets of events first", () => {
-    // Three replicas, each seeing a different "first half" of the
-    // event set before the rest is delivered. This is the canonical
-    // partition-then-heal pattern (network partition → partial
-    // catch-up → full reconciliation).
+    // Three replicas, each seeing a *different* random ~60% subset
+    // of the event set before the rest is delivered. This is the
+    // canonical partition-then-heal pattern (network partition →
+    // partial catch-up → full reconciliation): every replica
+    // observes a distinct prefix, so during the first phase the
+    // replicas are genuinely out of sync, and convergence is only
+    // re-established after the second phase delivers the
+    // complement.
     const { events, finalText } = runRandomizedMultiReplicaTrace({
       replicaCount: 3,
       eventBudget: 90,
@@ -798,28 +802,64 @@ describe("EgWalkerReplica realistic editing traces", () => {
     const rand = createPrng(0xfafa_fafa);
     const replicaCount = 3;
     const replicas: EgWalkerReplica[] = [];
+    // Each replica gets its OWN random partition so the "first
+    // halves" the replicas observe really are disjoint subsets of
+    // the trace, not the same subset under different delivery
+    // orders.
+    const firstHalves: GraphEvent[][] = [];
+    const secondHalves: GraphEvent[][] = [];
     for (let i = 0; i < replicaCount; i++) {
       replicas.push(new EgWalkerReplica(`partition-${i}`));
+      const perReplica = shuffled(events.map(cloneEvent), rand);
+      const splitAt = Math.floor(perReplica.length * 0.6);
+      firstHalves.push(perReplica.slice(0, splitAt));
+      secondHalves.push(perReplica.slice(splitAt));
     }
 
-    // Each replica receives a random 60% subset first (in shuffled
-    // order), the remaining 40% afterwards.
-    const permuted = shuffled(events.map(cloneEvent), rand);
-    const splitAt = Math.floor(permuted.length * 0.6);
-    const firstHalf = permuted.slice(0, splitAt);
-    const secondHalf = permuted.slice(splitAt);
-
-    for (const replica of replicas) {
-      for (const event of shuffled(firstHalf.map(cloneEvent), rand)) {
-        replica.applyRemoteEvent(event);
+    // Phase 1: each replica receives its own ~60% subset. After
+    // this phase the replicas have observed different subsets and
+    // may have buffered events whose causal predecessors are still
+    // in their respective second halves.
+    for (let i = 0; i < replicaCount; i++) {
+      for (const event of firstHalves[i]!) {
+        replicas[i]!.applyRemoteEvent(event);
       }
     }
-    for (const replica of replicas) {
-      for (const event of shuffled(secondHalf.map(cloneEvent), rand)) {
-        replica.applyRemoteEvent(event);
+    // Sanity: at least one replica must see a partition that
+    // differs from at least one other replica's. If they were all
+    // identical we would not actually be testing the partition
+    // pattern — we would just be testing delivery-order variation,
+    // which is already covered by other tests in this file.
+    const firstHalfIdSets = firstHalves.map(
+      (half) => new Set<EventId>(half.map((event) => event.id)),
+    );
+    let sawDisjointPair = false;
+    for (let a = 0; a < replicaCount && !sawDisjointPair; a++) {
+      for (let b = a + 1; b < replicaCount; b++) {
+        const aSet = firstHalfIdSets[a]!;
+        const bSet = firstHalfIdSets[b]!;
+        for (const id of aSet) {
+          if (!bSet.has(id)) {
+            sawDisjointPair = true;
+            break;
+          }
+        }
+        if (sawDisjointPair) {
+          break;
+        }
       }
-      expect(replica.getPendingRemoteCount()).toBe(0);
-      expect(replica.getText()).toBe(finalText);
+    }
+    expect(sawDisjointPair).toBe(true);
+
+    // Phase 2: deliver the complement. After this every replica
+    // has observed every event (in some delivery order) and must
+    // converge to the canonical text.
+    for (let i = 0; i < replicaCount; i++) {
+      for (const event of secondHalves[i]!) {
+        replicas[i]!.applyRemoteEvent(event);
+      }
+      expect(replicas[i]!.getPendingRemoteCount()).toBe(0);
+      expect(replicas[i]!.getText()).toBe(finalText);
     }
   });
 });

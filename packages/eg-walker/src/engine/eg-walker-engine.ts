@@ -638,13 +638,18 @@ export class EgWalkerEngine {
     }
     let mirrored = this.deleteTargetsByItem.get(toItemId);
     for (const deleteEventId of owners) {
+      // Invariant: `toItemId` is a freshly minted `nextPlaceholderId()`,
+      // so it cannot already appear in this delete event's target list.
+      // Guard defensively so a future call site that breaks the freshness
+      // assumption doesn't silently produce duplicate entries (which would
+      // double-toggle prepare-state on retreat/advance).
+      if (mirrored?.has(deleteEventId)) {
+        continue;
+      }
       const targets = this.deleteTargets.get(deleteEventId);
       if (!targets) {
         continue;
       }
-      // Append once per (event, item) pair so retreat/advance stay
-      // proportional to the number of code units the delete actually
-      // covered.
       targets.push(toItemId);
       if (!mirrored) {
         mirrored = new Set<EventId>();

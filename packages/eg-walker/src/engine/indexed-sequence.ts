@@ -5,6 +5,11 @@ type IndexedNode<T extends object> = LeafNode<T> | InternalNode<T>;
 
 interface NodeBase<T extends object> {
   parent: InternalNode<T> | null;
+  // Cached position within `parent.children`. Kept in sync by every code
+  // path that mutates a parent's child list so {@link positionOfNode}
+  // can walk up without scanning siblings linearly. Meaningless when
+  // `parent` is `null`; we leave it at 0 in that case.
+  childIndex: number;
   size: number;
   prepareSum: number;
   effectSum: number;
@@ -24,11 +29,17 @@ interface InternalNode<T extends object> extends NodeBase<T> {
 
 interface ItemLocation<T extends object> {
   leaf: LeafNode<T>;
+  // Cached offset of the item within `leaf.items`. Maintained by every
+  // splice on `leaf.items` so {@link IndexedSequence.positionOf} and
+  // {@link IndexedSequence.updateItem} can skip the O(leaf capacity)
+  // `Array.indexOf` scan called out in sub-issue 6.
+  offsetInLeaf: number;
 }
 
 const createLeaf = <T extends object>(): LeafNode<T> => ({
   kind: "leaf",
   parent: null,
+  childIndex: 0,
   items: [],
   prepareWeights: [],
   effectWeights: [],
@@ -40,35 +51,32 @@ const createLeaf = <T extends object>(): LeafNode<T> => ({
 const createInternal = <T extends object>(
   children: IndexedNode<T>[],
 ): InternalNode<T> => {
+  let size = 0;
+  let prepareSum = 0;
+  let effectSum = 0;
+  for (const child of children) {
+    size += child.size;
+    prepareSum += child.prepareSum;
+    effectSum += child.effectSum;
+  }
   const node: InternalNode<T> = {
     kind: "internal",
     parent: null,
+    childIndex: 0,
     children,
-    size: 0,
-    prepareSum: 0,
-    effectSum: 0,
+    size,
+    prepareSum,
+    effectSum,
   };
-  for (const child of children) {
+  for (let index = 0; index < children.length; index++) {
+    const child = children[index];
+    if (!child) {
+      continue;
+    }
     child.parent = node;
+    child.childIndex = index;
   }
-  refresh(node);
   return node;
-};
-
-const sum = (values: ReadonlyArray<number>): number =>
-  values.reduce((total, value) => total + value, 0);
-
-const refresh = <T extends object>(node: IndexedNode<T>): void => {
-  if (node.kind === "leaf") {
-    node.size = node.items.length;
-    node.prepareSum = sum(node.prepareWeights);
-    node.effectSum = sum(node.effectWeights);
-    return;
-  }
-
-  node.size = sum(node.children.map((child) => child.size));
-  node.prepareSum = sum(node.children.map((child) => child.prepareSum));
-  node.effectSum = sum(node.children.map((child) => child.effectSum));
 };
 
 /**
@@ -78,6 +86,18 @@ const refresh = <T extends object>(node: IndexedNode<T>): void => {
  * three ranks: record count, prepare-visible count, and effect-visible count.
  * This mirrors the paper's B-tree indexes while the separate WeakMap provides
  * O(log n) event-ID-to-record mapping after the caller resolves the event ID.
+ *
+ * Sub-issue 6 reshaped the maintenance paths so the hot ones — single-item
+ * inserts, weight updates, and `positionOf` lookups — run in O(log n):
+ *   - Inserts and weight updates propagate `(size, prepareSum, effectSum)`
+ *     deltas to ancestors instead of recomputing every internal node's
+ *     sums from its children.
+ *   - Each item caches its offset inside its leaf, and each node caches
+ *     its index inside its parent, so `positionOf` and `positionOfNode`
+ *     skip the inner `Array.indexOf` scans.
+ *   - Splits do not propagate deltas at all: the moved subtree's weight
+ *     leaves one parent edge and joins another, so the grandparent sums
+ *     are unchanged by construction.
  */
 export class IndexedSequence<T extends object> {
   private root: IndexedNode<T> | null = null;
@@ -139,13 +159,16 @@ export class IndexedSequence<T extends object> {
     if (!location) {
       return -1;
     }
-
-    const leafOffset = location.leaf.items.indexOf(item);
-    if (leafOffset === -1) {
-      return -1;
+    if (location.leaf.items[location.offsetInLeaf] !== item) {
+      // Defensive fallback: the cached offset disagrees with the leaf
+      // contents (should not happen, but be resilient to bugs).
+      const offset = location.leaf.items.indexOf(item);
+      if (offset === -1) {
+        return -1;
+      }
+      location.offsetInLeaf = offset;
     }
-
-    return this.positionOfNode(location.leaf) + leafOffset;
+    return this.positionOfNode(location.leaf) + location.offsetInLeaf;
   }
 
   clear(): void {
@@ -181,14 +204,30 @@ export class IndexedSequence<T extends object> {
       return;
     }
 
-    const offset = location.leaf.items.indexOf(item);
-    if (offset === -1) {
+    const leaf = location.leaf;
+    let offset = location.offsetInLeaf;
+    if (leaf.items[offset] !== item) {
+      const recovered = leaf.items.indexOf(item);
+      if (recovered === -1) {
+        return;
+      }
+      offset = recovered;
+      location.offsetInLeaf = recovered;
+    }
+
+    const oldPrepare = leaf.prepareWeights[offset] ?? 0;
+    const oldEffect = leaf.effectWeights[offset] ?? 0;
+    const newPrepare = this.prepareWeight(item);
+    const newEffect = this.effectWeight(item);
+    const prepareDelta = newPrepare - oldPrepare;
+    const effectDelta = newEffect - oldEffect;
+    if (prepareDelta === 0 && effectDelta === 0) {
       return;
     }
 
-    location.leaf.prepareWeights[offset] = this.prepareWeight(item);
-    location.leaf.effectWeights[offset] = this.effectWeight(item);
-    this.refreshUp(location.leaf);
+    leaf.prepareWeights[offset] = newPrepare;
+    leaf.effectWeights[offset] = newEffect;
+    this.propagateDelta(leaf, 0, prepareDelta, effectDelta);
   }
 
   updateWeights(): void {
@@ -253,11 +292,26 @@ export class IndexedSequence<T extends object> {
   }
 
   private insertIntoLeaf(leaf: LeafNode<T>, offset: number, item: T): void {
+    const prepare = this.prepareWeight(item);
+    const effect = this.effectWeight(item);
+
     leaf.items.splice(offset, 0, item);
-    leaf.prepareWeights.splice(offset, 0, this.prepareWeight(item));
-    leaf.effectWeights.splice(offset, 0, this.effectWeight(item));
-    this.locationsByItem.set(item, { leaf });
-    this.refreshUp(leaf);
+    leaf.prepareWeights.splice(offset, 0, prepare);
+    leaf.effectWeights.splice(offset, 0, effect);
+
+    this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
+    for (let index = offset + 1; index < leaf.items.length; index++) {
+      const sibling = leaf.items[index];
+      if (!sibling) {
+        continue;
+      }
+      const location = this.locationsByItem.get(sibling);
+      if (location) {
+        location.offsetInLeaf = index;
+      }
+    }
+
+    this.propagateDelta(leaf, 1, prepare, effect);
 
     if (leaf.items.length > LEAF_CAPACITY) {
       this.splitLeaf(leaf);
@@ -268,23 +322,56 @@ export class IndexedSequence<T extends object> {
     const midpoint = Math.ceil(leaf.items.length / 2);
     const sibling = createLeaf<T>();
 
-    sibling.items.push(...leaf.items.splice(midpoint));
-    sibling.prepareWeights.push(...leaf.prepareWeights.splice(midpoint));
-    sibling.effectWeights.push(...leaf.effectWeights.splice(midpoint));
+    const movedItems = leaf.items.splice(midpoint);
+    const movedPrepareWeights = leaf.prepareWeights.splice(midpoint);
+    const movedEffectWeights = leaf.effectWeights.splice(midpoint);
 
-    for (const item of sibling.items) {
-      this.locationsByItem.set(item, { leaf: sibling });
+    sibling.items.push(...movedItems);
+    sibling.prepareWeights.push(...movedPrepareWeights);
+    sibling.effectWeights.push(...movedEffectWeights);
+
+    let movedPrepareSum = 0;
+    let movedEffectSum = 0;
+    for (let index = 0; index < movedItems.length; index++) {
+      const item = movedItems[index];
+      const prepare = movedPrepareWeights[index] ?? 0;
+      const effect = movedEffectWeights[index] ?? 0;
+      movedPrepareSum += prepare;
+      movedEffectSum += effect;
+      if (item) {
+        this.locationsByItem.set(item, { leaf: sibling, offsetInLeaf: index });
+      }
     }
 
-    refresh(leaf);
-    refresh(sibling);
+    leaf.size = leaf.items.length;
+    leaf.prepareSum -= movedPrepareSum;
+    leaf.effectSum -= movedEffectSum;
+
+    sibling.size = sibling.items.length;
+    sibling.prepareSum = movedPrepareSum;
+    sibling.effectSum = movedEffectSum;
+
     this.insertSiblingAfter(leaf, sibling);
   }
 
   private splitInternal(node: InternalNode<T>): void {
     const midpoint = Math.ceil(node.children.length / 2);
-    const sibling = createInternal(node.children.splice(midpoint));
-    refresh(node);
+    const movedChildren = node.children.splice(midpoint);
+
+    let movedSize = 0;
+    let movedPrepareSum = 0;
+    let movedEffectSum = 0;
+    for (const child of movedChildren) {
+      movedSize += child.size;
+      movedPrepareSum += child.prepareSum;
+      movedEffectSum += child.effectSum;
+    }
+
+    node.size -= movedSize;
+    node.prepareSum -= movedPrepareSum;
+    node.effectSum -= movedEffectSum;
+
+    const sibling = createInternal(movedChildren);
     this.insertSiblingAfter(node, sibling);
   }
 
@@ -294,14 +381,27 @@ export class IndexedSequence<T extends object> {
   ): void {
     const parent = node.parent;
     if (!parent) {
+      // `node` was the root: wrap it and its new sibling in a fresh
+      // internal node. `node`'s and `sibling`'s sums are already
+      // correct, so `createInternal` just adds them.
       this.root = createInternal([node, sibling]);
       return;
     }
 
-    const nodeIndex = parent.children.indexOf(node);
+    const nodeIndex = node.childIndex;
     parent.children.splice(nodeIndex + 1, 0, sibling);
     sibling.parent = parent;
-    this.refreshUp(parent);
+    sibling.childIndex = nodeIndex + 1;
+    for (let index = nodeIndex + 2; index < parent.children.length; index++) {
+      const shifted = parent.children[index];
+      if (shifted) {
+        shifted.childIndex = index;
+      }
+    }
+
+    // No delta propagation: the moved subtree's weight left `node`'s
+    // edge and rejoined `parent` via `sibling`, so `parent` and its
+    // ancestors net zero change.
 
     if (parent.children.length > BRANCH_FACTOR) {
       this.splitInternal(parent);
@@ -361,9 +461,9 @@ export class IndexedSequence<T extends object> {
 
     while (current.parent) {
       const parent = current.parent;
-      const childIndex = parent.children.indexOf(current);
-      for (let i = 0; i < childIndex; i++) {
-        position += parent.children[i]?.size ?? 0;
+      const childIndex = current.childIndex;
+      for (let index = 0; index < childIndex; index++) {
+        position += parent.children[index]?.size ?? 0;
       }
       current = parent;
     }
@@ -477,34 +577,63 @@ export class IndexedSequence<T extends object> {
       : (node.effectWeights[offset] ?? 0);
   }
 
-  private refreshUp(node: IndexedNode<T>): void {
-    let current: IndexedNode<T> | null = node;
+  private propagateDelta(
+    start: IndexedNode<T>,
+    sizeDelta: number,
+    prepareDelta: number,
+    effectDelta: number,
+  ): void {
+    let current: IndexedNode<T> | null = start;
     while (current) {
-      refresh(current);
+      current.size += sizeDelta;
+      current.prepareSum += prepareDelta;
+      current.effectSum += effectDelta;
       current = current.parent;
     }
   }
 
+  /**
+   * Recompute every node's cached sums from its current contents. Used
+   * by {@link updateWeights} when a caller has mutated multiple items'
+   * weights externally; the per-update delta path keeps the tree
+   * accurate during normal operation.
+   */
   private refreshAll(node: IndexedNode<T>): void {
     if (node.kind === "leaf") {
-      node.prepareWeights.splice(
-        0,
-        node.prepareWeights.length,
-        ...node.items.map((item) => this.prepareWeight(item)),
-      );
-      node.effectWeights.splice(
-        0,
-        node.effectWeights.length,
-        ...node.items.map((item) => this.effectWeight(item)),
-      );
-      refresh(node);
+      let prepareSum = 0;
+      let effectSum = 0;
+      for (let index = 0; index < node.items.length; index++) {
+        const item = node.items[index];
+        if (!item) {
+          continue;
+        }
+        const prepare = this.prepareWeight(item);
+        const effect = this.effectWeight(item);
+        node.prepareWeights[index] = prepare;
+        node.effectWeights[index] = effect;
+        prepareSum += prepare;
+        effectSum += effect;
+      }
+      node.prepareWeights.length = node.items.length;
+      node.effectWeights.length = node.items.length;
+      node.size = node.items.length;
+      node.prepareSum = prepareSum;
+      node.effectSum = effectSum;
       return;
     }
 
+    let size = 0;
+    let prepareSum = 0;
+    let effectSum = 0;
     for (const child of node.children) {
       this.refreshAll(child);
+      size += child.size;
+      prepareSum += child.prepareSum;
+      effectSum += child.effectSum;
     }
-    refresh(node);
+    node.size = size;
+    node.prepareSum = prepareSum;
+    node.effectSum = effectSum;
   }
 
   private visit(node: IndexedNode<T>, visitor: (item: T) => void): void {

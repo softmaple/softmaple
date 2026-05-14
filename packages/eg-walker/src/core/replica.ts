@@ -90,6 +90,15 @@ export class EgWalkerReplica {
     this.currentVersion = this.eventGraph.getFrontier();
     this.nextSequenceNumber = this.inferNextSequenceNumber();
     if (this.eventGraph.getAllEvents().length > 0) {
+      // A prebuilt graph bypasses {@link applyRemoteEvent}, so its event
+      // payloads have never been screened by
+      // {@link assertRemoteEventWellFormed}. Validate them here before
+      // {@link fullReplay} so a tampered persisted payload (lone
+      // surrogate, negative delete length) cannot produce malformed
+      // {@link getText} output.
+      for (const event of this.eventGraph.getAllEvents()) {
+        assertRemoteEventWellFormed(event);
+      }
       this.fullReplay();
     }
     this.maybeAdvanceCheckpoint();

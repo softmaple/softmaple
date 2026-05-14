@@ -292,6 +292,8 @@ describe("ReplayWalker", () => {
       eventsProcessed: 0,
       retreatCount: 0,
       advanceCount: 0,
+      nonConflictingRunCount: 0,
+      fullReplayCount: 0,
     });
     expect(walker.getPrepareVersion()).toEqual(new Set());
     expect(walker.getEffectVersion()).toEqual(new Set());

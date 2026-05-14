@@ -19,8 +19,11 @@ import {
   updateInternalState,
 } from "../adapters/websocket/state";
 import { ActivityIndicator } from "../components/activity-indicator";
+import { ConnectionIndicator } from "../components/connection-indicator";
 import {
   cx,
+  formatPresenceSummary,
+  formatRelativeTime,
   getInitials,
   sortPresenceUsers,
 } from "../components/internal-utils";
@@ -115,6 +118,56 @@ describe("components/internal-utils", () => {
     expect(getInitials("Ada")).toBe("A");
     expect(getInitials("Ada Lovelace")).toBe("AL");
     expect(getInitials("  Ada   Lovelace  Byron ")).toBe("AL");
+  });
+
+  it("formatRelativeTime buckets into just-now / s / m / h / d", () => {
+    const now = 10_000_000;
+    expect(formatRelativeTime(now - 5_000, now)).toBe("just now");
+    expect(formatRelativeTime(now - 40_000, now)).toBe("40s ago");
+    expect(formatRelativeTime(now - 120_000, now)).toBe("2m ago");
+    expect(formatRelativeTime(now - 3 * 60 * 60_000, now)).toBe("3h ago");
+    expect(formatRelativeTime(now - 2 * 24 * 60 * 60_000, now)).toBe("2d ago");
+    // Future / clock skew → clamped to 0.
+    expect(formatRelativeTime(now + 5_000, now)).toBe("just now");
+  });
+
+  it("formatRelativeTime floors at bucket boundaries (no jump from 30m to 1h)", () => {
+    const now = 10_000_000;
+    // 59m59s: still in the minutes bucket, displayed as 59m (floor),
+    // not 60m (round would do that).
+    expect(formatRelativeTime(now - (60 * 60_000 - 1_000), now)).toBe(
+      "59m ago",
+    );
+    // Exactly one hour switches to the hours bucket.
+    expect(formatRelativeTime(now - 60 * 60_000, now)).toBe("1h ago");
+  });
+
+  it("formatPresenceSummary varies copy by status and typing meta", () => {
+    const base = (overrides: Partial<PresenceUser> = {}): PresenceUser => ({
+      userId: "u",
+      name: "User",
+      color: "#000",
+      status: "active",
+      lastActiveAt: 0,
+      ...overrides,
+    });
+    const now = 10_000_000;
+    expect(formatPresenceSummary(base(), now)).toBe("Active now");
+    expect(formatPresenceSummary(base({ meta: { isTyping: true } }), now)).toBe(
+      "Typing now",
+    );
+    expect(
+      formatPresenceSummary(
+        base({ status: "idle", lastActiveAt: now - 120_000 }),
+        now,
+      ),
+    ).toBe("Idle · last active 2m ago");
+    expect(
+      formatPresenceSummary(
+        base({ status: "offline", lastActiveAt: now - 3 * 60 * 60_000 }),
+        now,
+      ),
+    ).toBe("Offline · last seen 3h ago");
   });
 
   it("sortPresenceUsers ranks active before idle before offline, then by lastActiveAt desc", () => {
@@ -221,6 +274,101 @@ describe("PresenceBar without context", () => {
   it("renders empty label when no users provided and context is absent", () => {
     const html = renderToStaticMarkup(<PresenceBar emptyLabel="Nobody yet" />);
     expect(html).toContain("Nobody yet");
+  });
+
+  it("renders skeleton placeholders when loading", () => {
+    const html = renderToStaticMarkup(
+      <PresenceBar loading maxVisible={3} users={[]} />,
+    );
+    expect(html).toContain('aria-busy="true"');
+    expect(
+      html.match(/awareness-presence-bar__item--skeleton(?!-)/g)?.length,
+    ).toBe(3);
+  });
+
+  it("makes items keyboard-focusable and adds a tooltip when interactive", () => {
+    const ada: PresenceUser = {
+      userId: "ada",
+      name: "Ada",
+      color: "#000",
+      status: "active",
+      lastActiveAt: 0,
+    };
+    const html = renderToStaticMarkup(<PresenceBar users={[ada]} />);
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('role="tooltip"');
+    expect(html).toContain("awareness-presence-bar__item--interactive");
+  });
+
+  it("omits tooltip + tabIndex when interactive=false", () => {
+    const ada: PresenceUser = {
+      userId: "ada",
+      name: "Ada",
+      color: "#000",
+      status: "active",
+      lastActiveAt: 0,
+    };
+    const html = renderToStaticMarkup(
+      <PresenceBar interactive={false} users={[ada]} />,
+    );
+    expect(html).not.toContain('tabindex="0"');
+    expect(html).not.toContain('role="tooltip"');
+  });
+});
+
+describe("ConnectionIndicator", () => {
+  it("renders nothing when connected and hideWhenConnected is default", () => {
+    const html = renderToStaticMarkup(
+      <ConnectionIndicator state="connected" />,
+    );
+    expect(html).toBe("");
+  });
+
+  it("renders connection copy when degraded", () => {
+    const html = renderToStaticMarkup(
+      <ConnectionIndicator state="reconnecting" />,
+    );
+    expect(html).toContain("Reconnecting");
+    expect(html).toContain("awareness-connection-indicator--reconnecting");
+    expect(html).toContain('role="status"');
+  });
+
+  it("honors custom labels", () => {
+    const html = renderToStaticMarkup(
+      <ConnectionIndicator
+        labels={{ error: "Lost connection — retrying" }}
+        state="error"
+      />,
+    );
+    expect(html).toContain("Lost connection — retrying");
+  });
+
+  it("falls back to PresenceContext.connectionState", () => {
+    const ctx: PresenceContextValue = {
+      connectionState: "connecting",
+      self: null,
+      presence: new Map(),
+      others: [],
+      recentActivity: [],
+      updatePresence: vi.fn(),
+      connect: async () => {},
+      disconnect: async () => {},
+      adapter: null,
+    };
+    const html = renderToStaticMarkup(
+      <PresenceContext.Provider value={ctx}>
+        <ConnectionIndicator />
+      </PresenceContext.Provider>,
+    );
+    expect(html).toContain("Connecting");
+  });
+
+  it("can render even when connected via hideWhenConnected={false}", () => {
+    const html = renderToStaticMarkup(
+      <ConnectionIndicator hideWhenConnected={false} state="connected" />,
+    );
+    expect(html).toContain("Live");
+    expect(html).toContain("awareness-connection-indicator--connected");
   });
 });
 

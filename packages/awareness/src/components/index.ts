@@ -7,6 +7,11 @@ export {
   type BlockActivityIndicatorProps,
 } from "./block-activity-indicator";
 export {
+  ConnectionIndicator,
+  type ConnectionIndicatorLabels,
+  type ConnectionIndicatorProps,
+} from "./connection-indicator";
+export {
   LiveCursor,
   type LiveCursorPoint,
   type LiveCursorProps,

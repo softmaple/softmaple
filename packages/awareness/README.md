@@ -10,10 +10,12 @@ Based on the design principles outlined in [docs/design/awareness-and-presence.m
 
 ## Features
 
-- **PresenceBar**: Global awareness of who's online
+- **PresenceBar**: Global awareness of who's online, with keyboard-focusable avatars, hover/focus tooltips, and a `loading` skeleton state for in-flight connections
 - **LiveCursor**: Real-time cursor positions
-- **SelectionHighlight**: Block selection indicators
+- **SelectionHighlight**: Block selection indicators (multiply-blended so overlaid text stays readable)
 - **ActivityIndicator**: Recent activity notifications
+- **BlockActivityIndicator**: Per-block "who is editing here right now"
+- **ConnectionIndicator**: Low-noise indicator that surfaces a degraded transport (hidden when healthy)
 - **PresenceAvatar**: User avatars with status
 - **PresenceProvider**: React provider for transport-backed awareness state
 - **Transport adapters**: BroadcastChannel and WebSocket adapters

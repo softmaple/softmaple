@@ -91,3 +91,15 @@ export const LargeAvatars: Story = {
     ).toHaveClass("awareness-avatar--lg");
   },
 };
+
+export const Loading: Story = {
+  args: {
+    loading: true,
+    maxVisible: 4,
+    users: [],
+  },
+  play: async ({ canvas }) => {
+    const list = canvas.getByRole("list", { name: "Collaborators" });
+    await expect(list).toHaveAttribute("aria-busy", "true");
+  },
+};

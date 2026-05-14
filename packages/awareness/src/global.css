@@ -112,8 +112,17 @@
   @apply absolute right-[-1px] bottom-[-1px] w-[30%] min-w-2 h-[30%] min-h-2 border-2 border-awareness-surface rounded-full bg-awareness-status-active;
 }
 
+/*
+ * Liveness is signalled by the static green dot + its halo (set on the
+ * base `.awareness-avatar__status` rule). Per design doc §6 — "No
+ * persistent animation" — we deliberately avoid a continuous pulse here.
+ * The previous `awareness-status-pulse` keyframes have been removed.
+ */
 .awareness-avatar--active .awareness-avatar__status {
-  animation: awareness-status-pulse 2.6s ease-in-out infinite;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
+    0 0 0 3px
+    color-mix(in srgb, var(--color-awareness-status-active) 22%, transparent);
 }
 
 .awareness-avatar--idle .awareness-avatar__status {
@@ -133,30 +142,128 @@
   isolation: isolate;
   max-width: 100%;
   row-gap: 0.375rem;
-  @apply inline-flex min-h-8 flex-wrap items-center content-center m-0 p-0 font-awareness list-none;
+  /*
+   * The container reserves the 0.5rem overlap that each item then cancels
+   * via `-ml-2`. Without this, wrapped rows (where there's no `:first-child`
+   * to opt out) would shift left by the overlap amount.
+   */
+  padding-inline-start: 0.5rem;
+  @apply inline-flex min-h-8 flex-wrap items-center content-center m-0 py-0 font-awareness list-none;
 }
 
 .awareness-presence-bar__item {
+  position: relative;
   transition:
     transform 140ms ease,
     filter 140ms ease;
   @apply inline-flex -ml-2;
 }
 
-.awareness-presence-bar__item:hover {
+/*
+ * Pointer-coarse devices get an invisible hit-area pad so stacked
+ * 24-40px avatars meet WCAG 2.5.5 minimums (~44×44). The pad only
+ * applies to interactive items — decorative bars stay tight.
+ * 8px on every side gives an md (32px) avatar a 48×48 hit area,
+ * comfortably above the 44 floor.
+ */
+@media (pointer: coarse) {
+  .awareness-presence-bar__item--interactive::before {
+    content: "";
+    inset: -8px;
+    @apply absolute;
+  }
+}
+
+.awareness-presence-bar__item:hover,
+.awareness-presence-bar__item--interactive:focus-visible {
   filter: saturate(1.06);
   transform: translateY(-1px);
+  outline: none;
   @apply z-10;
 }
 
-.awareness-presence-bar__item:hover .awareness-avatar {
+.awareness-presence-bar__item:hover .awareness-avatar,
+.awareness-presence-bar__item--interactive:focus-visible .awareness-avatar {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 44%, transparent),
     0 6px 16px color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
 }
 
-.awareness-presence-bar__item:first-child {
-  @apply ml-0;
+.awareness-presence-bar__item--interactive:focus-visible .awareness-avatar {
+  /* Visible focus ring composed on top of the user-color glow. */
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 44%, transparent),
+    0 0 0 3px color-mix(in srgb, CanvasText 60%, transparent),
+    0 6px 16px color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
+}
+
+.awareness-presence-bar__tooltip {
+  --awareness-tooltip-x: -50%;
+  --awareness-tooltip-y: 4px;
+  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  box-shadow: var(--shadow-awareness);
+  left: 50%;
+  pointer-events: none;
+  transform: translate3d(
+    var(--awareness-tooltip-x),
+    calc(var(--awareness-tooltip-y) - 2px),
+    0
+  );
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  /*
+   * Cap so the tooltip never overflows past the viewport when an avatar
+   * sits near a column edge. The name stays on one line; the meta line
+   * is allowed to wrap (see __tooltip-meta below).
+   */
+  max-inline-size: min(14rem, calc(100vw - 1rem));
+  @apply absolute bottom-full mb-2 z-20 grid gap-0.5 rounded-md px-2 py-1.5 text-awareness-text font-awareness opacity-0;
+}
+
+.awareness-presence-bar__item:hover .awareness-presence-bar__tooltip,
+.awareness-presence-bar__item--interactive:focus-visible
+  .awareness-presence-bar__tooltip {
+  transform: translate3d(var(--awareness-tooltip-x), 0, 0);
+  @apply opacity-100;
+}
+
+.awareness-presence-bar__tooltip-name {
+  /* Name stays on one line; long names truncate rather than wrap. */
+  @apply text-[12px] font-semibold leading-[1.2] truncate;
+}
+
+.awareness-presence-bar__tooltip-meta {
+  /* Meta line wraps so the relative-time phrase isn't cut off. */
+  overflow-wrap: anywhere;
+  @apply text-[11px] leading-[1.3] text-awareness-muted;
+}
+
+.awareness-presence-bar__item--skeleton {
+  /* Skeletons should not animate (design §6: "No persistent animation"). */
+  pointer-events: none;
+}
+
+.awareness-presence-bar__skeleton {
+  --awareness-skeleton-size: 32px;
+  width: var(--awareness-skeleton-size);
+  height: var(--awareness-skeleton-size);
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+  box-shadow: inset 0 0 0 2px var(--color-awareness-surface);
+  @apply inline-block rounded-full;
+}
+
+.awareness-presence-bar__item--skeleton-sm .awareness-presence-bar__skeleton {
+  --awareness-skeleton-size: 24px;
+}
+
+.awareness-presence-bar__item--skeleton-md .awareness-presence-bar__skeleton {
+  --awareness-skeleton-size: 32px;
+}
+
+.awareness-presence-bar__item--skeleton-lg .awareness-presence-bar__skeleton {
+  --awareness-skeleton-size: 40px;
 }
 
 .awareness-presence-bar__overflow {
@@ -196,7 +303,11 @@
   --awareness-live-cursor-label-y: 3px;
   font-size: 12px;
   line-height: 1;
-  transition: transform 82ms linear;
+  /*
+   * Interpolated cursor motion (design §5.2). Ease-out cubic feels smoother
+   * than linear when updates arrive at irregular intervals from the network.
+   */
+  transition: transform 120ms cubic-bezier(0.22, 0.61, 0.36, 1);
   @apply absolute top-0 left-0 z-20 inline-flex items-start pointer-events-none will-change-transform;
 }
 
@@ -221,6 +332,11 @@
     opacity 160ms ease,
     transform 160ms ease;
   box-shadow: var(--shadow-awareness);
+  /*
+   * Soft dark shadow gives white text a readable edge over pale user
+   * colors (yellow/pastel) without relying on theme-dependent contrast.
+   */
+  text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
   @apply absolute bottom-full left-0 mb-[2px] max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
 }
 
@@ -236,6 +352,11 @@
   font-size: 12px;
   line-height: 1;
   background: transparent;
+  /*
+   * Isolate so the inner ::before's mix-blend-mode multiplies only against
+   * the editor surface beneath, never the rest of the viewport stack.
+   */
+  isolation: isolate;
   @apply absolute top-0 left-0 z-10 box-border rounded-[3px] pointer-events-none;
 }
 
@@ -245,12 +366,25 @@
   border-left: 2px solid var(--awareness-user-color);
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--awareness-user-color) 26%, transparent),
-    color-mix(in srgb, var(--awareness-user-color) 13%, transparent)
+    color-mix(in srgb, var(--awareness-user-color) 30%, transparent),
+    color-mix(in srgb, var(--awareness-user-color) 18%, transparent)
   );
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--awareness-user-color) 22%, transparent);
+  /*
+   * Multiply blend keeps overlaid text readable: the highlight darkens
+   * its background but the glyphs beneath retain their original contrast.
+   * Falls back gracefully on browsers that don't support it.
+   */
+  mix-blend-mode: multiply;
   @apply absolute rounded-[3px];
+}
+
+@media (prefers-color-scheme: dark) {
+  .awareness-selection-highlight::before {
+    /* Screen brightens on dark surfaces, the inverse of multiply on light. */
+    mix-blend-mode: screen;
+  }
 }
 
 .awareness-selection-highlight__label {
@@ -262,6 +396,7 @@
     var(--awareness-selection-label-y)
   );
   box-shadow: var(--shadow-awareness-close);
+  text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
   @apply absolute bottom-full left-0 mb-[2px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
@@ -387,19 +522,46 @@
   @apply min-w-0 truncate;
 }
 
-@keyframes awareness-status-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
-      0 0 0 0 color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
-  }
+.awareness-connection-indicator {
+  background: color-mix(in srgb, Canvas 92%, transparent);
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  box-shadow: var(--shadow-awareness-close);
+  max-width: 100%;
+  min-width: 0;
+  @apply inline-flex items-center gap-2 rounded-full px-2.5 py-[3px] text-awareness-text font-awareness text-[12px] leading-[1.2];
+}
 
-  50% {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, Canvas 70%, transparent),
-      0 0 0 4px color-mix(in srgb, var(--awareness-user-color) 0%, transparent);
-  }
+.awareness-connection-indicator__glyph {
+  --awareness-connection-color: var(--color-awareness-status-offline);
+  background: var(--awareness-connection-color);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--awareness-connection-color) 18%, transparent);
+  @apply block h-1.5 w-1.5 rounded-full flex-none;
+}
+
+.awareness-connection-indicator__text {
+  @apply min-w-0 truncate;
+}
+
+.awareness-connection-indicator--connected
+  .awareness-connection-indicator__glyph {
+  --awareness-connection-color: var(--color-awareness-status-active);
+}
+
+.awareness-connection-indicator--connecting
+  .awareness-connection-indicator__glyph,
+.awareness-connection-indicator--reconnecting
+  .awareness-connection-indicator__glyph {
+  --awareness-connection-color: var(--color-awareness-status-idle);
+}
+
+.awareness-connection-indicator--error .awareness-connection-indicator__glyph {
+  --awareness-connection-color: var(--color-awareness-activity-cursor);
+}
+
+.awareness-connection-indicator--disconnected
+  .awareness-connection-indicator__glyph {
+  --awareness-connection-color: var(--color-awareness-status-offline);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -408,13 +570,10 @@
   .awareness-live-cursor,
   .awareness-live-cursor__label,
   .awareness-presence-bar__item,
+  .awareness-presence-bar__tooltip,
   .awareness-selection-highlight--hoverable
     .awareness-selection-highlight__label {
     transition: none;
-  }
-
-  .awareness-avatar--active .awareness-avatar__status {
-    animation: none;
   }
 }
 
@@ -431,6 +590,15 @@
   .awareness-activity-indicator__item {
     @apply gap-1.5 px-2 py-1.5;
   }
+
+  .awareness-presence-bar__tooltip {
+    max-inline-size: min(12rem, calc(100vw - 1rem));
+    @apply px-1.5 py-1;
+  }
+
+  .awareness-connection-indicator {
+    @apply text-[11px];
+  }
 }
 
 @media (forced-colors: active) {
@@ -438,5 +606,15 @@
   .awareness-live-cursor__label,
   .awareness-selection-highlight__label {
     forced-color-adjust: none;
+  }
+
+  /*
+   * In forced-colors mode the user-color glow + custom focus ring above
+   * are stripped, leaving `outline: none` with nothing in its place.
+   * Restore a system-color outline so keyboard focus stays visible.
+   */
+  .awareness-presence-bar__item--interactive:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
   }
 }

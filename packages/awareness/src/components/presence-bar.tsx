@@ -1,7 +1,13 @@
-import { type ContextType, type ReactNode, useContext, useMemo } from "react";
+import {
+  type ContextType,
+  type ReactNode,
+  useContext,
+  useId,
+  useMemo,
+} from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
-import { cx, sortPresenceUsers } from "./internal-utils";
+import { cx, formatPresenceSummary, sortPresenceUsers } from "./internal-utils";
 import { PresenceAvatar, type PresenceAvatarSize } from "./presence-avatar";
 
 export interface PresenceBarProps {
@@ -12,6 +18,18 @@ export interface PresenceBarProps {
   readonly emptyLabel?: string;
   readonly className?: string;
   readonly "aria-label"?: string;
+  /**
+   * When `true` (default) avatar items are keyboard-focusable and reveal a
+   * tooltip with the user's name + status + relative last-active time on
+   * hover or focus. Set to `false` to render purely decorative avatars
+   * (e.g. inside a button that already exposes the same info).
+   */
+  readonly interactive?: boolean;
+  /**
+   * When `true`, render skeleton placeholders for `maxVisible` items
+   * instead of the user list. Useful while the adapter is connecting.
+   */
+  readonly loading?: boolean;
 }
 
 const getUsersFromContext = (
@@ -29,8 +47,11 @@ export const PresenceBar = ({
   emptyLabel = "No collaborators online",
   className,
   "aria-label": ariaLabel = "Collaborators",
+  interactive = true,
+  loading = false,
 }: PresenceBarProps): ReactNode => {
   const context = useContext(PresenceContext);
+  const tooltipIdBase = useId();
 
   const visibleUsers = useMemo(() => {
     const source = users ?? getUsersFromContext(context);
@@ -44,17 +65,70 @@ export const PresenceBar = ({
   const overflowUsers = visibleUsers.slice(maxVisible);
   const overflowLabel = overflowUsers.map((user) => user.name).join(", ");
 
+  if (loading) {
+    return (
+      <ul
+        aria-busy="true"
+        aria-label={ariaLabel}
+        className={cx("awareness-presence-bar", className)}
+      >
+        {Array.from({ length: maxVisible }).map((_, index) => (
+          <li
+            // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders have no stable identity.
+            key={`skeleton-${index}`}
+            className={cx(
+              "awareness-presence-bar__item",
+              "awareness-presence-bar__item--skeleton",
+              `awareness-presence-bar__item--skeleton-${size}`,
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className="awareness-presence-bar__skeleton"
+            />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <ul
       aria-label={ariaLabel}
       className={cx("awareness-presence-bar", className)}
     >
       {shownUsers.length > 0 ? (
-        shownUsers.map((user) => (
-          <li className="awareness-presence-bar__item" key={user.userId}>
-            <PresenceAvatar size={size} user={user} />
-          </li>
-        ))
+        shownUsers.map((user) => {
+          const tooltipId = `${tooltipIdBase}-${user.userId}`;
+          const summary = formatPresenceSummary(user);
+          return (
+            <li
+              aria-describedby={interactive ? tooltipId : undefined}
+              className={cx(
+                "awareness-presence-bar__item",
+                interactive && "awareness-presence-bar__item--interactive",
+              )}
+              key={user.userId}
+              tabIndex={interactive ? 0 : undefined}
+            >
+              <PresenceAvatar size={size} user={user} />
+              {interactive ? (
+                <span
+                  className="awareness-presence-bar__tooltip"
+                  id={tooltipId}
+                  role="tooltip"
+                >
+                  <span className="awareness-presence-bar__tooltip-name">
+                    {user.name}
+                  </span>
+                  <span className="awareness-presence-bar__tooltip-meta">
+                    {summary}
+                  </span>
+                </span>
+              ) : null}
+            </li>
+          );
+        })
       ) : (
         <li className="awareness-presence-bar__empty">{emptyLabel}</li>
       )}

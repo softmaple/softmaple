@@ -125,6 +125,16 @@ export class EgWalkerEngine {
   // boundary as if they had different origins, which breaks partial
   // replay convergence.
   private readonly originLeftRefs = new Map<EventId, Set<EventId>>();
+  // Reverse index: `target item id` -> set of delete event ids whose
+  // {@link deleteTargets} list contains it. Maintained so that
+  // {@link splitRecordAt} can extend the membership to the new right
+  // half when it carves a previously-deleted record in two: without
+  // this, retreating/advancing the delete only flips the prepare-state
+  // of the left half and the right half stays prepare-visible even
+  // though it is effect-deleted, which shifts later prepare-index
+  // lookups (e.g. local inserts anchored at the document end) into
+  // the middle of the deleted range.
+  private readonly deleteTargetsByItem = new Map<EventId, Set<EventId>>();
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
     (item) => (item.prepareState === 1 ? item.content.length : 0),
     (item) => (item.everDeleted ? 0 : item.content.length),
@@ -276,6 +286,7 @@ export class EgWalkerEngine {
     this.graph = options.eventGraph ?? new EventGraph();
     this.eventItems.clear();
     this.deleteTargets.clear();
+    this.deleteTargetsByItem.clear();
     this.itemsById.clear();
     this.originLeftRefs.clear();
     this.sequence.clear();
@@ -553,7 +564,7 @@ export class EgWalkerEngine {
       remaining -= 1;
     }
 
-    this.deleteTargets.set(event.id, deletedItemIds);
+    this.recordDeleteTargets(event.id, deletedItemIds);
 
     return coalesceDeleteRuns(outputDeleteIndexes);
   }
@@ -593,7 +604,54 @@ export class EgWalkerEngine {
     // references over. `originRight = left.id` references still point
     // at the left edge of the original record, which is unchanged.
     this.rewriteOriginLeftReferences(left.id, right.id);
+    // Extend any prior delete-target memberships to cover {@link right}
+    // as well. The pre-split record was already part of `deleteTargets`
+    // for every event in this set; both halves now share the same
+    // `everDeleted` and `prepareState` and must move together under
+    // future retreat / advance calls for those events.
+    this.extendDeleteTargetMembership(left.id, right.id);
     return position + 1;
+  }
+
+  private recordDeleteTargets(
+    deleteEventId: EventId,
+    itemIds: ReadonlyArray<EventId>,
+  ): void {
+    this.deleteTargets.set(deleteEventId, [...itemIds]);
+    for (const itemId of itemIds) {
+      let owners = this.deleteTargetsByItem.get(itemId);
+      if (!owners) {
+        owners = new Set<EventId>();
+        this.deleteTargetsByItem.set(itemId, owners);
+      }
+      owners.add(deleteEventId);
+    }
+  }
+
+  private extendDeleteTargetMembership(
+    fromItemId: EventId,
+    toItemId: EventId,
+  ): void {
+    const owners = this.deleteTargetsByItem.get(fromItemId);
+    if (!owners || owners.size === 0) {
+      return;
+    }
+    let mirrored = this.deleteTargetsByItem.get(toItemId);
+    for (const deleteEventId of owners) {
+      const targets = this.deleteTargets.get(deleteEventId);
+      if (!targets) {
+        continue;
+      }
+      // Append once per (event, item) pair so retreat/advance stay
+      // proportional to the number of code units the delete actually
+      // covered.
+      targets.push(toItemId);
+      if (!mirrored) {
+        mirrored = new Set<EventId>();
+        this.deleteTargetsByItem.set(toItemId, mirrored);
+      }
+      mirrored.add(deleteEventId);
+    }
   }
 
   private trackOriginLeft(itemId: EventId, originLeft: EventId | null): void {

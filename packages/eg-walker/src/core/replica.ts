@@ -17,7 +17,11 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
-import { createDocumentState } from "./invariants";
+import {
+  assertRemoteEventWellFormed,
+  assertWellFormedUtf16,
+  createDocumentState,
+} from "./invariants";
 import {
   EventGraph,
   EventAlreadyExistsError,
@@ -53,79 +57,6 @@ interface CriticalCheckpoint {
  * case for ordinary documents.
  */
 const MAX_RETAINED_CHECKPOINTS = 32;
-
-/**
- * Reject strings whose UTF-16 code-unit sequence contains a lone surrogate.
- *
- * The CRDT layer stores one item per UTF-16 code unit, so a lone high or low
- * surrogate would be materialised as a standalone CRDT item and surface as an
- * unpaired surrogate in {@link EgWalkerReplica.getText}. Catching this at the
- * boundary keeps the document and every concurrent merge of it well-formed
- * UTF-16 (a precondition for downstream JSON serialisation, regex matchers,
- * and any consumer that round-trips through `TextEncoder` / `TextDecoder`).
- *
- * A correctly-formed surrogate pair is allowed (and split across two CRDT
- * items as documented in `packages/eg-walker/AGENTS.md`); the mid-surrogate
- * *index* check stays in {@link EgWalkerReplica.assertNotMidSurrogate} so
- * concurrent operations cannot land between the two halves.
- */
-const assertWellFormedUtf16 = (text: string, context: string): void => {
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    const isHighSurrogate = code >= 0xd800 && code <= 0xdbff;
-    const isLowSurrogate = code >= 0xdc00 && code <= 0xdfff;
-    if (!isHighSurrogate && !isLowSurrogate) {
-      continue;
-    }
-    if (isLowSurrogate) {
-      throw new Error(
-        `${context} contains a lone low surrogate (0x${code
-          .toString(16)
-          .toUpperCase()
-          .padStart(4, "0")}) at index ${i}`,
-      );
-    }
-    const next = text.charCodeAt(i + 1);
-    if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) {
-      throw new Error(
-        `${context} contains a lone high surrogate (0x${code
-          .toString(16)
-          .toUpperCase()
-          .padStart(4, "0")}) at index ${i}`,
-      );
-    }
-    // Skip the paired low surrogate so we don't flag it as a stray.
-    i++;
-  }
-};
-
-/**
- * Validate the invariants the replica relies on for a remote {@link GraphEvent}
- * before accepting it into the event graph: insert payloads must be
- * well-formed UTF-16, and delete lengths must be finite and non-negative.
- *
- * Index validity against the prepare state at the event's parent version is
- * checked downstream by the engine (the replica doesn't materialise that view
- * for every remote delivery); this guard catches the cases the engine cannot
- * recover from cleanly — lone surrogates would otherwise round-trip into the
- * document as unpaired code units, and a NaN/negative delete length would
- * crash the prepare-index walk with an opaque error.
- */
-const assertRemoteEventWellFormed = (event: GraphEvent): void => {
-  if (event.operation.type === OPERATION_TYPE.INSERT) {
-    assertWellFormedUtf16(
-      event.operation.text,
-      `remote event ${event.id} insert text`,
-    );
-    return;
-  }
-  const length = event.operation.length;
-  if (!Number.isFinite(length) || length < 0) {
-    throw new Error(
-      `remote event ${event.id} has invalid delete length ${length}`,
-    );
-  }
-};
 
 /**
  * Public replica for Eg-walker.

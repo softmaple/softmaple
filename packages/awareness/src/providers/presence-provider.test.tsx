@@ -392,6 +392,74 @@ describe("PresenceProvider", () => {
     });
   });
 
+  it("does not tear down adapter subscriptions when only maxRecentActivity changes", async () => {
+    const adapter = new FullMockAdapter();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          maxRecentActivity={10}
+        >
+          <span />
+        </PresenceProvider>,
+      );
+    });
+
+    // Subscriptions registered once during initial mount.
+    const initialPresenceSubs = adapter.presenceCallbacks.size;
+    const initialEventSubs = adapter.eventCallbacks.size;
+    const initialConnectionSubs = adapter.connectionCallbacks.size;
+
+    // Re-render with a different cap. If the cap weren't ref-stored, the
+    // subscription effect would tear down and re-register all callbacks.
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          maxRecentActivity={25}
+        >
+          <span />
+        </PresenceProvider>,
+      );
+    });
+
+    expect(adapter.presenceCallbacks.size).toBe(initialPresenceSubs);
+    expect(adapter.eventCallbacks.size).toBe(initialEventSubs);
+    expect(adapter.connectionCallbacks.size).toBe(initialConnectionSubs);
+
+    // And the new cap is observed — emit 30 joins; only 25 should survive.
+    act(() => {
+      adapter.emitConnected({
+        userId: "self",
+        name: "Self",
+        color: "#000",
+        status: "active",
+        lastActiveAt: 0,
+      });
+    });
+    for (let i = 0; i < 30; i++) {
+      act(() => {
+        adapter.emitJoin({
+          userId: `peer-${i}`,
+          name: `Peer ${i}`,
+          color: "#111",
+          status: "active",
+          lastActiveAt: i,
+        });
+      });
+    }
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("emits an IDLE activity event when status sweep demotes a user", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(1_700_000_000_000));

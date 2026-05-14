@@ -389,6 +389,62 @@ describe("useUpdateCursor", () => {
     unmount();
   });
 
+  it("cancels a pending trailing send when throttleMs changes mid-session", () => {
+    vi.useFakeTimers();
+    const updatePresence = vi.fn();
+    let updateCursor: ((c: CursorPosition | undefined) => void) | null = null;
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    const Capture = ({ throttleMs }: { throttleMs: number }): null => {
+      updateCursor = useUpdateCursor(throttleMs);
+      return null;
+    };
+
+    act(() => {
+      root.render(
+        <PresenceContext.Provider
+          value={createContextValue(createSelf(), updatePresence)}
+        >
+          <Capture throttleMs={50} />
+        </PresenceContext.Provider>,
+      );
+    });
+
+    // Leading-edge fires immediately, then a trailing send is queued.
+    act(() => {
+      updateCursor?.({ blockId: "b", offset: 1 });
+      updateCursor?.({ blockId: "b", offset: 2 });
+    });
+    expect(updatePresence).toHaveBeenCalledTimes(1);
+
+    // Flip throttleMs to 0 BEFORE the trailing timer would have fired. The
+    // queued send must be cancelled so the consumer's "no throttling"
+    // intent is honored — no stale send under the new semantics.
+    act(() => {
+      root.render(
+        <PresenceContext.Provider
+          value={createContextValue(createSelf(), updatePresence)}
+        >
+          <Capture throttleMs={0} />
+        </PresenceContext.Provider>,
+      );
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(updatePresence).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    vi.useRealTimers();
+  });
+
   it("opts out of throttling when throttleMs=0", () => {
     const updatePresence = vi.fn();
     let updateCursor: ((c: CursorPosition | undefined) => void) | null = null;

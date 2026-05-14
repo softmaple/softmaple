@@ -313,6 +313,35 @@ describe("WebSocket adapter public API", () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
+  it("forwards malformed inbound payloads to adapter.onError", async () => {
+    const adapter = createWebSocketAdapter(baseConfig);
+    const errors: Error[] = [];
+    adapter.onError((error) => {
+      errors.push(error);
+    });
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    // PRESENCE_UPDATE with a malformed cursor shape — `blockId` present but
+    // `offset` missing. The runtime guard should reject and the websocket
+    // handler should pipe `result.error` into `subscriptions.notifyError`.
+    const badFrame = serializeMessage(
+      createMessage(WS_MESSAGE.PRESENCE_UPDATE, "room-1", "peer", {
+        userId: "peer",
+        updates: { cursor: { blockId: "b" } },
+      }),
+    );
+    fakeSockets[0]?.emitMessage(badFrame);
+
+    expect(errors.some((e) => e.message.includes("PRESENCE_UPDATE"))).toBe(
+      true,
+    );
+
+    await adapter.disconnect();
+  });
+
   it("connect → handleOpen sends JOIN + PRESENCE_SYNC and notifies callbacks", async () => {
     const adapter = createWebSocketAdapter(baseConfig);
     const presence = vi.fn();

@@ -7,7 +7,10 @@
  * - Subsequent calls inside the same `throttleMs` window only schedule a
  *   single trailing call carrying the most recent value.
  * - Passing `throttleMs <= 0` bypasses throttling entirely.
- * - Pending trailing calls are cancelled on unmount.
+ * - Pending trailing calls are cancelled on unmount AND when `throttleMs`
+ *   changes — otherwise a queued trailing call from the old window would
+ *   fire under the new semantics (e.g. throttleMs flipped 50 → 0 should
+ *   not still emit a "stale" trailing send).
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -22,14 +25,19 @@ export const useTrailingEdgeThrottle = <T>(
   const sinkRef = useRef(sink);
   sinkRef.current = sink;
 
+  // Clear any pending trailing call when the throttle window changes or the
+  // hook unmounts. Without this, a 50 → 0 prop change would still fire a
+  // queued trailing send despite the consumer opting out of throttling.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: throttleMs is intentionally listed even though the effect body doesn't read it — the cleanup must fire on every throttleMs change to drop stale pending timers.
   useEffect(
     () => () => {
       if (trailingTimerRef.current !== null) {
         clearTimeout(trailingTimerRef.current);
         trailingTimerRef.current = null;
+        trailingValueRef.current = undefined;
       }
     },
-    [],
+    [throttleMs],
   );
 
   return useCallback(

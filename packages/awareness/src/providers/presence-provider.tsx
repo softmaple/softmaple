@@ -262,6 +262,15 @@ export const PresenceProvider = ({
     ReadonlyArray<ActivityEvent>
   >([]);
 
+  // `maxRecentActivity` is a tuning knob, not a structural dependency. Read
+  // it from a ref inside subscription / interval closures so changing it
+  // doesn't tear down adapter subscriptions or the sweep interval (which
+  // would force a resubscribe/reconnect cycle).
+  const maxRecentActivityRef = useRef(maxRecentActivity);
+  useEffect(() => {
+    maxRecentActivityRef.current = maxRecentActivity;
+  }, [maxRecentActivity]);
+
   useEffect(() => {
     const unsubscribeConnection = adapter.onConnectionChange((state) => {
       setConnectionState(state);
@@ -283,7 +292,7 @@ export const PresenceProvider = ({
       const activity = presenceEventToActivity(event);
       if (activity) {
         setRecentActivity((prev) =>
-          addActivityEvent(prev, activity, maxRecentActivity),
+          addActivityEvent(prev, activity, maxRecentActivityRef.current),
         );
       }
     });
@@ -293,7 +302,7 @@ export const PresenceProvider = ({
       unsubscribePresence();
       unsubscribeEvent();
     };
-  }, [adapter, maxRecentActivity]);
+  }, [adapter]);
 
   useEffect(() => {
     if (autoConnect) {
@@ -355,7 +364,11 @@ export const PresenceProvider = ({
         const newActivities = sweepTransitionsToActivities(transitions);
         if (newActivities.length > 0) {
           setRecentActivity((prev) =>
-            addActivityEvents(prev, newActivities, maxRecentActivity),
+            addActivityEvents(
+              prev,
+              newActivities,
+              maxRecentActivityRef.current,
+            ),
           );
         }
       }
@@ -363,13 +376,7 @@ export const PresenceProvider = ({
 
     const id = setInterval(tick, statusSweepMs);
     return () => clearInterval(id);
-  }, [
-    adapter,
-    idleTimeoutMs,
-    offlineTimeoutMs,
-    statusSweepMs,
-    maxRecentActivity,
-  ]);
+  }, [adapter, idleTimeoutMs, offlineTimeoutMs, statusSweepMs]);
 
   // Use adapter directly in callbacks (no ref needed)
   const connect = useCallback(async (): Promise<void> => {

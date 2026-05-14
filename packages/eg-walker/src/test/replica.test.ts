@@ -573,6 +573,92 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
       expect(() => api.insert(api.getText().length, "Z")).not.toThrow();
     });
 
+    it("rejects local inserts whose payload contains a lone surrogate", () => {
+      const api = new EgWalkerReplica("r1", "hello");
+      // Lone high surrogate (U+D83D, the first half of "😀") with no low
+      // partner — would otherwise materialise as a standalone CRDT item
+      // and surface as an unpaired surrogate in getText().
+      expect(() => api.insert(0, "\uD83D")).toThrow(
+        /lone high surrogate.*at index 0/,
+      );
+      // Lone low surrogate.
+      expect(() => api.insert(0, "\uDE00")).toThrow(
+        /lone low surrogate.*at index 0/,
+      );
+      // High surrogate followed by a non-surrogate is also ill-formed.
+      expect(() => api.insert(0, "\uD83DA")).toThrow(/lone high surrogate/);
+      // Valid surrogate pair (emoji) is accepted.
+      expect(() => api.insert(0, "😀")).not.toThrow();
+      expect(api.getText().startsWith("😀")).toBe(true);
+    });
+
+    it("rejects initial document text containing a lone surrogate", () => {
+      expect(() => new EgWalkerReplica("r1", "\uD83Dhello")).toThrow(
+        /initial document text contains a lone high surrogate/,
+      );
+      expect(() => new EgWalkerReplica("r1", "hello\uDE00")).toThrow(
+        /initial document text contains a lone low surrogate/,
+      );
+      // A well-formed emoji at any position is fine.
+      expect(() => new EgWalkerReplica("r1", "hi 😀!")).not.toThrow();
+    });
+
+    it("rejects remote events whose insert payload contains a lone surrogate", () => {
+      const api = new EgWalkerReplica("r1");
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:0",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: "\uD83D",
+          },
+          timestamp: 1,
+        }),
+      ).toThrow(
+        /remote event bob:0 insert text contains a lone high surrogate/,
+      );
+      // A well-formed remote insert with a paired emoji passes.
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:1",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "😀" },
+          timestamp: 2,
+        }),
+      ).not.toThrow();
+      expect(api.getText()).toBe("😀");
+    });
+
+    it("rejects remote events with non-finite or negative delete lengths", () => {
+      const api = new EgWalkerReplica("r1", "hello");
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:0",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.DELETE,
+            index: 0,
+            length: Number.NaN,
+          },
+          timestamp: 1,
+        }),
+      ).toThrow(/remote event bob:0 has invalid delete length/);
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:1",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.DELETE,
+            index: 0,
+            length: -1,
+          },
+          timestamp: 2,
+        }),
+      ).toThrow(/remote event bob:1 has invalid delete length -1/);
+    });
+
     it("keeps concurrent emoji operations from splitting surrogate pairs", () => {
       const api = new EgWalkerReplica("alice", "ab");
 

@@ -81,6 +81,14 @@ const deleteText = (text: string, index: number, length: number): string =>
  * `Array.from(text)` (which iterates code points and would coalesce a
  * surrogate pair into one entry), this preserves the public-API code-unit
  * indexing on which the CRDT items are keyed.
+ *
+ * Lone surrogates are intentionally **not** rejected here: by the time a
+ * string reaches this helper it has already been validated at the public
+ * boundary (`EgWalkerReplica.assertWellFormedUtf16` for local inserts and
+ * `assertRemoteEventWellFormed` for remote events). Bypassing the engine
+ * directly with an ill-formed string would still materialise lone
+ * surrogates as standalone CRDT items, but the public API never reaches
+ * this path with such input.
  */
 const stringCodeUnits = (text: string): string[] => text.split("");
 

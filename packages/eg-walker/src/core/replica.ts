@@ -322,7 +322,13 @@ export class EgWalkerReplica {
   }
 
   private fullReplay(): void {
-    const sortedEvents = this.eventGraph.getTopologicalOrder();
+    // Section 3.4 of the paper: walk the event graph in branch-preserving
+    // order so each parent transition matches the engine's current version
+    // and triggers the non-conflicting-run fast path instead of forcing a
+    // retreat/advance round-trip across an interleaved Kahn order. The
+    // columnar codec keeps using {@link EventGraph.getTopologicalOrder}
+    // (Kahn) so persisted on-disk bytes stay stable.
+    const sortedEvents = this.eventGraph.getBranchPreservingTopologicalOrder();
     const engine = new EgWalkerEngine();
     const generated = engine.generate(sortedEvents, this.initialText, {
       eventGraph: this.eventGraph,

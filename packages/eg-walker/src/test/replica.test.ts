@@ -464,6 +464,76 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(api.getText().includes("R")).toBe(true);
   });
 
+  it("uses branch-preserving traversal during fullReplay to minimise retreat/advance churn", () => {
+    // Build B parallel chains of length L forking off a common root, with ids
+    // assigned in BFS order so a Kahn-ordered replay interleaves every branch
+    // at each depth (retreat the previous branch / advance the next on every
+    // transition). Branch-preserving DFS walks one branch to depth before
+    // visiting the next, so retreat/advance only fire at branch boundaries.
+    //
+    // Delivering the events to the replica out of causal order forces the
+    // last delivery to trigger a fresh `fullReplay` over the whole graph; the
+    // engine's cumulative retreat/advance counters then reflect exactly how
+    // many retreats the chosen runtime traversal order produced.
+    const branches = 4;
+    const depth = 6;
+    const expectedEvents = 1 + branches * depth;
+    const events: GraphEvent[] = [];
+    const idAt = (level: number, branch: number): string =>
+      `n-${String(level * branches + branch).padStart(3, "0")}`;
+    events.push({
+      id: "n-000",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+      timestamp: 0,
+    });
+    for (let level = 0; level < depth; level++) {
+      for (let branch = 0; branch < branches; branch++) {
+        const id = idAt(level + 1, branch);
+        const parent = level === 0 ? "n-000" : idAt(level, branch);
+        events.push({
+          id,
+          parentVersion: new Set([parent]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "x" },
+          timestamp: 1 + level * branches + branch,
+        });
+      }
+    }
+
+    // Deliver events in causal order so each landing extends the frontier.
+    const api = new EgWalkerReplica("r1");
+    for (const event of events) {
+      api.applyRemoteEvent(event);
+    }
+    // Now force a full replay by introducing a concurrent root: it shares no
+    // critical ancestor with the existing graph, so the replica falls back to
+    // `fullReplay` over every event including the new one.
+    api.applyRemoteEvent({
+      id: "m-000",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+      timestamp: 999,
+    });
+
+    const stats = api.getReplayStats();
+    // Sanity: a fullReplay was actually triggered for the concurrent root.
+    expect(stats.fullReplays).toBeGreaterThanOrEqual(2);
+    // Branch-preserving order retreats whole branches at branch boundaries
+    // instead of single events at every level transition: on this 4x6 grid
+    // it retreats `depth` ancestors at each of `branches-1` boundaries plus
+    // one final `depth`-deep retreat to land the concurrent root, i.e. a
+    // bound of `branches * depth`. A Kahn-ordered replay would retreat 1-2
+    // events at every level of every branch (roughly `events * branches`)
+    // and quickly clear the same bound.
+    const branchPreservingBound = branches * depth;
+    expect(stats.engineRetreats).toBeLessThanOrEqual(branchPreservingBound);
+
+    // Convergence sanity: every inserted character lands in the document.
+    expect(api.getText()).toHaveLength(expectedEvents + 1);
+    expect(api.getText().includes("M")).toBe(true);
+    expect(api.getText().includes("R")).toBe(true);
+  });
+
   it("falls back to full replay only when no critical checkpoint dominates the merge", () => {
     // Two concurrent root inserts share no critical-version ancestor (the
     // empty version isn't critical once any event exists), so the replica

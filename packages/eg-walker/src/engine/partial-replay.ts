@@ -41,7 +41,7 @@ export class PartialReplayManager {
       targetVersion,
     );
     const eventById = new Map(
-      graph.getTopologicalOrder().map((event) => [event.id, event]),
+      graph.getAllEvents().map((event) => [event.id, event]),
     );
     const events = replayedEventIds
       .map((eventId) => eventById.get(eventId))
@@ -67,8 +67,14 @@ export class PartialReplayManager {
     to: Version,
   ): ReadonlyArray<EventId> {
     const { onlyInRight } = graph.diffVersions(from, to);
+    // Section 3.4: walk the divergent suffix in branch-preserving order so
+    // each event lands on a parent version matching the engine's current
+    // version where possible, keeping the replay on the non-conflicting-run
+    // fast path and minimising retreat/advance churn. The columnar codec
+    // keeps using {@link EventGraph.getTopologicalOrder} (Kahn) for byte
+    // stability of persisted graphs.
     return graph
-      .getTopologicalOrder()
+      .getBranchPreservingTopologicalOrder()
       .map((event) => event.id)
       .filter((eventId) => onlyInRight.has(eventId));
   }

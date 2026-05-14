@@ -14,8 +14,8 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 
 ### Code Organization
 
-- **Public API**: `src/core/external-api.ts`
-- **Replay engine**: `src/engine/eg-walker-engine.ts`
+- **Public API**: `src/core/replica.ts`
+- **Replay engine**: `src/engine/eg-walker-engine.ts` (orchestrator) with engine-private helpers under `src/engine/internals/`
 - **Graph and storage**: `src/graph/event-graph.ts`, `src/graph/columnar-codec.ts`
 - **Tests**: `src/test/` with corresponding `.test.ts` files
 

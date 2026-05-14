@@ -223,7 +223,9 @@ export class EgWalkerEngine {
     // The typed-run coalescing path may have left an open buffer of
     // appended text. The returned document is observable, so materialise
     // it before handing back the snapshot.
-    this.flushPendingInsert();
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
 
     return {
       text: this.resultingText,
@@ -255,8 +257,13 @@ export class EgWalkerEngine {
     // {@link EgWalkerReplica.applyRemoteEvent} reads `getText()` immediately
     // after this call, so the incremental return value must reflect the
     // post-event document. Flush any open coalesced typed-run before we
-    // hand the text out.
-    this.flushPendingInsert();
+    // hand the text out. Hoist the empty-buffer check so the common case
+    // (event did not touch the coalescing path, or its buffer was already
+    // flushed by a downstream applyDelete / non-coalesced splice) skips
+    // the function call entirely.
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
     return {
       text: this.resultingText,
       transformedOperations: transformed,
@@ -266,8 +273,12 @@ export class EgWalkerEngine {
   getText(): string {
     // Materialise any deferred typed-run appends before exposing the
     // text. Callers (replicas, tests, serializers) treat `getText` as the
-    // canonical document snapshot.
-    this.flushPendingInsert();
+    // canonical document snapshot. The buffer is empty on the common
+    // path (callers usually read `getText` after `applyEvent` has already
+    // flushed), so the hoisted check keeps this a cheap field read.
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
     return this.resultingText;
   }
 
@@ -615,7 +626,9 @@ export class EgWalkerEngine {
     // or non-empty conflict region) must observe the current document so
     // {@link effectIndex} aligns with {@link resultingText}. Drain any
     // open typed-run buffer before splicing.
-    this.flushPendingInsert();
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
     this.resultingText = spliceText(
       this.resultingText,
       effectIndex,
@@ -642,8 +655,11 @@ export class EgWalkerEngine {
     // been coalescing into {@link pendingInsertText}. Flush before we
     // start carving records and slicing the document text so the per-slot
     // {@link effectIndex} arithmetic below operates on the materialised
-    // document.
-    this.flushPendingInsert();
+    // document. Hoist the empty-buffer check inline so the common case
+    // (delete on a non-coalescing trace) doesn't pay the call overhead.
+    if (this.pendingInsertText.length > 0) {
+      this.flushPendingInsert();
+    }
     const deletedItemIds: EventId[] = [];
     const outputDeleteIndexes: number[] = [];
     let remaining = operation.length;
@@ -1186,15 +1202,17 @@ export class EgWalkerEngine {
    * non-coalesced read or write of the document text.
    */
   private appendPendingInsert(effectIndex: number, text: string): void {
+    const buffered = this.pendingInsertText;
     if (
-      this.pendingInsertText.length > 0 &&
-      effectIndex ===
-        this.pendingInsertEffectIndex + this.pendingInsertText.length
+      buffered.length > 0 &&
+      effectIndex === this.pendingInsertEffectIndex + buffered.length
     ) {
-      this.pendingInsertText += text;
+      this.pendingInsertText = buffered + text;
       return;
     }
-    this.flushPendingInsert();
+    if (buffered.length > 0) {
+      this.flushPendingInsert();
+    }
     this.pendingInsertText = text;
     this.pendingInsertEffectIndex = effectIndex;
   }

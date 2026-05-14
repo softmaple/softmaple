@@ -295,12 +295,13 @@ describe("Section 3.4 non-conflicting-run fast path", () => {
     //
     // Wall-clock budgets are noisy on shared CI, but the quadratic-vs-linear
     // gap is large enough that even a generous budget catches a regression:
-    // an O(N^2) implementation on 100 000 events allocates ~5 GiB of string
-    // bytes (sum from 1..100_000 of 8 B/char), which exceeds a couple of
-    // seconds on any realistic runner. The post-fix path comfortably stays
-    // well under the budget locally.
-    const EVENT_COUNT = 100_000;
-    const BUDGET_MS = 5_000;
+    // an O(N^2) implementation on 50 000 events allocates ~1.25 GiB of
+    // string bytes (sum from 1..50_000 of 8 B/char), which exceeds a couple
+    // of seconds on any realistic runner. The post-fix path comfortably
+    // stays well under the budget locally (~150 ms) and doesn't crowd out
+    // other parallel test files under the coverage workflow.
+    const EVENT_COUNT = 50_000;
+    const BUDGET_MS = 3_000;
 
     const events = buildLinearInsertTrace(EVENT_COUNT);
     const graph = EventGraph.fromEvents(events);

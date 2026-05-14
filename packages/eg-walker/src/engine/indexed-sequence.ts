@@ -252,6 +252,41 @@ export class IndexedSequence<T extends object> {
     return this.weightIndexToPositionAndOffset(index, allowEnd, "prepare");
   }
 
+  /**
+   * Non-throwing variant of {@link prepareIndexToPositionAndOffset}.
+   *
+   * Returns `undefined` when `index` falls outside the prepare-visible
+   * weight range (negative index, empty tree without `allowEnd`, or
+   * `index >= prepareSum`). Distinguishes this expected "ran past the
+   * end" condition from structural bugs in the ranked B-tree, which
+   * still throw and propagate. Callers that legitimately tolerate
+   * indexes past the end (e.g. defensive replay of a delete event
+   * whose `length` exceeds the visible prepare items at the parent
+   * version) should use this method instead of wrapping the throwing
+   * variant in a try/catch that swallows every error indiscriminately.
+   */
+  tryPrepareIndexToPositionAndOffset(
+    index: number,
+    allowEnd: boolean,
+  ):
+    | { readonly position: number; readonly offsetInRecord: number }
+    | undefined {
+    if (index < 0) {
+      return undefined;
+    }
+    if (!this.root) {
+      if (allowEnd && index === 0) {
+        return { position: 0, offsetInRecord: 0 };
+      }
+      return undefined;
+    }
+    const total = allowEnd ? this.root.prepareSum + 1 : this.root.prepareSum;
+    if (index >= total) {
+      return undefined;
+    }
+    return this.weightIndexToPositionAndOffset(index, allowEnd, "prepare");
+  }
+
   effectIndexBeforePosition(position: number): number {
     return this.prefixSum(position, "effect");
   }

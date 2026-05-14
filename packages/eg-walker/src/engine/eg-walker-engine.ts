@@ -469,13 +469,31 @@ export class EgWalkerEngine {
     let remaining = operation.length;
 
     while (remaining > 0) {
-      const landing = this.prepareIndexLanding(operation.index, false);
+      // A delete event whose `length` runs past the prepare-visible items at
+      // the engine's current parent version legitimately stops short — this
+      // is exercised by the "deletes that run past visible prepare items"
+      // test. The previous implementation wrapped the throwing
+      // `prepareIndexToPositionAndOffset` in a catch-all try/catch, which
+      // also swallowed real bugs (e.g. ranked-B-tree aggregate corruption).
+      // Use the explicit non-throwing variant for the expected end-of-text
+      // case, and let other errors surface.
+      const landing = this.sequence.tryPrepareIndexToPositionAndOffset(
+        operation.index,
+        false,
+      );
       if (!landing) {
         break;
       }
       const candidate = this.sequence.at(landing.position);
       if (!candidate) {
-        break;
+        // The ranked B-tree just told us the prepare-weight prefix sum lands
+        // on `landing.position`, so a missing record there means the tree's
+        // aggregates disagree with its children — a structural bug we want
+        // to surface, not silently truncate the delete around.
+        throw new Error(
+          `Engine bug: prepare-index ${operation.index} landed at sequence position ` +
+            `${landing.position} but no record exists there (remaining=${remaining}).`,
+        );
       }
 
       if (isPlaceholder(candidate) && candidate.content.length > 1) {
@@ -626,19 +644,6 @@ export class EgWalkerEngine {
       this.splitRecordAt(position, length);
     }
     return middle;
-  }
-
-  private prepareIndexLanding(
-    index: number,
-    allowEnd: boolean,
-  ):
-    | { readonly position: number; readonly offsetInRecord: number }
-    | undefined {
-    try {
-      return this.sequence.prepareIndexToPositionAndOffset(index, allowEnd);
-    } catch {
-      return undefined;
-    }
   }
 
   private retreat(eventId: EventId): void {

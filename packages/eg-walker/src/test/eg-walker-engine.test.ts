@@ -371,6 +371,43 @@ describe("Full paper architecture utilities", () => {
     expect(sequence.effectIndexBeforePosition(4)).toBe(4);
   });
 
+  it("distinguishes out-of-range lookups from structural errors via tryPrepareIndexToPositionAndOffset", () => {
+    const items = [
+      { id: "a", prepare: 1, effect: 1 },
+      { id: "b", prepare: 0, effect: 1 },
+      { id: "c", prepare: 1, effect: 0 },
+    ];
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => item.prepare,
+      (item: (typeof items)[number]) => item.effect,
+      items,
+    );
+
+    // Within range: prepare-index 1 lands at the second prepare-visible
+    // record (position 2, which is item "c") with no record offset.
+    expect(sequence.tryPrepareIndexToPositionAndOffset(1, false)).toEqual({
+      position: 2,
+      offsetInRecord: 0,
+    });
+
+    // Past the prepare-visible weight sum and negative indexes return
+    // `undefined` instead of throwing, so callers can distinguish the
+    // expected end-of-text condition from real bugs without a
+    // catch-all try/catch.
+    expect(
+      sequence.tryPrepareIndexToPositionAndOffset(2, false),
+    ).toBeUndefined();
+    expect(
+      sequence.tryPrepareIndexToPositionAndOffset(-1, false),
+    ).toBeUndefined();
+
+    // The throwing variant still raises on the same inputs so structural
+    // bugs (aggregate corruption etc.) propagate as before.
+    expect(() => sequence.prepareIndexToPositionAndOffset(2, false)).toThrow(
+      /out of bounds/,
+    );
+  });
+
   it("keeps ranked B-tree indexes correct across leaf and internal splits", () => {
     const items = Array.from({ length: 2_200 }, (_, index) => ({
       id: `item-${index}`,

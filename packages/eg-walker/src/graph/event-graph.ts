@@ -174,6 +174,30 @@ export class EventGraph {
    */
   private readonly insertionRank: Map<EventId, number> = new Map();
   private metadata: Record<string, unknown> = {};
+  /**
+   * Memoized output of {@link getTopologicalOrder}. Invalidated whenever the
+   * graph is mutated (currently {@link addEvent} and {@link clear}). The
+   * cached array is frozen so callers cannot accidentally corrupt the cache
+   * by mutating the returned reference.
+   *
+   * Multiple replay paths request the topological order on every mutation:
+   * `EgWalkerEngine.reset`, `PartialReplayManager.replayFromCheckpoint`,
+   * `EgWalkerReplica.fullReplay`, the columnar codec encoder, and
+   * `CriticalVersionAnalyzer.latestCriticalVersion`. Caching it turns those
+   * O(N log N) recomputations into O(1) lookups while the graph is stable.
+   */
+  private cachedTopologicalOrder: ReadonlyArray<GraphEvent> | null = null;
+  /** Memoized output of {@link getBranchPreservingTopologicalOrder}. */
+  private cachedBranchPreservingOrder: ReadonlyArray<GraphEvent> | null = null;
+
+  /**
+   * Drop all derived caches. Must be called from every mutator so that
+   * subsequent reads recompute against the new graph state.
+   */
+  private invalidateDerivedCaches(): void {
+    this.cachedTopologicalOrder = null;
+    this.cachedBranchPreservingOrder = null;
+  }
 
   /**
    * Remove all events and metadata from the graph.
@@ -184,6 +208,7 @@ export class EventGraph {
     this.parentsMap.clear();
     this.insertionRank.clear();
     this.metadata = {};
+    this.invalidateDerivedCaches();
   }
 
   /**
@@ -212,6 +237,8 @@ export class EventGraph {
       parents.add(parentId);
       this.parentsMap.set(event.id, parents);
     }
+
+    this.invalidateDerivedCaches();
   }
 
   /**
@@ -409,6 +436,10 @@ export class EventGraph {
    * {@link getBranchPreservingTopologicalOrder}.
    */
   getTopologicalOrder(): ReadonlyArray<GraphEvent> {
+    if (this.cachedTopologicalOrder !== null) {
+      return this.cachedTopologicalOrder;
+    }
+
     const remainingParents = new Map<EventId, number>();
     const ready: EventId[] = [];
 
@@ -453,7 +484,8 @@ export class EventGraph {
       throw new Error("Cycle detected in event graph");
     }
 
-    return result;
+    this.cachedTopologicalOrder = Object.freeze(result);
+    return this.cachedTopologicalOrder;
   }
 
   /**
@@ -488,6 +520,10 @@ export class EventGraph {
    * tie-break to reduce churn further on skewed graphs.
    */
   getBranchPreservingTopologicalOrder(): ReadonlyArray<GraphEvent> {
+    if (this.cachedBranchPreservingOrder !== null) {
+      return this.cachedBranchPreservingOrder;
+    }
+
     const remainingParents = new Map<EventId, number>();
     const roots: EventId[] = [];
 
@@ -550,7 +586,8 @@ export class EventGraph {
       throw new Error("Cycle detected in event graph");
     }
 
-    return result;
+    this.cachedBranchPreservingOrder = Object.freeze(result);
+    return this.cachedBranchPreservingOrder;
   }
 
   /**

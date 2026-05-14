@@ -755,17 +755,17 @@ describe("Full paper architecture utilities", () => {
   });
 
   it("converges with full replay when concurrent inserts split the same placeholder at different offsets", () => {
-    // Sub-issue 5 regression: when partial replay starts from a
-    // checkpoint, pre-checkpoint text is collapsed into a single
-    // placeholder record. Two concurrent inserts inside that
-    // placeholder split it at different offsets, and a descendant of
-    // one of those inserts is later integrated into the conflict
-    // region created by the other. The YATA integration scan compares
-    // origin ids by identity, so the engine has to rewrite the
-    // existing items' `originLeft` references when a placeholder
-    // splits — otherwise siblings anchored to the same logical
-    // boundary look as if they have different origins and partial
-    // replay diverges from full replay.
+    // Regression for partial-replay placeholder splitting: when
+    // partial replay starts from a checkpoint, pre-checkpoint text is
+    // collapsed into a single placeholder record. Two concurrent
+    // inserts inside that placeholder split it at different offsets,
+    // and a descendant of one of those inserts is later integrated
+    // into the conflict region created by the other. The YATA
+    // integration scan compares origin ids by identity, so the engine
+    // has to rewrite the existing items' `originLeft` references when
+    // a placeholder splits — otherwise siblings anchored to the same
+    // logical boundary look as if they have different origins and
+    // partial replay diverges from full replay.
     const graph = new EventGraph();
     const events: GraphEvent[] = [
       {
@@ -1322,11 +1322,10 @@ describe("branch-preserving topological traversal", () => {
 
   it("produces the same text across Kahn and branch-preserving traversals", () => {
     // Two concurrent root inserts (a:0, b:0) plus a descendant of one
-    // of them (c:0 under a:0). Sub-issue 5 closes the engine's
-    // traversal-order dependence: the YATA-style integration scan
-    // anchors items against their parent-version view, so the same
-    // event graph produces the same text regardless of which valid
-    // topological order the caller hands the engine.
+    // of them (c:0 under a:0). The YATA-style integration scan anchors
+    // items against their parent-version view, so the same event graph
+    // produces the same text regardless of which valid topological
+    // order the caller hands the engine.
     const graph = new EventGraph();
     graph.addEvent({
       id: "a:0",

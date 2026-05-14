@@ -1,8 +1,9 @@
 /**
- * Property tests for sub-issue 5: insertion ordering is now
- * traversal-order independent, concurrent multi-character inserts do
- * not interleave, and {@link compareEventIds} orders event IDs by their
- * numeric `replicaId:sequence` suffix.
+ * Property tests for the engine's traversal-order independence
+ * guarantees: insertion ordering is traversal-order independent,
+ * concurrent multi-character inserts do not interleave, and
+ * {@link compareEventIds} orders event IDs by their numeric
+ * `replicaId:sequence` suffix.
  *
  * Each property test randomises something the engine should be robust
  * to (topological order, branching shape, replica count) and asserts
@@ -396,7 +397,7 @@ describe("EgWalkerEngine traversal-order independence", () => {
   });
 });
 
-describe("compareEventIds (sub-issue 5 numeric suffix tie-break)", () => {
+describe("compareEventIds (numeric suffix tie-break)", () => {
   it("orders r1:10 after r1:2 numerically", () => {
     expect(compareEventIds("r1:2", "r1:10")).toBeLessThan(0);
     expect(compareEventIds("r1:10", "r1:2")).toBeGreaterThan(0);
@@ -421,10 +422,10 @@ describe("compareEventIds (sub-issue 5 numeric suffix tie-break)", () => {
   });
 
   it("keeps concurrent inserts under double-digit sequence numbers stable", () => {
-    // Sub-issue 5 cited `r1:10` vs `r1:2` as the canonical regression:
-    // before this fix the engine's bucket lookup tied them with
-    // lexicographic ordering, which inverted the YATA tie-break for
-    // any replica that crosses ten events between checkpoints.
+    // `r1:10` vs `r1:2` is the canonical regression: a plain
+    // lexicographic compare would tie them in the wrong order, which
+    // inverts the YATA tie-break for any replica that crosses ten
+    // events between checkpoints.
     const events: GraphEvent[] = [
       {
         id: "root:0",

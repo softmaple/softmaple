@@ -474,15 +474,14 @@ export class EventGraph {
    * roots and sibling branches are ordered by numeric-aware event id
    * via {@link compareEventIds}.
    *
-   * Sub-issue 5 made `EgWalkerEngine.generate` traversal-order
-   * independent for concurrent inserts (YATA-style integration scan
-   * anchored against the parent-version view), so either this order
-   * or {@link getTopologicalOrder} now produces the same document
-   * text. {@link getTopologicalOrder} remains the default at the
-   * call sites that persist on-disk columnar bytes to avoid
-   * gratuitously reshuffling existing files; new performance-
-   * sensitive call sites can pick this order to minimise
-   * retreat/advance churn.
+   * `EgWalkerEngine.generate` is traversal-order independent for
+   * concurrent inserts (YATA-style integration scan anchored against
+   * the parent-version view), so either this order or
+   * {@link getTopologicalOrder} produces the same document text.
+   * {@link getTopologicalOrder} remains the default at the call sites
+   * that persist on-disk columnar bytes to avoid gratuitously
+   * reshuffling existing files; new performance-sensitive call sites
+   * can pick this order to minimise retreat/advance churn.
    *
    * TODO: consider weighting sibling branches by estimated subtree
    * size (the paper's optional heuristic) instead of pure lex

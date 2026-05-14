@@ -237,8 +237,19 @@ const buildMostlyLinearEditingSession = (params: {
     const id = `main:${i}`;
     const jitter = Math.floor(prng() * 5) - 2;
     cursor = Math.max(0, Math.min(length, cursor + jitter));
-    const wantDelete = prng() < 0.25 && length > 0;
+    // Only emit a DELETE when there is at least one character at or
+    // after `cursor` to delete. `cursor < length` is the right gate
+    // (rather than just `length > 0`) because `Math.min(length, ...)`
+    // above lets `cursor` land on `length`, which would produce an
+    // out-of-range delete: the remote-apply path silently no-ops it
+    // but the generator would still decrement its local `length`,
+    // drifting its tracked state from the replica's actual text and
+    // making the replay metrics measure a malformed event stream.
+    const wantDelete = prng() < 0.25 && cursor < length;
     if (wantDelete) {
+      // `cursor < length` here, so `length - cursor >= 1`, so the
+      // inner Math.min is at least 1, so `deleteLen >= 1` and the
+      // delete is always in range.
       const deleteLen = Math.max(
         1,
         Math.min(length - cursor, 1 + Math.floor(prng() * 3)),

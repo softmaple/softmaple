@@ -122,7 +122,7 @@ const runReplicaBenchmark = (
   // Frontier size after a fully-applied trace tells us how many
   // concurrent tips the trace ended on — a single-author trace
   // ends on 1, a deep concurrent fork can end on N.
-  const frontier = computeFrontier(allEvents);
+  const frontier = reconstructedGraph.getFrontier();
 
   return {
     result: {
@@ -141,32 +141,6 @@ const runReplicaBenchmark = (
   };
 };
 
-/**
- * Compute the frontier (set of events with no children) for the
- * given event set. Mirrors {@link EventGraph.getFrontier} so we
- * don't need a private accessor.
- */
-const computeFrontier = (
-  events: ReadonlyArray<GraphEvent>,
-): ReadonlySet<EventId> => {
-  const allIds = new Set<EventId>(events.map((event) => event.id));
-  const hasChild = new Set<EventId>();
-  for (const event of events) {
-    for (const parent of event.parentVersion) {
-      if (allIds.has(parent)) {
-        hasChild.add(parent);
-      }
-    }
-  }
-  const frontier = new Set<EventId>();
-  for (const id of allIds) {
-    if (!hasChild.has(id)) {
-      frontier.add(id);
-    }
-  }
-  return frontier;
-};
-
 // ----------------------------------------------------------------------
 // Trace builders
 // ----------------------------------------------------------------------
@@ -175,13 +149,16 @@ const buildLargeLinearHistory = (eventCount: number): GraphEvent[] => {
   const events: GraphEvent[] = [];
   let parent: EventId | null = null;
   let cursor = 0;
-  const prng = createPrng(0x9e3779b9 | 0);
+  // Drives only the inserted character at each position; the trace
+  // *structure* (one event per step, single parent = previous id)
+  // is fully deterministic and does not depend on this PRNG.
+  const pickChar = createPrng(0x9e3779b9 | 0);
   for (let i = 0; i < eventCount; i++) {
     const id = `linear:${i}`;
     // Single-author append: every event extends the previous one in
     // strict order, so the engine should take the
     // non-conflicting-run fast path on every event after the first.
-    const ch = String.fromCharCode(0x61 + Math.floor(prng() * 26));
+    const ch = String.fromCharCode(0x61 + Math.floor(pickChar() * 26));
     events.push({
       id,
       parentVersion: new Set<EventId>(parent ? [parent] : []),
@@ -283,18 +260,26 @@ const buildMostlyLinearEditingSession = (params: {
     // Periodically fork off the main author for a few events and
     // re-merge. Models a second author typing alongside the primary.
     if ((i + 1) % forkEveryN === 0) {
-      let forkParent = parent;
+      // `parent` is always non-null here because we just appended an
+      // event in this iteration and set `parent = id` above. Capture
+      // it into a non-nullable local so the fork/merge code can stay
+      // free of non-null assertions even after the inner loop
+      // reassigns its own parent pointer.
+      const mainTip: EventId = parent;
+      let forkTip: EventId = mainTip;
       const forkIds: EventId[] = [];
       for (let f = 0; f < forkEvents; f++) {
         const forkId = `fork-${i}-${f}`;
-        const forkAt = Math.min(length, Math.floor(prng() * length));
+        // `prng()` is in [0, 1), so `Math.floor(prng() * length)` is
+        // already < length — the outer Math.min would be a no-op.
+        const forkAt = Math.floor(prng() * length);
         events.push({
           id: forkId,
-          parentVersion: new Set<EventId>([forkParent!]),
+          parentVersion: new Set<EventId>([forkTip]),
           operation: { type: OPERATION_TYPE.INSERT, index: forkAt, text: "+" },
           timestamp: 1_778_000_000_000 + i + f + 1,
         });
-        forkParent = forkId;
+        forkTip = forkId;
         forkIds.push(forkId);
         length += 1;
       }
@@ -302,7 +287,7 @@ const buildMostlyLinearEditingSession = (params: {
       const mergeId = `merge:${i}`;
       events.push({
         id: mergeId,
-        parentVersion: new Set<EventId>([parent!, forkParent!]),
+        parentVersion: new Set<EventId>([mainTip, forkTip]),
         operation: {
           type: OPERATION_TYPE.INSERT,
           index: cursor,
@@ -493,6 +478,9 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
           `binary=${String(row.binaryBytes).padStart(6)}B`,
       )
       .join("\n");
+    // Pure diagnostic output. Not used for control flow — every
+    // numeric bound the benchmarks care about is asserted inline
+    // inside the corresponding `it(...)` block above.
     console.info(
       `\nReplay & storage benchmark summary (issue #673):\n${summary}\n`,
     );

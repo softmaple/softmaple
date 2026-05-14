@@ -58,14 +58,20 @@ const cloneEvent = (event: GraphEvent): GraphEvent => ({
   timestamp: event.timestamp,
 });
 
-const shuffleInPlace = <T>(items: T[], rand: () => number): T[] => {
-  for (let i = items.length - 1; i > 0; i--) {
+/**
+ * Return a Fisher–Yates-shuffled copy of `items`. The input is not
+ * mutated, so callers can pass `ReadonlyArray<T>` (including the
+ * canonical event list) without having to pre-clone defensively.
+ */
+const shuffled = <T>(items: ReadonlyArray<T>, rand: () => number): T[] => {
+  const result = items.slice();
+  for (let i = result.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
-    const tmp = items[i]!;
-    items[i] = items[j]!;
-    items[j] = tmp;
+    const tmp = result[i]!;
+    result[i] = result[j]!;
+    result[j] = tmp;
   }
-  return items;
+  return result;
 };
 
 /**
@@ -98,8 +104,11 @@ const applyInRandomDeliveryOrder = (
   rand: () => number,
 ): EgWalkerReplica => {
   const replica = new EgWalkerReplica(replicaId);
-  const shuffled = shuffleInPlace(events.map(cloneEvent), rand);
-  for (const event of shuffled) {
+  // Clone each event before delivery so a replica that mutates the
+  // parentVersion set of an applied event can't bleed back into the
+  // shared canonical event list owned by the caller.
+  const delivery = shuffled(events.map(cloneEvent), rand);
+  for (const event of delivery) {
     replica.applyRemoteEvent(event);
   }
   if (replica.getPendingRemoteCount() !== 0) {
@@ -127,10 +136,12 @@ interface ReplicaSim {
  * replicas. Returns the deduplicated set of events produced by all
  * replicas, plus the canonical text after the entire run.
  *
- * The simulation is non-deterministic on the wall clock — multiple
- * replicas may edit before sync — which is exactly the "concurrent
- * edits with random delivery" scenario the paper's convergence proof
- * needs.
+ * The trace is fully deterministic in `seed`. The "concurrency" the
+ * test cares about comes from `syncEveryN > 1`: every replica gets
+ * to accumulate several local edits before broadcasting, so the
+ * resulting graph contains genuinely concurrent branches — exactly
+ * the "concurrent edits with random delivery" scenario the paper's
+ * convergence proof needs.
  */
 const runRandomizedMultiReplicaTrace = (params: {
   readonly replicaCount: number;
@@ -183,7 +194,7 @@ const runRandomizedMultiReplicaTrace = (params: {
       return;
     }
     for (const sim of simReplicas) {
-      const delivery = shuffleInPlace(
+      const delivery = shuffled(
         fresh.map(cloneEvent).filter((event) => {
           // Skip re-delivering an event back to the replica that
           // originated it (event ids are `<replicaId>:<seq>`).
@@ -732,7 +743,7 @@ describe("EgWalkerReplica realistic editing traces", () => {
         ...bob.exportEventGraph().map(cloneEvent),
       ];
       const rand = createPrng(0x9999_9999);
-      for (const event of shuffleInPlace(events, rand)) {
+      for (const event of shuffled(events, rand)) {
         alice.applyRemoteEvent(cloneEvent(event));
         bob.applyRemoteEvent(cloneEvent(event));
       }
@@ -793,18 +804,18 @@ describe("EgWalkerReplica realistic editing traces", () => {
 
     // Each replica receives a random 60% subset first (in shuffled
     // order), the remaining 40% afterwards.
-    const shuffled = shuffleInPlace(events.map(cloneEvent), rand);
-    const splitAt = Math.floor(shuffled.length * 0.6);
-    const firstHalf = shuffled.slice(0, splitAt);
-    const secondHalf = shuffled.slice(splitAt);
+    const permuted = shuffled(events.map(cloneEvent), rand);
+    const splitAt = Math.floor(permuted.length * 0.6);
+    const firstHalf = permuted.slice(0, splitAt);
+    const secondHalf = permuted.slice(splitAt);
 
     for (const replica of replicas) {
-      for (const event of shuffleInPlace(firstHalf.map(cloneEvent), rand)) {
+      for (const event of shuffled(firstHalf.map(cloneEvent), rand)) {
         replica.applyRemoteEvent(event);
       }
     }
     for (const replica of replicas) {
-      for (const event of shuffleInPlace(secondHalf.map(cloneEvent), rand)) {
+      for (const event of shuffled(secondHalf.map(cloneEvent), rand)) {
         replica.applyRemoteEvent(event);
       }
       expect(replica.getPendingRemoteCount()).toBe(0);

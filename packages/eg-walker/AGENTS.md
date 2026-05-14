@@ -59,14 +59,25 @@ Events are stored in compressed columnar format:
 
 ### Binary Format
 
-- Magic prefix `EGW2` (`0x45 0x47 0x57 0x32`). Older `EGW1` payloads from
-  the pre-rewrite scaffolding are not compatible and are rejected at decode.
-- Each `IdRun` carries an explicit `custom` flag that distinguishes parsed
-  `replicaId:sequence` IDs from verbatim string IDs.
+- Magic prefix `EGW3` (`0x45 0x47 0x57 0x33`). Older `EGW1` and `EGW2`
+  payloads are not compatible and are rejected at decode — the EGW3 layout
+  drops every derivable column and switches near-monotonic columns to
+  zigzag-delta varints, so it is not a superset of EGW2.
+- `operationRuns` are written as `(type, length)`; `startEventOffset`,
+  `startIndex`, and `textLength` are reconstructed from `operationIndexes`
+  and `operationLengths`.
+- `operationIndexes` and `timestamps` are zigzag-delta varint arrays.
+- `textLengths` is omitted on the wire; the decoder reconstructs it from
+  `operationRuns` (type) and `operationLengths`.
+- `parentOverrides` event offsets are monotonic-delta varints.
+- Each `IdRun` carries an explicit `custom` flag (packed into the low bit
+  of the run-length varint) that distinguishes parsed `replicaId:sequence`
+  IDs from verbatim string IDs. `startEventOffset` is the prefix sum of
+  run lengths and is not on the wire.
 - Inserted content is LZ4-framed. `decodeBinary` enforces a memory cap on
   the destination buffer (4 UTF-8 bytes per declared UTF-16 code unit plus
   64-byte slack) and verifies that the decoded string length matches the
-  declared `textLengths` sum, so a tampered payload that truncates or
+  reconstructed `textLengths` sum, so a tampered payload that truncates or
   inflates content is rejected.
 
 ### Known Limitations

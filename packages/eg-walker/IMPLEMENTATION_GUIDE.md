@@ -80,9 +80,33 @@ and tests verify which path was taken.
 ## Storage Model
 
 The binary columnar codec stores topologically sorted graph data in separate
-columns for operation runs, operation indexes, lengths, text lengths, parent
-overrides, event ID runs, and timestamps. Integer columns use unsigned varints;
-inserted UTF-8 content is compressed with LZ4 framed compression.
+columns for operation runs, operation indexes, operation lengths, parent
+overrides, event ID runs, and timestamps. Inserted UTF-8 content is compressed
+with LZ4 framed compression. The wire format (`EGW3`) drops every column that
+is derivable from the others and switches the near-monotonic per-event columns
+to zigzag-delta varints:
+
+- `operationRuns` carry only `(type, length)` on the wire. `startEventOffset`
+  is the prefix sum of run lengths; `startIndex` is
+  `operationIndexes[startEventOffset]`; an INSERT run's `textLength` is the
+  sum of `operationLengths` over the run's events.
+- `operationIndexes` and `timestamps` are zigzag-delta varint arrays. Linear
+  single-author traces and near-monotonic editor timestamps collapse to ~1
+  byte per event regardless of document size.
+- `operationLengths` is a plain varint array (typically one byte per event
+  for single-character edits).
+- `textLengths` is omitted entirely — `textLength[i]` equals
+  `operationLengths[i]` when the covering run is INSERT, else `0`.
+- `parentOverrides` event offsets are monotonic-delta varints (the first
+  delta is relative to `-1`).
+- `idRuns` drop `startEventOffset` (also the prefix sum of run lengths) and
+  pack the `custom` flag into the low bit of the run length.
+
+`packages/eg-walker/src/test/columnar-codec-size.test.ts` benchmarks the binary
+form against `JSON.stringify(graph.serialize())` over four realistic editing
+traces (linear append, mixed insert/delete, paste-then-edit, multi-author
+concurrent merges) and asserts hard size-ratio upper bounds as a regression
+guard. `EGW2` and `EGW1` payloads are rejected at decode.
 
 ## Verification
 

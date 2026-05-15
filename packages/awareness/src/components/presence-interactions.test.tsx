@@ -172,6 +172,48 @@ describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
   });
 });
 
+describe("LiveCursor hover-to-reveal label (design §5.3)", () => {
+  it('adds hoverable class, tabindex, and renders label when showLabel="hover"', () => {
+    const html = renderToStaticMarkup(
+      <LiveCursor
+        point={{ x: 0, y: 0 }}
+        showLabel="hover"
+        user={user("a", { name: "HoverCaret" })}
+      />,
+    );
+    expect(html).toContain("awareness-live-cursor--hoverable");
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain("HoverCaret");
+    // Hoverable cursors don't get the always-on label-visible class —
+    // CSS :hover/:focus-visible drives opacity instead.
+    expect(html).not.toContain("awareness-live-cursor--label-visible");
+  });
+
+  it("does not add hoverable class for boolean showLabel", () => {
+    const truthy = renderToStaticMarkup(
+      <LiveCursor
+        point={{ x: 0, y: 0 }}
+        showLabel
+        user={user("a", { name: "VisCaret" })}
+      />,
+    );
+    expect(truthy).not.toContain("awareness-live-cursor--hoverable");
+    expect(truthy).toContain("VisCaret");
+
+    const hidden = renderToStaticMarkup(
+      <LiveCursor
+        point={{ x: 0, y: 0 }}
+        showLabel={false}
+        user={user("a", { name: "HiddenCaret" })}
+      />,
+    );
+    expect(hidden).not.toContain("awareness-live-cursor--hoverable");
+    // The label span itself isn't rendered when showLabel={false}; the
+    // name still appears inside the aria-label, which is expected.
+    expect(hidden).not.toContain("awareness-live-cursor__label");
+  });
+});
+
 describe("BlockActivityIndicator (design §5.4)", () => {
   const a = user("a", {
     name: "Ada",

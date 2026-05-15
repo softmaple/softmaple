@@ -30,7 +30,16 @@ export interface LiveCursorProps {
   readonly user: PresenceUser;
   readonly point: LiveCursorPoint;
   readonly labelVisibleMs?: number;
-  readonly showLabel?: boolean;
+  /**
+   * Controls how the user label is presented.
+   * - `true` (default): label shows on mount and after every move, then
+   *   auto-hides after `labelVisibleMs`.
+   * - `false`: label is never rendered.
+   * - `"hover"`: label is hidden until the caret is hovered or keyboard-
+   *   focused — matches the same opt-in pattern used by
+   *   `SelectionHighlight` (design doc §5.3 "Hover reveals user badge").
+   */
+  readonly showLabel?: boolean | "hover";
   readonly className?: string;
   /**
    * Bounds used for off-screen culling. Defaults to the current window.
@@ -83,7 +92,12 @@ export const LiveCursor = ({
   viewport = "window",
   cullMargin = 32,
 }: LiveCursorProps): ReactNode => {
-  const [isLabelVisible, setIsLabelVisible] = useState(showLabel);
+  const isHoverLabel = showLabel === "hover";
+  const renderLabel = showLabel === true || isHoverLabel;
+  // Auto-fade only applies to the always-on label. The hover variant lets
+  // CSS :hover / :focus-visible drive opacity, so we don't toggle the
+  // `--label-visible` class for it.
+  const [isLabelVisible, setIsLabelVisible] = useState(showLabel === true);
   const previousPointRef = useRef(point);
 
   // Re-evaluate window-based culling on resize so cursors near the edge
@@ -101,7 +115,7 @@ export const LiveCursor = ({
   }, [viewport]);
 
   useEffect(() => {
-    if (!showLabel) {
+    if (showLabel !== true) {
       setIsLabelVisible(false);
       return;
     }
@@ -133,6 +147,7 @@ export const LiveCursor = ({
       className={cx(
         "awareness-live-cursor",
         isLabelVisible && "awareness-live-cursor--label-visible",
+        isHoverLabel && "awareness-live-cursor--hoverable",
         className,
       )}
       role="img"
@@ -140,9 +155,10 @@ export const LiveCursor = ({
         ...toUserColorStyle(user.color),
         transform: `translate3d(${point.x}px, ${point.y}px, 0)`,
       }}
+      tabIndex={isHoverLabel ? 0 : undefined}
     >
       <span aria-hidden="true" className="awareness-live-cursor__caret" />
-      {showLabel ? (
+      {renderLabel ? (
         <span className="awareness-live-cursor__label">{user.name}</span>
       ) : null}
     </div>

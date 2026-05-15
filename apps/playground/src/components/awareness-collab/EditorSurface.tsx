@@ -187,6 +187,7 @@ export function EditorSurface({
                   key={`cursor-${peer.userId}`}
                   user={peer}
                   point={point}
+                  showLabel="hover"
                 />
               );
             }

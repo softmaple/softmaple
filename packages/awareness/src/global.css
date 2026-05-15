@@ -301,6 +301,7 @@
 .awareness-live-cursor {
   --awareness-live-cursor-label-x: 0px;
   --awareness-live-cursor-label-y: 3px;
+  --awareness-live-cursor-caret-height: 1.25rem;
   font-size: 12px;
   line-height: 1;
   /*
@@ -311,12 +312,42 @@
   @apply absolute top-0 left-0 z-20 inline-flex items-start pointer-events-none will-change-transform;
 }
 
+/*
+ * The caret is centered on the consumer-provided `point.x` rather than
+ * sitting flush-right of it: a real text caret straddles the character
+ * boundary, so we shift the 2px bar left by half its width. Without this,
+ * the caret visually drifts one pixel to the right of where the local
+ * text cursor would sit.
+ */
 .awareness-live-cursor__caret {
   background: var(--awareness-user-color);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 34%, transparent),
-    0 5px 14px color-mix(in srgb, var(--awareness-user-color) 30%, transparent);
-  @apply relative block w-[2px] h-5 rounded-full;
+  /*
+   * Soft directional shadow only (no all-around halo). The previous
+   * 1px ring on every side rendered as a stubby "flag" at the top edge
+   * of the bar; the drop shadow below gives depth without the halo.
+   */
+  box-shadow: 0 2px 6px
+    color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
+  height: var(--awareness-live-cursor-caret-height);
+  margin-left: -1px;
+  @apply relative block w-[2px] rounded-[1px];
+}
+
+/*
+ * Small "flag" chip at the top of the caret — a 5×5 rounded square that
+ * matches the user color. It marks the caret with a consistent visual
+ * anchor (the same shape consumers see on hover labels), without
+ * relying on the always-on name label to communicate presence.
+ */
+.awareness-live-cursor__caret::before {
+  content: "";
+  background: var(--awareness-user-color);
+  border-radius: 2px 2px 2px 0;
+  height: 5px;
+  width: 5px;
+  inset-block-start: -3px;
+  inset-inline-start: -1.5px;
+  @apply absolute pointer-events-none;
 }
 
 .awareness-live-cursor__label {
@@ -331,18 +362,63 @@
   transition:
     opacity 160ms ease,
     transform 160ms ease;
-  box-shadow: var(--shadow-awareness);
+  box-shadow: var(--shadow-awareness-close);
   /*
    * Soft dark shadow gives white text a readable edge over pale user
    * colors (yellow/pastel) without relying on theme-dependent contrast.
    */
   text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
-  @apply absolute bottom-full left-0 mb-[2px] max-w-64 overflow-hidden px-2 py-[3px] rounded-md text-white font-awareness text-xs tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap shadow-awareness;
+  @apply absolute bottom-full left-0 mb-[3px] max-w-64 overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none text-white font-awareness text-[11px] tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
   --awareness-live-cursor-label-y: 0px;
   @apply opacity-100;
+}
+
+/*
+ * Hoverable cursor: the label is rendered but invisible until the caret
+ * is hovered or keyboard-focused. Keeps the editor surface low-noise
+ * while still letting collaborators inspect attribution on demand — the
+ * same opt-in pattern used by `.awareness-selection-highlight--hoverable`.
+ */
+.awareness-live-cursor--hoverable {
+  pointer-events: auto;
+}
+
+/*
+ * The caret bar is only 2px wide — too small to comfortably hit with a
+ * pointer or focus ring. Pad the hit/focus area to ~16×24 via the
+ * caret's ::after so the underlying click target stays accessible.
+ */
+.awareness-live-cursor--hoverable .awareness-live-cursor__caret::after {
+  content: "";
+  inset-block: -4px;
+  inset-inline: -8px;
+  @apply absolute pointer-events-auto;
+}
+
+.awareness-live-cursor--hoverable .awareness-live-cursor__label {
+  --awareness-live-cursor-label-y: 0px;
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.awareness-live-cursor--hoverable:hover .awareness-live-cursor__label,
+.awareness-live-cursor--hoverable:focus-visible .awareness-live-cursor__label {
+  opacity: 1;
+}
+
+.awareness-live-cursor--hoverable:focus-visible {
+  outline: none;
+}
+
+.awareness-live-cursor--hoverable:focus-visible .awareness-live-cursor__caret {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, CanvasText 60%, transparent),
+    0 2px 6px color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
 }
 
 .awareness-selection-highlight {
@@ -357,32 +433,33 @@
    * the editor surface beneath, never the rest of the viewport stack.
    */
   isolation: isolate;
-  @apply absolute top-0 left-0 z-10 box-border rounded-[3px] pointer-events-none;
+  @apply absolute top-0 left-0 z-10 box-border rounded-[4px] pointer-events-none;
 }
 
+/*
+ * Soft, evenly-tinted fill — no hard left border or hard 1px outline.
+ * The previous `border-left: 2px solid` + `inset 0 0 0 1px` ring produced
+ * a blocky/highlighter-marker look that fought the prose underneath; a
+ * flat low-opacity tint matches what users expect from native browser
+ * selection while still keeping a per-user color.
+ */
 .awareness-selection-highlight::before {
   content: "";
-  inset: 2px 0;
-  border-left: 2px solid var(--awareness-user-color);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--awareness-user-color) 30%, transparent),
-    color-mix(in srgb, var(--awareness-user-color) 18%, transparent)
-  );
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--awareness-user-color) 22%, transparent);
+  inset: 1px 0;
+  background: color-mix(in srgb, var(--awareness-user-color) 26%, transparent);
   /*
    * Multiply blend keeps overlaid text readable: the highlight darkens
    * its background but the glyphs beneath retain their original contrast.
    * Falls back gracefully on browsers that don't support it.
    */
   mix-blend-mode: multiply;
-  @apply absolute rounded-[3px];
+  @apply absolute inset-0 rounded-[4px];
 }
 
 @media (prefers-color-scheme: dark) {
   .awareness-selection-highlight::before {
     /* Screen brightens on dark surfaces, the inverse of multiply on light. */
+    background: color-mix(in srgb, var(--awareness-user-color) 40%, transparent);
     mix-blend-mode: screen;
   }
 }
@@ -397,7 +474,7 @@
   );
   box-shadow: var(--shadow-awareness-close);
   text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
-  @apply absolute bottom-full left-0 mb-[2px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
+  @apply absolute bottom-full left-0 mb-[3px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
 .awareness-selection-highlight--hoverable {

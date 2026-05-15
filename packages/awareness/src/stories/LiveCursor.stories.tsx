@@ -60,6 +60,38 @@ export const CursorOnly: Story = {
   },
 };
 
+// Design §5.3: "Hover reveals user badge" — same opt-in pattern that
+// SelectionHighlight uses, applied to the caret. The label is rendered into
+// the DOM but hidden (opacity:0) until pointer hover or keyboard focus.
+//
+// As with the selection variant we assert the structural wiring (hoverable
+// class, tabindex, label rendered but hidden by default) rather than the
+// post-:hover computed style: synthetic hover events don't reliably trigger
+// the CSS `:hover` pseudo-class across test browsers.
+export const HoverableLabel: Story = {
+  args: {
+    point: { x: 36, y: 94 },
+    showLabel: "hover",
+    user: bulbasaur,
+  },
+  play: async ({ canvas }) => {
+    const cursor = canvas.getByRole("img", { name: "Bulbasaur cursor" });
+
+    await expect(cursor).toHaveClass("awareness-live-cursor--hoverable");
+    await expect(cursor).toHaveAttribute("tabindex", "0");
+    await expect(cursor).not.toHaveClass(
+      "awareness-live-cursor--label-visible",
+    );
+
+    const label = canvas.getByText("Bulbasaur");
+    await expect(label).toBeInTheDocument();
+    await expect(label).not.toBeVisible();
+
+    cursor.focus();
+    await expect(cursor).toHaveFocus();
+  },
+};
+
 export const AutoHiddenLabel: Story = {
   args: {
     labelVisibleMs: 60,

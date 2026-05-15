@@ -214,10 +214,16 @@
     opacity 140ms ease,
     transform 140ms ease;
   /*
-   * Cap so the tooltip never overflows past the viewport when an avatar
-   * sits near a column edge. The name stays on one line; the meta line
-   * is allowed to wrap (see __tooltip-meta below).
+   * Size to the natural content width but never overflow the viewport.
+   * Without `inline-size: max-content` the absolutely-positioned tooltip
+   * inherits a min-content width from its parent layout — combined with
+   * `truncate` on the name (intrinsic min-content = 0) and
+   * `overflow-wrap: anywhere` on the meta line, the column collapses to
+   * a single character and the meta text wraps vertically. Pinning to
+   * `max-content` lets the tooltip lay out at its natural width up to
+   * the cap below.
    */
+  inline-size: max-content;
   max-inline-size: min(14rem, calc(100vw - 1rem));
   @apply absolute bottom-full mb-2 z-20 grid gap-0.5 rounded-md px-2 py-1.5 text-awareness-text font-awareness opacity-0;
 }

@@ -18,8 +18,14 @@
       "@softmaple/ui/*": ["../../packages/ui/src/*"],
       "@softmaple/editor/*": ["../../packages/editor/src/*"],
       "@softmaple/db/*": ["../../packages/db/src/*"],
+      "@softmaple/eg-walker": ["../../packages/eg-walker/src/index.ts"],
       "@softmaple/eg-walker/*": ["../../packages/eg-walker/src/*"],
-      "@softmaple/md2latex/*": ["../../packages/md2latex/src/*"]
+      "@softmaple/md2latex/*": ["../../packages/md2latex/src/*"],
+      "@softmaple/awareness": ["../../packages/awareness/src/index.ts"],
+      "@softmaple/awareness/styles.css": [
+        "../../packages/awareness/src/global.css"
+      ],
+      "@softmaple/awareness/*": ["../../packages/awareness/src/*"]
     }
   }
 }

@@ -5,8 +5,12 @@ import viteReact from "@vitejs/plugin-react";
 import viteTsConfigPaths from "vite-tsconfig-paths";
 import tailwindcss from "@tailwindcss/vite";
 import { nitro } from "nitro/vite";
+import { workspaceAlias } from "./workspace-aliases";
 
 const config = defineConfig(({ mode }) => ({
+  resolve: {
+    alias: workspaceAlias,
+  },
   plugins: [
     // Only load dev tools and nitro in non-test mode to prevent hanging processes
     ...(mode !== "test" ? [devtools(), nitro()] : []),

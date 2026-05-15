@@ -1,26 +1,35 @@
-import { createFileRoute } from "@tanstack/react-router";
 import {
   Card,
+  CardContent,
   CardHeader,
   CardTitle,
-  CardContent,
 } from "@softmaple/ui/components/card";
+import { createFileRoute } from "@tanstack/react-router";
 import {
-  Zap,
-  Server,
+  Globe,
   Route as RouteIcon,
+  Server,
   Shield,
-  Waves,
+  Sparkle,
   Sparkles,
   SplitSquareHorizontal,
   Users,
-  Globe,
+  Waves,
+  Zap,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: App });
 
+interface Feature {
+  readonly icon: React.ReactNode;
+  readonly title: string;
+  readonly description: string;
+  readonly link: string;
+  readonly external?: boolean;
+}
+
 function App() {
-  const features = [
+  const features: ReadonlyArray<Feature> = [
     {
       icon: <SplitSquareHorizontal className="w-12 h-12 text-cyan-400" />,
       title: "Two-Panel Editor Demo",
@@ -41,6 +50,13 @@ function App() {
       description:
         "Create or join rooms to collaborate with multiple users in real-time. Share room links for instant collaboration.",
       link: "/demo/online-collab-editor",
+    },
+    {
+      icon: <Sparkle className="w-12 h-12 text-cyan-400" />,
+      title: "Awareness + Eg-Walker",
+      description:
+        "Pick a Pokémon trainer and collaborate with live cursors, selection highlights, and presence indicators powered by the @softmaple/awareness package.",
+      link: "/demo/awareness-collab",
     },
     {
       icon: <Zap className="w-12 h-12 text-cyan-400" />,
@@ -139,17 +155,15 @@ function App() {
 
       <section className="py-16 px-6 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {features.map((feature, index) => (
+          {features.map((feature) => (
             <Card
-              key={index}
+              key={feature.title}
               className="bg-slate-800/50 border-slate-700 hover:bg-slate-800/70 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer group"
             >
               <a
                 href={feature.link}
-                target={(feature as any).external ? "_blank" : "_self"}
-                rel={
-                  (feature as any).external ? "noopener noreferrer" : undefined
-                }
+                target={feature.external ? "_blank" : "_self"}
+                rel={feature.external ? "noopener noreferrer" : undefined}
                 className="block h-full"
               >
                 <CardHeader>

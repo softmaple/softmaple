@@ -1,23 +1,25 @@
-import { defineConfig } from 'vitest/config';
-import * as path from 'node:path';
+import * as path from "node:path";
+import { defineConfig } from "vitest/config";
+import { workspaceAlias } from "./workspace-aliases";
 
 export default defineConfig({
   test: {
-    environment: 'jsdom',
-    setupFiles: ['fake-indexeddb/auto'],
+    environment: "jsdom",
+    setupFiles: ["fake-indexeddb/auto"],
     exclude: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/cypress/**',
-      '**/.{idea,git,cache,output,temp}/**',
-      '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress}.config.*',
-      '**/e2e/**',  // Exclude Playwright E2E tests
-      '**/*.spec.ts',  // Exclude Playwright spec files
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/cypress/**",
+      "**/.{idea,git,cache,output,temp}/**",
+      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress}.config.*",
+      "**/e2e/**", // Exclude Playwright E2E tests
+      "**/*.spec.ts", // Exclude Playwright spec files
     ],
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      ...workspaceAlias,
+      "@": path.resolve(__dirname, "./src"),
     },
   },
 });

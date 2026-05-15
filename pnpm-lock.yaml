@@ -39,6 +39,9 @@ importers:
 
   apps/playground:
     dependencies:
+      '@softmaple/awareness':
+        specifier: workspace:*
+        version: link:../../packages/awareness
       '@softmaple/eg-walker':
         specifier: workspace:*
         version: link:../../packages/eg-walker

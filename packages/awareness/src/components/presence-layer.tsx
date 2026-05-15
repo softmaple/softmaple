@@ -117,10 +117,9 @@ export const PresenceLayer = ({
   const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
   useLayoutEffect(() => {
-    const el = host.current;
-    if (!el) return;
-
     const update = (): void => {
+      const el = host.current;
+      if (!el) return;
       const rect = el.getBoundingClientRect();
       // When `trackHostScroll` is on, subtract the host's internal
       // scroll so that content-relative children coordinates land in
@@ -132,14 +131,35 @@ export const PresenceLayer = ({
         prev.left === left && prev.top === top ? prev : { left, top },
       );
     };
-    update();
 
-    // ResizeObserver is missing in jsdom and older SSR environments —
-    // the scroll/resize listeners below cover the most common cases
-    // even when it's unavailable.
-    const ro =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
-    ro?.observe(el);
+    let ro: ResizeObserver | null = null;
+    let rafId = 0;
+
+    const attach = (): void => {
+      const el = host.current;
+      if (!el) return;
+      update();
+      // ResizeObserver is missing in jsdom and older SSR environments —
+      // the scroll/resize listeners below cover the most common cases
+      // even when it's unavailable.
+      if (typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(update);
+        ro.observe(el);
+      }
+    };
+
+    // Layout effects fire bottom-up, so when the host ref points to an
+    // ancestor of `<PresenceLayer>` (e.g. a parent surface div with
+    // `ref={surfaceRef}` that wraps the layer), the ancestor's ref
+    // hasn't been attached yet at this point and `host.current` is
+    // `null`. `requestAnimationFrame` defers until after the current
+    // commit completes — by then every ref in the tree is attached.
+    if (host.current) {
+      attach();
+    } else {
+      rafId = requestAnimationFrame(attach);
+    }
+
     // Capture-phase scroll catches scrolls in any ancestor (the host can
     // sit inside an arbitrary scroll container the consumer owns) AND
     // the host element itself when it scrolls its own content —
@@ -148,6 +168,7 @@ export const PresenceLayer = ({
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
+      if (rafId !== 0) cancelAnimationFrame(rafId);
       ro?.disconnect();
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);

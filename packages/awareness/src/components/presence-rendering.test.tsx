@@ -249,6 +249,77 @@ describe("presence components", () => {
     });
   });
 
+  it("measures the host on the next frame when its ref is on an ancestor of the layer", async () => {
+    const user = createUser("1", { name: "Ancestor" });
+
+    const HOST_LEFT = 60;
+    const HOST_TOP = 90;
+
+    // Stories wrap `<PresenceLayer>` *inside* the host div, so
+    // `host.current` is `null` when the layer's layout effect runs
+    // (parent host refs attach after their children's layout effects).
+    // The layer must defer measurement to the next frame instead of
+    // bailing — otherwise the offset stays at (0,0) and overlays
+    // render at the viewport top-left.
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <div
+          ref={(el) => {
+            if (!el) return;
+            hostRef.current = el;
+            el.getBoundingClientRect = () =>
+              ({
+                left: HOST_LEFT,
+                top: HOST_TOP,
+                right: HOST_LEFT + 200,
+                bottom: HOST_TOP + 100,
+                width: 200,
+                height: 100,
+                x: HOST_LEFT,
+                y: HOST_TOP,
+                toJSON() {
+                  return {};
+                },
+              }) as DOMRect;
+          }}
+        >
+          <PresenceLayer host={hostRef}>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+          </PresenceLayer>
+        </div>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    // Flush the rAF the layer scheduled when it found host.current
+    // null. jsdom's rAF resolves on the next microtask boundary, so a
+    // single `act` tick is enough to surface the re-render.
+    await act(async () => {
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => resolve(null)),
+      );
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    // host(60, 90) + point(5, 7) = (65, 97)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(65px, 97px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("folds host.scrollLeft/scrollTop into the offset when trackHostScroll is set", async () => {
     const user = createUser("1", { name: "Scrollie" });
 

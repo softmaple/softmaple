@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,9 @@ import { ActivityIndicator } from "./activity-indicator";
 import { LiveCursor } from "./live-cursor";
 import { PresenceAvatar } from "./presence-avatar";
 import { PresenceBar } from "./presence-bar";
+import { PresenceLayer } from "./presence-layer";
 import { SelectionHighlight } from "./selection-highlight";
+import { InTestLayer } from "./test-utils";
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -98,15 +100,19 @@ describe("presence components", () => {
     const user = createUser("1", { name: "Grace" });
 
     const cursorHtml = renderToStaticMarkup(
-      <LiveCursor point={{ x: 12, y: 24 }} user={user} />,
+      <InTestLayer>
+        <LiveCursor point={{ x: 12, y: 24 }} user={user} />
+      </InTestLayer>,
     );
     const selectionHtml = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 4, y: 8, width: 120, height: 20 }}
-        selectedText="shared note"
-        showLabel
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 4, y: 8, width: 120, height: 20 }}
+          selectedText="shared note"
+          showLabel
+          user={user}
+        />
+      </InTestLayer>,
     );
 
     expect(cursorHtml).toContain("translate3d(12px, 24px, 0)");
@@ -133,17 +139,21 @@ describe("presence components", () => {
     const user = createUser("1", { name: "Grace" });
 
     const undefinedHtml = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          user={user}
+        />
+      </InTestLayer>,
     );
     const emptyHtml = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        selectedText=""
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          selectedText=""
+          user={user}
+        />
+      </InTestLayer>,
     );
 
     expect(undefinedHtml).toContain('aria-label="Grace selection"');
@@ -157,15 +167,128 @@ describe("presence components", () => {
     const longText = "a".repeat(200);
 
     const html = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        selectedText={longText}
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          selectedText={longText}
+          user={user}
+        />
+      </InTestLayer>,
     );
 
     expect(html).toContain(`Grace selection: ${"a".repeat(120)}…`);
     expect(html).not.toContain("a".repeat(121));
+  });
+
+  it("translates host-local cursor and selection coordinates by the layer offset", async () => {
+    const user = createUser("1", { name: "Hostie" });
+
+    const HOST_LEFT = 40;
+    const HOST_TOP = 80;
+    // jsdom's `getBoundingClientRect` is hard-coded to 0/0, so override
+    // the host element's per-instance to simulate it sitting at (40, 80).
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div
+            ref={(el) => {
+              if (!el) return;
+              hostRef.current = el;
+              el.getBoundingClientRect = () =>
+                ({
+                  left: HOST_LEFT,
+                  top: HOST_TOP,
+                  right: HOST_LEFT + 200,
+                  bottom: HOST_TOP + 100,
+                  width: 200,
+                  height: 100,
+                  x: HOST_LEFT,
+                  y: HOST_TOP,
+                  toJSON() {
+                    return {};
+                  },
+                }) as DOMRect;
+            }}
+          />
+          <PresenceLayer host={hostRef}>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+            <SelectionHighlight
+              rect={{ x: 10, y: 12, width: 30, height: 18 }}
+              user={user}
+            />
+          </PresenceLayer>
+        </>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    const selection = container.querySelector(".awareness-selection-highlight");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    expect(selection).toBeInstanceOf(HTMLElement);
+
+    // 5 + 40 = 45, 7 + 80 = 87
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(45px, 87px, 0)",
+    );
+    // 10 + 40 = 50, 12 + 80 = 92
+    expect((selection as HTMLElement).style.transform).toBe(
+      "translate3d(50px, 92px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("warns once when LiveCursor or SelectionHighlight is rendered without a PresenceLayer", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const user = createUser("1", { name: "Lone" });
+
+    // Rendered without an <InTestLayer> wrapper — both components should
+    // bail out and emit a single dev warning naming themselves. The
+    // dedupe set inside `presence-layer.tsx` is module-scoped so the
+    // second render of the same component must NOT re-warn.
+    const cursorHtml = renderToStaticMarkup(
+      <LiveCursor point={{ x: 0, y: 0 }} user={user} />,
+    );
+    const cursorHtmlAgain = renderToStaticMarkup(
+      <LiveCursor point={{ x: 1, y: 1 }} user={user} />,
+    );
+    const selectionHtml = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        user={user}
+      />,
+    );
+    const selectionHtmlAgain = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        user={user}
+      />,
+    );
+
+    expect(cursorHtml).toBe("");
+    expect(cursorHtmlAgain).toBe("");
+    expect(selectionHtml).toBe("");
+    expect(selectionHtmlAgain).toBe("");
+
+    const messages = warn.mock.calls.map((args) => String(args[0] ?? ""));
+    expect(messages.filter((m) => m.includes("<LiveCursor>"))).toHaveLength(1);
+    expect(
+      messages.filter((m) => m.includes("<SelectionHighlight>")),
+    ).toHaveLength(1);
+    expect(messages[0]).toContain("PresenceLayer");
+
+    warn.mockRestore();
   });
 
   it("hides the initial LiveCursor label after the configured timeout", async () => {
@@ -177,11 +300,13 @@ describe("presence components", () => {
 
     await act(async () => {
       root.render(
-        <LiveCursor
-          labelVisibleMs={100}
-          point={{ x: 12, y: 24 }}
-          user={user}
-        />,
+        <InTestLayer>
+          <LiveCursor
+            labelVisibleMs={100}
+            point={{ x: 12, y: 24 }}
+            user={user}
+          />
+        </InTestLayer>,
       );
     });
 

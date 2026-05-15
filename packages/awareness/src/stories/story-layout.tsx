@@ -1,4 +1,9 @@
-import type { CSSProperties, ReactNode } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+  useRef,
+} from "react";
 
 const pokeballSvg =
   "url(\"data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' fill='none' stroke='%23ef4444' stroke-width='2'%3E%3Ccircle cx='100' cy='100' r='90'/%3E%3Cpath d='M10 100h70a20 20 0 0 1 40 0h70'/%3E%3Ccircle cx='100' cy='100' r='18'/%3E%3Ccircle cx='100' cy='100' r='10' fill='%23ef4444'/%3E%3C/svg%3E\")";
@@ -213,42 +218,58 @@ export const StoryShowcase = ({
   </StoryFrame>
 );
 
+/**
+ * `children` may be either a static `ReactNode` (rendered as a direct
+ * child of the surface) or a function that receives a ref to the
+ * surface div. The function form lets stories wrap awareness overlays in
+ * a `<PresenceLayer host={surfaceRef}>` while still rendering other
+ * absolute-positioned content (presence rail, block badge, etc.) as
+ * direct children, so those overlays' positioning context stays the
+ * surface and not the fixed PresenceLayer.
+ */
+export type CollaborationSurfaceChildren =
+  | ReactNode
+  | ((surfaceRef: RefObject<HTMLDivElement | null>) => ReactNode);
+
 export const CollaborationSurface = ({
   children,
 }: {
-  readonly children: ReactNode;
-}): ReactNode => (
-  <StoryShowcase
-    eyebrow="Pokédex · Live Editing"
-    subtitle="A shared Pokédex draft updated in real time. Cursors and selections show where each trainer is focused."
-    title="Field Notes — collaborative draft"
-  >
-    <div style={surfaceStyle}>
-      <div style={surfaceChromeStyle}>
-        <span aria-hidden="true" style={trafficLightStyle}>
-          <span style={dot("#ef4444")} />
-          <span style={dot("#f59e0b")} />
-          <span style={dot("#22c55e")} />
-        </span>
-        <span>Pokédex Draft · v0.3</span>
+  readonly children: CollaborationSurfaceChildren;
+}): ReactNode => {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  return (
+    <StoryShowcase
+      eyebrow="Pokédex · Live Editing"
+      subtitle="A shared Pokédex draft updated in real time. Cursors and selections show where each trainer is focused."
+      title="Field Notes — collaborative draft"
+    >
+      <div ref={surfaceRef} style={surfaceStyle}>
+        <div style={surfaceChromeStyle}>
+          <span aria-hidden="true" style={trafficLightStyle}>
+            <span style={dot("#ef4444")} />
+            <span style={dot("#f59e0b")} />
+            <span style={dot("#22c55e")} />
+          </span>
+          <span>Pokédex Draft · v0.3</span>
+        </div>
+        <div style={pageContentStyle}>
+          <p style={docMetaStyle}>Entry · Genus · Habitat</p>
+          <h3 style={docHeadingStyle}>Field guide: tracking wild encounters</h3>
+          <p style={paragraphStyle}>
+            Collaborative editing keeps each trainer visible without pulling
+            focus from the page. Remote cursors anchor activity to the text.
+          </p>
+          <p style={paragraphStyle}>
+            Selections highlight the passage a teammate is reviewing, while
+            avatars summarize who is currently in the document.
+          </p>
+          <p style={paragraphStyle}>
+            Presence updates independently from content, so the page stays
+            responsive even during long research sessions in the tall grass.
+          </p>
+        </div>
+        {typeof children === "function" ? children(surfaceRef) : children}
       </div>
-      <div style={pageContentStyle}>
-        <p style={docMetaStyle}>Entry · Genus · Habitat</p>
-        <h3 style={docHeadingStyle}>Field guide: tracking wild encounters</h3>
-        <p style={paragraphStyle}>
-          Collaborative editing keeps each trainer visible without pulling focus
-          from the page. Remote cursors anchor activity to the text.
-        </p>
-        <p style={paragraphStyle}>
-          Selections highlight the passage a teammate is reviewing, while
-          avatars summarize who is currently in the document.
-        </p>
-        <p style={paragraphStyle}>
-          Presence updates independently from content, so the page stays
-          responsive even during long research sessions in the tall grass.
-        </p>
-      </div>
-      {children}
-    </div>
-  </StoryShowcase>
-);
+    </StoryShowcase>
+  );
+};

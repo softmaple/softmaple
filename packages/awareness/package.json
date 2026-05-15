@@ -35,6 +35,10 @@
       "types": "./dist/components/presence-bar.d.ts",
       "import": "./dist/components/presence-bar.js"
     },
+    "./components/presence-layer": {
+      "types": "./dist/components/presence-layer.d.ts",
+      "import": "./dist/components/presence-layer.js"
+    },
     "./components/selection-highlight": {
       "types": "./dist/components/selection-highlight.d.ts",
       "import": "./dist/components/selection-highlight.js"

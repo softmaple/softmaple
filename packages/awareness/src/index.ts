@@ -41,8 +41,13 @@ export {
   type PresenceAvatarSize,
   PresenceBar,
   type PresenceBarProps,
+  PresenceLayer,
+  PresenceLayerContext,
+  type PresenceLayerOffset,
+  type PresenceLayerProps,
   SelectionHighlight,
   type SelectionHighlightProps,
+  usePresenceLayerOffset,
 } from "./components";
 export {
   type PeerCursor,

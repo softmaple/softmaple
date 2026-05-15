@@ -1,6 +1,10 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, toUserColorStyle } from "./internal-utils";
+import {
+  usePresenceLayerOffset,
+  warnMissingPresenceLayerOnce,
+} from "./presence-layer";
 
 export interface LiveCursorPoint {
   readonly x: number;
@@ -30,7 +34,16 @@ export interface LiveCursorProps {
   readonly user: PresenceUser;
   readonly point: LiveCursorPoint;
   readonly labelVisibleMs?: number;
-  readonly showLabel?: boolean;
+  /**
+   * Controls how the user label is presented.
+   * - `true` (default): label shows on mount and after every move, then
+   *   auto-hides after `labelVisibleMs`.
+   * - `false`: label is never rendered.
+   * - `"hover"`: label is hidden until the caret is hovered or keyboard-
+   *   focused — matches the same opt-in pattern used by
+   *   `SelectionHighlight` (design doc §5.3 "Hover reveals user badge").
+   */
+  readonly showLabel?: boolean | "hover";
   readonly className?: string;
   /**
    * Bounds used for off-screen culling. Defaults to the current window.
@@ -83,8 +96,20 @@ export const LiveCursor = ({
   viewport = "window",
   cullMargin = 32,
 }: LiveCursorProps): ReactNode => {
-  const [isLabelVisible, setIsLabelVisible] = useState(showLabel);
+  const isHoverLabel = showLabel === "hover";
+  const renderLabel = showLabel === true || isHoverLabel;
+  // Auto-fade only applies to the always-on label. The hover variant lets
+  // CSS :hover / :focus-visible drive opacity, so we don't toggle the
+  // `--label-visible` class for it.
+  const [isLabelVisible, setIsLabelVisible] = useState(showLabel === true);
   const previousPointRef = useRef(point);
+
+  // `LiveCursor` requires a `<PresenceLayer>` ancestor — the layer owns the
+  // host's bounding rect, which is the only sane reference frame for
+  // overlay coordinates. Without one, the cursor would render at the
+  // wrong position (the original bug class this API was introduced to
+  // remove), so we render nothing instead.
+  const layerOffset = usePresenceLayerOffset();
 
   // Re-evaluate window-based culling on resize so cursors near the edge
   // cull/uncull correctly without waiting for the next pointer move.
@@ -100,8 +125,11 @@ export const LiveCursor = ({
     };
   }, [viewport]);
 
+  // `point.x` / `point.y` are intentional dependencies: every move re-arms
+  // the auto-fade so the label re-appears at the new location, matching
+  // design §6 ("label visible while cursor is active, then fades").
   useEffect(() => {
-    if (!showLabel) {
+    if (showLabel !== true) {
       setIsLabelVisible(false);
       return;
     }
@@ -123,7 +151,16 @@ export const LiveCursor = ({
     };
   }, [labelVisibleMs, point.x, point.y, showLabel]);
 
-  if (!isPointInViewport(point, viewport, cullMargin)) {
+  if (layerOffset === null) {
+    warnMissingPresenceLayerOnce("LiveCursor");
+    return null;
+  }
+  const screenPoint = {
+    x: point.x + layerOffset.left,
+    y: point.y + layerOffset.top,
+  };
+
+  if (!isPointInViewport(screenPoint, viewport, cullMargin)) {
     return null;
   }
 
@@ -133,16 +170,23 @@ export const LiveCursor = ({
       className={cx(
         "awareness-live-cursor",
         isLabelVisible && "awareness-live-cursor--label-visible",
+        isHoverLabel && "awareness-live-cursor--hoverable",
         className,
       )}
       role="img"
       style={{
         ...toUserColorStyle(user.color),
-        transform: `translate3d(${point.x}px, ${point.y}px, 0)`,
+        transform: `translate3d(${screenPoint.x}px, ${screenPoint.y}px, 0)`,
       }}
+      // Hover variant is keyboard-discoverable: focusing the caret reveals
+      // the user badge via CSS `:focus-visible`. Each visible peer adds one
+      // tab stop — intentional, so screen-reader / keyboard users can
+      // inspect attribution without a pointer. Mirrors the same pattern in
+      // `SelectionHighlight`.
+      tabIndex={isHoverLabel ? 0 : undefined}
     >
       <span aria-hidden="true" className="awareness-live-cursor__caret" />
-      {showLabel ? (
+      {renderLabel ? (
         <span className="awareness-live-cursor__label">{user.name}</span>
       ) : null}
     </div>

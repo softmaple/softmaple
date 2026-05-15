@@ -7,6 +7,7 @@ import { BlockActivityIndicator } from "../components/block-activity-indicator";
 import { ConnectionIndicator } from "../components/connection-indicator";
 import { LiveCursor } from "../components/live-cursor";
 import { PresenceBar } from "../components/presence-bar";
+import { PresenceLayer } from "../components/presence-layer";
 import { SelectionHighlight } from "../components/selection-highlight";
 import type { PresenceUser } from "../types/presence";
 import {
@@ -91,44 +92,61 @@ type Story = StoryObj<typeof meta>;
 export const TrainerHuddle: Story = {
   render: () => (
     <CollaborationSurface>
-      <div style={overlayLayerStyle}>
-        <div style={topRailStyle}>
-          <PresenceBar maxVisible={5} users={collaborators} />
-          <ConnectionIndicator hideWhenConnected={false} state="reconnecting" />
-        </div>
-        <SelectionHighlight
-          rect={{ x: 36, y: 36, width: 172, height: 24 }}
-          selectedText="Collaborative editing keeps"
-          showLabel
-          user={inBlock(charmander, SHARED_BLOCK_ID)}
-        />
-        <LiveCursor
-          labelVisibleMs={60_000}
-          point={{ x: 184, y: 130 }}
-          user={inBlock(pikachu, SHARED_BLOCK_ID)}
-          viewport="none"
-        />
-        <LiveCursor
-          labelVisibleMs={60_000}
-          point={{ x: 96, y: 184 }}
-          showLabel={false}
-          user={inBlock(bulbasaur, SHARED_BLOCK_ID)}
-          viewport="none"
-        />
-        <div style={blockBadgePositionStyle}>
-          <BlockActivityIndicator
-            blockId={SHARED_BLOCK_ID}
-            users={blockUsers}
-          />
-        </div>
-      </div>
-      <div style={activityFootnoteStyle}>
-        <ActivityIndicator
-          activities={recentActivities}
-          maxItems={3}
-          users={usersById}
-        />
-      </div>
+      {(surfaceRef) => (
+        <>
+          {/* Non-overlay UI (presence rail, block badge) keeps the
+           *  surface as its positioning context — they intentionally use
+           *  position:absolute relative to the surface div. */}
+          <div style={overlayLayerStyle}>
+            <div style={topRailStyle}>
+              <PresenceBar maxVisible={5} users={collaborators} />
+              <ConnectionIndicator
+                hideWhenConnected={false}
+                state="reconnecting"
+              />
+            </div>
+            <div style={blockBadgePositionStyle}>
+              <BlockActivityIndicator
+                blockId={SHARED_BLOCK_ID}
+                users={blockUsers}
+              />
+            </div>
+          </div>
+          {/* Cursors and selections go inside the PresenceLayer so their
+           *  host-local coordinates get translated against the surface.
+           *  y≈134 lands on paragraph 1 line 1 inside the demo surface
+           *  (chrome ~37px + page-content padding 26px push the prose
+           *  down from the surface's top-left). */}
+          <PresenceLayer host={surfaceRef}>
+            <SelectionHighlight
+              rect={{ x: 32, y: 134, width: 172, height: 24 }}
+              selectedText="Collaborative editing keeps"
+              showLabel
+              user={inBlock(charmander, SHARED_BLOCK_ID)}
+            />
+            <LiveCursor
+              labelVisibleMs={60_000}
+              point={{ x: 208, y: 134 }}
+              user={inBlock(pikachu, SHARED_BLOCK_ID)}
+              viewport="none"
+            />
+            <LiveCursor
+              labelVisibleMs={60_000}
+              point={{ x: 96, y: 196 }}
+              showLabel={false}
+              user={inBlock(bulbasaur, SHARED_BLOCK_ID)}
+              viewport="none"
+            />
+          </PresenceLayer>
+          <div style={activityFootnoteStyle}>
+            <ActivityIndicator
+              activities={recentActivities}
+              maxItems={3}
+              users={usersById}
+            />
+          </div>
+        </>
+      )}
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
@@ -178,27 +196,33 @@ export const SoloEditor: Story = {
     };
     return (
       <CollaborationSurface>
-        <div style={overlayLayerStyle}>
-          <div style={topRailStyle}>
-            <PresenceBar
-              maxVisible={5}
-              users={[lonelyEditor, { ...pikachu, status: "offline" }]}
-            />
-            <ConnectionIndicator state="connected" />
-          </div>
-          <LiveCursor
-            labelVisibleMs={60_000}
-            point={{ x: 220, y: 118 }}
-            user={lonelyEditor}
-            viewport="none"
-          />
-          <div style={blockBadgePositionStyle}>
-            <BlockActivityIndicator
-              blockId={SHARED_BLOCK_ID}
-              users={[lonelyEditor]}
-            />
-          </div>
-        </div>
+        {(surfaceRef) => (
+          <>
+            <div style={overlayLayerStyle}>
+              <div style={topRailStyle}>
+                <PresenceBar
+                  maxVisible={5}
+                  users={[lonelyEditor, { ...pikachu, status: "offline" }]}
+                />
+                <ConnectionIndicator state="connected" />
+              </div>
+              <div style={blockBadgePositionStyle}>
+                <BlockActivityIndicator
+                  blockId={SHARED_BLOCK_ID}
+                  users={[lonelyEditor]}
+                />
+              </div>
+            </div>
+            <PresenceLayer host={surfaceRef}>
+              <LiveCursor
+                labelVisibleMs={60_000}
+                point={{ x: 220, y: 134 }}
+                user={lonelyEditor}
+                viewport="none"
+              />
+            </PresenceLayer>
+          </>
+        )}
       </CollaborationSurface>
     );
   },

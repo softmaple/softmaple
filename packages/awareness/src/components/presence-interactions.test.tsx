@@ -26,6 +26,7 @@ import type { PresenceUser } from "../types/presence";
 import { BlockActivityIndicator } from "./block-activity-indicator";
 import { LiveCursor } from "./live-cursor";
 import { SelectionHighlight } from "./selection-highlight";
+import { InTestLayer } from "./test-utils";
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -52,33 +53,41 @@ afterEach(() => {
 describe("LiveCursor off-screen culling (design §7)", () => {
   it("renders when point is inside the window viewport", () => {
     const html = renderToStaticMarkup(
-      <LiveCursor point={{ x: 100, y: 100 }} user={user("a")} />,
+      <InTestLayer>
+        <LiveCursor point={{ x: 100, y: 100 }} user={user("a")} />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-live-cursor");
   });
 
   it("returns null when point is far outside the window viewport", () => {
     const html = renderToStaticMarkup(
-      <LiveCursor point={{ x: 999_999, y: 999_999 }} user={user("a")} />,
+      <InTestLayer>
+        <LiveCursor point={{ x: 999_999, y: 999_999 }} user={user("a")} />
+      </InTestLayer>,
     );
     expect(html).toBe("");
   });
 
   it("honors an explicit viewport rect", () => {
     const inside = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 50, y: 50 }}
-        user={user("a")}
-        viewport={{ x: 0, y: 0, width: 200, height: 200 }}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 50, y: 50 }}
+          user={user("a")}
+          viewport={{ x: 0, y: 0, width: 200, height: 200 }}
+        />
+      </InTestLayer>,
     );
     const outside = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 500, y: 500 }}
-        user={user("a")}
-        cullMargin={0}
-        viewport={{ x: 0, y: 0, width: 200, height: 200 }}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 500, y: 500 }}
+          user={user("a")}
+          cullMargin={0}
+          viewport={{ x: 0, y: 0, width: 200, height: 200 }}
+        />
+      </InTestLayer>,
     );
     expect(inside).toContain("awareness-live-cursor");
     expect(outside).toBe("");
@@ -86,11 +95,13 @@ describe("LiveCursor off-screen culling (design §7)", () => {
 
   it('never culls when viewport="none"', () => {
     const html = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 999_999, y: 999_999 }}
-        user={user("a")}
-        viewport="none"
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 999_999, y: 999_999 }}
+          user={user("a")}
+          viewport="none"
+        />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-live-cursor");
   });
@@ -103,56 +114,63 @@ describe("LiveCursor off-screen culling (design §7)", () => {
     document.body.append(container);
     const root = createRoot(container);
 
-    await act(async () => {
-      root.render(
-        <LiveCursor
-          cullMargin={0}
-          point={{ x: 400, y: 400 }}
-          user={user("a")}
-        />,
-      );
-    });
-    expect(container.querySelector(".awareness-live-cursor")).not.toBeNull();
+    try {
+      await act(async () => {
+        root.render(
+          <InTestLayer>
+            <LiveCursor
+              cullMargin={0}
+              point={{ x: 400, y: 400 }}
+              user={user("a")}
+            />
+          </InTestLayer>,
+        );
+      });
+      expect(container.querySelector(".awareness-live-cursor")).not.toBeNull();
 
-    // Shrink the window and dispatch resize — cursor should re-evaluate
-    // and cull itself without any pointer movement.
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 100,
-    });
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 100,
-    });
-    await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-    });
+      // Shrink the window and dispatch resize — cursor should re-evaluate
+      // and cull itself without any pointer movement.
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 100,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 100,
+      });
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+      });
 
-    expect(container.querySelector(".awareness-live-cursor")).toBeNull();
+      expect(container.querySelector(".awareness-live-cursor")).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
 
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: originalInnerWidth,
-    });
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: originalInnerHeight,
-    });
-
-    await act(async () => {
-      root.unmount();
-    });
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
   });
 });
 
 describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
   it('adds hoverable class when showLabel="hover"', () => {
     const html = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        showLabel="hover"
-        user={user("a", { name: "Hover" })}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          showLabel="hover"
+          user={user("a", { name: "Hover" })}
+        />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-selection-highlight--hoverable");
     expect(html).toContain("Hover");
@@ -161,14 +179,64 @@ describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
 
   it("does not add hoverable class for boolean showLabel", () => {
     const truthy = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        showLabel
-        user={user("a", { name: "Vis" })}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          showLabel
+          user={user("a", { name: "Vis" })}
+        />
+      </InTestLayer>,
     );
     expect(truthy).not.toContain("awareness-selection-highlight--hoverable");
     expect(truthy).toContain("Vis");
+  });
+});
+
+describe("LiveCursor hover-to-reveal label (design §5.3)", () => {
+  it('adds hoverable class, tabindex, and renders label when showLabel="hover"', () => {
+    const html = renderToStaticMarkup(
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 0, y: 0 }}
+          showLabel="hover"
+          user={user("a", { name: "HoverCaret" })}
+        />
+      </InTestLayer>,
+    );
+    expect(html).toContain("awareness-live-cursor--hoverable");
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain("HoverCaret");
+    // Hoverable cursors don't get the always-on label-visible class —
+    // CSS :hover/:focus-visible drives opacity instead.
+    expect(html).not.toContain("awareness-live-cursor--label-visible");
+  });
+
+  it("does not add hoverable class for boolean showLabel", () => {
+    const truthy = renderToStaticMarkup(
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 0, y: 0 }}
+          showLabel
+          user={user("a", { name: "VisCaret" })}
+        />
+      </InTestLayer>,
+    );
+    expect(truthy).not.toContain("awareness-live-cursor--hoverable");
+    expect(truthy).toContain("VisCaret");
+
+    const hidden = renderToStaticMarkup(
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 0, y: 0 }}
+          showLabel={false}
+          user={user("a", { name: "HiddenCaret" })}
+        />
+      </InTestLayer>,
+    );
+    expect(hidden).not.toContain("awareness-live-cursor--hoverable");
+    // The label span itself isn't rendered when showLabel={false}; the
+    // name still appears inside the aria-label, which is expected.
+    expect(hidden).not.toContain("awareness-live-cursor__label");
   });
 });
 

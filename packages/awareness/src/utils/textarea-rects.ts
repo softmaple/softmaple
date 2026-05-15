@@ -134,14 +134,15 @@ export const getTextareaCaretRect = (
     mirror.textContent = textarea.value.substring(0, position);
 
     const marker = doc.createElement("span");
-    // Use a zero-width space when the caret is at end-of-text so the
-    // browser still lays the marker out (an empty span has no box) but
-    // the marker contributes zero width to `offsetLeft` — a literal
+    // Use a zero-width space (U+200B) when the caret is at end-of-text so
+    // the browser still lays the marker out (an empty span has no box)
+    // but the marker contributes zero width to `offsetLeft` — a literal
     // `"."` would shift the measured caret right by one glyph at the
     // end of a line. Mid-text, the remaining text itself gives the
-    // marker its box.
+    // marker its box. Spelled as an escape (rather than the literal
+    // invisible char) so editors / sanitizers can't silently strip it.
     const tail = textarea.value.substring(position);
-    marker.textContent = tail.length > 0 ? tail : "​";
+    marker.textContent = tail.length > 0 ? tail : "\u200B";
     mirror.appendChild(marker);
 
     // `lineHeight` is often `"normal"`; fall back to `fontSize`, then

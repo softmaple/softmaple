@@ -76,6 +76,10 @@ export function EditorSurface({
   // where `text` differs from the live DOM value, write it and restore
   // the caret. Mid-composition we skip the write so we never collapse an
   // in-progress IME composition.
+  // `composingRef` is intentionally NOT in the dependency array — it's a
+  // ref, and we read its current value at effect time. Adding it would
+  // do nothing (refs don't trigger re-renders) and removing the
+  // `composingRef.current` guard would re-introduce the IME collapse bug.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;

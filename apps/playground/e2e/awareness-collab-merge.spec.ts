@@ -21,7 +21,7 @@ test.describe("Awareness collab demo - CRDT merge", () => {
     await context.close();
   });
 
-  test("tab B appending to tab A's text merges in order", async () => {
+  const seedTwoTabs = async () => {
     const pageA = await context.newPage();
     await pageA.goto("/demo/awareness-collab");
     await pageA.waitForLoadState("networkidle");
@@ -36,23 +36,47 @@ test.describe("Awareness collab demo - CRDT merge", () => {
     const textB = pageB.locator("textarea").first();
     await expect(textB).toBeVisible();
 
+    return { pageA, textA, pageB, textB };
+  };
+
+  test("tab B appending to tab A's text merges in order (explicit caret)", async () => {
+    const { pageA, textA, textB } = await seedTwoTabs();
+
     await textA.click();
     await pageA.keyboard.type("Hello", { delay: 20 });
     await expect(textB).toHaveValue("Hello");
-
-    // Settle the snapshot/event broadcasts.
     await pageA.waitForTimeout(100);
 
-    // Focus tab B and explicitly position the caret at end-of-text.
-    // (A plain `textB.click()` in the textarea center hits empty area
-    // and Chromium leaves the caret at 0 in this layout — that's not
-    // what we're regression-testing here.)
+    // Explicitly position the caret at end-of-text. Catches regressions
+    // where the React commit overwrites `el.value` and resets the caret
+    // between renders.
     await textB.focus();
     await textB.evaluate((el: HTMLTextAreaElement) => {
       el.setSelectionRange(el.value.length, el.value.length);
     });
 
     await textB.pressSequentially(" world", { delay: 20 });
+
+    await expect(textA).toHaveValue("Hello world");
+    await expect(textB).toHaveValue("Hello world");
+  });
+
+  test("tab B appending via click + End merges in order (user-flow caret)", async () => {
+    const { pageA, textA, pageB, textB } = await seedTwoTabs();
+
+    await textA.click();
+    await pageA.keyboard.type("Hello", { delay: 20 });
+    await expect(textB).toHaveValue("Hello");
+    await pageA.waitForTimeout(100);
+
+    // User-level path: click into the textarea, press End to move to
+    // end-of-text, then type. Exercises the same bug at the layer the
+    // user actually hits — if React ever re-introduces a `value` /
+    // `defaultValue` overwrite, the caret will reset between End and
+    // the next keystroke and this test will fail.
+    await textB.click();
+    await pageB.keyboard.press("End");
+    await pageB.keyboard.type(" world", { delay: 20 });
 
     await expect(textA).toHaveValue("Hello world");
     await expect(textB).toHaveValue("Hello world");

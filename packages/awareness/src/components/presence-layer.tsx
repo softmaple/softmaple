@@ -159,6 +159,11 @@ export const PresenceLayer = ({
     let rafId = 0;
 
     const attach = (): void => {
+      // Clear the deferred handle so cleanup doesn't try to cancel an
+      // already-fired rAF — `cancelAnimationFrame` on a stale id is
+      // technically a no-op in browsers, but the explicit reset
+      // documents the lifecycle.
+      rafId = 0;
       const el = host.current;
       if (!el) return;
       update();

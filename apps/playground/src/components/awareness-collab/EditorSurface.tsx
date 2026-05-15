@@ -17,9 +17,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { caretCoordinates } from "@/modules/awareness-collab/caret-coordinates";
 import { BlockActivityBadge } from "./BlockActivityBadge";
 
-const BLOCK_ID = "awareness-collab-doc";
+/**
+ * Shared block id for the demo's single editable surface. Exported so the
+ * route owner can pass the same id back to the CRDT/sync layer without
+ * having to redeclare it.
+ */
+export const COLLAB_BLOCK_ID = "awareness-collab-doc";
 
 interface EditorSurfaceProps {
+  readonly blockId: string;
   readonly text: string;
   readonly onTextChange: (newText: string) => void;
   readonly textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -27,6 +33,7 @@ interface EditorSurfaceProps {
 }
 
 export function EditorSurface({
+  blockId,
   text,
   onTextChange,
   textareaRef,
@@ -73,10 +80,10 @@ export function EditorSurface({
     const el = textareaRef.current;
     if (!el) return;
     const { selectionStart, selectionEnd } = el;
-    updateCursor({ blockId: BLOCK_ID, offset: selectionEnd });
+    updateCursor({ blockId: blockId, offset: selectionEnd });
     if (selectionStart !== selectionEnd) {
       const range: SelectionRange = {
-        blockId: BLOCK_ID,
+        blockId: blockId,
         from: selectionStart,
         to: selectionEnd,
       };
@@ -148,7 +155,7 @@ export function EditorSurface({
           <p className="text-xs uppercase tracking-widest text-cyan-400 font-semibold">
             Pokédex · Shared Field Notes
           </p>
-          <BlockActivityBadge blockId={BLOCK_ID} />
+          <BlockActivityBadge blockId={blockId} />
         </div>
         <textarea
           ref={textareaRef}
@@ -172,7 +179,7 @@ export function EditorSurface({
           className="pointer-events-none fixed inset-0 z-30"
         >
           {others.map((peer) => {
-            if (peer.cursor && peer.cursor.blockId === BLOCK_ID) {
+            if (peer.cursor && peer.cursor.blockId === blockId) {
               const point = pointFor(peer.cursor.offset);
               if (!point) return null;
               return (
@@ -186,7 +193,7 @@ export function EditorSurface({
             return null;
           })}
           {others.map((peer) => {
-            if (peer.selection && peer.selection.blockId === BLOCK_ID) {
+            if (peer.selection && peer.selection.blockId === blockId) {
               const rect = rectFor(peer.selection);
               if (!rect) return null;
               const selectedText = text.slice(

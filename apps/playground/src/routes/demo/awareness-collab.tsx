@@ -1,8 +1,15 @@
-import { EgWalkerReplica } from "@softmaple/eg-walker";
+import {
+  EgWalkerReplica,
+  type EventId,
+  type GraphEvent,
+} from "@softmaple/eg-walker";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AwarenessOverlay } from "@/components/awareness-collab/AwarenessOverlay";
-import { EditorSurface } from "@/components/awareness-collab/EditorSurface";
+import {
+  COLLAB_BLOCK_ID,
+  EditorSurface,
+} from "@/components/awareness-collab/EditorSurface";
 import { TrainerPicker } from "@/components/awareness-collab/TrainerPicker";
 import {
   findDeletePosition,
@@ -28,11 +35,32 @@ function AwarenessCollabDemo() {
   return <CollabSession trainerId={trainer} onLeave={() => setTrainer(null)} />;
 }
 
-interface SyncMessage {
-  readonly type: "eg-walker-event";
-  readonly senderId: string;
-  readonly event: unknown;
-}
+/**
+ * Cross-tab sync protocol. Three message shapes:
+ *
+ * - `event`     a single newly-produced event, broadcast as it happens.
+ * - `request`   a freshly-mounted tab asks peers for their event graph.
+ * - `snapshot`  a peer's reply to `request` carrying their full event graph.
+ *
+ * `recipientId` is set on `snapshot` so other already-synced tabs can ignore
+ * it cheaply. `request` and `event` are broadcast to all tabs in the room.
+ */
+type SyncMessage =
+  | {
+      readonly type: "event";
+      readonly senderId: string;
+      readonly event: GraphEvent;
+    }
+  | {
+      readonly type: "request";
+      readonly senderId: string;
+    }
+  | {
+      readonly type: "snapshot";
+      readonly senderId: string;
+      readonly recipientId: string;
+      readonly events: ReadonlyArray<GraphEvent>;
+    };
 
 function CollabSession({
   trainerId,
@@ -45,7 +73,11 @@ function CollabSession({
   const [replica] = useState(() => new EgWalkerReplica(userInfo.userId, ""));
   const [text, setText] = useState("");
   const broadcastRef = useRef<BroadcastChannel | null>(null);
-  const lastSentEventCountRef = useRef(0);
+  // Event IDs we've already published (either broadcast ourselves or
+  // received from a peer). Using IDs — rather than a graph-length index —
+  // means applying a remote event never causes us to re-broadcast it on the
+  // next local edit.
+  const publishedIdsRef = useRef<Set<EventId>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Separate BroadcastChannel for CRDT event sync. Awareness adapter
@@ -55,17 +87,54 @@ function CollabSession({
   useEffect(() => {
     const channel = new BroadcastChannel(SYNC_CHANNEL);
     broadcastRef.current = channel;
+    const selfId = userInfo.userId;
+
+    const acceptRemote = (event: GraphEvent): void => {
+      replica.applyRemoteEvent(event);
+      // Mark as published-from-elsewhere so our outbound loop doesn't
+      // bounce it back to peers.
+      publishedIdsRef.current.add(event.id);
+    };
 
     channel.onmessage = (e: MessageEvent<SyncMessage>) => {
       const msg = e.data;
-      if (msg.type !== "eg-walker-event") return;
-      if (msg.senderId === userInfo.userId) return;
-      // biome-ignore lint/suspicious/noExplicitAny: cross-tab payload
-      replica.applyRemoteEvent(msg.event as any);
-      const updated = replica.getText();
-      setText(updated);
-      // Receiving a remote event doesn't change our outgoing count.
+      if (msg.senderId === selfId) return;
+
+      switch (msg.type) {
+        case "event": {
+          acceptRemote(msg.event);
+          setText(replica.getText());
+          return;
+        }
+        case "request": {
+          // Reply only if we have anything to share. Multiple already-synced
+          // tabs may answer; the requester dedups by event id in the replica.
+          const events = replica.exportEventGraph();
+          if (events.length === 0) return;
+          channel.postMessage({
+            type: "snapshot",
+            senderId: selfId,
+            recipientId: msg.senderId,
+            events,
+          } satisfies SyncMessage);
+          return;
+        }
+        case "snapshot": {
+          if (msg.recipientId !== selfId) return;
+          for (const event of msg.events) {
+            acceptRemote(event);
+          }
+          setText(replica.getText());
+          return;
+        }
+      }
     };
+
+    // Ask any open tab for their event graph so we don't start at "".
+    channel.postMessage({
+      type: "request",
+      senderId: selfId,
+    } satisfies SyncMessage);
 
     return () => {
       channel.close();
@@ -73,21 +142,22 @@ function CollabSession({
     };
   }, [replica, userInfo.userId]);
 
-  // Sync any newly-produced local events to peers. Tracking the count
-  // means we only emit the latest delta per edit instead of resending
-  // the entire event graph.
+  // Broadcast events the replica has produced that we haven't shared yet.
+  // Tracking publication by id (rather than by graph length) keeps remote
+  // events from being echoed back.
   const broadcastNewEvents = useCallback(() => {
-    const events = replica.exportEventGraph();
     const channel = broadcastRef.current;
     if (!channel) return;
-    for (let i = lastSentEventCountRef.current; i < events.length; i++) {
+    const selfId = userInfo.userId;
+    for (const event of replica.exportEventGraph()) {
+      if (publishedIdsRef.current.has(event.id)) continue;
       channel.postMessage({
-        type: "eg-walker-event",
-        senderId: userInfo.userId,
-        event: events[i],
+        type: "event",
+        senderId: selfId,
+        event,
       } satisfies SyncMessage);
+      publishedIdsRef.current.add(event.id);
     }
-    lastSentEventCountRef.current = events.length;
   }, [replica, userInfo.userId]);
 
   const handleTextChange = useCallback(
@@ -158,6 +228,7 @@ function CollabSession({
 
         <AwarenessOverlay adapter={adapter} userInfo={userInfo}>
           <EditorSurface
+            blockId={COLLAB_BLOCK_ID}
             text={text}
             onTextChange={handleTextChange}
             textareaRef={textareaRef}

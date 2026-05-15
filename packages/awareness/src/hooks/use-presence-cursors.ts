@@ -1,5 +1,5 @@
 /**
- * useCursors hook - Convenience selector for rendering peer cursors.
+ * usePeerCursors hook - Convenience selector for rendering peer cursors.
  *
  * Returns only the other users (excluding self) that currently report a
  * cursor position, filtered to non-offline by default. This is the typical

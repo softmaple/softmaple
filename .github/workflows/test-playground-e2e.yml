@@ -42,8 +42,9 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm --filter @softmaple/playground exec playwright install chromium --with-deps
 
-      - name: Build eg-walker
-        run: pnpm --filter @softmaple/eg-walker build
+      # No upstream `pnpm --filter @softmaple/eg-walker build` step needed —
+      # the playground's `workspace-aliases.ts` resolves workspace packages
+      # straight to source.
 
       - name: Run E2E tests
         run: pnpm --filter @softmaple/playground test:e2e

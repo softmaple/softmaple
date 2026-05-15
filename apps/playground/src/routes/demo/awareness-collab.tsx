@@ -109,6 +109,15 @@ function CollabSession({
         case "request": {
           // Reply only if we have anything to share. Multiple already-synced
           // tabs may answer; the requester dedups by event id in the replica.
+          //
+          // Note: `exportEventGraph` returns only events that have been
+          // integrated into the graph. Remote events that are still buffered
+          // in the replica waiting on missing parents won't be in the
+          // snapshot. Convergence still holds — those buffered events were
+          // produced by some peer who is also in the room and will reply to
+          // the same `request` with their own (more complete) graph — but
+          // the requester may briefly observe a graph that lags behind its
+          // most-advanced peer.
           const events = replica.exportEventGraph();
           if (events.length === 0) return;
           channel.postMessage({

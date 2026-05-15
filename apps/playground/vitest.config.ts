@@ -1,7 +1,6 @@
 import * as path from "node:path";
 import { defineConfig } from "vitest/config";
-
-const fromHere = (p: string) => path.resolve(__dirname, p);
+import { workspaceAlias } from "./workspace-aliases";
 
 export default defineConfig({
   test: {
@@ -19,19 +18,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // Workspace packages have a `package.json#exports` pointing to `./dist`,
-      // but for the playground we resolve them straight to source so a fresh
-      // clone never has to build dependent packages before running tests.
-      // Keep this list in sync with the matching entries in vite.config.ts.
-      "@softmaple/awareness/styles.css": fromHere(
-        "../../packages/awareness/src/global.css",
-      ),
-      "@softmaple/awareness": fromHere(
-        "../../packages/awareness/src/index.ts",
-      ),
-      "@softmaple/eg-walker": fromHere(
-        "../../packages/eg-walker/src/index.ts",
-      ),
+      ...workspaceAlias,
       "@": path.resolve(__dirname, "./src"),
     },
   },

@@ -106,6 +106,17 @@ export function EditorSurface({
   // content right edge, full-width middle lines, last line from the
   // content left edge to `to.left`. A single bounding rect would paint a
   // giant block over unselected content between the wrap boundaries.
+  //
+  // The `Math.max(2, …)` floors below keep degenerate rects (collapsed
+  // ranges, caret at line edge) visible — 0-width rects would disappear
+  // and a 1px rect blends with the background.
+  //
+  // Assumes uniform line height (textarea has a single font/leading);
+  // the middle-line count uses `Math.round((end.top - start.top) /
+  // lineHeight) - 1`, which is robust for integer line heights but can
+  // drift off-by-one if the host has fractional `line-height` and the
+  // wrap span lands near a half-line boundary. Adequate for demo-grade
+  // textarea selections.
   const rectsFor = (range: SelectionRange): HighlightRect[] => {
     const el = textareaRef.current;
     if (!el) return [];

@@ -8,24 +8,9 @@ import { ActivityIndicator } from "./activity-indicator";
 import { LiveCursor } from "./live-cursor";
 import { PresenceAvatar } from "./presence-avatar";
 import { PresenceBar } from "./presence-bar";
-import {
-  PresenceLayer,
-  PresenceLayerContext,
-  type PresenceLayerOffset,
-} from "./presence-layer";
+import { PresenceLayer } from "./presence-layer";
 import { SelectionHighlight } from "./selection-highlight";
-
-// Tests that render `LiveCursor`/`SelectionHighlight` via SSR-style
-// `renderToStaticMarkup` can't go through `<PresenceLayer>` (its layout
-// effect doesn't fire under SSR), so they inject the context offset
-// directly. An identity offset {0, 0} satisfies the layer-required
-// guard without affecting the structural HTML the tests inspect.
-const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
-const InTestLayer = ({ children }: { children: React.ReactNode }) => (
-  <PresenceLayerContext.Provider value={IDENTITY_OFFSET}>
-    {children}
-  </PresenceLayerContext.Provider>
-);
+import { InTestLayer } from "./test-utils";
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -260,6 +245,48 @@ describe("presence components", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("warns once when LiveCursor or SelectionHighlight is rendered without a PresenceLayer", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const user = createUser("1", { name: "Lone" });
+
+    // Rendered without an <InTestLayer> wrapper — both components should
+    // bail out and emit a single dev warning naming themselves. The
+    // dedupe set inside `presence-layer.tsx` is module-scoped so the
+    // second render of the same component must NOT re-warn.
+    const cursorHtml = renderToStaticMarkup(
+      <LiveCursor point={{ x: 0, y: 0 }} user={user} />,
+    );
+    const cursorHtmlAgain = renderToStaticMarkup(
+      <LiveCursor point={{ x: 1, y: 1 }} user={user} />,
+    );
+    const selectionHtml = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        user={user}
+      />,
+    );
+    const selectionHtmlAgain = renderToStaticMarkup(
+      <SelectionHighlight
+        rect={{ x: 0, y: 0, width: 10, height: 10 }}
+        user={user}
+      />,
+    );
+
+    expect(cursorHtml).toBe("");
+    expect(cursorHtmlAgain).toBe("");
+    expect(selectionHtml).toBe("");
+    expect(selectionHtmlAgain).toBe("");
+
+    const messages = warn.mock.calls.map((args) => String(args[0] ?? ""));
+    expect(messages.filter((m) => m.includes("<LiveCursor>"))).toHaveLength(1);
+    expect(
+      messages.filter((m) => m.includes("<SelectionHighlight>")),
+    ).toHaveLength(1);
+    expect(messages[0]).toContain("PresenceLayer");
+
+    warn.mockRestore();
   });
 
   it("hides the initial LiveCursor label after the configured timeout", async () => {

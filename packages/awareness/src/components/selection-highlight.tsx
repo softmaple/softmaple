@@ -84,6 +84,10 @@ export const SelectionHighlight = ({
         width: rect.width,
         ...style,
       }}
+      // Hover variant is keyboard-discoverable: focusing the highlight
+      // reveals the user badge via CSS `:focus-visible`. Each visible
+      // selection adds one tab stop — intentional, so screen-reader /
+      // keyboard users can inspect attribution without a pointer.
       tabIndex={isHoverLabel ? 0 : undefined}
     >
       {renderLabel ? (

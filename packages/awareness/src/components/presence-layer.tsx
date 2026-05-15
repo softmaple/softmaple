@@ -81,6 +81,15 @@ const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
  * presence overlay anchored to the wrong element pushes cursors and
  * selections off the line goes away once everything inside the layer
  * uses host-local coordinates.
+ *
+ * Contract: the layer tracks the host's **position** (its bounding
+ * rect in viewport space). It does *not* observe host-internal
+ * scrolling — `getBoundingClientRect` doesn't change when a textarea
+ * or scroll container scrolls its own content. Consumers that produce
+ * host-local `point`/`rect` values must subtract `host.scrollLeft` /
+ * `host.scrollTop` themselves (see `EditorSurface.pointFor` for the
+ * pattern), and must re-emit those values when the host scrolls if
+ * the underlying caret/selection didn't move.
  */
 export const PresenceLayer = ({
   host,

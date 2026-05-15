@@ -15,13 +15,14 @@ import { StoryShowcase } from "./story-layout";
  * themselves. Children pass coordinates relative to the host's top-left
  * (post host scroll) and the layer adds the host rect on render.
  */
-// Loose typing (no `Meta<typeof PresenceLayer>`) because the story
-// renders its own scene rather than spreading args into PresenceLayer —
-// the layer requires a `host` ref that only makes sense to construct
-// inside the render function.
+// `component: PresenceLayer` is intentionally omitted here: the layer
+// requires a `host` ref which can only be constructed inside the render
+// function, and pinning the meta to the component would force every
+// story to supply a placeholder `host` in `args` just to satisfy the
+// type contract. The story still appears under the right title and
+// renders the layer in the docs page below.
 const meta = {
   title: "Awareness/PresenceLayer",
-  component: PresenceLayer,
   tags: ["autodocs"],
   parameters: {
     layout: "fullscreen",
@@ -79,13 +80,7 @@ const HostedOverlays = () => {
   );
 };
 
-// `host` is required by PresenceLayer's prop type, so the type system
-// insists on `args.host` even though the story's `render` ignores args
-// entirely. A noop ref placeholder satisfies the contract.
-const NOOP_HOST_REF = { current: null };
-
 export const HostedToTextarea: Story = {
-  args: { host: NOOP_HOST_REF },
   render: () => <HostedOverlays />,
   play: async ({ canvas }) => {
     // PresenceLayer renders null until its layout effect measures the

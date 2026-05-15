@@ -25,23 +25,8 @@ import { PresenceProvider } from "../providers/presence-provider";
 import type { PresenceUser } from "../types/presence";
 import { BlockActivityIndicator } from "./block-activity-indicator";
 import { LiveCursor } from "./live-cursor";
-import {
-  PresenceLayerContext,
-  type PresenceLayerOffset,
-} from "./presence-layer";
 import { SelectionHighlight } from "./selection-highlight";
-
-// `LiveCursor` and `SelectionHighlight` require a `<PresenceLayer>`
-// ancestor in production. The layer's measurement effect doesn't fire
-// under SSR / `renderToStaticMarkup`, so SSR tests inject the context
-// directly with an identity offset — enough to satisfy the guard while
-// leaving the rendered HTML structurally identical.
-const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
-const InTestLayer = ({ children }: { children: React.ReactNode }) => (
-  <PresenceLayerContext.Provider value={IDENTITY_OFFSET}>
-    {children}
-  </PresenceLayerContext.Provider>
-);
+import { InTestLayer } from "./test-utils";
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;

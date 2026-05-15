@@ -125,6 +125,9 @@ export const LiveCursor = ({
     };
   }, [viewport]);
 
+  // `point.x` / `point.y` are intentional dependencies: every move re-arms
+  // the auto-fade so the label re-appears at the new location, matching
+  // design §6 ("label visible while cursor is active, then fades").
   useEffect(() => {
     if (showLabel !== true) {
       setIsLabelVisible(false);
@@ -175,6 +178,11 @@ export const LiveCursor = ({
         ...toUserColorStyle(user.color),
         transform: `translate3d(${screenPoint.x}px, ${screenPoint.y}px, 0)`,
       }}
+      // Hover variant is keyboard-discoverable: focusing the caret reveals
+      // the user badge via CSS `:focus-visible`. Each visible peer adds one
+      // tab stop — intentional, so screen-reader / keyboard users can
+      // inspect attribution without a pointer. Mirrors the same pattern in
+      // `SelectionHighlight`.
       tabIndex={isHoverLabel ? 0 : undefined}
     >
       <span aria-hidden="true" className="awareness-live-cursor__caret" />

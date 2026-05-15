@@ -16,7 +16,7 @@ import {
   useUpdateSelection,
   useUpdateTyping,
 } from "@softmaple/awareness";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { BlockActivityBadge } from "./BlockActivityBadge";
 
 /**
@@ -48,23 +48,34 @@ export function EditorSurface({
 
   const editorBoxRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<number | null>(null);
-  // Tracks whether the user is mid-IME-composition (typing CJK / pinyin
-  // / hangul / kana etc). Mid-composition we deliberately do NOT diff
-  // intermediate textarea values into the eg-walker CRDT — for pinyin
-  // "nihao" the textarea fires `onChange` six times with the latin
-  // intermediates and then a final `onChange` with "你好". Diffing each
-  // one would emit per-keystroke insert/delete ops and then a final
-  // delete-3 / insert-2 op pair that reshapes the CRDT in a way the
-  // controlled `text` state can't catch up with, so the textarea snaps
-  // back to the latin intermediate and the IME composition collapses.
-  //
-  // Instead we let the browser's textarea evolve its DOM value
-  // naturally during composition and emit a single diff on
-  // `compositionend`. Using a ref (not state) is important: any state
-  // update during composition would cause React to reconcile the
-  // controlled `value` prop back into the DOM and clobber the IME's
-  // intermediate text.
+  // Tracks whether the user is mid-IME-composition (typing CJK /
+  // pinyin / hangul / kana etc). See the long comment on the textarea
+  // JSX below for why this matters.
   const composingRef = useRef(false);
+
+  // The textarea is *uncontrolled* (see `defaultValue` below). This
+  // effect is what keeps the DOM `value` in sync with the `text` prop
+  // for changes that originate outside the textarea — remote peer
+  // edits applied via `setText(replica.getText())` upstream. Local
+  // edits go textarea → `onTextChange` → `setText` → here, and the
+  // `el.value !== text` guard makes that a no-op so we don't fight the
+  // browser's caret. Mid-composition we deliberately skip the sync;
+  // overwriting `el.value` while an IME is composing collapses the
+  // composition.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (composingRef.current) return;
+    if (el.value === text) return;
+    const { selectionStart, selectionEnd } = el;
+    el.value = text;
+    // Best-effort cursor preservation. If a peer inserted before our
+    // caret the offset will be off by the diff length — acceptable for
+    // the demo; a real editor would translate selection through the
+    // CRDT op. setSelectionRange clamps internally so out-of-range
+    // values are safe.
+    el.setSelectionRange(selectionStart, selectionEnd);
+  }, [text, textareaRef]);
 
   // Clear typing indicator after a short idle period.
   useEffect(() => {
@@ -104,14 +115,18 @@ export function EditorSurface({
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    // While an IME composition is active we let the textarea's DOM
-    // value evolve untouched and defer the single "committed text"
-    // diff to `onCompositionEnd`. We still show the typing indicator
-    // so peers see that this trainer is mid-input.
-    if (composingRef.current) {
-      armTypingIndicator();
-      return;
-    }
+    // Mid-IME-composition the textarea fires intermediate `input`
+    // events with the latin pinyin ("n", "ni", "nih", "niha", "nihao")
+    // before committing the final CJK text on `compositionend`.
+    // Diffing those into the eg-walker CRDT produces per-keystroke
+    // insert ops and a wrong final delete-3 / insert-2 pair that
+    // doesn't reconcile with the final composition. We also can't
+    // call any awareness `updatePresence` here — the adapter's
+    // `onPresenceChange` listener synchronously triggers `setSelf` /
+    // `setPresence` in `PresenceProvider`, which re-renders this
+    // component. Even though the textarea is uncontrolled now, we
+    // still avoid the broadcast traffic for intermediate states.
+    if (composingRef.current) return;
     onTextChange(e.target.value);
     pushSelection();
     armTypingIndicator();
@@ -119,16 +134,27 @@ export function EditorSurface({
 
   const handleCompositionStart = () => {
     composingRef.current = true;
-    armTypingIndicator();
+    // Intentionally no `armTypingIndicator()` here. See the comment
+    // in `handleInput` above — any `updatePresence` call during
+    // composition cascades into a re-render of this component, and
+    // historically (when the textarea was controlled) that re-render
+    // collapsed the IME composition. The textarea is uncontrolled now
+    // so a re-render wouldn't directly clobber the DOM value, but we
+    // still don't want to broadcast a stream of "typing" updates for
+    // an in-progress composition the peers can't see anyway.
   };
 
   const handleCompositionEnd = (
     e: React.CompositionEvent<HTMLTextAreaElement>,
   ) => {
     composingRef.current = false;
-    // One diff for the entire composition. `currentTarget.value` here
-    // is the post-commit text (e.g. "你好"), not the latin
-    // intermediate ("nihao") that fired during composition.
+    // One diff for the entire composition. `currentTarget.value` is
+    // the post-commit text (e.g. "你好"), not the latin intermediate
+    // ("nihao") that fired during composition. Some browsers (Chrome)
+    // fire `compositionend` *before* the final `input` event; reading
+    // `currentTarget.value` here is still correct because the DOM
+    // value was updated synchronously by the IME before either event
+    // dispatched.
     onTextChange(e.currentTarget.value);
     pushSelection();
     armTypingIndicator();
@@ -171,9 +197,27 @@ export function EditorSurface({
           </p>
           <BlockActivityBadge blockId={blockId} />
         </div>
+        {/* The textarea is *uncontrolled* (`defaultValue`, not
+         *  `value`). This matters specifically for IME composition.
+         *
+         *  A controlled `value={text}` textarea makes React run a
+         *  reconciliation step on every re-render that compares the
+         *  `value` prop against the live DOM value and, if they
+         *  differ, writes the prop back onto the DOM. During an IME
+         *  composition the DOM holds the in-progress text ("nihao")
+         *  while the React state still holds the pre-composition
+         *  value (""), and any re-render — from `updatePresence`,
+         *  `useOthers()`, a peer's cursor moving, anything — would
+         *  clobber the DOM back to the prop value and collapse the
+         *  composition. Making the textarea uncontrolled removes
+         *  that reconciliation step entirely. We sync external
+         *  changes (peer edits) back into the DOM imperatively in
+         *  the `useLayoutEffect` above, which is allowed to skip
+         *  writes while `composingRef.current` is true.
+         */}
         <textarea
           ref={textareaRef}
-          value={text}
+          defaultValue={text}
           onChange={handleInput}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}

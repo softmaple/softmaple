@@ -314,18 +314,26 @@
 }
 
 /*
- * Fixed-position overlay aligned to a host element (textarea, editor
- * surface, etc.). Children inside use host-local coordinates and the
- * layer is responsible for translating them into screen space — see
+ * Absolute-positioned overlay aligned to a host element (textarea,
+ * editor surface, etc.). Children inside use host-local coordinates
+ * and the layer is responsible for translating them — see
  * `PresenceLayer` in components/presence-layer.tsx.
  *
- * `pointer-events: none` so the layer never steals input from the host;
- * hoverable cursor/selection labels override this with `auto` on
- * themselves.
+ * `position: absolute` (not `fixed`) so the layer lives in the same
+ * document flow as the host. When the page scrolls, both move
+ * together and the host-to-layer offset stays invariant — the
+ * browser handles scrolling natively, with no one-frame lag from JS
+ * having to chase the scroll event. The layer is sized to (0, 0) by
+ * default; absolute children translate out of that origin.
+ *
+ * `pointer-events: none` so the layer never steals input from the
+ * host; hoverable cursor/selection labels override this with `auto`
+ * on themselves.
  */
 .awareness-presence-layer {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
   z-index: 20;
   pointer-events: none;
   /*

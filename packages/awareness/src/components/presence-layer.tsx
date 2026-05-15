@@ -4,6 +4,7 @@ import {
   type RefObject,
   useContext,
   useLayoutEffect,
+  useRef,
   useState,
 } from "react";
 import { cx } from "./internal-utils";
@@ -93,20 +94,28 @@ export interface PresenceLayerProps {
 const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
 
 /**
- * Fixed-position overlay aligned to a host element. Owns the
+ * Absolute-positioned overlay aligned to a host element. Owns the
  * `getBoundingClientRect` tracking (ResizeObserver + scroll/resize) so
  * consumers don't have to wire it themselves — the bug class where a
  * presence overlay anchored to the wrong element pushes cursors and
  * selections off the line goes away once everything inside the layer
  * uses host-local coordinates.
  *
- * By default the layer tracks the host's **position** (its bounding
- * rect in viewport space) but ignores host-internal scrolling —
- * `getBoundingClientRect` doesn't change when a textarea or scroll
- * container scrolls its own content. Pass `trackHostScroll` to also
- * subscribe to the host's `scroll` events and fold its `scrollLeft` /
- * `scrollTop` into the offset; children can then pass
- * content-relative coordinates without subtracting scroll themselves.
+ * The layer renders inline (no portal) as `position: absolute` and
+ * stores the **difference** between the host's bounding rect and the
+ * layer's own bounding rect. When the page scrolls, the layer and host
+ * move together in the document — their relative offset is unchanged,
+ * so the children's transforms don't need to update and the browser
+ * handles the scroll natively without the one-frame lag a viewport-
+ * anchored (`position: fixed`) layer would have to chase via JS.
+ *
+ * By default the layer tracks the host's **position** but ignores
+ * host-internal scrolling — `getBoundingClientRect` doesn't change
+ * when a textarea or scroll container scrolls its own content. Pass
+ * `trackHostScroll` to also subscribe to the host's `scroll` events
+ * and fold its `scrollLeft` / `scrollTop` into the offset; children
+ * can then pass content-relative coordinates without subtracting
+ * scroll themselves.
  */
 export const PresenceLayer = ({
   host,
@@ -114,19 +123,33 @@ export const PresenceLayer = ({
   className,
   trackHostScroll = false,
 }: PresenceLayerProps): ReactNode => {
+  const layerRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
   useLayoutEffect(() => {
     const update = (): void => {
-      const el = host.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
+      const hostEl = host.current;
+      const layerEl = layerRef.current;
+      if (!hostEl || !layerEl) return;
+      const hostRect = hostEl.getBoundingClientRect();
+      const layerRect = layerEl.getBoundingClientRect();
+      // Offset is the host's position *relative to the layer's own box*.
+      // Because the layer is `position: absolute` and lives in the same
+      // document flow as the host, `hostRect - layerRect` stays
+      // invariant under window scroll: both rects shift by the same
+      // amount, so the difference is unchanged and no re-render fires
+      // on the scroll listener. The capture-phase listener still runs
+      // for nested scroll containers that move only one of the two.
+      //
       // When `trackHostScroll` is on, subtract the host's internal
       // scroll so that content-relative children coordinates land in
-      // the right place. When it's off, the offset is purely the
-      // host's viewport position — children own scroll subtraction.
-      const left = trackHostScroll ? rect.left - el.scrollLeft : rect.left;
-      const top = trackHostScroll ? rect.top - el.scrollTop : rect.top;
+      // the right place.
+      const left =
+        hostRect.left -
+        layerRect.left -
+        (trackHostScroll ? hostEl.scrollLeft : 0);
+      const top =
+        hostRect.top - layerRect.top - (trackHostScroll ? hostEl.scrollTop : 0);
       setOffset((prev) =>
         prev.left === left && prev.top === top ? prev : { left, top },
       );
@@ -184,7 +207,7 @@ export const PresenceLayer = ({
        * hover or focus. Hiding the whole subtree at the layer level would
        * silence those.
        */}
-      <div className={cx("awareness-presence-layer", className)}>
+      <div className={cx("awareness-presence-layer", className)} ref={layerRef}>
         {children}
       </div>
     </PresenceLayerContext.Provider>

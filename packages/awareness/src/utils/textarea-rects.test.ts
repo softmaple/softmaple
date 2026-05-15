@@ -98,6 +98,12 @@ describe("getTextareaSelectionRects", () => {
     // rect. Stub `HTMLElement.prototype.offsetTop` to fake line wrapping:
     // each newline in the marker's preceding text node bumps offsetTop
     // by one line. This exercises the per-line rect emission branch.
+    //
+    // The stub touches `HTMLElement.prototype` globally. Vitest's default
+    // isolation (one VM per test file) keeps the override from leaking
+    // across files; the `afterEach` restore covers leakage within this
+    // file. If we ever switch to shared-environment mode, this stub
+    // becomes a footgun and should move behind a per-test wrapper.
     const LINE = 20;
     let originalOffsetTop: PropertyDescriptor | undefined;
 
@@ -112,7 +118,7 @@ describe("getTextareaSelectionRects", () => {
           // carrying `textarea.value.substring(0, position)`. Everything
           // else stays at jsdom's default 0.
           const prev = this.previousSibling;
-          if (!prev || prev.nodeType !== 3) return 0;
+          if (!prev || prev.nodeType !== Node.TEXT_NODE) return 0;
           const text = prev.textContent ?? "";
           const newlines = (text.match(/\n/g) ?? []).length;
           return newlines * LINE;
@@ -157,14 +163,50 @@ describe("getTextareaSelectionRects", () => {
 
     it("falls back to `window` when textarea.ownerDocument.defaultView is null", () => {
       // Edge branch in the multi-line path: `doc.defaultView ?? window`.
-      const el = makeTextarea("line one\nline two");
+      const el = makeTextarea("line one\nline two\nline three");
       Object.defineProperty(el.ownerDocument, "defaultView", {
         value: null,
         configurable: true,
       });
-      expect(() =>
-        getTextareaSelectionRects(el, { from: 0, to: el.value.length }),
-      ).not.toThrow();
+      const rects = getTextareaSelectionRects(el, {
+        from: 0,
+        to: el.value.length,
+      });
+      // Stronger than `not.toThrow`: the fallback must still produce a
+      // well-formed multi-line result. A silent partial-result regression
+      // would slip past a no-throw assertion.
+      expect(rects.length).toBeGreaterThanOrEqual(3);
+      for (const rect of rects) {
+        expect(Number.isFinite(rect.x)).toBe(true);
+        expect(Number.isFinite(rect.y)).toBe(true);
+        expect(rect.width).toBeGreaterThanOrEqual(2);
+      }
+    });
+
+    it("falls back when paddingLeft/paddingRight are unparseable", () => {
+      // Covers the `Number.parseFloat(cs.paddingLeft) || 0` and
+      // matching paddingRight branches. jsdom returns "" for an unset
+      // padding-left when no inline padding is set on the side, which
+      // `parseFloat` resolves to NaN.
+      const el = document.createElement("textarea");
+      el.value = "line one\nline two\nline three";
+      el.style.fontSize = "16px";
+      el.style.lineHeight = "20px";
+      el.style.width = "200px";
+      // Deliberately no paddingLeft/Right set.
+      document.body.appendChild(el);
+      textarea = el;
+
+      const rects = getTextareaSelectionRects(el, {
+        from: 0,
+        to: el.value.length,
+      });
+      expect(rects.length).toBeGreaterThanOrEqual(3);
+      // contentLeft = padLeft = 0, so the middle / last rects' x is
+      // exactly 0 — proves the fallback fired.
+      const middle = rects[1];
+      if (!middle) throw new Error("expected a middle rect");
+      expect(middle.x).toBe(0);
     });
   });
 

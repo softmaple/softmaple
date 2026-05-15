@@ -78,6 +78,11 @@ function CollabSession({
   // means applying a remote event never causes us to re-broadcast it on the
   // next local edit.
   const publishedIdsRef = useRef<Set<EventId>>(new Set());
+  // Length of the exported graph prefix the broadcast loop has already
+  // inspected. Lets every keystroke skip the O(N) re-scan and only walk
+  // freshly-appended events. The Set above is still the source of truth for
+  // dedupe — this just bounds the iteration.
+  const scannedPrefixRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Separate BroadcastChannel for CRDT event sync. Awareness adapter
@@ -152,13 +157,23 @@ function CollabSession({
   }, [replica, userInfo.userId]);
 
   // Broadcast events the replica has produced that we haven't shared yet.
-  // Tracking publication by id (rather than by graph length) keeps remote
-  // events from being echoed back.
+  // Resumes from `scannedPrefixRef` so each keystroke walks only freshly-
+  // appended events; the id Set still dedupes inside the suffix in case a
+  // remote event landed at the tail between scans.
   const broadcastNewEvents = useCallback(() => {
     const channel = broadcastRef.current;
     if (!channel) return;
     const selfId = userInfo.userId;
-    for (const event of replica.exportEventGraph()) {
+    const events = replica.exportEventGraph();
+    // Defensive: if the graph ever shrinks (shouldn't happen with an
+    // append-only CRDT, but guards against future replica behavior), rescan
+    // from the beginning. The id Set keeps us correct either way.
+    if (events.length < scannedPrefixRef.current) {
+      scannedPrefixRef.current = 0;
+    }
+    for (let i = scannedPrefixRef.current; i < events.length; i++) {
+      const event = events[i];
+      if (!event) continue;
       if (publishedIdsRef.current.has(event.id)) continue;
       channel.postMessage({
         type: "event",
@@ -167,6 +182,7 @@ function CollabSession({
       } satisfies SyncMessage);
       publishedIdsRef.current.add(event.id);
     }
+    scannedPrefixRef.current = events.length;
   }, [replica, userInfo.userId]);
 
   const handleTextChange = useCallback(

@@ -60,6 +60,16 @@ type StyleRecord = Record<string, string>;
 const asStyleRecord = (value: CSSStyleDeclaration): StyleRecord =>
   value as unknown as StyleRecord;
 
+// Computed style values can be non-numeric (`lineHeight: "normal"`,
+// missing borders) — `Number.parseInt` of those returns `NaN`, which
+// poisons downstream math (caret height = NaN → selection rect = NaN →
+// overlays collapse). Resolve to a finite fallback at the read site.
+const toFiniteInt = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+
 export const caretCoordinates = (
   textarea: HTMLTextAreaElement,
   position: number,
@@ -97,10 +107,15 @@ export const caretCoordinates = (
     marker.textContent = textarea.value.substring(position) || ".";
     mirror.appendChild(marker);
 
+    // `lineHeight` is often `"normal"`; fall back to `fontSize`, then to a
+    // sane default. Border widths default to 0 when absent.
+    const height =
+      toFiniteInt(computed.lineHeight, Number.NaN) ||
+      toFiniteInt(computed.fontSize, 20);
     return {
-      top: marker.offsetTop + parseInt(computed.borderTopWidth || "0", 10),
-      left: marker.offsetLeft + parseInt(computed.borderLeftWidth || "0", 10),
-      height: parseInt(computed.lineHeight || computed.fontSize || "20", 10),
+      top: marker.offsetTop + toFiniteInt(computed.borderTopWidth, 0),
+      left: marker.offsetLeft + toFiniteInt(computed.borderLeftWidth, 0),
+      height,
     };
   } finally {
     mirror.remove();

@@ -3,6 +3,16 @@
  * playground demo. Returns the adapter and the resolved `AdapterUserInfo`
  * so the parent can both pass it to `<PresenceProvider>` and reference
  * the chosen trainer.
+ *
+ * Lifecycle: this hook deliberately has no cleanup. `<PresenceProvider>`
+ * owns the adapter's connect/disconnect — it calls `adapter.disconnect()`
+ * on unmount and whenever its `adapter` prop changes, which closes the
+ * underlying BroadcastChannel (see
+ * packages/awareness/src/adapters/broadcast-channel/broadcast-channel.ts).
+ * Because the `useMemo` keys on `[trainerId, roomId]`, a trainer/room
+ * switch produces a new adapter instance; the provider observes the prop
+ * change and disposes the old one. Adding a cleanup here would just
+ * double-dispose.
  */
 
 import {

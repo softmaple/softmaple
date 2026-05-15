@@ -42,7 +42,6 @@ export {
   PresenceBar,
   type PresenceBarProps,
   PresenceLayer,
-  PresenceLayerContext,
   type PresenceLayerOffset,
   type PresenceLayerProps,
   SelectionHighlight,
@@ -124,3 +123,9 @@ export type {
   PresenceState,
   PresenceStateConfig,
 } from "./types/state";
+export {
+  getTextareaCaretRect,
+  getTextareaSelectionRects,
+  type TextareaCaretRect,
+  type TextareaSelectionRange,
+} from "./utils/textarea-rects";

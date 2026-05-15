@@ -57,13 +57,31 @@ export interface PresenceLayerProps {
   /**
    * The element overlay coordinates are measured against. Children pass
    * `point`/`rect` values whose `x`/`y` are relative to this element's
-   * top-left in viewport coordinates (i.e., already adjusted for any
-   * internal scroll the host has). The layer adds the host's bounding
-   * rect so children render in the right place.
+   * top-left.
+   *
+   * By default the layer assumes those coordinates already account for
+   * the host's internal scroll (the consumer subtracted `host.scrollLeft`
+   * / `scrollTop`). Pass `trackHostScroll` to flip that contract — see
+   * the prop doc for details.
    */
   readonly host: RefObject<HTMLElement | null>;
   readonly children?: ReactNode;
   readonly className?: string;
+  /**
+   * When `true`, the layer also subscribes to the host's `scroll`
+   * events and folds `host.scrollLeft` / `scrollTop` into the offset.
+   * Children can then pass *content-relative* coordinates (i.e. the
+   * raw values from `getTextareaSelectionRects` and friends) and the
+   * layer will move them with the host's scroll automatically.
+   *
+   * When `false` (default), the layer only tracks the host's bounding
+   * rect in viewport space. Children must subtract
+   * `host.scrollLeft` / `scrollTop` themselves and re-emit their
+   * coordinates when the host scrolls — appropriate for hosts that
+   * never scroll, or for editors with their own selection model that
+   * already feed in viewport-relative values.
+   */
+  readonly trackHostScroll?: boolean;
 }
 
 // Identity offset used until the host is measured. Rendering with this
@@ -82,19 +100,19 @@ const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
  * selections off the line goes away once everything inside the layer
  * uses host-local coordinates.
  *
- * Contract: the layer tracks the host's **position** (its bounding
- * rect in viewport space). It does *not* observe host-internal
- * scrolling — `getBoundingClientRect` doesn't change when a textarea
- * or scroll container scrolls its own content. Consumers that produce
- * host-local `point`/`rect` values must subtract `host.scrollLeft` /
- * `host.scrollTop` themselves (see `EditorSurface.pointFor` for the
- * pattern), and must re-emit those values when the host scrolls if
- * the underlying caret/selection didn't move.
+ * By default the layer tracks the host's **position** (its bounding
+ * rect in viewport space) but ignores host-internal scrolling —
+ * `getBoundingClientRect` doesn't change when a textarea or scroll
+ * container scrolls its own content. Pass `trackHostScroll` to also
+ * subscribe to the host's `scroll` events and fold its `scrollLeft` /
+ * `scrollTop` into the offset; children can then pass
+ * content-relative coordinates without subtracting scroll themselves.
  */
 export const PresenceLayer = ({
   host,
   children,
   className,
+  trackHostScroll = false,
 }: PresenceLayerProps): ReactNode => {
   const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
@@ -104,10 +122,14 @@ export const PresenceLayer = ({
 
     const update = (): void => {
       const rect = el.getBoundingClientRect();
+      // When `trackHostScroll` is on, subtract the host's internal
+      // scroll so that content-relative children coordinates land in
+      // the right place. When it's off, the offset is purely the
+      // host's viewport position — children own scroll subtraction.
+      const left = trackHostScroll ? rect.left - el.scrollLeft : rect.left;
+      const top = trackHostScroll ? rect.top - el.scrollTop : rect.top;
       setOffset((prev) =>
-        prev.left === rect.left && prev.top === rect.top
-          ? prev
-          : { left: rect.left, top: rect.top },
+        prev.left === left && prev.top === top ? prev : { left, top },
       );
     };
     update();
@@ -119,7 +141,10 @@ export const PresenceLayer = ({
       typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
     ro?.observe(el);
     // Capture-phase scroll catches scrolls in any ancestor (the host can
-    // sit inside an arbitrary scroll container the consumer owns).
+    // sit inside an arbitrary scroll container the consumer owns) AND
+    // the host element itself when it scrolls its own content —
+    // capture-phase scroll events from the host bubble up through the
+    // window in capture phase too, so this single listener covers both.
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
@@ -127,7 +152,7 @@ export const PresenceLayer = ({
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [host]);
+  }, [host, trackHostScroll]);
 
   return (
     <PresenceLayerContext.Provider value={offset}>

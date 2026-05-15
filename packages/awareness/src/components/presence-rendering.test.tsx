@@ -249,6 +249,76 @@ describe("presence components", () => {
     });
   });
 
+  it("folds host.scrollLeft/scrollTop into the offset when trackHostScroll is set", async () => {
+    const user = createUser("1", { name: "Scrollie" });
+
+    const HOST_LEFT = 50;
+    const HOST_TOP = 100;
+    const HOST_SCROLL_LEFT = 13;
+    const HOST_SCROLL_TOP = 21;
+
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div
+            ref={(el) => {
+              if (!el) return;
+              hostRef.current = el;
+              el.getBoundingClientRect = () =>
+                ({
+                  left: HOST_LEFT,
+                  top: HOST_TOP,
+                  right: HOST_LEFT + 200,
+                  bottom: HOST_TOP + 100,
+                  width: 200,
+                  height: 100,
+                  x: HOST_LEFT,
+                  y: HOST_TOP,
+                  toJSON() {
+                    return {};
+                  },
+                }) as DOMRect;
+              // jsdom keeps `scrollLeft`/`scrollTop` writable; the
+              // layer reads them on every update so we set them once
+              // here and let the initial layout effect pick them up.
+              Object.defineProperty(el, "scrollLeft", {
+                configurable: true,
+                value: HOST_SCROLL_LEFT,
+              });
+              Object.defineProperty(el, "scrollTop", {
+                configurable: true,
+                value: HOST_SCROLL_TOP,
+              });
+            }}
+          />
+          <PresenceLayer host={hostRef} trackHostScroll>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+          </PresenceLayer>
+        </>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    // host(50,100) - scroll(13,21) + point(5,7) = (42, 86)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(42px, 86px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("warns once when LiveCursor or SelectionHighlight is rendered without a PresenceLayer", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const user = createUser("1", { name: "Lone" });

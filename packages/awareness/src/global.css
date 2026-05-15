@@ -502,9 +502,36 @@
 @media (prefers-color-scheme: dark) {
   .awareness-selection-highlight::before {
     /* Screen brightens on dark surfaces, the inverse of multiply on light. */
-    background: color-mix(in srgb, var(--awareness-user-color) 40%, transparent);
+    background: color-mix(
+      in srgb,
+      var(--awareness-user-color) 40%,
+      transparent
+    );
     mix-blend-mode: screen;
   }
+}
+
+/*
+ * Class-based dark theme opt-in. Mirrors Tailwind's class-based dark
+ * mode: a consumer rendering in a dark UI on a light-OS machine sets
+ * `data-awareness-theme="dark"` on any ancestor of the highlight (the
+ * editor wrapper, the app root, etc.) to force the screen-blend
+ * variant regardless of `prefers-color-scheme`. Without this opt-in
+ * the highlight uses `multiply` against a dark background and the
+ * per-user tint barely renders.
+ *
+ * Listed after the media query so it wins when both apply (a consumer
+ * on a dark-OS machine that wraps a light surface in
+ * `data-awareness-theme="light"` would expect light blending).
+ */
+[data-awareness-theme="dark"] .awareness-selection-highlight::before {
+  background: color-mix(in srgb, var(--awareness-user-color) 40%, transparent);
+  mix-blend-mode: screen;
+}
+
+[data-awareness-theme="light"] .awareness-selection-highlight::before {
+  background: color-mix(in srgb, var(--awareness-user-color) 26%, transparent);
+  mix-blend-mode: multiply;
 }
 
 .awareness-selection-highlight__label {

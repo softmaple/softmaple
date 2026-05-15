@@ -50,10 +50,19 @@ export default defineConfig({
           __dirname,
           "src/components/presence-bar.tsx",
         ),
+        "components/presence-layer": path.resolve(
+          __dirname,
+          "src/components/presence-layer.tsx",
+        ),
         "components/selection-highlight": path.resolve(
           __dirname,
           "src/components/selection-highlight.tsx",
         ),
+        "utils/textarea-rects": path.resolve(
+          __dirname,
+          "src/utils/textarea-rects.ts",
+        ),
+        "testing/index": path.resolve(__dirname, "src/testing/index.ts"),
         "hooks/index": path.resolve(__dirname, "src/hooks/index.ts"),
         "adapters/index": path.resolve(__dirname, "src/adapters/index.ts"),
         "state/index": path.resolve(__dirname, "src/state/index.ts"),

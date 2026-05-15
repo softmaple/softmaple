@@ -26,6 +26,16 @@ export interface SelectionHighlightProps {
   readonly showLabel?: boolean | "hover";
   readonly className?: string;
   readonly style?: CSSProperties;
+  /**
+   * Whether the highlight participates in the keyboard tab order so
+   * screen-reader / keyboard users can focus it to surface the
+   * attribution badge. Defaults to `showLabel === "hover"` so the
+   * hover label remains keyboard-discoverable. Editors with many
+   * peers can pass `focusable={false}` (e.g. for sibling rects of a
+   * multi-line selection that already render unlabeled) to avoid
+   * inserting extra tab stops ahead of the host's own controls.
+   */
+  readonly focusable?: boolean;
 }
 
 const ARIA_LABEL_MAX_TEXT = 120;
@@ -51,9 +61,16 @@ export const SelectionHighlight = ({
   showLabel = false,
   className,
   style,
+  focusable,
 }: SelectionHighlightProps): ReactNode => {
   const isHoverLabel = showLabel === "hover";
   const renderLabel = showLabel === true || isHoverLabel;
+  // Default `focusable` to the legacy implicit behavior (focusable
+  // when the label is hover-revealed) so existing stories keep their
+  // keyboard-discoverable badge. Editors with many peers — or sibling
+  // rects of a multi-line selection that don't render a label — can
+  // pass `focusable={false}` to avoid burning extra tab stops.
+  const isFocusable = focusable ?? isHoverLabel;
 
   // `SelectionHighlight` requires a `<PresenceLayer>` ancestor — the
   // layer owns the host's bounding rect, which is the only sane reference
@@ -85,10 +102,10 @@ export const SelectionHighlight = ({
         ...style,
       }}
       // Hover variant is keyboard-discoverable: focusing the highlight
-      // reveals the user badge via CSS `:focus-visible`. Each visible
-      // selection adds one tab stop — intentional, so screen-reader /
-      // keyboard users can inspect attribution without a pointer.
-      tabIndex={isHoverLabel ? 0 : undefined}
+      // reveals the user badge via CSS `:focus-visible`. Each focusable
+      // selection adds one tab stop — the host opts into that budget
+      // via the `focusable` prop (default: `showLabel === "hover"`).
+      tabIndex={isFocusable ? 0 : undefined}
     >
       {renderLabel ? (
         <span className="awareness-selection-highlight__label">

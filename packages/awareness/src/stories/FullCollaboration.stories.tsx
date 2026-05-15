@@ -19,7 +19,7 @@ import {
   squirtle,
   usersById,
 } from "./awareness-fixtures";
-import { CollaborationSurface } from "./story-layout";
+import { CollaborationSurface, FIRST_LINE_Y } from "./story-layout";
 
 const SHARED_BLOCK_ID = "field-guide";
 
@@ -119,14 +119,14 @@ export const TrainerHuddle: Story = {
            *  down from the surface's top-left). */}
           <PresenceLayer host={surfaceRef}>
             <SelectionHighlight
-              rect={{ x: 32, y: 134, width: 172, height: 24 }}
+              rect={{ x: 32, y: FIRST_LINE_Y, width: 172, height: 24 }}
               selectedText="Collaborative editing keeps"
               showLabel
               user={inBlock(charmander, SHARED_BLOCK_ID)}
             />
             <LiveCursor
               labelVisibleMs={60_000}
-              point={{ x: 208, y: 134 }}
+              point={{ x: 208, y: FIRST_LINE_Y }}
               user={inBlock(pikachu, SHARED_BLOCK_ID)}
               viewport="none"
             />
@@ -216,7 +216,7 @@ export const SoloEditor: Story = {
             <PresenceLayer host={surfaceRef}>
               <LiveCursor
                 labelVisibleMs={60_000}
-                point={{ x: 220, y: 134 }}
+                point={{ x: 220, y: FIRST_LINE_Y }}
                 user={lonelyEditor}
                 viewport="none"
               />

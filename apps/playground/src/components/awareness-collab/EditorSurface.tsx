@@ -48,6 +48,23 @@ export function EditorSurface({
 
   const editorBoxRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<number | null>(null);
+  // Tracks whether the user is mid-IME-composition (typing CJK / pinyin
+  // / hangul / kana etc). Mid-composition we deliberately do NOT diff
+  // intermediate textarea values into the eg-walker CRDT — for pinyin
+  // "nihao" the textarea fires `onChange` six times with the latin
+  // intermediates and then a final `onChange` with "你好". Diffing each
+  // one would emit per-keystroke insert/delete ops and then a final
+  // delete-3 / insert-2 op pair that reshapes the CRDT in a way the
+  // controlled `text` state can't catch up with, so the textarea snaps
+  // back to the latin intermediate and the IME composition collapses.
+  //
+  // Instead we let the browser's textarea evolve its DOM value
+  // naturally during composition and emit a single diff on
+  // `compositionend`. Using a ref (not state) is important: any state
+  // update during composition would cause React to reconcile the
+  // controlled `value` prop back into the DOM and clobber the IME's
+  // intermediate text.
+  const composingRef = useRef(false);
 
   // Clear typing indicator after a short idle period.
   useEffect(() => {
@@ -75,9 +92,7 @@ export function EditorSurface({
     }
   };
 
-  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onTextChange(e.target.value);
-    pushSelection();
+  const armTypingIndicator = () => {
     updateTyping(true);
     if (typingTimerRef.current !== null) {
       window.clearTimeout(typingTimerRef.current);
@@ -86,6 +101,46 @@ export function EditorSurface({
       updateTyping(false);
       typingTimerRef.current = null;
     }, 800);
+  };
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    // While an IME composition is active we let the textarea's DOM
+    // value evolve untouched and defer the single "committed text"
+    // diff to `onCompositionEnd`. We still show the typing indicator
+    // so peers see that this trainer is mid-input.
+    if (composingRef.current) {
+      armTypingIndicator();
+      return;
+    }
+    onTextChange(e.target.value);
+    pushSelection();
+    armTypingIndicator();
+  };
+
+  const handleCompositionStart = () => {
+    composingRef.current = true;
+    armTypingIndicator();
+  };
+
+  const handleCompositionEnd = (
+    e: React.CompositionEvent<HTMLTextAreaElement>,
+  ) => {
+    composingRef.current = false;
+    // One diff for the entire composition. `currentTarget.value` here
+    // is the post-commit text (e.g. "你好"), not the latin
+    // intermediate ("nihao") that fired during composition.
+    onTextChange(e.currentTarget.value);
+    pushSelection();
+    armTypingIndicator();
+  };
+
+  // `onSelect` / `onKeyUp` / `onClick` all funnel through this so
+  // selectionchange events fired by the IME mid-composition (which
+  // some browsers do for the composition span itself) don't get
+  // broadcast as the user's "real" selection.
+  const maybePushSelection = () => {
+    if (composingRef.current) return;
+    pushSelection();
   };
 
   // `getTextareaCaretRect` / `getTextareaSelectionRects` return
@@ -120,9 +175,11 @@ export function EditorSurface({
           ref={textareaRef}
           value={text}
           onChange={handleInput}
-          onSelect={pushSelection}
-          onKeyUp={pushSelection}
-          onClick={pushSelection}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          onSelect={maybePushSelection}
+          onKeyUp={maybePushSelection}
+          onClick={maybePushSelection}
           onBlur={() => updateTyping(false)}
           placeholder="Type field notes here. Open another tab as a different trainer to collaborate."
           className="w-full min-h-[280px] sm:min-h-[360px] resize-y p-4 bg-transparent text-gray-100 placeholder:text-gray-600 focus:outline-none font-mono text-sm leading-relaxed"

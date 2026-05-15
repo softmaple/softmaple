@@ -10,7 +10,16 @@ export {
   useOthersCount,
   useOthersFiltered,
 } from "./use-others";
+export {
+  type UsePeersInBlockOptions,
+  usePeersInBlock,
+} from "./use-peers-in-block";
 export { usePresence } from "./use-presence";
+export {
+  type PeerCursor,
+  type UsePeerCursorsOptions,
+  usePeerCursors,
+} from "./use-presence-cursors";
 export { useSelf, useSelfSelector } from "./use-self";
 export {
   useUpdateCursor,

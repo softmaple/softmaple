@@ -95,6 +95,14 @@ export default defineConfig({
           "src/hooks/use-update-typing.ts",
         ),
         "hooks/use-activity": path.resolve(__dirname, "src/hooks/use-activity.ts"),
+        "hooks/use-presence-cursors": path.resolve(
+          __dirname,
+          "src/hooks/use-presence-cursors.ts",
+        ),
+        "hooks/use-peers-in-block": path.resolve(
+          __dirname,
+          "src/hooks/use-peers-in-block.ts",
+        ),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,

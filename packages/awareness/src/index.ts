@@ -1,4 +1,29 @@
 export {
+  BROADCAST_MESSAGE,
+  type BroadcastChannelAdapterConfig,
+  type BroadcastMessageType,
+  broadcastChannelAdapterFactory,
+  createBroadcastChannelAdapter,
+} from "./adapters/broadcast-channel";
+export {
+  createNoopAdapter,
+  type NoopAdapterConfig,
+  noopAdapterFactory,
+} from "./adapters/noop";
+export type {
+  AdapterConfig,
+  AdapterConnectionState,
+  AdapterFactory,
+  AdapterUserInfo,
+  PresenceAdapter,
+  ReconnectConfig,
+} from "./adapters/types";
+export {
+  createWebSocketAdapter,
+  type WebSocketAdapterConfig,
+  webSocketAdapterFactory,
+} from "./adapters/websocket";
+export {
   ActivityIndicator,
   type ActivityIndicatorProps,
   BlockActivityIndicator,
@@ -20,6 +45,9 @@ export {
   type SelectionHighlightProps,
 } from "./components";
 export {
+  type PeerCursor,
+  type UsePeerCursorsOptions,
+  type UsePeersInBlockOptions,
   useActivityByType,
   useConnectionState,
   useIsConnected,
@@ -27,6 +55,8 @@ export {
   useOthers,
   useOthersCount,
   useOthersFiltered,
+  usePeerCursors,
+  usePeersInBlock,
   usePresence,
   useRecentActivity,
   useSelf,

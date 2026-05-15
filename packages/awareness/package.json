@@ -118,6 +118,14 @@
     "./hooks/use-activity": {
       "types": "./dist/hooks/use-activity.d.ts",
       "import": "./dist/hooks/use-activity.js"
+    },
+    "./hooks/use-presence-cursors": {
+      "types": "./dist/hooks/use-presence-cursors.d.ts",
+      "import": "./dist/hooks/use-presence-cursors.js"
+    },
+    "./hooks/use-peers-in-block": {
+      "types": "./dist/hooks/use-peers-in-block.d.ts",
+      "import": "./dist/hooks/use-peers-in-block.js"
     }
   },
   "files": [

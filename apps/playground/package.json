@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
-    "prebuild": "pnpm --filter @softmaple/eg-walker build && pnpm --filter @softmaple/awareness build",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

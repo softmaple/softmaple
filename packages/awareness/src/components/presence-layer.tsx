@@ -4,6 +4,7 @@ import {
   type RefObject,
   useContext,
   useLayoutEffect,
+  useRef,
   useState,
 } from "react";
 import { cx } from "./internal-utils";
@@ -57,13 +58,31 @@ export interface PresenceLayerProps {
   /**
    * The element overlay coordinates are measured against. Children pass
    * `point`/`rect` values whose `x`/`y` are relative to this element's
-   * top-left in viewport coordinates (i.e., already adjusted for any
-   * internal scroll the host has). The layer adds the host's bounding
-   * rect so children render in the right place.
+   * top-left.
+   *
+   * By default the layer assumes those coordinates already account for
+   * the host's internal scroll (the consumer subtracted `host.scrollLeft`
+   * / `scrollTop`). Pass `trackHostScroll` to flip that contract — see
+   * the prop doc for details.
    */
   readonly host: RefObject<HTMLElement | null>;
   readonly children?: ReactNode;
   readonly className?: string;
+  /**
+   * When `true`, the layer also subscribes to the host's `scroll`
+   * events and folds `host.scrollLeft` / `scrollTop` into the offset.
+   * Children can then pass *content-relative* coordinates (i.e. the
+   * raw values from `getTextareaSelectionRects` and friends) and the
+   * layer will move them with the host's scroll automatically.
+   *
+   * When `false` (default), the layer only tracks the host's bounding
+   * rect in viewport space. Children must subtract
+   * `host.scrollLeft` / `scrollTop` themselves and re-emit their
+   * coordinates when the host scrolls — appropriate for hosts that
+   * never scroll, or for editors with their own selection model that
+   * already feed in viewport-relative values.
+   */
+  readonly trackHostScroll?: boolean;
 }
 
 // Identity offset used until the host is measured. Rendering with this
@@ -75,59 +94,114 @@ export interface PresenceLayerProps {
 const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
 
 /**
- * Fixed-position overlay aligned to a host element. Owns the
+ * Absolute-positioned overlay aligned to a host element. Owns the
  * `getBoundingClientRect` tracking (ResizeObserver + scroll/resize) so
  * consumers don't have to wire it themselves — the bug class where a
  * presence overlay anchored to the wrong element pushes cursors and
  * selections off the line goes away once everything inside the layer
  * uses host-local coordinates.
  *
- * Contract: the layer tracks the host's **position** (its bounding
- * rect in viewport space). It does *not* observe host-internal
- * scrolling — `getBoundingClientRect` doesn't change when a textarea
- * or scroll container scrolls its own content. Consumers that produce
- * host-local `point`/`rect` values must subtract `host.scrollLeft` /
- * `host.scrollTop` themselves (see `EditorSurface.pointFor` for the
- * pattern), and must re-emit those values when the host scrolls if
- * the underlying caret/selection didn't move.
+ * The layer renders inline (no portal) as `position: absolute` and
+ * stores the **difference** between the host's bounding rect and the
+ * layer's own bounding rect. When the page scrolls, the layer and host
+ * move together in the document — their relative offset is unchanged,
+ * so the children's transforms don't need to update and the browser
+ * handles the scroll natively without the one-frame lag a viewport-
+ * anchored (`position: fixed`) layer would have to chase via JS.
+ *
+ * By default the layer tracks the host's **position** but ignores
+ * host-internal scrolling — `getBoundingClientRect` doesn't change
+ * when a textarea or scroll container scrolls its own content. Pass
+ * `trackHostScroll` to also subscribe to the host's `scroll` events
+ * and fold its `scrollLeft` / `scrollTop` into the offset; children
+ * can then pass content-relative coordinates without subtracting
+ * scroll themselves.
  */
 export const PresenceLayer = ({
   host,
   children,
   className,
+  trackHostScroll = false,
 }: PresenceLayerProps): ReactNode => {
+  const layerRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
   useLayoutEffect(() => {
-    const el = host.current;
-    if (!el) return;
-
     const update = (): void => {
-      const rect = el.getBoundingClientRect();
+      const hostEl = host.current;
+      const layerEl = layerRef.current;
+      if (!hostEl || !layerEl) return;
+      const hostRect = hostEl.getBoundingClientRect();
+      const layerRect = layerEl.getBoundingClientRect();
+      // Offset is the host's position *relative to the layer's own box*.
+      // Because the layer is `position: absolute` and lives in the same
+      // document flow as the host, `hostRect - layerRect` stays
+      // invariant under window scroll: both rects shift by the same
+      // amount, so the difference is unchanged and no re-render fires
+      // on the scroll listener. The capture-phase listener still runs
+      // for nested scroll containers that move only one of the two.
+      //
+      // When `trackHostScroll` is on, subtract the host's internal
+      // scroll so that content-relative children coordinates land in
+      // the right place.
+      const left =
+        hostRect.left -
+        layerRect.left -
+        (trackHostScroll ? hostEl.scrollLeft : 0);
+      const top =
+        hostRect.top - layerRect.top - (trackHostScroll ? hostEl.scrollTop : 0);
       setOffset((prev) =>
-        prev.left === rect.left && prev.top === rect.top
-          ? prev
-          : { left: rect.left, top: rect.top },
+        prev.left === left && prev.top === top ? prev : { left, top },
       );
     };
-    update();
 
-    // ResizeObserver is missing in jsdom and older SSR environments —
-    // the scroll/resize listeners below cover the most common cases
-    // even when it's unavailable.
-    const ro =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
-    ro?.observe(el);
+    let ro: ResizeObserver | null = null;
+    let rafId = 0;
+
+    const attach = (): void => {
+      // Clear the deferred handle so cleanup doesn't try to cancel an
+      // already-fired rAF — `cancelAnimationFrame` on a stale id is
+      // technically a no-op in browsers, but the explicit reset
+      // documents the lifecycle.
+      rafId = 0;
+      const el = host.current;
+      if (!el) return;
+      update();
+      // ResizeObserver is missing in jsdom and older SSR environments —
+      // the scroll/resize listeners below cover the most common cases
+      // even when it's unavailable.
+      if (typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(update);
+        ro.observe(el);
+      }
+    };
+
+    // Layout effects fire bottom-up, so when the host ref points to an
+    // ancestor of `<PresenceLayer>` (e.g. a parent surface div with
+    // `ref={surfaceRef}` that wraps the layer), the ancestor's ref
+    // hasn't been attached yet at this point and `host.current` is
+    // `null`. `requestAnimationFrame` defers until after the current
+    // commit completes — by then every ref in the tree is attached.
+    if (host.current) {
+      attach();
+    } else {
+      rafId = requestAnimationFrame(attach);
+    }
+
     // Capture-phase scroll catches scrolls in any ancestor (the host can
-    // sit inside an arbitrary scroll container the consumer owns).
+    // sit inside an arbitrary scroll container the consumer owns) AND
+    // the host element itself when it scrolls its own content —
+    // capture-phase scroll events from the host bubble up through the
+    // window in capture phase too, so this single listener covers both.
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
+      if (rafId !== 0) cancelAnimationFrame(rafId);
       ro?.disconnect();
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [host]);
+  }, [host, trackHostScroll]);
 
   return (
     <PresenceLayerContext.Provider value={offset}>
@@ -138,7 +212,7 @@ export const PresenceLayer = ({
        * hover or focus. Hiding the whole subtree at the layer level would
        * silence those.
        */}
-      <div className={cx("awareness-presence-layer", className)}>
+      <div className={cx("awareness-presence-layer", className)} ref={layerRef}>
         {children}
       </div>
     </PresenceLayerContext.Provider>

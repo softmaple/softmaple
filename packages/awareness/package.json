@@ -43,6 +43,14 @@
       "types": "./dist/components/selection-highlight.d.ts",
       "import": "./dist/components/selection-highlight.js"
     },
+    "./utils/textarea-rects": {
+      "types": "./dist/utils/textarea-rects.d.ts",
+      "import": "./dist/utils/textarea-rects.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
     "./hooks": {
       "types": "./dist/hooks/index.d.ts",
       "import": "./dist/hooks/index.js"

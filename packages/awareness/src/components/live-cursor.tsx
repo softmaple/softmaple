@@ -57,6 +57,16 @@ export interface LiveCursorProps {
    * Defaults to 32.
    */
   readonly cullMargin?: number;
+  /**
+   * Whether the cursor participates in the keyboard tab order so
+   * screen-reader / keyboard users can focus it to surface the
+   * attribution badge. Defaults to `showLabel === "hover"` so the
+   * hover label remains keyboard-discoverable. Editors with many
+   * peers can pass `focusable={false}` to avoid burning up to `N` tab
+   * stops on remote cursors when keyboard users need to reach the
+   * host's own focusable controls first.
+   */
+  readonly focusable?: boolean;
 }
 
 const isPointInViewport = (
@@ -95,9 +105,15 @@ export const LiveCursor = ({
   className,
   viewport = "window",
   cullMargin = 32,
+  focusable,
 }: LiveCursorProps): ReactNode => {
   const isHoverLabel = showLabel === "hover";
   const renderLabel = showLabel === true || isHoverLabel;
+  // Default `focusable` to the legacy implicit behavior (focusable
+  // when the label is hover-revealed) so existing consumers don't see
+  // their tab order shift. Editors that want to suppress remote-cursor
+  // tab stops can pass `focusable={false}` explicitly.
+  const isFocusable = focusable ?? isHoverLabel;
   // Auto-fade only applies to the always-on label. The hover variant lets
   // CSS :hover / :focus-visible drive opacity, so we don't toggle the
   // `--label-visible` class for it.
@@ -178,12 +194,11 @@ export const LiveCursor = ({
         ...toUserColorStyle(user.color),
         transform: `translate3d(${screenPoint.x}px, ${screenPoint.y}px, 0)`,
       }}
-      // Hover variant is keyboard-discoverable: focusing the caret reveals
-      // the user badge via CSS `:focus-visible`. Each visible peer adds one
-      // tab stop — intentional, so screen-reader / keyboard users can
-      // inspect attribution without a pointer. Mirrors the same pattern in
-      // `SelectionHighlight`.
-      tabIndex={isHoverLabel ? 0 : undefined}
+      // Hover variant is keyboard-discoverable: focusing the caret
+      // reveals the user badge via CSS `:focus-visible`. Each focusable
+      // peer adds one tab stop — the host opts into that budget via
+      // the `focusable` prop (default: `showLabel === "hover"`).
+      tabIndex={isFocusable ? 0 : undefined}
     >
       <span aria-hidden="true" className="awareness-live-cursor__caret" />
       {renderLabel ? (

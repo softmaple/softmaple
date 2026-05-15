@@ -5,6 +5,25 @@ import {
   useRef,
 } from "react";
 
+/**
+ * Y-coordinate (host-local, in CSS pixels) of paragraph 1 line 1 inside
+ * the demo surface used by `CollaborationSurface` / `StoryShowcase`.
+ *
+ * The chrome bar is ~37px (`surfaceChromeStyle` padding + border) and
+ * the page-content padding-top is 26px (`pageContentStyle`). Together
+ * with the doc meta + heading + grid gaps this lands the first
+ * paragraph at y \u2248 134 inside the surface card.
+ *
+ * Stories that anchor cursors / selections to that line import this
+ * constant instead of hard-coding `134`, so any change to the surface
+ * chrome only needs to touch one place. jsdom can't measure real
+ * layout (offsetTop / getBoundingClientRect return zero for everything)
+ * so this value isn't unit-tested; the Chromatic baseline for the
+ * `LiveCursor` / `SelectionHighlight` / `FullCollaboration` stories is
+ * the authoritative regression check.
+ */
+export const FIRST_LINE_Y = 134;
+
 const pokeballSvg =
   "url(\"data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' fill='none' stroke='%23ef4444' stroke-width='2'%3E%3Ccircle cx='100' cy='100' r='90'/%3E%3Cpath d='M10 100h70a20 20 0 0 1 40 0h70'/%3E%3Ccircle cx='100' cy='100' r='18'/%3E%3Ccircle cx='100' cy='100' r='10' fill='%23ef4444'/%3E%3C/svg%3E\")";
 

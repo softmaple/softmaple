@@ -4,7 +4,7 @@ import { expect, waitFor } from "storybook/test";
 import { LiveCursor } from "../components/live-cursor";
 import { PresenceLayer } from "../components/presence-layer";
 import { bulbasaur, charmander, pikachu } from "./awareness-fixtures";
-import { CollaborationSurface } from "./story-layout";
+import { CollaborationSurface, FIRST_LINE_Y } from "./story-layout";
 
 const meta = {
   title: "Awareness/LiveCursor",
@@ -13,13 +13,13 @@ const meta = {
   parameters: {
     layout: "fullscreen",
   },
-  // Points are host-local (surface-card relative). y≈134 lands the caret
-  // on paragraph 1 line 1 inside the demo surface; the chrome bar (~37px)
-  // and page-content padding-top (26px) push the prose down from the
-  // surface's top-left, which is the layer's reference point.
+  // Points are host-local (surface-card relative). `FIRST_LINE_Y` lands
+  // the caret on paragraph 1 line 1 inside the demo surface; the
+  // constant is exported from `story-layout.tsx` so all stories stay
+  // in register if the surface chrome is restyled.
   args: {
     labelVisibleMs: 60_000,
-    point: { x: 36, y: 134 },
+    point: { x: 36, y: FIRST_LINE_Y },
     user: bulbasaur,
   },
   // The render function uses CollaborationSurface's render-prop form so
@@ -59,7 +59,7 @@ export const LabeledCursor: Story = {
 
 export const CursorOnly: Story = {
   args: {
-    point: { x: 184, y: 134 },
+    point: { x: 184, y: FIRST_LINE_Y },
     showLabel: false,
     user: pikachu,
   },
@@ -84,7 +84,7 @@ export const CursorOnly: Story = {
 // the CSS `:hover` pseudo-class across test browsers.
 export const HoverableLabel: Story = {
   args: {
-    point: { x: 36, y: 134 },
+    point: { x: 36, y: FIRST_LINE_Y },
     showLabel: "hover",
     user: bulbasaur,
   },
@@ -111,7 +111,7 @@ export const HoverableLabel: Story = {
 export const AutoHiddenLabel: Story = {
   args: {
     labelVisibleMs: 60,
-    point: { x: 36, y: 134 },
+    point: { x: 36, y: FIRST_LINE_Y },
     user: bulbasaur,
   },
   play: async ({ canvas }) => {
@@ -144,7 +144,7 @@ export const MultipleCursors: Story = {
           />
           <LiveCursor
             labelVisibleMs={60_000}
-            point={{ x: 176, y: 134 }}
+            point={{ x: 176, y: FIRST_LINE_Y }}
             showLabel={false}
             user={charmander}
           />

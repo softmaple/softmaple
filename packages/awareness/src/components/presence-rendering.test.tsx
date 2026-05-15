@@ -249,6 +249,284 @@ describe("presence components", () => {
     });
   });
 
+  it("measures the host on the next frame when its ref is on an ancestor of the layer", async () => {
+    const user = createUser("1", { name: "Ancestor" });
+
+    const HOST_LEFT = 60;
+    const HOST_TOP = 90;
+
+    // Stories wrap `<PresenceLayer>` *inside* the host div, so
+    // `host.current` is `null` when the layer's layout effect runs
+    // (parent host refs attach after their children's layout effects).
+    // The layer must defer measurement to the next frame instead of
+    // bailing — otherwise the offset stays at (0,0) and overlays
+    // render at the viewport top-left.
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <div
+          ref={(el) => {
+            if (!el) return;
+            hostRef.current = el;
+            el.getBoundingClientRect = () =>
+              ({
+                left: HOST_LEFT,
+                top: HOST_TOP,
+                right: HOST_LEFT + 200,
+                bottom: HOST_TOP + 100,
+                width: 200,
+                height: 100,
+                x: HOST_LEFT,
+                y: HOST_TOP,
+                toJSON() {
+                  return {};
+                },
+              }) as DOMRect;
+          }}
+        >
+          <PresenceLayer host={hostRef}>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+          </PresenceLayer>
+        </div>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    // Flush the rAF the layer scheduled when it found host.current
+    // null. jsdom's rAF resolves on the next microtask boundary, so a
+    // single `act` tick is enough to surface the re-render.
+    await act(async () => {
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => resolve(null)),
+      );
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    // host(60, 90) + point(5, 7) = (65, 97)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(65px, 97px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("keeps the offset invariant when host and layer scroll together with the page", async () => {
+    const user = createUser("1", { name: "Scrolled" });
+
+    // The layer measures `hostRect - layerRect`, so a shared scroll
+    // delta cancels out and the offset is unchanged. This is what
+    // eliminates the one-frame lag the old `position: fixed` design
+    // had during window scroll — the listener still fires, but
+    // `setOffset` early-returns when values match and no re-render
+    // (and no transform update on children) happens.
+    const HOST_LEFT = 80;
+    const HOST_TOP = 120;
+    let hostEl: HTMLDivElement | null = null;
+    let layerEl: HTMLElement | null = null;
+    let scrollDelta = 0;
+
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div
+            ref={(el) => {
+              if (!el) return;
+              hostRef.current = el;
+              hostEl = el;
+              el.getBoundingClientRect = () =>
+                ({
+                  left: HOST_LEFT,
+                  top: HOST_TOP - scrollDelta,
+                  right: HOST_LEFT + 200,
+                  bottom: HOST_TOP + 100 - scrollDelta,
+                  width: 200,
+                  height: 100,
+                  x: HOST_LEFT,
+                  y: HOST_TOP - scrollDelta,
+                  toJSON() {
+                    return {};
+                  },
+                }) as DOMRect;
+            }}
+          />
+          <PresenceLayer host={hostRef}>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+          </PresenceLayer>
+        </>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    layerEl = container.querySelector(".awareness-presence-layer");
+    expect(layerEl).not.toBeNull();
+    // Make the layer move with the same scroll delta as the host —
+    // simulates the document scrolling and both elements shifting up
+    // together.
+    (layerEl as HTMLElement).getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: -scrollDelta,
+        right: 0,
+        bottom: -scrollDelta,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: -scrollDelta,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    // Initial transform: host(80, 120) - layer(0, 0) + point(5, 7) = (85, 127)
+    const cursor = container.querySelector(
+      ".awareness-live-cursor",
+    ) as HTMLElement;
+    expect(cursor.style.transform).toBe("translate3d(85px, 127px, 0)");
+
+    // Simulate the page scrolling down 50px: both host and layer
+    // shift up by 50.
+    scrollDelta = 50;
+    expect(hostEl).not.toBeNull();
+    const target = hostEl as unknown as HTMLDivElement;
+    await act(async () => {
+      target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    // Offset (host − layer) is unchanged, so the transform is too.
+    // Children render at the same coordinates *relative to the
+    // layer's box*, and the layer itself scrolled with the page —
+    // the visible viewport position follows naturally without a JS
+    // re-render of the child.
+    expect(cursor.style.transform).toBe("translate3d(85px, 127px, 0)");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("folds host.scrollLeft/scrollTop into the offset when trackHostScroll is set", async () => {
+    const user = createUser("1", { name: "Scrollie" });
+
+    const HOST_LEFT = 50;
+    const HOST_TOP = 100;
+    const HOST_SCROLL_LEFT = 13;
+    const HOST_SCROLL_TOP = 21;
+
+    // The harness keeps a handle on the host element so the test can
+    // mutate `scrollLeft` / `scrollTop` and fire a scroll event to
+    // verify the layer re-reads scroll on the capture-phase listener.
+    let hostEl: HTMLDivElement | null = null;
+
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div
+            ref={(el) => {
+              if (!el) return;
+              hostRef.current = el;
+              hostEl = el;
+              el.getBoundingClientRect = () =>
+                ({
+                  left: HOST_LEFT,
+                  top: HOST_TOP,
+                  right: HOST_LEFT + 200,
+                  bottom: HOST_TOP + 100,
+                  width: 200,
+                  height: 100,
+                  x: HOST_LEFT,
+                  y: HOST_TOP,
+                  toJSON() {
+                    return {};
+                  },
+                }) as DOMRect;
+              // jsdom keeps `scrollLeft`/`scrollTop` writable; the
+              // layer reads them on every update so we set them once
+              // here and let the initial layout effect pick them up.
+              Object.defineProperty(el, "scrollLeft", {
+                configurable: true,
+                writable: true,
+                value: HOST_SCROLL_LEFT,
+              });
+              Object.defineProperty(el, "scrollTop", {
+                configurable: true,
+                writable: true,
+                value: HOST_SCROLL_TOP,
+              });
+            }}
+          />
+          <PresenceLayer host={hostRef} trackHostScroll>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+          </PresenceLayer>
+        </>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    // host(50,100) - scroll(13,21) + point(5,7) = (42, 86)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(42px, 86px, 0)",
+    );
+
+    // Now scroll the host. The layer subscribes to capture-phase
+    // window scroll events, which bubble up from the host element, so
+    // dispatching a scroll event on the host (with `bubbles: true`,
+    // since capture-phase listeners on window also see bubbling
+    // events on their way down the tree) should re-trigger `update()`
+    // and fold the new scroll offset in.
+    expect(hostEl).not.toBeNull();
+    const target = hostEl as unknown as HTMLDivElement;
+    await act(async () => {
+      Object.defineProperty(target, "scrollLeft", {
+        configurable: true,
+        writable: true,
+        value: 30,
+      });
+      Object.defineProperty(target, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 45,
+      });
+      target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    // host(50,100) - scroll(30,45) + point(5,7) = (25, 62)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(25px, 62px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("warns once when LiveCursor or SelectionHighlight is rendered without a PresenceLayer", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const user = createUser("1", { name: "Lone" });

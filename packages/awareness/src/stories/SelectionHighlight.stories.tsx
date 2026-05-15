@@ -5,47 +5,52 @@ import { expect } from "storybook/test";
 import { PresenceLayer } from "../components/presence-layer";
 import { SelectionHighlight } from "../components/selection-highlight";
 import { charmander, pikachu } from "./awareness-fixtures";
-import { CollaborationSurface } from "./story-layout";
+import { CollaborationSurface, FIRST_LINE_Y } from "./story-layout";
 
 // Coordinates are host-local (surface-card relative). The selection rects
 // below land on paragraph 1 line 1 — "Collaborative editing keeps each
-// trainer visible…" — which sits at y≈134 inside the surface (chrome ~37px
-// + page-content padding-top 26px + docMeta + heading + grid gaps).
+// trainer visible…" — which sits at `FIRST_LINE_Y` inside the surface.
+// Exporting that constant from `story-layout.tsx` keeps all stories in
+// register with a single number to change if the surface chrome is
+// restyled.
+const LINE_HEIGHT = 24;
+const SECOND_LINE_Y = FIRST_LINE_Y + LINE_HEIGHT;
+const THIRD_LINE_Y = FIRST_LINE_Y + 2 * LINE_HEIGHT;
+
 const focusSelection = {
-  rect: { x: 32, y: 134, width: 172, height: 24 },
+  rect: { x: 32, y: FIRST_LINE_Y, width: 172, height: LINE_HEIGHT },
   text: "Collaborative editing keeps",
 } as const;
 
 const inlineSelection = {
-  rect: { x: 32, y: 134, width: 96, height: 24 },
+  rect: { x: 32, y: FIRST_LINE_Y, width: 96, height: LINE_HEIGHT },
   text: "Collaborative",
 } as const;
 
 const firstLineSelection = {
-  rect: { x: 32, y: 134, width: 172, height: 24 },
+  rect: { x: 32, y: FIRST_LINE_Y, width: 172, height: LINE_HEIGHT },
   text: "Collaborative editing keeps",
 } as const;
 
 const overlappingFirstLineSelection = {
-  rect: { x: 126, y: 134, width: 82, height: 24 },
+  rect: { x: 126, y: FIRST_LINE_Y, width: 82, height: LINE_HEIGHT },
   text: "editing keeps",
 } as const;
 
 // Three-rect selection mirroring the per-line rendering pattern that
-// `apps/playground/src/components/awareness-collab/EditorSurface.tsx`
-// produces from `rectsFor` for wrapped textarea selections — one rect
-// per visible line so the highlight follows the text instead of
-// painting a single bounding box over the unselected content between
-// the wrap boundaries.
+// `getTextareaSelectionRects` produces for wrapped textarea selections
+// — one rect per visible line so the highlight follows the text
+// instead of painting a single bounding box over the unselected
+// content between the wrap boundaries.
 const multiLineSelection = {
   text: "each trainer visible without pulling focus from the page. Remote cursors anchor activity to the",
   rects: [
     // Line 1 partial: from mid-line to the content right edge.
-    { x: 200, y: 134, width: 296, height: 24 },
+    { x: 200, y: FIRST_LINE_Y, width: 296, height: LINE_HEIGHT },
     // Line 2 full-width: content left edge to right edge.
-    { x: 32, y: 158, width: 496, height: 24 },
+    { x: 32, y: SECOND_LINE_Y, width: 496, height: LINE_HEIGHT },
     // Line 3 partial: content left edge to mid-line.
-    { x: 32, y: 182, width: 220, height: 24 },
+    { x: 32, y: THIRD_LINE_Y, width: 220, height: LINE_HEIGHT },
   ],
 } as const;
 

@@ -11,6 +11,15 @@
  *   changes — otherwise a queued trailing call from the old window would
  *   fire under the new semantics (e.g. throttleMs flipped 50 → 0 should
  *   not still emit a "stale" trailing send).
+ *
+ * Contract on `T`: callers must pass a concrete value type. The trailing
+ * branch stores the last value in a ref and asserts it back to `T` when
+ * the timer fires; if `T` itself included `undefined` (e.g. `string |
+ * undefined`), the ref's initial `undefined` and an intentional sentinel
+ * would be indistinguishable. Callers that need a "clear" semantics
+ * should pick a non-undefined sentinel (the existing `useUpdateCursor` /
+ * `useUpdateSelection` consumers accept `null | undefined` at the
+ * public API and normalize to `undefined` inside the throttled sink).
  */
 
 import { useCallback, useEffect, useRef } from "react";

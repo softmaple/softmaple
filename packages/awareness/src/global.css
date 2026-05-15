@@ -737,4 +737,14 @@
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
+
+  /*
+   * Same fix for the live cursor's hover/focus affordance: the
+   * `color-mix(...CanvasText...)` box-shadow used as a focus ring above
+   * is suppressed under forced colors, so reinstate a real outline.
+   */
+  .awareness-live-cursor--hoverable:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
 }

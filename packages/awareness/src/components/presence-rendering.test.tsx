@@ -232,6 +232,8 @@ describe("presence components", () => {
 
     const cursor = container.querySelector(".awareness-live-cursor");
     const selection = container.querySelector(".awareness-selection-highlight");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    expect(selection).toBeInstanceOf(HTMLElement);
 
     // 5 + 40 = 45, 7 + 80 = 87
     expect((cursor as HTMLElement).style.transform).toBe(

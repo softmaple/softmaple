@@ -114,47 +114,50 @@ describe("LiveCursor off-screen culling (design §7)", () => {
     document.body.append(container);
     const root = createRoot(container);
 
-    await act(async () => {
-      root.render(
-        <InTestLayer>
-          <LiveCursor
-            cullMargin={0}
-            point={{ x: 400, y: 400 }}
-            user={user("a")}
-          />
-        </InTestLayer>,
-      );
-    });
-    expect(container.querySelector(".awareness-live-cursor")).not.toBeNull();
+    try {
+      await act(async () => {
+        root.render(
+          <InTestLayer>
+            <LiveCursor
+              cullMargin={0}
+              point={{ x: 400, y: 400 }}
+              user={user("a")}
+            />
+          </InTestLayer>,
+        );
+      });
+      expect(container.querySelector(".awareness-live-cursor")).not.toBeNull();
 
-    // Shrink the window and dispatch resize — cursor should re-evaluate
-    // and cull itself without any pointer movement.
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 100,
-    });
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 100,
-    });
-    await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-    });
+      // Shrink the window and dispatch resize — cursor should re-evaluate
+      // and cull itself without any pointer movement.
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 100,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 100,
+      });
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+      });
 
-    expect(container.querySelector(".awareness-live-cursor")).toBeNull();
+      expect(container.querySelector(".awareness-live-cursor")).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
 
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: originalInnerWidth,
-    });
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: originalInnerHeight,
-    });
-
-    await act(async () => {
-      root.unmount();
-    });
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
   });
 });
 

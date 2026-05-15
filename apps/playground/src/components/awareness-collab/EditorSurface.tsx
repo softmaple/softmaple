@@ -6,6 +6,7 @@
 
 import {
   LiveCursor,
+  PresenceLayer,
   SelectionHighlight,
   type SelectionRange,
   useOthers,
@@ -13,7 +14,7 @@ import {
   useUpdateSelection,
   useUpdateTyping,
 } from "@softmaple/awareness";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { caretCoordinates } from "@/modules/awareness-collab/caret-coordinates";
 import { BlockActivityBadge } from "./BlockActivityBadge";
 
@@ -45,29 +46,7 @@ export function EditorSurface({
   const updateTyping = useUpdateTyping();
 
   const editorBoxRef = useRef<HTMLDivElement>(null);
-  // Track the *textarea*'s bounding rect — `caret-coordinates` returns
-  // offsets measured from the textarea's top-left, so any other origin
-  // (like the outer card, which also includes the header bar) would push
-  // overlays up by the header height.
-  const [editorRect, setEditorRect] = useState<DOMRect | null>(null);
   const typingTimerRef = useRef<number | null>(null);
-
-  useLayoutEffect(() => {
-    const update = () => {
-      const el = textareaRef.current;
-      if (el) setEditorRect(el.getBoundingClientRect());
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    if (textareaRef.current) ro.observe(textareaRef.current);
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [textareaRef]);
 
   // Clear typing indicator after a short idle period.
   useEffect(() => {
@@ -108,40 +87,41 @@ export function EditorSurface({
     }, 800);
   };
 
-  // Compute a screen-relative point for an offset in the textarea.
+  // Coordinates returned here are *host-local* (relative to the textarea
+  // top-left, post-scroll). PresenceLayer translates them to screen space
+  // on render, so we never have to reach for `getBoundingClientRect`.
   const pointFor = (offset: number) => {
     const el = textareaRef.current;
-    if (!el || !editorRect) return null;
+    if (!el) return null;
     const local = caretCoordinates(el, Math.min(offset, text.length));
     return {
-      x: editorRect.left + local.left - el.scrollLeft,
-      y: editorRect.top + local.top - el.scrollTop,
+      x: local.left - el.scrollLeft,
+      y: local.top - el.scrollTop,
     };
   };
 
-  // Compute a screen-relative rect for a selection range. Naive
-  // single-line bounding box — sufficient for the demo and matches
+  // Naive single-line bounding rect — sufficient for the demo and matches
   // SelectionHighlight's contract (HighlightRect with x,y,width,height).
   const rectFor = (range: SelectionRange) => {
     const el = textareaRef.current;
-    if (!el || !editorRect) return null;
+    if (!el) return null;
     const from = caretCoordinates(el, Math.min(range.from, text.length));
     const to = caretCoordinates(el, Math.min(range.to, text.length));
     const lineHeight = to.height || from.height || 20;
     if (from.top === to.top) {
       return {
-        x: editorRect.left + from.left - el.scrollLeft,
-        y: editorRect.top + from.top - el.scrollTop,
+        x: from.left - el.scrollLeft,
+        y: from.top - el.scrollTop,
         width: Math.max(2, to.left - from.left),
         height: lineHeight,
       };
     }
-    // Multi-line: span from `from` to right edge of editor as a coarse
-    // approximation. The demo seldom selects across many lines.
+    // Multi-line: span from `from` to the textarea's right edge as a
+    // coarse approximation. The demo seldom selects across many lines.
     return {
-      x: editorRect.left + from.left - el.scrollLeft,
-      y: editorRect.top + from.top - el.scrollTop,
-      width: editorRect.width - (from.left - el.scrollLeft) - 24,
+      x: from.left - el.scrollLeft,
+      y: from.top - el.scrollTop,
+      width: el.clientWidth - (from.left - el.scrollLeft) - 24,
       height: to.top - from.top + lineHeight,
     };
   };
@@ -173,50 +153,47 @@ export function EditorSurface({
         />
       </div>
 
-      {/* Awareness overlays. Rendered as a position:fixed layer so cursor
-       *  coordinates are screen-relative and survive scroll. */}
-      {editorRect ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 z-30"
-        >
-          {others.map((peer) => {
-            if (peer.cursor && peer.cursor.blockId === blockId) {
-              const point = pointFor(peer.cursor.offset);
-              if (!point) return null;
-              return (
-                <LiveCursor
-                  key={`cursor-${peer.userId}`}
-                  user={peer}
-                  point={point}
-                  showLabel="hover"
-                />
-              );
-            }
-            return null;
-          })}
-          {others.map((peer) => {
-            if (peer.selection && peer.selection.blockId === blockId) {
-              const rect = rectFor(peer.selection);
-              if (!rect) return null;
-              const selectedText = text.slice(
-                peer.selection.from,
-                peer.selection.to,
-              );
-              return (
-                <SelectionHighlight
-                  key={`sel-${peer.userId}`}
-                  user={peer}
-                  rect={rect}
-                  selectedText={selectedText}
-                  showLabel="hover"
-                />
-              );
-            }
-            return null;
-          })}
-        </div>
-      ) : null}
+      {/* Awareness overlays. PresenceLayer owns the fixed positioning
+       *  layer and translates host-local coordinates from `pointFor` /
+       *  `rectFor` into screen space, so we never compute screen offsets
+       *  here. */}
+      <PresenceLayer host={textareaRef}>
+        {others.map((peer) => {
+          if (peer.cursor && peer.cursor.blockId === blockId) {
+            const point = pointFor(peer.cursor.offset);
+            if (!point) return null;
+            return (
+              <LiveCursor
+                key={`cursor-${peer.userId}`}
+                user={peer}
+                point={point}
+                showLabel="hover"
+              />
+            );
+          }
+          return null;
+        })}
+        {others.map((peer) => {
+          if (peer.selection && peer.selection.blockId === blockId) {
+            const rect = rectFor(peer.selection);
+            if (!rect) return null;
+            const selectedText = text.slice(
+              peer.selection.from,
+              peer.selection.to,
+            );
+            return (
+              <SelectionHighlight
+                key={`sel-${peer.userId}`}
+                user={peer}
+                rect={rect}
+                selectedText={selectedText}
+                showLabel="hover"
+              />
+            );
+          }
+          return null;
+        })}
+      </PresenceLayer>
     </div>
   );
 }

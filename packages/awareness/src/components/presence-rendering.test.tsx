@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { ActivityIndicator } from "./activity-indicator";
 import { LiveCursor } from "./live-cursor";
 import { PresenceAvatar } from "./presence-avatar";
 import { PresenceBar } from "./presence-bar";
+import { PresenceLayer } from "./presence-layer";
 import { SelectionHighlight } from "./selection-highlight";
 
 const reactActGlobal = globalThis as typeof globalThis & {
@@ -166,6 +167,73 @@ describe("presence components", () => {
 
     expect(html).toContain(`Grace selection: ${"a".repeat(120)}…`);
     expect(html).not.toContain("a".repeat(121));
+  });
+
+  it("translates host-local cursor and selection coordinates by the layer offset", async () => {
+    const user = createUser("1", { name: "Hostie" });
+
+    const HOST_LEFT = 40;
+    const HOST_TOP = 80;
+    // jsdom's `getBoundingClientRect` is hard-coded to 0/0, so override
+    // the host element's per-instance to simulate it sitting at (40, 80).
+    const Harness = (): React.ReactNode => {
+      const hostRef = useRef<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div
+            ref={(el) => {
+              if (!el) return;
+              hostRef.current = el;
+              el.getBoundingClientRect = () =>
+                ({
+                  left: HOST_LEFT,
+                  top: HOST_TOP,
+                  right: HOST_LEFT + 200,
+                  bottom: HOST_TOP + 100,
+                  width: 200,
+                  height: 100,
+                  x: HOST_LEFT,
+                  y: HOST_TOP,
+                  toJSON() {
+                    return {};
+                  },
+                }) as DOMRect;
+            }}
+          />
+          <PresenceLayer host={hostRef}>
+            <LiveCursor point={{ x: 5, y: 7 }} showLabel={false} user={user} />
+            <SelectionHighlight
+              rect={{ x: 10, y: 12, width: 30, height: 18 }}
+              user={user}
+            />
+          </PresenceLayer>
+        </>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    const selection = container.querySelector(".awareness-selection-highlight");
+
+    // 5 + 40 = 45, 7 + 80 = 87
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(45px, 87px, 0)",
+    );
+    // 10 + 40 = 50, 12 + 80 = 92
+    expect((selection as HTMLElement).style.transform).toBe(
+      "translate3d(50px, 92px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
   });
 
   it("hides the initial LiveCursor label after the configured timeout", async () => {

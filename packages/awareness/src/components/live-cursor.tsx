@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, toUserColorStyle } from "./internal-utils";
+import { usePresenceLayerOffset } from "./presence-layer";
 
 export interface LiveCursorPoint {
   readonly x: number;
@@ -100,6 +101,14 @@ export const LiveCursor = ({
   const [isLabelVisible, setIsLabelVisible] = useState(showLabel === true);
   const previousPointRef = useRef(point);
 
+  // When wrapped in a `<PresenceLayer>`, `point` is host-local; outside one
+  // it stays screen-relative (back-compat for direct consumers and stories).
+  const layerOffset = usePresenceLayerOffset();
+  const screenPoint =
+    layerOffset === null
+      ? point
+      : { x: point.x + layerOffset.left, y: point.y + layerOffset.top };
+
   // Re-evaluate window-based culling on resize so cursors near the edge
   // cull/uncull correctly without waiting for the next pointer move.
   const [, bumpResize] = useReducer((x: number) => x + 1, 0);
@@ -137,7 +146,7 @@ export const LiveCursor = ({
     };
   }, [labelVisibleMs, point.x, point.y, showLabel]);
 
-  if (!isPointInViewport(point, viewport, cullMargin)) {
+  if (!isPointInViewport(screenPoint, viewport, cullMargin)) {
     return null;
   }
 
@@ -153,7 +162,7 @@ export const LiveCursor = ({
       role="img"
       style={{
         ...toUserColorStyle(user.color),
-        transform: `translate3d(${point.x}px, ${point.y}px, 0)`,
+        transform: `translate3d(${screenPoint.x}px, ${screenPoint.y}px, 0)`,
       }}
       tabIndex={isHoverLabel ? 0 : undefined}
     >

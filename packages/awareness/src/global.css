@@ -298,6 +298,29 @@
   @apply text-awareness-muted font-awareness text-[13px] leading-[1.4];
 }
 
+/*
+ * Fixed-position overlay aligned to a host element (textarea, editor
+ * surface, etc.). Children inside use host-local coordinates and the
+ * layer is responsible for translating them into screen space — see
+ * `PresenceLayer` in components/presence-layer.tsx.
+ *
+ * `pointer-events: none` so the layer never steals input from the host;
+ * hoverable cursor/selection labels override this with `auto` on
+ * themselves.
+ */
+.awareness-presence-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  /*
+   * Layout/style containment lets the browser skip parts of the cascade
+   * when nothing in the layer changes, which matters because the layer
+   * re-renders on every host scroll/resize event.
+   */
+  contain: layout style;
+}
+
 .awareness-live-cursor {
   --awareness-live-cursor-label-x: 0px;
   --awareness-live-cursor-label-y: 3px;

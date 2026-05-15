@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, toUserColorStyle } from "./internal-utils";
+import { usePresenceLayerOffset } from "./presence-layer";
 
 export interface HighlightRect {
   readonly x: number;
@@ -51,6 +52,13 @@ export const SelectionHighlight = ({
   const isHoverLabel = showLabel === "hover";
   const renderLabel = showLabel === true || isHoverLabel;
 
+  // When wrapped in a `<PresenceLayer>`, `rect.x/y` are host-local; outside
+  // a layer they stay screen-relative (back-compat for stories and one-off
+  // direct consumers).
+  const layerOffset = usePresenceLayerOffset();
+  const screenX = layerOffset === null ? rect.x : rect.x + layerOffset.left;
+  const screenY = layerOffset === null ? rect.y : rect.y + layerOffset.top;
+
   return (
     <div
       aria-label={getSelectionLabel(user, selectedText)}
@@ -63,7 +71,7 @@ export const SelectionHighlight = ({
       style={{
         ...toUserColorStyle(user.color),
         height: rect.height,
-        transform: `translate3d(${rect.x}px, ${rect.y}px, 0)`,
+        transform: `translate3d(${screenX}px, ${screenY}px, 0)`,
         width: rect.width,
         ...style,
       }}

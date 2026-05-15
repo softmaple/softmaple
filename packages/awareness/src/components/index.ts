@@ -24,6 +24,12 @@ export {
 } from "./presence-avatar";
 export { PresenceBar, type PresenceBarProps } from "./presence-bar";
 export {
+  PresenceLayer,
+  type PresenceLayerOffset,
+  type PresenceLayerProps,
+  usePresenceLayerOffset,
+} from "./presence-layer";
+export {
   type HighlightRect,
   SelectionHighlight,
   type SelectionHighlightProps,

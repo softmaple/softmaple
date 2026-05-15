@@ -52,6 +52,16 @@ export function EditorSurface({
   // pinyin / hangul / kana etc). See the long comment on the textarea
   // JSX below for why this matters.
   const composingRef = useRef(false);
+  // Holds the value committed by the most recent `compositionend`.
+  // Chrome (and WebKit) dispatch a trailing `input` event immediately
+  // after `compositionend` with the same post-commit value; the
+  // compositionend handler already pushed that value through
+  // `onTextChange`, so the next `input` event must swallow the echo
+  // instead of re-dispatching. Firefox doesn't fire the trailing
+  // input — the ref is consumed on the next input either way (it
+  // resets to `null`) so a real subsequent keystroke dispatches
+  // normally.
+  const lastCompositionCommitRef = useRef<string | null>(null);
 
   // The textarea is *uncontrolled* (see `defaultValue` below). This
   // effect is what keeps the DOM `value` in sync with the `text` prop
@@ -127,7 +137,19 @@ export function EditorSurface({
     // component. Even though the textarea is uncontrolled now, we
     // still avoid the broadcast traffic for intermediate states.
     if (composingRef.current) return;
-    onTextChange(e.target.value);
+    const value = e.target.value;
+    // Swallow Chrome / WebKit's trailing post-commit `input` event
+    // whose value matches what `handleCompositionEnd` just dispatched.
+    // The ref is consumed unconditionally so the very next keystroke
+    // (with a different value) dispatches normally; if Firefox skips
+    // the trailing input, the ref simply lingers until the next
+    // keystroke consumes (and ignores) it.
+    if (lastCompositionCommitRef.current !== null) {
+      const expected = lastCompositionCommitRef.current;
+      lastCompositionCommitRef.current = null;
+      if (value === expected) return;
+    }
+    onTextChange(value);
     pushSelection();
     armTypingIndicator();
   };
@@ -150,12 +172,25 @@ export function EditorSurface({
     composingRef.current = false;
     // One diff for the entire composition. `currentTarget.value` is
     // the post-commit text (e.g. "你好"), not the latin intermediate
-    // ("nihao") that fired during composition. Some browsers (Chrome)
-    // fire `compositionend` *before* the final `input` event; reading
-    // `currentTarget.value` here is still correct because the DOM
-    // value was updated synchronously by the IME before either event
-    // dispatched.
-    onTextChange(e.currentTarget.value);
+    // ("nihao") that fired during composition. Some browsers (Chrome,
+    // WebKit) fire `compositionend` *before* the final `input` event;
+    // reading `currentTarget.value` here is still correct because the
+    // DOM value was updated synchronously by the IME before either
+    // event dispatched. The trailing `input` event echo is suppressed
+    // in `handleInput` via `lastCompositionCommitRef`.
+    //
+    // If a peer edit arrived mid-composition, `text` flipped to the
+    // peer's value while the layout-effect sync bailed on the
+    // `composingRef` guard — leaving DOM and prop out of sync. The
+    // `onTextChange` dispatch below feeds the local commit into the
+    // CRDT, which merges with the peer's ops and emits a fresh `text`;
+    // that re-render re-runs the layout effect (`composingRef` is
+    // false now) and reconciles DOM to the merged value. No explicit
+    // reconcile here — doing it before dispatch would briefly clobber
+    // the just-committed characters with the peer's text.
+    const value = e.currentTarget.value;
+    lastCompositionCommitRef.current = value;
+    onTextChange(value);
     pushSelection();
     armTypingIndicator();
   };
@@ -224,7 +259,18 @@ export function EditorSurface({
           onSelect={maybePushSelection}
           onKeyUp={maybePushSelection}
           onClick={maybePushSelection}
-          onBlur={() => updateTyping(false)}
+          onBlur={() => {
+            // Defensive: a few mobile IMEs / older WebKit builds can
+            // drop `compositionend` when focus is yanked out from
+            // under an in-progress composition. Without this reset,
+            // `composingRef` would stay `true` forever and silently
+            // swallow every subsequent keystroke. Worst case on a
+            // well-behaved IME this is a no-op (the ref was already
+            // false), so it's safe to clear unconditionally.
+            composingRef.current = false;
+            lastCompositionCommitRef.current = null;
+            updateTyping(false);
+          }}
           placeholder="Type field notes here. Open another tab as a different trainer to collaborate."
           className="w-full min-h-[280px] sm:min-h-[360px] resize-y p-4 bg-transparent text-gray-100 placeholder:text-gray-600 focus:outline-none font-mono text-sm leading-relaxed"
           spellCheck={false}

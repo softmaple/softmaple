@@ -257,6 +257,11 @@ describe("presence components", () => {
     const HOST_SCROLL_LEFT = 13;
     const HOST_SCROLL_TOP = 21;
 
+    // The harness keeps a handle on the host element so the test can
+    // mutate `scrollLeft` / `scrollTop` and fire a scroll event to
+    // verify the layer re-reads scroll on the capture-phase listener.
+    let hostEl: HTMLDivElement | null = null;
+
     const Harness = (): React.ReactNode => {
       const hostRef = useRef<HTMLDivElement | null>(null);
       return (
@@ -265,6 +270,7 @@ describe("presence components", () => {
             ref={(el) => {
               if (!el) return;
               hostRef.current = el;
+              hostEl = el;
               el.getBoundingClientRect = () =>
                 ({
                   left: HOST_LEFT,
@@ -284,10 +290,12 @@ describe("presence components", () => {
               // here and let the initial layout effect pick them up.
               Object.defineProperty(el, "scrollLeft", {
                 configurable: true,
+                writable: true,
                 value: HOST_SCROLL_LEFT,
               });
               Object.defineProperty(el, "scrollTop", {
                 configurable: true,
+                writable: true,
                 value: HOST_SCROLL_TOP,
               });
             }}
@@ -312,6 +320,33 @@ describe("presence components", () => {
     // host(50,100) - scroll(13,21) + point(5,7) = (42, 86)
     expect((cursor as HTMLElement).style.transform).toBe(
       "translate3d(42px, 86px, 0)",
+    );
+
+    // Now scroll the host. The layer subscribes to capture-phase
+    // window scroll events, which bubble up from the host element, so
+    // dispatching a scroll event on the host (with `bubbles: true`,
+    // since capture-phase listeners on window also see bubbling
+    // events on their way down the tree) should re-trigger `update()`
+    // and fold the new scroll offset in.
+    expect(hostEl).not.toBeNull();
+    const target = hostEl as unknown as HTMLDivElement;
+    await act(async () => {
+      Object.defineProperty(target, "scrollLeft", {
+        configurable: true,
+        writable: true,
+        value: 30,
+      });
+      Object.defineProperty(target, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 45,
+      });
+      target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    // host(50,100) - scroll(30,45) + point(5,7) = (25, 62)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(25px, 62px, 0)",
     );
 
     await act(async () => {

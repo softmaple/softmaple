@@ -50,6 +50,18 @@ export default defineConfig({
           __dirname,
           "src/components/presence-bar.tsx",
         ),
+        // `components/presence-layer` is intentionally a build entry
+        // even though `package.json#exports` does NOT expose it as a
+        // public subpath. Both the main entry and `./testing` import
+        // `PresenceLayerContext` from this module; splitting it as its
+        // own chunk keeps a single module instance shared across the
+        // two entries, so `<PresenceLayer>` in app code and
+        // `<InTestLayer>` in tests resolve to the same React context.
+        // Without this entry, Vite would inline the module into each
+        // consumer and consumers would see two different context
+        // identities (a `<PresenceLayer>` provider would be invisible
+        // to a `useContext(PresenceLayerContext)` read from the
+        // testing entry).
         "components/presence-layer": path.resolve(
           __dirname,
           "src/components/presence-layer.tsx",

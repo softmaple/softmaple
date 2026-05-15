@@ -16,9 +16,11 @@ import {
  *
  * Stories that anchor cursors / selections to that line import this
  * constant instead of hard-coding `134`, so any change to the surface
- * chrome only needs to touch one place. The `story-layout.test.tsx`
- * suite snapshots this value against a rendered surface to catch
- * silent drift if the chrome is restyled.
+ * chrome only needs to touch one place. jsdom can't measure real
+ * layout (offsetTop / getBoundingClientRect return zero for everything)
+ * so this value isn't unit-tested; the Chromatic baseline for the
+ * `LiveCursor` / `SelectionHighlight` / `FullCollaboration` stories is
+ * the authoritative regression check.
  */
 export const FIRST_LINE_Y = 134;
 

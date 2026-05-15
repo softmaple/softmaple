@@ -63,15 +63,19 @@ export function EditorSurface({
   // normally.
   const lastCompositionCommitRef = useRef<string | null>(null);
 
-  // The textarea is *uncontrolled* (see `defaultValue` below). This
-  // effect is what keeps the DOM `value` in sync with the `text` prop
-  // for changes that originate outside the textarea — remote peer
-  // edits applied via `setText(replica.getText())` upstream. Local
-  // edits go textarea → `onTextChange` → `setText` → here, and the
-  // `el.value !== text` guard makes that a no-op so we don't fight the
-  // browser's caret. Mid-composition we deliberately skip the sync;
-  // overwriting `el.value` while an IME is composing collapses the
-  // composition.
+  // The textarea is *fully uncontrolled* — we don't pass `value` OR
+  // `defaultValue` as a prop, because React's `<textarea>` implementation
+  // re-applies BOTH on every commit (unlike `<input>`, where defaultValue
+  // is only applied at mount). A re-applied `defaultValue` writes
+  // `el.value = text` on every render, which resets the browser caret to
+  // 0 — the very next keystroke then inserts at the wrong position. Tab
+  // B typing " world" at the end of "Hello" merged as " worldHello" in
+  // multi-tab E2E coverage; see `e2e/awareness-collab-merge.spec.ts`.
+  //
+  // Instead we own the DOM `value` imperatively here: on every commit
+  // where `text` differs from the live DOM value, write it and restore
+  // the caret. Mid-composition we skip the write so we never collapse an
+  // in-progress IME composition.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -79,11 +83,8 @@ export function EditorSurface({
     if (el.value === text) return;
     const { selectionStart, selectionEnd } = el;
     el.value = text;
-    // Best-effort cursor preservation. If a peer inserted before our
-    // caret the offset will be off by the diff length — acceptable for
-    // the demo; a real editor would translate selection through the
-    // CRDT op. setSelectionRange clamps internally so out-of-range
-    // values are safe.
+    // setSelectionRange clamps to value.length internally, so peer
+    // inserts that shrink the doc past the local caret are safe.
     el.setSelectionRange(selectionStart, selectionEnd);
   }, [text, textareaRef]);
 
@@ -232,27 +233,20 @@ export function EditorSurface({
           </p>
           <BlockActivityBadge blockId={blockId} />
         </div>
-        {/* The textarea is *uncontrolled* (`defaultValue`, not
-         *  `value`). This matters specifically for IME composition.
-         *
-         *  A controlled `value={text}` textarea makes React run a
-         *  reconciliation step on every re-render that compares the
-         *  `value` prop against the live DOM value and, if they
-         *  differ, writes the prop back onto the DOM. During an IME
-         *  composition the DOM holds the in-progress text ("nihao")
-         *  while the React state still holds the pre-composition
-         *  value (""), and any re-render — from `updatePresence`,
-         *  `useOthers()`, a peer's cursor moving, anything — would
-         *  clobber the DOM back to the prop value and collapse the
-         *  composition. Making the textarea uncontrolled removes
-         *  that reconciliation step entirely. We sync external
-         *  changes (peer edits) back into the DOM imperatively in
-         *  the `useLayoutEffect` above, which is allowed to skip
-         *  writes while `composingRef.current` is true.
+        {/* The textarea is *fully uncontrolled* — no `value` AND no
+         *  `defaultValue` prop. React's `<textarea>` implementation
+         *  applies BOTH props on every commit (the source applies
+         *  `defaultValue` through the same path as `value`), so even
+         *  with `defaultValue={text}` a re-render that arrives between
+         *  keystrokes would write `el.value = text` and reset the
+         *  caret to 0 — the next keystroke then inserts at the wrong
+         *  position. The `useLayoutEffect` above owns the DOM value
+         *  imperatively, including caret preservation, and bails
+         *  during IME composition so we never collapse an in-progress
+         *  one.
          */}
         <textarea
           ref={textareaRef}
-          defaultValue={text}
           onChange={handleInput}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}

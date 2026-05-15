@@ -25,7 +25,23 @@ import { PresenceProvider } from "../providers/presence-provider";
 import type { PresenceUser } from "../types/presence";
 import { BlockActivityIndicator } from "./block-activity-indicator";
 import { LiveCursor } from "./live-cursor";
+import {
+  PresenceLayerContext,
+  type PresenceLayerOffset,
+} from "./presence-layer";
 import { SelectionHighlight } from "./selection-highlight";
+
+// `LiveCursor` and `SelectionHighlight` require a `<PresenceLayer>`
+// ancestor in production. The layer's measurement effect doesn't fire
+// under SSR / `renderToStaticMarkup`, so SSR tests inject the context
+// directly with an identity offset — enough to satisfy the guard while
+// leaving the rendered HTML structurally identical.
+const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
+const InTestLayer = ({ children }: { children: React.ReactNode }) => (
+  <PresenceLayerContext.Provider value={IDENTITY_OFFSET}>
+    {children}
+  </PresenceLayerContext.Provider>
+);
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -52,33 +68,41 @@ afterEach(() => {
 describe("LiveCursor off-screen culling (design §7)", () => {
   it("renders when point is inside the window viewport", () => {
     const html = renderToStaticMarkup(
-      <LiveCursor point={{ x: 100, y: 100 }} user={user("a")} />,
+      <InTestLayer>
+        <LiveCursor point={{ x: 100, y: 100 }} user={user("a")} />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-live-cursor");
   });
 
   it("returns null when point is far outside the window viewport", () => {
     const html = renderToStaticMarkup(
-      <LiveCursor point={{ x: 999_999, y: 999_999 }} user={user("a")} />,
+      <InTestLayer>
+        <LiveCursor point={{ x: 999_999, y: 999_999 }} user={user("a")} />
+      </InTestLayer>,
     );
     expect(html).toBe("");
   });
 
   it("honors an explicit viewport rect", () => {
     const inside = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 50, y: 50 }}
-        user={user("a")}
-        viewport={{ x: 0, y: 0, width: 200, height: 200 }}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 50, y: 50 }}
+          user={user("a")}
+          viewport={{ x: 0, y: 0, width: 200, height: 200 }}
+        />
+      </InTestLayer>,
     );
     const outside = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 500, y: 500 }}
-        user={user("a")}
-        cullMargin={0}
-        viewport={{ x: 0, y: 0, width: 200, height: 200 }}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 500, y: 500 }}
+          user={user("a")}
+          cullMargin={0}
+          viewport={{ x: 0, y: 0, width: 200, height: 200 }}
+        />
+      </InTestLayer>,
     );
     expect(inside).toContain("awareness-live-cursor");
     expect(outside).toBe("");
@@ -86,11 +110,13 @@ describe("LiveCursor off-screen culling (design §7)", () => {
 
   it('never culls when viewport="none"', () => {
     const html = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 999_999, y: 999_999 }}
-        user={user("a")}
-        viewport="none"
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 999_999, y: 999_999 }}
+          user={user("a")}
+          viewport="none"
+        />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-live-cursor");
   });
@@ -105,11 +131,13 @@ describe("LiveCursor off-screen culling (design §7)", () => {
 
     await act(async () => {
       root.render(
-        <LiveCursor
-          cullMargin={0}
-          point={{ x: 400, y: 400 }}
-          user={user("a")}
-        />,
+        <InTestLayer>
+          <LiveCursor
+            cullMargin={0}
+            point={{ x: 400, y: 400 }}
+            user={user("a")}
+          />
+        </InTestLayer>,
       );
     });
     expect(container.querySelector(".awareness-live-cursor")).not.toBeNull();
@@ -148,11 +176,13 @@ describe("LiveCursor off-screen culling (design §7)", () => {
 describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
   it('adds hoverable class when showLabel="hover"', () => {
     const html = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        showLabel="hover"
-        user={user("a", { name: "Hover" })}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          showLabel="hover"
+          user={user("a", { name: "Hover" })}
+        />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-selection-highlight--hoverable");
     expect(html).toContain("Hover");
@@ -161,11 +191,13 @@ describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
 
   it("does not add hoverable class for boolean showLabel", () => {
     const truthy = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        showLabel
-        user={user("a", { name: "Vis" })}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          showLabel
+          user={user("a", { name: "Vis" })}
+        />
+      </InTestLayer>,
     );
     expect(truthy).not.toContain("awareness-selection-highlight--hoverable");
     expect(truthy).toContain("Vis");
@@ -175,11 +207,13 @@ describe("SelectionHighlight hover-to-reveal label (design §5.3)", () => {
 describe("LiveCursor hover-to-reveal label (design §5.3)", () => {
   it('adds hoverable class, tabindex, and renders label when showLabel="hover"', () => {
     const html = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 0, y: 0 }}
-        showLabel="hover"
-        user={user("a", { name: "HoverCaret" })}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 0, y: 0 }}
+          showLabel="hover"
+          user={user("a", { name: "HoverCaret" })}
+        />
+      </InTestLayer>,
     );
     expect(html).toContain("awareness-live-cursor--hoverable");
     expect(html).toContain('tabindex="0"');
@@ -191,21 +225,25 @@ describe("LiveCursor hover-to-reveal label (design §5.3)", () => {
 
   it("does not add hoverable class for boolean showLabel", () => {
     const truthy = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 0, y: 0 }}
-        showLabel
-        user={user("a", { name: "VisCaret" })}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 0, y: 0 }}
+          showLabel
+          user={user("a", { name: "VisCaret" })}
+        />
+      </InTestLayer>,
     );
     expect(truthy).not.toContain("awareness-live-cursor--hoverable");
     expect(truthy).toContain("VisCaret");
 
     const hidden = renderToStaticMarkup(
-      <LiveCursor
-        point={{ x: 0, y: 0 }}
-        showLabel={false}
-        user={user("a", { name: "HiddenCaret" })}
-      />,
+      <InTestLayer>
+        <LiveCursor
+          point={{ x: 0, y: 0 }}
+          showLabel={false}
+          user={user("a", { name: "HiddenCaret" })}
+        />
+      </InTestLayer>,
     );
     expect(hidden).not.toContain("awareness-live-cursor--hoverable");
     // The label span itself isn't rendered when showLabel={false}; the

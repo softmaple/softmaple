@@ -1,7 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, toUserColorStyle } from "./internal-utils";
-import { usePresenceLayerOffset } from "./presence-layer";
+import {
+  usePresenceLayerOffset,
+  warnMissingPresenceLayerOnce,
+} from "./presence-layer";
 
 export interface HighlightRect {
   readonly x: number;
@@ -52,12 +55,18 @@ export const SelectionHighlight = ({
   const isHoverLabel = showLabel === "hover";
   const renderLabel = showLabel === true || isHoverLabel;
 
-  // When wrapped in a `<PresenceLayer>`, `rect.x/y` are host-local; outside
-  // a layer they stay screen-relative (back-compat for stories and one-off
-  // direct consumers).
+  // `SelectionHighlight` requires a `<PresenceLayer>` ancestor — the
+  // layer owns the host's bounding rect, which is the only sane reference
+  // frame for overlay coordinates. Without one, the highlight would
+  // render at the wrong position (the bug class this API was introduced
+  // to remove), so we render nothing instead.
   const layerOffset = usePresenceLayerOffset();
-  const screenX = layerOffset === null ? rect.x : rect.x + layerOffset.left;
-  const screenY = layerOffset === null ? rect.y : rect.y + layerOffset.top;
+  if (layerOffset === null) {
+    warnMissingPresenceLayerOnce("SelectionHighlight");
+    return null;
+  }
+  const screenX = rect.x + layerOffset.left;
+  const screenY = rect.y + layerOffset.top;
 
   return (
     <div

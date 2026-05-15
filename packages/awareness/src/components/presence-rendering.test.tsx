@@ -8,8 +8,24 @@ import { ActivityIndicator } from "./activity-indicator";
 import { LiveCursor } from "./live-cursor";
 import { PresenceAvatar } from "./presence-avatar";
 import { PresenceBar } from "./presence-bar";
-import { PresenceLayer } from "./presence-layer";
+import {
+  PresenceLayer,
+  PresenceLayerContext,
+  type PresenceLayerOffset,
+} from "./presence-layer";
 import { SelectionHighlight } from "./selection-highlight";
+
+// Tests that render `LiveCursor`/`SelectionHighlight` via SSR-style
+// `renderToStaticMarkup` can't go through `<PresenceLayer>` (its layout
+// effect doesn't fire under SSR), so they inject the context offset
+// directly. An identity offset {0, 0} satisfies the layer-required
+// guard without affecting the structural HTML the tests inspect.
+const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
+const InTestLayer = ({ children }: { children: React.ReactNode }) => (
+  <PresenceLayerContext.Provider value={IDENTITY_OFFSET}>
+    {children}
+  </PresenceLayerContext.Provider>
+);
 
 const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -99,15 +115,19 @@ describe("presence components", () => {
     const user = createUser("1", { name: "Grace" });
 
     const cursorHtml = renderToStaticMarkup(
-      <LiveCursor point={{ x: 12, y: 24 }} user={user} />,
+      <InTestLayer>
+        <LiveCursor point={{ x: 12, y: 24 }} user={user} />
+      </InTestLayer>,
     );
     const selectionHtml = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 4, y: 8, width: 120, height: 20 }}
-        selectedText="shared note"
-        showLabel
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 4, y: 8, width: 120, height: 20 }}
+          selectedText="shared note"
+          showLabel
+          user={user}
+        />
+      </InTestLayer>,
     );
 
     expect(cursorHtml).toContain("translate3d(12px, 24px, 0)");
@@ -134,17 +154,21 @@ describe("presence components", () => {
     const user = createUser("1", { name: "Grace" });
 
     const undefinedHtml = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          user={user}
+        />
+      </InTestLayer>,
     );
     const emptyHtml = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        selectedText=""
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          selectedText=""
+          user={user}
+        />
+      </InTestLayer>,
     );
 
     expect(undefinedHtml).toContain('aria-label="Grace selection"');
@@ -158,11 +182,13 @@ describe("presence components", () => {
     const longText = "a".repeat(200);
 
     const html = renderToStaticMarkup(
-      <SelectionHighlight
-        rect={{ x: 0, y: 0, width: 10, height: 10 }}
-        selectedText={longText}
-        user={user}
-      />,
+      <InTestLayer>
+        <SelectionHighlight
+          rect={{ x: 0, y: 0, width: 10, height: 10 }}
+          selectedText={longText}
+          user={user}
+        />
+      </InTestLayer>,
     );
 
     expect(html).toContain(`Grace selection: ${"a".repeat(120)}…`);
@@ -245,11 +271,13 @@ describe("presence components", () => {
 
     await act(async () => {
       root.render(
-        <LiveCursor
-          labelVisibleMs={100}
-          point={{ x: 12, y: 24 }}
-          user={user}
-        />,
+        <InTestLayer>
+          <LiveCursor
+            labelVisibleMs={100}
+            point={{ x: 12, y: 24 }}
+            user={user}
+          />
+        </InTestLayer>,
       );
     });
 

@@ -42,6 +42,7 @@ export {
   PresenceBar,
   type PresenceBarProps,
   PresenceLayer,
+  PresenceLayerContext,
   type PresenceLayerOffset,
   type PresenceLayerProps,
   SelectionHighlight,

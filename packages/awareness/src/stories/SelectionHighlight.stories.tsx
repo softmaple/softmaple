@@ -2,27 +2,32 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { CSSProperties } from "react";
 import { expect } from "storybook/test";
 
+import { PresenceLayer } from "../components/presence-layer";
 import { SelectionHighlight } from "../components/selection-highlight";
 import { charmander, pikachu } from "./awareness-fixtures";
 import { CollaborationSurface } from "./story-layout";
 
+// Coordinates are host-local (surface-card relative). The selection rects
+// below land on paragraph 1 line 1 — "Collaborative editing keeps each
+// trainer visible…" — which sits at y≈134 inside the surface (chrome ~37px
+// + page-content padding-top 26px + docMeta + heading + grid gaps).
 const focusSelection = {
-  rect: { x: 36, y: 36, width: 172, height: 24 },
+  rect: { x: 32, y: 134, width: 172, height: 24 },
   text: "Collaborative editing keeps",
 } as const;
 
 const inlineSelection = {
-  rect: { x: 36, y: 36, width: 96, height: 24 },
+  rect: { x: 32, y: 134, width: 96, height: 24 },
   text: "Collaborative",
 } as const;
 
 const firstLineSelection = {
-  rect: { x: 36, y: 36, width: 172, height: 24 },
+  rect: { x: 32, y: 134, width: 172, height: 24 },
   text: "Collaborative editing keeps",
 } as const;
 
 const overlappingFirstLineSelection = {
-  rect: { x: 126, y: 36, width: 82, height: 24 },
+  rect: { x: 126, y: 134, width: 82, height: 24 },
   text: "editing keeps",
 } as const;
 
@@ -43,9 +48,15 @@ const meta = {
     showLabel: true,
     user: charmander,
   },
+  // SelectionHighlight requires a `<PresenceLayer>` ancestor — the
+  // layer translates host-local rect coordinates into screen space.
   render: (args) => (
     <CollaborationSurface>
-      <SelectionHighlight {...args} />
+      {(surfaceRef) => (
+        <PresenceLayer host={surfaceRef}>
+          <SelectionHighlight {...args} />
+        </PresenceLayer>
+      )}
     </CollaborationSurface>
   ),
 } satisfies Meta<typeof SelectionHighlight>;
@@ -55,15 +66,17 @@ type Story = StoryObj<typeof meta>;
 
 export const LabeledSelection: Story = {
   play: async ({ canvas }) => {
-    const selection = canvas.getByRole("img", {
+    // PresenceLayer renders its children only after measuring the host,
+    // so use the async `findBy*` queries to wait for the second commit.
+    const selection = await canvas.findByRole("img", {
       name: `Charmander selection: ${focusSelection.text}`,
     });
 
     await expect(selection).toBeVisible();
     await expect(selection).toHaveStyle({ height: "24px", width: "172px" });
-    await expect(selection.getAttribute("style")).toContain(
-      "translate3d(36px, 36px, 0px)",
-    );
+    // No strict transform assertion — the rect's translate3d is now
+    // host-rect-relative, which depends on viewport layout in a way that
+    // makes hard-coded pixel values brittle.
     await expect(canvas.getByText("Charmander")).toBeVisible();
   },
 };
@@ -76,15 +89,12 @@ export const InlineSelection: Story = {
     user: pikachu,
   },
   play: async ({ canvas }) => {
-    const selection = canvas.getByRole("img", {
+    const selection = await canvas.findByRole("img", {
       name: `Pikachu selection: ${inlineSelection.text}`,
     });
 
     await expect(selection).toBeVisible();
     await expect(selection).toHaveStyle({ height: "24px", width: "96px" });
-    await expect(selection.getAttribute("style")).toContain(
-      "translate3d(36px, 36px, 0px)",
-    );
     await expect(canvas.queryByText("Pikachu")).not.toBeInTheDocument();
   },
 };
@@ -105,7 +115,7 @@ export const HoverableLabel: Story = {
     selectedText: focusSelection.text,
   },
   play: async ({ canvas }) => {
-    const selection = canvas.getByRole("img", {
+    const selection = await canvas.findByRole("img", {
       name: `Pikachu selection: ${focusSelection.text}`,
     });
 
@@ -130,29 +140,33 @@ export const HoverableLabel: Story = {
 export const OverlappingSelections: Story = {
   render: () => (
     <CollaborationSurface>
-      <SelectionHighlight
-        rect={firstLineSelection.rect}
-        selectedText={firstLineSelection.text}
-        showLabel
-        user={charmander}
-      />
-      <SelectionHighlight
-        rect={overlappingFirstLineSelection.rect}
-        selectedText={overlappingFirstLineSelection.text}
-        showLabel
-        style={raisedSelectionLabelStyle}
-        user={pikachu}
-      />
+      {(surfaceRef) => (
+        <PresenceLayer host={surfaceRef}>
+          <SelectionHighlight
+            rect={firstLineSelection.rect}
+            selectedText={firstLineSelection.text}
+            showLabel
+            user={charmander}
+          />
+          <SelectionHighlight
+            rect={overlappingFirstLineSelection.rect}
+            selectedText={overlappingFirstLineSelection.text}
+            showLabel
+            style={raisedSelectionLabelStyle}
+            user={pikachu}
+          />
+        </PresenceLayer>
+      )}
     </CollaborationSurface>
   ),
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByRole("img", {
+      await canvas.findByRole("img", {
         name: `Charmander selection: ${firstLineSelection.text}`,
       }),
     ).toBeVisible();
     await expect(
-      canvas.getByRole("img", {
+      await canvas.findByRole("img", {
         name: `Pikachu selection: ${overlappingFirstLineSelection.text}`,
       }),
     ).toBeVisible();

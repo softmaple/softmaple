@@ -25,6 +25,7 @@ export {
 export { PresenceBar, type PresenceBarProps } from "./presence-bar";
 export {
   PresenceLayer,
+  PresenceLayerContext,
   type PresenceLayerOffset,
   type PresenceLayerProps,
   usePresenceLayerOffset,

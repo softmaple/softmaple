@@ -1,7 +1,10 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, toUserColorStyle } from "./internal-utils";
-import { usePresenceLayerOffset } from "./presence-layer";
+import {
+  usePresenceLayerOffset,
+  warnMissingPresenceLayerOnce,
+} from "./presence-layer";
 
 export interface LiveCursorPoint {
   readonly x: number;
@@ -101,13 +104,12 @@ export const LiveCursor = ({
   const [isLabelVisible, setIsLabelVisible] = useState(showLabel === true);
   const previousPointRef = useRef(point);
 
-  // When wrapped in a `<PresenceLayer>`, `point` is host-local; outside one
-  // it stays screen-relative (back-compat for direct consumers and stories).
+  // `LiveCursor` requires a `<PresenceLayer>` ancestor — the layer owns the
+  // host's bounding rect, which is the only sane reference frame for
+  // overlay coordinates. Without one, the cursor would render at the
+  // wrong position (the original bug class this API was introduced to
+  // remove), so we render nothing instead.
   const layerOffset = usePresenceLayerOffset();
-  const screenPoint =
-    layerOffset === null
-      ? point
-      : { x: point.x + layerOffset.left, y: point.y + layerOffset.top };
 
   // Re-evaluate window-based culling on resize so cursors near the edge
   // cull/uncull correctly without waiting for the next pointer move.
@@ -145,6 +147,15 @@ export const LiveCursor = ({
       clearTimeout(timeoutId);
     };
   }, [labelVisibleMs, point.x, point.y, showLabel]);
+
+  if (layerOffset === null) {
+    warnMissingPresenceLayerOnce("LiveCursor");
+    return null;
+  }
+  const screenPoint = {
+    x: point.x + layerOffset.left,
+    y: point.y + layerOffset.top,
+  };
 
   if (!isPointInViewport(screenPoint, viewport, cullMargin)) {
     return null;

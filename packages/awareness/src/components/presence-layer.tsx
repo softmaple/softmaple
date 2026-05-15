@@ -13,16 +13,45 @@ export interface PresenceLayerOffset {
   readonly top: number;
 }
 
-const PresenceLayerContext = createContext<PresenceLayerOffset | null>(null);
+/**
+ * The context that `<PresenceLayer>` populates with the host's bounding
+ * offset. Exposed so unit tests can inject a fixed offset without going
+ * through `useLayoutEffect`-based measurement (which doesn't run under
+ * SSR / `renderToStaticMarkup`). Prefer `<PresenceLayer>` in real apps.
+ */
+export const PresenceLayerContext = createContext<PresenceLayerOffset | null>(
+  null,
+);
 
 /**
  * Read the current host offset injected by the nearest `<PresenceLayer>`
- * ancestor. Returns `null` outside a layer — components that consume this
- * should treat that as "use coordinates as-is" so they keep working when
- * rendered standalone (e.g. in stories or one-off overlays).
+ * ancestor. Returns `null` when no layer is in scope; the consumer
+ * should treat that as a misuse and either render nothing or fall back
+ * loudly (see `warnMissingPresenceLayerOnce`).
  */
 export const usePresenceLayerOffset = (): PresenceLayerOffset | null =>
   useContext(PresenceLayerContext);
+
+const warnedComponents = new Set<string>();
+
+/**
+ * Logs a single dev-mode warning the first time a given component is
+ * rendered without a `<PresenceLayer>` ancestor. Stripped from
+ * production bundles by the standard `process.env.NODE_ENV` check.
+ */
+export const warnMissingPresenceLayerOnce = (componentName: string): void => {
+  if (
+    typeof process === "undefined" ||
+    process.env.NODE_ENV === "production" ||
+    warnedComponents.has(componentName)
+  ) {
+    return;
+  }
+  warnedComponents.add(componentName);
+  console.warn(
+    `[@softmaple/awareness] <${componentName}> was rendered without a <PresenceLayer> ancestor and will not render. Wrap it in <PresenceLayer host={ref}> so coordinates can be translated against a host element.`,
+  );
+};
 
 export interface PresenceLayerProps {
   /**
@@ -37,6 +66,14 @@ export interface PresenceLayerProps {
   readonly className?: string;
 }
 
+// Identity offset used until the host is measured. Rendering with this
+// value (rather than waiting for the first useLayoutEffect tick) means
+// children mount on the first commit, which keeps refs and effects
+// inside the layer (e.g. `useEffect` in `LiveCursor`) wired up
+// predictably. The layer corrects the offset on the same paint via
+// `useLayoutEffect`, so there's no visible flicker.
+const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
+
 /**
  * Fixed-position overlay aligned to a host element. Owns the
  * `getBoundingClientRect` tracking (ResizeObserver + scroll/resize) so
@@ -44,16 +81,13 @@ export interface PresenceLayerProps {
  * presence overlay anchored to the wrong element pushes cursors and
  * selections off the line goes away once everything inside the layer
  * uses host-local coordinates.
- *
- * The layer renders nothing visible until the host has been measured;
- * this avoids a one-frame flash at (0,0) before the first layout pass.
  */
 export const PresenceLayer = ({
   host,
   children,
   className,
 }: PresenceLayerProps): ReactNode => {
-  const [offset, setOffset] = useState<PresenceLayerOffset | null>(null);
+  const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
   useLayoutEffect(() => {
     const el = host.current;
@@ -62,7 +96,7 @@ export const PresenceLayer = ({
     const update = (): void => {
       const rect = el.getBoundingClientRect();
       setOffset((prev) =>
-        prev !== null && prev.left === rect.left && prev.top === rect.top
+        prev.left === rect.left && prev.top === rect.top
           ? prev
           : { left: rect.left, top: rect.top },
       );
@@ -85,8 +119,6 @@ export const PresenceLayer = ({
       window.removeEventListener("resize", update);
     };
   }, [host]);
-
-  if (!offset) return null;
 
   return (
     <PresenceLayerContext.Provider value={offset}>

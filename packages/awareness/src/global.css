@@ -20,8 +20,17 @@
     sans-serif;
   --color-awareness-surface: color-mix(in srgb, Canvas 96%, CanvasText 4%);
   --color-awareness-border: color-mix(in srgb, CanvasText 16%, transparent);
-  --color-awareness-muted: color-mix(in srgb, CanvasText 56%, transparent);
-  --color-awareness-text: color-mix(in srgb, CanvasText 86%, transparent);
+  /*
+   * Derive secondary/primary text from `currentColor` so the package
+   * adapts to whatever text color the consuming context sets — not just
+   * the OS-driven `CanvasText`. Storybook stories that explicitly use
+   * `color: CanvasText` on their surfaces still render unchanged
+   * (currentColor = CanvasText there); apps with their own theme
+   * (e.g. dark-slate panels with `text-slate-100`) get readable
+   * contrast instead of OS-black-on-dark-slate.
+   */
+  --color-awareness-muted: color-mix(in srgb, currentColor 56%, transparent);
+  --color-awareness-text: color-mix(in srgb, currentColor 86%, transparent);
   --color-awareness-overflow-bg: color-mix(in srgb, Canvas 82%, CanvasText 18%);
   --color-awareness-status-active: #22c55e;
   --color-awareness-status-idle: #f59e0b;

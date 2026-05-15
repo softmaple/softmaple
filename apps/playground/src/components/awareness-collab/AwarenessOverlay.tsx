@@ -29,7 +29,7 @@ export function AwarenessOverlay({
   return (
     <PresenceProvider adapter={adapter}>
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl bg-slate-800/60 border border-slate-700 px-4 py-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl bg-slate-800/60 border border-slate-700 px-4 py-3 text-slate-100">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-center gap-2 shrink-0">
               <img

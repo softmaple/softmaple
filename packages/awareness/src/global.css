@@ -445,7 +445,12 @@
  */
 .awareness-selection-highlight::before {
   content: "";
-  inset: 1px 0;
+  /*
+   * 1px breathing room top and bottom keeps stacked highlights from
+   * touching on adjacent lines without visibly shrinking the fill.
+   */
+  inset-block: 1px;
+  inset-inline: 0;
   background: color-mix(in srgb, var(--awareness-user-color) 26%, transparent);
   /*
    * Multiply blend keeps overlaid text readable: the highlight darkens
@@ -453,7 +458,7 @@
    * Falls back gracefully on browsers that don't support it.
    */
   mix-blend-mode: multiply;
-  @apply absolute inset-0 rounded-[4px];
+  @apply absolute rounded-[4px];
 }
 
 @media (prefers-color-scheme: dark) {

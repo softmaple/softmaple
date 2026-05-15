@@ -45,19 +45,21 @@ export function EditorSurface({
   const updateTyping = useUpdateTyping();
 
   const editorBoxRef = useRef<HTMLDivElement>(null);
+  // Track the *textarea*'s bounding rect — `caret-coordinates` returns
+  // offsets measured from the textarea's top-left, so any other origin
+  // (like the outer card, which also includes the header bar) would push
+  // overlays up by the header height.
   const [editorRect, setEditorRect] = useState<DOMRect | null>(null);
   const typingTimerRef = useRef<number | null>(null);
 
-  // Track the editor box for overlay positioning. Recompute on resize.
   useLayoutEffect(() => {
     const update = () => {
-      if (editorBoxRef.current) {
-        setEditorRect(editorBoxRef.current.getBoundingClientRect());
-      }
+      const el = textareaRef.current;
+      if (el) setEditorRect(el.getBoundingClientRect());
     };
     update();
     const ro = new ResizeObserver(update);
-    if (editorBoxRef.current) ro.observe(editorBoxRef.current);
+    if (textareaRef.current) ro.observe(textareaRef.current);
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
@@ -65,7 +67,7 @@ export function EditorSurface({
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, []);
+  }, [textareaRef]);
 
   // Clear typing indicator after a short idle period.
   useEffect(() => {

@@ -16,6 +16,7 @@ import {
   findDifferingRange,
   findInsertPosition,
 } from "@/lib/text-diff";
+import { getTrainer } from "@/modules/awareness-collab/trainers";
 import { useAwarenessAdapter } from "@/modules/awareness-collab/use-awareness-adapter";
 
 export const Route = createFileRoute("/demo/awareness-collab")({
@@ -70,6 +71,7 @@ function CollabSession({
   readonly onLeave: () => void;
 }) {
   const { adapter, userInfo } = useAwarenessAdapter(trainerId, ROOM_ID);
+  const trainer = getTrainer(trainerId);
   const [replica] = useState(() => new EgWalkerReplica(userInfo.userId, ""));
   const [text, setText] = useState("");
   const broadcastRef = useRef<BroadcastChannel | null>(null);
@@ -251,7 +253,11 @@ function CollabSession({
           </div>
         </header>
 
-        <AwarenessOverlay adapter={adapter} userInfo={userInfo}>
+        <AwarenessOverlay
+          adapter={adapter}
+          userInfo={userInfo}
+          accentColor={trainer?.color}
+        >
           <EditorSurface
             blockId={COLLAB_BLOCK_ID}
             text={text}

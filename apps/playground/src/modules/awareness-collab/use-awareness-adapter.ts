@@ -42,10 +42,14 @@ export const useAwarenessAdapter = (
     // the same trainer don't collide. Awareness still groups them as
     // distinct presences.
     const tabTag = crypto.randomUUID().slice(0, 6);
+    // Use the darker `userColor` for awareness chrome — it backs the
+    // cursor and selection labels (white text on color), so it must clear
+    // WCAG AA against white. The bright `trainer.color` stays available
+    // to consumers for chips and accent text on dark surfaces.
     const userInfo: AdapterUserInfo = {
       userId: `${trainer.id}-${tabTag}`,
       name: trainer.name,
-      color: trainer.color,
+      color: trainer.userColor,
       avatarUrl: trainer.avatarUrl,
     };
 

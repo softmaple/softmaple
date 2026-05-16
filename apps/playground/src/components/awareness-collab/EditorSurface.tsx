@@ -221,14 +221,21 @@ export function EditorSurface({
   //
   // Both helpers under the hood mount + measure + unmount a mirror
   // <div> per call, so calling them inside the JSX (once per peer per
-  // render) churns the DOM each time `useOthers` ticks. Memoizing here
-  // means the mirror element only runs when the keyed inputs (peer
-  // offsets, selection ranges, current text) actually changed.
-  // Single pass per render: `getTextareaSelectionRects` doesn't read
-  // `text` itself (it measures the live DOM), but a local edit shifts
-  // the textarea's measured geometry, so `text` is a real cache key
-  // for both maps. Computing them together keeps that key honest in
-  // one place instead of duplicating it across two memos.
+  // render) churned the DOM on every render. Memoize them in a single
+  // pass keyed on `others`, `blockId`, and `text`. `text` isn't read
+  // by `getTextareaSelectionRects` (which measures the live DOM), but
+  // a local edit shifts the textarea's measured geometry, so it's a
+  // real cache key for both maps; computing them together keeps that
+  // key honest in one place.
+  //
+  // Trade-off: `useOthers` returns a new array reference on every
+  // presence tick, so the cache invalidates whenever ANY peer moves
+  // (not just peers in this block). At N=6 demo peers the win is
+  // already worthwhile — we move from O(N) mirror mounts per render
+  // to O(N) per tick — and a per-peer ref-cache keyed on `(userId,
+  // offset)` would eliminate the over-invalidation but adds a manual
+  // invalidation pass on text change. Skipped here pending a real
+  // need.
   const { cursorPoints, selectionRects } = useMemo(() => {
     const el = textareaRef.current;
     const cursors = new Map<string, { x: number; y: number }>();

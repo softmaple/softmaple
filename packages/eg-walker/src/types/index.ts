@@ -88,25 +88,6 @@ export interface SerializedGraphEventInput {
   readonly timestamp: number;
 }
 
-// ============================================================================
-// Invariant Types
-// ============================================================================
-
-/**
- * Invariant checker to ensure strong list specification
- */
-export interface ListInvariant {
-  /**
-   * Verify that applying operations produces deterministic results
-   */
-  verify(events: ReadonlyArray<GraphEvent>): boolean;
-
-  /**
-   * Check that two states are equivalent
-   */
-  equivalent(state1: DocumentState, state2: DocumentState): boolean;
-}
-
 /**
  * Shape produced by {@link EventGraph.serialize} — always JSON-safe.
  */

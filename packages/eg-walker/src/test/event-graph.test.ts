@@ -943,20 +943,14 @@ describe("EventGraph", () => {
       expect(graph.getEvent("child")?.parentVersion).toEqual(new Set(["root"]));
     });
 
-    it("falls back to [] for legacy JSON.stringify(Set) → {} payloads", () => {
-      // Hits the Object.keys defensive branch: a non-iterable plain object
-      // cannot recover the original IDs, so the deserialized event ends up
-      // with no parents. Verifies the fallback does not crash.
-      const graph = EventGraph.deserialize({
-        version: [],
-        events: [root()] as never,
-        // Stand-alone root with parentVersion === {} (empty plain object).
-      });
+    it("falls back to [] for non-iterable object parentVersion payloads", () => {
+      // A non-iterable plain object (e.g. the `{}` produced by accidentally
+      // JSON.stringify-ing a Set in pre-1.0 code) deserializes to an event
+      // with no parents instead of crashing.
       const isolated = EventGraph.deserialize({
         version: [],
         events: [{ ...root(), parentVersion: {} } as never] as never,
       });
-      expect(graph.getEvent("root")?.parentVersion).toEqual(new Set());
       expect(isolated.getEvent("root")?.parentVersion).toEqual(new Set());
     });
 

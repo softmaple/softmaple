@@ -1,4 +1,4 @@
-import { act, useRef } from "react";
+import { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -242,6 +242,107 @@ describe("presence components", () => {
     // 10 + 40 = 50, 12 + 80 = 92
     expect((selection as HTMLElement).style.transform).toBe(
       "translate3d(50px, 92px, 0)",
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("re-measures when the host prop swaps to a different ref", async () => {
+    // Locks in the host-swap reset path in PresenceLayer's
+    // useLayoutEffect. When the consumer passes a new RefObject for
+    // `host` (e.g. switching trainers in a multi-host editor), the
+    // layer must (1) reset to identity offset so the first frame
+    // doesn't render at the previous host's coordinates, and (2)
+    // re-measure against the new host on the same paint. This test
+    // observes (2) — jsdom paints synchronously after layout effects,
+    // so (1) isn't directly observable, but the contract that swap
+    // triggers re-measurement is what matters.
+    const user = createUser("1", { name: "Swapper" });
+
+    const HOST_A = { left: 30, top: 40 };
+    const HOST_B = { left: 200, top: 150 };
+
+    const Harness = (): React.ReactNode => {
+      const hostARef = useRef<HTMLDivElement | null>(null);
+      const hostBRef = useRef<HTMLDivElement | null>(null);
+      const [active, setActive] = useState<"a" | "b">("a");
+      const stamp = (
+        el: HTMLDivElement | null,
+        rect: { left: number; top: number },
+      ) => {
+        if (!el) return;
+        el.getBoundingClientRect = () =>
+          ({
+            left: rect.left,
+            top: rect.top,
+            right: rect.left + 100,
+            bottom: rect.top + 50,
+            width: 100,
+            height: 50,
+            x: rect.left,
+            y: rect.top,
+            toJSON() {
+              return {};
+            },
+          }) as DOMRect;
+      };
+      return (
+        <>
+          <div
+            ref={(el) => {
+              hostARef.current = el;
+              stamp(el, HOST_A);
+            }}
+          />
+          <div
+            ref={(el) => {
+              hostBRef.current = el;
+              stamp(el, HOST_B);
+            }}
+          />
+          <button
+            data-testid="swap"
+            onClick={() => setActive("b")}
+            type="button"
+          >
+            swap
+          </button>
+          <PresenceLayer host={active === "a" ? hostARef : hostBRef}>
+            <LiveCursor point={{ x: 5, y: 5 }} showLabel={false} user={user} />
+          </PresenceLayer>
+        </>
+      );
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    const cursor = container.querySelector(".awareness-live-cursor");
+    expect(cursor).toBeInstanceOf(HTMLElement);
+    // hostA(30, 40) + point(5, 5) = (35, 45)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(35px, 45px, 0)",
+    );
+
+    // Click the swap button to flip the host prop from hostARef to
+    // hostBRef. The layer's useLayoutEffect should re-fire on the new
+    // dep, reset offset to identity, then re-measure against hostB.
+    await act(async () => {
+      (
+        container.querySelector('[data-testid="swap"]') as HTMLButtonElement
+      ).click();
+    });
+
+    // hostB(200, 150) + point(5, 5) = (205, 155)
+    expect((cursor as HTMLElement).style.transform).toBe(
+      "translate3d(205px, 155px, 0)",
     );
 
     await act(async () => {

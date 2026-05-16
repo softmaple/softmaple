@@ -58,19 +58,30 @@ export const ConnectionIndicator = ({
   const resolved: AdapterConnectionState =
     state ?? context?.connectionState ?? "disconnected";
 
-  if (hideWhenConnected && resolved === "connected") return null;
-
   const copy = { ...DEFAULT_LABELS, ...labels };
   const text = copy[resolved];
+  // When `hideWhenConnected` and we're connected, keep the children
+  // rendered so the wrapper's layout box stays the same width — but
+  // visually hide and AT-hide them. Returning `null` here caused
+  // sibling chrome (e.g. PresenceBar) to expand into the gap on every
+  // connect/reconnect transition, producing a jarring reflow.
+  const visuallyHidden = hideWhenConnected && resolved === "connected";
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: <output> is for form-calculated values; this is transport telemetry, so a div with role="status" is the semantically appropriate live region (mirrors block-activity-indicator).
     <div
-      aria-label={ariaLabel ?? text}
+      // Only set `aria-label` when a consumer overrides it. Without an
+      // override the visible `<span class="…__text">` provides the
+      // accessible name; setting `aria-label` to the same string would
+      // suppress AT from announcing the inner text and produce no
+      // observable difference except a duplicated string in the DOM.
+      aria-label={ariaLabel}
+      aria-hidden={visuallyHidden ? true : undefined}
       aria-live="polite"
       className={cx(
         "awareness-connection-indicator",
         `awareness-connection-indicator--${resolved}`,
+        visuallyHidden && "awareness-connection-indicator--placeholder",
         className,
       )}
       role="status"

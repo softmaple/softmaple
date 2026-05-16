@@ -4,7 +4,7 @@
  * are present. Falls back to a "Just you" caption otherwise.
  */
 
-import { usePeersInBlock } from "@softmaple/awareness";
+import { getInitials, usePeersInBlock } from "@softmaple/awareness";
 
 interface BlockActivityBadgeProps {
   readonly blockId: string;
@@ -19,6 +19,10 @@ export function BlockActivityBadge({ blockId }: BlockActivityBadgeProps) {
     );
   }
 
+  // Defensive: `peers[0]` is non-null inside `peers.length === 1`, but
+  // TS can't narrow array access through length checks.
+  const firstPeer = peers[0];
+
   return (
     <span className="inline-flex items-center gap-2 text-xs text-gray-300">
       <span className="flex -space-x-2">
@@ -31,13 +35,16 @@ export function BlockActivityBadge({ blockId }: BlockActivityBadgeProps) {
             }}
             title={peer.name}
           >
-            {peer.name[0]}
+            {/* `getInitials` handles empty / whitespace names by
+             *  returning "?", so a peer that registered with `""`
+             *  doesn't render an empty avatar bubble. */}
+            {getInitials(peer.name)}
           </span>
         ))}
       </span>
       <span>
-        {peers.length === 1
-          ? `${peers[0]?.name} is editing here`
+        {peers.length === 1 && firstPeer
+          ? `${firstPeer.name} is editing here`
           : `${peers.length} trainers editing here`}
       </span>
     </span>

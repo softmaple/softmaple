@@ -103,11 +103,20 @@ const IDENTITY_OFFSET: PresenceLayerOffset = { left: 0, top: 0 };
  *
  * The layer renders inline (no portal) as `position: absolute` and
  * stores the **difference** between the host's bounding rect and the
- * layer's own bounding rect. When the page scrolls, the layer and host
- * move together in the document — their relative offset is unchanged,
- * so the children's transforms don't need to update and the browser
- * handles the scroll natively without the one-frame lag a viewport-
- * anchored (`position: fixed`) layer would have to chase via JS.
+ * layer's own bounding rect. The unnested case — host and layer
+ * scrolling together with the page — is the calm path: their relative
+ * offset is unchanged, the `setOffset` early-return below skips the
+ * re-render entirely, and the browser handles the scroll natively
+ * without the one-frame lag a viewport-anchored (`position: fixed`)
+ * layer would have to chase via JS. Nested cases where only one of
+ * the two scrolls (e.g. host inside a custom scroll container) DO
+ * trigger a re-render — that's the price of staying inline.
+ *
+ * Because the layer renders inline rather than through a portal, its
+ * stacking context is whatever surrounds it. Cursors and selections
+ * carry `z-20` in the package CSS so they sit above their siblings,
+ * but a consumer rendering the layer inside a `<dialog>` or other
+ * `z-index: 1000+` overlay needs its own bump.
  *
  * By default the layer tracks the host's **position** but ignores
  * host-internal scrolling — `getBoundingClientRect` doesn't change
@@ -127,6 +136,20 @@ export const PresenceLayer = ({
   const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
   useLayoutEffect(() => {
+    // Host *prop* swap (consumer passes a new `host` ref object —
+    // e.g. `<PresenceLayer host={trainerARef}>` →
+    // `<PresenceLayer host={trainerBRef}>`): reset to identity before
+    // measuring so the first frame after the swap doesn't briefly
+    // render children at the previous host's offset. The measurement
+    // below replaces this on the same paint, so no visible flicker.
+    //
+    // Note: a `.current` mutation on the same RefObject (consumer
+    // holding a stable ref and reassigning its element) does NOT
+    // re-run this effect — refs don't trigger re-renders or dep
+    // changes. That's a known limitation of `useLayoutEffect`, not
+    // addressable here without polling.
+    setOffset((prev) => (prev === IDENTITY_OFFSET ? prev : IDENTITY_OFFSET));
+
     const update = (): void => {
       const hostEl = host.current;
       const layerEl = layerRef.current;

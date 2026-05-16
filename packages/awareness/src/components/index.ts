@@ -11,6 +11,15 @@ export {
   type ConnectionIndicatorLabels,
   type ConnectionIndicatorProps,
 } from "./connection-indicator";
+// Display helpers consumers reach for when building presence chrome
+// alongside the package's components — initials for avatar fallbacks,
+// status sentence for tooltips, relative-time phrase for "X ago"
+// strings. Re-exported here rather than duplicated in app code.
+export {
+  formatPresenceSummary,
+  formatRelativeTime,
+  getInitials,
+} from "./internal-utils";
 export {
   LiveCursor,
   type LiveCursorPoint,

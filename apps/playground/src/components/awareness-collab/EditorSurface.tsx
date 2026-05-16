@@ -262,6 +262,11 @@ export function EditorSurface({
       <div
         ref={editorBoxRef}
         className="relative rounded-xl border border-slate-700 bg-slate-900/60 overflow-hidden shadow-lg"
+        // The testid uses the bare `trainerId`, not the per-tab
+        // `userInfo.userId` (which has a tabTag suffix). Safe because
+        // one tab mounts one EditorSurface, but the e2e tests should
+        // distinguish tabs through their browser context, not by
+        // inspecting two surfaces with the same testid in one DOM.
         data-testid={`editor-surface-${trainerId}`}
       >
         <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-slate-800 bg-slate-900/80">
@@ -303,7 +308,11 @@ export function EditorSurface({
             updateTyping(false);
           }}
           placeholder="Type field notes here. Open another tab as a different trainer to collaborate."
-          className="w-full min-h-[280px] sm:min-h-[360px] resize-y p-4 bg-transparent text-gray-100 placeholder:text-gray-600 focus:outline-none font-mono text-sm leading-relaxed"
+          // `text-gray-600` on `bg-slate-900` rendered the onboarding
+          // hint at ~3:1 — placeholders are technically AA-exempt but
+          // the cue is real instruction copy and was barely legible.
+          // `text-slate-400` lifts it well above 4.5:1.
+          className="w-full min-h-[280px] sm:min-h-[360px] resize-y p-4 bg-transparent text-gray-100 placeholder:text-slate-400 focus:outline-none font-mono text-sm leading-relaxed"
           spellCheck={false}
         />
       </div>

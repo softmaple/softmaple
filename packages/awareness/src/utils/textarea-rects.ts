@@ -80,12 +80,26 @@ const asStyleRecord = (value: CSSStyleDeclaration): StyleRecord =>
   value as unknown as StyleRecord;
 
 // Computed style values can be non-numeric (`lineHeight: "normal"`,
-// missing borders) — `Number.parseInt` of those returns `NaN`, which
-// poisons downstream math (caret height = NaN → selection rect = NaN
-// → overlays collapse). Resolve to a finite fallback at the read site.
+// missing borders) — `Number.parseInt` / `Number.parseFloat` of those
+// returns `NaN`, which poisons downstream math (caret height = NaN →
+// selection rect = NaN → overlays collapse). Resolve to a finite
+// fallback at the read site.
 const toFiniteInt = (value: string | undefined, fallback: number): number => {
   if (!value) return fallback;
   const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+// Float-preserving variant. Used for `lineHeight`, where truncating
+// `"22.4px"` to `22` causes the per-line rect math
+// (`start.top + i * lineHeight`) to drift by ~0.4·i pixels per row —
+// visible as a gap above each middle rect on hosts with fractional
+// `line-height` (e.g. `1.4` × an odd font-size). Browsers position
+// `transform: translate3d` at subpixel precision, so keeping the
+// fractional value through the math is both correct and free.
+const toFiniteFloat = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const n = Number.parseFloat(value);
   return Number.isFinite(n) ? n : fallback;
 };
 
@@ -147,9 +161,12 @@ export const getTextareaCaretRect = (
 
     // `lineHeight` is often `"normal"`; fall back to `fontSize`, then
     // a sane default. Border widths default to 0 when absent.
+    // Read line-height as a float (see `toFiniteFloat`) so fractional
+    // values flow through the per-line rect math without integer
+    // truncation.
     const height =
-      toFiniteInt(computed.lineHeight, Number.NaN) ||
-      toFiniteInt(computed.fontSize, 20);
+      toFiniteFloat(computed.lineHeight, Number.NaN) ||
+      toFiniteFloat(computed.fontSize, 20);
     return {
       top: marker.offsetTop + toFiniteInt(computed.borderTopWidth, 0),
       left: marker.offsetLeft + toFiniteInt(computed.borderLeftWidth, 0),
@@ -178,11 +195,12 @@ export const getTextareaCaretRect = (
  *
  * Assumes uniform line height (textarea has a single font/leading);
  * the middle-line count uses `Math.round((end.top - start.top) /
- * lineHeight) - 1`, which is robust for integer line heights but can
- * drift off-by-one if the host has fractional `line-height` and the
- * wrap span lands near a half-line boundary. Adequate for demo-grade
- * textarea selections; richer editors should compute rects from their
- * own selection model rather than the textarea mirror.
+ * lineHeight) - 1`. `lineHeight` is read with `Number.parseFloat` so
+ * fractional values (e.g. `line-height: 1.4` × an odd font-size) flow
+ * through both the count and the per-row `y = start.top + i *
+ * lineHeight` math at subpixel precision. Richer editors with
+ * non-uniform line height should compute rects from their own
+ * selection model rather than the textarea mirror.
  *
  * Returns `[]` for collapsed/inverted ranges or when the textarea
  * isn't measurable (e.g. detached, zero-width).

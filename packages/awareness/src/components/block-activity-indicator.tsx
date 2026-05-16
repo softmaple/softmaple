@@ -13,7 +13,7 @@
 import { type ReactNode, useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
-import { cx } from "./internal-utils";
+import { cx, toUserColorStyle } from "./internal-utils";
 
 export interface BlockActivityIndicatorProps {
   /** The block this indicator is anchored to. */
@@ -117,14 +117,7 @@ export const BlockActivityIndicator = ({
       aria-live={ariaLive}
       className={cx("awareness-block-activity-indicator", className)}
       role="status"
-      style={
-        primaryColor
-          ? ({ "--awareness-user-color": primaryColor } as Record<
-              string,
-              string
-            >)
-          : undefined
-      }
+      style={primaryColor ? toUserColorStyle(primaryColor) : undefined}
     >
       <span
         aria-hidden="true"

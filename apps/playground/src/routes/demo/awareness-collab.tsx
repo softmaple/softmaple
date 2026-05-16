@@ -245,10 +245,21 @@ function CollabSession({
             </Link>
             <button
               type="button"
-              onClick={onLeave}
-              className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-gray-200 text-sm transition-colors"
+              onClick={() => {
+                // Mid-edit accidental clicks here drop the local
+                // presence and re-mount the adapter — annoying but
+                // recoverable. `window.confirm` is the lightweight
+                // middle ground: enough friction to catch a misclick
+                // without building a real modal for a demo button.
+                // The muted text styling (vs. the chunkier "Home"
+                // link) signals it as a secondary action.
+                if (window.confirm("Leave this trainer and pick a new one?")) {
+                  onLeave();
+                }
+              }}
+              className="px-3 py-2 text-gray-400 hover:text-gray-200 text-sm transition-colors underline-offset-4 hover:underline"
             >
-              Switch Trainer
+              Change trainer →
             </button>
           </div>
         </header>

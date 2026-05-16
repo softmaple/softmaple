@@ -4,6 +4,7 @@
 
 import { useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
+import { applyResolver } from "../state/resolve-peer";
 import type { PresenceUser } from "../types/presence";
 
 const PROVIDER_ERROR_MSG =
@@ -47,9 +48,14 @@ export const useOther = (userId: string): PresenceUser | undefined => {
   if (!context) {
     throw new Error(`useOther ${PROVIDER_ERROR_MSG}`);
   }
-  const { presence, self } = context;
-  if (self !== null && userId === self.userId) return undefined;
-  return presence.get(userId);
+  const { presence, self, resolver } = context;
+  const selfId = self?.userId ?? null;
+
+  return useMemo(() => {
+    if (selfId !== null && userId === selfId) return undefined;
+    const raw = presence.get(userId);
+    return raw === undefined ? undefined : applyResolver(raw, resolver);
+  }, [presence, userId, selfId, resolver]);
 };
 
 /**

@@ -7,7 +7,7 @@ import {
 } from "../providers/presence-context";
 import type { PresenceResolver } from "../resolver";
 import type { PresenceUser } from "../types/presence";
-import { useOther } from "./use-others";
+import { useOther, useOthers } from "./use-others";
 import { usePeerCursors } from "./use-presence-cursors";
 
 const reactActGlobal = globalThis as typeof globalThis & {
@@ -158,6 +158,105 @@ describe("resolved peer positions", () => {
       x: 24,
       y: 48,
       space: "document",
+    });
+    unmount();
+  });
+
+  it("resolves anchored cursor for useOther", () => {
+    const resolver: PresenceResolver = {
+      resolveCursor: vi.fn(() => ({ blockId: "body", offset: 42 })),
+    };
+    const peer = createUser("peer", {
+      cursor: { blockId: "body", offset: 6, anchor: "anchor" },
+    });
+
+    const { result, unmount } = renderHook(
+      () => useOther("peer"),
+      baseContext([peer], resolver),
+    );
+
+    expect(resolver.resolveCursor).toHaveBeenCalledWith(peer.cursor, "peer");
+    expect(result.current?.cursor).toEqual({ blockId: "body", offset: 42 });
+    unmount();
+  });
+
+  it("resolves anchored selection for useOther", () => {
+    const resolver: PresenceResolver = {
+      resolveSelection: vi.fn(() => ({ blockId: "body", from: 10, to: 15 })),
+    };
+    const peer = createUser("peer", {
+      selection: {
+        blockId: "body",
+        from: 6,
+        to: 11,
+        fromAnchor: "from",
+        toAnchor: "to",
+      },
+    });
+
+    const { result, unmount } = renderHook(
+      () => useOther("peer"),
+      baseContext([peer], resolver),
+    );
+
+    expect(resolver.resolveSelection).toHaveBeenCalledWith(
+      peer.selection,
+      "peer",
+    );
+    expect(result.current?.selection).toEqual({
+      blockId: "body",
+      from: 10,
+      to: 15,
+    });
+    unmount();
+  });
+
+  it("clears only the affected field when resolveSelection returns null", () => {
+    const resolver: PresenceResolver = {
+      resolveSelection: vi.fn(() => null),
+    };
+    const peer = createUser("peer", {
+      cursor: { blockId: "body", offset: 6 },
+      selection: {
+        blockId: "body",
+        from: 6,
+        to: 11,
+        fromAnchor: "gone",
+        toAnchor: "gone",
+      },
+      pointer: { x: 1, y: 2, space: "viewport" },
+    });
+
+    const { result, unmount } = renderHook(
+      () => useOther("peer"),
+      baseContext([peer], resolver),
+    );
+
+    // Peer is still present; only the unresolvable selection is cleared.
+    expect(result.current).toBeDefined();
+    expect(result.current?.selection).toBeUndefined();
+    expect(result.current?.cursor).toEqual({ blockId: "body", offset: 6 });
+    expect(result.current?.pointer).toEqual({ x: 1, y: 2, space: "viewport" });
+    unmount();
+  });
+
+  it("returns resolved peers from useOthers when context is pre-resolved", () => {
+    // `useOthers` returns `context.others` as-is — the resolver is applied
+    // upstream in PresenceProvider (covered by a provider-level test). This
+    // verifies the hook does not strip or override that resolution.
+    const resolved = createUser("peer", {
+      selection: { blockId: "body", from: 10, to: 15 },
+    });
+
+    const { result, unmount } = renderHook(
+      () => useOthers(),
+      baseContext([resolved]),
+    );
+
+    expect(result.current?.[0]?.selection).toEqual({
+      blockId: "body",
+      from: 10,
+      to: 15,
     });
     unmount();
   });

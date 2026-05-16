@@ -9,6 +9,7 @@
 
 import { useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
+import { applyResolver } from "../state/resolve-peer";
 import type { PresenceUser } from "../types/presence";
 
 const PROVIDER_ERROR_MSG =
@@ -50,13 +51,29 @@ export const usePeersInBlock = (
     throw new Error(`usePeersInBlock ${PROVIDER_ERROR_MSG}`);
   }
   const { includeSelf = false, includeOffline = false } = options;
-  const { others, presence } = context;
+  const { others, presence, self, resolver } = context;
+  const selfId = self?.userId ?? null;
 
   return useMemo(() => {
-    const source = includeSelf ? Array.from(presence.values()) : others;
+    // `others` is already resolver-applied at the provider. For the
+    // `includeSelf` branch we walk `presence` directly, so apply the resolver
+    // here too — but never to self, which is broadcast and not resolved.
+    const source: ReadonlyArray<PresenceUser> = includeSelf
+      ? Array.from(presence.values()).map((user) =>
+          user.userId === selfId ? user : applyResolver(user, resolver),
+        )
+      : others;
     return source.filter((user) => {
       if (!includeOffline && user.status === "offline") return false;
       return isUserInBlock(user, blockId);
     });
-  }, [blockId, includeOffline, includeSelf, others, presence]);
+  }, [
+    blockId,
+    includeOffline,
+    includeSelf,
+    others,
+    presence,
+    selfId,
+    resolver,
+  ]);
 };

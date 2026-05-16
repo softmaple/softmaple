@@ -402,6 +402,91 @@ describe("PresenceProvider", () => {
     });
   });
 
+  it("applies resolver to peers exposed via others / presence", async () => {
+    const adapter = new FullMockAdapter();
+    const contextRef: { current: PresenceContextValue | null } = {
+      current: null,
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    const resolveCursor = vi.fn(() => ({ blockId: "body", offset: 42 }));
+    const resolveSelection = vi.fn(() => ({
+      blockId: "body",
+      from: 10,
+      to: 15,
+    }));
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider
+          adapter={adapter}
+          autoConnect={false}
+          resolver={{ resolveCursor, resolveSelection }}
+        >
+          <PresenceContext.Consumer>
+            {(value) => {
+              contextRef.current = value;
+              return null;
+            }}
+          </PresenceContext.Consumer>
+        </PresenceProvider>,
+      );
+    });
+
+    const self: PresenceUser = {
+      userId: "self",
+      name: "Self",
+      color: "#000",
+      status: "active",
+      lastActiveAt: 0,
+      cursor: { blockId: "body", offset: 1, anchor: "self-anchor" },
+    };
+    const peer: PresenceUser = {
+      userId: "peer",
+      name: "Peer",
+      color: "#111",
+      status: "active",
+      lastActiveAt: 0,
+      cursor: { blockId: "body", offset: 6, anchor: "cursor-anchor" },
+      selection: {
+        blockId: "body",
+        from: 6,
+        to: 11,
+        fromAnchor: "from",
+        toAnchor: "to",
+      },
+    };
+
+    act(() => {
+      adapter.self = self;
+      adapter.emitPresence([self, peer]);
+    });
+
+    const resolvedPeer = contextRef.current?.others[0];
+    expect(resolvedPeer?.userId).toBe("peer");
+    expect(resolvedPeer?.cursor).toEqual({ blockId: "body", offset: 42 });
+    expect(resolvedPeer?.selection).toEqual({
+      blockId: "body",
+      from: 10,
+      to: 15,
+    });
+
+    // Self is broadcast, not resolved — the raw anchored cursor is preserved.
+    expect(contextRef.current?.self?.cursor).toEqual({
+      blockId: "body",
+      offset: 1,
+      anchor: "self-anchor",
+    });
+    // Resolver must never be invoked with the self user.
+    expect(resolveCursor).not.toHaveBeenCalledWith(expect.anything(), "self");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("caps recentActivity at maxRecentActivity (FIFO)", async () => {
     const adapter = new FullMockAdapter();
     const contextRef: { current: PresenceContextValue | null } = {

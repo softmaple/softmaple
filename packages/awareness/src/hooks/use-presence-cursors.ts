@@ -8,7 +8,7 @@
 
 import { useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
-import type { PresenceResolver } from "../resolver";
+import { applyResolver } from "../state/resolve-peer";
 import type { CursorPosition, PresenceUser } from "../types/presence";
 
 const PROVIDER_ERROR_MSG =
@@ -32,40 +32,6 @@ export interface UsePeerCursorsOptions {
    */
   readonly blockId?: string;
 }
-
-const hasSelectionAnchor = (user: PresenceUser): boolean =>
-  user.selection?.fromAnchor !== undefined ||
-  user.selection?.toAnchor !== undefined;
-
-const resolvePeerForRendering = (
-  user: PresenceUser,
-  resolver: PresenceResolver | undefined,
-): PresenceUser | null => {
-  if (resolver === undefined) return user;
-
-  let cursor = user.cursor;
-  let selection = user.selection;
-
-  // Anchors win over offsets when a resolver is configured. If the resolver
-  // returns null the anchor no longer points at valid content and the peer is
-  // dropped from rendering.
-  if (cursor?.anchor !== undefined && resolver.resolveCursor !== undefined) {
-    cursor = resolver.resolveCursor(cursor, user.userId) ?? undefined;
-    if (cursor === undefined) return null;
-  }
-
-  if (
-    selection !== undefined &&
-    hasSelectionAnchor(user) &&
-    resolver.resolveSelection !== undefined
-  ) {
-    selection = resolver.resolveSelection(selection, user.userId) ?? undefined;
-    if (selection === undefined) return null;
-  }
-
-  if (cursor === user.cursor && selection === user.selection) return user;
-  return { ...user, cursor, selection };
-};
 
 /**
  * Hook to access peer cursors as `{ user, cursor }` pairs.
@@ -98,12 +64,16 @@ export const usePeerCursors = (
     const result: PeerCursor[] = [];
     for (const user of others) {
       if (!includeOffline && user.status === "offline") continue;
-      const resolvedUser = resolvePeerForRendering(user, resolver);
-      if (resolvedUser?.cursor === undefined) continue;
-      if (blockId !== undefined && resolvedUser.cursor.blockId !== blockId) {
+      // `others` is already resolver-applied at the provider; this second pass
+      // is idempotent (a resolved cursor has no `anchor` and is skipped) but
+      // keeps the hook correct when consumers inject `others` directly in
+      // tests that bypass the provider.
+      const resolved = applyResolver(user, resolver);
+      if (resolved.cursor === undefined) continue;
+      if (blockId !== undefined && resolved.cursor.blockId !== blockId) {
         continue;
       }
-      result.push({ user: resolvedUser, cursor: resolvedUser.cursor });
+      result.push({ user: resolved, cursor: resolved.cursor });
     }
     return result;
   }, [others, includeOffline, blockId, resolver]);

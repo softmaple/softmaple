@@ -17,6 +17,7 @@ import type {
 } from "../adapters/types";
 import type { PositionMapper, PresenceResolver } from "../resolver";
 import { remapRemotePositions as remapRemotePositionsState } from "../state/cursor-operations";
+import { applyResolver } from "../state/resolve-peer";
 import { DEFAULT_PRESENCE_CONFIG } from "../state/selectors";
 import { determineUserStatus } from "../state/status-operations";
 import {
@@ -66,17 +67,20 @@ export interface PresenceProviderProps {
 }
 
 /**
- * Derive others list from presence map (excluding self)
+ * Derive others list from presence map (excluding self). Anchored cursor /
+ * selection fields are resolved through the optional resolver so every consumer
+ * of `useOthers` (and downstream hooks) sees document-correct positions.
  */
 const deriveOthers = (
   presence: ReadonlyMap<string, PresenceUser>,
   selfId: string | null,
+  resolver: PresenceResolver | undefined,
 ): ReadonlyArray<PresenceUser> => {
   if (selfId === null) return [];
   const others: PresenceUser[] = [];
   for (const [userId, user] of presence) {
     if (userId !== selfId) {
-      others.push(user);
+      others.push(applyResolver(user, resolver));
     }
   }
   return others;
@@ -427,8 +431,8 @@ export const PresenceProvider = ({
   }, []);
 
   const others = useMemo(
-    () => deriveOthers(presence, self?.userId ?? null),
-    [presence, self?.userId],
+    () => deriveOthers(presence, self?.userId ?? null, resolver),
+    [presence, self?.userId, resolver],
   );
 
   const contextValue: PresenceContextValue = useMemo(

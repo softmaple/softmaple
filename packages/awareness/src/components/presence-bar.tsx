@@ -2,8 +2,10 @@ import {
   type ContextType,
   type ReactNode,
   useContext,
+  useEffect,
   useId,
   useMemo,
+  useReducer,
 } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
@@ -64,6 +66,24 @@ export const PresenceBar = ({
   const shownUsers = visibleUsers.slice(0, maxVisible);
   const overflowUsers = visibleUsers.slice(maxVisible);
   const overflowLabel = overflowUsers.map((user) => user.name).join(", ");
+
+  // The tooltip summary for idle / offline peers reads "last active
+  // 3m ago" — a relative time computed at render with `Date.now()`.
+  // Without a periodic re-render the phrase ages with the tab and
+  // freezes at whatever it said when the user list last changed.
+  // Tick only when at least one shown peer is in a stale-able status;
+  // active peers say "Active now" / "Typing now" and never go stale.
+  const hasStaleableSummary = shownUsers.some(
+    (user) => user.status === "idle" || user.status === "offline",
+  );
+  const [, refreshSummaries] = useReducer((tick: number) => tick + 1, 0);
+  useEffect(() => {
+    if (!hasStaleableSummary) return;
+    const id = window.setInterval(refreshSummaries, 30_000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [hasStaleableSummary]);
 
   if (loading) {
     return (

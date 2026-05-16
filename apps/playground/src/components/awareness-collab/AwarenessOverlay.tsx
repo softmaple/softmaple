@@ -18,17 +18,34 @@ import type { ReactNode } from "react";
 interface AwarenessOverlayProps {
   readonly adapter: PresenceAdapter;
   readonly userInfo: AdapterUserInfo;
+  /**
+   * Bright accent color for local chrome (avatar tint, "You are X" label)
+   * rendered on dark surfaces. Falls back to `userInfo.color`, which is
+   * the contrast-safe value the awareness package uses for white-on-color
+   * cursor/selection labels — that value is intentionally darker and can
+   * be hard to read on dark backgrounds, so consumers should pass a
+   * brighter accent when they have one.
+   */
+  readonly accentColor?: string;
   readonly children: ReactNode;
 }
 
 export function AwarenessOverlay({
   adapter,
   userInfo,
+  accentColor,
   children,
 }: AwarenessOverlayProps) {
+  const chromeColor = accentColor ?? userInfo.color;
   return (
     <PresenceProvider adapter={adapter}>
-      <div className="space-y-4">
+      {/*
+        Force the dark-theme awareness tokens regardless of the visitor's
+        OS color scheme. The demo surface is dark slate, so the package's
+        light-mode `mix-blend-mode: multiply` would paint selections to
+        near-black and effectively erase them.
+      */}
+      <div className="space-y-4" data-awareness-theme="dark">
         <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl bg-slate-800/60 border border-slate-700 px-4 py-3 text-slate-100">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-center gap-2 shrink-0">
@@ -37,7 +54,7 @@ export function AwarenessOverlay({
                 alt={userInfo.name}
                 className="w-8 h-8 rounded-full [image-rendering:pixelated]"
                 style={{
-                  background: `color-mix(in srgb, ${userInfo.color} 18%, transparent)`,
+                  background: `color-mix(in srgb, ${chromeColor} 18%, transparent)`,
                 }}
               />
               <div className="hidden sm:block">
@@ -46,7 +63,7 @@ export function AwarenessOverlay({
                 </p>
                 <p
                   className="text-sm font-semibold"
-                  style={{ color: userInfo.color }}
+                  style={{ color: chromeColor }}
                 >
                   {userInfo.name}
                 </p>

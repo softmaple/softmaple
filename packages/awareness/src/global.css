@@ -248,6 +248,12 @@
   background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
   border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
   box-shadow: var(--shadow-awareness);
+  /*
+   * The tooltip surface is anchored to Canvas/CanvasText instead of the
+   * surrounding app panel. Keep the foreground on the same color pair so
+   * dark custom panels don't inherit light text onto a light Canvas tooltip.
+   */
+  color: CanvasText;
   left: 50%;
   pointer-events: none;
   transform: translate3d(
@@ -270,7 +276,7 @@
    */
   inline-size: max-content;
   max-inline-size: min(14rem, calc(100vw - 1rem));
-  @apply absolute bottom-full mb-2 z-20 grid gap-0.5 rounded-md px-2 py-1.5 text-awareness-text font-awareness opacity-0;
+  @apply absolute bottom-full mb-2 z-20 grid gap-0.5 rounded-md px-2 py-1.5 font-awareness opacity-0;
 }
 
 .awareness-presence-bar__item:hover .awareness-presence-bar__tooltip,

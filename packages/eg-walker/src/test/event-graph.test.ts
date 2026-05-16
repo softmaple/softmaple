@@ -756,6 +756,40 @@ describe("EventGraph", () => {
       );
     });
 
+    it("should reject serialized graphs containing a multi-event cycle", () => {
+      // event-a → event-b → event-c → event-a, covering the path where a
+      // cycle spans more than two nodes (the A↔B test above is the minimal
+      // case).
+      expect(() =>
+        EventGraph.deserialize({
+          version: new Set<EventId>(),
+          events: [
+            {
+              id: "event-a",
+              timestamp: 1,
+              parentVersion: new Set<EventId>(["event-c"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+            },
+            {
+              id: "event-b",
+              timestamp: 2,
+              parentVersion: new Set<EventId>(["event-a"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+            },
+            {
+              id: "event-c",
+              timestamp: 3,
+              parentVersion: new Set<EventId>(["event-b"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+            },
+          ],
+          metadata: {},
+        }),
+      ).toThrow(
+        "Cannot deserialize event graph: cycle or unresolvable ordering detected",
+      );
+    });
+
     it("should reject serialized graphs containing a self-parent (degenerate cycle)", () => {
       expect(() =>
         EventGraph.deserialize({

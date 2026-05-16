@@ -3,13 +3,15 @@ import { describe, expect, it } from "vitest";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
 
 describe("BinaryReader.readVarint hardening", () => {
-  it("rejects an overlong varint (more bytes than a safe-integer needs)", () => {
-    // Nine continuation bytes — never legal: a Number.MAX_SAFE_INTEGER value
-    // fits in 8 bytes (7 continuation + 1 terminating). The decoder should
-    // bail before reading past the cap rather than spinning over the input.
-    const overlong = new Uint8Array(9).fill(0xff);
-    expect(() => new BinaryReader(overlong).readVarint()).toThrow(
-      /maximum encoded length|MAX_SAFE_INTEGER/,
+  it("rejects a payload longer than the MAX_BYTES cap", () => {
+    // Eight continuation-only bytes (0x80 = continuation set, zero data
+    // payload) keep the accumulated value at 0 through every iteration, so
+    // the per-byte `value > MAX_SAFE_INTEGER` guard never fires. The loop
+    // exits via its `bytesRead < MAX_BYTES` condition instead, exercising
+    // the length-cap throw distinctly from the value-overflow path below.
+    const lengthCapped = new Uint8Array(8).fill(0x80);
+    expect(() => new BinaryReader(lengthCapped).readVarint()).toThrow(
+      /maximum encoded length/,
     );
   });
 
@@ -41,11 +43,21 @@ describe("BinaryReader.readVarint hardening", () => {
     expect(new BinaryReader(bytes).readVarint()).toBe(Number.MAX_SAFE_INTEGER);
   });
 
-  it("round-trips small varints with no overhead", () => {
-    for (const value of [0, 1, 127, 128, 16383, 16384, 2 ** 32]) {
+  it("round-trips representative values at each encoding-length boundary", () => {
+    const cases: ReadonlyArray<{ label: string; value: number }> = [
+      { label: "zero", value: 0 },
+      { label: "single-byte max (127)", value: 127 },
+      { label: "two-byte min (128)", value: 128 },
+      { label: "two-byte max (16383)", value: 16383 },
+      { label: "three-byte min (16384)", value: 16384 },
+      { label: "five-byte (2^32)", value: 2 ** 32 },
+    ];
+    for (const { label, value } of cases) {
       const writer = new BinaryWriter();
       writer.writeVarint(value);
-      expect(new BinaryReader(writer.toUint8Array()).readVarint()).toBe(value);
+      expect(new BinaryReader(writer.toUint8Array()).readVarint(), label).toBe(
+        value,
+      );
     }
   });
 });

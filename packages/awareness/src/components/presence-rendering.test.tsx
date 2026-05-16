@@ -569,6 +569,57 @@ describe("presence components", () => {
     warn.mockRestore();
   });
 
+  it("refreshes PresenceBar tooltip relative times on its 30s tick", async () => {
+    vi.useFakeTimers();
+    // Anchor wall time so the relative phrase math is deterministic.
+    vi.setSystemTime(new Date(2026, 0, 1, 12, 0, 0));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    // Idle peer whose `lastActiveAt` is 5 minutes behind the anchor.
+    // `formatPresenceSummary` for idle status reads
+    // "Idle · last active <relative>", and the relative phrase falls
+    // into the "Xm ago" bucket here. Active peers say "Active now" /
+    // "Typing now" — they never go stale and don't arm the timer.
+    const idleUser = createUser("1", {
+      name: "Slacker",
+      status: "idle",
+      lastActiveAt: Date.now() - 5 * 60_000,
+    });
+
+    await act(async () => {
+      root.render(<PresenceBar users={[idleUser]} />);
+    });
+
+    const tooltipMeta = () =>
+      container.querySelector(".awareness-presence-bar__tooltip-meta")
+        ?.textContent;
+    expect(tooltipMeta()).toBe("Idle · last active 5m ago");
+
+    // Advance past one 30s tick — the interval the bar arms when at
+    // least one user is in a stale-able status should fire, queue a
+    // re-render, and the tooltip should pick up the new relative
+    // phrase from `formatRelativeTime(Date.now())`.
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(tooltipMeta()).toBe("Idle · last active 6m ago");
+
+    // The interval should be the only pending timer at this point;
+    // unmounting must clear it. Without the cleanup, a stray tick
+    // would queue a setState on the unmounted tree.
+    expect(vi.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("hides the initial LiveCursor label after the configured timeout", async () => {
     vi.useFakeTimers();
 

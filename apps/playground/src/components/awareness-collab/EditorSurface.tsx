@@ -7,6 +7,7 @@
 import {
   getTextareaCaretRect,
   getTextareaSelectionRects,
+  type HighlightRect,
   LiveCursor,
   PresenceLayer,
   SelectionHighlight,
@@ -16,7 +17,7 @@ import {
   useUpdateSelection,
   useUpdateTyping,
 } from "@softmaple/awareness";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { BlockActivityBadge } from "./BlockActivityBadge";
 
 /**
@@ -217,12 +218,44 @@ export function EditorSurface({
   // other consumer building a textarea-backed editor gets the same
   // implementation — and the same set of tests — instead of
   // reinventing it with subtly different bugs.
-  const pointFor = (offset: number) => {
+  //
+  // Both helpers under the hood mount + measure + unmount a mirror
+  // <div> per call, so calling them inside the JSX (once per peer per
+  // render) churned the DOM on every render. Memoize them in a single
+  // pass keyed on `others`, `blockId`, and `text`. `text` isn't read
+  // by `getTextareaSelectionRects` (which measures the live DOM), but
+  // a local edit shifts the textarea's measured geometry, so it's a
+  // real cache key for both maps; computing them together keeps that
+  // key honest in one place.
+  //
+  // Trade-off: `useOthers` returns a new array reference on every
+  // presence tick, so the cache invalidates whenever ANY peer moves
+  // (not just peers in this block). At N=6 demo peers the win is
+  // already worthwhile — we move from O(N) mirror mounts per render
+  // to O(N) per tick — and a per-peer ref-cache keyed on `(userId,
+  // offset)` would eliminate the over-invalidation but adds a manual
+  // invalidation pass on text change. Skipped here pending a real
+  // need.
+  const { cursorPoints, selectionRects } = useMemo(() => {
     const el = textareaRef.current;
-    if (!el) return null;
-    const local = getTextareaCaretRect(el, Math.min(offset, text.length));
-    return { x: local.left, y: local.top };
-  };
+    const cursors = new Map<string, { x: number; y: number }>();
+    const selections = new Map<string, ReadonlyArray<HighlightRect>>();
+    if (!el) return { cursorPoints: cursors, selectionRects: selections };
+    for (const peer of others) {
+      if (peer.cursor?.blockId === blockId) {
+        const local = getTextareaCaretRect(
+          el,
+          Math.min(peer.cursor.offset, text.length),
+        );
+        cursors.set(peer.userId, { x: local.left, y: local.top });
+      }
+      if (peer.selection?.blockId === blockId) {
+        const rects = getTextareaSelectionRects(el, peer.selection);
+        if (rects.length > 0) selections.set(peer.userId, rects);
+      }
+    }
+    return { cursorPoints: cursors, selectionRects: selections };
+  }, [others, blockId, text, textareaRef]);
 
   return (
     <div className="relative">
@@ -291,27 +324,26 @@ export function EditorSurface({
        */}
       <PresenceLayer host={textareaRef} trackHostScroll>
         {others.map((peer) => {
-          if (peer.cursor && peer.cursor.blockId === blockId) {
-            const point = pointFor(peer.cursor.offset);
-            if (!point) return null;
-            return (
-              <LiveCursor
-                key={`cursor-${peer.userId}`}
-                user={peer}
-                point={point}
-                showLabel="hover"
-                focusable={false}
-              />
-            );
-          }
-          return null;
+          const point = cursorPoints.get(peer.userId);
+          if (!point) return null;
+          return (
+            <LiveCursor
+              key={`cursor-${peer.userId}`}
+              user={peer}
+              point={point}
+              showLabel="hover"
+              focusable={false}
+            />
+          );
         })}
         {others.flatMap((peer) => {
-          if (!peer.selection || peer.selection.blockId !== blockId) return [];
-          const el = textareaRef.current;
-          if (!el) return [];
-          const rects = getTextareaSelectionRects(el, peer.selection);
-          if (rects.length === 0) return [];
+          const rects = selectionRects.get(peer.userId);
+          // The cache invariant guarantees `peer.selection` is defined
+          // whenever `rects` is set (it's the gate that puts the entry
+          // into the map). The extra `!peer.selection` check is for
+          // the type narrower so the `peer.selection.from` / `.to`
+          // reads below don't need a non-null assertion.
+          if (!rects || !peer.selection) return [];
           const selectedText = text.slice(
             peer.selection.from,
             peer.selection.to,

@@ -203,10 +203,6 @@ describe("EgWalkerEngine", () => {
       retreat: ["c"],
       advance: ["a", "b"],
     });
-    // @ts-expect-error - Private method coverage for ID tie fallback.
-    expect(engine.compareByTopologicalOrder("b", "a")).toBeGreaterThan(0);
-    // @ts-expect-error - Private method coverage for locale-independent ID ordering.
-    expect(engine.compareByTopologicalOrder("Z:0", "a:0")).toBeLessThan(0);
   });
 
   it("round-trips persisted event graph state through the public API", () => {

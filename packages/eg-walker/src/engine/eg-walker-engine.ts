@@ -428,9 +428,7 @@ export class EgWalkerEngine {
   // Pre-materialise the topological rank per id so the sort comparator
   // doesn't pay two `eventOrder.get()` calls per comparison. When two ids
   // share a rank (unknown ids both default to MAX_SAFE_INTEGER), fall back
-  // to {@link compareEventIds} directly instead of round-tripping through
-  // {@link compareByTopologicalOrder} — the inner method would just repeat
-  // the same map lookups before falling through to the same compare.
+  // to {@link compareEventIds} for a stable lex tiebreak.
   private sortByEventOrder(
     ids: Iterable<EventId>,
     descending: boolean,
@@ -448,15 +446,6 @@ export class EgWalkerEngine {
         : compareEventIds(left.id, right.id);
     });
     return ranked.map(({ id }) => id);
-  }
-
-  private compareByTopologicalOrder(left: EventId, right: EventId): number {
-    const leftOrder = this.eventOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = this.eventOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-    return compareEventIds(left, right);
   }
 
   private requireItem(itemId: EventId): AugmentedCRDTItem {

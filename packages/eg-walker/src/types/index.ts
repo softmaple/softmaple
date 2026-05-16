@@ -63,16 +63,15 @@ export interface GraphEvent {
 export type SerializedVersionOutput = ReadonlyArray<EventId>;
 
 /**
- * Serialized version input: tolerant shape accepted by `EventGraph.deserialize()`.
- * Covers the JSON-safe array form, in-memory `Set` instances, generic
- * iterables, and (defensively) plain objects produced by accidentally
- * `JSON.stringify`ing a `Set` from older code.
+ * Serialized version input: shape accepted by `EventGraph.deserialize()`.
+ * Covers the JSON-safe array form, in-memory `Set` instances, and generic
+ * iterables. (`Set` and `ReadonlyArray` are themselves `Iterable`; the three
+ * entries are listed separately for documentation.)
  */
 export type SerializedVersionInput =
   | ReadonlyArray<EventId>
   | ReadonlySet<EventId>
-  | Iterable<EventId>
-  | Record<string, unknown>;
+  | Iterable<EventId>;
 
 export interface SerializedGraphEventOutput {
   readonly id: EventId;

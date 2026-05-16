@@ -16,12 +16,11 @@ import { compareEventIds } from "./event-id";
 /**
  * Coerce a deserialized parent-version value into an array of event IDs.
  *
- * Tolerates the JSON-safe array form, in-memory `Set` instances, and generic
- * iterables. The final `Object.keys` branch is a defensive landing zone for
- * payloads produced by `JSON.stringify`ing a `Set` (which produces `{}`) — it
- * cannot recover the original IDs in that case and returns `[]`, but it
- * prevents a hard crash on malformed legacy data. Pre-1.0 callers that may
- * still hold such payloads must re-serialize through the current code path.
+ * Tolerates the three forms `SerializedVersionInput` documents (JSON-safe
+ * array, in-memory `Set`, generic iterable). The parameter is typed as
+ * `unknown` because deserialize ingests JSON-parsed data: malformed payloads
+ * are filtered to `[]` rather than crashing, but no recovery is attempted for
+ * non-iterable objects.
  */
 const normalizeEventIds = (value: unknown): EventId[] => {
   if (Array.isArray(value)) {
@@ -41,11 +40,6 @@ const normalizeEventIds = (value: unknown): EventId[] => {
         (id): id is EventId => typeof id === "string",
       );
     }
-
-    // Last resort: payload shape is a non-iterable object. The most common
-    // source is JSON.stringify(new Set(...)) producing `{}`; recovery is
-    // impossible from this shape.
-    return Object.keys(value);
   }
 
   return [];

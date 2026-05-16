@@ -1,15 +1,23 @@
 /**
  * Bench: checkpoint effectiveness.
  *
- * Replays the same trace twice and compares wall-clock between:
- *   - "incremental" — `applyRemoteEvent` per event, the path that uses
- *     `CriticalCheckpointStore` to short-circuit replay work.
- *   - "batch-from-graph" — events are pre-loaded into an `EventGraph` and
- *     the replica's constructor runs a single cold-start `fullReplay`.
+ * The trace (`buildCheckpointTrace`) is a long linear chain followed by
+ * concurrent siblings off the tail — a shape that drives
+ * `canIncrementallyAdvance` to false on every sibling after the first
+ * and forces `partialReplayFromCheckpoint` against the tail checkpoint.
+ * `partialReplays ≈ siblingCount - 1` in the stats line is the signal
+ * that the checkpoint store is being used; a regression in
+ * `CriticalCheckpointStore.pickFor` or in `canIncrementallyAdvance`
+ * will show up as either a drop in `partialReplays` or a spike in
+ * `fullReplays`.
  *
- * The pair lets readers compare wall-clock and replay-source mix against
- * each other; the `afterAll` line reports the stats from the incremental
- * path which is where checkpoint reuse actually shows up.
+ * Two benches share the trace:
+ *   - "incremental" — `applyRemoteEvent` per event, which is the path
+ *     that actually consults the checkpoint store.
+ *   - "batch-from-graph" — events are pre-loaded into an `EventGraph`
+ *     and the replica's constructor runs a single cold-start
+ *     `fullReplay`. This is the baseline that partial replays should
+ *     beat as the trace grows.
  */
 
 import { afterAll, bench, describe } from "vitest";
@@ -22,10 +30,13 @@ import {
   summariseReplica,
 } from "./traces";
 
+// 100 linear events seed the checkpoint store; 20 sibling events off the
+// tail force ~19 partial replays from the tail checkpoint. The exact count
+// surfaces in `afterAll`'s stats line so a regression in checkpoint
+// selection or `canIncrementallyAdvance` is visible.
 const events = buildCheckpointTrace({
-  mainEvents: 600,
-  forkEveryN: 40,
-  forkDepth: 5,
+  linearHistory: 100,
+  siblingCount: 20,
 });
 
 let lastIncremental: EgWalkerReplica | null = null;

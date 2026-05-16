@@ -169,58 +169,67 @@ export const buildDeleteHeavyWorkload = (count: number): GraphEvent[] => {
 };
 
 /**
- * Trace designed to exercise the checkpoint store: a long linear history
- * with `forkEveryN` periodic forks that each diverge by `forkDepth` events
- * then re-merge. Each fan-in creates a candidate critical checkpoint, so
- * the trace produces both `fullReplays` (cold start) and `partialReplays`
- * (subsequent applies that find a usable checkpoint).
+ * Trace designed to force `CriticalCheckpointStore` reuse so the bench
+ * actually exercises the partial-replay path rather than just the
+ * incremental apply path.
+ *
+ * Recipe (mirrors `replica.test.ts` "replays only the post-checkpoint
+ * suffix when a concurrent branch arrives off a long linear history"):
+ *
+ * - Phase 1: long linear single-author chain. Every event collapses the
+ *   frontier to one tip and is recorded by the checkpoint store as a
+ *   critical version (capped at `MAX_RETAINED_CHECKPOINTS = 32` via LRU).
+ * - Phase 2: many concurrent siblings each parented at the linear tail.
+ *   The first sibling applies incrementally (engine state `{tail}` is a
+ *   causal ancestor of `tail`). Every subsequent sibling has engine
+ *   state that includes prior siblings — concurrent with the new event —
+ *   so `canIncrementallyAdvance` returns false (`core/replica.ts`) and
+ *   the replica falls back to `partialReplayFromCheckpoint` using the
+ *   tail checkpoint as the anchor.
+ *
+ * Result: `partialReplays ≈ siblingCount - 1`, with each partial replay
+ * scoped to the divergent suffix (the post-tail siblings).
  */
 export const buildCheckpointTrace = (params: {
-  readonly mainEvents: number;
-  readonly forkEveryN: number;
-  readonly forkDepth: number;
+  readonly linearHistory: number;
+  readonly siblingCount: number;
 }): GraphEvent[] => {
-  const { mainEvents, forkEveryN, forkDepth } = params;
+  const { linearHistory, siblingCount } = params;
   const events: GraphEvent[] = [];
+  let timestamp = BASE_TIMESTAMP;
+
   let parent: EventId | null = null;
-  let length = 0;
-  for (let i = 0; i < mainEvents; i++) {
-    const id: EventId = `main:${i}`;
+  for (let i = 0; i < linearHistory; i++) {
+    const id: EventId = `linear:${i}`;
     events.push({
       id,
       parentVersion: new Set<EventId>(parent ? [parent] : []),
-      operation: { type: OPERATION_TYPE.INSERT, index: length, text: "m" },
-      timestamp: BASE_TIMESTAMP + i,
+      operation: { type: OPERATION_TYPE.INSERT, index: i, text: "x" },
+      timestamp: timestamp++,
     });
     parent = id;
-    length += 1;
-
-    if ((i + 1) % forkEveryN === 0) {
-      // Fork off a short side branch that re-merges with the main chain.
-      const forkRoot = parent;
-      let forkTip: EventId = forkRoot;
-      for (let f = 0; f < forkDepth; f++) {
-        const fid: EventId = `fork:${i}:${f}`;
-        events.push({
-          id: fid,
-          parentVersion: new Set<EventId>([forkTip]),
-          operation: { type: OPERATION_TYPE.INSERT, index: length, text: "f" },
-          timestamp: BASE_TIMESTAMP + i + 1 + f,
-        });
-        forkTip = fid;
-      }
-      // Merge fork tip back into the main chain.
-      const mergeId: EventId = `merge:${i}`;
-      events.push({
-        id: mergeId,
-        parentVersion: new Set<EventId>([parent, forkTip]),
-        operation: { type: OPERATION_TYPE.INSERT, index: length, text: "M" },
-        timestamp: BASE_TIMESTAMP + i + 1 + forkDepth,
-      });
-      parent = mergeId;
-      length += forkDepth + 1;
-    }
   }
+  if (parent === null) {
+    return events;
+  }
+  const tail: EventId = parent;
+
+  for (let i = 0; i < siblingCount; i++) {
+    events.push({
+      id: `sibling:${i}`,
+      parentVersion: new Set<EventId>([tail]),
+      // Every sibling inserts at the tail's end-of-doc position. They are
+      // concurrent with each other, so YATA breaks ties on origin-left;
+      // the exact merge order is not what the bench measures.
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: linearHistory,
+        text: String.fromCharCode(0x41 + (i % 26)),
+      },
+      timestamp: timestamp++,
+    });
+  }
+
   return events;
 };
 

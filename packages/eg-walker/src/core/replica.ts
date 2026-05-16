@@ -112,7 +112,7 @@ export class EgWalkerReplica {
   private incrementalApplyCount = 0;
   private readonly criticalAnalyzer = new CriticalVersionAnalyzer();
   private readonly partialReplayer = new PartialReplayManager();
-  private readonly criticalCheckpoints: CriticalCheckpoint[] = [];
+  private criticalCheckpoints: ReadonlyArray<CriticalCheckpoint> = [];
 
   constructor(
     private readonly replicaId: string,
@@ -497,15 +497,25 @@ export class EgWalkerReplica {
     if (last && this.versionsEqual(last.version, frontier)) {
       return;
     }
-    this.criticalCheckpoints.push({
+    this.appendCheckpoint({
       version: new Set(frontier),
       text: this.document,
     });
-    // Evict the oldest entries one at a time so a future change that pushes
-    // multiple checkpoints in a single tick still ends the call bounded.
-    while (this.criticalCheckpoints.length > MAX_RETAINED_CHECKPOINTS) {
-      this.criticalCheckpoints.shift();
-    }
+  }
+
+  /**
+   * Single seam for growing {@link criticalCheckpoints}. Routing every write
+   * through here makes the {@link MAX_RETAINED_CHECKPOINTS} cap a structural
+   * invariant of the array rather than a per-call-site convention, so a
+   * future mutation site cannot drift past the bound by forgetting an
+   * eviction loop.
+   */
+  private appendCheckpoint(checkpoint: CriticalCheckpoint): void {
+    const next = [...this.criticalCheckpoints, checkpoint];
+    this.criticalCheckpoints =
+      next.length <= MAX_RETAINED_CHECKPOINTS
+        ? next
+        : next.slice(next.length - MAX_RETAINED_CHECKPOINTS);
   }
 
   /**

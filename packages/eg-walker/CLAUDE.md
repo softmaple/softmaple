@@ -106,8 +106,8 @@ Scenarios:
   shared parent; stresses YATA origin-left tie-breaking
   (`engine/internals/yata-integration.ts`).
 - `long-offline-branch-merge` — two long branches fan in at a single
-  merge event; stresses `engine/partial-replay.ts` and
-  `core/internals/critical-checkpoint-store.ts`.
+  merge event; measures recovery from a stale branch plus the
+  retreat/advance work over a long offline edit.
 - `delete-heavy-workload` — ~70% deletes; stresses
   `engine/internals/delete-target-index.ts`.
 - `checkpoint-effectiveness` — paired benches comparing

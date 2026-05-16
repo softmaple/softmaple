@@ -1,8 +1,8 @@
 /**
  * Bench: two replicas diverge from a root for `depth` events each, then
- * merge at a single fan-in event. Exercises the partial-replay path
- * (`engine/partial-replay.ts`) and checkpoint selection
- * (`core/internals/critical-checkpoint-store.ts`) on the merge.
+ * merge at a single fan-in event. The first stale branch event forces the
+ * replica to recover from a non-ancestor version, then the rest of the
+ * branch and merge measure retreat/advance work over a long offline edit.
  */
 
 import { afterAll, bench, describe } from "vitest";

@@ -71,8 +71,8 @@ export const buildConcurrentSameIndexInserts = (
 
 /**
  * Two replicas diverge from a root for `depth` events each, then a
- * merging event combines the tips. Exercises the partial-replay path
- * and checkpoint selection on the fan-in.
+ * merging event combines the tips. Models a long offline branch arriving
+ * after another branch has already advanced the local replica.
  */
 export const buildLongOfflineBranchMerge = (depth: number): GraphEvent[] => {
   const events: GraphEvent[] = [];

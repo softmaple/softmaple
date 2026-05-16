@@ -16,8 +16,8 @@
  *     that actually consults the checkpoint store.
  *   - "batch-from-graph" — events are pre-loaded into an `EventGraph`
  *     and the replica's constructor runs a single cold-start
- *     `fullReplay`. This is the baseline that partial replays should
- *     beat as the trace grows.
+ *     `fullReplay`. This gives a cold-start baseline for the same graph
+ *     shape, not a throughput target for the incremental path.
  */
 
 import { afterAll, bench, describe } from "vitest";

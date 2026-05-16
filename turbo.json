@@ -13,6 +13,11 @@
     "check-types": {
       "dependsOn": ["^check-types"]
     },
+    "bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
+    },
     "dev": {
       "dependsOn": ["^db:generate"],
       "cache": false,

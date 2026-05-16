@@ -11,145 +11,21 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
-import { compareEventIds } from "./event-id";
+import {
+  EventAlreadyExistsError,
+  MissingParentError,
+} from "./event-graph-errors";
+import { diffVersions as diffVersionSets } from "./internals/diff-versions";
+import { deserializeEventGraph } from "./internals/event-graph-serialization";
+import {
+  getBranchPreservingTopologicalOrder as computeBranchPreservingTopologicalOrder,
+  getTopologicalOrder as computeTopologicalOrder,
+} from "./internals/topological-order";
 
-/**
- * Coerce a deserialized parent-version value into an array of event IDs.
- *
- * Tolerates the three forms `SerializedVersionInput` documents (JSON-safe
- * array, in-memory `Set`, generic iterable). The parameter is typed as
- * `unknown` because deserialize ingests JSON-parsed data: malformed payloads
- * are filtered to `[]` rather than crashing, but no recovery is attempted for
- * non-iterable objects.
- */
-const normalizeEventIds = (value: unknown): EventId[] => {
-  if (Array.isArray(value)) {
-    return value.filter((id): id is EventId => typeof id === "string");
-  }
-
-  if (value instanceof Set) {
-    return Array.from(value).filter(
-      (id): id is EventId => typeof id === "string",
-    );
-  }
-
-  if (value && typeof value === "object") {
-    const maybeIterable = value as { [Symbol.iterator]?: unknown };
-    if (typeof maybeIterable[Symbol.iterator] === "function") {
-      return Array.from(value as Iterable<unknown>).filter(
-        (id): id is EventId => typeof id === "string",
-      );
-    }
-  }
-
-  return [];
-};
-
-export class EventAlreadyExistsError extends Error {
-  readonly eventId: EventId;
-
-  constructor(eventId: EventId) {
-    super(`Event ${eventId} already exists`);
-    this.name = "EventAlreadyExistsError";
-    this.eventId = eventId;
-  }
-}
-
-export class MissingParentError extends Error {
-  readonly parentId: EventId;
-
-  constructor(parentId: EventId) {
-    super(`Missing parent event: ${parentId}`);
-    this.name = "MissingParentError";
-    this.parentId = parentId;
-  }
-}
-
-/**
- * Bit flags used by `diffVersions` to colour events while running the
- * priority-queue diff. `LEFT` means "reachable from the left frontier",
- * `RIGHT` means "reachable from the right frontier", and `COMMON = LEFT | RIGHT`
- * means the event is a shared ancestor.
- */
-const DIFF_COLOR = {
-  LEFT: 1,
-  RIGHT: 2,
-  COMMON: 3,
-} as const;
-
-/**
- * Minimal binary max-heap. The eg-walker package does not depend on a
- * priority-queue library, and `diffVersions` is the only consumer, so we
- * keep a small inline implementation rather than pulling in a dependency.
- */
-class MaxHeap<T> {
-  private readonly items: T[] = [];
-
-  constructor(private readonly compare: (left: T, right: T) => number) {}
-
-  get size(): number {
-    return this.items.length;
-  }
-
-  push(value: T): void {
-    this.items.push(value);
-    this.siftUp(this.items.length - 1);
-  }
-
-  pop(): T | undefined {
-    if (this.items.length === 0) {
-      return undefined;
-    }
-    const top = this.items[0]!;
-    const last = this.items.pop()!;
-    if (this.items.length > 0) {
-      this.items[0] = last;
-      this.siftDown(0);
-    }
-    return top;
-  }
-
-  private siftUp(index: number): void {
-    while (index > 0) {
-      const parent = (index - 1) >> 1;
-      if (this.compare(this.items[index]!, this.items[parent]!) <= 0) {
-        return;
-      }
-      const tmp = this.items[index]!;
-      this.items[index] = this.items[parent]!;
-      this.items[parent] = tmp;
-      index = parent;
-    }
-  }
-
-  private siftDown(index: number): void {
-    const length = this.items.length;
-    while (true) {
-      const left = 2 * index + 1;
-      const right = 2 * index + 2;
-      let largest = index;
-      if (
-        left < length &&
-        this.compare(this.items[left]!, this.items[largest]!) > 0
-      ) {
-        largest = left;
-      }
-      if (
-        right < length &&
-        this.compare(this.items[right]!, this.items[largest]!) > 0
-      ) {
-        largest = right;
-      }
-      if (largest === index) {
-        return;
-      }
-      const tmp = this.items[index]!;
-      this.items[index] = this.items[largest]!;
-      this.items[largest] = tmp;
-      index = largest;
-    }
-  }
-}
+export {
+  EventAlreadyExistsError,
+  MissingParentError,
+} from "./event-graph-errors";
 
 /**
  * Event graph for storing operation history
@@ -159,6 +35,7 @@ export class EventGraph {
   private readonly events: Map<EventId, GraphEvent> = new Map();
   private readonly childrenMap: Map<EventId, Set<EventId>> = new Map();
   private readonly parentsMap: Map<EventId, Set<EventId>> = new Map();
+  private readonly frontier: Set<EventId> = new Set();
   /**
    * Monotonically increasing rank assigned to each event in the order it was
    * inserted into the graph. Because `addEvent` rejects events whose parents
@@ -201,6 +78,7 @@ export class EventGraph {
     this.childrenMap.clear();
     this.parentsMap.clear();
     this.insertionRank.clear();
+    this.frontier.clear();
     this.metadata = {};
     this.invalidateDerivedCaches();
   }
@@ -221,11 +99,13 @@ export class EventGraph {
 
     this.events.set(event.id, event);
     this.insertionRank.set(event.id, this.insertionRank.size);
+    this.frontier.add(event.id);
 
     for (const parentId of event.parentVersion) {
       const children = this.childrenMap.get(parentId) ?? new Set();
       children.add(event.id);
       this.childrenMap.set(parentId, children);
+      this.frontier.delete(parentId);
 
       const parents = this.parentsMap.get(event.id) ?? new Set();
       parents.add(parentId);
@@ -274,16 +154,7 @@ export class EventGraph {
    * Get the frontier version: events with no known children.
    */
   getFrontier(): Set<EventId> {
-    const frontier = new Set<EventId>();
-
-    for (const eventId of this.events.keys()) {
-      const children = this.childrenMap.get(eventId);
-      if (!children || children.size === 0) {
-        frontier.add(eventId);
-      }
-    }
-
-    return frontier;
+    return new Set(this.frontier);
   }
 
   /**
@@ -338,79 +209,11 @@ export class EventGraph {
     left: ReadonlySet<EventId>,
     right: ReadonlySet<EventId>,
   ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
-    const onlyInLeft = new Set<EventId>();
-    const onlyInRight = new Set<EventId>();
-
-    const color = new Map<EventId, number>();
-    const heap = new MaxHeap<EventId>(
-      (a, b) =>
-        (this.insertionRank.get(a) ?? -1) - (this.insertionRank.get(b) ?? -1),
-    );
-
-    /**
-     * Count of events currently in the heap whose colour is not yet
-     * `COMMON`. Once this drops to zero, every remaining heap entry is
-     * a common ancestor and its own ancestors must be common as well, so
-     * the traversal can terminate early.
-     */
-    let pendingDivergent = 0;
-
-    const paint = (id: EventId, addedColor: number): void => {
-      if (!this.events.has(id)) {
-        return;
-      }
-      const existing = color.get(id) ?? 0;
-      const merged = existing | addedColor;
-      if (merged === existing) {
-        return;
-      }
-      color.set(id, merged);
-      if (existing === 0) {
-        heap.push(id);
-        if (merged !== DIFF_COLOR.COMMON) {
-          pendingDivergent++;
-        }
-      } else if (
-        existing !== DIFF_COLOR.COMMON &&
-        merged === DIFF_COLOR.COMMON
-      ) {
-        // The event was queued as divergent earlier but a second-frontier
-        // descendant has just revealed that it is in fact common. It is
-        // still in the heap, so adjust the divergent counter without
-        // pushing a duplicate entry.
-        pendingDivergent--;
-      }
-    };
-
-    for (const id of left) {
-      paint(id, DIFF_COLOR.LEFT);
-    }
-    for (const id of right) {
-      paint(id, DIFF_COLOR.RIGHT);
-    }
-
-    while (heap.size > 0 && pendingDivergent > 0) {
-      const id = heap.pop()!;
-      const finalColor = color.get(id) ?? 0;
-
-      if (finalColor === DIFF_COLOR.LEFT) {
-        onlyInLeft.add(id);
-        pendingDivergent--;
-      } else if (finalColor === DIFF_COLOR.RIGHT) {
-        onlyInRight.add(id);
-        pendingDivergent--;
-      }
-      // COMMON events fall through; their colour is propagated below so
-      // that ancestors reachable only through this path are also marked
-      // as common rather than being mis-classified as one-sided.
-
-      const parents = this.getParents(id);
-      for (const parent of parents) {
-        paint(parent, finalColor);
-      }
-    }
-
-    return { onlyInLeft, onlyInRight };
+    return diffVersionSets(left, right, {
+      getParents: (id) => this.getParents(id),
+      hasEvent: (id) => this.hasEvent(id),
+      insertionRankOf: (id) => this.insertionRank.get(id),
+    });
   }
 
   /**
@@ -434,51 +237,12 @@ export class EventGraph {
       return this.cachedTopologicalOrder;
     }
 
-    const remainingParents = new Map<EventId, number>();
-    const ready: EventId[] = [];
-
-    for (const [id, event] of this.events) {
-      remainingParents.set(id, event.parentVersion.size);
-      if (event.parentVersion.size === 0) {
-        ready.push(id);
-      }
-    }
-    ready.sort(compareEventIds);
-
-    const result: GraphEvent[] = [];
-    while (ready.length > 0) {
-      const id = ready.shift()!;
-      const event = this.events.get(id);
-      if (!event) {
-        continue;
-      }
-      result.push(event);
-
-      const children = Array.from(this.childrenMap.get(id) ?? []).sort(
-        compareEventIds,
-      );
-      for (const childId of children) {
-        const remaining = (remainingParents.get(childId) ?? 0) - 1;
-        remainingParents.set(childId, remaining);
-        if (remaining === 0) {
-          // Insertion-sort into ready to keep deterministic order
-          // without re-sorting the whole queue.
-          let insertionIndex = ready.findIndex(
-            (pending) => compareEventIds(pending, childId) > 0,
-          );
-          if (insertionIndex === -1) {
-            insertionIndex = ready.length;
-          }
-          ready.splice(insertionIndex, 0, childId);
-        }
-      }
-    }
-
-    if (result.length !== this.events.size) {
-      throw new Error("Cycle detected in event graph");
-    }
-
-    this.cachedTopologicalOrder = Object.freeze(result);
+    this.cachedTopologicalOrder = Object.freeze(
+      computeTopologicalOrder({
+        events: this.events,
+        childrenMap: this.childrenMap,
+      }),
+    );
     return this.cachedTopologicalOrder;
   }
 
@@ -520,69 +284,12 @@ export class EventGraph {
       return this.cachedBranchPreservingOrder;
     }
 
-    const remainingParents = new Map<EventId, number>();
-    const roots: EventId[] = [];
-
-    for (const [id, event] of this.events) {
-      remainingParents.set(id, event.parentVersion.size);
-      if (event.parentVersion.size === 0) {
-        roots.push(id);
-      }
-    }
-    roots.sort(compareEventIds);
-
-    // The stack is the deferred set: events that became ready but are
-    // not the natural continuation of the branch we're currently
-    // walking. We push children in descending order so the smallest
-    // (by `compareEventIds`) is on top and is popped next, which keeps
-    // the traversal deterministic across input shapes.
-    const stack: EventId[] = [];
-    for (let i = roots.length - 1; i >= 0; i--) {
-      stack.push(roots[i]!);
-    }
-
-    const result: GraphEvent[] = [];
-    const visited = new Set<EventId>();
-
-    while (stack.length > 0) {
-      const id = stack.pop()!;
-      if (visited.has(id)) {
-        continue;
-      }
-      const event = this.events.get(id);
-      if (!event) {
-        continue;
-      }
-      visited.add(id);
-      result.push(event);
-
-      const children = this.childrenMap.get(id);
-      if (!children || children.size === 0) {
-        continue;
-      }
-
-      const newlyReady: EventId[] = [];
-      for (const childId of children) {
-        const remaining = (remainingParents.get(childId) ?? 0) - 1;
-        remainingParents.set(childId, remaining);
-        if (remaining === 0) {
-          newlyReady.push(childId);
-        }
-      }
-      if (newlyReady.length === 0) {
-        continue;
-      }
-      newlyReady.sort(compareEventIds);
-      for (let i = newlyReady.length - 1; i >= 0; i--) {
-        stack.push(newlyReady[i]!);
-      }
-    }
-
-    if (result.length !== this.events.size) {
-      throw new Error("Cycle detected in event graph");
-    }
-
-    this.cachedBranchPreservingOrder = Object.freeze(result);
+    this.cachedBranchPreservingOrder = Object.freeze(
+      computeBranchPreservingTopologicalOrder({
+        events: this.events,
+        childrenMap: this.childrenMap,
+      }),
+    );
     return this.cachedBranchPreservingOrder;
   }
 
@@ -607,17 +314,17 @@ export class EventGraph {
     if (ancestor === descendant) return false;
 
     const visited = new Set<EventId>();
-    const queue = [descendant];
+    const stack = [descendant];
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    while (stack.length > 0) {
+      const current = stack.pop()!;
       if (visited.has(current)) continue;
       visited.add(current);
 
       const parents = this.getParents(current);
       for (const parent of parents) {
         if (parent === ancestor) return true;
-        queue.push(parent);
+        stack.push(parent);
       }
     }
 
@@ -662,74 +369,6 @@ export class EventGraph {
    * Deserialize event graph from persistence (Kahn's algorithm; O(n)).
    */
   static deserialize(data: SerializedGraphInput): EventGraph {
-    const graph = new EventGraph();
-
-    if (data.metadata) {
-      graph.metadata = data.metadata;
-    }
-
-    const eventsById = new Map<EventId, GraphEvent>();
-    const remainingParents = new Map<EventId, number>();
-    const childrenIndex = new Map<EventId, EventId[]>();
-
-    for (const incoming of data.events) {
-      const event: GraphEvent = {
-        id: incoming.id,
-        operation: incoming.operation,
-        parentVersion: new Set(normalizeEventIds(incoming.parentVersion)),
-        timestamp: incoming.timestamp,
-      };
-      eventsById.set(event.id, event);
-      remainingParents.set(event.id, event.parentVersion.size);
-      for (const parentId of event.parentVersion) {
-        const list = childrenIndex.get(parentId) ?? [];
-        list.push(event.id);
-        childrenIndex.set(parentId, list);
-      }
-    }
-
-    const ready: EventId[] = [];
-    for (const [id, count] of remainingParents) {
-      if (count === 0) {
-        ready.push(id);
-      }
-    }
-
-    let added = 0;
-    while (ready.length > 0) {
-      const id = ready.pop()!;
-      const event = eventsById.get(id);
-      if (!event) {
-        continue;
-      }
-      graph.addEvent(event);
-      added++;
-
-      for (const childId of childrenIndex.get(id) ?? []) {
-        const remaining = (remainingParents.get(childId) ?? 0) - 1;
-        remainingParents.set(childId, remaining);
-        if (remaining === 0) {
-          ready.push(childId);
-        }
-      }
-    }
-
-    if (added !== eventsById.size) {
-      const missingParents = new Set<EventId>();
-      for (const event of eventsById.values()) {
-        for (const parentId of event.parentVersion) {
-          if (!eventsById.has(parentId)) {
-            missingParents.add(parentId);
-          }
-        }
-      }
-      throw new Error(
-        `Cannot deserialize event graph with missing parents: ${[
-          ...missingParents,
-        ].join(", ")}`,
-      );
-    }
-
-    return graph;
+    return deserializeEventGraph(data, () => new EventGraph());
   }
 }

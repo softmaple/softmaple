@@ -73,8 +73,13 @@ export const Empty: Story = {
     users: [],
   },
   play: async ({ canvas }) => {
+    // Empty roster renders a status region, not a list — see the
+    // "Empty roster gets its own status region" branch in
+    // `presence-bar.tsx`. Announcing through `role="status"` reads
+    // better than "Collaborators list, 1 item, No collaborators
+    // online" and avoids axe's `role="status"` on `<li>` warning.
     await expect(
-      canvas.getByRole("list", { name: "Collaborators" }),
+      canvas.getByRole("status", { name: "Collaborators" }),
     ).toBeVisible();
     await expect(canvas.getByText("No one else is editing")).toBeVisible();
   },
@@ -101,5 +106,14 @@ export const Loading: Story = {
   play: async ({ canvas }) => {
     const list = canvas.getByRole("list", { name: "Collaborators" });
     await expect(list).toHaveAttribute("aria-busy", "true");
+    // The skeletons are decorative (animation suppressed per design
+    // §6 "no persistent animation"), so the AT signal lives in a
+    // sibling `role="status"` region. Use getByText because
+    // Playwright's accessibility tree filters out the visually-hidden
+    // (`awareness-sr-only`) status node; the text presence is enough
+    // to confirm the live region is wired.
+    await expect(
+      canvas.getByText("Loading collaborators…"),
+    ).toBeInTheDocument();
   },
 };

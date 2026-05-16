@@ -450,7 +450,10 @@
    * colors (yellow/pastel) without relying on theme-dependent contrast.
    */
   text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
-  @apply absolute bottom-full left-0 mb-[3px] max-w-64 overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none text-white font-awareness text-[11px] tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap;
+  /* `max-inline-size` above already caps the label width with viewport
+   * awareness; the explicit `max-w-64` we used to apply here was dead
+   * code (the cascade order put `max-inline-size` last). */
+  @apply absolute bottom-full left-0 mb-[3px] overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none text-white font-awareness text-[11px] tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
@@ -753,6 +756,22 @@
 .awareness-connection-indicator--disconnected
   .awareness-connection-indicator__glyph {
   --awareness-connection-color: var(--color-awareness-status-offline);
+}
+
+/*
+ * Placeholder state used when `hideWhenConnected` is on and the
+ * adapter is connected. The wrapper keeps its layout box (so a
+ * connect/reconnect flap doesn't shift sibling chrome) but is
+ * visually and a11y-hidden. `visibility: hidden` preserves the
+ * intrinsic width of the still-rendered children; the colors are
+ * neutralized so a brief paint between state transitions doesn't
+ * flash the previous status's accent.
+ */
+.awareness-connection-indicator--placeholder {
+  visibility: hidden;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

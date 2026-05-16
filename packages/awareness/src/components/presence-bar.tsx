@@ -125,6 +125,28 @@ export const PresenceBar = ({
     );
   }
 
+  // Empty roster gets its own status region rather than living inside
+  // an empty <ul>. axe (justifiably) rejects `role="status"` on a bare
+  // <li>, and announcing "Collaborators list, 1 item, No collaborators
+  // online" reads worse than "No collaborators online" via a real
+  // status region.
+  if (shownUsers.length === 0 && overflowUsers.length === 0) {
+    return (
+      // biome-ignore lint/a11y/useSemanticElements: <output> is for form-calculated values; this is presence telemetry, so a div with role="status" is the appropriate live region.
+      <div
+        aria-label={ariaLabel}
+        className={cx(
+          "awareness-presence-bar",
+          "awareness-presence-bar--empty",
+          className,
+        )}
+        role="status"
+      >
+        <span className="awareness-presence-bar__empty">{emptyLabel}</span>
+      </div>
+    );
+  }
+
   return (
     <ul
       aria-label={ariaLabel}

@@ -5,6 +5,14 @@ export const cx = (
   ...classes: ReadonlyArray<string | false | null | undefined>
 ): string => classes.filter(Boolean).join(" ");
 
+/**
+ * Build a 1–2 letter initials label for an avatar fallback.
+ *
+ * Trims whitespace, splits on runs of spaces, takes the first two
+ * parts and uppercases their first character. Returns `"?"` for
+ * empty / whitespace-only input so callers don't need a separate
+ * empty-name guard.
+ */
 export const getInitials = (name: string): string => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";

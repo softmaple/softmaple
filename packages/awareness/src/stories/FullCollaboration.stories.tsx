@@ -38,6 +38,14 @@ const blockUsers: ReadonlyArray<PresenceUser> = [
   inBlock(charmander, SHARED_BLOCK_ID),
 ];
 
+/*
+ * Inline positioning chrome below is **story-only** scaffolding so the
+ * presence rail, block badge, and connection indicator land in
+ * recognizable spots inside the screenshot. Consumers should not
+ * cargo-cult these `position: absolute` styles — the package's own
+ * `<PresenceLayer>` is what owns overlay coordinate translation; the
+ * positioning here is just frame composition for the demo.
+ */
 const overlayLayerStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
@@ -227,7 +235,10 @@ export const SoloEditor: Story = {
     );
   },
   play: async ({ canvas }) => {
-    // Healthy connection collapses the indicator to null.
+    // Healthy connection renders the indicator as an aria-hidden
+    // placeholder (preserves layout box, removes it from the AT tree).
+    // `queryByRole` filters out aria-hidden subtrees, so it returns
+    // null — same observable AT behavior as before, no sibling reflow.
     await expect(canvas.queryByRole("status", { name: /Live/i })).toBeNull();
     // Single editor → singular label.
     await expect(

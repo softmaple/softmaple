@@ -319,11 +319,18 @@ describe("PresenceBar without context", () => {
 });
 
 describe("ConnectionIndicator", () => {
-  it("renders nothing when connected and hideWhenConnected is default", () => {
+  it("renders an aria-hidden placeholder when connected and hideWhenConnected is default", () => {
+    // Previously this returned `null`; the empty markup caused
+    // sibling chrome to expand into the gap on every reconnect flap.
+    // The placeholder keeps the layout box but hides it from sighted
+    // users (visibility: hidden via the modifier class) and AT
+    // (aria-hidden). The visible text still renders inside so the
+    // wrapper has its intrinsic width.
     const html = renderToStaticMarkup(
       <ConnectionIndicator state="connected" />,
     );
-    expect(html).toBe("");
+    expect(html).toContain("awareness-connection-indicator--placeholder");
+    expect(html).toContain('aria-hidden="true"');
   });
 
   it("renders connection copy when degraded", () => {

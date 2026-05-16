@@ -93,6 +93,28 @@ describe("getTextareaSelectionRects", () => {
     expect(rect.height).toBeGreaterThan(0);
   });
 
+  it("preserves fractional line-height through the rect math", () => {
+    // `line-height: 1.4` × `font-size: 16px` is the default Tailwind
+    // body-text leading. Previously `toFiniteInt` truncated this to
+    // 22, and the per-row math (`start.top + i * lineHeight`) drifted
+    // ~0.4·i pixels above each subsequent row. With `toFiniteFloat`
+    // the fractional value flows through unchanged.
+    const el = document.createElement("textarea");
+    el.value = "anything";
+    el.style.fontSize = "16px";
+    el.style.lineHeight = "22.4px";
+    el.style.padding = "0";
+    el.style.width = "200px";
+    document.body.appendChild(el);
+    textarea = el;
+
+    const rects = getTextareaSelectionRects(el, { from: 0, to: 5 });
+    expect(rects).toHaveLength(1);
+    const rect = rects[0];
+    if (!rect) throw new Error("expected one rect");
+    expect(rect.height).toBeCloseTo(22.4, 5);
+  });
+
   describe("multi-line selections (stubbed layout)", () => {
     // jsdom's offsetTop is always 0, so every selection collapses to one
     // rect. Stub `HTMLElement.prototype.offsetTop` to fake line wrapping:

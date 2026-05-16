@@ -608,9 +608,16 @@ describe("presence components", () => {
 
     expect(tooltipMeta()).toBe("Idle · last active 6m ago");
 
+    // The interval should be the only pending timer at this point;
+    // unmounting must clear it. Without the cleanup, a stray tick
+    // would queue a setState on the unmounted tree.
+    expect(vi.getTimerCount()).toBe(1);
+
     await act(async () => {
       root.unmount();
     });
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("hides the initial LiveCursor label after the configured timeout", async () => {

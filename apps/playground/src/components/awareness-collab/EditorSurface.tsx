@@ -338,6 +338,11 @@ export function EditorSurface({
         })}
         {others.flatMap((peer) => {
           const rects = selectionRects.get(peer.userId);
+          // The cache invariant guarantees `peer.selection` is defined
+          // whenever `rects` is set (it's the gate that puts the entry
+          // into the map). The extra `!peer.selection` check is for
+          // the type narrower so the `peer.selection.from` / `.to`
+          // reads below don't need a non-null assertion.
           if (!rects || !peer.selection) return [];
           const selectedText = text.slice(
             peer.selection.from,

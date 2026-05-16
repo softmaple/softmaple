@@ -12,6 +12,10 @@ src/
     replica.ts
     invariants.ts
     replay-walker.ts
+    internals/
+      critical-checkpoint-store.ts
+      persistence-metadata.ts
+      remote-event-buffer.ts
   engine/
     eg-walker-engine.ts
     indexed-sequence.ts
@@ -25,9 +29,20 @@ src/
       delete-target-index.ts
       yata-integration.ts
       record-splitter.ts
+      indexed-sequence-node.ts
+      insert-handler.ts
+      delete-handler.ts
   graph/
     event-graph.ts
+    event-graph-errors.ts
+    event-id.ts
     columnar-codec.ts
+    internals/
+      binary-io.ts
+      diff-versions.ts
+      event-graph-serialization.ts
+      max-heap.ts
+      topological-order.ts
   types/index.ts
 ```
 
@@ -37,7 +52,10 @@ src/
 - Do not persist or export temporary replay metadata.
 - Put causal graph logic in `graph/`.
 - Put prepare/effect replay logic in `engine/`.
-- Put engine-private helpers (no semver) under `engine/internals/`.
+- Put layer-private helpers (no semver) under `<layer>/internals/`:
+  `core/internals/` for replica-private state stores, `engine/internals/`
+  for prepare/effect helpers, `graph/internals/` for codec/traversal
+  helpers.
 - Keep `core/` thin and user-facing.
 - Avoid adding compatibility modules for removed legacy files.
 

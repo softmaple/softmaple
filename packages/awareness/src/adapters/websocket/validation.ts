@@ -11,12 +11,13 @@
  * presence-state update functions or surfaced as a `PresenceEvent`.
  */
 
-import type {
-  CursorPosition,
-  PointerPosition,
-  PresenceUser,
-  SelectionRange,
-} from "../../types/presence";
+import {
+  isCursorPosition,
+  isPointerPosition,
+  isRecord,
+  isSelectionRange,
+} from "../../types/guards";
+import type { PresenceUser } from "../../types/presence";
 import type {
   ErrorPayload,
   JoinPayload,
@@ -25,28 +26,7 @@ import type {
   PresenceUpdatePayload,
 } from "./types";
 
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isCursorPosition = (value: unknown): value is CursorPosition =>
-  isRecord(value) &&
-  typeof value.blockId === "string" &&
-  typeof value.offset === "number" &&
-  (value.anchor === undefined || typeof value.anchor === "string");
-
-const isSelectionRange = (value: unknown): value is SelectionRange =>
-  isRecord(value) &&
-  typeof value.blockId === "string" &&
-  typeof value.from === "number" &&
-  typeof value.to === "number" &&
-  (value.fromAnchor === undefined || typeof value.fromAnchor === "string") &&
-  (value.toAnchor === undefined || typeof value.toAnchor === "string");
-
-const isPointerPosition = (value: unknown): value is PointerPosition =>
-  isRecord(value) &&
-  typeof value.x === "number" &&
-  typeof value.y === "number" &&
-  (value.space === "viewport" || value.space === "document");
+export { isRecord };
 
 /**
  * `PresenceUser` requires `userId`, `name`, `color`, `status`, `lastActiveAt`.

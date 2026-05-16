@@ -10,12 +10,13 @@ import {
   type PresenceUpdatePayload,
   type PresenceUserUpdates,
 } from "../../types/events";
-import type {
-  CursorPosition,
-  PointerPosition,
-  PresenceUser,
-  SelectionRange,
-} from "../../types/presence";
+import {
+  isCursorPosition,
+  isPointerPosition,
+  isRecord,
+  isSelectionRange,
+} from "../../types/guards";
+import type { PresenceUser } from "../../types/presence";
 import { updatePresenceUser } from "../../types/presence";
 import {
   type AdapterState,
@@ -42,32 +43,6 @@ export interface BroadcastMessage {
   readonly timestamp: number;
   readonly payload: unknown;
 }
-
-/**
- * Type guard for plain objects
- */
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isCursorPosition = (value: unknown): value is CursorPosition =>
-  isRecord(value) &&
-  typeof value.blockId === "string" &&
-  typeof value.offset === "number" &&
-  (value.anchor === undefined || typeof value.anchor === "string");
-
-const isSelectionRange = (value: unknown): value is SelectionRange =>
-  isRecord(value) &&
-  typeof value.blockId === "string" &&
-  typeof value.from === "number" &&
-  typeof value.to === "number" &&
-  (value.fromAnchor === undefined || typeof value.fromAnchor === "string") &&
-  (value.toAnchor === undefined || typeof value.toAnchor === "string");
-
-const isPointerPosition = (value: unknown): value is PointerPosition =>
-  isRecord(value) &&
-  typeof value.x === "number" &&
-  typeof value.y === "number" &&
-  (value.space === "viewport" || value.space === "document");
 
 /**
  * Type guard for PresenceUser payload

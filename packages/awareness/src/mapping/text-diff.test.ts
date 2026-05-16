@@ -90,4 +90,20 @@ describe("findDifferingRange", () => {
   it("finds the outermost bounds when changes wrap around shared interior", () => {
     expect(findDifferingRange("abcde", "xbcdz")).toEqual({ start: 0, end: 4 });
   });
+
+  it("returns end < start when newText only appends to oldText", () => {
+    const result = findDifferingRange("abc", "abcdef");
+    expect(result.end).toBeLessThan(result.start);
+  });
+
+  it("reports a suffix deletion in oldText correctly", () => {
+    expect(findDifferingRange("abcdef", "abc")).toEqual({ start: 3, end: 5 });
+  });
+
+  it("aligns the backward scan to each string's own length", () => {
+    expect(findDifferingRange("abcde", "abXYZde")).toEqual({
+      start: 2,
+      end: 2,
+    });
+  });
 });

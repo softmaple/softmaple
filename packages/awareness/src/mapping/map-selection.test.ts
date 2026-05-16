@@ -53,6 +53,24 @@ describe("mapSelectionThroughOperation: insert", () => {
       to: 7,
     });
   });
+
+  it("keeps the trailing boundary put when insert lands exactly at `to`", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 1, to: 3 }, insertAt(3, 2)),
+    ).toEqual({ from: 1, to: 3 });
+  });
+
+  it("still advances the trailing boundary for inserts strictly inside the selection", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 1, to: 5 }, insertAt(3, 2)),
+    ).toEqual({ from: 1, to: 7 });
+  });
+
+  it("shifts a non-collapsed selection right when insert lands at `from`", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 3, to: 5 }, insertAt(3, 2)),
+    ).toEqual({ from: 5, to: 7 });
+  });
 });
 
 describe("mapSelectionThroughOperation: delete", () => {

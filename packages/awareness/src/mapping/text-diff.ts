@@ -38,15 +38,24 @@ export const findDifferingRange = (
   newText: string,
 ): { start: number; end: number } => {
   let start = 0;
-  let end = oldText.length - 1;
+  let endOld = oldText.length - 1;
+  let endNew = newText.length - 1;
 
   while (start < oldText.length && oldText[start] === newText[start]) {
     start++;
   }
 
-  while (end >= start && oldText[end] === newText[end]) {
-    end--;
+  // Track separate end pointers so a different-length newText doesn't drag
+  // oldText's end pointer past a real divergence (e.g. shared "de" suffix
+  // in "abcde" / "abXYZde" lives at different indices in each string).
+  while (
+    endOld >= start &&
+    endNew >= start &&
+    oldText[endOld] === newText[endNew]
+  ) {
+    endOld--;
+    endNew--;
   }
 
-  return { start, end };
+  return { start, end: endOld };
 };

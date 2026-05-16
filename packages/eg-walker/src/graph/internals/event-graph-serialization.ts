@@ -43,6 +43,14 @@ export const deserializeEventGraph = <TGraph extends MutableEventGraph>(
   const childrenIndex = new Map<EventId, EventId[]>();
 
   for (const incoming of data.events) {
+    // Reject duplicate ids up front. Silently overwriting would coalesce two
+    // distinct payloads under one id and double-count this id in
+    // `childrenIndex` from both edges, breaking the Kahn pass below.
+    if (eventsById.has(incoming.id)) {
+      throw new Error(
+        `Cannot deserialize event graph with duplicate event id: ${incoming.id}`,
+      );
+    }
     const event: GraphEvent = {
       id: incoming.id,
       operation: incoming.operation,
@@ -93,10 +101,19 @@ export const deserializeEventGraph = <TGraph extends MutableEventGraph>(
         }
       }
     }
+    if (missingParents.size > 0) {
+      throw new Error(
+        `Cannot deserialize event graph with missing parents: ${[
+          ...missingParents,
+        ].join(", ")}`,
+      );
+    }
+    // Every parent is present in the payload but the Kahn pass still
+    // couldn't drain it — only a cycle (or some other unresolvable
+    // dependency, e.g. a self-parent) can leave events with non-zero
+    // `remainingParents` in that state.
     throw new Error(
-      `Cannot deserialize event graph with missing parents: ${[
-        ...missingParents,
-      ].join(", ")}`,
+      "Cannot deserialize event graph: cycle or unresolvable ordering detected",
     );
   }
 

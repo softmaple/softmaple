@@ -114,19 +114,34 @@ export class BinaryReader {
   readVarint(): number {
     let value = 0;
     let multiplier = 1;
+    // A safe-integer (53-bit) value encodes to at most 8 continuation bytes
+    // plus 1 terminating byte. Reject anything longer up front so a crafted
+    // payload can't loop the decoder over arbitrary input.
+    const MAX_BYTES = 9;
 
-    while (true) {
-      const byte = this.bytes[this.offset++];
-      if (byte === undefined) {
+    for (let bytesRead = 0; bytesRead < MAX_BYTES; bytesRead++) {
+      if (this.offset >= this.bytes.length) {
         throw new Error("Unexpected end of varint");
       }
+      const byte = this.bytes[this.offset++]!;
 
       value += (byte & 0x7f) * multiplier;
+      // Even within MAX_BYTES, a high-bit-set byte combined with a large
+      // multiplier can carry the partial result past Number.MAX_SAFE_INTEGER,
+      // where integer arithmetic silently loses precision. Fail loudly
+      // instead of returning a corrupted number.
+      if (value > Number.MAX_SAFE_INTEGER) {
+        throw new Error("Varint exceeds Number.MAX_SAFE_INTEGER");
+      }
       if ((byte & 0x80) === 0) {
         return value;
       }
       multiplier *= 0x80;
     }
+
+    throw new Error(
+      `Varint exceeds maximum encoded length of ${MAX_BYTES} bytes`,
+    );
   }
 
   readVarintArray(): number[] {

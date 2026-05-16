@@ -33,6 +33,8 @@ const baseContext = (): PresenceContextValue => ({
   others: [],
   recentActivity: [],
   updatePresence: () => {},
+  updatePointer: () => {},
+  remapRemotePositions: () => {},
   connect: async () => {},
   disconnect: async () => {},
   adapter: null,

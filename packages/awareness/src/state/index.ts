@@ -16,12 +16,15 @@ export {
 } from "./connection-operations";
 export {
   clearUserCursor,
+  clearUserPointer,
   clearUserSelection,
   getCursorsByBlock,
   getUsersInBlock,
   getUsersSelectingBlock,
   hasOtherCursorsInBlock,
+  remapRemotePositions,
   updateUserCursor,
+  updateUserPointer,
   updateUserSelection,
 } from "./cursor-operations";
 export {

@@ -15,6 +15,8 @@ import type {
   AdapterConnectionState,
   PresenceAdapter,
 } from "../adapters/types";
+import type { PositionMapper, PresenceResolver } from "../resolver";
+import { remapRemotePositions as remapRemotePositionsState } from "../state/cursor-operations";
 import { DEFAULT_PRESENCE_CONFIG } from "../state/selectors";
 import { determineUserStatus } from "../state/status-operations";
 import {
@@ -23,8 +25,8 @@ import {
   PRESENCE_EVENT,
   type PresenceEvent,
 } from "../types/events";
-import type { PresenceUser } from "../types/presence";
-import type { PresenceStateConfig } from "../types/state";
+import type { PointerPosition, PresenceUser } from "../types/presence";
+import type { PresenceState, PresenceStateConfig } from "../types/state";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
 
 /** Default cap on the bounded recent-activity buffer */
@@ -57,6 +59,8 @@ export interface PresenceProviderProps {
    * dropped FIFO. Defaults to 50.
    */
   readonly maxRecentActivity?: number;
+  /** Optional resolver for editor-specific anchored cursor/selection data */
+  readonly resolver?: PresenceResolver;
   /** Children to render */
   readonly children: ReactNode;
 }
@@ -247,6 +251,7 @@ export const PresenceProvider = ({
   statusConfig = DEFAULT_PRESENCE_CONFIG,
   statusSweepMs = DEFAULT_STATUS_SWEEP_MS,
   maxRecentActivity = DEFAULT_MAX_RECENT_ACTIVITY,
+  resolver,
   children,
 }: PresenceProviderProps): ReactNode => {
   // Use lazy initializers to get real adapter state on first render
@@ -261,6 +266,10 @@ export const PresenceProvider = ({
   const [recentActivity, setRecentActivity] = useState<
     ReadonlyArray<ActivityEvent>
   >([]);
+  const selfIdRef = useRef(self?.userId ?? null);
+  useEffect(() => {
+    selfIdRef.current = self?.userId ?? null;
+  }, [self?.userId]);
 
   // `maxRecentActivity` is a tuning knob, not a structural dependency. Read
   // it from a ref inside subscription / interval closures so changing it
@@ -394,6 +403,29 @@ export const PresenceProvider = ({
     [adapter],
   );
 
+  const updatePointer = useCallback(
+    (pointer: PointerPosition | null): void => {
+      adapter.updatePresence({ pointer: pointer ?? undefined });
+    },
+    [adapter],
+  );
+
+  const remapRemotePositions = useCallback((mapper: PositionMapper): void => {
+    setPresence((current) => {
+      const state: PresenceState = {
+        users: current,
+        activities: [],
+        connectionStatus: "connected",
+        selfId: selfIdRef.current,
+      };
+      const next = remapRemotePositionsState(state, mapper).users;
+      if (next === current) return current;
+      // Local-only: never rebroadcast remapped remote state.
+      presenceRef.current = next;
+      return next;
+    });
+  }, []);
+
   const others = useMemo(
     () => deriveOthers(presence, self?.userId ?? null),
     [presence, self?.userId],
@@ -407,6 +439,9 @@ export const PresenceProvider = ({
       others,
       recentActivity,
       updatePresence,
+      updatePointer,
+      remapRemotePositions,
+      resolver,
       connect,
       disconnect,
       adapter,
@@ -418,6 +453,9 @@ export const PresenceProvider = ({
       others,
       recentActivity,
       updatePresence,
+      updatePointer,
+      remapRemotePositions,
+      resolver,
       connect,
       disconnect,
       adapter,

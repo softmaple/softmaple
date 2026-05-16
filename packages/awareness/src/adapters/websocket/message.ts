@@ -57,10 +57,10 @@ export const createMessage = (
 /**
  * Serialize message for sending.
  *
- * For `PRESENCE_UPDATE`, JSON would silently drop `cursor: undefined` /
- * `selection: undefined` keys, which makes a "clear cursor" update
- * indistinguishable from "no change to cursor" on peers. We rewrite those
- * fields to `null` so the intent survives the wire. The receiver
+ * For `PRESENCE_UPDATE`, JSON would silently drop `cursor: undefined`,
+ * `selection: undefined`, and `pointer: undefined` keys, which makes a
+ * "clear" update indistinguishable from "no change" on peers. We rewrite
+ * those fields to `null` so the intent survives the wire. The receiver
  * (`processPresenceUpdate`) normalizes `null` back to `undefined`.
  */
 export const serializeMessage = (message: WebSocketMessage): string => {
@@ -76,6 +76,9 @@ export const serializeMessage = (message: WebSocketMessage): string => {
     }
     if ("selection" in updates && updates.selection === undefined) {
       normalizedUpdates.selection = null;
+    }
+    if ("pointer" in updates && updates.pointer === undefined) {
+      normalizedUpdates.pointer = null;
     }
     return JSON.stringify({
       ...message,
@@ -103,7 +106,7 @@ export const parseMessage = (data: string): WebSocketMessage | null => {
 };
 
 /**
- * Map `null` cursor/selection (wire-level clear) back to `undefined` so
+ * Map `null` cursor/selection/pointer (wire-level clear) back to `undefined` so
  * downstream state code, which treats `undefined` as "field absent", stays
  * the source of truth.
  */
@@ -121,6 +124,9 @@ const normalizeReceivedUpdates = (
   }
   if (wireUpdates.selection === null) {
     out.selection = undefined;
+  }
+  if (wireUpdates.pointer === null) {
+    out.pointer = undefined;
   }
   return out as unknown as PresenceUpdatePayload["updates"];
 };

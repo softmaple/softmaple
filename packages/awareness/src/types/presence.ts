@@ -12,6 +12,12 @@
 export type PresenceStatus = "active" | "idle" | "offline";
 
 /**
+ * Opaque, JSON-serializable anchor encoded by the editor integration.
+ * Awareness stores and forwards it, but never inspects the contents.
+ */
+export type PositionAnchor = string;
+
+/**
  * Cursor position within the document
  */
 export interface CursorPosition {
@@ -19,6 +25,11 @@ export interface CursorPosition {
   readonly blockId: string;
   /** Character offset within the block */
   readonly offset: number;
+  /**
+   * Optional editor-specific anchor. Receivers should prefer a resolved anchor
+   * over `offset` when a resolver is configured.
+   */
+  readonly anchor?: PositionAnchor;
 }
 
 /**
@@ -31,6 +42,20 @@ export interface SelectionRange {
   readonly from: number;
   /** End offset of selection */
   readonly to: number;
+  /** Optional editor-specific anchor for `from`. */
+  readonly fromAnchor?: PositionAnchor;
+  /** Optional editor-specific anchor for `to`. */
+  readonly toAnchor?: PositionAnchor;
+}
+
+/**
+ * Pointer position within an explicit coordinate space. Pointers are not
+ * document cursors and are never transformed by document edits.
+ */
+export interface PointerPosition {
+  readonly x: number;
+  readonly y: number;
+  readonly space: "viewport" | "document";
 }
 
 /**
@@ -64,6 +89,8 @@ export interface PresenceUser {
   readonly cursor?: CursorPosition;
   /** Current selection range (optional) */
   readonly selection?: SelectionRange;
+  /** Current pointer position (optional) */
+  readonly pointer?: PointerPosition;
   /** Additional metadata */
   readonly meta?: PresenceMeta;
 }
@@ -101,6 +128,7 @@ export interface CreatePresenceUserOptions {
   readonly avatarUrl?: string;
   readonly cursor?: CursorPosition;
   readonly selection?: SelectionRange;
+  readonly pointer?: PointerPosition;
   readonly meta?: PresenceMeta;
 }
 
@@ -118,5 +146,6 @@ export const createPresenceUser = (
   avatarUrl: options.avatarUrl,
   cursor: options.cursor,
   selection: options.selection,
+  pointer: options.pointer,
   meta: options.meta,
 });

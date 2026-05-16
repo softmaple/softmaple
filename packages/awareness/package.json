@@ -63,6 +63,10 @@
       "types": "./dist/state/index.d.ts",
       "import": "./dist/state/index.js"
     },
+    "./resolver": {
+      "types": "./dist/resolver.d.ts",
+      "import": "./dist/resolver.js"
+    },
     "./types/presence": {
       "types": "./dist/types/presence.d.ts",
       "import": "./dist/types/presence.js"
@@ -106,6 +110,10 @@
     "./hooks/use-presence": {
       "types": "./dist/hooks/use-presence.d.ts",
       "import": "./dist/hooks/use-presence.js"
+    },
+    "./hooks/use-remap-remote-positions": {
+      "types": "./dist/hooks/use-remap-remote-positions.d.ts",
+      "import": "./dist/hooks/use-remap-remote-positions.js"
     },
     "./hooks/use-self": {
       "types": "./dist/hooks/use-self.d.ts",

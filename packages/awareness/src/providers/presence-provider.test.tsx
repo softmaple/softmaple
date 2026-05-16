@@ -148,6 +148,11 @@ class FullMockAdapter implements PresenceAdapter {
       });
     }
   };
+
+  emitPresence = (users: ReadonlyArray<PresenceUser>): void => {
+    this.presence = new Map(users.map((user) => [user.userId, user]));
+    for (const cb of this.presenceCallbacks) cb(this.presence);
+  };
 }
 
 describe("PresenceProvider", () => {
@@ -325,6 +330,72 @@ describe("PresenceProvider", () => {
     });
     expect(adapter.disconnect).toHaveBeenCalled();
     expect(contextRef.current?.adapter).toBe(adapter);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("remaps remote positions locally without sending adapter updates", async () => {
+    const adapter = new FullMockAdapter();
+    const contextRef: { current: PresenceContextValue | null } = {
+      current: null,
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PresenceProvider adapter={adapter} autoConnect={false}>
+          <PresenceContext.Consumer>
+            {(value) => {
+              contextRef.current = value;
+              return null;
+            }}
+          </PresenceContext.Consumer>
+        </PresenceProvider>,
+      );
+    });
+
+    const self: PresenceUser = {
+      userId: "self",
+      name: "Self",
+      color: "#000",
+      status: "active",
+      lastActiveAt: 0,
+      cursor: { blockId: "body", offset: 1 },
+    };
+    const peer: PresenceUser = {
+      userId: "peer",
+      name: "Peer",
+      color: "#111",
+      status: "active",
+      lastActiveAt: 0,
+      cursor: { blockId: "body", offset: 6 },
+    };
+
+    act(() => {
+      adapter.self = self;
+      adapter.emitPresence([self, peer]);
+    });
+
+    act(() => {
+      contextRef.current?.remapRemotePositions({
+        mapPosition: ({ blockId, offset }) => ({ blockId, offset: offset + 4 }),
+      });
+    });
+
+    expect(contextRef.current?.presence.get("self")?.cursor).toEqual({
+      blockId: "body",
+      offset: 1,
+    });
+    expect(contextRef.current?.presence.get("peer")?.cursor).toEqual({
+      blockId: "body",
+      offset: 10,
+    });
+    expect(adapter.updatePresence).not.toHaveBeenCalled();
+    expect(adapter.broadcast).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();

@@ -7,11 +7,13 @@ import {
 } from "../providers/presence-context";
 import type {
   CursorPosition,
+  PointerPosition,
   PresenceUser,
   SelectionRange,
 } from "../types/presence";
 import {
   useUpdateCursor,
+  useUpdatePointer,
   useUpdatePresence,
   useUpdateSelection,
   useUpdateTyping,
@@ -42,6 +44,8 @@ const createContextValue = (
   others: [],
   recentActivity: [],
   updatePresence,
+  updatePointer: (pointer) => updatePresence({ pointer: pointer ?? undefined }),
+  remapRemotePositions: () => {},
   connect: async () => {},
   disconnect: async () => {},
   adapter: null,
@@ -93,6 +97,40 @@ const renderCursorWithContext = (
 
   const Capture = (): null => {
     capture(useUpdateCursor(throttleMs));
+    return null;
+  };
+
+  act(() => {
+    root.render(
+      <PresenceContext.Provider value={contextValue}>
+        <Capture />
+      </PresenceContext.Provider>,
+    );
+  });
+
+  return {
+    unmount: () => {
+      act(() => {
+        root.unmount();
+      });
+      container.remove();
+    },
+  };
+};
+
+const renderPointerWithContext = (
+  contextValue: PresenceContextValue,
+  capture: (
+    update: (pointer: PointerPosition | null | undefined) => void,
+  ) => void,
+  throttleMs?: number,
+): { unmount: () => void } => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+
+  const Capture = (): null => {
+    capture(useUpdatePointer(throttleMs));
     return null;
   };
 
@@ -665,5 +703,96 @@ describe("useUpdatePresence and useUpdateSelection", () => {
     });
     container.remove();
     consoleError.mockRestore();
+  });
+});
+
+describe("useUpdatePointer", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.useRealTimers();
+  });
+
+  it("collapses rapid pointer calls into a single trailing update", () => {
+    vi.useFakeTimers();
+    const updatePresence = vi.fn();
+    let updatePointer:
+      | ((pointer: PointerPosition | null | undefined) => void)
+      | null = null;
+
+    const { unmount } = renderPointerWithContext(
+      createContextValue(createSelf(), updatePresence),
+      (fn) => {
+        updatePointer = fn;
+      },
+      32,
+    );
+
+    act(() => {
+      updatePointer?.({ x: 1, y: 2, space: "viewport" });
+    });
+    expect(updatePresence).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      updatePointer?.({ x: 3, y: 4, space: "viewport" });
+      updatePointer?.({ x: 5, y: 6, space: "viewport" });
+    });
+    expect(updatePresence).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(40);
+    });
+
+    expect(updatePresence).toHaveBeenCalledTimes(2);
+    expect(updatePresence).toHaveBeenLastCalledWith({
+      pointer: { x: 5, y: 6, space: "viewport" },
+    });
+
+    unmount();
+  });
+
+  it("clears pointer when passed null", () => {
+    const updatePresence = vi.fn();
+    let updatePointer:
+      | ((pointer: PointerPosition | null | undefined) => void)
+      | null = null;
+
+    const { unmount } = renderPointerWithContext(
+      createContextValue(createSelf(), updatePresence),
+      (fn) => {
+        updatePointer = fn;
+      },
+      0,
+    );
+
+    act(() => {
+      updatePointer?.(null);
+    });
+
+    expect(updatePresence).toHaveBeenCalledWith({ pointer: undefined });
+    unmount();
+  });
+
+  it("sends pointer payloads through the presence update path", () => {
+    const updatePresence = vi.fn();
+    let updatePointer:
+      | ((pointer: PointerPosition | null | undefined) => void)
+      | null = null;
+
+    const { unmount } = renderPointerWithContext(
+      createContextValue(createSelf(), updatePresence),
+      (fn) => {
+        updatePointer = fn;
+      },
+      0,
+    );
+
+    act(() => {
+      updatePointer?.({ x: 10, y: 12, space: "document" });
+    });
+
+    expect(updatePresence).toHaveBeenCalledWith({
+      pointer: { x: 10, y: 12, space: "document" },
+    });
+    unmount();
   });
 });

@@ -5,8 +5,9 @@
 
 import { createContext } from "react";
 import type { PresenceAdapter } from "../adapters/types";
+import type { PositionMapper, PresenceResolver } from "../resolver";
 import type { ActivityEvent } from "../types/events";
-import type { PresenceUser } from "../types/presence";
+import type { PointerPosition, PresenceUser } from "../types/presence";
 
 /**
  * Presence context value type
@@ -31,6 +32,12 @@ export interface PresenceContextValue {
   readonly updatePresence: (
     updates: Partial<Omit<PresenceUser, "userId">>,
   ) => void;
+  /** Update current user's pointer presence */
+  readonly updatePointer: (pointer: PointerPosition | null) => void;
+  /** Remap remote offset-only positions after a local document change */
+  readonly remapRemotePositions: (mapper: PositionMapper) => void;
+  /** Optional resolver for editor-specific anchored positions */
+  readonly resolver?: PresenceResolver;
   /** Connect to the presence channel */
   readonly connect: () => Promise<void>;
   /** Disconnect from the presence channel */

@@ -4,7 +4,11 @@
 
 import { useContext } from "react";
 import { PresenceContext } from "../providers/presence-context";
-import type { CursorPosition, SelectionRange } from "../types/presence";
+import type {
+  CursorPosition,
+  PointerPosition,
+  SelectionRange,
+} from "../types/presence";
 import { useTrailingEdgeThrottle } from "./internal/use-trailing-throttle";
 
 export { useUpdateTyping } from "./use-update-typing";
@@ -26,6 +30,9 @@ const DEFAULT_CURSOR_THROTTLE_MS = 16;
  * a drag, so a coarser default than cursor is appropriate.
  */
 const DEFAULT_SELECTION_THROTTLE_MS = 50;
+
+/** Default pointer throttle window. Pointer streams are high-frequency. */
+const DEFAULT_POINTER_THROTTLE_MS = 32;
 
 /**
  * "Clear" sentinel accepted by `useUpdateCursor` / `useUpdateSelection`. Both
@@ -89,5 +96,25 @@ export const useUpdateSelection = (
 
   return useTrailingEdgeThrottle<SelectionRange | Clear>((selection) => {
     updatePresence({ selection: selection ?? undefined });
+  }, throttleMs);
+};
+
+/**
+ * Hook to update pointer position. Pass `null` or `undefined` to clear the
+ * pointer. Pointer coordinates are never transformed by document edits.
+ *
+ * @throws Error if used outside of PresenceProvider
+ */
+export const useUpdatePointer = (
+  throttleMs: number = DEFAULT_POINTER_THROTTLE_MS,
+) => {
+  const context = useContext(PresenceContext);
+  if (!context) {
+    throw new Error(`useUpdatePointer ${PROVIDER_ERROR_MSG}`);
+  }
+  const { updatePointer } = context;
+
+  return useTrailingEdgeThrottle<PointerPosition | Clear>((pointer) => {
+    updatePointer(pointer ?? null);
   }, throttleMs);
 };

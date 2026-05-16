@@ -77,6 +77,7 @@ export default defineConfig({
         "hooks/index": path.resolve(__dirname, "src/hooks/index.ts"),
         "adapters/index": path.resolve(__dirname, "src/adapters/index.ts"),
         "state/index": path.resolve(__dirname, "src/state/index.ts"),
+        resolver: path.resolve(__dirname, "src/resolver.ts"),
         "types/presence": path.resolve(__dirname, "src/types/presence.ts"),
         "types/events": path.resolve(__dirname, "src/types/events.ts"),
         "types/state": path.resolve(__dirname, "src/types/state.ts"),
@@ -103,6 +104,10 @@ export default defineConfig({
           "src/providers/presence-provider.tsx",
         ),
         "hooks/use-presence": path.resolve(__dirname, "src/hooks/use-presence.ts"),
+        "hooks/use-remap-remote-positions": path.resolve(
+          __dirname,
+          "src/hooks/use-remap-remote-positions.ts",
+        ),
         "hooks/use-self": path.resolve(__dirname, "src/hooks/use-self.ts"),
         "hooks/use-others": path.resolve(__dirname, "src/hooks/use-others.ts"),
         "hooks/use-connection": path.resolve(__dirname, "src/hooks/use-connection.ts"),

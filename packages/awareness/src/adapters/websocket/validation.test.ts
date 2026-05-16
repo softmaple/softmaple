@@ -56,12 +56,47 @@ describe("websocket validation", () => {
       ).toBe(false);
       expect(
         isJoinPayload({
+          user: {
+            ...validUser(),
+            cursor: { blockId: "b", offset: 1, anchor: 42 },
+          },
+        }),
+      ).toBe(false);
+      expect(
+        isJoinPayload({
           user: { ...validUser(), selection: { blockId: "b", from: 0 } },
+        }),
+      ).toBe(false);
+      expect(
+        isJoinPayload({
+          user: {
+            ...validUser(),
+            pointer: { x: 1, y: 2, space: "unknown" },
+          },
         }),
       ).toBe(false);
       expect(isJoinPayload({ user: { ...validUser(), meta: "no" } })).toBe(
         false,
       );
+    });
+
+    it("accepts anchored cursor, anchored selection, and pointer fields", () => {
+      expect(
+        isJoinPayload({
+          user: {
+            ...validUser(),
+            cursor: { blockId: "b", offset: 1, anchor: "abc" },
+            selection: {
+              blockId: "b",
+              from: 0,
+              to: 4,
+              fromAnchor: "from",
+              toAnchor: "to",
+            },
+            pointer: { x: 10, y: 20, space: "viewport" },
+          },
+        }),
+      ).toBe(true);
     });
   });
 
@@ -105,6 +140,47 @@ describe("websocket validation", () => {
           updates: { selection: { blockId: "b", from: "0", to: 1 } },
         }),
       ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          userId: "u-1",
+          updates: { cursor: { blockId: "b", offset: 1, anchor: 42 } },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          userId: "u-1",
+          updates: { pointer: { x: 1, y: 2, space: "page" } },
+        }),
+      ).toBe(false);
+    });
+
+    it("accepts anchors and pointer updates", () => {
+      expect(
+        isPresenceUpdatePayload({
+          userId: "u-1",
+          updates: { cursor: { blockId: "b", offset: 1, anchor: "abc" } },
+        }),
+      ).toBe(true);
+      expect(
+        isPresenceUpdatePayload({
+          userId: "u-1",
+          updates: {
+            selection: {
+              blockId: "b",
+              from: 0,
+              to: 5,
+              fromAnchor: "from",
+              toAnchor: "to",
+            },
+          },
+        }),
+      ).toBe(true);
+      expect(
+        isPresenceUpdatePayload({
+          userId: "u-1",
+          updates: { pointer: { x: 1, y: 2, space: "viewport" } },
+        }),
+      ).toBe(true);
     });
 
     it("rejects when updates is not an object", () => {
@@ -221,6 +297,16 @@ describe("WebSocket clear-cursor wire semantics", () => {
 
     const wire = serializeMessage(message);
     expect(JSON.parse(wire).payload.updates.selection).toBeNull();
+  });
+
+  it("serializes pointer: undefined as pointer: null", () => {
+    const message = createMessage(WS_MESSAGE.PRESENCE_UPDATE, "room-1", "u-1", {
+      userId: "u-1",
+      updates: { pointer: undefined },
+    });
+
+    const wire = serializeMessage(message);
+    expect(JSON.parse(wire).payload.updates.pointer).toBeNull();
   });
 
   it("leaves untouched updates that don't reference cursor / selection", () => {

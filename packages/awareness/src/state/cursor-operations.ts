@@ -2,8 +2,10 @@
  * Pure functions for cursor and selection operations
  */
 
+import type { PositionMapper } from "../resolver";
 import type {
   CursorPosition,
+  PointerPosition,
   PresenceUser,
   SelectionRange,
 } from "../types/presence";
@@ -56,6 +58,109 @@ export const updateUserSelection = (
   newUsers.set(userId, updatedUser);
 
   return { ...state, users: newUsers };
+};
+
+/**
+ * Update a user's pointer position (pure function)
+ */
+export const updateUserPointer = (
+  state: PresenceState,
+  userId: string,
+  pointer: PointerPosition | null,
+): PresenceState => {
+  const user = state.users.get(userId);
+  if (user === undefined) {
+    return state;
+  }
+
+  const updatedUser = updatePresenceUser(user, {
+    pointer: pointer ?? undefined,
+    lastActiveAt: Date.now(),
+  });
+
+  const newUsers = new Map(state.users);
+  newUsers.set(userId, updatedUser);
+
+  return { ...state, users: newUsers };
+};
+
+const hasSelectionAnchor = (selection: SelectionRange): boolean =>
+  selection.fromAnchor !== undefined || selection.toAnchor !== undefined;
+
+const remapUserPositions = (
+  user: PresenceUser,
+  mapper: PositionMapper,
+): PresenceUser => {
+  let cursor = user.cursor;
+  let selection = user.selection;
+
+  if (cursor !== undefined && cursor.anchor === undefined) {
+    const mapped = mapper.mapPosition({
+      blockId: cursor.blockId,
+      offset: cursor.offset,
+    });
+    cursor =
+      mapped === null
+        ? undefined
+        : { ...cursor, blockId: mapped.blockId, offset: mapped.offset };
+  }
+
+  if (selection !== undefined && !hasSelectionAnchor(selection)) {
+    const mappedFrom = mapper.mapPosition({
+      blockId: selection.blockId,
+      offset: selection.from,
+    });
+    const mappedTo = mapper.mapPosition({
+      blockId: selection.blockId,
+      offset: selection.to,
+    });
+    selection =
+      mappedFrom === null || mappedTo === null
+        ? undefined
+        : {
+            ...selection,
+            blockId: mappedFrom.blockId,
+            from: mappedFrom.offset,
+            to: mappedTo.offset,
+          };
+  }
+
+  if (cursor === user.cursor && selection === user.selection) {
+    return user;
+  }
+
+  return {
+    ...user,
+    cursor,
+    selection,
+  };
+};
+
+/**
+ * Remaps remote peers' offset-only cursors/selections through a consumer-
+ * supplied mapper after the local document changes. Skipped for:
+ *   - self (state.selfId) — self is broadcast, not remapped
+ *   - cursors/selections that carry an anchor — those resolve at render
+ *   - pointer — different coordinate space, never transformed by edits
+ * This is local rendering state; do not forward to the adapter.
+ */
+export const remapRemotePositions = (
+  state: PresenceState,
+  mapper: PositionMapper,
+): PresenceState => {
+  let newUsers: Map<string, PresenceUser> | null = null;
+
+  for (const [userId, user] of state.users) {
+    if (userId === state.selfId) continue;
+
+    const remapped = remapUserPositions(user, mapper);
+    if (remapped !== user) {
+      if (newUsers === null) newUsers = new Map(state.users);
+      newUsers.set(userId, remapped);
+    }
+  }
+
+  return newUsers === null ? state : { ...state, users: newUsers };
 };
 
 /**
@@ -127,3 +232,11 @@ export const clearUserSelection = (
   state: PresenceState,
   userId: string,
 ): PresenceState => updateUserSelection(state, userId, null);
+
+/**
+ * Clear pointer for a user (pure function)
+ */
+export const clearUserPointer = (
+  state: PresenceState,
+  userId: string,
+): PresenceState => updateUserPointer(state, userId, null);

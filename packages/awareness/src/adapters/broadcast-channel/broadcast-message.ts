@@ -10,7 +10,13 @@ import {
   type PresenceUpdatePayload,
   type PresenceUserUpdates,
 } from "../../types/events";
-import { type PresenceUser, updatePresenceUser } from "../../types/presence";
+import type {
+  CursorPosition,
+  PointerPosition,
+  PresenceUser,
+  SelectionRange,
+} from "../../types/presence";
+import { updatePresenceUser } from "../../types/presence";
 import {
   type AdapterState,
   removePresenceUser,
@@ -38,20 +44,79 @@ export interface BroadcastMessage {
 }
 
 /**
+ * Type guard for plain objects
+ */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isCursorPosition = (value: unknown): value is CursorPosition =>
+  isRecord(value) &&
+  typeof value.blockId === "string" &&
+  typeof value.offset === "number" &&
+  (value.anchor === undefined || typeof value.anchor === "string");
+
+const isSelectionRange = (value: unknown): value is SelectionRange =>
+  isRecord(value) &&
+  typeof value.blockId === "string" &&
+  typeof value.from === "number" &&
+  typeof value.to === "number" &&
+  (value.fromAnchor === undefined || typeof value.fromAnchor === "string") &&
+  (value.toAnchor === undefined || typeof value.toAnchor === "string");
+
+const isPointerPosition = (value: unknown): value is PointerPosition =>
+  isRecord(value) &&
+  typeof value.x === "number" &&
+  typeof value.y === "number" &&
+  (value.space === "viewport" || value.space === "document");
+
+/**
  * Type guard for PresenceUser payload
  */
 const isPresenceUser = (value: unknown): value is PresenceUser => {
-  if (value === null || typeof value !== "object") return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.userId === "string" &&
-    typeof obj.name === "string" &&
-    typeof obj.color === "string" &&
-    (obj.status === "active" ||
-      obj.status === "idle" ||
-      obj.status === "offline") &&
-    typeof obj.lastActiveAt === "number"
-  );
+  if (!isRecord(value)) return false;
+  if (typeof value.userId !== "string") return false;
+  if (typeof value.name !== "string") return false;
+  if (typeof value.color !== "string") return false;
+  if (
+    value.status !== "active" &&
+    value.status !== "idle" &&
+    value.status !== "offline"
+  ) {
+    return false;
+  }
+  if (typeof value.lastActiveAt !== "number") return false;
+  if (value.avatarUrl !== undefined && typeof value.avatarUrl !== "string") {
+    return false;
+  }
+  if (
+    value.cursor !== undefined &&
+    value.cursor !== null &&
+    !isCursorPosition(value.cursor)
+  ) {
+    return false;
+  }
+  if (
+    value.selection !== undefined &&
+    value.selection !== null &&
+    !isSelectionRange(value.selection)
+  ) {
+    return false;
+  }
+  if (
+    value.pointer !== undefined &&
+    value.pointer !== null &&
+    !isPointerPosition(value.pointer)
+  ) {
+    return false;
+  }
+  if (
+    value.meta !== undefined &&
+    value.meta !== null &&
+    !isRecord(value.meta)
+  ) {
+    return false;
+  }
+  return true;
 };
 
 /**
@@ -60,13 +125,33 @@ const isPresenceUser = (value: unknown): value is PresenceUser => {
 const isUpdatePayload = (
   value: unknown,
 ): value is { userId: string; updates: PresenceUserUpdates } => {
-  if (value === null || typeof value !== "object") return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.userId === "string" &&
-    typeof obj.updates === "object" &&
-    obj.updates !== null
-  );
+  if (!isRecord(value)) return false;
+  if (typeof value.userId !== "string") return false;
+  if (!isRecord(value.updates)) return false;
+
+  const updates = value.updates;
+  if (
+    updates.cursor !== undefined &&
+    updates.cursor !== null &&
+    !isCursorPosition(updates.cursor)
+  ) {
+    return false;
+  }
+  if (
+    updates.selection !== undefined &&
+    updates.selection !== null &&
+    !isSelectionRange(updates.selection)
+  ) {
+    return false;
+  }
+  if (
+    updates.pointer !== undefined &&
+    updates.pointer !== null &&
+    !isPointerPosition(updates.pointer)
+  ) {
+    return false;
+  }
+  return true;
 };
 
 /**

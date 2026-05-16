@@ -33,6 +33,7 @@ import {
   PresenceProvider,
   PresenceBar,
   useUpdateCursor,
+  useUpdatePointer,
 } from "@softmaple/awareness";
 import { createBroadcastChannelAdapter } from "@softmaple/awareness/adapters";
 import "@softmaple/awareness/styles.css";
@@ -48,13 +49,15 @@ const adapter = createBroadcastChannelAdapter({
 
 function EditorPresence() {
   const updateCursor = useUpdateCursor();
+  const updatePointer = useUpdatePointer();
 
   return (
     <div
       onPointerMove={(event) => {
-        updateCursor({
-          blockId: "current-block",
-          offset: Math.round(event.clientX),
+        updatePointer({
+          x: event.clientX,
+          y: event.clientY,
+          space: "viewport",
         });
       }}
     >
@@ -71,6 +74,32 @@ export function App() {
   );
 }
 ```
+
+## Anchored positions and pointers
+
+`cursor` and `selection` still include block-relative numeric offsets for
+simple integrations. They can also carry opaque string anchors:
+`cursor.anchor`, `selection.fromAnchor`, and `selection.toAnchor`. The package
+does not inspect anchors; editor bindings can encode CRDT or editor-native
+positions and pass a `resolver` to `PresenceProvider` so receivers resolve
+anchors against their local document at render time.
+
+For offset-only integrations, call `useRemapRemotePositions()` from your
+editor's local document-change listener. It remaps only remote users through a
+consumer-supplied `PositionMapper`, never rebroadcasts the result, and skips
+anchored positions because those are handled by the resolver.
+
+Pointer presence is separate from document cursor presence:
+
+```tsx
+const updatePointer = useUpdatePointer();
+
+updatePointer({ x: event.clientX, y: event.clientY, space: "viewport" });
+updatePointer(null); // clear pointer
+```
+
+Pointers use an explicit `"viewport"` or `"document"` coordinate space and are
+never transformed by document edits.
 
 ## Adapters
 
@@ -119,19 +148,19 @@ surfaced via `adapter.onError` instead of crashing consumers.
 
 ### Clear-cursor wire semantics
 
-`cursor` and `selection` are optional fields on `PresenceUser`. In the
+`cursor`, `selection`, and `pointer` are optional fields on `PresenceUser`. In the
 in-memory model, "no cursor" is represented as `undefined`. JSON serialization
 silently drops `undefined`, which would make a `useUpdateCursor(undefined)`
 indistinguishable from "no change". To preserve intent on the wire, the
 WebSocket adapter:
 
-- **On send:** rewrites `cursor: undefined` / `selection: undefined` to
-  `cursor: null` / `selection: null` inside `presence_update` payloads.
-- **On receive:** normalizes `cursor: null` / `selection: null` back to
+- **On send:** rewrites `cursor: undefined`, `selection: undefined`, and
+  `pointer: undefined` to `null` inside `presence_update` payloads.
+- **On receive:** normalizes `cursor: null`, `selection: null`, and `pointer: null` back to
   `undefined` before applying to local state.
 
 Server implementations should mirror this convention — emit `null` (not an
-absent key) when a peer clears their cursor.
+absent key) when a peer clears their cursor, selection, or pointer.
 
 ## Public API
 
@@ -142,6 +171,7 @@ absent key) when a peer clears their cursor.
 - `@softmaple/awareness/adapters/noop`: SSR/test-safe no-op adapter (also
   re-exported from `/adapters`)
 - `@softmaple/awareness/state`: Pure state helpers
+- `@softmaple/awareness/resolver`: Anchor resolver and offset mapper types
 - `@softmaple/awareness/styles.css`: Component styles
 
 ## Development

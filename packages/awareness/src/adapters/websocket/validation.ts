@@ -13,6 +13,7 @@
 
 import type {
   CursorPosition,
+  PointerPosition,
   PresenceUser,
   SelectionRange,
 } from "../../types/presence";
@@ -30,18 +31,27 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isCursorPosition = (value: unknown): value is CursorPosition =>
   isRecord(value) &&
   typeof value.blockId === "string" &&
-  typeof value.offset === "number";
+  typeof value.offset === "number" &&
+  (value.anchor === undefined || typeof value.anchor === "string");
 
 const isSelectionRange = (value: unknown): value is SelectionRange =>
   isRecord(value) &&
   typeof value.blockId === "string" &&
   typeof value.from === "number" &&
-  typeof value.to === "number";
+  typeof value.to === "number" &&
+  (value.fromAnchor === undefined || typeof value.fromAnchor === "string") &&
+  (value.toAnchor === undefined || typeof value.toAnchor === "string");
+
+const isPointerPosition = (value: unknown): value is PointerPosition =>
+  isRecord(value) &&
+  typeof value.x === "number" &&
+  typeof value.y === "number" &&
+  (value.space === "viewport" || value.space === "document");
 
 /**
  * `PresenceUser` requires `userId`, `name`, `color`, `status`, `lastActiveAt`.
- * Optional fields (`avatarUrl`, `cursor`, `selection`, `meta`) are validated
- * when present.
+ * Optional fields (`avatarUrl`, `cursor`, `selection`, `pointer`, `meta`) are
+ * validated when present.
  */
 export const isPresenceUser = (value: unknown): value is PresenceUser => {
   if (!isRecord(value)) return false;
@@ -70,6 +80,13 @@ export const isPresenceUser = (value: unknown): value is PresenceUser => {
     value.selection !== undefined &&
     value.selection !== null &&
     !isSelectionRange(value.selection)
+  ) {
+    return false;
+  }
+  if (
+    value.pointer !== undefined &&
+    value.pointer !== null &&
+    !isPointerPosition(value.pointer)
   ) {
     return false;
   }
@@ -140,6 +157,13 @@ export const isPresenceUpdatePayload = (
     updates.selection !== undefined &&
     updates.selection !== null &&
     !isSelectionRange(updates.selection)
+  ) {
+    return false;
+  }
+  if (
+    updates.pointer !== undefined &&
+    updates.pointer !== null &&
+    !isPointerPosition(updates.pointer)
   ) {
     return false;
   }

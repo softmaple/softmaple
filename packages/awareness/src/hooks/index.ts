@@ -20,9 +20,11 @@ export {
   type UsePeerCursorsOptions,
   usePeerCursors,
 } from "./use-presence-cursors";
+export { useRemapRemotePositions } from "./use-remap-remote-positions";
 export { useSelf, useSelfSelector } from "./use-self";
 export {
   useUpdateCursor,
+  useUpdatePointer,
   useUpdatePresence,
   useUpdateSelection,
 } from "./use-update-presence";

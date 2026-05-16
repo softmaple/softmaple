@@ -66,9 +66,11 @@ export {
   usePeersInBlock,
   usePresence,
   useRecentActivity,
+  useRemapRemotePositions,
   useSelf,
   useSelfSelector,
   useUpdateCursor,
+  useUpdatePointer,
   useUpdatePresence,
   useUpdateSelection,
   useUpdateTyping,
@@ -80,6 +82,7 @@ export {
   PresenceProvider,
   type PresenceProviderProps,
 } from "./providers";
+export type { PositionMapper, PresenceResolver } from "./resolver";
 export {
   createInitialPresenceState,
   DEFAULT_PRESENCE_CONFIG,
@@ -114,6 +117,8 @@ export {
   type CreatePresenceUserOptions,
   type CursorPosition,
   createPresenceUser,
+  type PointerPosition,
+  type PositionAnchor,
   type PresenceMeta,
   type PresenceStatus,
   type PresenceUser,

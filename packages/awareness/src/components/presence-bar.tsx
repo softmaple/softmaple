@@ -67,28 +67,41 @@ export const PresenceBar = ({
 
   if (loading) {
     return (
-      <ul
-        aria-busy="true"
-        aria-label={ariaLabel}
-        className={cx("awareness-presence-bar", className)}
-      >
-        {Array.from({ length: maxVisible }).map((_, index) => (
-          <li
-            // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders have no stable identity.
-            key={`skeleton-${index}`}
-            className={cx(
-              "awareness-presence-bar__item",
-              "awareness-presence-bar__item--skeleton",
-              `awareness-presence-bar__item--skeleton-${size}`,
-            )}
-          >
-            <span
+      <>
+        {/*
+          AT-only loading status. The skeleton dots intentionally don't
+          animate (design §6) and convey nothing without a label, so we
+          surface "Loading collaborators…" via a sibling status region
+          and aria-hide the placeholder list items.
+        */}
+        {/* biome-ignore lint/a11y/useSemanticElements: <output> is for form-calculated values; this is a loading state for an inert chrome region, so a span with role="status" is the appropriate live region (mirrors block-activity-indicator). */}
+        <span className="awareness-sr-only" role="status">
+          Loading collaborators…
+        </span>
+        <ul
+          aria-busy="true"
+          aria-label={ariaLabel}
+          className={cx("awareness-presence-bar", className)}
+        >
+          {Array.from({ length: maxVisible }).map((_, index) => (
+            <li
               aria-hidden="true"
-              className="awareness-presence-bar__skeleton"
-            />
-          </li>
-        ))}
-      </ul>
+              // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders have no stable identity.
+              key={`skeleton-${index}`}
+              className={cx(
+                "awareness-presence-bar__item",
+                "awareness-presence-bar__item--skeleton",
+                `awareness-presence-bar__item--skeleton-${size}`,
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className="awareness-presence-bar__skeleton"
+              />
+            </li>
+          ))}
+        </ul>
+      </>
     );
   }
 
@@ -103,15 +116,29 @@ export const PresenceBar = ({
           const summary = formatPresenceSummary(user);
           return (
             <li
-              aria-describedby={interactive ? tooltipId : undefined}
               className={cx(
                 "awareness-presence-bar__item",
                 interactive && "awareness-presence-bar__item--interactive",
               )}
               key={user.userId}
-              tabIndex={interactive ? 0 : undefined}
             >
-              <PresenceAvatar size={size} user={user} />
+              {interactive ? (
+                // <button> gives us a real focusable element with the
+                // right AT semantics (announces as "Pikachu, button"
+                // not "list item"). The tooltip text is wired through
+                // aria-describedby so AT reads name first, then the
+                // status + last-active meta.
+                <button
+                  aria-describedby={tooltipId}
+                  aria-label={user.name}
+                  className="awareness-presence-bar__button"
+                  type="button"
+                >
+                  <PresenceAvatar size={size} user={user} />
+                </button>
+              ) : (
+                <PresenceAvatar size={size} user={user} />
+              )}
               {interactive ? (
                 <span
                   className="awareness-presence-bar__tooltip"

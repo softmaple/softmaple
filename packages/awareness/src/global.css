@@ -147,6 +147,23 @@
   @apply bg-awareness-status-offline;
 }
 
+/*
+ * Visually hidden but exposed to assistive tech. Used for status
+ * messages whose visible counterpart is non-textual (skeletons, icons).
+ */
+.awareness-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .awareness-presence-bar {
   isolation: isolate;
   max-width: 100%;
@@ -184,7 +201,7 @@
 }
 
 .awareness-presence-bar__item:hover,
-.awareness-presence-bar__item--interactive:focus-visible {
+.awareness-presence-bar__item--interactive:focus-within {
   filter: saturate(1.06);
   transform: translateY(-1px);
   outline: none;
@@ -192,18 +209,37 @@
 }
 
 .awareness-presence-bar__item:hover .awareness-avatar,
-.awareness-presence-bar__item--interactive:focus-visible .awareness-avatar {
+.awareness-presence-bar__item--interactive:focus-within .awareness-avatar {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 44%, transparent),
     0 6px 16px color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
 }
 
-.awareness-presence-bar__item--interactive:focus-visible .awareness-avatar {
+.awareness-presence-bar__item--interactive:focus-within .awareness-avatar {
   /* Visible focus ring composed on top of the user-color glow. */
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 44%, transparent),
     0 0 0 3px color-mix(in srgb, CanvasText 60%, transparent),
     0 6px 16px color-mix(in srgb, var(--awareness-user-color) 28%, transparent);
+}
+
+/*
+ * Reset the inner <button> so it inherits the item's layout and the
+ * avatar continues to drive the visual; the button just contributes
+ * focusability and AT semantics.
+ */
+.awareness-presence-bar__button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  @apply inline-flex items-center;
+}
+
+.awareness-presence-bar__button:focus {
+  outline: none;
 }
 
 .awareness-presence-bar__tooltip {
@@ -238,7 +274,7 @@
 }
 
 .awareness-presence-bar__item:hover .awareness-presence-bar__tooltip,
-.awareness-presence-bar__item--interactive:focus-visible
+.awareness-presence-bar__item--interactive:focus-within
   .awareness-presence-bar__tooltip {
   transform: translate3d(var(--awareness-tooltip-x), 0, 0);
   @apply opacity-100;
@@ -768,7 +804,7 @@
    * are stripped, leaving `outline: none` with nothing in its place.
    * Restore a system-color outline so keyboard focus stays visible.
    */
-  .awareness-presence-bar__item--interactive:focus-visible {
+  .awareness-presence-bar__item--interactive:focus-within {
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }

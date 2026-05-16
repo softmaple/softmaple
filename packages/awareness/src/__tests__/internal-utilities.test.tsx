@@ -286,7 +286,7 @@ describe("PresenceBar without context", () => {
     ).toBe(3);
   });
 
-  it("makes items keyboard-focusable and adds a tooltip when interactive", () => {
+  it("wraps the avatar in a focusable button and adds a tooltip when interactive", () => {
     const ada: PresenceUser = {
       userId: "ada",
       name: "Ada",
@@ -295,12 +295,14 @@ describe("PresenceBar without context", () => {
       lastActiveAt: 0,
     };
     const html = renderToStaticMarkup(<PresenceBar users={[ada]} />);
-    expect(html).toContain('tabindex="0"');
+    expect(html).toContain("awareness-presence-bar__button");
+    expect(html).toContain('aria-label="Ada"');
+    expect(html).toContain("aria-describedby=");
     expect(html).toContain('role="tooltip"');
     expect(html).toContain("awareness-presence-bar__item--interactive");
   });
 
-  it("omits tooltip + tabIndex when interactive=false", () => {
+  it("omits the button + tooltip when interactive=false", () => {
     const ada: PresenceUser = {
       userId: "ada",
       name: "Ada",
@@ -311,7 +313,7 @@ describe("PresenceBar without context", () => {
     const html = renderToStaticMarkup(
       <PresenceBar interactive={false} users={[ada]} />,
     );
-    expect(html).not.toContain('tabindex="0"');
+    expect(html).not.toContain("awareness-presence-bar__button");
     expect(html).not.toContain('role="tooltip"');
   });
 });

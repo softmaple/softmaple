@@ -48,6 +48,15 @@ export interface BlockActivityIndicatorProps {
   readonly formatLabel?: (users: ReadonlyArray<PresenceUser>) => string;
   readonly className?: string;
   readonly "aria-label"?: string;
+  /**
+   * Politeness for the underlying live region. Defaults to `"off"` —
+   * cursor enter/exit churn would otherwise stream "Pikachu is editing
+   * here" → "2 trainers editing here" announcements through every screen
+   * reader, drowning out the user's own editing flow. Sighted users
+   * still see the visible pill. Pass `"polite"` if you want the
+   * transitions announced anyway.
+   */
+  readonly ariaLive?: "off" | "polite" | "assertive";
 }
 
 const isUserInBlock = (user: PresenceUser, blockId: string): boolean =>
@@ -72,6 +81,7 @@ export const BlockActivityIndicator = ({
   formatLabel = defaultFormatLabel,
   className,
   "aria-label": ariaLabel,
+  ariaLive = "off",
 }: BlockActivityIndicatorProps): ReactNode => {
   const context = useContext(PresenceContext);
   // Narrow the memo deps so unrelated context churn (e.g. a new
@@ -104,7 +114,7 @@ export const BlockActivityIndicator = ({
     // biome-ignore lint/a11y/useSemanticElements: <output> is for form-calculated values; this is presence telemetry, so a div with role="status" is the semantically appropriate live region.
     <div
       aria-label={ariaLabel ?? label}
-      aria-live="polite"
+      aria-live={ariaLive}
       className={cx("awareness-block-activity-indicator", className)}
       role="status"
       style={

@@ -43,6 +43,13 @@ src/
       event-graph-serialization.ts
       max-heap.ts
       topological-order.ts
+  bench/
+    traces.ts
+    long-linear-history.bench.ts
+    concurrent-same-index-inserts.bench.ts
+    long-offline-branch-merge.bench.ts
+    delete-heavy-workload.bench.ts
+    checkpoint-effectiveness.bench.ts
   types/index.ts
 ```
 
@@ -69,3 +76,44 @@ pnpm --filter @softmaple/eg-walker typecheck
 pnpm --filter @softmaple/eg-walker build
 pnpm --filter @softmaple/eg-walker lint
 ```
+
+## Benchmarks
+
+`src/bench/*.bench.ts` are `vitest bench` files; trace builders live in
+`src/bench/traces.ts` and are reused across scenarios. Run with:
+
+```bash
+pnpm --filter @softmaple/eg-walker bench
+# or, with caching disabled:
+turbo run bench --filter=@softmaple/eg-walker
+```
+
+Each scenario builds its trace once at module load, then the `bench()`
+body applies events to a fresh `EgWalkerReplica` per iteration so the
+measurement reflects end-to-end throughput from cold start. An
+`afterAll` hook prints one stats line per scenario via `console.info`
+using `summariseReplica` / `formatStatsLine` from `traces.ts`. The
+fields come from `EgWalkerReplica.getReplayStats()` and the engine's
+`getStats()`, so a regression in `fullReplays`, `partialReplays`,
+`engineRetreats`, or `sequenceRecordCount` is visible alongside the
+wall-clock numbers.
+
+Scenarios:
+
+- `long-linear-history` — single-author append-only chain; exercises
+  the Section 3.4 non-conflicting-run fast path.
+- `concurrent-same-index-inserts` — every event is concurrent with no
+  shared parent; stresses YATA origin-left tie-breaking
+  (`engine/internals/yata-integration.ts`).
+- `long-offline-branch-merge` — two long branches fan in at a single
+  merge event; measures recovery from a stale branch plus the
+  retreat/advance work over a long offline edit.
+- `delete-heavy-workload` — ~70% deletes; stresses
+  `engine/internals/delete-target-index.ts`.
+- `checkpoint-effectiveness` — paired benches comparing
+  `applyRemoteEvent` (checkpoint-aware incremental) vs a single
+  cold-start `fullReplay` via `EventGraph.fromEvents`. The vitest
+  summary reports the speedup ratio between the two.
+
+Bench files are excluded from coverage (`src/bench/**` and
+`src/**/*.bench.ts` are added to `vitest.config.ts#coverage.exclude`).

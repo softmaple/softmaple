@@ -25,6 +25,7 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
+    "bench": "vitest bench --run",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

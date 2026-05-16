@@ -5,13 +5,24 @@
       "dependsOn": ["^build", "^db:generate"],
       "env": ["LIVEBLOCKS_SECRET_KEY"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**", ".output/**", ".vinxi/**"]
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**",
+        "build/**",
+        ".output/**",
+        ".vinxi/**"
+      ]
     },
     "lint": {
       "dependsOn": ["^lint"]
     },
     "check-types": {
       "dependsOn": ["^check-types"]
+    },
+    "bench": {
+      "cache": false,
+      "outputLogs": "full"
     },
     "dev": {
       "dependsOn": ["^db:generate"],

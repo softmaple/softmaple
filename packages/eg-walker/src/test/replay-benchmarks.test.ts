@@ -276,15 +276,10 @@ const buildMostlyLinearEditingSession = (params: {
     if ((i + 1) % forkEveryN === 0) {
       // `parent` is always non-null here because we just appended an
       // event in this iteration and set `parent = id` above.
-      // `forkRoot` is the shared ancestor of both the fork chain and
-      // the post-fork main-chain event we add below; keeping the
-      // two chains rooted at the *same* event (rather than chaining
-      // the fork off of the post-fork main event) is what makes the
-      // eventual merge a genuine fork/merge with two concurrent
-      // tips, instead of a degenerate merge whose parents are an
-      // ancestor and descendant of each other.
-      const forkRoot: EventId = parent;
-      let forkTip: EventId = forkRoot;
+      // Keeping the two chains rooted at the same event (rather than
+      // chaining the fork off of the post-fork main event) is what makes
+      // the eventual merge a genuine fork/merge with two concurrent tips.
+      let forkTip: EventId = parent;
       for (let f = 0; f < forkEvents; f++) {
         const forkId = `fork-${i}-${f}`;
         // `prng()` is in [0, 1), so `Math.floor(prng() * length)` is
@@ -300,12 +295,12 @@ const buildMostlyLinearEditingSession = (params: {
         length += 1;
       }
       // Extend the main author by one event AFTER the fork started.
-      // Its only parent is `forkRoot`, so it's concurrent with every
+      // Its only parent is the fork root, so it's concurrent with every
       // fork event — neither side is an ancestor of the other.
       const postForkMainId: EventId = `main-post-${i}`;
       events.push({
         id: postForkMainId,
-        parentVersion: new Set<EventId>([forkRoot]),
+        parentVersion: new Set<EventId>([parent]),
         operation: { type: OPERATION_TYPE.INSERT, index: cursor, text: "." },
         timestamp: 1_778_000_000_000 + i + forkEvents + 1,
       });

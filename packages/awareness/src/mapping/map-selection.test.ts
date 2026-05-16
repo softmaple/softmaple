@@ -148,4 +148,15 @@ describe("mapSelectionThroughOperation: invariants", () => {
       mapSelectionThroughOperation({ from: 9, to: 3 }, insertAt(5, 2)),
     ).toEqual({ from: 3, to: 11 });
   });
+
+  it("maps equivalent forward and reversed ranges identically at insert boundaries", () => {
+    const operation = insertAt(5, 2);
+
+    expect(mapSelectionThroughOperation({ from: 3, to: 5 }, operation)).toEqual(
+      { from: 3, to: 5 },
+    );
+    expect(mapSelectionThroughOperation({ from: 5, to: 3 }, operation)).toEqual(
+      { from: 3, to: 5 },
+    );
+  });
 });

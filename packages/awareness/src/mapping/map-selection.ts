@@ -31,16 +31,20 @@ export const mapSelectionThroughOperation = (
   range: PositionRange,
   operation: PositionOperation,
 ): PositionRange => {
-  const from = mapCursorThroughOperation(range.from, operation);
+  const low = Math.min(range.from, range.to);
+  const high = Math.max(range.from, range.to);
 
-  const useLeftBiasOnTo =
-    operation.type === POSITION_OPERATION_TYPE.Insert &&
-    range.from !== range.to;
-  const to = useLeftBiasOnTo
-    ? range.to <= operation.index
-      ? range.to
-      : range.to + operation.length
-    : mapCursorThroughOperation(range.to, operation);
+  const mappedLow = mapCursorThroughOperation(low, operation);
 
-  return from <= to ? { from, to } : { from: to, to: from };
+  const useLeftBiasOnHigh =
+    operation.type === POSITION_OPERATION_TYPE.Insert && low !== high;
+  const mappedHigh = useLeftBiasOnHigh
+    ? high <= operation.index
+      ? high
+      : high + operation.length
+    : mapCursorThroughOperation(high, operation);
+
+  return mappedLow <= mappedHigh
+    ? { from: mappedLow, to: mappedHigh }
+    : { from: mappedHigh, to: mappedLow };
 };

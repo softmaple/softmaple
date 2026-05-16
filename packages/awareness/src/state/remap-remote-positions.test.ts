@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PositionMapper } from "../resolver";
-import { createPresenceUser } from "../types/presence";
+import { createPresenceUser, type PresenceUser } from "../types/presence";
 import type { PresenceState } from "../types/state";
-import { remapRemotePositions } from "./cursor-operations";
+import { remapRemotePositions, remapRemoteUsers } from "./cursor-operations";
 import { createInitialPresenceState } from "./selectors";
 
 const makeUser = (
@@ -187,5 +187,43 @@ describe("remapRemotePositions", () => {
       blockId: "body",
       offset: 6,
     });
+  });
+});
+
+describe("remapRemoteUsers", () => {
+  const makeMap = (
+    users: ReadonlyArray<PresenceUser>,
+  ): ReadonlyMap<string, PresenceUser> =>
+    new Map(users.map((user) => [user.userId, user]));
+
+  it("returns the same Map reference when nothing needs remapping", () => {
+    const users = makeMap([makeUser("self"), makeUser("peer")]);
+
+    const next = remapRemoteUsers(users, "self", insertAt(0, 4));
+
+    expect(next).toBe(users);
+  });
+
+  it("remaps non-self peer cursors", () => {
+    const users = makeMap([
+      makeUser("self", { cursor: { blockId: "body", offset: 1 } }),
+      makeUser("peer", { cursor: { blockId: "body", offset: 6 } }),
+    ]);
+
+    const next = remapRemoteUsers(users, "self", insertAt(0, 4));
+
+    expect(next).not.toBe(users);
+    expect(next.get("self")?.cursor).toEqual({ blockId: "body", offset: 1 });
+    expect(next.get("peer")?.cursor).toEqual({ blockId: "body", offset: 10 });
+  });
+
+  it("treats a null selfId as 'remap every user'", () => {
+    const users = makeMap([
+      makeUser("a", { cursor: { blockId: "body", offset: 6 } }),
+    ]);
+
+    const next = remapRemoteUsers(users, null, insertAt(0, 4));
+
+    expect(next.get("a")?.cursor).toEqual({ blockId: "body", offset: 10 });
   });
 });

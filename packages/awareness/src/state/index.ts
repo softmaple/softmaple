@@ -23,6 +23,7 @@ export {
   getUsersSelectingBlock,
   hasOtherCursorsInBlock,
   remapRemotePositions,
+  remapRemoteUsers,
   updateUserCursor,
   updateUserPointer,
   updateUserSelection,

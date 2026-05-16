@@ -16,7 +16,7 @@ import type {
   PresenceAdapter,
 } from "../adapters/types";
 import type { PositionMapper, PresenceResolver } from "../resolver";
-import { remapRemotePositions as remapRemotePositionsState } from "../state/cursor-operations";
+import { remapRemoteUsers } from "../state/cursor-operations";
 import { applyResolver } from "../state/resolve-peer";
 import { DEFAULT_PRESENCE_CONFIG } from "../state/selectors";
 import { determineUserStatus } from "../state/status-operations";
@@ -27,7 +27,7 @@ import {
   type PresenceEvent,
 } from "../types/events";
 import type { PointerPosition, PresenceUser } from "../types/presence";
-import type { PresenceState, PresenceStateConfig } from "../types/state";
+import type { PresenceStateConfig } from "../types/state";
 import { PresenceContext, type PresenceContextValue } from "./presence-context";
 
 /** Default cap on the bounded recent-activity buffer */
@@ -414,20 +414,11 @@ export const PresenceProvider = ({
     [adapter],
   );
 
+  // Local-only: never rebroadcast remapped remote state.
   const remapRemotePositions = useCallback((mapper: PositionMapper): void => {
-    setPresence((current) => {
-      const state: PresenceState = {
-        users: current,
-        activities: [],
-        connectionStatus: "connected",
-        selfId: selfIdRef.current,
-      };
-      const next = remapRemotePositionsState(state, mapper).users;
-      if (next === current) return current;
-      // Local-only: never rebroadcast remapped remote state.
-      presenceRef.current = next;
-      return next;
-    });
+    setPresence((current) =>
+      remapRemoteUsers(current, selfIdRef.current, mapper),
+    );
   }, []);
 
   const others = useMemo(

@@ -137,6 +137,31 @@ const remapUserPositions = (
 };
 
 /**
+ * Map-level remap of remote peers' offset-only cursors/selections through a
+ * consumer-supplied mapper. Returns the input reference unchanged when no
+ * peer needed remapping. Skip rules match `remapRemotePositions`.
+ */
+export const remapRemoteUsers = (
+  users: ReadonlyMap<string, PresenceUser>,
+  selfId: string | null,
+  mapper: PositionMapper,
+): ReadonlyMap<string, PresenceUser> => {
+  let next: Map<string, PresenceUser> | null = null;
+
+  for (const [userId, user] of users) {
+    if (userId === selfId) continue;
+
+    const remapped = remapUserPositions(user, mapper);
+    if (remapped !== user) {
+      if (next === null) next = new Map(users);
+      next.set(userId, remapped);
+    }
+  }
+
+  return next ?? users;
+};
+
+/**
  * Remaps remote peers' offset-only cursors/selections through a consumer-
  * supplied mapper after the local document changes. Skipped for:
  *   - self (state.selfId) — self is broadcast, not remapped

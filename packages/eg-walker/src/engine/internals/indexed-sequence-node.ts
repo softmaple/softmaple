@@ -5,6 +5,10 @@ export type IndexedNode<T extends object> = LeafNode<T> | InternalNode<T>;
 
 interface NodeBase<T extends object> {
   parent: InternalNode<T> | null;
+  // Cached position within `parent.children`. Kept in sync by every code path
+  // that mutates a parent's child list so {@link IndexedSequence} can walk
+  // up without scanning siblings linearly. Meaningless when `parent` is
+  // `null`; we leave it at 0 in that case.
   childIndex: number;
   size: number;
   prepareSum: number;
@@ -25,6 +29,10 @@ export interface InternalNode<T extends object> extends NodeBase<T> {
 
 export interface ItemLocation<T extends object> {
   leaf: LeafNode<T>;
+  // Cached offset of the item within `leaf.items`. Maintained by every splice
+  // on `leaf.items` so {@link IndexedSequence.positionOf} and
+  // {@link IndexedSequence.updateItem} can skip the O(leaf capacity)
+  // `Array.indexOf` scan.
   offsetInLeaf: number;
 }
 

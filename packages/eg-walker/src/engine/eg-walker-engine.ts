@@ -4,7 +4,10 @@ import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 import { DeleteTargetIndex } from "./internals/delete-target-index";
-import { applyDelete } from "./internals/delete-handler";
+import {
+  applyDelete,
+  type DeleteHandlerDeps,
+} from "./internals/delete-handler";
 import {
   PLACEHOLDER_EVENT_ID,
   PLACEHOLDER_ID_PREFIX,
@@ -14,7 +17,10 @@ import {
   type GenerateOptions,
   type IncrementalApplyResult,
 } from "./internals/engine-types";
-import { applyInsert } from "./internals/insert-handler";
+import {
+  applyInsert,
+  type InsertHandlerDeps,
+} from "./internals/insert-handler";
 import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import { RecordSplitter } from "./internals/record-splitter";
@@ -286,36 +292,10 @@ export class EgWalkerEngine {
     const operation = event.operation;
 
     if (operation.type === OPERATION_TYPE.INSERT) {
-      return applyInsert(event, operation, {
-        sequence: this.sequence,
-        itemsById: this.itemsById,
-        eventItems: this.eventItems,
-        originLeftIndex: this.originLeftIndex,
-        recordSplitter: this.recordSplitter,
-        pendingInsert: this.pendingInsert,
-        applyPendingSplice: this.applyPendingSplice,
-        flushPendingInsert: () => this.flushPendingInsert(),
-        itemToEffectIndex: (target) => this.itemToEffectIndex(target),
-        requireItem: (itemId) => this.requireItem(itemId),
-        getResultingText: () => this.resultingText,
-        setResultingText: (text) => {
-          this.resultingText = text;
-        },
-      });
+      return applyInsert(event, operation, this.insertDeps);
     }
 
-    return applyDelete(event, operation, {
-      sequence: this.sequence,
-      deleteTargets: this.deleteTargets,
-      recordSplitter: this.recordSplitter,
-      pendingInsert: this.pendingInsert,
-      flushPendingInsert: () => this.flushPendingInsert(),
-      itemToEffectIndex: (target) => this.itemToEffectIndex(target),
-      getResultingText: () => this.resultingText,
-      setResultingText: (text) => {
-        this.resultingText = text;
-      },
-    });
+    return applyDelete(event, operation, this.deleteDeps);
   }
 
   private retreat(eventId: EventId): void {
@@ -391,6 +371,41 @@ export class EgWalkerEngine {
     this.resultingText = spliceText(this.resultingText, effectIndex, text);
   };
 
+  // Built once per engine instance so {@link processEvent} doesn't allocate a
+  // fresh deps object plus a handful of arrow closures on every applied event.
+  // The captured references (sequence, itemsById, etc.) are stable for the
+  // lifetime of the engine; mutations happen through the references, not by
+  // swapping them out, so a one-shot snapshot at construction is sound.
+  private readonly insertDeps: InsertHandlerDeps = {
+    sequence: this.sequence,
+    itemsById: this.itemsById,
+    eventItems: this.eventItems,
+    originLeftIndex: this.originLeftIndex,
+    recordSplitter: this.recordSplitter,
+    pendingInsert: this.pendingInsert,
+    applyPendingSplice: this.applyPendingSplice,
+    flushPendingInsert: () => this.flushPendingInsert(),
+    itemToEffectIndex: (target) => this.itemToEffectIndex(target),
+    requireItem: (itemId) => this.requireItem(itemId),
+    getResultingText: () => this.resultingText,
+    setResultingText: (text) => {
+      this.resultingText = text;
+    },
+  };
+
+  private readonly deleteDeps: DeleteHandlerDeps = {
+    sequence: this.sequence,
+    deleteTargets: this.deleteTargets,
+    recordSplitter: this.recordSplitter,
+    pendingInsert: this.pendingInsert,
+    flushPendingInsert: () => this.flushPendingInsert(),
+    itemToEffectIndex: (target) => this.itemToEffectIndex(target),
+    getResultingText: () => this.resultingText,
+    setResultingText: (text) => {
+      this.resultingText = text;
+    },
+  };
+
   private flushPendingInsert(): void {
     this.pendingInsert.flush(this.applyPendingSplice);
   }
@@ -404,30 +419,35 @@ export class EgWalkerEngine {
       targetVersion,
     );
 
-    const retreat = Array.from(onlyInLeft)
-      .map((id) => ({
-        id,
-        order: this.eventOrder.get(id) ?? Number.MAX_SAFE_INTEGER,
-      }))
-      .sort((left, right) =>
-        left.order !== right.order
-          ? right.order - left.order
-          : this.compareByTopologicalOrder(right.id, left.id),
-      )
-      .map(({ id }) => id);
-    const advance = Array.from(onlyInRight)
-      .map((id) => ({
-        id,
-        order: this.eventOrder.get(id) ?? Number.MAX_SAFE_INTEGER,
-      }))
-      .sort((left, right) =>
-        left.order !== right.order
-          ? left.order - right.order
-          : this.compareByTopologicalOrder(left.id, right.id),
-      )
-      .map(({ id }) => id);
+    return {
+      retreat: this.sortByEventOrder(onlyInLeft, true),
+      advance: this.sortByEventOrder(onlyInRight, false),
+    };
+  }
 
-    return { retreat, advance };
+  // Pre-materialise the topological rank per id so the sort comparator
+  // doesn't pay two `eventOrder.get()` calls per comparison. When two ids
+  // share a rank (unknown ids both default to MAX_SAFE_INTEGER), fall back
+  // to {@link compareEventIds} directly instead of round-tripping through
+  // {@link compareByTopologicalOrder} — the inner method would just repeat
+  // the same map lookups before falling through to the same compare.
+  private sortByEventOrder(
+    ids: Iterable<EventId>,
+    descending: boolean,
+  ): EventId[] {
+    const ranked = Array.from(ids, (id) => ({
+      id,
+      order: this.eventOrder.get(id) ?? Number.MAX_SAFE_INTEGER,
+    }));
+    ranked.sort((left, right) => {
+      if (left.order !== right.order) {
+        return descending ? right.order - left.order : left.order - right.order;
+      }
+      return descending
+        ? compareEventIds(right.id, left.id)
+        : compareEventIds(left.id, right.id);
+    });
+    return ranked.map(({ id }) => id);
   }
 
   private compareByTopologicalOrder(left: EventId, right: EventId): number {

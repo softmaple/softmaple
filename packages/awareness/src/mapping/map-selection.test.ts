@@ -1,0 +1,133 @@
+import { describe, expect, it } from "vitest";
+import { mapSelectionThroughOperation } from "./map-selection";
+import {
+  POSITION_OPERATION_TYPE,
+  type PositionOperation,
+} from "./position-operation";
+
+const insertAt = (index: number, length: number): PositionOperation => ({
+  type: POSITION_OPERATION_TYPE.Insert,
+  index,
+  length,
+});
+
+const deleteAt = (index: number, length: number): PositionOperation => ({
+  type: POSITION_OPERATION_TYPE.Delete,
+  index,
+  length,
+});
+
+describe("mapSelectionThroughOperation: insert", () => {
+  it("leaves a selection strictly before the insert unchanged", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 1, to: 3 }, insertAt(5, 4)),
+    ).toEqual({
+      from: 1,
+      to: 3,
+    });
+  });
+
+  it("shifts a selection strictly after the insert right by the inserted length", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 6, to: 9 }, insertAt(5, 4)),
+    ).toEqual({
+      from: 10,
+      to: 13,
+    });
+  });
+
+  it("extends a selection whose range straddles the insert", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 3, to: 8 }, insertAt(5, 4)),
+    ).toEqual({
+      from: 3,
+      to: 12,
+    });
+  });
+
+  it("shifts a collapsed selection at the insert index", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 5, to: 5 }, insertAt(5, 2)),
+    ).toEqual({
+      from: 7,
+      to: 7,
+    });
+  });
+});
+
+describe("mapSelectionThroughOperation: delete", () => {
+  it("leaves a selection before the delete unchanged", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 1, to: 3 }, deleteAt(5, 4)),
+    ).toEqual({
+      from: 1,
+      to: 3,
+    });
+  });
+
+  it("shifts a selection after the delete left by the deleted length", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 10, to: 14 }, deleteAt(5, 4)),
+    ).toEqual({
+      from: 6,
+      to: 10,
+    });
+  });
+
+  it("collapses a selection fully inside the deleted range to a point", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 6, to: 8 }, deleteAt(5, 4)),
+    ).toEqual({
+      from: 5,
+      to: 5,
+    });
+  });
+
+  it("clamps a selection that partially overlaps the start of a deletion", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 3, to: 7 }, deleteAt(5, 4)),
+    ).toEqual({
+      from: 3,
+      to: 5,
+    });
+  });
+
+  it("clamps a selection that partially overlaps the end of a deletion", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 7, to: 12 }, deleteAt(5, 4)),
+    ).toEqual({
+      from: 5,
+      to: 8,
+    });
+  });
+
+  it("clamps a selection whose range fully contains a deletion", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 2, to: 12 }, deleteAt(5, 4)),
+    ).toEqual({
+      from: 2,
+      to: 8,
+    });
+  });
+});
+
+describe("mapSelectionThroughOperation: invariants", () => {
+  it("always returns from <= to", () => {
+    const cases = [
+      { range: { from: 0, to: 10 }, op: insertAt(5, 2) },
+      { range: { from: 0, to: 10 }, op: deleteAt(2, 5) },
+      { range: { from: 3, to: 3 }, op: deleteAt(2, 2) },
+      { range: { from: 7, to: 9 }, op: deleteAt(5, 6) },
+    ];
+    for (const { range, op } of cases) {
+      const mapped = mapSelectionThroughOperation(range, op);
+      expect(mapped.from).toBeLessThanOrEqual(mapped.to);
+    }
+  });
+
+  it("normalises a reversed input range (from > to) into from <= to", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 9, to: 3 }, insertAt(5, 2)),
+    ).toEqual({ from: 3, to: 11 });
+  });
+});

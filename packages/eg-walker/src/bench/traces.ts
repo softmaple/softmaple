@@ -171,9 +171,9 @@ export const buildDeleteHeavyWorkload = (count: number): GraphEvent[] => {
 /**
  * Trace designed to exercise the checkpoint store: a long linear history
  * with `forkEveryN` periodic forks that each diverge by `forkDepth` events
- * then re-merge. Each fan-in creates a candidate critical checkpoint, so
- * the trace produces both `fullReplays` (cold start) and `partialReplays`
- * (subsequent applies that find a usable checkpoint).
+ * then re-merge. This primarily exercises cold-start replay through
+ * periodic fan-in structure and is paired with the incremental-per-event
+ * benchmark path for comparison.
  */
 export const buildCheckpointTrace = (params: {
   readonly mainEvents: number;
@@ -197,8 +197,7 @@ export const buildCheckpointTrace = (params: {
 
     if ((i + 1) % forkEveryN === 0) {
       // Fork off a short side branch that re-merges with the main chain.
-      const forkRoot = parent;
-      let forkTip: EventId = forkRoot;
+      let forkTip: EventId = parent;
       for (let f = 0; f < forkDepth; f++) {
         const fid: EventId = `fork:${i}:${f}`;
         events.push({

@@ -248,10 +248,11 @@ function CollabSession({
               onClick={() => {
                 // Mid-edit accidental clicks here drop the local
                 // presence and re-mount the adapter — annoying but
-                // recoverable. A confirm prompt is heavier than a
-                // demo button warrants; the muted text styling
-                // (vs. the chunkier "Home" link) signals it as a
-                // secondary action without going full modal.
+                // recoverable. `window.confirm` is the lightweight
+                // middle ground: enough friction to catch a misclick
+                // without building a real modal for a demo button.
+                // The muted text styling (vs. the chunkier "Home"
+                // link) signals it as a secondary action.
                 if (window.confirm("Leave this trainer and pick a new one?")) {
                   onLeave();
                 }

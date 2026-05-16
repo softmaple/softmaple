@@ -135,11 +135,7 @@ export const PresenceBar = ({
       // biome-ignore lint/a11y/useSemanticElements: <output> is for form-calculated values; this is presence telemetry, so a div with role="status" is the appropriate live region.
       <div
         aria-label={ariaLabel}
-        className={cx(
-          "awareness-presence-bar",
-          "awareness-presence-bar--empty",
-          className,
-        )}
+        className={cx("awareness-presence-bar", className)}
         role="status"
       >
         <span className="awareness-presence-bar__empty">{emptyLabel}</span>
@@ -152,55 +148,51 @@ export const PresenceBar = ({
       aria-label={ariaLabel}
       className={cx("awareness-presence-bar", className)}
     >
-      {shownUsers.length > 0 ? (
-        shownUsers.map((user) => {
-          const tooltipId = `${tooltipIdBase}-${user.userId}`;
-          const summary = formatPresenceSummary(user);
-          return (
-            <li
-              className={cx(
-                "awareness-presence-bar__item",
-                interactive && "awareness-presence-bar__item--interactive",
-              )}
-              key={user.userId}
-            >
-              {interactive ? (
-                // <button> gives us a real focusable element with the
-                // right AT semantics (announces as "Pikachu, button"
-                // not "list item"). The tooltip text is wired through
-                // aria-describedby so AT reads name first, then the
-                // status + last-active meta.
-                <button
-                  aria-describedby={tooltipId}
-                  aria-label={user.name}
-                  className="awareness-presence-bar__button"
-                  type="button"
-                >
-                  <PresenceAvatar size={size} user={user} />
-                </button>
-              ) : (
+      {shownUsers.map((user) => {
+        const tooltipId = `${tooltipIdBase}-${user.userId}`;
+        const summary = formatPresenceSummary(user);
+        return (
+          <li
+            className={cx(
+              "awareness-presence-bar__item",
+              interactive && "awareness-presence-bar__item--interactive",
+            )}
+            key={user.userId}
+          >
+            {interactive ? (
+              // <button> gives us a real focusable element with the
+              // right AT semantics (announces as "Pikachu, button"
+              // not "list item"). The tooltip text is wired through
+              // aria-describedby so AT reads name first, then the
+              // status + last-active meta.
+              <button
+                aria-describedby={tooltipId}
+                aria-label={user.name}
+                className="awareness-presence-bar__button"
+                type="button"
+              >
                 <PresenceAvatar size={size} user={user} />
-              )}
-              {interactive ? (
-                <span
-                  className="awareness-presence-bar__tooltip"
-                  id={tooltipId}
-                  role="tooltip"
-                >
-                  <span className="awareness-presence-bar__tooltip-name">
-                    {user.name}
-                  </span>
-                  <span className="awareness-presence-bar__tooltip-meta">
-                    {summary}
-                  </span>
+              </button>
+            ) : (
+              <PresenceAvatar size={size} user={user} />
+            )}
+            {interactive ? (
+              <span
+                className="awareness-presence-bar__tooltip"
+                id={tooltipId}
+                role="tooltip"
+              >
+                <span className="awareness-presence-bar__tooltip-name">
+                  {user.name}
                 </span>
-              ) : null}
-            </li>
-          );
-        })
-      ) : (
-        <li className="awareness-presence-bar__empty">{emptyLabel}</li>
-      )}
+                <span className="awareness-presence-bar__tooltip-meta">
+                  {summary}
+                </span>
+              </span>
+            ) : null}
+          </li>
+        );
+      })}
       {overflowUsers.length > 0 ? (
         <li
           aria-label={`${overflowUsers.length} more collaborators: ${overflowLabel}`}

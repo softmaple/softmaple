@@ -136,11 +136,18 @@ export const PresenceLayer = ({
   const [offset, setOffset] = useState<PresenceLayerOffset>(IDENTITY_OFFSET);
 
   useLayoutEffect(() => {
-    // Host swap (e.g. consumer flips `host` to a different element):
-    // reset to identity before measuring so the first frame after the
-    // swap doesn't briefly render children at the *previous* host's
-    // offset. The measurement below replaces this on the same paint,
-    // so there's no visible flicker.
+    // Host *prop* swap (consumer passes a new `host` ref object —
+    // e.g. `<PresenceLayer host={trainerARef}>` →
+    // `<PresenceLayer host={trainerBRef}>`): reset to identity before
+    // measuring so the first frame after the swap doesn't briefly
+    // render children at the previous host's offset. The measurement
+    // below replaces this on the same paint, so no visible flicker.
+    //
+    // Note: a `.current` mutation on the same RefObject (consumer
+    // holding a stable ref and reassigning its element) does NOT
+    // re-run this effect — refs don't trigger re-renders or dep
+    // changes. That's a known limitation of `useLayoutEffect`, not
+    // addressable here without polling.
     setOffset((prev) => (prev === IDENTITY_OFFSET ? prev : IDENTITY_OFFSET));
 
     const update = (): void => {

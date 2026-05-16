@@ -1,9 +1,13 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
-import { compareEventIds, parseEventId } from "../graph/event-id";
+import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 import { DeleteTargetIndex } from "./internals/delete-target-index";
+import {
+  applyDelete,
+  type DeleteHandlerDeps,
+} from "./internals/delete-handler";
 import {
   PLACEHOLDER_EVENT_ID,
   PLACEHOLDER_ID_PREFIX,
@@ -12,18 +16,15 @@ import {
   type GeneratedDocument,
   type GenerateOptions,
   type IncrementalApplyResult,
-  type TypedRun,
 } from "./internals/engine-types";
+import {
+  applyInsert,
+  type InsertHandlerDeps,
+} from "./internals/insert-handler";
 import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import { RecordSplitter } from "./internals/record-splitter";
-import {
-  coalesceDeleteRuns,
-  deleteText,
-  spliceText,
-  stringCodeUnits,
-} from "./internals/text-utils";
-import { findIntegrationPosition } from "./internals/yata-integration";
+import { spliceText } from "./internals/text-utils";
 
 export type {
   EngineStats,
@@ -291,337 +292,10 @@ export class EgWalkerEngine {
     const operation = event.operation;
 
     if (operation.type === OPERATION_TYPE.INSERT) {
-      return this.applyInsert(event, operation);
+      return applyInsert(event, operation, this.insertDeps);
     }
 
-    return this.applyDelete(event, operation);
-  }
-
-  private applyInsert(
-    event: GraphEvent,
-    operation: Extract<
-      ExternalOperation,
-      { type: typeof OPERATION_TYPE.INSERT }
-    >,
-  ): ExternalOperation[] {
-    if (operation.text.length === 0) {
-      this.eventItems.set(event.id, []);
-      return [];
-    }
-
-    const landing = this.sequence.prepareIndexToPositionAndOffset(
-      operation.index,
-      true,
-    );
-    const firstInsertPosition =
-      landing.offsetInRecord > 0
-        ? this.recordSplitter.splitRecordAt(
-            landing.position,
-            landing.offsetInRecord,
-          )
-        : landing.position;
-    // YATA-style origins: anchor against the records visible in the
-    // event's parent version (prepare-state >= 1), NOT against whichever
-    // concurrent records happen to be sitting in the sequence right now.
-    // Without this filter the engine would assign different origins to
-    // the same event depending on which concurrent siblings were
-    // integrated first, breaking traversal-order independence.
-    const originLeftPosition =
-      this.sequence.previousPrepareVisiblePosition(firstInsertPosition);
-    const originLeft =
-      originLeftPosition === null
-        ? null
-        : (this.sequence.at(originLeftPosition)?.id ?? null);
-    const originRightPosition =
-      this.sequence.nextPrepareVisiblePosition(firstInsertPosition);
-    const originRight =
-      originRightPosition === null
-        ? null
-        : (this.sequence.at(originRightPosition)?.id ?? null);
-
-    // Section 3.4 internal-document fast path for the first item.
-    //
-    // The YATA integration scan walks the sequence positions strictly
-    // between `originLeft` and `originRight`. When that range is empty
-    // (no retreated, deleted, or otherwise non-prepare-visible records
-    // sit in it) the scan is provably a no-op, so we can place the
-    // first item at `firstInsertPosition` without invoking it. The
-    // dominant case for this is a non-conflicting run: no concurrent
-    // siblings have been integrated near the insertion point, so the
-    // previous-prepare-visible record is the literal neighbour of
-    // `firstInsertPosition`.
-    const leftBound = originLeftPosition ?? -1;
-    const rightBound = originRightPosition ?? this.sequence.length;
-    const conflictRegionEmpty =
-      leftBound + 1 === firstInsertPosition &&
-      firstInsertPosition === rightBound;
-
-    // Section 3.4 "smaller" lever: typed-run coalescing.
-    //
-    // When a single-character INSERT lands at the right boundary of an
-    // adjacent typed-run record from the same author whose run extends by
-    // exactly one sequence number, append to that record's content
-    // instead of allocating a new CRDT item. The columnar codec already
-    // groups events into id-runs by (replicaId, contiguous sequence) for
-    // wire encoding; mirroring that grouping in the ranked B-tree
-    // collapses a 20k-character linear single-author trace to ~1 record
-    // (down from one per code unit) while leaving multi-author / multi-event
-    // ordering unchanged — split-on-demand carves the run when a
-    // concurrent insert or delete anchors inside it.
-    const parsed = parseEventId(event.id);
-    if (
-      conflictRegionEmpty &&
-      operation.text.length === 1 &&
-      parsed !== null &&
-      originLeftPosition !== null &&
-      originLeftPosition === firstInsertPosition - 1
-    ) {
-      const leftRecord = this.sequence.at(originLeftPosition);
-      if (
-        leftRecord !== undefined &&
-        leftRecord.run !== null &&
-        leftRecord.run.replicaId === parsed.replicaId &&
-        leftRecord.run.startSequence + leftRecord.content.length ===
-          parsed.sequence &&
-        leftRecord.prepareState === 1 &&
-        !leftRecord.everDeleted &&
-        // Don't extend a run that already has items anchored to its right
-        // boundary — those items chose this id as their `originLeft` at a
-        // moment when the record ended one code unit earlier, and stretching
-        // the content would shift the boundary they were anchored to.
-        !this.originLeftIndex.has(leftRecord.id)
-      ) {
-        const effectIndex =
-          this.itemToEffectIndex(leftRecord) + leftRecord.content.length;
-        leftRecord.content += operation.text;
-        this.sequence.updateItem(leftRecord);
-        this.eventItems.set(event.id, [leftRecord.id]);
-        // Defer the splice on {@link resultingText} into the
-        // pending-insert buffer so a long single-author typed run doesn't
-        // pay an O(document length) string realloc per keystroke.
-        // {@link flushPendingInsert} materialises the buffer before any
-        // non-coalesced read or write of the document text.
-        this.pendingInsert.append(
-          effectIndex,
-          operation.text,
-          this.applyPendingSplice,
-        );
-
-        return [
-          {
-            type: OPERATION_TYPE.INSERT,
-            index: effectIndex,
-            text: operation.text,
-          },
-        ];
-      }
-    }
-
-    const codeUnits = stringCodeUnits(operation.text);
-    const insertedIds: EventId[] = [];
-    let left = originLeft;
-
-    // First code unit: pay the full integration scan if the conflict region
-    // isn't empty. Single-character INSERTs from a canonical
-    // `replicaId:sequence` author seed a typed-run record so that later
-    // contiguous events from the same author can extend it in-place (the
-    // coalescing branch above). Multi-character INSERTs and IDs that don't
-    // parse keep `run = null` and behave like the pre-coalescing engine.
-    const firstRun: TypedRun | null =
-      parsed !== null && operation.text.length === 1
-        ? { replicaId: parsed.replicaId, startSequence: parsed.sequence }
-        : null;
-    const firstItem: AugmentedCRDTItem = {
-      id: `${event.id}:0`,
-      eventId: event.id,
-      content: codeUnits[0] ?? "",
-      originLeft: left,
-      originRight,
-      everDeleted: false,
-      prepareState: 1,
-      run: firstRun,
-    };
-    let actualFirstPosition: number;
-    if (conflictRegionEmpty) {
-      actualFirstPosition = firstInsertPosition;
-      this.sequence.insert(actualFirstPosition, firstItem);
-    } else {
-      actualFirstPosition = findIntegrationPosition(
-        firstItem,
-        this.sequence,
-        this.itemsById,
-      );
-      this.sequence.insert(actualFirstPosition, firstItem);
-    }
-    this.itemsById.set(firstItem.id, firstItem);
-    this.originLeftIndex.track(firstItem.id, firstItem.originLeft);
-    insertedIds.push(firstItem.id);
-    left = firstItem.id;
-
-    // Multi-character inserts: every subsequent item is chained off the
-    // previous item via `originLeft`. No record that existed before this
-    // event can reference that brand-new id, so the YATA scan for chars
-    // 1..N terminates on its first iteration and the integration
-    // position is unconditionally `previous + 1`. We bypass the scan
-    // and place them at sequential positions instead of paying
-    // `findIntegrationPosition`'s setup cost per character. The items
-    // stay `run = null` because typed-run coalescing operates on
-    // single-character events from contiguous sequence numbers, not on
-    // the per-code-unit fragments of one multi-character INSERT.
-    for (let offset = 1; offset < codeUnits.length; offset++) {
-      const item: AugmentedCRDTItem = {
-        id: `${event.id}:${offset}`,
-        eventId: event.id,
-        content: codeUnits[offset] ?? "",
-        originLeft: left,
-        originRight,
-        everDeleted: false,
-        prepareState: 1,
-        run: null,
-      };
-      this.sequence.insert(actualFirstPosition + offset, item);
-      this.itemsById.set(item.id, item);
-      this.originLeftIndex.track(item.id, item.originLeft);
-      insertedIds.push(item.id);
-      left = item.id;
-    }
-
-    this.eventItems.set(event.id, insertedIds);
-
-    const firstInserted = this.requireItem(insertedIds[0] ?? event.id);
-    const effectIndex = this.itemToEffectIndex(firstInserted);
-    // A non-coalesced insert (multi-character event, new typed-run seed,
-    // or non-empty conflict region) must observe the current document so
-    // {@link effectIndex} aligns with {@link resultingText}. Drain any
-    // open typed-run buffer before splicing. Hoist the empty-buffer check
-    // inline because this is the per-event hot path for non-coalescing
-    // inserts and the buffer is empty on every full-replay event.
-    if (!this.pendingInsert.isEmpty()) {
-      this.flushPendingInsert();
-    }
-    this.resultingText = spliceText(
-      this.resultingText,
-      effectIndex,
-      operation.text,
-    );
-
-    return [
-      {
-        type: OPERATION_TYPE.INSERT,
-        index: effectIndex,
-        text: operation.text,
-      },
-    ];
-  }
-
-  private applyDelete(
-    event: GraphEvent,
-    operation: Extract<
-      ExternalOperation,
-      { type: typeof OPERATION_TYPE.DELETE }
-    >,
-  ): ExternalOperation[] {
-    // Any concurrent insert or delete breaks the typed-run we may have
-    // been coalescing into the pending-insert buffer. Flush before we
-    // start carving records and slicing the document text so the per-slot
-    // {@link effectIndex} arithmetic below operates on the materialised
-    // document. Hoist the empty-buffer check inline because `applyDelete`
-    // is on the per-event hot path and the buffer is empty on every
-    // non-coalescing trace, so the inline check saves a function call on
-    // the common case.
-    if (!this.pendingInsert.isEmpty()) {
-      this.flushPendingInsert();
-    }
-    const deletedItemIds: EventId[] = [];
-    const outputDeleteIndexes: number[] = [];
-    let remaining = operation.length;
-
-    while (remaining > 0) {
-      // A delete event whose `length` runs past the prepare-visible items at
-      // the engine's current parent version legitimately stops short — this
-      // is exercised by the "deletes that run past visible prepare items"
-      // test. The previous implementation wrapped the throwing
-      // `prepareIndexToPositionAndOffset` in a catch-all try/catch, which
-      // also swallowed real bugs (e.g. ranked-B-tree aggregate corruption).
-      // Use the explicit non-throwing variant for the expected end-of-text
-      // case, and let other errors surface.
-      const landing = this.sequence.tryPrepareIndexToPositionAndOffset(
-        operation.index,
-        false,
-      );
-      if (!landing) {
-        break;
-      }
-      const candidate = this.sequence.at(landing.position);
-      if (!candidate) {
-        // The ranked B-tree just told us the prepare-weight prefix sum lands
-        // on `landing.position`, so a missing record there means the tree's
-        // aggregates disagree with its children — a structural bug we want
-        // to surface, not silently truncate the delete around.
-        throw new Error(
-          `Engine bug: prepare-index ${operation.index} landed at sequence position ` +
-            `${landing.position} but no record exists there (remaining=${remaining}).`,
-        );
-      }
-
-      // Multi-character records (placeholders and typed-run leaves coalesced
-      // by Section 3.4) are split on demand so the deleted slice is its own
-      // record. Single-character records and per-code-unit paste fragments
-      // skip the split entirely and are marked in place.
-      const isMultiCharRecord =
-        (candidate.eventId === PLACEHOLDER_EVENT_ID ||
-          candidate.run !== null) &&
-        candidate.content.length > 1;
-      if (isMultiCharRecord) {
-        const availableInRecord =
-          candidate.content.length - landing.offsetInRecord;
-        const toDelete = Math.min(remaining, availableInRecord);
-        const middle = this.recordSplitter.splitRecordForDelete(
-          landing.position,
-          landing.offsetInRecord,
-          toDelete,
-        );
-
-        deletedItemIds.push(middle.id);
-        // A concurrent delete that lands on an already-effect-deleted slice
-        // (e.g. after retreating an overlapping sibling) must NOT remove
-        // characters from the text again. Without this, two concurrent
-        // deletes of the same region replay to a shorter string than full
-        // replay produces.
-        if (!middle.everDeleted) {
-          const effectIndex = this.itemToEffectIndex(middle);
-          for (let k = 0; k < toDelete; k++) {
-            outputDeleteIndexes.push(effectIndex);
-          }
-          this.resultingText = deleteText(
-            this.resultingText,
-            effectIndex,
-            toDelete,
-          );
-        }
-
-        middle.everDeleted = true;
-        middle.prepareState += 1;
-        this.sequence.updateItem(middle);
-        remaining -= toDelete;
-        continue;
-      }
-
-      deletedItemIds.push(candidate.id);
-      if (!candidate.everDeleted) {
-        const effectIndex = this.itemToEffectIndex(candidate);
-        outputDeleteIndexes.push(effectIndex);
-        this.resultingText = deleteText(this.resultingText, effectIndex, 1);
-      }
-      candidate.everDeleted = true;
-      candidate.prepareState += 1;
-      this.sequence.updateItem(candidate);
-      remaining -= 1;
-    }
-
-    this.deleteTargets.record(event.id, deletedItemIds);
-
-    return coalesceDeleteRuns(outputDeleteIndexes);
+    return applyDelete(event, operation, this.deleteDeps);
   }
 
   private retreat(eventId: EventId): void {
@@ -697,6 +371,41 @@ export class EgWalkerEngine {
     this.resultingText = spliceText(this.resultingText, effectIndex, text);
   };
 
+  // Built once per engine instance so {@link processEvent} doesn't allocate a
+  // fresh deps object plus a handful of arrow closures on every applied event.
+  // The captured references (sequence, itemsById, etc.) are stable for the
+  // lifetime of the engine; mutations happen through the references, not by
+  // swapping them out, so a one-shot snapshot at construction is sound.
+  private readonly insertDeps: InsertHandlerDeps = {
+    sequence: this.sequence,
+    itemsById: this.itemsById,
+    eventItems: this.eventItems,
+    originLeftIndex: this.originLeftIndex,
+    recordSplitter: this.recordSplitter,
+    pendingInsert: this.pendingInsert,
+    applyPendingSplice: this.applyPendingSplice,
+    flushPendingInsert: () => this.flushPendingInsert(),
+    itemToEffectIndex: (target) => this.itemToEffectIndex(target),
+    requireItem: (itemId) => this.requireItem(itemId),
+    getResultingText: () => this.resultingText,
+    setResultingText: (text) => {
+      this.resultingText = text;
+    },
+  };
+
+  private readonly deleteDeps: DeleteHandlerDeps = {
+    sequence: this.sequence,
+    deleteTargets: this.deleteTargets,
+    recordSplitter: this.recordSplitter,
+    pendingInsert: this.pendingInsert,
+    flushPendingInsert: () => this.flushPendingInsert(),
+    itemToEffectIndex: (target) => this.itemToEffectIndex(target),
+    getResultingText: () => this.resultingText,
+    setResultingText: (text) => {
+      this.resultingText = text;
+    },
+  };
+
   private flushPendingInsert(): void {
     this.pendingInsert.flush(this.applyPendingSplice);
   }
@@ -710,23 +419,33 @@ export class EgWalkerEngine {
       targetVersion,
     );
 
-    const retreat = Array.from(onlyInLeft).sort((left, right) =>
-      this.compareByTopologicalOrder(right, left),
-    );
-    const advance = Array.from(onlyInRight).sort((left, right) =>
-      this.compareByTopologicalOrder(left, right),
-    );
-
-    return { retreat, advance };
+    return {
+      retreat: this.sortByEventOrder(onlyInLeft, true),
+      advance: this.sortByEventOrder(onlyInRight, false),
+    };
   }
 
-  private compareByTopologicalOrder(left: EventId, right: EventId): number {
-    const leftOrder = this.eventOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = this.eventOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-    return compareEventIds(left, right);
+  // Pre-materialise the topological rank per id so the sort comparator
+  // doesn't pay two `eventOrder.get()` calls per comparison. When two ids
+  // share a rank (unknown ids both default to MAX_SAFE_INTEGER), fall back
+  // to {@link compareEventIds} for a stable lex tiebreak.
+  private sortByEventOrder(
+    ids: Iterable<EventId>,
+    descending: boolean,
+  ): EventId[] {
+    const ranked = Array.from(ids, (id) => ({
+      id,
+      order: this.eventOrder.get(id) ?? Number.MAX_SAFE_INTEGER,
+    }));
+    ranked.sort((left, right) => {
+      if (left.order !== right.order) {
+        return descending ? right.order - left.order : left.order - right.order;
+      }
+      return descending
+        ? compareEventIds(right.id, left.id)
+        : compareEventIds(left.id, right.id);
+    });
+    return ranked.map(({ id }) => id);
   }
 
   private requireItem(itemId: EventId): AugmentedCRDTItem {

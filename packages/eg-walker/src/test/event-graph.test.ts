@@ -708,6 +708,106 @@ describe("EventGraph", () => {
         "Cannot deserialize event graph with missing parents: missing-parent",
       );
     });
+
+    it("should reject serialized graphs with duplicate event ids", () => {
+      const event: GraphEvent = {
+        id: "event-1",
+        timestamp: 100,
+        parentVersion: new Set<EventId>(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      };
+
+      expect(() =>
+        EventGraph.deserialize({
+          version: new Set<EventId>(),
+          events: [event, event],
+          metadata: {},
+        }),
+      ).toThrow(
+        "Cannot deserialize event graph with duplicate event id: event-1",
+      );
+    });
+
+    it("should reject serialized graphs containing a parent cycle", () => {
+      // event-a parents on event-b, event-b parents on event-a — every parent
+      // referenced is present in the payload, so the failure mode is a cycle,
+      // not a missing parent.
+      expect(() =>
+        EventGraph.deserialize({
+          version: new Set<EventId>(),
+          events: [
+            {
+              id: "event-a",
+              timestamp: 1,
+              parentVersion: new Set<EventId>(["event-b"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+            },
+            {
+              id: "event-b",
+              timestamp: 2,
+              parentVersion: new Set<EventId>(["event-a"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+            },
+          ],
+          metadata: {},
+        }),
+      ).toThrow(
+        "Cannot deserialize event graph: cycle or unresolvable ordering detected",
+      );
+    });
+
+    it("should reject serialized graphs containing a multi-event cycle", () => {
+      // event-a → event-b → event-c → event-a, covering the path where a
+      // cycle spans more than two nodes (the A↔B test above is the minimal
+      // case).
+      expect(() =>
+        EventGraph.deserialize({
+          version: new Set<EventId>(),
+          events: [
+            {
+              id: "event-a",
+              timestamp: 1,
+              parentVersion: new Set<EventId>(["event-c"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+            },
+            {
+              id: "event-b",
+              timestamp: 2,
+              parentVersion: new Set<EventId>(["event-a"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+            },
+            {
+              id: "event-c",
+              timestamp: 3,
+              parentVersion: new Set<EventId>(["event-b"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+            },
+          ],
+          metadata: {},
+        }),
+      ).toThrow(
+        "Cannot deserialize event graph: cycle or unresolvable ordering detected",
+      );
+    });
+
+    it("should reject serialized graphs containing a self-parent (degenerate cycle)", () => {
+      expect(() =>
+        EventGraph.deserialize({
+          version: new Set<EventId>(),
+          events: [
+            {
+              id: "self",
+              timestamp: 1,
+              parentVersion: new Set<EventId>(["self"]),
+              operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "X" },
+            },
+          ],
+          metadata: {},
+        }),
+      ).toThrow(
+        "Cannot deserialize event graph: cycle or unresolvable ordering detected",
+      );
+    });
   });
 
   describe("branch coverage improvements", () => {

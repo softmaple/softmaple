@@ -18,81 +18,23 @@ import type {
   SerializedGraphOutput,
 } from "../types";
 import {
+  CriticalCheckpointStore,
+  type CriticalCheckpoint,
+} from "./internals/critical-checkpoint-store";
+import {
   assertRemoteEventWellFormed,
   assertWellFormedUtf16,
   createDocumentState,
 } from "./invariants";
-import {
-  EventGraph,
-  EventAlreadyExistsError,
-  MissingParentError,
-} from "../graph/event-graph";
+import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { PartialReplayManager } from "../engine/partial-replay";
-
-interface CriticalCheckpoint {
-  readonly version: Version;
-  readonly text: string;
-}
-
-/**
- * Upper bound on retained critical checkpoints.
- *
- * Section 3.5/3.6 of the Eg-walker paper requires *some* critical-version
- * snapshot in scope to skip the full-replay path when a concurrent branch
- * arrives; the latest dominating checkpoint is always the cheapest one to
- * replay from, and any older checkpoint is only useful when a concurrent
- * branch is rooted earlier than every retained checkpoint. Capping the
- * retained list at this many newest entries keeps replica memory O(1) in
- * history length without sacrificing the common-case partial-replay path
- * (the worst case — a concurrent branch rooted before the oldest retained
- * checkpoint — falls back to {@link fullReplay}, which is already the
- * pre-checkpoint behaviour).
- *
- * The value is empirical: 32 is comfortably above the number of distinct
- * critical versions any single editing session is expected to materialise
- * between concurrent merges, while bounding each checkpoint's per-replica
- * cost (a frontier `Set` plus a snapshot text string) at a few KB worst
- * case for ordinary documents.
- */
-const MAX_RETAINED_CHECKPOINTS = 32;
-
-/**
- * Persistence schema the replica writes into (and reads from) the event
- * graph's free-form metadata bag. The graph itself is codec-agnostic and
- * stores arbitrary `Record<string, unknown>`; centralising the known fields
- * here keeps the schema in one place and turns the previous inline
- * `typeof` guards into a single typed surface.
- */
-interface ReplicaPersistenceMetadata {
-  readonly initialText?: string;
-  readonly nextSequenceNumber?: number;
-}
-
-const readReplicaMetadata = (graph: EventGraph): ReplicaPersistenceMetadata => {
-  const raw = graph.getMetadata();
-  const rawInitialText = raw.initialText;
-  const rawNextSequenceNumber = raw.nextSequenceNumber;
-  return {
-    initialText:
-      typeof rawInitialText === "string" ? rawInitialText : undefined,
-    nextSequenceNumber:
-      typeof rawNextSequenceNumber === "number"
-        ? rawNextSequenceNumber
-        : undefined,
-  };
-};
-
-const writeReplicaMetadata = (
-  graph: EventGraph,
-  metadata: ReplicaPersistenceMetadata,
-): void => {
-  graph.setMetadata({
-    ...graph.getMetadata(),
-    ...metadata,
-  });
-};
+import {
+  readReplicaMetadata,
+  writeReplicaMetadata,
+} from "./internals/persistence-metadata";
+import { RemoteEventBuffer } from "./internals/remote-event-buffer";
 
 /**
  * Public replica for Eg-walker.
@@ -105,14 +47,15 @@ export class EgWalkerReplica {
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
-  private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
-  private readonly bufferedEventIds = new Set<EventId>();
+  private readonly remoteEvents: RemoteEventBuffer;
   private fullReplayCount = 0;
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
   private readonly criticalAnalyzer = new CriticalVersionAnalyzer();
+  private readonly criticalCheckpoints = new CriticalCheckpointStore(
+    this.criticalAnalyzer,
+  );
   private readonly partialReplayer = new PartialReplayManager();
-  private criticalCheckpoints: ReadonlyArray<CriticalCheckpoint> = [];
 
   constructor(
     private readonly replicaId: string,
@@ -123,6 +66,10 @@ export class EgWalkerReplica {
     this.document = initialText;
     this.initialText = initialText;
     this.eventGraph = eventGraph ?? new EventGraph();
+    this.remoteEvents = new RemoteEventBuffer({
+      graph: this.eventGraph,
+      advanceWithEvent: (event) => this.advanceWithEvent(event),
+    });
     this.currentVersion = this.eventGraph.getFrontier();
     this.nextSequenceNumber = this.inferNextSequenceNumber();
     if (this.eventGraph.getAllEvents().length > 0) {
@@ -254,7 +201,7 @@ export class EgWalkerReplica {
    */
   applyRemoteEvent(event: GraphEvent): void {
     assertRemoteEventWellFormed(event);
-    this.tryAcceptRemoteEvent(event);
+    this.remoteEvents.tryAccept(event);
   }
 
   /**
@@ -262,7 +209,7 @@ export class EgWalkerReplica {
    * Exposed primarily for tests and diagnostics.
    */
   getPendingRemoteCount(): number {
-    return this.bufferedEventIds.size;
+    return this.remoteEvents.pendingCount;
   }
 
   /**
@@ -292,7 +239,7 @@ export class EgWalkerReplica {
       incrementalApplies: this.incrementalApplyCount,
       engineRetreats: engineStats?.retreatCount ?? 0,
       engineAdvances: engineStats?.advanceCount ?? 0,
-      checkpointCount: this.criticalCheckpoints.length,
+      checkpointCount: this.criticalCheckpoints.count,
       sequenceRecordCount: engineStats?.sequenceRecordCount ?? 0,
     };
   }
@@ -442,7 +389,7 @@ export class EgWalkerReplica {
       return;
     }
 
-    const checkpoint = this.pickCheckpoint();
+    const checkpoint = this.criticalCheckpoints.pickFor(this.eventGraph);
     if (checkpoint) {
       this.partialReplayFromCheckpoint(checkpoint);
     } else {
@@ -473,69 +420,8 @@ export class EgWalkerReplica {
     return true;
   }
 
-  /**
-   * Snapshot the current (version, text) pair when the graph's frontier is a
-   * single-element critical version. These checkpoints let later concurrent
-   * branches partial-replay only the post-checkpoint suffix instead of the
-   * whole graph.
-   *
-   * The retained list is capped at {@link MAX_RETAINED_CHECKPOINTS} entries —
-   * a long linear history evicts the oldest checkpoints, keeping replica
-   * memory O(1) in history length. A concurrent branch rooted before every
-   * retained checkpoint falls back to {@link fullReplay}, the same path the
-   * replica took before checkpoints existed at all.
-   */
   private maybeAdvanceCheckpoint(): void {
-    const frontier = this.eventGraph.getFrontier();
-    if (frontier.size !== 1) {
-      return;
-    }
-    if (!this.criticalAnalyzer.isCritical(this.eventGraph, frontier)) {
-      return;
-    }
-    const last = this.criticalCheckpoints[this.criticalCheckpoints.length - 1];
-    if (last && this.versionsEqual(last.version, frontier)) {
-      return;
-    }
-    this.appendCheckpoint({
-      version: new Set(frontier),
-      text: this.document,
-    });
-  }
-
-  /**
-   * Single seam for growing {@link criticalCheckpoints}. Routing every write
-   * through here makes the {@link MAX_RETAINED_CHECKPOINTS} cap a structural
-   * invariant of the array rather than a per-call-site convention, so a
-   * future mutation site cannot drift past the bound by forgetting an
-   * eviction loop.
-   */
-  private appendCheckpoint(checkpoint: CriticalCheckpoint): void {
-    const next = [...this.criticalCheckpoints, checkpoint];
-    this.criticalCheckpoints =
-      next.length <= MAX_RETAINED_CHECKPOINTS
-        ? next
-        : next.slice(next.length - MAX_RETAINED_CHECKPOINTS);
-  }
-
-  /**
-   * Latest checkpoint that is still a critical version of the current graph.
-   * Critical versions are causally ordered, so scanning newest-first returns
-   * the deepest dominating checkpoint.
-   */
-  private pickCheckpoint(): CriticalCheckpoint | null {
-    for (let i = this.criticalCheckpoints.length - 1; i >= 0; i--) {
-      const candidate = this.criticalCheckpoints[i];
-      if (!candidate) {
-        continue;
-      }
-      if (
-        this.criticalAnalyzer.isCritical(this.eventGraph, candidate.version)
-      ) {
-        return candidate;
-      }
-    }
-    return null;
+    this.criticalCheckpoints.maybeAdvance(this.eventGraph, this.document);
   }
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
@@ -549,75 +435,6 @@ export class EgWalkerReplica {
     this.document = result.text;
     this.currentVersion = frontier;
     this.partialReplayCount++;
-  }
-
-  private versionsEqual(
-    left: ReadonlySet<EventId>,
-    right: ReadonlySet<EventId>,
-  ): boolean {
-    if (left.size !== right.size) {
-      return false;
-    }
-    for (const id of left) {
-      if (!right.has(id)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private tryAcceptRemoteEvent(event: GraphEvent): void {
-    if (
-      this.eventGraph.hasEvent(event.id) ||
-      this.bufferedEventIds.has(event.id)
-    ) {
-      return;
-    }
-
-    const missingParent = this.findMissingParent(event);
-    if (missingParent !== null) {
-      const queue = this.pendingByMissingParent.get(missingParent) ?? [];
-      queue.push(event);
-      this.pendingByMissingParent.set(missingParent, queue);
-      this.bufferedEventIds.add(event.id);
-      return;
-    }
-
-    try {
-      this.eventGraph.addEvent(event);
-    } catch (error) {
-      if (
-        error instanceof EventAlreadyExistsError ||
-        error instanceof MissingParentError
-      ) {
-        return;
-      }
-      throw error;
-    }
-
-    this.advanceWithEvent(event);
-    this.flushPendingChildrenOf(event.id);
-  }
-
-  private findMissingParent(event: GraphEvent): EventId | null {
-    for (const parentId of event.parentVersion) {
-      if (!this.eventGraph.hasEvent(parentId)) {
-        return parentId;
-      }
-    }
-    return null;
-  }
-
-  private flushPendingChildrenOf(parentId: EventId): void {
-    const waiters = this.pendingByMissingParent.get(parentId);
-    if (!waiters) {
-      return;
-    }
-    this.pendingByMissingParent.delete(parentId);
-    for (const waiter of waiters) {
-      this.bufferedEventIds.delete(waiter.id);
-      this.tryAcceptRemoteEvent(waiter);
-    }
   }
 
   private inferNextSequenceNumber(): number {

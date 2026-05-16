@@ -2,6 +2,14 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "./event-graph";
 import { parseEventId } from "./event-id";
 import lz4 from "lz4js";
+import {
+  BINARY_MAGIC,
+  BinaryReader,
+  BinaryWriter,
+  decodeText,
+  encodeText,
+  toUint8Array,
+} from "./internals/binary-io";
 import type {
   EventId,
   ExternalOperation,
@@ -62,13 +70,6 @@ export interface ColumnarEventGraph {
 // The in-memory `ColumnarEventGraph` / `OperationRun` / `IdRun` shapes are
 // unchanged; only the binary wire format is more compact. EGW2 and EGW1
 // payloads are rejected at decode.
-const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x33]); // EGW3
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-const toUint8Array = (bytes: ReadonlyArray<number> | Uint8Array): Uint8Array =>
-  bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-
 const operationTextLength = (operation: ExternalOperation): number =>
   operation.type === OPERATION_TYPE.INSERT ? operation.text.length : 0;
 
@@ -137,18 +138,6 @@ const finalizeOperationRuns = (
     return { ...run, startIndex, textLength };
   });
 
-/**
- * Zigzag encoding maps signed integers to non-negative integers:
- * `0 → 0, -1 → 1, 1 → 2, -2 → 3, 2 → 4, ...`. Uses safe-integer arithmetic
- * rather than bitwise ops so values beyond ±2^31 (timestamps in ms since epoch
- * are ~1.7×10^12) round-trip correctly.
- */
-const zigzagEncode = (value: number): number =>
-  value >= 0 ? value * 2 : value * -2 - 1;
-
-const zigzagDecode = (value: number): number =>
-  value % 2 === 0 ? value / 2 : -((value + 1) / 2);
-
 export class ColumnarEventGraphCodec {
   encode(graph: EventGraph): ColumnarEventGraph {
     const events = graph.getTopologicalOrder();
@@ -215,9 +204,7 @@ export class ColumnarEventGraphCodec {
     writer.writeZigZagDeltaArray(encoded.operationIndexes);
     writer.writeVarintArray(encoded.operationLengths);
     // textLengths intentionally omitted: derivable from operationRuns + operationLengths.
-    writer.writeBytes(
-      lz4.compress(textEncoder.encode(encoded.insertedContent)),
-    );
+    writer.writeBytes(lz4.compress(encodeText(encoded.insertedContent)));
     this.writeParentOverrides(writer, encoded.parentOverrides);
     this.writeIdRuns(writer, encoded.idRuns);
     writer.writeZigZagDeltaArray(encoded.timestamps);
@@ -262,7 +249,7 @@ export class ColumnarEventGraphCodec {
     const decompressed = toUint8Array(
       lz4.decompress(compressed, maxInsertedBytes),
     );
-    const insertedContent = textDecoder.decode(decompressed);
+    const insertedContent = decodeText(decompressed);
     if (insertedContent.length !== expectedInsertedSize) {
       throw new Error(
         `Decompressed inserted-content size mismatch (expected ${expectedInsertedSize} UTF-16 code units, got ${insertedContent.length})`,
@@ -590,161 +577,5 @@ export class ColumnarEventGraphCodec {
     }
 
     return parents;
-  }
-}
-
-class BinaryWriter {
-  private buffer = new Uint8Array(256);
-  private size = 0;
-
-  writeVarint(value: number): void {
-    if (!Number.isSafeInteger(value) || value < 0) {
-      throw new Error(`Cannot encode invalid varint value ${value}`);
-    }
-
-    let remaining = value;
-    while (remaining >= 0x80) {
-      this.writeByte((remaining % 0x80) + 0x80);
-      remaining = Math.floor(remaining / 0x80);
-    }
-    this.writeByte(remaining);
-  }
-
-  writeVarintArray(values: ReadonlyArray<number>): void {
-    this.writeVarint(values.length);
-    for (const value of values) {
-      this.writeVarint(value);
-    }
-  }
-
-  /**
-   * Write a signed integer using zigzag varint encoding. Allows negative
-   * deltas (e.g. document positions that move backwards on delete) while
-   * keeping the common small-delta case at one byte.
-   */
-  writeZigZagVarint(value: number): void {
-    if (!Number.isSafeInteger(value)) {
-      throw new Error(`Cannot encode invalid zigzag varint value ${value}`);
-    }
-    this.writeVarint(zigzagEncode(value));
-  }
-
-  /**
-   * Write a numeric array as a zigzag-delta varint array: a count followed by
-   * `zigzag(values[i] - values[i-1])` for each entry (the first entry is
-   * relative to `0`). For monotonically increasing or near-stationary columns
-   * (timestamps, document positions in a linear trace) this compresses to
-   * ~1 byte per value.
-   */
-  writeZigZagDeltaArray(values: ReadonlyArray<number>): void {
-    this.writeVarint(values.length);
-    let previous = 0;
-    for (const value of values) {
-      this.writeZigZagVarint(value - previous);
-      previous = value;
-    }
-  }
-
-  writeString(value: string): void {
-    this.writeBytes(textEncoder.encode(value));
-  }
-
-  writeStringArray(values: ReadonlyArray<string>): void {
-    this.writeVarint(values.length);
-    for (const value of values) {
-      this.writeString(value);
-    }
-  }
-
-  writeBytes(bytes: Uint8Array): void {
-    this.writeVarint(bytes.length);
-    this.ensureCapacity(this.size + bytes.length);
-    this.buffer.set(bytes, this.size);
-    this.size += bytes.length;
-  }
-
-  toUint8Array(): Uint8Array {
-    return this.buffer.slice(0, this.size);
-  }
-
-  private writeByte(byte: number): void {
-    this.ensureCapacity(this.size + 1);
-    this.buffer[this.size++] = byte;
-  }
-
-  private ensureCapacity(required: number): void {
-    if (required <= this.buffer.length) {
-      return;
-    }
-    let nextCapacity = this.buffer.length * 2;
-    while (nextCapacity < required) {
-      nextCapacity *= 2;
-    }
-    const next = new Uint8Array(nextCapacity);
-    next.set(this.buffer);
-    this.buffer = next;
-  }
-}
-
-class BinaryReader {
-  private offset = 0;
-
-  constructor(private readonly bytes: Uint8Array) {}
-
-  readVarint(): number {
-    let value = 0;
-    let multiplier = 1;
-
-    while (true) {
-      const byte = this.bytes[this.offset++];
-      if (byte === undefined) {
-        throw new Error("Unexpected end of varint");
-      }
-
-      value += (byte & 0x7f) * multiplier;
-      if ((byte & 0x80) === 0) {
-        return value;
-      }
-      multiplier *= 0x80;
-    }
-  }
-
-  readVarintArray(): number[] {
-    const length = this.readVarint();
-    return Array.from({ length }, () => this.readVarint());
-  }
-
-  readZigZagVarint(): number {
-    return zigzagDecode(this.readVarint());
-  }
-
-  readZigZagDeltaArray(): number[] {
-    const length = this.readVarint();
-    const values: number[] = new Array<number>(length);
-    let previous = 0;
-    for (let i = 0; i < length; i++) {
-      const value = previous + this.readZigZagVarint();
-      values[i] = value;
-      previous = value;
-    }
-    return values;
-  }
-
-  readString(): string {
-    return textDecoder.decode(this.readBytes(this.readVarint()));
-  }
-
-  readStringArray(): string[] {
-    const length = this.readVarint();
-    return Array.from({ length }, () => this.readString());
-  }
-
-  readBytes(length: number): Uint8Array {
-    if (this.offset + length > this.bytes.length) {
-      throw new Error("Unexpected end of binary eg-walker graph");
-    }
-    const result = this.bytes.slice(this.offset, this.offset + length);
-    this.offset += length;
-    return result;
   }
 }

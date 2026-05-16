@@ -281,6 +281,14 @@ export function EditorSurface({
        *  `trackHostScroll` folds the textarea's internal scroll into
        *  the offset so we hand over textarea-content-relative values
        *  without subtracting `scrollLeft` / `scrollTop` ourselves. */}
+      {/*
+       *  Cursor and selection overlays explicitly opt OUT of the keyboard
+       *  tab order. With N peers, the default `focusable={showLabel === "hover"}`
+       *  inserts up to 2N tab stops between the textarea and the rest of
+       *  the page. Keyboard users discover peer attribution through the
+       *  `<PresenceBar>` roster instead; sighted users still get the
+       *  hover label.
+       */}
       <PresenceLayer host={textareaRef} trackHostScroll>
         {others.map((peer) => {
           if (peer.cursor && peer.cursor.blockId === blockId) {
@@ -292,6 +300,7 @@ export function EditorSurface({
                 user={peer}
                 point={point}
                 showLabel="hover"
+                focusable={false}
               />
             );
           }
@@ -307,15 +316,14 @@ export function EditorSurface({
             peer.selection.from,
             peer.selection.to,
           );
-          // Only the first rect carries the user-visible label, the
-          // full selectedText aria-label, and an opt-in tab stop;
-          // sibling rects render as unlabeled, non-focusable
-          // continuations so a single wrapped selection doesn't burn
-          // 3 tab stops on the host.
+          // Only the first rect carries the user-visible label and the
+          // full selectedText aria-label; sibling rects render as
+          // unlabeled continuations. None are focusable here — keyboard
+          // attribution lives in the PresenceBar.
           return rects.map((rect, i) => (
             <SelectionHighlight
               key={`sel-${peer.userId}-${i}`}
-              focusable={i === 0}
+              focusable={false}
               user={peer}
               rect={rect}
               selectedText={i === 0 ? selectedText : undefined}

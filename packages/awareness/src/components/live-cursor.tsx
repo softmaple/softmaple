@@ -141,31 +141,52 @@ export const LiveCursor = ({
     };
   }, [viewport]);
 
-  // `point.x` / `point.y` are intentional dependencies: every move re-arms
-  // the auto-fade so the label re-appears at the new location, matching
-  // design §6 ("label visible while cursor is active, then fades").
+  // One auto-hide timer survives across many coord updates. Using a ref
+  // (rather than scheduling inside the effect cleanup) lets us *not*
+  // re-arm the fade on every sub-second move during sustained typing —
+  // the previous behavior kept the label permanently visible whenever a
+  // peer was actively editing, defeating §6's "label fades when active"
+  // promise. Now the label flashes once per burst and only re-shows
+  // after the prior burst has fully faded.
+  const labelHideTimeoutRef = useRef<number | null>(null);
+  const isInitialLabelMountRef = useRef(true);
+
   useEffect(() => {
     if (showLabel !== true) {
       setIsLabelVisible(false);
+      if (labelHideTimeoutRef.current !== null) {
+        window.clearTimeout(labelHideTimeoutRef.current);
+        labelHideTimeoutRef.current = null;
+      }
       return;
     }
+
+    const isInitial = isInitialLabelMountRef.current;
+    isInitialLabelMountRef.current = false;
 
     const previousPoint = previousPointRef.current;
     const moved = previousPoint.x !== point.x || previousPoint.y !== point.y;
     previousPointRef.current = { x: point.x, y: point.y };
 
-    if (moved) {
-      setIsLabelVisible(true);
-    }
+    // Nothing changed — no need to touch the label.
+    if (!isInitial && !moved) return;
+    // A burst is already in flight — let it fade naturally.
+    if (labelHideTimeoutRef.current !== null) return;
 
-    const timeoutId = setTimeout(() => {
+    setIsLabelVisible(true);
+    labelHideTimeoutRef.current = window.setTimeout(() => {
       setIsLabelVisible(false);
+      labelHideTimeoutRef.current = null;
     }, labelVisibleMs);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
   }, [labelVisibleMs, point.x, point.y, showLabel]);
+
+  useEffect(() => {
+    return () => {
+      if (labelHideTimeoutRef.current !== null) {
+        window.clearTimeout(labelHideTimeoutRef.current);
+      }
+    };
+  }, []);
 
   if (layerOffset === null) {
     warnMissingPresenceLayerOnce("LiveCursor");

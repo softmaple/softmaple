@@ -47,6 +47,10 @@
       "types": "./dist/utils/textarea-rects.d.ts",
       "import": "./dist/utils/textarea-rects.js"
     },
+    "./mapping": {
+      "types": "./dist/mapping/index.d.ts",
+      "import": "./dist/mapping/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"

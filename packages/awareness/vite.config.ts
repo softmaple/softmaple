@@ -73,6 +73,7 @@ export default defineConfig({
           __dirname,
           "src/utils/textarea-rects.ts",
         ),
+        "mapping/index": path.resolve(__dirname, "src/mapping/index.ts"),
         "testing/index": path.resolve(__dirname, "src/testing/index.ts"),
         "hooks/index": path.resolve(__dirname, "src/hooks/index.ts"),
         "adapters/index": path.resolve(__dirname, "src/adapters/index.ts"),

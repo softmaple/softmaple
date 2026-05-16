@@ -59,6 +59,42 @@ interface CriticalCheckpoint {
 const MAX_RETAINED_CHECKPOINTS = 32;
 
 /**
+ * Persistence schema the replica writes into (and reads from) the event
+ * graph's free-form metadata bag. The graph itself is codec-agnostic and
+ * stores arbitrary `Record<string, unknown>`; centralising the known fields
+ * here keeps the schema in one place and turns the previous inline
+ * `typeof` guards into a single typed surface.
+ */
+interface ReplicaPersistenceMetadata {
+  readonly initialText?: string;
+  readonly nextSequenceNumber?: number;
+}
+
+const readReplicaMetadata = (graph: EventGraph): ReplicaPersistenceMetadata => {
+  const raw = graph.getMetadata();
+  const rawInitialText = raw.initialText;
+  const rawNextSequenceNumber = raw.nextSequenceNumber;
+  return {
+    initialText:
+      typeof rawInitialText === "string" ? rawInitialText : undefined,
+    nextSequenceNumber:
+      typeof rawNextSequenceNumber === "number"
+        ? rawNextSequenceNumber
+        : undefined,
+  };
+};
+
+const writeReplicaMetadata = (
+  graph: EventGraph,
+  metadata: ReplicaPersistenceMetadata,
+): void => {
+  graph.setMetadata({
+    ...graph.getMetadata(),
+    ...metadata,
+  });
+};
+
+/**
  * Public replica for Eg-walker.
  * Strictly index-based, no CRDT exposure.
  */
@@ -145,8 +181,7 @@ export class EgWalkerReplica {
    * Serialize the document state (text + event graph)
    */
   serialize(): { text: string; eventGraph: SerializedGraphOutput } {
-    this.eventGraph.setMetadata({
-      ...this.eventGraph.getMetadata(),
+    writeReplicaMetadata(this.eventGraph, {
       initialText: this.initialText,
       nextSequenceNumber: this.nextSequenceNumber,
     });
@@ -169,16 +204,13 @@ export class EgWalkerReplica {
     }
 
     const graph = EventGraph.deserialize(serialized.eventGraph);
-    const metadata = graph.getMetadata();
+    const metadata = readReplicaMetadata(graph);
     const initialText =
-      typeof metadata.initialText === "string"
-        ? metadata.initialText
-        : graph.getAllEvents().length === 0
-          ? serialized.text
-          : "";
+      metadata.initialText ??
+      (graph.getAllEvents().length === 0 ? serialized.text : "");
     const replica = new EgWalkerReplica(replicaId, initialText, graph);
 
-    if (typeof metadata.nextSequenceNumber === "number") {
+    if (metadata.nextSequenceNumber !== undefined) {
       replica.nextSequenceNumber = metadata.nextSequenceNumber;
     }
 

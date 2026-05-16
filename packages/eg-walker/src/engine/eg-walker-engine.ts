@@ -412,7 +412,7 @@ export class EgWalkerEngine {
       .sort((left, right) =>
         left.order !== right.order
           ? right.order - left.order
-          : compareEventIds(right.id, left.id),
+          : this.compareByTopologicalOrder(right.id, left.id),
       )
       .map(({ id }) => id);
     const advance = Array.from(onlyInRight)
@@ -423,7 +423,7 @@ export class EgWalkerEngine {
       .sort((left, right) =>
         left.order !== right.order
           ? left.order - right.order
-          : compareEventIds(left.id, right.id),
+          : this.compareByTopologicalOrder(left.id, right.id),
       )
       .map(({ id }) => id);
 

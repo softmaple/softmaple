@@ -26,11 +26,16 @@ const AWARENESS_PATTERNS = [
 ];
 
 /**
- * Editor frameworks that the two core collaboration packages
- * (eg-walker, awareness) MUST NOT depend on. See
- * `docs/design/collaboration-layers.md` for the rationale.
+ * Editor frameworks that `@softmaple/eg-walker` MUST NOT depend on.
+ * The awareness package mirrors this list in its own `biome.json`
+ * because it does not run ESLint — keep them in sync when changing
+ * either side (see `docs/design/collaboration-layers.md`).
+ *
+ * Not exported: nothing outside this module needs it, and dropping
+ * the export keeps the public surface of `@softmaple/eslint-config`
+ * minimal.
  */
-export const EDITOR_FRAMEWORK_PATTERNS = [
+const EDITOR_FRAMEWORK_PATTERNS = [
   {
     // Subpath siblings (`@lexical/*/**`, `prosemirror-*/**`,
     // `slate-*/**`) are required because minimatch's `*` does not cross

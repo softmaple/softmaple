@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { Linter } from "eslint";
 
 import {
-  EDITOR_FRAMEWORK_PATTERNS,
   egWalkerCollaborationConfig,
   egWalkerCollaborationPatterns,
 } from "../collaboration-layers.js";
@@ -115,15 +114,6 @@ test("eg-walker patterns allow benign imports", () => {
     'import lz4 from "lz4js";\nimport type { Foo } from "./types";\n',
   );
   assert.equal(findRestrictedImportMessages(messages).length, 0);
-});
-
-test("EDITOR_FRAMEWORK_PATTERNS is included in eg-walker patterns", () => {
-  for (const editorPattern of EDITOR_FRAMEWORK_PATTERNS) {
-    assert.ok(
-      egWalkerCollaborationPatterns.includes(editorPattern),
-      "eg-walker patterns should include shared editor patterns",
-    );
-  }
 });
 
 test("egWalkerCollaborationConfig trips on a deliberately-bad import in a .ts file", () => {

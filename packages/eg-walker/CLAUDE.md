@@ -13,9 +13,9 @@ the `egWalkerCollaborationConfig` export from
 `@softmaple/eslint-config/collaboration-layers`.
 
 In short, this package MUST NOT depend on `@softmaple/awareness`, on
-any editor framework (`lexical`, `prosemirror-*`, `slate*`), or expose
-anything other than index-based operations on its public API. Read the
-layering doc before adding or moving public exports.
+any editor framework (`lexical`, `prosemirror-*`, `slate` / `slate-*`),
+or expose anything other than index-based operations on its public
+API. Read the layering doc before adding or moving public exports.
 
 ## Current Structure
 

@@ -36,6 +36,36 @@
         "noExplicitAny": {
           "level": "error"
         }
+      },
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@softmaple/eg-walker": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker.",
+              "lexical": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Lexical bindings belong in apps/* or a future bindings sub-path.",
+              "slate": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Slate bindings belong in apps/* or a future bindings sub-path."
+            },
+            "patterns": [
+              {
+                "group": ["@softmaple/eg-walker/**"],
+                "message": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker."
+              },
+              {
+                "group": ["lexical/**", "@lexical/*", "@lexical/*/**"],
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Lexical bindings belong in apps/* or a future bindings sub-path."
+              },
+              {
+                "group": ["prosemirror-*", "prosemirror-*/**"],
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; ProseMirror bindings belong in apps/* or a future bindings sub-path."
+              },
+              {
+                "group": ["slate/**", "slate-*", "slate-*/**"],
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Slate bindings belong in apps/* or a future bindings sub-path."
+              }
+            ]
+          }
+        }
       }
     }
   },

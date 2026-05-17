@@ -7,21 +7,14 @@
  * - `@softmaple/eg-walker` MUST NOT import `@softmaple/awareness` or any
  *   editor framework (Lexical, ProseMirror, Slate).
  * - `@softmaple/awareness` MUST NOT import `@softmaple/eg-walker` or any
- *   editor framework.
+ *   editor framework. The awareness package enforces this via Biome's
+ *   `style/noRestrictedImports` in `packages/awareness/biome.json` —
+ *   if you change the deny list below, mirror the change there.
  * - Only `apps/*` may combine the two core packages with a concrete
  *   editor framework.
  *
  * @module @softmaple/eslint-config/collaboration-layers
  */
-
-const EG_WALKER_PATTERNS = [
-  {
-    group: ["@softmaple/eg-walker", "@softmaple/eg-walker/*"],
-    message:
-      "Cross-layer import: see docs/design/collaboration-layers.md. " +
-      "@softmaple/awareness must not depend on @softmaple/eg-walker.",
-  },
-];
 
 const AWARENESS_PATTERNS = [
   {
@@ -39,21 +32,24 @@ const AWARENESS_PATTERNS = [
  */
 export const EDITOR_FRAMEWORK_PATTERNS = [
   {
-    group: ["lexical", "lexical/*", "@lexical/*"],
+    // Subpath siblings (`@lexical/*/**`, `prosemirror-*/**`,
+    // `slate-*/**`) are required because minimatch's `*` does not cross
+    // `/`, so e.g. `@lexical/*` would miss `@lexical/react/LexicalComposer`.
+    group: ["lexical", "lexical/**", "@lexical/*", "@lexical/*/**"],
     message:
       "Editor-framework import: see docs/design/collaboration-layers.md. " +
       "Core collaboration packages must be editor-class-agnostic; " +
       "Lexical bindings belong in apps/* or a future bindings sub-path.",
   },
   {
-    group: ["prosemirror-*"],
+    group: ["prosemirror-*", "prosemirror-*/**"],
     message:
       "Editor-framework import: see docs/design/collaboration-layers.md. " +
       "Core collaboration packages must be editor-class-agnostic; " +
       "ProseMirror bindings belong in apps/* or a future bindings sub-path.",
   },
   {
-    group: ["slate", "slate-*"],
+    group: ["slate", "slate/**", "slate-*", "slate-*/**"],
     message:
       "Editor-framework import: see docs/design/collaboration-layers.md. " +
       "Core collaboration packages must be editor-class-agnostic; " +
@@ -71,15 +67,6 @@ export const egWalkerCollaborationPatterns = [
 ];
 
 /**
- * `no-restricted-imports` patterns for `@softmaple/awareness`:
- * forbids `@softmaple/eg-walker` and any editor framework.
- */
-export const awarenessCollaborationPatterns = [
-  ...EG_WALKER_PATTERNS,
-  ...EDITOR_FRAMEWORK_PATTERNS,
-];
-
-/**
  * Flat ESLint config block that enforces the eg-walker layering rules
  * on all TypeScript sources in the consuming package.
  *
@@ -92,24 +79,6 @@ export const egWalkerCollaborationConfig = [
       "no-restricted-imports": [
         "error",
         { patterns: egWalkerCollaborationPatterns },
-      ],
-    },
-  },
-];
-
-/**
- * Flat ESLint config block that enforces the awareness layering rules
- * on all TypeScript sources in the consuming package.
- *
- * @type {import("eslint").Linter.Config[]}
- */
-export const awarenessCollaborationConfig = [
-  {
-    files: ["**/*.ts", "**/*.tsx"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        { patterns: awarenessCollaborationPatterns },
       ],
     },
   },

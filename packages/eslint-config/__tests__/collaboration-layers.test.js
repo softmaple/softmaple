@@ -4,8 +4,6 @@ import assert from "node:assert/strict";
 import { Linter } from "eslint";
 
 import {
-  awarenessCollaborationConfig,
-  awarenessCollaborationPatterns,
   EDITOR_FRAMEWORK_PATTERNS,
   egWalkerCollaborationConfig,
   egWalkerCollaborationPatterns,
@@ -87,40 +85,26 @@ test("eg-walker patterns forbid editor frameworks (lexical, prosemirror, slate)"
   }
 });
 
-test("awareness patterns forbid importing @softmaple/eg-walker", () => {
-  const messages = lintWithPatterns(
-    awarenessCollaborationPatterns,
-    'import { EgWalkerReplica } from "@softmaple/eg-walker";\n',
-  );
-  const restricted = findRestrictedImportMessages(messages);
-  assert.equal(restricted.length, 1);
-  assert.match(restricted[0].message, /@softmaple\/eg-walker/);
-});
-
-test("awareness patterns forbid importing @softmaple/eg-walker subpaths", () => {
-  const messages = lintWithPatterns(
-    awarenessCollaborationPatterns,
-    'import x from "@softmaple/eg-walker/internal";\n',
-  );
-  assert.equal(findRestrictedImportMessages(messages).length, 1);
-});
-
-test("awareness patterns forbid editor frameworks (lexical, prosemirror, slate)", () => {
+test("eg-walker patterns forbid editor-framework subpath imports", () => {
+  // minimatch's `*` does not cross `/`, so subpath imports below the
+  // top-level package are a real failure mode without `**` siblings.
   for (const specifier of [
-    "lexical",
-    "@lexical/react",
-    "prosemirror-view",
-    "slate",
-    "slate-history",
+    "lexical/LexicalEditor",
+    "@lexical/react/LexicalComposer",
+    "@lexical/react/LexicalComposerContext",
+    "prosemirror-state/style",
+    "prosemirror-view/dist/index.js",
+    "slate/dist/index",
+    "slate-react/dist/dom",
   ]) {
     const messages = lintWithPatterns(
-      awarenessCollaborationPatterns,
+      egWalkerCollaborationPatterns,
       `import x from "${specifier}";\n`,
     );
     assert.equal(
       findRestrictedImportMessages(messages).length,
       1,
-      `expected ${specifier} to be restricted`,
+      `expected ${specifier} subpath to be restricted`,
     );
   }
 });
@@ -133,23 +117,11 @@ test("eg-walker patterns allow benign imports", () => {
   assert.equal(findRestrictedImportMessages(messages).length, 0);
 });
 
-test("awareness patterns allow benign imports", () => {
-  const messages = lintWithPatterns(
-    awarenessCollaborationPatterns,
-    'import * as React from "react";\nimport { useState } from "react";\n',
-  );
-  assert.equal(findRestrictedImportMessages(messages).length, 0);
-});
-
-test("EDITOR_FRAMEWORK_PATTERNS is shared between both core packages", () => {
+test("EDITOR_FRAMEWORK_PATTERNS is included in eg-walker patterns", () => {
   for (const editorPattern of EDITOR_FRAMEWORK_PATTERNS) {
     assert.ok(
       egWalkerCollaborationPatterns.includes(editorPattern),
       "eg-walker patterns should include shared editor patterns",
-    );
-    assert.ok(
-      awarenessCollaborationPatterns.includes(editorPattern),
-      "awareness patterns should include shared editor patterns",
     );
   }
 });
@@ -171,13 +143,4 @@ test("egWalkerCollaborationConfig does not match non-TS fixtures", () => {
   );
   // No matching config for a .md file -> no restricted-imports error.
   assert.equal(findRestrictedImportMessages(messages).length, 0);
-});
-
-test("awarenessCollaborationConfig trips on a deliberately-bad import in a .tsx file", () => {
-  const messages = lintWithConfig(
-    awarenessCollaborationConfig,
-    'import { EgWalkerReplica } from "@softmaple/eg-walker";\n',
-    "src/fixtures/presence-bar.tsx",
-  );
-  assert.equal(findRestrictedImportMessages(messages).length, 1);
 });

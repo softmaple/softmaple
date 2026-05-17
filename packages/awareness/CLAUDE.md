@@ -4,14 +4,19 @@ The cross-package boundaries for `@softmaple/awareness`,
 `@softmaple/eg-walker`, and `apps/*` are defined in
 [`docs/design/collaboration-layers.md`](../../docs/design/collaboration-layers.md).
 That document is the source of truth and is enforced mechanically by
-the `awarenessCollaborationConfig` export from
-`@softmaple/eslint-config/collaboration-layers`.
+the `style/noRestrictedImports` rule in `biome.json` in this package.
 
 In short, this package MUST NOT depend on `@softmaple/eg-walker` or on
-any editor framework (`lexical`, `prosemirror-*`, `slate*`). Editor
-bindings are deferred (issue B2) and will live in a dedicated
-`bindings/<editor>` sub-path when introduced. Read the layering doc
-before adding new dependencies or sub-path exports.
+any editor framework (`lexical`, `prosemirror-*`, `slate` / `slate-*`),
+including subpath imports. Editor bindings are deferred (issue B2)
+and will live in a dedicated `bindings/<editor>` sub-path when
+introduced. Read the layering doc before adding new dependencies or
+sub-path exports.
+
+If you change the deny list, update both `biome.json` here **and**
+the matching ESLint patterns in
+`packages/eslint-config/collaboration-layers.js` so eg-walker stays
+in sync.
 
 ---
 

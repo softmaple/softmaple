@@ -141,23 +141,46 @@ editor-specific glue that leaks into a package is a bug.
 
 ## Enforcement
 
-The rules above are enforced mechanically by an ESLint
-`no-restricted-imports` configuration exported from
-`@softmaple/eslint-config/collaboration-layers`:
+The rules above are enforced mechanically by each package's existing
+linter. The two collaboration packages use different linters, so the
+same intent is expressed in two formats:
 
-- `egWalkerCollaborationConfig` — forbids `@softmaple/awareness`,
-  `lexical`, `prosemirror-*`, and `slate*` inside `@softmaple/eg-walker`.
-- `awarenessCollaborationConfig` — forbids `@softmaple/eg-walker`,
-  `lexical`, `prosemirror-*`, and `slate*` inside `@softmaple/awareness`.
+- **`@softmaple/eg-walker`** (ESLint) — wired in via
+  `packages/eg-walker/eslint.config.js`, drawing patterns from
+  `egWalkerCollaborationPatterns` in
+  `@softmaple/eslint-config/collaboration-layers`. Forbids
+  `@softmaple/awareness`, `lexical`, `prosemirror-*`, and `slate` /
+  `slate-*` — including subpath imports like
+  `@lexical/react/LexicalComposer`.
+- **`@softmaple/awareness`** (Biome) — wired in via the
+  `style/noRestrictedImports` rule in `packages/awareness/biome.json`.
+  Forbids `@softmaple/eg-walker`, `lexical`, `prosemirror-*`, and
+  `slate` / `slate-*` (including subpath imports). Biome is already the
+  lint+format tool of record for this package; adding the boundary
+  here avoids introducing a second linter.
 
-A unit test in `packages/eslint-config` lints a deliberately-bad
-import against each config and asserts the rule trips, so a future
-refactor that accidentally weakens the rule fails CI.
+Subpath patterns (`@lexical/*/**`, `prosemirror-*/**`, `slate-*/**`)
+are spelled out explicitly in both configs because the glob `*` does
+not cross `/` in either matcher; without them an import like
+`@lexical/react/LexicalComposer` would slip past the rule. Biome's
+`noRestrictedImports` additionally requires bare specifiers
+(`@softmaple/eg-walker`, `lexical`, `slate`) to live in `paths`
+rather than `patterns`, so those are listed separately in
+`biome.json`.
+
+A unit test in `packages/eslint-config` lints deliberately-bad imports
+(including subpath specifiers) against the eg-walker config and
+asserts the rule trips. The awareness Biome config is verified by
+running `pnpm --filter @softmaple/awareness lint` against a fixture
+import; CI catches regressions because the package's `lint` task is
+already in the `turbo run lint` pipeline.
 
 If you need to add a new editor framework, extend
 `EDITOR_FRAMEWORK_PATTERNS` in
-`packages/eslint-config/collaboration-layers.js` rather than carving
-out exceptions in individual packages.
+`packages/eslint-config/collaboration-layers.js` **and** the matching
+`style/noRestrictedImports` block in `packages/awareness/biome.json`
+in the same change. The two configs must stay in sync; the doc above
+describes the contract both implement.
 
 ## When to update this doc
 

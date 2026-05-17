@@ -78,6 +78,24 @@ export const egWalkerCollaborationPatterns = [
  * that wants to layer additional patterns on top of
  * `egWalkerCollaborationPatterns` has to spread both sets manually.
  *
+ * @example
+ *   // Apply both the cross-package layering rules and a package-internal
+ *   // boundary in the same `no-restricted-imports` config block:
+ *   {
+ *     files: ["src/core/**\/*.ts"],
+ *     rules: {
+ *       "no-restricted-imports": [
+ *         "error",
+ *         {
+ *           patterns: combinePatterns(
+ *             egWalkerCollaborationPatterns,
+ *             ENGINE_INTERNALS_PATTERNS,
+ *           ),
+ *         },
+ *       ],
+ *     },
+ *   }
+ *
  * @param {...Array<object>} patternSets
  * @returns {Array<object>}
  */

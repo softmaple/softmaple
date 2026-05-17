@@ -10,14 +10,14 @@ script + delivery permutation instead of an opaque seed.
 Every property uses a shared run-count knob defined in
 [`run-config.ts`](./run-config.ts). The default is **100 runs per
 property** (the acceptance criterion on softmaple/softmaple issue
-#722). Override it from the shell:
+`#722`). Override it from the shell:
 
 ```bash
 # Default — 100 runs per property.
 pnpm --filter @softmaple/eg-walker test
 
 # Cheap smoke run — 10 runs per property. Useful when iterating.
-EG_WALKER_PROPERTY_RUNS=10 pnpm --filter @softmaple/eg-walker test -- --run src/test/property
+EG_WALKER_PROPERTY_RUNS=10 pnpm --filter @softmaple/eg-walker test --run src/test/property
 
 # Recommended pre-release sweep — 500 runs per property.
 EG_WALKER_PROPERTY_RUNS=500 pnpm --filter @softmaple/eg-walker test

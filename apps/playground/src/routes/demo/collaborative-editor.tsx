@@ -6,11 +6,57 @@ import {
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
 import { createFileRoute } from "@tanstack/react-router";
+import type { ChangeEvent, RefObject } from "react";
 import { useCollaborativeEditor } from "@/modules/collaborative-editor/use-collaborative-editor";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
   component: CollaborativeEditor,
 });
+
+type ReplicaEditorPanelProps = {
+  readonly editorRef: RefObject<HTMLTextAreaElement | null>;
+  readonly label: string;
+  readonly labelId: string;
+  readonly testId: string;
+  readonly value: string;
+  readonly onChange: (
+    event: ChangeEvent<HTMLTextAreaElement>,
+  ) => Promise<void>;
+  readonly placeholder: string;
+  readonly focusRingClassName: string;
+};
+
+function ReplicaEditorPanel({
+  editorRef,
+  label,
+  labelId,
+  testId,
+  value,
+  onChange,
+  placeholder,
+  focusRingClassName,
+}: ReplicaEditorPanelProps) {
+  return (
+    <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
+      <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
+        <CardTitle id={labelId} className="text-xl text-white">
+          {label}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex-1 p-0">
+        <Textarea
+          ref={editorRef}
+          data-testid={testId}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          aria-labelledby={labelId}
+          className={`h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 border-0 rounded-none p-4 ${focusRingClassName}`}
+        />
+      </CardContent>
+    </Card>
+  );
+}
 
 function CollaborativeEditor() {
   const {
@@ -21,6 +67,29 @@ function CollaborativeEditor() {
     handleReplica1Change,
     handleReplica2Change,
   } = useCollaborativeEditor();
+
+  const replicaEditors: readonly ReplicaEditorPanelProps[] = [
+    {
+      editorRef: replica1Ref,
+      label: "Replica 1",
+      labelId: "replica-1-label",
+      testId: "replica-1",
+      value: replica1Text,
+      onChange: handleReplica1Change,
+      placeholder: "Start typing in Replica 1...",
+      focusRingClassName: "focus-visible:ring-blue-400",
+    },
+    {
+      editorRef: replica2Ref,
+      label: "Replica 2",
+      labelId: "replica-2-label",
+      testId: "replica-2",
+      value: replica2Text,
+      onChange: handleReplica2Change,
+      placeholder: "Start typing in Replica 2...",
+      focusRingClassName: "focus-visible:ring-green-400",
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-white p-8">
@@ -35,45 +104,9 @@ function CollaborativeEditor() {
 
         {/* Two-panel layout: side-by-side on desktop, stacked on mobile */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Replica 1 */}
-          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
-            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <CardTitle id="replica-1-label" className="text-xl text-white">
-                Replica 1
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 p-0">
-              <Textarea
-                ref={replica1Ref}
-                data-testid="replica-1"
-                value={replica1Text}
-                onChange={handleReplica1Change}
-                placeholder="Start typing in Replica 1..."
-                aria-labelledby="replica-1-label"
-                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-blue-400 border-0 rounded-none p-4"
-              />
-            </CardContent>
-          </Card>
-
-          {/* Replica 2 */}
-          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
-            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <CardTitle id="replica-2-label" className="text-xl text-white">
-                Replica 2
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 p-0">
-              <Textarea
-                ref={replica2Ref}
-                data-testid="replica-2"
-                value={replica2Text}
-                onChange={handleReplica2Change}
-                placeholder="Start typing in Replica 2..."
-                aria-labelledby="replica-2-label"
-                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-green-400 border-0 rounded-none p-4"
-              />
-            </CardContent>
-          </Card>
+          {replicaEditors.map((editor) => (
+            <ReplicaEditorPanel key={editor.testId} {...editor} />
+          ))}
         </div>
       </div>
     </div>

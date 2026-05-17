@@ -28,43 +28,16 @@ const BIOME_BIN = join(
   "biome",
 );
 
-function stripJsonComments(input: string): string {
-  let out = "";
-  let i = 0;
-  while (i < input.length) {
-    const c = input[i];
-    if (c === '"') {
-      out += c;
-      i++;
-      while (i < input.length) {
-        out += input[i];
-        if (input[i] === "\\" && i + 1 < input.length) {
-          out += input[i + 1];
-          i += 2;
-        } else if (input[i] === '"') {
-          i++;
-          break;
-        } else {
-          i++;
-        }
-      }
-    } else if (c === "/" && input[i + 1] === "/") {
-      while (i < input.length && input[i] !== "\n") i++;
-    } else if (c === "/" && input[i + 1] === "*") {
-      i += 2;
-      while (
-        i < input.length - 1 &&
-        !(input[i] === "*" && input[i + 1] === "/")
-      ) {
-        i++;
-      }
-      i += 2;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
+/**
+ * Parse the package's `biome.jsonc` into a plain object. JSONC is a
+ * strict subset of JS object-literal syntax (quoted keys, `//` and
+ * `/* *\/` comments, trailing commas), so wrapping the file contents
+ * in `return (...)` and handing it to `Function` is a one-line
+ * alternative to pulling in a JSONC parser. Safe here because the
+ * input is our own checked-in config — no untrusted content path.
+ */
+function parseJsonc<T>(source: string): T {
+  return new Function(`return (${source});`)() as T;
 }
 
 let workDir: string;
@@ -72,8 +45,8 @@ let workDir: string;
 beforeAll(() => {
   workDir = mkdtempSync(join(tmpdir(), "awareness-biome-boundary-"));
   mkdirSync(join(workDir, "src"));
-  const realConfig = JSON.parse(
-    stripJsonComments(readFileSync(REAL_BIOME_JSONC, "utf8")),
+  const realConfig = parseJsonc<{ files?: unknown }>(
+    readFileSync(REAL_BIOME_JSONC, "utf8"),
   );
   realConfig.files = { includes: ["**/*.ts"] };
   writeFileSync(

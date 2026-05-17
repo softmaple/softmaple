@@ -3,12 +3,37 @@ import {
   MissingParentError,
   type EventGraph,
 } from "../../graph/event-graph";
-import type { EventId, GraphEvent } from "../../types";
+import {
+  APPLY_REMOTE_EVENT_STATUS,
+  type ApplyRemoteEventResult,
+  type EventId,
+  type GraphEvent,
+  type PositionOperation,
+} from "../../types";
 
 interface RemoteEventBufferDeps {
   readonly graph: EventGraph;
-  readonly advanceWithEvent: (event: GraphEvent) => void;
+  /**
+   * Apply the event on top of existing replica state. The dependency
+   * returns the position operation produced by the integration when the
+   * engine can attribute one to this event in isolation: the incremental
+   * advance path and the cold-start single-event full replay both
+   * surface the single transformed op. Returns `null` for partial/full
+   * replay on an existing engine (concurrent integration retransforms
+   * multiple events), multi-op coalesced deletes, and visible no-ops.
+   *
+   * See `IntegratedApplyRemoteEventResult.operation` for the contract.
+   */
+  readonly advanceWithEvent: (event: GraphEvent) => PositionOperation | null;
 }
+
+const BUFFERED_RESULT = {
+  status: APPLY_REMOTE_EVENT_STATUS.Buffered,
+} as const;
+
+const DUPLICATE_RESULT = {
+  status: APPLY_REMOTE_EVENT_STATUS.Duplicate,
+} as const;
 
 export class RemoteEventBuffer {
   private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
@@ -28,18 +53,23 @@ export class RemoteEventBuffer {
   /**
    * Apply a remote event, or buffer it until its missing parents arrive.
    *
-   * If `event` is already in the graph or already buffered it is ignored.
-   * If any parent is unknown the event is queued against the missing parent
-   * id; the queue is flushed when that parent is later accepted. Otherwise
-   * the event is added to the graph and `deps.advanceWithEvent` is invoked,
-   * then any waiters queued on this event's id are recursively accepted.
+   * If `event` is already in the graph or already buffered the call is a
+   * no-op and reports `"duplicate"`. If any parent is unknown the event
+   * is queued against the missing parent id and reports `"buffered"`;
+   * the queue is flushed when that parent is later accepted. Otherwise
+   * the event is added to the graph, `deps.advanceWithEvent` is invoked,
+   * any waiters queued on this event's id are recursively accepted as a
+   * side effect (not reported), and the call reports `"integrated"` with
+   * the engine-attributed position operation (or `null`; see the type
+   * docstring for when).
    *
    * @param {GraphEvent} event remote event to accept or buffer.
+   * @returns {ApplyRemoteEventResult} structural integration status.
    */
-  tryAccept(event: GraphEvent): void {
+  tryAccept(event: GraphEvent): ApplyRemoteEventResult {
     const { graph } = this.deps;
     if (graph.hasEvent(event.id) || this.bufferedEventIds.has(event.id)) {
-      return;
+      return DUPLICATE_RESULT;
     }
 
     const missingParent = this.findMissingParent(event);
@@ -48,23 +78,33 @@ export class RemoteEventBuffer {
       queue.push(event);
       this.pendingByMissingParent.set(missingParent, queue);
       this.bufferedEventIds.add(event.id);
-      return;
+      return BUFFERED_RESULT;
     }
 
     try {
       graph.addEvent(event);
     } catch (error) {
+      // `EventAlreadyExistsError` overlaps with the fast-path check at
+      // the top of this method; the graph is the source of truth.
+      // `MissingParentError` here would be a race (we just checked
+      // every parent via `findMissingParent` and found none missing) —
+      // there is no useful new status to surface, so we coalesce it
+      // into `DUPLICATE_RESULT` rather than letting it propagate.
       if (
         error instanceof EventAlreadyExistsError ||
         error instanceof MissingParentError
       ) {
-        return;
+        return DUPLICATE_RESULT;
       }
       throw error;
     }
 
-    this.deps.advanceWithEvent(event);
+    const operation = this.deps.advanceWithEvent(event);
     this.flushPendingChildrenOf(event.id);
+    return {
+      status: APPLY_REMOTE_EVENT_STATUS.Integrated,
+      operation,
+    };
   }
 
   private findMissingParent(event: GraphEvent): EventId | null {

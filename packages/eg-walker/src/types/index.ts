@@ -9,6 +9,20 @@
  */
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+
+export type {
+  PositionOperation,
+  InsertPositionOperation,
+  DeletePositionOperation,
+} from "./position-operation";
+export {
+  APPLY_REMOTE_EVENT_STATUS,
+  type ApplyRemoteEventResult,
+  type ApplyRemoteEventStatus,
+  type IntegratedApplyRemoteEventResult,
+  type BufferedApplyRemoteEventResult,
+  type DuplicateApplyRemoteEventResult,
+} from "./apply-remote-event-result";
 // ============================================================================
 // External API Types (Index-based, no CRDT exposure)
 // ============================================================================

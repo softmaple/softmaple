@@ -214,6 +214,80 @@ following shapes:
   y, width, height }`) so a canvas integration never has to round-trip
   through `CursorPosition`.
 
+### Structural remote-event result (issue [#747](https://github.com/softmaple/softmaple/issues/747))
+
+`EgWalkerReplica.applyRemoteEvent` returns an
+`ApplyRemoteEventResult` describing the integration outcome
+structurally, so consumers do not have to infer it from a `getText()`
+pre/post comparison:
+
+```ts
+type ApplyRemoteEventResult =
+  | { status: "integrated"; operation: PositionOperation | null }
+  | { status: "buffered" }
+  | { status: "duplicate" };
+```
+
+- **`"integrated"`** — the event landed in the graph and advanced the
+  document. `operation` carries the engine-attributed
+  `PositionOperation` when the engine took the incremental advance
+  path and produced exactly one transformed op; otherwise `null`
+  (visible no-op, multi-op coalesced delete, or partial/full replay).
+  Consumers driving selection mapping should treat `null` as
+  "remap from text diff", not "skip the remap".
+- **`"buffered"`** — at least one parent is missing, the event is
+  queued, and the document is unchanged. The buffered event flushes
+  automatically when its last parent arrives, as a side effect of the
+  parent's `applyRemoteEvent` call. That flush is **not** reported
+  through a separate result — a consumer that needs per-flush
+  notifications must currently re-derive them by walking the post-call
+  text.
+- **`"duplicate"`** — the event id is already in the graph or already
+  buffered; the call is a no-op.
+
+The `PositionOperation` shape returned from eg-walker mirrors the type
+defined by `@softmaple/awareness/mapping`. Each package owns its own
+copy so the layer boundary holds (eg-walker still does not depend on
+awareness), and structural typing lets consumers pass either through
+`mapTextareaSelectionThroughOperation` interchangeably.
+
+#### Why this is safer than a `getText()` comparison
+
+The pre-#747 consumer code in
+`apps/playground/src/modules/collaborative-editor/use-collaborative-editor.ts`
+inferred integration from a text side effect:
+
+```ts
+const before = remoteReplica.getText();
+remoteReplica.applyRemoteEvent(event);
+if (remoteReplica.getText() !== before) { /* assume integrated */ }
+```
+
+That works in practice but is brittle:
+
+- It is *behavioral*, not *structural*. Any future change that lets an
+  integrated event produce a zero-width visible change (a delete that
+  fully overlaps already-deleted characters, an empty insert sliding
+  through a coalescing path, IME compositions in #704) would silently
+  flip the inferred outcome.
+- It materialises the full text twice per event. The structural API
+  is free on the common (incremental-advance) path; consumers that
+  need a mapping op only fall back to a text diff when the engine
+  returns `operation: null` (partial/full replay, multi-op coalesced
+  delete, visible no-op), which is the minority case.
+- It conflates "integrated" with "buffered" with "duplicate" into a
+  single boolean. The new API distinguishes them so a buffered event
+  cannot be mistaken for an integrated one.
+
+#### Buffering semantics
+
+`RemoteEventBuffer` (in `core/internals/`) still owns the same
+state machine: an event with a missing parent is keyed on the
+missing parent id; when that parent later arrives, every queued child
+is re-tried in causal order via recursive `tryAccept` calls. The only
+behavioral change is the return shape — pending/applied/duplicate
+ordering, idempotence, and causal-flush semantics are preserved.
+
 ### Audit (issue [#727](https://github.com/softmaple/softmaple/issues/727))
 
 Both packages' public types were audited against the contract above and

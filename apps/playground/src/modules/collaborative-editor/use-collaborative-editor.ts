@@ -9,7 +9,10 @@ import {
   POSITION_OPERATION_TYPE,
   type PositionOperation,
 } from "@softmaple/awareness/mapping";
-import { EgWalkerReplica } from "@softmaple/eg-walker";
+import {
+  APPLY_REMOTE_EVENT_STATUS,
+  EgWalkerReplica,
+} from "@softmaple/eg-walker";
 import {
   type ChangeEvent,
   type Dispatch,
@@ -77,6 +80,22 @@ const mapSelectionThroughOperations = (
     selection,
   );
 
+/**
+ * Derive the mapping operation(s) implied by the remote replica's
+ * pre/post text. Reuses `computeLocalEdit` — same plain-text 1D diff
+ * shape, different replica — so the engine's `null` cases (partial/full
+ * replay, multi-op coalesced delete, visible no-op) still produce a
+ * faithful mapping op for selection remap. Visible no-ops correctly
+ * return an empty array because both texts compare equal.
+ */
+const computeMappingOperationsFromTextChange = (
+  oldText: string,
+  newText: string,
+): readonly PositionOperation[] => {
+  const edit = computeLocalEdit(oldText, newText);
+  return edit?.mappingOperations ?? [];
+};
+
 export type ReplicaChangeContext = {
   readonly localReplica: EgWalkerReplica;
   readonly remoteReplica: EgWalkerReplica;
@@ -126,13 +145,23 @@ export const runReplicaChange = async (
 
   const appliedMappingOperations: PositionOperation[] = [];
   try {
-    for (const [index, remoteEvent] of newEvents.entries()) {
+    for (const remoteEvent of newEvents) {
       const textBeforeRemoteApply = remoteReplica.getText();
-      await remoteReplica.applyRemoteEvent(remoteEvent);
-      const operation = edit.mappingOperations[index];
-      if (operation && remoteReplica.getText() !== textBeforeRemoteApply) {
-        appliedMappingOperations.push(operation);
+      const result = await remoteReplica.applyRemoteEvent(remoteEvent);
+      if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
+        continue;
       }
+      if (result.operation) {
+        appliedMappingOperations.push(result.operation);
+        continue;
+      }
+      const textAfterRemoteApply = remoteReplica.getText();
+      appliedMappingOperations.push(
+        ...computeMappingOperationsFromTextChange(
+          textBeforeRemoteApply,
+          textAfterRemoteApply,
+        ),
+      );
     }
   } catch (error) {
     console.error(`Failed to sync edit to ${remoteLabel}:`, error);

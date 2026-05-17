@@ -12,7 +12,7 @@ import type fc from "fast-check";
 
 const parsed = Number(process.env.EG_WALKER_PROPERTY_RUNS);
 export const PROPERTY_RUNS: number =
-  Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 100;
+  Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.floor(parsed)) : 100;
 
 export const fcParams = (
   overrides?: fc.Parameters<unknown>,

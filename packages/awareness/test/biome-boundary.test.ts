@@ -49,6 +49,20 @@ function parseOwnBiomeConfig<T>(source: string): T {
 
 let workDir: string;
 
+function cleanupWorkDir(): void {
+  if (workDir) {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+// `afterAll` covers the normal path; the process-exit hook is a
+// belt-and-suspenders safety net for the case where vitest crashes
+// (or the worker is killed) between beforeAll and afterAll. Without
+// it, the temp dir would be orphaned in os.tmpdir() on crash. Both
+// callbacks are idempotent — rmSync with { force: true } on a
+// missing path is a no-op.
+process.on("exit", cleanupWorkDir);
+
 beforeAll(() => {
   workDir = mkdtempSync(join(tmpdir(), "awareness-biome-boundary-"));
   mkdirSync(join(workDir, "src"));
@@ -62,11 +76,7 @@ beforeAll(() => {
   );
 });
 
-afterAll(() => {
-  if (workDir) {
-    rmSync(workDir, { recursive: true, force: true });
-  }
-});
+afterAll(cleanupWorkDir);
 
 function lintImport(specifier: string): { exitCode: number; output: string } {
   // Per-call fixture name so concurrent test execution (vitest's

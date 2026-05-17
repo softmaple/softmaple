@@ -250,11 +250,13 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
 
     it("only contains the documented string-literal values", () => {
       // Cheap structural check guarding against accidental enum-shape drift.
-      expect(Object.values(REPLAY_SOURCE)).toEqual([
-        "incremental",
-        "partial",
-        "full",
-      ]);
+      // Use `arrayContaining` + length so re-ordering the const object
+      // doesn't break the test for reasons unrelated to the contract.
+      const values = Object.values(REPLAY_SOURCE);
+      expect(values).toHaveLength(3);
+      expect(values).toEqual(
+        expect.arrayContaining(["incremental", "partial", "full"]),
+      );
     });
   });
 });

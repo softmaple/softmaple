@@ -127,6 +127,15 @@ describe("mapSelectionThroughOperation: delete", () => {
       to: 8,
     });
   });
+
+  it("collapses a selection whose endpoints extend past the deletion edges", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 5, to: 9 }, deleteAt(3, 10)),
+    ).toEqual({
+      from: 3,
+      to: 3,
+    });
+  });
 });
 
 describe("mapSelectionThroughOperation: invariants", () => {
@@ -147,6 +156,12 @@ describe("mapSelectionThroughOperation: invariants", () => {
     expect(
       mapSelectionThroughOperation({ from: 9, to: 3 }, insertAt(5, 2)),
     ).toEqual({ from: 3, to: 11 });
+  });
+
+  it("normalises reversed input before mapping a delete overlap", () => {
+    expect(
+      mapSelectionThroughOperation({ from: 9, to: 3 }, deleteAt(5, 2)),
+    ).toEqual({ from: 3, to: 7 });
   });
 
   it("maps equivalent forward and reversed ranges identically at insert boundaries", () => {

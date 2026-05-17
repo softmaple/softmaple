@@ -85,6 +85,15 @@ export interface EngineStats {
    * a slowdown.
    */
   readonly sequenceRecordCount: number;
+  /**
+   * High-water mark of {@link sequenceRecordCount} across the engine's
+   * lifetime. Sampled after each `apply` (and after the initial-text
+   * placeholder is seeded in `reset`). Useful for benchmarks because the
+   * steady-state `sequenceRecordCount` can hide transient pressure during a
+   * heavy concurrent merge — the peak surfaces that pressure even when
+   * later deletes/coalescing have shrunk the live record set.
+   */
+  readonly peakSequenceRecordCount: number;
 }
 
 export interface GenerateOptions {

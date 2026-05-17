@@ -67,6 +67,7 @@ export class EgWalkerEngine {
   private advanceCount = 0;
   private nonConflictingRunCount = 0;
   private fullReplayCount = 0;
+  private peakSequenceRecordCount = 0;
   private placeholderCounter = 0;
 
   generate(
@@ -100,6 +101,7 @@ export class EgWalkerEngine {
         nonConflictingRunCount: this.nonConflictingRunCount,
         fullReplayCount: this.fullReplayCount,
         sequenceRecordCount: this.itemsById.size,
+        peakSequenceRecordCount: this.peakSequenceRecordCount,
       },
     };
   }
@@ -154,6 +156,7 @@ export class EgWalkerEngine {
       nonConflictingRunCount: this.nonConflictingRunCount,
       fullReplayCount: this.fullReplayCount,
       sequenceRecordCount: this.itemsById.size,
+      peakSequenceRecordCount: this.peakSequenceRecordCount,
     };
   }
 
@@ -175,6 +178,7 @@ export class EgWalkerEngine {
       const transformed = this.apply(event);
       this.currentVersion = new Set([event.id]);
       this.nonConflictingRunCount++;
+      this.samplePeakSequenceRecordCount();
       return transformed;
     }
 
@@ -193,7 +197,22 @@ export class EgWalkerEngine {
     const transformed = this.apply(event);
     this.currentVersion = new Set([event.id]);
     this.fullReplayCount++;
+    this.samplePeakSequenceRecordCount();
     return transformed;
+  }
+
+  /**
+   * Update the high-water mark for {@link sequenceRecordCount}. Sampling
+   * after each `apply` (and after the initial-text placeholder seed in
+   * `reset`) is sufficient: every record creation goes through `apply` or
+   * the placeholder seed path, and the post-apply sample captures any
+   * mid-apply growth that splits/inserts produced.
+   */
+  private samplePeakSequenceRecordCount(): void {
+    const live = this.itemsById.size;
+    if (live > this.peakSequenceRecordCount) {
+      this.peakSequenceRecordCount = live;
+    }
   }
 
   /**
@@ -240,6 +259,7 @@ export class EgWalkerEngine {
     this.advanceCount = 0;
     this.nonConflictingRunCount = 0;
     this.fullReplayCount = 0;
+    this.peakSequenceRecordCount = 0;
     this.placeholderCounter = 0;
 
     const graphEvents = options.eventGraph?.getTopologicalOrder() ?? events;
@@ -282,6 +302,7 @@ export class EgWalkerEngine {
     };
     this.sequence.push(placeholder);
     this.itemsById.set(placeholder.id, placeholder);
+    this.samplePeakSequenceRecordCount();
   }
 
   private nextPlaceholderId(): EventId {

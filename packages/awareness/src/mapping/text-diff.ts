@@ -7,6 +7,10 @@
  * `oldText` and `newText` and bail out at the first divergence.
  */
 
+/**
+ * @deprecated Use `findChangedSpan` instead. This helper assumes exactly one
+ * insert and can produce incorrect positions for replacements.
+ */
 export const findInsertPosition = (
   oldText: string,
   newText: string,
@@ -20,6 +24,10 @@ export const findInsertPosition = (
   return oldText.length;
 };
 
+/**
+ * @deprecated Use `findChangedSpan` instead. This helper assumes exactly one
+ * delete and can produce incorrect positions for replacements.
+ */
 export const findDeletePosition = (
   oldText: string,
   newText: string,
@@ -81,6 +89,11 @@ export const findChangedSpan = (
   return { prefix, suffix };
 };
 
+/**
+ * @deprecated Use `findChangedSpan` instead. This helper assumes a
+ * same-length-or-equivalent replacement shape and can produce incorrect
+ * ranges for mixed-length edits.
+ */
 export const findDifferingRange = (
   oldText: string,
   newText: string,

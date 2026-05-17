@@ -1,5 +1,8 @@
 import { config } from "@softmaple/eslint-config/base";
-import { egWalkerCollaborationPatterns } from "@softmaple/eslint-config/collaboration-layers";
+import {
+  combinePatterns,
+  egWalkerCollaborationPatterns,
+} from "@softmaple/eslint-config/collaboration-layers";
 
 const ENGINE_INTERNALS_PATTERNS = [
   {
@@ -26,18 +29,19 @@ export default [
   },
   {
     // Core and graph layers additionally must not reach into
-    // engine/internals/*. Combine both pattern sets here because
-    // flat-config rule merging replaces — it does not concat — when
-    // the same rule is reconfigured.
+    // engine/internals/*. `combinePatterns` re-applies the eg-walker
+    // collaboration patterns alongside the engine-internals boundary
+    // because flat-config rule reconfiguration replaces — it does not
+    // concat — when the same rule fires again.
     files: ["src/core/**/*.ts", "src/graph/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
-          patterns: [
-            ...egWalkerCollaborationPatterns,
-            ...ENGINE_INTERNALS_PATTERNS,
-          ],
+          patterns: combinePatterns(
+            egWalkerCollaborationPatterns,
+            ENGINE_INTERNALS_PATTERNS,
+          ),
         },
       ],
     },

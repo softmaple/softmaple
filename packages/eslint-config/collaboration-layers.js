@@ -72,6 +72,18 @@ export const egWalkerCollaborationPatterns = [
 ];
 
 /**
+ * Concatenate one or more `no-restricted-imports` pattern arrays into
+ * a single array. Useful because flat-config rule reconfiguration
+ * *replaces* rather than concats, so a more specific config block
+ * that wants to layer additional patterns on top of
+ * `egWalkerCollaborationPatterns` has to spread both sets manually.
+ *
+ * @param {...Array<object>} patternSets
+ * @returns {Array<object>}
+ */
+export const combinePatterns = (...patternSets) => patternSets.flat();
+
+/**
  * Flat ESLint config block that enforces the eg-walker layering rules
  * on all TypeScript sources in the consuming package.
  *

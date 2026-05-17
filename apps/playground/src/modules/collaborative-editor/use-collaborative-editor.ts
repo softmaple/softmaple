@@ -5,6 +5,7 @@ import {
   useTextareaSelectionSync,
 } from "@softmaple/awareness/hooks";
 import {
+  findChangedSpan,
   POSITION_OPERATION_TYPE,
   type PositionOperation,
 } from "@softmaple/awareness/mapping";
@@ -18,61 +19,9 @@ import {
   useState,
 } from "react";
 
-export type {
-  TextareaSelection,
-  UseTextareaSelectionSyncResult,
-} from "@softmaple/awareness/hooks";
-export {
-  mapTextareaSelectionThroughOperation,
-  useTextareaSelectionSync,
-} from "@softmaple/awareness/hooks";
-export type { PositionOperation } from "@softmaple/awareness/mapping";
-export {
-  findDeletePosition,
-  findDifferingRange,
-  findInsertPosition,
-  POSITION_OPERATION_TYPE,
-} from "@softmaple/awareness/mapping";
-
 export type LocalEdit = {
   readonly mappingOperations: readonly PositionOperation[];
   readonly apply: (replica: EgWalkerReplica) => void;
-};
-
-export type DifferingSpan = {
-  readonly prefix: number;
-  readonly suffix: number;
-  readonly oldEnd: number;
-  readonly newEnd: number;
-};
-
-export const findChangedSpan = (
-  oldText: string,
-  newText: string,
-): DifferingSpan => {
-  const minLength = Math.min(oldText.length, newText.length);
-  let prefix = 0;
-
-  while (prefix < minLength && oldText[prefix] === newText[prefix]) {
-    prefix++;
-  }
-
-  let suffix = 0;
-  while (
-    suffix < oldText.length - prefix &&
-    suffix < newText.length - prefix &&
-    oldText[oldText.length - suffix - 1] ===
-      newText[newText.length - suffix - 1]
-  ) {
-    suffix++;
-  }
-
-  return {
-    prefix,
-    suffix,
-    oldEnd: oldText.length - suffix,
-    newEnd: newText.length - suffix,
-  };
 };
 
 export const computeLocalEdit = (
@@ -161,15 +110,19 @@ export const runReplicaChange = async (
     return;
   }
 
-  // Capture cursor positions before any state mutation so we can restore the
-  // local cursor and map the remote cursor through the local operation(s).
-  localSync.captureSelection();
+  // Capture cursor positions into local vars (not just the hook's shared ref)
+  // so a concurrent edit firing during the await below cannot overwrite the
+  // selection this handler will restore.
+  const localSelection = localSync.captureSelection();
   const remoteSelection = remoteSync.captureSelection();
 
+  // Snapshot the event graph length before applying so we walk exactly the
+  // events this edit produced, without assuming "one replica call = one
+  // event" or N == mappingOperations.length.
+  const eventsBeforeApply = localReplica.exportEventGraph().length;
   edit.apply(localReplica);
+  const newEvents = localReplica.exportEventGraph().slice(eventsBeforeApply);
 
-  const events = localReplica.exportEventGraph();
-  const newEvents = events.slice(-edit.mappingOperations.length);
   const appliedMappingOperations: PositionOperation[] = [];
   try {
     for (const [index, remoteEvent] of newEvents.entries()) {
@@ -185,7 +138,7 @@ export const runReplicaChange = async (
   }
 
   setLocalText(localReplica.getText());
-  localSync.restoreSelection();
+  localSync.restoreSelection(localSelection);
 
   setRemoteText(remoteReplica.getText());
   if (remoteSelection && appliedMappingOperations.length > 0) {

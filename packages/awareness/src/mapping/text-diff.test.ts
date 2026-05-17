@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findChangedSpan,
   findDeletePosition,
   findDifferingRange,
   findInsertPosition,
@@ -105,5 +106,64 @@ describe("findDifferingRange", () => {
       start: 2,
       end: 2,
     });
+  });
+});
+
+describe("findChangedSpan", () => {
+  it("returns zero-length span for equal strings", () => {
+    expect(findChangedSpan("abc", "abc")).toEqual({ prefix: 3, suffix: 0 });
+  });
+
+  it("identifies a pure prefix insert", () => {
+    expect(findChangedSpan("world", "hello world")).toEqual({
+      prefix: 0,
+      suffix: 5,
+    });
+  });
+
+  it("identifies a pure suffix delete", () => {
+    expect(findChangedSpan("hello world", "hello")).toEqual({
+      prefix: 5,
+      suffix: 0,
+    });
+  });
+
+  it("identifies a same-length middle replacement", () => {
+    // "abc" + "XYZ" + "def" → "abc" + "123" + "def"
+    expect(findChangedSpan("abcXYZdef", "abc123def")).toEqual({
+      prefix: 3,
+      suffix: 3,
+    });
+  });
+
+  it("identifies a net-insertion middle replacement", () => {
+    // "abc" + "XYZ" + "def" → "abc" + "12345" + "def"
+    expect(findChangedSpan("abcXYZdef", "abc12345def")).toEqual({
+      prefix: 3,
+      suffix: 3,
+    });
+  });
+
+  it("identifies a net-deletion middle replacement", () => {
+    // "abc" + "12345" + "def" → "abc" + "XY" + "def"
+    expect(findChangedSpan("abc12345def", "abcXYdef")).toEqual({
+      prefix: 3,
+      suffix: 3,
+    });
+  });
+
+  it("does not double-count overlapping prefix and suffix on shrinks", () => {
+    // Prefix walks "ab" (matches), then stops at index 2. Suffix walks back
+    // through "b" and "a" but must not cross into the prefix — `suffix` is
+    // capped by the remaining length on each side.
+    expect(findChangedSpan("abab", "ab")).toEqual({ prefix: 2, suffix: 0 });
+  });
+
+  it("handles insert into empty string", () => {
+    expect(findChangedSpan("", "abc")).toEqual({ prefix: 0, suffix: 0 });
+  });
+
+  it("handles delete to empty string", () => {
+    expect(findChangedSpan("abc", "")).toEqual({ prefix: 0, suffix: 0 });
   });
 });

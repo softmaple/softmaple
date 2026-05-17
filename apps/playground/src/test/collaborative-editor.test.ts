@@ -1,3 +1,4 @@
+import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
 import { EgWalkerReplica } from "@softmaple/eg-walker";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -5,10 +6,7 @@ import {
   findDifferingRange,
   findInsertPosition,
 } from "../lib/text-diff";
-import {
-  computeLocalEdit,
-  POSITION_OPERATION_TYPE,
-} from "../modules/collaborative-editor/use-collaborative-editor";
+import { computeLocalEdit } from "../modules/collaborative-editor/use-collaborative-editor";
 
 interface MockEgWalkerReplica {
   insert: (position: number, text: string) => void;

@@ -1,11 +1,13 @@
+import type {
+  TextareaSelection,
+  UseTextareaSelectionSyncResult,
+} from "@softmaple/awareness/hooks";
 import { EgWalkerReplica } from "@softmaple/eg-walker";
 import type { ChangeEvent, Dispatch, SetStateAction } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   computeLocalEdit,
   runReplicaChange,
-  type TextareaSelection,
-  type UseTextareaSelectionSyncResult,
 } from "../modules/collaborative-editor/use-collaborative-editor";
 
 const applyLocalEditToReplicaPair = (
@@ -19,9 +21,9 @@ const applyLocalEditToReplicaPair = (
     return;
   }
 
+  const eventsBeforeApply = localReplica.exportEventGraph().length;
   edit.apply(localReplica);
-  const events = localReplica.exportEventGraph();
-  const newEvents = events.slice(-edit.mappingOperations.length);
+  const newEvents = localReplica.exportEventGraph().slice(eventsBeforeApply);
   for (const event of newEvents) {
     remoteReplica.applyRemoteEvent(event);
   }

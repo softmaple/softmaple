@@ -9,6 +9,8 @@ export {
   type PositionRange,
 } from "./position-operation";
 export {
+  type ChangedSpan,
+  findChangedSpan,
   findDeletePosition,
   findDifferingRange,
   findInsertPosition,

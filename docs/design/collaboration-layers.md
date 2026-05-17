@@ -176,12 +176,14 @@ running `pnpm --filter @softmaple/awareness lint` against a fixture
 import; CI catches regressions because the package's `lint` task is
 already in the `turbo run lint` pipeline.
 
-If you need to add a new editor framework, extend
-`EDITOR_FRAMEWORK_PATTERNS` in
-`packages/eslint-config/collaboration-layers.js` **and** the matching
-`style/noRestrictedImports` block in `packages/awareness/biome.jsonc`
-in the same change. The two configs must stay in sync; the doc above
-describes the contract both implement.
+If you need to add a new editor framework, extend the
+module-internal `EDITOR_FRAMEWORK_PATTERNS` constant inside
+`packages/eslint-config/collaboration-layers.js` (it is intentionally
+not exported — there is no out-of-module consumer) **and** the
+matching `style/noRestrictedImports` block in
+`packages/awareness/biome.jsonc` in the same change. The two configs
+must stay in sync; the doc above describes the contract both
+implement.
 
 ## When to update this doc
 

@@ -13,10 +13,29 @@ import {
 } from "./textarea-selection-sync";
 
 export type UseTextareaSelectionSyncResult = {
+  /**
+   * Capture the textarea's current DOM selection.
+   */
   readonly captureSelection: () => TextareaSelection | null;
+  /**
+   * Restore a selection immediately against the textarea's current value.
+   *
+   * The returned selection reflects that synchronous restore and may be
+   * clamped to the current value length. If React commits a textarea value
+   * change in the same batch, the hook re-applies the requested selection
+   * after commit against the new value.
+   */
   readonly restoreSelection: (
     selection?: TextareaSelection | null,
   ) => TextareaSelection | null;
+  /**
+   * Map a selection through an operation and restore it immediately.
+   *
+   * The returned selection reflects the synchronous restore against the
+   * textarea's current value. When the textarea value changes in the same
+   * React batch, the post-commit layout effect restores the mapped selection
+   * again against the new value.
+   */
   readonly mapAndRestoreSelection: (
     operation: PositionOperation,
     selection?: TextareaSelection | null,
@@ -152,6 +171,8 @@ export const useTextareaSelectionSync = (
     [captureSelection, restoreSelection],
   );
 
+  // Intentionally runs after every commit so a restore requested in the same
+  // batch as a textarea value update can be re-applied after the new value lands.
   useLayoutEffect(() => {
     const pendingSelection = pendingRestoreRef.current;
     if (!pendingSelection) {

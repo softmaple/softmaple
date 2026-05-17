@@ -124,6 +124,10 @@ export default defineConfig({
           __dirname,
           "src/hooks/use-peers-in-block.ts",
         ),
+        "hooks/use-textarea-selection-sync": path.resolve(
+          __dirname,
+          "src/hooks/use-textarea-selection-sync.ts",
+        ),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,

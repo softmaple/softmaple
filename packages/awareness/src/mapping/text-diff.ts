@@ -52,6 +52,11 @@ export type ChangedSpan = {
  *   - `insertedText  = newText.slice(prefix, newText.length - suffix)`
  *
  * Both can be zero (pure insert, pure delete, or no-op).
+ *
+ * Encoding convention: prefix is consumed greedily first, then suffix. So
+ * equal strings return `{ prefix: len, suffix: 0 }` rather than the
+ * symmetrically-valid `{ prefix: 0, suffix: len }`. Consumers that derive
+ * `deletedLength` / `insertedText` from the result are unaffected.
  */
 export const findChangedSpan = (
   oldText: string,

@@ -104,6 +104,57 @@ describe("collaborative editor utilities", () => {
     });
   });
 
+  it("restores the local selection captured at handler-start, not whatever a later capture would return", async () => {
+    // Regression guard for the explicit-pass fix: localSync.captureSelection's
+    // return value is stored in a local var and passed explicitly to
+    // restoreSelection, so a concurrent edit's overwrite of the hook's shared
+    // ref cannot leak into this handler's restore. If someone reverts to
+    // `localSync.restoreSelection()` (no args), the mock receives `undefined`
+    // and this test fails.
+    const localReplica = new EgWalkerReplica("local");
+    const remoteReplica = new EgWalkerReplica("remote");
+
+    const capturedAtHandlerStart: TextareaSelection = {
+      selectionStart: 1,
+      selectionEnd: 1,
+      selectionDirection: "none",
+    };
+    const wouldBeFromAConcurrentEdit: TextareaSelection = {
+      selectionStart: 99,
+      selectionEnd: 99,
+      selectionDirection: "none",
+    };
+    const localCapture = vi
+      .fn<() => TextareaSelection | null>()
+      .mockReturnValueOnce(capturedAtHandlerStart)
+      .mockReturnValue(wouldBeFromAConcurrentEdit);
+    const localRestore = vi.fn();
+    const localSync: UseTextareaSelectionSyncResult = {
+      captureSelection: localCapture,
+      restoreSelection: localRestore,
+      mapAndRestoreSelection: vi.fn(),
+    };
+
+    await runReplicaChange(
+      {
+        target: { value: "x" },
+      } as ChangeEvent<HTMLTextAreaElement>,
+      {
+        localReplica,
+        remoteReplica,
+        localSync,
+        remoteSync: createTextareaSelectionSync(null),
+        setLocalText: vi.fn(),
+        setRemoteText: vi.fn(),
+        remoteLabel: "remote",
+      },
+    );
+
+    expect(localRestore).toHaveBeenCalledTimes(1);
+    expect(localRestore).toHaveBeenCalledWith(capturedAtHandlerStart);
+    expect(localRestore).not.toHaveBeenCalledWith(wouldBeFromAConcurrentEdit);
+  });
+
   it("does not remap remote selection for buffered remote events", async () => {
     const localReplica = new EgWalkerReplica("local");
     const remoteReplica = new EgWalkerReplica("remote");

@@ -13,6 +13,7 @@ import { EgWalkerReplica } from "@softmaple/eg-walker";
 import {
   type ChangeEvent,
   type Dispatch,
+  type RefObject,
   type SetStateAction,
   useCallback,
   useRef,
@@ -66,7 +67,7 @@ export const computeLocalEdit = (
   };
 };
 
-export const mapSelectionThroughOperations = (
+const mapSelectionThroughOperations = (
   selection: TextareaSelection,
   operations: readonly PositionOperation[],
 ): TextareaSelection =>
@@ -148,7 +149,20 @@ export const runReplicaChange = async (
   }
 };
 
-export const useCollaborativeEditor = () => {
+export type UseCollaborativeEditorResult = {
+  readonly replica1Text: string;
+  readonly replica2Text: string;
+  readonly replica1Ref: RefObject<HTMLTextAreaElement | null>;
+  readonly replica2Ref: RefObject<HTMLTextAreaElement | null>;
+  readonly handleReplica1Change: (
+    event: ChangeEvent<HTMLTextAreaElement>,
+  ) => Promise<void>;
+  readonly handleReplica2Change: (
+    event: ChangeEvent<HTMLTextAreaElement>,
+  ) => Promise<void>;
+};
+
+export const useCollaborativeEditor = (): UseCollaborativeEditorResult => {
   const [replica1Text, setReplica1Text] = useState("");
   const [replica2Text, setReplica2Text] = useState("");
   const [api1] = useState(() => new EgWalkerReplica("replica-1"));

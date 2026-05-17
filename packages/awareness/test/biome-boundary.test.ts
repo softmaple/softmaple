@@ -18,15 +18,16 @@ const REAL_BIOME_JSONC = join(PACKAGE_ROOT, "biome.jsonc");
 
 // Resolve the biome CLI directly via @biomejs/biome's package.json so
 // the test does not depend on `pnpm` (or any other launcher) being on
-// PATH inside the test runtime. The bin entry is a Node JS shim that
-// dispatches to the platform-specific native binary, so invoking it
-// with process.execPath works everywhere @biomejs/biome installs.
+// PATH inside the test runtime. Read the bin path from the package's
+// own `bin` field rather than hardcoding `bin/biome` so the test
+// keeps working if @biomejs/biome ever relocates its entry point.
+// The bin entry is a Node JS shim that dispatches to the
+// platform-specific native binary, so invoking it with
+// process.execPath works everywhere @biomejs/biome installs.
 const require = createRequire(import.meta.url);
-const BIOME_BIN = join(
-  dirname(require.resolve("@biomejs/biome/package.json")),
-  "bin",
-  "biome",
-);
+const biomePkgPath = require.resolve("@biomejs/biome/package.json");
+const biomePkg = require(biomePkgPath) as { bin: { biome: string } };
+const BIOME_BIN = join(dirname(biomePkgPath), biomePkg.bin.biome);
 
 /**
  * Parse the package's own `biome.jsonc` into a plain object.

@@ -45,6 +45,27 @@ describe("mapTextareaSelectionThroughOperation", () => {
     });
   });
 
+  it("leaves a cursor at the remote delete index unchanged", () => {
+    const mapped = mapTextareaSelectionThroughOperation(
+      {
+        selectionStart: 5,
+        selectionEnd: 5,
+        selectionDirection: "none",
+      },
+      {
+        type: POSITION_OPERATION_TYPE.Delete,
+        index: 5,
+        length: 3,
+      },
+    );
+
+    expect(mapped).toEqual({
+      selectionStart: 5,
+      selectionEnd: 5,
+      selectionDirection: "none",
+    });
+  });
+
   it("collapses a selection covered by a remote delete", () => {
     const mapped = mapTextareaSelectionThroughOperation(
       {

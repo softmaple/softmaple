@@ -52,10 +52,7 @@ export {
   usePresenceLayerOffset,
 } from "./components";
 export {
-  mapTextareaSelectionThroughOperation,
   type PeerCursor,
-  type TextareaSelection,
-  type TextareaSelectionDirection,
   type UsePeerCursorsOptions,
   type UsePeersInBlockOptions,
   useActivityByType,

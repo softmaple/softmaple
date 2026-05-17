@@ -128,7 +128,7 @@ describe("mapSelectionThroughOperation: delete", () => {
     });
   });
 
-  it("collapses a selection fully covered by a deletion to the deletion start", () => {
+  it("collapses a selection whose endpoints extend past the deletion edges", () => {
     expect(
       mapSelectionThroughOperation({ from: 5, to: 9 }, deleteAt(3, 10)),
     ).toEqual({

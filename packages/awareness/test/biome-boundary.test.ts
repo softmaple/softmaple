@@ -29,14 +29,20 @@ const BIOME_BIN = join(
 );
 
 /**
- * Parse the package's `biome.jsonc` into a plain object. JSONC is a
- * strict subset of JS object-literal syntax (quoted keys, `//` and
- * `/* *\/` comments, trailing commas), so wrapping the file contents
- * in `return (...)` and handing it to `Function` is a one-line
- * alternative to pulling in a JSONC parser. Safe here because the
- * input is our own checked-in config — no untrusted content path.
+ * Parse the package's own `biome.jsonc` into a plain object.
+ *
+ * JSONC is a strict subset of JS object-literal syntax (quoted keys,
+ * `//` and `/* *\/` comments, trailing commas), so wrapping the file
+ * contents in `return (...)` and handing it to `Function` is a
+ * one-line alternative to pulling in a JSONC parser.
+ *
+ * **Intentionally lax**: this helper would also accept JS that is not
+ * valid JSONC (computed expressions, identifier references, etc.).
+ * That is acceptable *only* because the single caller passes our own
+ * checked-in `biome.jsonc`. Do not generalise this to untrusted input
+ * — use a real JSONC parser if the call site changes.
  */
-function parseJsonc<T>(source: string): T {
+function parseOwnBiomeConfig<T>(source: string): T {
   return new Function(`return (${source});`)() as T;
 }
 
@@ -45,7 +51,7 @@ let workDir: string;
 beforeAll(() => {
   workDir = mkdtempSync(join(tmpdir(), "awareness-biome-boundary-"));
   mkdirSync(join(workDir, "src"));
-  const realConfig = parseJsonc<{ files?: unknown }>(
+  const realConfig = parseOwnBiomeConfig<{ files?: unknown }>(
     readFileSync(REAL_BIOME_JSONC, "utf8"),
   );
   realConfig.files = { includes: ["**/*.ts"] };

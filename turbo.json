@@ -24,6 +24,9 @@
       "cache": false,
       "outputLogs": "full"
     },
+    "test": {
+      "env": ["EG_WALKER_PROPERTY_RUNS"]
+    },
     "dev": {
       "dependsOn": ["^db:generate"],
       "cache": false,

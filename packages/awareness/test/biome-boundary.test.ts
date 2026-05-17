@@ -69,7 +69,13 @@ afterAll(() => {
 });
 
 function lintImport(specifier: string): { exitCode: number; output: string } {
-  const fixture = join(workDir, "src", "fixture.ts");
+  // Per-call fixture name so concurrent test execution (vitest's
+  // describe.concurrent, or a future default flip) cannot race two
+  // cases on the same file. Sanitise the specifier into a filename-
+  // safe slug; the resulting path stays inside workDir so cleanup
+  // via rmSync(workDir) still catches every fixture.
+  const slug = specifier.replace(/[^a-z0-9]+/gi, "_");
+  const fixture = join(workDir, "src", `fixture-${slug}.ts`);
   writeFileSync(fixture, `import "${specifier}";\n`);
   try {
     // No `cwd` override: biome resolves its config from the linted

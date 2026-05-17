@@ -17,11 +17,6 @@ import {
   EditorSurface,
 } from "@/components/awareness-collab/EditorSurface";
 import { TrainerPicker } from "@/components/awareness-collab/TrainerPicker";
-import {
-  findDeletePosition,
-  findDifferingRange,
-  findInsertPosition,
-} from "@/lib/text-diff";
 import { getTrainer } from "@/modules/awareness-collab/trainers";
 import { useAwarenessAdapter } from "@/modules/awareness-collab/use-awareness-adapter";
 
@@ -314,23 +309,15 @@ function CollabSession({
       const oldText = replica.getText();
       if (newText === oldText) return;
 
-      if (newText.length > oldText.length) {
-        const insertPos = findInsertPosition(oldText, newText);
-        const insertedText = newText.slice(
-          insertPos,
-          insertPos + (newText.length - oldText.length),
-        );
-        replica.insert(insertPos, insertedText);
-      } else if (newText.length < oldText.length) {
-        const deletePos = findDeletePosition(oldText, newText);
-        const deleteCount = oldText.length - newText.length;
-        replica.delete(deletePos, deleteCount);
-      } else {
-        const { start, end } = findDifferingRange(oldText, newText);
-        const deleteCount = end - start + 1;
-        const replacementText = newText.slice(start, end + 1);
-        replica.delete(start, deleteCount);
-        replica.insert(start, replacementText);
+      const { prefix, suffix } = findChangedSpan(oldText, newText);
+      const deletedLength = oldText.length - prefix - suffix;
+      const insertedText = newText.slice(prefix, newText.length - suffix);
+
+      if (deletedLength > 0) {
+        replica.delete(prefix, deletedLength);
+      }
+      if (insertedText.length > 0) {
+        replica.insert(prefix, insertedText);
       }
 
       setText(replica.getText());

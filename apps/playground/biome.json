@@ -35,6 +35,31 @@
           "level": "warn"
         }
       },
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@/lib/text-diff": {
+                "importNames": [
+                  "findInsertPosition",
+                  "findDeletePosition",
+                  "findDifferingRange"
+                ],
+                "message": "Use findChangedSpan for text diffs; the special-case diff helpers are deprecated."
+              },
+              "@softmaple/awareness/mapping": {
+                "importNames": [
+                  "findInsertPosition",
+                  "findDeletePosition",
+                  "findDifferingRange"
+                ],
+                "message": "Use findChangedSpan for text diffs; the special-case diff helpers are deprecated."
+              }
+            }
+          }
+        }
+      },
       "suspicious": {
         "noExplicitAny": {
           "level": "error"

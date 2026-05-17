@@ -1,124 +1,83 @@
-import { describe, it, expect } from "vitest";
-import {
-  findInsertPosition,
-  findDeletePosition,
-  findDifferingRange,
-} from "../../lib/text-diff";
+import { describe, expect, it } from "vitest";
+import { findChangedSpan } from "../../lib/text-diff";
 
 describe("text-diff utilities", () => {
-  describe("findInsertPosition", () => {
-    it("should find insertion at the beginning", () => {
-      const oldText = "world";
-      const newText = "hello world";
-      expect(findInsertPosition(oldText, newText)).toBe(0);
+  describe("findChangedSpan", () => {
+    it("should identify no-op changes", () => {
+      expect(findChangedSpan("hello", "hello")).toEqual({
+        prefix: 5,
+        suffix: 0,
+      });
     });
 
-    it("should find insertion in the middle", () => {
-      const oldText = "hello world";
-      const newText = "hello beautiful world";
-      expect(findInsertPosition(oldText, newText)).toBe(6);
+    it("should identify insertion at the beginning", () => {
+      expect(findChangedSpan("world", "hello world")).toEqual({
+        prefix: 0,
+        suffix: 5,
+      });
     });
 
-    it("should find insertion at the end", () => {
-      const oldText = "hello";
-      const newText = "hello world";
-      expect(findInsertPosition(oldText, newText)).toBe(5);
+    it("should identify insertion in the middle", () => {
+      expect(findChangedSpan("hello world", "hello beautiful world")).toEqual({
+        prefix: 6,
+        suffix: 5,
+      });
     });
 
-    it("should handle empty old text", () => {
-      const oldText = "";
-      const newText = "hello";
-      expect(findInsertPosition(oldText, newText)).toBe(0);
+    it("should identify insertion at the end", () => {
+      expect(findChangedSpan("hello", "hello world")).toEqual({
+        prefix: 5,
+        suffix: 0,
+      });
     });
 
-    it("should handle single character insertion", () => {
-      const oldText = "hllo";
-      const newText = "hello";
-      expect(findInsertPosition(oldText, newText)).toBe(1);
-    });
-  });
-
-  describe("findDeletePosition", () => {
-    it("should find deletion at the beginning", () => {
-      const oldText = "hello world";
-      const newText = "world";
-      expect(findDeletePosition(oldText, newText)).toBe(0);
+    it("should identify deletion at the beginning", () => {
+      expect(findChangedSpan("hello world", "world")).toEqual({
+        prefix: 0,
+        suffix: 5,
+      });
     });
 
-    it("should find deletion in the middle", () => {
-      const oldText = "hello beautiful world";
-      const newText = "hello world";
-      expect(findDeletePosition(oldText, newText)).toBe(6);
+    it("should identify deletion in the middle", () => {
+      expect(findChangedSpan("hello beautiful world", "hello world")).toEqual({
+        prefix: 6,
+        suffix: 5,
+      });
     });
 
-    it("should find deletion at the end", () => {
-      const oldText = "hello world";
-      const newText = "hello";
-      expect(findDeletePosition(oldText, newText)).toBe(5);
+    it("should identify deletion at the end", () => {
+      expect(findChangedSpan("hello world", "hello")).toEqual({
+        prefix: 5,
+        suffix: 0,
+      });
     });
 
-    it("should handle complete deletion", () => {
-      const oldText = "hello";
-      const newText = "";
-      expect(findDeletePosition(oldText, newText)).toBe(0);
+    it("should identify same-length replacement", () => {
+      expect(findChangedSpan("hello world", "hello WORLD")).toEqual({
+        prefix: 6,
+        suffix: 0,
+      });
     });
 
-    it("should handle single character deletion", () => {
-      const oldText = "hello";
-      const newText = "hllo";
-      expect(findDeletePosition(oldText, newText)).toBe(1);
-    });
-  });
-
-  describe("findDifferingRange", () => {
-    it("should find differing range at the beginning", () => {
-      const oldText = "hello world";
-      const newText = "HELLO world";
-      const result = findDifferingRange(oldText, newText);
-      expect(result).toEqual({ start: 0, end: 4 });
+    it("should identify replacement with net insertion", () => {
+      expect(findChangedSpan("abcXYZdef", "abc12345def")).toEqual({
+        prefix: 3,
+        suffix: 3,
+      });
     });
 
-    it("should find differing range in the middle", () => {
-      const oldText = "hello world";
-      const newText = "hello WORLD";
-      const result = findDifferingRange(oldText, newText);
-      expect(result).toEqual({ start: 6, end: 10 });
+    it("should identify replacement with net deletion", () => {
+      expect(findChangedSpan("abc12345def", "abcXYdef")).toEqual({
+        prefix: 3,
+        suffix: 3,
+      });
     });
 
-    it("should find differing range at the end", () => {
-      const oldText = "hello world";
-      const newText = "hello worlD";
-      const result = findDifferingRange(oldText, newText);
-      expect(result).toEqual({ start: 10, end: 10 });
-    });
-
-    it("should find differing range for complete replacement", () => {
-      const oldText = "abc";
-      const newText = "xyz";
-      const result = findDifferingRange(oldText, newText);
-      expect(result).toEqual({ start: 0, end: 2 });
-    });
-
-    it("should find differing range for single character", () => {
-      const oldText = "hello";
-      const newText = "heLlo";
-      const result = findDifferingRange(oldText, newText);
-      expect(result).toEqual({ start: 2, end: 2 });
-    });
-
-    it("should handle multiple differing ranges by finding outermost bounds", () => {
-      const oldText = "abcde";
-      const newText = "xbcdz";
-      const result = findDifferingRange(oldText, newText);
-      expect(result).toEqual({ start: 0, end: 4 });
-    });
-
-    it("should handle identical strings", () => {
-      const oldText = "hello";
-      const newText = "hello";
-      const result = findDifferingRange(oldText, newText);
-      // When strings are identical, start > end
-      expect(result.start).toBeGreaterThan(result.end);
+    it("should handle complete replacement", () => {
+      expect(findChangedSpan("abc", "xyz")).toEqual({
+        prefix: 0,
+        suffix: 0,
+      });
     });
   });
 });

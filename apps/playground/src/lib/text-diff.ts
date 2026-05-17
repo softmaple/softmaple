@@ -6,8 +6,4 @@
  * `@/lib/text-diff` imports working.
  */
 
-export {
-  findDeletePosition,
-  findDifferingRange,
-  findInsertPosition,
-} from "@softmaple/awareness/mapping";
+export { findChangedSpan } from "@softmaple/awareness/mapping";

@@ -185,6 +185,54 @@ matching `style/noRestrictedImports` block in
 must stay in sync; the doc above describes the contract both
 implement.
 
+## Generic position contract
+
+The collaboration foundation must work for plain text, rich text, block,
+canvas/whiteboard, node-based, and IDE-like editors. To keep the two
+packages editor-class agnostic, positions and ranges flow through the
+following shapes:
+
+- **1D index** — for sequence editors (plain text, rich text linearised).
+  Used by `@softmaple/eg-walker`'s `ExternalOperation`
+  (`{ type: "insert", index, text }` / `{ type: "delete", index, length }`)
+  and by `@softmaple/awareness`'s `mapping/` subpath
+  (`PositionOperation`, `PositionRange`). Indices are in whichever unit
+  the caller picks (UTF-16 code units, graphemes, UTF-32 code points);
+  the package does not interpret them.
+- **`{ blockId, offset }`** — for block / node editors. The canonical
+  cursor and selection shape in `@softmaple/awareness`
+  (`CursorPosition`, `SelectionRange`). Plain-text editors use a single
+  synthetic `blockId` (e.g. `"root"`); rich-text editors map one
+  `blockId` per block. `selection.from` / `selection.to` are 1D offsets
+  inside the addressed block.
+- **`{ x, y }`** (or an arbitrary opaque blob) — for canvas /
+  whiteboard editors. Canvas-style positions are **not** baked into
+  awareness's core types. Adapters carry them through `PresenceMeta`'s
+  open-ended `[key: string]: unknown` field, and renderer components
+  (`LiveCursor`, `SelectionHighlight`) already accept post-resolved
+  screen coordinates (`LiveCursorPoint { x, y }`, `HighlightRect { x,
+  y, width, height }`) so a canvas integration never has to round-trip
+  through `CursorPosition`.
+
+### Audit (issue [#727](https://github.com/softmaple/softmaple/issues/727))
+
+Both packages' public types were audited against the contract above and
+found clean — no editor-class assumption has leaked in:
+
+- `@softmaple/eg-walker` public types (`packages/eg-walker/src/types/`)
+  describe index-based operations on a 1D sequence and never reference
+  blocks, selections, DOM, or any editor framework.
+- `@softmaple/awareness` public types
+  (`packages/awareness/src/types/`) use `{ blockId, offset }` for
+  cursors and `{ blockId, from, to }` for selections; `SelectionRange`
+  is normalised to `min/max` at use sites rather than enforcing
+  `from < to` at the type level. The `mapping/` subpath operates on
+  1D indices and is explicitly scoped to sequence editors. Renderer
+  components accept resolved screen coordinates (`x`, `y`, rect)
+  rather than baking textarea geometry into a position type; the
+  textarea-specific helpers in `utils/textarea-rects.ts` are renderer
+  utilities, not part of the position contract.
+
 ## When to update this doc
 
 Update this page whenever any of the following change:

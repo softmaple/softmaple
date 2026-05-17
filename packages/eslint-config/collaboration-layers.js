@@ -27,7 +27,7 @@ const AWARENESS_PATTERNS = [
 
 /**
  * Editor frameworks that `@softmaple/eg-walker` MUST NOT depend on.
- * The awareness package mirrors this list in its own `biome.json`
+ * The awareness package mirrors this list in its own `biome.jsonc`
  * because it does not run ESLint — keep them in sync when changing
  * either side (see `docs/design/collaboration-layers.md`).
  *

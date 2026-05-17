@@ -30,6 +30,9 @@ export const workspaceAlias: Readonly<Record<string, string>> = {
   "@softmaple/awareness/mapping": fromPlayground(
     "../../packages/awareness/src/mapping/index.ts",
   ),
+  "@softmaple/awareness/hooks": fromPlayground(
+    "../../packages/awareness/src/hooks/index.ts",
+  ),
   "@softmaple/awareness": fromPlayground(
     "../../packages/awareness/src/index.ts",
   ),

@@ -113,9 +113,7 @@ describe("property: columnar codec round-trip", () => {
         }),
         (params) => {
           const trace = runTrace(params);
-          if (trace.events.length === 0) {
-            return;
-          }
+          fc.pre(trace.appliedEdits > 0);
 
           const sourceGraph = new EventGraph();
           for (const event of trace.events.map(cloneEvent)) {

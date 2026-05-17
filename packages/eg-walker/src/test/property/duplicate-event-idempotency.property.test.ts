@@ -34,9 +34,7 @@ describe("property: duplicate event delivery is idempotent", () => {
         fc.integer({ min: 0, max: 0x7fff_ffff }),
         (params, baselineSeed, duplicateSeed) => {
           const trace = runTrace(params);
-          if (trace.events.length === 0) {
-            return;
-          }
+          fc.pre(trace.appliedEdits > 0);
 
           const baseline = new EgWalkerReplica("baseline", params.initialText);
           for (const event of shuffleWithSeed(trace.events, baselineSeed)) {

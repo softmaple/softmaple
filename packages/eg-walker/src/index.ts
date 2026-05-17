@@ -12,5 +12,7 @@ export { ReplayWalker } from "./core/replay-walker";
 export type { WalkerConfig, WalkResult } from "./core/replay-walker";
 export { EventGraph } from "./graph/event-graph";
 export { OPERATION_TYPE } from "./constants/operation-types";
+export { REPLAY_SOURCE } from "./constants/replay-source";
+export type { ReplaySource } from "./constants/replay-source";
 
 export * from "./types";

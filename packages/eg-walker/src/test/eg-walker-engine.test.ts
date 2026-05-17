@@ -283,6 +283,10 @@ describe("ReplayWalker", () => {
       advanceCount: 0,
       nonConflictingRunCount: 0,
       fullReplayCount: 0,
+      // The engine seeds the initial-text placeholder during `reset` and
+      // samples the peak right after, so even an empty event list reports
+      // 1 live record.
+      peakSequenceRecordCount: 1,
     });
     expect(walker.getPrepareVersion()).toEqual(new Set());
     expect(walker.getEffectVersion()).toEqual(new Set());

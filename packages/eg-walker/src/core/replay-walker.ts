@@ -23,6 +23,13 @@ export interface WalkResult {
    * to the full prepare/effect replay path.
    */
   readonly fullReplayCount: number;
+  /**
+   * High-water mark of the engine's live record count over the walk.
+   * Same semantics as {@link EngineStats.peakSequenceRecordCount} — the
+   * one-shot walker uses a single engine for its lifetime, so the engine
+   * peak and the walk peak coincide.
+   */
+  readonly peakSequenceRecordCount: number;
 }
 
 /**
@@ -59,6 +66,7 @@ export class ReplayWalker {
       advanceCount: generated.stats.advanceCount,
       nonConflictingRunCount: generated.stats.nonConflictingRunCount,
       fullReplayCount: generated.stats.fullReplayCount,
+      peakSequenceRecordCount: generated.stats.peakSequenceRecordCount,
     };
   }
 

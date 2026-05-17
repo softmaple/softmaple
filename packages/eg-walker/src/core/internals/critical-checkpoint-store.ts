@@ -9,11 +9,32 @@ export type CriticalCheckpoint = ReplayCheckpoint;
 
 export class CriticalCheckpointStore {
   private checkpoints: ReadonlyArray<CriticalCheckpoint> = [];
+  private hitCount = 0;
+  private missCount = 0;
 
   constructor(private readonly analyzer: CriticalVersionAnalyzer) {}
 
   get count(): number {
     return this.checkpoints.length;
+  }
+
+  /**
+   * Cumulative count of {@link pickFor} calls that returned a usable
+   * checkpoint (i.e. a previously-recorded critical version dominated the
+   * graph's current frontier). Paired with {@link misses} to give benches
+   * a direct signal for partial-replay coverage on a given trace.
+   */
+  get hits(): number {
+    return this.hitCount;
+  }
+
+  /**
+   * Cumulative count of {@link pickFor} calls that returned `null`,
+   * forcing the caller (today: `EgWalkerReplica.advanceWithEvent`) into a
+   * full replay because no retained checkpoint dominated the divergence.
+   */
+  get misses(): number {
+    return this.missCount;
   }
 
   maybeAdvance(graph: EventGraph, document: string): void {
@@ -41,9 +62,11 @@ export class CriticalCheckpointStore {
         continue;
       }
       if (this.analyzer.isCritical(graph, candidate.version)) {
+        this.hitCount++;
         return candidate;
       }
     }
+    this.missCount++;
     return null;
   }
 

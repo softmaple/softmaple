@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { REPLAY_SOURCE } from "../constants/replay-source";
 import { EgWalkerReplica } from "../core/replica";
+import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../types";
 
 const buildLinearHistory = (count: number): GraphEvent[] => {
@@ -188,6 +189,21 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
         timestamp: 1,
       });
       expect(api.getReplayStats().lastReplaySource).toBe(REPLAY_SOURCE.FULL);
+    });
+
+    it("is 'full' when the constructor adopts a prebuilt graph with events", () => {
+      // The constructor calls `fullReplay()` directly when handed an event
+      // graph that already has events, bypassing `advanceWithEvent`. That
+      // path is distinct from the cold-start `applyRemoteEvent` route and
+      // needs its own guard so a future refactor doesn't leave
+      // `lastReplaySource` null after a deserialize round-trip.
+      const prebuilt = new EventGraph();
+      for (const event of buildLinearHistory(3)) {
+        prebuilt.addEvent(event);
+      }
+      const api = new EgWalkerReplica("r1", "", prebuilt);
+      expect(api.getReplayStats().lastReplaySource).toBe(REPLAY_SOURCE.FULL);
+      expect(api.getReplayStats().fullReplays).toBe(1);
     });
 
     it("transitions through full → incremental → partial → full across a known sequence", () => {

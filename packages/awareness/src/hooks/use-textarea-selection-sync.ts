@@ -23,6 +23,11 @@ export type UseTextareaSelectionSyncResult = {
   ) => TextareaSelection | null;
 };
 
+type PendingTextareaSelectionRestore = {
+  readonly selection: TextareaSelection;
+  readonly value: string;
+};
+
 const normalizeSelectionDirection = (
   direction: string | null,
 ): TextareaSelectionDirection => {
@@ -36,33 +41,62 @@ const normalizeSelectionDirection = (
   return "none";
 };
 
+const flipSelectionDirection = (
+  direction: TextareaSelectionDirection | undefined,
+): TextareaSelectionDirection => {
+  if (direction === "forward") {
+    return "backward";
+  }
+  if (direction === "backward") {
+    return "forward";
+  }
+  return "none";
+};
+
 const clampSelectionToValue = (
   selection: TextareaSelection,
   valueLength: number,
 ): Required<TextareaSelection> => {
-  const selectionStart = Math.min(
+  const clampedStart = Math.min(
     Math.max(selection.selectionStart, 0),
     valueLength,
   );
-  const selectionEnd = Math.min(
-    Math.max(selection.selectionEnd, 0),
-    valueLength,
-  );
+  const clampedEnd = Math.min(Math.max(selection.selectionEnd, 0), valueLength);
+  const selectionStart = Math.min(clampedStart, clampedEnd);
+  const selectionEnd = Math.max(clampedStart, clampedEnd);
+  const selectionDirection =
+    clampedStart > clampedEnd
+      ? flipSelectionDirection(selection.selectionDirection)
+      : (selection.selectionDirection ?? "none");
+
   return {
     selectionStart,
     selectionEnd,
     selectionDirection:
-      selectionStart === selectionEnd
-        ? "none"
-        : (selection.selectionDirection ?? "none"),
+      selectionStart === selectionEnd ? "none" : selectionDirection,
   };
+};
+
+const restoreToTextarea = (
+  textarea: HTMLTextAreaElement,
+  selection: TextareaSelection,
+): Required<TextareaSelection> => {
+  const nextSelection = clampSelectionToValue(selection, textarea.value.length);
+  textarea.setSelectionRange(
+    nextSelection.selectionStart,
+    nextSelection.selectionEnd,
+    nextSelection.selectionDirection,
+  );
+  return nextSelection;
 };
 
 export const useTextareaSelectionSync = (
   textareaRef: RefObject<HTMLTextAreaElement | null>,
 ): UseTextareaSelectionSyncResult => {
   const selectionRef = useRef<TextareaSelection | null>(null);
-  const pendingRestoreRef = useRef<TextareaSelection | null>(null);
+  const pendingRestoreRef = useRef<PendingTextareaSelectionRestore | null>(
+    null,
+  );
 
   const captureSelection = useCallback((): TextareaSelection | null => {
     const textarea = textareaRef.current;
@@ -81,53 +115,36 @@ export const useTextareaSelectionSync = (
     return selection;
   }, [textareaRef]);
 
-  const restoreToTextarea = useCallback(
-    (selection: TextareaSelection): Required<TextareaSelection> | null => {
+  const restoreSelection = useCallback(
+    (selection: TextareaSelection | null = selectionRef.current) => {
       const textarea = textareaRef.current;
-      if (!textarea) {
+      if (!selection || !textarea) {
         return null;
       }
 
-      const nextSelection = clampSelectionToValue(
+      const restoredSelection = restoreToTextarea(textarea, selection);
+      pendingRestoreRef.current = {
         selection,
-        textarea.value.length,
-      );
-      textarea.setSelectionRange(
-        nextSelection.selectionStart,
-        nextSelection.selectionEnd,
-        nextSelection.selectionDirection,
-      );
-      return nextSelection;
+        value: textarea.value,
+      };
+      selectionRef.current = restoredSelection;
+      return restoredSelection;
     },
     [textareaRef],
   );
 
-  const restoreSelection = useCallback(
-    (selection: TextareaSelection | null = selectionRef.current) => {
-      if (!selection) {
-        return null;
-      }
-
-      pendingRestoreRef.current = selection;
-      selectionRef.current = selection;
-      restoreToTextarea(selection);
-      return selection;
-    },
-    [restoreToTextarea],
-  );
-
   const mapAndRestoreSelection = useCallback(
-    (
-      operation: PositionOperation,
-      selection: TextareaSelection | null = selectionRef.current ??
-        captureSelection(),
-    ) => {
-      if (!selection) {
+    (operation: PositionOperation, selection?: TextareaSelection | null) => {
+      const currentSelection =
+        selection === undefined
+          ? (selectionRef.current ?? captureSelection())
+          : selection;
+      if (!currentSelection) {
         return null;
       }
 
       const mappedSelection = mapTextareaSelectionThroughOperation(
-        selection,
+        currentSelection,
         operation,
       );
       return restoreSelection(mappedSelection);
@@ -142,8 +159,15 @@ export const useTextareaSelectionSync = (
     }
 
     pendingRestoreRef.current = null;
-    const restoredSelection = restoreToTextarea(pendingSelection);
-    selectionRef.current = restoredSelection ?? pendingSelection;
+    const textarea = textareaRef.current;
+    if (!textarea || textarea.value === pendingSelection.value) {
+      return;
+    }
+
+    selectionRef.current = restoreToTextarea(
+      textarea,
+      pendingSelection.selection,
+    );
   });
 
   return useMemo(

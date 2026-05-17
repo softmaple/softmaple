@@ -558,9 +558,9 @@ export function createEgWalkerReplica(
  *   or a delete that fully overlaps already-deleted characters).
  * - Multiple ops → `null` (a delete that coalesced into disjoint runs;
  *   the caller would need a multi-op API to represent it faithfully).
- * - One op → mapped to `PositionOperation`. Insert payloads strip the
- *   `text` field because awareness consumers only need the length in
- *   UTF-16 code units.
+ * - One op → mapped to `PositionOperation`. Insert payloads convert
+ *   `text` to `length` (UTF-16 code units) because awareness consumers
+ *   address positions by length, not by inserted string.
  */
 function toPositionOperation(
   transformed: ReadonlyArray<ExternalOperation>,

@@ -80,6 +80,14 @@ const mapSelectionThroughOperations = (
     selection,
   );
 
+/**
+ * Derive the mapping operation(s) implied by the remote replica's
+ * pre/post text. Reuses `computeLocalEdit` — same plain-text 1D diff
+ * shape, different replica — so the engine's `null` cases (partial/full
+ * replay, multi-op coalesced delete, visible no-op) still produce a
+ * faithful mapping op for selection remap. Visible no-ops correctly
+ * return an empty array because both texts compare equal.
+ */
 const computeMappingOperationsFromTextChange = (
   oldText: string,
   newText: string,

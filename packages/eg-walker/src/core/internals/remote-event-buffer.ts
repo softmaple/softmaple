@@ -16,9 +16,11 @@ interface RemoteEventBufferDeps {
   /**
    * Apply the event on top of existing replica state. The dependency
    * returns the position operation produced by the integration when the
-   * engine can attribute one to this event in isolation (incremental
-   * advance, single transformed op); otherwise `null` (partial/full
-   * replay, multi-op coalesced delete, visible no-op).
+   * engine can attribute one to this event in isolation: the incremental
+   * advance path and the cold-start single-event full replay both
+   * surface the single transformed op. Returns `null` for partial/full
+   * replay on an existing engine (concurrent integration retransforms
+   * multiple events), multi-op coalesced deletes, and visible no-ops.
    *
    * See `IntegratedApplyRemoteEventResult.operation` for the contract.
    */
@@ -82,6 +84,12 @@ export class RemoteEventBuffer {
     try {
       graph.addEvent(event);
     } catch (error) {
+      // `EventAlreadyExistsError` overlaps with the fast-path check at
+      // the top of this method; the graph is the source of truth.
+      // `MissingParentError` here would be a race (we just checked
+      // every parent via `findMissingParent` and found none missing) —
+      // there is no useful new status to surface, so we coalesce it
+      // into `DUPLICATE_RESULT` rather than letting it propagate.
       if (
         error instanceof EventAlreadyExistsError ||
         error instanceof MissingParentError

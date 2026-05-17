@@ -271,7 +271,10 @@ That works in practice but is brittle:
   through a coalescing path, IME compositions in #704) would silently
   flip the inferred outcome.
 - It materialises the full text twice per event. The structural API
-  has zero per-event text cost.
+  is free on the common (incremental-advance) path; consumers that
+  need a mapping op only fall back to a text diff when the engine
+  returns `operation: null` (partial/full replay, multi-op coalesced
+  delete, visible no-op), which is the minority case.
 - It conflates "integrated" with "buffered" with "duplicate" into a
   single boolean. The new API distinguishes them so a buffered event
   cannot be mistaken for an integrated one.

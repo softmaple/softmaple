@@ -1,6 +1,6 @@
 import { act, type JSX, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { POSITION_OPERATION_TYPE } from "../mapping/position-operation";
 import {
   type UseTextareaSelectionSyncResult,
@@ -173,6 +173,31 @@ describe("useTextareaSelectionSync", () => {
     expect(textarea.selectionStart).toBe(5);
     expect(textarea.selectionEnd).toBe(5);
     expect(textarea.selectionDirection).toBe("none");
+    harness.unmount();
+  });
+
+  it("does not replay a restore on a later unrelated value update", async () => {
+    const harness = renderHarness("hello world");
+    const textarea = harness.getTextarea();
+    const api = harness.getApi();
+    api.restoreSelection({
+      selectionStart: 0,
+      selectionEnd: 0,
+      selectionDirection: "none",
+    });
+    textarea.setSelectionRange(5, 5, "none");
+
+    await Promise.resolve();
+
+    const setSelectionRange = vi.spyOn(textarea, "setSelectionRange");
+    act(() => {
+      harness.setValue("hello world!");
+    });
+
+    expect(setSelectionRange).not.toHaveBeenCalled();
+    expect(textarea.selectionStart).not.toBe(0);
+    expect(textarea.selectionEnd).not.toBe(0);
+    setSelectionRange.mockRestore();
     harness.unmount();
   });
 

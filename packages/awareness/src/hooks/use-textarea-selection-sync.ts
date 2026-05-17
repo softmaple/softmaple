@@ -46,8 +46,13 @@ export type UseTextareaSelectionSyncResult = {
 };
 
 type PendingTextareaSelectionRestore = {
+  readonly id: number;
   readonly selection: TextareaSelection;
   readonly value: string;
+};
+
+type PendingTextareaSelectionRestoreRef = {
+  current: PendingTextareaSelectionRestore | null;
 };
 
 const normalizeSelectionDirection = (
@@ -112,10 +117,22 @@ const restoreToTextarea = (
   return nextSelection;
 };
 
+const schedulePendingRestoreExpiration = (
+  restoreId: number,
+  pendingRestoreRef: PendingTextareaSelectionRestoreRef,
+): void => {
+  queueMicrotask(() => {
+    if (pendingRestoreRef.current?.id === restoreId) {
+      pendingRestoreRef.current = null;
+    }
+  });
+};
+
 export const useTextareaSelectionSync = (
   textareaRef: RefObject<HTMLTextAreaElement | null>,
 ): UseTextareaSelectionSyncResult => {
   const selectionRef = useRef<TextareaSelection | null>(null);
+  const restoreIdRef = useRef(0);
   const pendingRestoreRef = useRef<PendingTextareaSelectionRestore | null>(
     null,
   );
@@ -145,10 +162,14 @@ export const useTextareaSelectionSync = (
       }
 
       const restoredSelection = restoreToTextarea(textarea, selection);
+      const restoreId = restoreIdRef.current + 1;
+      restoreIdRef.current = restoreId;
       pendingRestoreRef.current = {
+        id: restoreId,
         selection,
         value: textarea.value,
       };
+      schedulePendingRestoreExpiration(restoreId, pendingRestoreRef);
       selectionRef.current = restoredSelection;
       return restoredSelection;
     },
@@ -176,6 +197,7 @@ export const useTextareaSelectionSync = (
 
   // Intentionally runs after every commit so a restore requested in the same
   // batch as a textarea value update can be re-applied after the new value lands.
+  // Pending restores expire in a microtask, so they cannot leak into later work.
   useLayoutEffect(() => {
     const pendingSelection = pendingRestoreRef.current;
     if (!pendingSelection) {

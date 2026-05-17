@@ -76,7 +76,12 @@ beforeAll(() => {
   );
 });
 
-afterAll(cleanupWorkDir);
+afterAll(() => {
+  cleanupWorkDir();
+  // Deregister the exit hook on the happy path so vitest watch-mode
+  // reloads do not accumulate listeners (Node warns past 10).
+  process.off("exit", cleanupWorkDir);
+});
 
 function lintImport(specifier: string): { exitCode: number; output: string } {
   // Per-call fixture name so concurrent test execution (vitest's

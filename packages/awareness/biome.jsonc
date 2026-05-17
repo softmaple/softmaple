@@ -1,0 +1,98 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
+  "vcs": {
+    "enabled": false,
+    "clientKind": "git",
+    "useIgnoreFile": false
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": [
+      "**/src/**/*",
+      "**/test/**/*",
+      "**/.storybook/**/*",
+      "**/package.json",
+      "**/tsconfig.json",
+      "**/tsup.config.ts",
+      "**/vitest.config.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "useArrowFunction": {
+          "level": "warn"
+        }
+      },
+      "suspicious": {
+        "noExplicitAny": {
+          "level": "error"
+        }
+      },
+      "style": {
+        // Collaboration-architecture layering (see
+        // docs/design/collaboration-layers.md). Biome's
+        // noRestrictedImports has a load-bearing quirk: bare
+        // specifiers containing `/` (like `@softmaple/eg-walker`,
+        // `lexical`, `slate`) MUST live in `paths`, not `patterns`,
+        // because the pattern matcher is gitignore-style and anchors
+        // around `/`, so an entry like `@softmaple/eg-walker` under
+        // `patterns.group` silently does not match
+        // `import "@softmaple/eg-walker"`. Globs
+        // (`@softmaple/eg-walker/**`, `@lexical/*`, etc.) stay in
+        // `patterns`. Keep this in sync with the matching ESLint rule
+        // in `packages/eslint-config/collaboration-layers.js`; the
+        // regression test in `test/biome-boundary.test.ts` will fail
+        // if the split is broken.
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@softmaple/eg-walker": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker.",
+              "lexical": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Lexical bindings belong in apps/* or a future bindings sub-path.",
+              "slate": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Slate bindings belong in apps/* or a future bindings sub-path."
+            },
+            "patterns": [
+              {
+                "group": ["@softmaple/eg-walker/**"],
+                "message": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker."
+              },
+              {
+                "group": ["lexical/**", "@lexical/*", "@lexical/*/**"],
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Lexical bindings belong in apps/* or a future bindings sub-path."
+              },
+              {
+                "group": ["prosemirror-*", "prosemirror-*/**"],
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; ProseMirror bindings belong in apps/* or a future bindings sub-path."
+              },
+              {
+                "group": ["slate/**", "slate-*", "slate-*/**"],
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Slate bindings belong in apps/* or a future bindings sub-path."
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "css": {
+    "parser": {
+      "cssModules": false,
+      "tailwindDirectives": true
+    }
+  },
+  "overrides": []
+}

@@ -40,7 +40,8 @@
       {
         "group": "Design Documents",
         "pages": [
-          "design/awareness-and-presence"
+          "design/awareness-and-presence",
+          "design/collaboration-layers"
         ]
       },
       {

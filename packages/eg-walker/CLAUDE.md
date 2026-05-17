@@ -3,6 +3,20 @@
 `@softmaple/eg-walker` implements the Eg-walker paper architecture directly.
 There is no legacy `crdt/` runtime layer.
 
+## Layering Rules (Source of Truth)
+
+The cross-package boundaries for `@softmaple/eg-walker`,
+`@softmaple/awareness`, and `apps/*` are defined in
+[`docs/design/collaboration-layers.md`](../../docs/design/collaboration-layers.md).
+That document is the source of truth and is enforced mechanically by
+the `egWalkerCollaborationConfig` export from
+`@softmaple/eslint-config/collaboration-layers`.
+
+In short, this package MUST NOT depend on `@softmaple/awareness`, on
+any editor framework (`lexical`, `prosemirror-*`, `slate` / `slate-*`),
+or expose anything other than index-based operations on its public
+API. Read the layering doc before adding or moving public exports.
+
 ## Current Structure
 
 ```text

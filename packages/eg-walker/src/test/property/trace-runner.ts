@@ -21,6 +21,15 @@ export interface TraceResult {
   readonly events: ReadonlyArray<GraphEvent>;
   readonly canonicalText: string;
   readonly finalTextPerReplica: ReadonlyMap<string, string>;
+  /**
+   * Count of edit instructions in `params.scripts` that actually produced
+   * a `GraphEvent`. Lower than the total instruction count when the
+   * runner skipped no-ops (empty insert, delete on empty text, zero-length
+   * delete). Property tests use this with `fc.pre` to reject iterations
+   * whose generated script collapsed to nothing, instead of silently
+   * passing on an empty trace.
+   */
+  readonly appliedEdits: number;
 }
 
 const snapPastSurrogate = (text: string, index: number): number => {
@@ -38,33 +47,43 @@ const snapPastSurrogate = (text: string, index: number): number => {
   return index;
 };
 
-const applyEdit = (replica: EgWalkerReplica, edit: EditInstruction): void => {
+/**
+ * Apply one edit instruction. Returns `true` if the edit actually
+ * produced a `GraphEvent` on the replica, `false` if it was a no-op
+ * (empty insert, delete on empty text, zero-length delete). The caller
+ * uses this to maintain {@link TraceResult.appliedEdits}.
+ */
+const applyEdit = (
+  replica: EgWalkerReplica,
+  edit: EditInstruction,
+): boolean => {
   const text = replica.getText();
   if (edit.kind === "insert") {
     if (edit.text.length === 0) {
-      return;
+      return false;
     }
     const rawIndex = Math.floor(edit.offsetSeed * (text.length + 1));
     const index = snapPastSurrogate(text, rawIndex);
     replica.insert(index, edit.text);
-    return;
+    return true;
   }
   if (text.length === 0) {
-    return;
+    return false;
   }
   const rawStart = Math.floor(edit.offsetSeed * text.length);
   const start = snapPastSurrogate(text, Math.min(rawStart, text.length - 1));
   if (start >= text.length) {
-    return;
+    return false;
   }
   const remaining = text.length - start;
   const rawLen = Math.max(1, Math.floor(edit.lengthSeed * remaining));
   const rawEnd = snapPastSurrogate(text, start + rawLen);
   const length = Math.min(rawEnd - start, remaining);
   if (length <= 0) {
-    return;
+    return false;
   }
   replica.delete(start, length);
+  return true;
 };
 
 const broadcast = (params: {
@@ -136,13 +155,16 @@ export const runTrace = (params: TraceParams): TraceResult => {
     0,
   );
   let stepCounter = 0;
+  let appliedEdits = 0;
   for (let step = 0; step < maxSteps; step++) {
     for (let r = 0; r < sims.length; r++) {
       const edits = scripts[r]!.edits;
       if (step >= edits.length) {
         continue;
       }
-      applyEdit(sims[r]!.replica, edits[step]!);
+      if (applyEdit(sims[r]!.replica, edits[step]!)) {
+        appliedEdits++;
+      }
       stepCounter++;
       if (stepCounter % syncEveryN === 0) {
         sync();
@@ -160,5 +182,6 @@ export const runTrace = (params: TraceParams): TraceResult => {
     events: aggregateEvents,
     canonicalText,
     finalTextPerReplica,
+    appliedEdits,
   };
 };

@@ -1,4 +1,9 @@
 export {
+  mapTextareaSelectionThroughOperation,
+  type TextareaSelection,
+  type TextareaSelectionDirection,
+} from "./textarea-selection-sync";
+export {
   useActivityByType,
   useRecentActivity,
   useUserActivity,

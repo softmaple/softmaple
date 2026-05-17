@@ -1,4 +1,10 @@
 import {
+  findChangedSpan,
+  POSITION_OPERATION_TYPE,
+  type PositionOperation,
+} from "@softmaple/awareness/mapping";
+import {
+  APPLY_REMOTE_EVENT_STATUS,
   EgWalkerReplica,
   type EventId,
   type GraphEvent,
@@ -25,6 +31,51 @@ export const Route = createFileRoute("/demo/awareness-collab")({
 
 const ROOM_ID = "awareness-collab-demo";
 const SYNC_CHANNEL = `eg-walker-sync:${ROOM_ID}`;
+
+/**
+ * Reconstruct the visible position operation(s) implied by a remote
+ * replica's pre/post text. Used as a fallback when
+ * `applyRemoteEvent` returns `status: "integrated"` with `operation: null`
+ * (partial/full replay, multi-op coalesced delete, or a visible no-op
+ * the engine cannot attribute to a single op). Mirrors
+ * `apps/playground/src/modules/collaborative-editor/use-collaborative-editor.ts`
+ * — same plain-text 1D diff shape, different replica path. Visible
+ * no-ops correctly return an empty array because both texts compare
+ * equal.
+ */
+const computeMappingOperationsFromTextChange = (
+  oldText: string,
+  newText: string,
+): readonly PositionOperation[] => {
+  if (oldText === newText) return [];
+  const { prefix, suffix } = findChangedSpan(oldText, newText);
+  const deletedLength = oldText.length - prefix - suffix;
+  const insertedText = newText.slice(prefix, newText.length - suffix);
+  const operations: PositionOperation[] = [];
+  if (deletedLength > 0) {
+    operations.push({
+      type: POSITION_OPERATION_TYPE.Delete,
+      index: prefix,
+      length: deletedLength,
+    });
+  }
+  if (insertedText.length > 0) {
+    operations.push({
+      type: POSITION_OPERATION_TYPE.Insert,
+      index: prefix,
+      length: insertedText.length,
+    });
+  }
+  return operations;
+};
+
+const isSamePositionOperation = (
+  left: PositionOperation,
+  right: PositionOperation,
+): boolean =>
+  left.type === right.type &&
+  left.index === right.index &&
+  left.length === right.length;
 
 function AwarenessCollabDemo() {
   const [trainer, setTrainer] = useState<string | null>(null);
@@ -86,6 +137,14 @@ function CollabSession({
   // dedupe — this just bounds the iteration.
   const scannedPrefixRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Mapping operations accumulated by `acceptRemote` for the events
+  // integrated in the current React tick. The post-commit layout effect
+  // in `EditorSurface` drains and applies them to the captured local
+  // selection so the caret rides through peer inserts/deletes correctly.
+  // Owned here (not in `EditorSurface`) so a snapshot of N events
+  // accumulates ops across the whole batch before the single `setText`
+  // triggers the layout effect.
+  const pendingMappingOperationsRef = useRef<PositionOperation[]>([]);
 
   // Separate BroadcastChannel for CRDT event sync. Awareness adapter
   // already opens its own channel for presence — keeping them isolated
@@ -95,12 +154,75 @@ function CollabSession({
     const channel = new BroadcastChannel(SYNC_CHANNEL);
     broadcastRef.current = channel;
     const selfId = userInfo.userId;
+    const pendingByMissingParent = new Map<EventId, GraphEvent[]>();
+    const bufferedEventIds = new Set<EventId>();
+
+    const getIntegratedEventIds = (): Set<EventId> =>
+      new Set(replica.exportEventGraph().map((event) => event.id));
+
+    const findMissingParent = (event: GraphEvent): EventId | null => {
+      const integratedIds = getIntegratedEventIds();
+      for (const parentId of event.parentVersion) {
+        if (!integratedIds.has(parentId)) {
+          return parentId;
+        }
+      }
+      return null;
+    };
+
+    const bufferRemote = (event: GraphEvent, missingParent: EventId): void => {
+      if (bufferedEventIds.has(event.id)) return;
+      const waiters = pendingByMissingParent.get(missingParent) ?? [];
+      waiters.push(event);
+      pendingByMissingParent.set(missingParent, waiters);
+      bufferedEventIds.add(event.id);
+    };
+
+    const drainPendingChildren = (parentId: EventId): void => {
+      const waiters = pendingByMissingParent.get(parentId);
+      if (!waiters) return;
+      pendingByMissingParent.delete(parentId);
+      for (const waiter of waiters) {
+        bufferedEventIds.delete(waiter.id);
+        acceptRemote(waiter);
+      }
+    };
 
     const acceptRemote = (event: GraphEvent): void => {
-      replica.applyRemoteEvent(event);
+      if (getIntegratedEventIds().has(event.id)) return;
+      const missingParent = findMissingParent(event);
+      if (missingParent) {
+        bufferRemote(event, missingParent);
+        return;
+      }
+      const textBefore = replica.getText();
+      const result = replica.applyRemoteEvent(event);
+      const textAfter = replica.getText();
       // Mark as published-from-elsewhere so our outbound loop doesn't
       // bounce it back to peers.
       publishedIdsRef.current.add(event.id);
+      if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) return;
+      const fallbackOperations = computeMappingOperationsFromTextChange(
+        textBefore,
+        textAfter,
+      );
+      const [fallbackOperation] = fallbackOperations;
+      if (
+        result.operation &&
+        fallbackOperations.length === 1 &&
+        fallbackOperation &&
+        isSamePositionOperation(result.operation, fallbackOperation)
+      ) {
+        pendingMappingOperationsRef.current.push(result.operation);
+        drainPendingChildren(event.id);
+        return;
+      }
+      // Engine couldn't attribute a single op (partial/full replay or
+      // multi-op coalesced delete), or `applyRemoteEvent` flushed buffered
+      // child events as a side effect. Reconstruct from pre/post text so
+      // the selection mapping still covers the whole visible commit.
+      pendingMappingOperationsRef.current.push(...fallbackOperations);
+      drainPendingChildren(event.id);
     };
 
     channel.onmessage = (e: MessageEvent<SyncMessage>) => {
@@ -275,6 +397,7 @@ function CollabSession({
             onTextChange={handleTextChange}
             textareaRef={textareaRef}
             trainerId={trainerId}
+            pendingMappingOperationsRef={pendingMappingOperationsRef}
           />
         </AwarenessOverlay>
 

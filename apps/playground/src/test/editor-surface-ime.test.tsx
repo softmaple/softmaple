@@ -44,17 +44,25 @@ vi.mock("@/components/awareness-collab/BlockActivityBadge", () => ({
   BlockActivityBadge: () => null,
 }));
 
+import {
+  POSITION_OPERATION_TYPE,
+  type PositionOperation,
+} from "@softmaple/awareness/mapping";
+import type { RefObject } from "react";
 import { useRef } from "react";
 import { EditorSurface } from "@/components/awareness-collab/EditorSurface";
 
 const Harness = ({
   text,
   onTextChange,
+  pendingMappingOperationsRef,
 }: {
   text: string;
   onTextChange: (next: string) => void;
+  pendingMappingOperationsRef?: RefObject<PositionOperation[]>;
 }): React.ReactNode => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const defaultPendingMappingOperationsRef = useRef<PositionOperation[]>([]);
   return (
     <EditorSurface
       blockId="block-1"
@@ -62,6 +70,9 @@ const Harness = ({
       onTextChange={onTextChange}
       textareaRef={textareaRef}
       trainerId="trainer-1"
+      pendingMappingOperationsRef={
+        pendingMappingOperationsRef ?? defaultPendingMappingOperationsRef
+      }
     />
   );
 };
@@ -165,3 +176,148 @@ describe("EditorSurface — IME composition handling", () => {
     expect(onTextChange).toHaveBeenCalledWith("hello");
   });
 });
+
+describe("EditorSurface — remote selection mapping", () => {
+  it("maps the caret through a remote insert before the cursor", () => {
+    // Arrange
+    const pendingMappingOperationsRef = createPendingMappingOperationsRef();
+    const { container, rerender } = render(
+      <Harness
+        text="hello"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+    const textarea = getTextarea(container);
+    textarea.setSelectionRange(3, 3);
+    pendingMappingOperationsRef.current.push({
+      type: POSITION_OPERATION_TYPE.Insert,
+      index: 1,
+      length: 2,
+    });
+
+    // Act
+    rerender(
+      <Harness
+        text="hXXello"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+
+    // Assert
+    expect(textarea.selectionStart).toBe(5);
+    expect(textarea.selectionEnd).toBe(5);
+    expect(pendingMappingOperationsRef.current).toEqual([]);
+  });
+
+  it("maps the caret through a remote delete before the cursor", () => {
+    // Arrange
+    const pendingMappingOperationsRef = createPendingMappingOperationsRef();
+    const { container, rerender } = render(
+      <Harness
+        text="hello world"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+    const textarea = getTextarea(container);
+    textarea.setSelectionRange(5, 5);
+    pendingMappingOperationsRef.current.push({
+      type: POSITION_OPERATION_TYPE.Delete,
+      index: 1,
+      length: 3,
+    });
+
+    // Act
+    rerender(
+      <Harness
+        text="ho world"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+
+    // Assert
+    expect(textarea.selectionStart).toBe(2);
+    expect(textarea.selectionEnd).toBe(2);
+  });
+
+  it("collapses the selection when a remote delete overlaps it", () => {
+    // Arrange
+    const pendingMappingOperationsRef = createPendingMappingOperationsRef();
+    const { container, rerender } = render(
+      <Harness
+        text="abcdefg"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+    const textarea = getTextarea(container);
+    textarea.setSelectionRange(2, 5);
+    pendingMappingOperationsRef.current.push({
+      type: POSITION_OPERATION_TYPE.Delete,
+      index: 1,
+      length: 5,
+    });
+
+    // Act
+    rerender(
+      <Harness
+        text="ag"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+
+    // Assert
+    expect(textarea.selectionStart).toBe(1);
+    expect(textarea.selectionEnd).toBe(1);
+  });
+
+  it("does not expand the selection for a remote insert at selection end", () => {
+    // Arrange
+    const pendingMappingOperationsRef = createPendingMappingOperationsRef();
+    const { container, rerender } = render(
+      <Harness
+        text="abcd"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+    const textarea = getTextarea(container);
+    textarea.setSelectionRange(1, 3);
+    pendingMappingOperationsRef.current.push({
+      type: POSITION_OPERATION_TYPE.Insert,
+      index: 3,
+      length: 2,
+    });
+
+    // Act
+    rerender(
+      <Harness
+        text="abcXXd"
+        onTextChange={vi.fn()}
+        pendingMappingOperationsRef={pendingMappingOperationsRef}
+      />,
+    );
+
+    // Assert
+    expect(textarea.selectionStart).toBe(1);
+    expect(textarea.selectionEnd).toBe(3);
+  });
+});
+
+// Helpers
+const createPendingMappingOperationsRef = (): RefObject<
+  PositionOperation[]
+> => ({
+  current: [],
+});
+
+const getTextarea = (container: HTMLElement): HTMLTextAreaElement => {
+  const textarea = container.querySelector("textarea");
+  expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+  if (!textarea) throw new Error("expected textarea");
+  return textarea;
+};

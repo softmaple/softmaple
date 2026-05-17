@@ -17,7 +17,19 @@ import {
   useUpdateSelection,
   useUpdateTyping,
 } from "@softmaple/awareness";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  mapTextareaSelectionThroughOperation,
+  type TextareaSelection,
+  useTextareaSelectionSync,
+} from "@softmaple/awareness/hooks";
+import type { PositionOperation } from "@softmaple/awareness/mapping";
+import {
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import { BlockActivityBadge } from "./BlockActivityBadge";
 
 /**
@@ -33,6 +45,16 @@ interface EditorSurfaceProps {
   readonly onTextChange: (newText: string) => void;
   readonly textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   readonly trainerId: string;
+  /**
+   * Mapping operations queued by the route's BroadcastChannel handler for
+   * remote events that have just been integrated into the local replica.
+   * The post-commit layout effect drains and applies them to the captured
+   * local selection so the caret rides through peer inserts/deletes
+   * instead of staying pinned at its raw byte offset. Owned by the route
+   * (a ref so accumulation across multiple events in one tick doesn't
+   * race React state); consumed exactly once per `text` commit.
+   */
+  readonly pendingMappingOperationsRef: RefObject<PositionOperation[]>;
 }
 
 export function EditorSurface({
@@ -41,11 +63,13 @@ export function EditorSurface({
   onTextChange,
   textareaRef,
   trainerId,
+  pendingMappingOperationsRef,
 }: EditorSurfaceProps) {
   const others = useOthers();
   const updateCursor = useUpdateCursor();
   const updateSelection = useUpdateSelection();
   const updateTyping = useUpdateTyping();
+  const textareaSelectionSync = useTextareaSelectionSync(textareaRef);
 
   const editorBoxRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<number | null>(null);
@@ -75,8 +99,16 @@ export function EditorSurface({
   //
   // Instead we own the DOM `value` imperatively here: on every commit
   // where `text` differs from the live DOM value, write it and restore
-  // the caret. Mid-composition we skip the write so we never collapse an
-  // in-progress IME composition.
+  // the caret via `useTextareaSelectionSync`. Mid-composition we skip
+  // the write so we never collapse an in-progress IME composition.
+  //
+  // When `pendingMappingOperationsRef` has entries, the route's
+  // BroadcastChannel handler integrated one or more remote events for
+  // this commit; chain the captured selection through those ops so a
+  // peer insert before the caret shifts it right (and a peer delete
+  // shifts it left / collapses overlapping selections) instead of
+  // leaving it pinned at the now-stale raw byte index.
+  //
   // `composingRef` is intentionally NOT in the dependency array — it's a
   // ref, and we read its current value at effect time. Adding it would
   // do nothing (refs don't trigger re-renders) and removing the
@@ -86,12 +118,22 @@ export function EditorSurface({
     if (!el) return;
     if (composingRef.current) return;
     if (el.value === text) return;
-    const { selectionStart, selectionEnd } = el;
+    const captured = textareaSelectionSync.captureSelection();
     el.value = text;
-    // setSelectionRange clamps to value.length internally, so peer
-    // inserts that shrink the doc past the local caret are safe.
-    el.setSelectionRange(selectionStart, selectionEnd);
-  }, [text, textareaRef]);
+    const operations = pendingMappingOperationsRef.current;
+    if (captured && operations.length > 0) {
+      const mapped = operations.reduce<TextareaSelection>(
+        (current, op) => mapTextareaSelectionThroughOperation(current, op),
+        captured,
+      );
+      textareaSelectionSync.restoreSelection(mapped);
+    } else {
+      // `restoreSelection` clamps to `value.length` internally, so peer
+      // inserts that shrink the doc past the local caret are safe.
+      textareaSelectionSync.restoreSelection(captured);
+    }
+    pendingMappingOperationsRef.current = [];
+  }, [text, textareaRef, textareaSelectionSync, pendingMappingOperationsRef]);
 
   // Clear typing indicator after a short idle period.
   useEffect(() => {

@@ -62,11 +62,11 @@ describe("mapTextareaSelectionThroughOperation", () => {
     expect(mapped).toEqual({
       selectionStart: 3,
       selectionEnd: 3,
-      selectionDirection: "forward",
+      selectionDirection: "none",
     });
   });
 
-  it("preserves backward selection direction while normalising offsets", () => {
+  it("preserves backward selection direction for a non-collapsed mapped selection", () => {
     const mapped = mapTextareaSelectionThroughOperation(
       {
         selectionStart: 4,
@@ -84,6 +84,48 @@ describe("mapTextareaSelectionThroughOperation", () => {
       selectionStart: 4,
       selectionEnd: 12,
       selectionDirection: "backward",
+    });
+  });
+
+  it("keeps a remote insert at the trailing boundary outside the selection", () => {
+    const mapped = mapTextareaSelectionThroughOperation(
+      {
+        selectionStart: 2,
+        selectionEnd: 6,
+        selectionDirection: "forward",
+      },
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 6,
+        length: 3,
+      },
+    );
+
+    expect(mapped).toEqual({
+      selectionStart: 2,
+      selectionEnd: 6,
+      selectionDirection: "forward",
+    });
+  });
+
+  it("shrinks a selection when a remote delete lands inside it", () => {
+    const mapped = mapTextareaSelectionThroughOperation(
+      {
+        selectionStart: 2,
+        selectionEnd: 10,
+        selectionDirection: "forward",
+      },
+      {
+        type: POSITION_OPERATION_TYPE.Delete,
+        index: 5,
+        length: 3,
+      },
+    );
+
+    expect(mapped).toEqual({
+      selectionStart: 2,
+      selectionEnd: 7,
+      selectionDirection: "forward",
     });
   });
 

@@ -14,7 +14,8 @@ export type TextareaSelection = {
  *
  * This helper is DOM-independent so the textarea hook can keep browser wiring
  * small while sharing the same operation-based selection behavior as other
- * awareness consumers.
+ * awareness consumers. Collapsed results clear direction because there is no
+ * longer a meaningful anchor/head orientation.
  */
 export const mapTextareaSelectionThroughOperation = (
   selection: TextareaSelection,
@@ -31,6 +32,9 @@ export const mapTextareaSelectionThroughOperation = (
   return {
     selectionStart: mapped.from,
     selectionEnd: mapped.to,
-    selectionDirection: selection.selectionDirection ?? "none",
+    selectionDirection:
+      mapped.from === mapped.to
+        ? "none"
+        : (selection.selectionDirection ?? "none"),
   };
 };

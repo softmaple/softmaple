@@ -67,14 +67,21 @@ describe("checkpoint-effectiveness", () => {
 
 afterAll(() => {
   if (lastIncremental) {
-    console.info(
-      formatStatsLine(
-        summariseReplica(
-          "checkpoint-effectiveness",
-          events.length,
-          lastIncremental,
-        ),
-      ),
+    const summary = summariseReplica(
+      "checkpoint-effectiveness",
+      events.length,
+      lastIncremental,
     );
+    console.info(formatStatsLine(summary));
+    // The whole point of this bench is to exercise the partial-replay path
+    // via `CriticalCheckpointStore.pickFor`. A regression that quietly
+    // skipped the checkpoint store (or never produced a usable checkpoint)
+    // would still report sensible wall-clock times, so guard the diagnostic
+    // here: the trace must produce strictly positive checkpoint hits.
+    if (summary.criticalCheckpointHits <= 0) {
+      throw new Error(
+        `checkpoint-effectiveness bench expected criticalCheckpointHits > 0, got ${summary.criticalCheckpointHits}`,
+      );
+    }
   }
 });

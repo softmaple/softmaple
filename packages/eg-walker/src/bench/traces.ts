@@ -9,6 +9,7 @@
  */
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+import type { ReplaySource } from "../constants/replay-source";
 import type { EgWalkerReplica } from "../core/replica";
 import type { EventId, GraphEvent } from "../types";
 
@@ -244,6 +245,10 @@ export interface BenchStatsSummary {
   readonly engineAdvances: number;
   readonly checkpointCount: number;
   readonly sequenceRecordCount: number;
+  readonly peakSequenceRecordCount: number;
+  readonly criticalCheckpointHits: number;
+  readonly criticalCheckpointMisses: number;
+  readonly lastReplaySource: ReplaySource | null;
 }
 
 /**
@@ -274,6 +279,10 @@ export const summariseReplica = (
     engineAdvances: stats.engineAdvances,
     checkpointCount: stats.checkpointCount,
     sequenceRecordCount: stats.sequenceRecordCount,
+    peakSequenceRecordCount: stats.peakSequenceRecordCount,
+    criticalCheckpointHits: stats.criticalCheckpointHits,
+    criticalCheckpointMisses: stats.criticalCheckpointMisses,
+    lastReplaySource: stats.lastReplaySource,
   };
 };
 
@@ -287,4 +296,8 @@ export const formatStatsLine = (summary: BenchStatsSummary): string =>
   ` retreats=${summary.engineRetreats}` +
   ` advances=${summary.engineAdvances}` +
   ` checkpoints=${summary.checkpointCount}` +
-  ` sequenceRecords=${summary.sequenceRecordCount}`;
+  ` sequenceRecords=${summary.sequenceRecordCount}` +
+  ` peakSequenceRecords=${summary.peakSequenceRecordCount}` +
+  ` checkpointHits=${summary.criticalCheckpointHits}` +
+  ` checkpointMisses=${summary.criticalCheckpointMisses}` +
+  ` lastReplaySource=${summary.lastReplaySource ?? "none"}`;

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Collaborative Text Editor", () => {
+  test.describe.configure({ mode: "serial" });
+
   test.beforeEach(async ({ page }) => {
     await page.goto("/demo/collaborative-editor");
     // Wait for DOM to load and editors to be rendered
@@ -79,7 +81,7 @@ test.describe("Collaborative Text Editor", () => {
     await expect(replica2).toHaveValue("hello", { timeout: 5000 });
 
     // Replace by selecting all and typing new text
-    await replica1.press("Control+A");
+    await replica1.press("ControlOrMeta+A");
     await replica1.pressSequentially("HELLO", { delay: 100 });
     await expect(replica2).toHaveValue("HELLO", { timeout: 5000 });
   });

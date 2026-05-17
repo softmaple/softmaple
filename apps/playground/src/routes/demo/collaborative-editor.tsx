@@ -1,18 +1,4 @@
 import {
-  mapTextareaSelectionThroughOperation,
-  type TextareaSelection,
-  type UseTextareaSelectionSyncResult,
-  useTextareaSelectionSync,
-} from "@softmaple/awareness/hooks";
-import {
-  findDeletePosition,
-  findDifferingRange,
-  findInsertPosition,
-  POSITION_OPERATION_TYPE,
-  type PositionOperation,
-} from "@softmaple/awareness/mapping";
-import { EgWalkerReplica } from "@softmaple/eg-walker";
-import {
   Card,
   CardContent,
   CardHeader,
@@ -20,194 +6,21 @@ import {
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useRef, useState } from "react";
+import { useCollaborativeEditor } from "@/modules/collaborative-editor/use-collaborative-editor";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
   component: CollaborativeEditor,
 });
 
-type LocalEdit = {
-  readonly mappingOperations: readonly PositionOperation[];
-  readonly apply: (replica: EgWalkerReplica) => void;
-};
-
-const computeLocalEdit = (
-  oldText: string,
-  newText: string,
-): LocalEdit | null => {
-  if (newText === oldText) {
-    return null;
-  }
-
-  if (newText.length > oldText.length) {
-    const insertPos = findInsertPosition(oldText, newText);
-    const insertedText = newText.slice(
-      insertPos,
-      insertPos + (newText.length - oldText.length),
-    );
-    return {
-      mappingOperations: [
-        {
-          type: POSITION_OPERATION_TYPE.Insert,
-          index: insertPos,
-          length: insertedText.length,
-        },
-      ],
-      apply: (replica) => {
-        replica.insert(insertPos, insertedText);
-      },
-    };
-  }
-
-  if (newText.length < oldText.length) {
-    const deletePos = findDeletePosition(oldText, newText);
-    const deleteCount = oldText.length - newText.length;
-    return {
-      mappingOperations: [
-        {
-          type: POSITION_OPERATION_TYPE.Delete,
-          index: deletePos,
-          length: deleteCount,
-        },
-      ],
-      apply: (replica) => {
-        replica.delete(deletePos, deleteCount);
-      },
-    };
-  }
-
-  const { start, end } = findDifferingRange(oldText, newText);
-  const length = end - start + 1;
-  const replacementText = newText.slice(start, end + 1);
-  return {
-    mappingOperations: [
-      {
-        type: POSITION_OPERATION_TYPE.Delete,
-        index: start,
-        length,
-      },
-      {
-        type: POSITION_OPERATION_TYPE.Insert,
-        index: start,
-        length: replacementText.length,
-      },
-    ],
-    apply: (replica) => {
-      replica.delete(start, length);
-      replica.insert(start, replacementText);
-    },
-  };
-};
-
-const mapSelectionThroughOperations = (
-  selection: TextareaSelection,
-  operations: readonly PositionOperation[],
-): TextareaSelection =>
-  operations.reduce<TextareaSelection>(
-    (current, operation) =>
-      mapTextareaSelectionThroughOperation(current, operation),
-    selection,
-  );
-
-type ReplicaChangeContext = {
-  readonly localReplica: EgWalkerReplica;
-  readonly remoteReplica: EgWalkerReplica;
-  readonly localSync: UseTextareaSelectionSyncResult;
-  readonly remoteSync: UseTextareaSelectionSyncResult;
-  readonly setLocalText: React.Dispatch<React.SetStateAction<string>>;
-  readonly setRemoteText: React.Dispatch<React.SetStateAction<string>>;
-  readonly remoteLabel: string;
-};
-
-const runReplicaChange = async (
-  event: React.ChangeEvent<HTMLTextAreaElement>,
-  context: ReplicaChangeContext,
-): Promise<void> => {
-  const {
-    localReplica,
-    remoteReplica,
-    localSync,
-    remoteSync,
-    setLocalText,
-    setRemoteText,
-    remoteLabel,
-  } = context;
-
-  const newText = event.target.value;
-  const oldText = localReplica.getText();
-  const edit = computeLocalEdit(oldText, newText);
-
-  if (!edit) {
-    setLocalText(localReplica.getText());
-    setRemoteText(remoteReplica.getText());
-    return;
-  }
-
-  // Capture cursor positions before any state mutation so we can restore the
-  // local cursor and map the remote cursor through the local operation(s).
-  localSync.captureSelection();
-  const remoteSelection = remoteSync.captureSelection();
-
-  edit.apply(localReplica);
-
-  const events = localReplica.exportEventGraph();
-  const newEvents = events.slice(-edit.mappingOperations.length);
-  try {
-    for (const remoteEvent of newEvents) {
-      await remoteReplica.applyRemoteEvent(remoteEvent);
-    }
-  } catch (error) {
-    console.error(`Failed to sync edit to ${remoteLabel}:`, error);
-  }
-
-  setLocalText(localReplica.getText());
-  localSync.restoreSelection();
-
-  setRemoteText(remoteReplica.getText());
-  if (remoteSelection) {
-    remoteSync.restoreSelection(
-      mapSelectionThroughOperations(remoteSelection, edit.mappingOperations),
-    );
-  }
-};
-
 function CollaborativeEditor() {
-  const [replica1Text, setReplica1Text] = useState("");
-  const [replica2Text, setReplica2Text] = useState("");
-  const [api1] = useState(() => new EgWalkerReplica("replica-1"));
-  const [api2] = useState(() => new EgWalkerReplica("replica-2"));
-  const replica1Ref = useRef<HTMLTextAreaElement>(null);
-  const replica2Ref = useRef<HTMLTextAreaElement>(null);
-  const replica1Sync = useTextareaSelectionSync(replica1Ref);
-  const replica2Sync = useTextareaSelectionSync(replica2Ref);
-
-  const handleReplica1Change = useCallback(
-    (event: React.ChangeEvent<HTMLTextAreaElement>) =>
-      runReplicaChange(event, {
-        localReplica: api1,
-        remoteReplica: api2,
-        localSync: replica1Sync,
-        remoteSync: replica2Sync,
-        setLocalText: setReplica1Text,
-        setRemoteText: setReplica2Text,
-        remoteLabel: "replica-2",
-      }),
-    [api1, api2, replica1Sync, replica2Sync],
-  );
-
-  const handleReplica2Change = useCallback(
-    (event: React.ChangeEvent<HTMLTextAreaElement>) =>
-      runReplicaChange(event, {
-        localReplica: api2,
-        remoteReplica: api1,
-        localSync: replica2Sync,
-        remoteSync: replica1Sync,
-        setLocalText: setReplica2Text,
-        setRemoteText: setReplica1Text,
-        remoteLabel: "replica-1",
-      }),
-    [api1, api2, replica1Sync, replica2Sync],
-  );
+  const {
+    replica1Text,
+    replica2Text,
+    replica1Ref,
+    replica2Ref,
+    handleReplica1Change,
+    handleReplica2Change,
+  } = useCollaborativeEditor();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-white p-8">

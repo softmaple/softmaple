@@ -98,6 +98,33 @@ fields come from `EgWalkerReplica.getReplayStats()` and the engine's
 `engineRetreats`, or `sequenceRecordCount` is visible alongside the
 wall-clock numbers.
 
+`getReplayStats()` surfaces both steady-state counters and a few
+diagnostic fields aimed at benches:
+
+- `fullReplays` / `partialReplays` / `incrementalApplies` — counts of
+  which replay path handled each event.
+- `engineRetreats` / `engineAdvances` — cumulative engine churn.
+- `checkpointCount` — retained critical-version checkpoints in
+  `CriticalCheckpointStore` (capped at 32 via LRU).
+- `sequenceRecordCount` — live records in the ranked B-tree; a memory
+  proxy.
+- `peakSequenceRecordCount` — high-water mark of `sequenceRecordCount`
+  across the engine's lifetime. Survives later deletes/coalescing, so a
+  transient spike during a concurrent merge stays visible.
+- `criticalCheckpointHits` / `criticalCheckpointMisses` — how often
+  `CriticalCheckpointStore.pickFor` produced a usable starting point
+  vs. forced a full replay. A miss means no retained critical version
+  dominated the divergent suffix.
+- `lastReplaySource` — `"incremental" | "partial" | "full" | null`
+  (const object `REPLAY_SOURCE` in `constants/replay-source.ts`),
+  indicating which path handled the most recent event. `null` only on
+  a replica that has not yet processed an event.
+
+The `checkpoint-effectiveness` bench asserts
+`criticalCheckpointHits > 0` in its `afterAll`, so a regression that
+quietly stops using the checkpoint store fails the bench instead of
+just changing the wall-clock number.
+
 Scenarios:
 
 - `long-linear-history` — single-author append-only chain; exercises

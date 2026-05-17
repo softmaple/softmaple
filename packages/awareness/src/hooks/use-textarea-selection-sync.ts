@@ -35,6 +35,9 @@ export type UseTextareaSelectionSyncResult = {
    * textarea's current value. When the textarea value changes in the same
    * React batch, the post-commit layout effect restores the mapped selection
    * again against the new value.
+   *
+   * Omit `selection` to use the last captured selection; pass `null` to return
+   * `null` without restoring.
    */
   readonly mapAndRestoreSelection: (
     operation: PositionOperation,

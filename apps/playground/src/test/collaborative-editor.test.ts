@@ -1,3 +1,4 @@
+import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
 import { EgWalkerReplica } from "@softmaple/eg-walker";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -5,6 +6,7 @@ import {
   findDifferingRange,
   findInsertPosition,
 } from "../lib/text-diff";
+import { computeLocalEdit } from "../modules/collaborative-editor/use-collaborative-editor";
 
 interface MockEgWalkerReplica {
   insert: (position: number, text: string) => void;
@@ -119,6 +121,52 @@ describe("Collaborative Editor Integration", () => {
   });
 
   describe("Replacement operations", () => {
+    it("should derive delete and insert for replacements with net insertion", () => {
+      const oldText = "abcXYZdef";
+      const newText = "abc12345def";
+      const edit = computeLocalEdit(oldText, newText);
+
+      edit?.apply(api as unknown as EgWalkerReplica);
+
+      expect(edit?.mappingOperations).toEqual([
+        {
+          type: POSITION_OPERATION_TYPE.Delete,
+          index: 3,
+          length: 3,
+        },
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 3,
+          length: 5,
+        },
+      ]);
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(3, 3);
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(3, "12345");
+    });
+
+    it("should derive delete and insert for replacements with net deletion", () => {
+      const oldText = "abc12345def";
+      const newText = "abcXYdef";
+      const edit = computeLocalEdit(oldText, newText);
+
+      edit?.apply(api as unknown as EgWalkerReplica);
+
+      expect(edit?.mappingOperations).toEqual([
+        {
+          type: POSITION_OPERATION_TYPE.Delete,
+          index: 3,
+          length: 5,
+        },
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 3,
+          length: 2,
+        },
+      ]);
+      expect(vi.mocked(api.delete)).toHaveBeenCalledWith(3, 5);
+      expect(vi.mocked(api.insert)).toHaveBeenCalledWith(3, "XY");
+    });
+
     it("should call delete and insert for replacement at the beginning", () => {
       const oldText = "hello world";
       const newText = "HELLO world";

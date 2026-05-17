@@ -33,6 +33,54 @@ export const findDeletePosition = (
   return newText.length;
 };
 
+export type ChangedSpan = {
+  /** Length of the common prefix shared by `oldText` and `newText`. */
+  readonly prefix: number;
+  /** Length of the common suffix shared by `oldText` and `newText`. */
+  readonly suffix: number;
+};
+
+/**
+ * Identify the changed span between `oldText` and `newText` by stripping the
+ * longest common prefix and longest common suffix. Handles inserts, deletes,
+ * and net-length-changing replacements in a single pass — unlike the
+ * `find{Insert,Delete}Position` / `findDifferingRange` helpers above, which
+ * each assume one specific shape of edit.
+ *
+ * Callers derive the edit from `{ prefix, suffix }`:
+ *   - `deletedLength = oldText.length - prefix - suffix`
+ *   - `insertedText  = newText.slice(prefix, newText.length - suffix)`
+ *
+ * Both can be zero (pure insert, pure delete, or no-op).
+ *
+ * Encoding convention: prefix is consumed greedily first, then suffix. So
+ * equal strings return `{ prefix: len, suffix: 0 }` rather than the
+ * symmetrically-valid `{ prefix: 0, suffix: len }`. Consumers that derive
+ * `deletedLength` / `insertedText` from the result are unaffected.
+ */
+export const findChangedSpan = (
+  oldText: string,
+  newText: string,
+): ChangedSpan => {
+  const minLength = Math.min(oldText.length, newText.length);
+  let prefix = 0;
+  while (prefix < minLength && oldText[prefix] === newText[prefix]) {
+    prefix++;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < oldText.length - prefix &&
+    suffix < newText.length - prefix &&
+    oldText[oldText.length - suffix - 1] ===
+      newText[newText.length - suffix - 1]
+  ) {
+    suffix++;
+  }
+
+  return { prefix, suffix };
+};
+
 export const findDifferingRange = (
   oldText: string,
   newText: string,

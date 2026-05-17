@@ -13,6 +13,7 @@
       "**/.vscode/**/*",
       "**/index.html",
       "**/vite.config.js",
+      "**/workspace-aliases.ts",
       "**/package.json",
       "**/tsconfig.json",
       "!**/src/routeTree.gen.ts",

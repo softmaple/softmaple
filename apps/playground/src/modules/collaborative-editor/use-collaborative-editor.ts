@@ -170,9 +170,15 @@ export const runReplicaChange = async (
 
   const events = localReplica.exportEventGraph();
   const newEvents = events.slice(-edit.mappingOperations.length);
+  const appliedMappingOperations: PositionOperation[] = [];
   try {
-    for (const remoteEvent of newEvents) {
+    for (const [index, remoteEvent] of newEvents.entries()) {
+      const textBeforeRemoteApply = remoteReplica.getText();
       await remoteReplica.applyRemoteEvent(remoteEvent);
+      const operation = edit.mappingOperations[index];
+      if (operation && remoteReplica.getText() !== textBeforeRemoteApply) {
+        appliedMappingOperations.push(operation);
+      }
     }
   } catch (error) {
     console.error(`Failed to sync edit to ${remoteLabel}:`, error);
@@ -182,9 +188,9 @@ export const runReplicaChange = async (
   localSync.restoreSelection();
 
   setRemoteText(remoteReplica.getText());
-  if (remoteSelection) {
+  if (remoteSelection && appliedMappingOperations.length > 0) {
     remoteSync.restoreSelection(
-      mapSelectionThroughOperations(remoteSelection, edit.mappingOperations),
+      mapSelectionThroughOperations(remoteSelection, appliedMappingOperations),
     );
   }
 };

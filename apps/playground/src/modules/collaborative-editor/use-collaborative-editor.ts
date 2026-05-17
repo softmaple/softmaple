@@ -80,6 +80,14 @@ const mapSelectionThroughOperations = (
     selection,
   );
 
+const computeMappingOperationsFromTextChange = (
+  oldText: string,
+  newText: string,
+): readonly PositionOperation[] => {
+  const edit = computeLocalEdit(oldText, newText);
+  return edit?.mappingOperations ?? [];
+};
+
 export type ReplicaChangeContext = {
   readonly localReplica: EgWalkerReplica;
   readonly remoteReplica: EgWalkerReplica;
@@ -129,23 +137,23 @@ export const runReplicaChange = async (
 
   const appliedMappingOperations: PositionOperation[] = [];
   try {
-    for (const [index, remoteEvent] of newEvents.entries()) {
+    for (const remoteEvent of newEvents) {
+      const textBeforeRemoteApply = remoteReplica.getText();
       const result = await remoteReplica.applyRemoteEvent(remoteEvent);
       if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
         continue;
       }
-      // Prefer the engine-attributed PositionOperation: it reflects the
-      // actual effect-index integration on the remote replica, which is
-      // what selection mapping needs. Fall back to the locally-computed
-      // mapping operation only when the engine returned `null` (visible
-      // no-op, multi-op coalesced delete, or partial/full replay path)
-      // — in that case the local mapping op is still the best available
-      // approximation for the simple two-replica scenario.
-      const mappingOperation =
-        result.operation ?? edit.mappingOperations[index] ?? null;
-      if (mappingOperation) {
-        appliedMappingOperations.push(mappingOperation);
+      if (result.operation) {
+        appliedMappingOperations.push(result.operation);
+        continue;
       }
+      const textAfterRemoteApply = remoteReplica.getText();
+      appliedMappingOperations.push(
+        ...computeMappingOperationsFromTextChange(
+          textBeforeRemoteApply,
+          textAfterRemoteApply,
+        ),
+      );
     }
   } catch (error) {
     console.error(`Failed to sync edit to ${remoteLabel}:`, error);

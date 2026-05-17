@@ -187,6 +187,45 @@ describe("collaborative editor utilities", () => {
     expect(remoteReplica.getPendingRemoteCount()).toBeGreaterThan(0);
     expect(remoteSync.restoreSelection).not.toHaveBeenCalled();
   });
+
+  it("does not remap remote selection when a null remote operation is a visible no-op", async () => {
+    const seed = new EgWalkerReplica("seed");
+    seed.insert(0, "abcd");
+    const [seedEvent] = seed.exportEventGraph();
+    expect(seedEvent).toBeDefined();
+
+    const localReplica = new EgWalkerReplica("local");
+    const remoteReplica = new EgWalkerReplica("remote");
+    localReplica.applyRemoteEvent(seedEvent!);
+    remoteReplica.applyRemoteEvent(seedEvent!);
+
+    remoteReplica.delete(1, 2);
+
+    const remoteSync = createTextareaSelectionSync({
+      selectionStart: 2,
+      selectionEnd: 2,
+      selectionDirection: "none",
+    });
+
+    await runReplicaChange(
+      {
+        target: { value: "ad" },
+      } as ChangeEvent<HTMLTextAreaElement>,
+      {
+        localReplica,
+        remoteReplica,
+        localSync: createTextareaSelectionSync(null),
+        remoteSync,
+        setLocalText: vi.fn(),
+        setRemoteText: vi.fn(),
+        remoteLabel: "remote",
+      },
+    );
+
+    expect(localReplica.getText()).toBe("ad");
+    expect(remoteReplica.getText()).toBe("ad");
+    expect(remoteSync.restoreSelection).not.toHaveBeenCalled();
+  });
 });
 
 const createTextareaSelectionSync = (

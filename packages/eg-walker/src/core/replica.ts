@@ -8,6 +8,7 @@
  */
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { REPLAY_SOURCE, type ReplaySource } from "../constants/replay-source";
 import type {
   ExternalOperation,
   DocumentState,
@@ -51,6 +52,7 @@ export class EgWalkerReplica {
   private fullReplayCount = 0;
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
+  private lastReplaySource: ReplaySource | null = null;
   private readonly criticalAnalyzer = new CriticalVersionAnalyzer();
   private readonly criticalCheckpoints = new CriticalCheckpointStore(
     this.criticalAnalyzer,
@@ -231,6 +233,10 @@ export class EgWalkerReplica {
     readonly engineAdvances: number;
     readonly checkpointCount: number;
     readonly sequenceRecordCount: number;
+    readonly peakSequenceRecordCount: number;
+    readonly criticalCheckpointHits: number;
+    readonly criticalCheckpointMisses: number;
+    readonly lastReplaySource: ReplaySource | null;
   } {
     const engineStats = this.engine?.getStats();
     return {
@@ -241,6 +247,10 @@ export class EgWalkerReplica {
       engineAdvances: engineStats?.advanceCount ?? 0,
       checkpointCount: this.criticalCheckpoints.count,
       sequenceRecordCount: engineStats?.sequenceRecordCount ?? 0,
+      peakSequenceRecordCount: engineStats?.peakSequenceRecordCount ?? 0,
+      criticalCheckpointHits: this.criticalCheckpoints.hits,
+      criticalCheckpointMisses: this.criticalCheckpoints.misses,
+      lastReplaySource: this.lastReplaySource,
     };
   }
 
@@ -356,6 +366,7 @@ export class EgWalkerReplica {
     this.currentVersion = this.eventGraph.getFrontier();
     this.engine = engine;
     this.fullReplayCount++;
+    this.lastReplaySource = REPLAY_SOURCE.FULL;
   }
 
   /**
@@ -385,6 +396,7 @@ export class EgWalkerReplica {
       this.document = this.engine.getText();
       this.currentVersion = this.eventGraph.getFrontier();
       this.incrementalApplyCount++;
+      this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.maybeAdvanceCheckpoint();
       return;
     }
@@ -435,6 +447,7 @@ export class EgWalkerReplica {
     this.document = result.text;
     this.currentVersion = frontier;
     this.partialReplayCount++;
+    this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
   }
 
   private inferNextSequenceNumber(): number {

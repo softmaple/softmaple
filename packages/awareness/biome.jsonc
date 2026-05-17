@@ -50,7 +50,7 @@
         // (`@softmaple/eg-walker/**`, `@lexical/*`, etc.) stay in
         // `patterns`. Keep this in sync with the matching ESLint rule
         // in `packages/eslint-config/collaboration-layers.js`; the
-        // regression test in `src/biome-boundary.test.ts` will fail
+        // regression test in `test/biome-boundary.test.ts` will fail
         // if the split is broken.
         "noRestrictedImports": {
           "level": "error",

@@ -1,3 +1,16 @@
+import {
+  mapTextareaSelectionThroughOperation,
+  type TextareaSelection,
+  type UseTextareaSelectionSyncResult,
+  useTextareaSelectionSync,
+} from "@softmaple/awareness/hooks";
+import {
+  findDeletePosition,
+  findDifferingRange,
+  findInsertPosition,
+  POSITION_OPERATION_TYPE,
+  type PositionOperation,
+} from "@softmaple/awareness/mapping";
 import { EgWalkerReplica } from "@softmaple/eg-walker";
 import {
   Card,
@@ -8,15 +21,155 @@ import {
 import { Textarea } from "@softmaple/ui/components/textarea";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
-import {
-  findDeletePosition,
-  findDifferingRange,
-  findInsertPosition,
-} from "@/lib/text-diff";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
   component: CollaborativeEditor,
 });
+
+type LocalEdit = {
+  readonly mappingOperations: readonly PositionOperation[];
+  readonly apply: (replica: EgWalkerReplica) => void;
+};
+
+const computeLocalEdit = (
+  oldText: string,
+  newText: string,
+): LocalEdit | null => {
+  if (newText === oldText) {
+    return null;
+  }
+
+  if (newText.length > oldText.length) {
+    const insertPos = findInsertPosition(oldText, newText);
+    const insertedText = newText.slice(
+      insertPos,
+      insertPos + (newText.length - oldText.length),
+    );
+    return {
+      mappingOperations: [
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: insertPos,
+          length: insertedText.length,
+        },
+      ],
+      apply: (replica) => {
+        replica.insert(insertPos, insertedText);
+      },
+    };
+  }
+
+  if (newText.length < oldText.length) {
+    const deletePos = findDeletePosition(oldText, newText);
+    const deleteCount = oldText.length - newText.length;
+    return {
+      mappingOperations: [
+        {
+          type: POSITION_OPERATION_TYPE.Delete,
+          index: deletePos,
+          length: deleteCount,
+        },
+      ],
+      apply: (replica) => {
+        replica.delete(deletePos, deleteCount);
+      },
+    };
+  }
+
+  const { start, end } = findDifferingRange(oldText, newText);
+  const length = end - start + 1;
+  const replacementText = newText.slice(start, end + 1);
+  return {
+    mappingOperations: [
+      {
+        type: POSITION_OPERATION_TYPE.Delete,
+        index: start,
+        length,
+      },
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: start,
+        length: replacementText.length,
+      },
+    ],
+    apply: (replica) => {
+      replica.delete(start, length);
+      replica.insert(start, replacementText);
+    },
+  };
+};
+
+const mapSelectionThroughOperations = (
+  selection: TextareaSelection,
+  operations: readonly PositionOperation[],
+): TextareaSelection =>
+  operations.reduce<TextareaSelection>(
+    (current, operation) =>
+      mapTextareaSelectionThroughOperation(current, operation),
+    selection,
+  );
+
+type ReplicaChangeContext = {
+  readonly localReplica: EgWalkerReplica;
+  readonly remoteReplica: EgWalkerReplica;
+  readonly localSync: UseTextareaSelectionSyncResult;
+  readonly remoteSync: UseTextareaSelectionSyncResult;
+  readonly setLocalText: React.Dispatch<React.SetStateAction<string>>;
+  readonly setRemoteText: React.Dispatch<React.SetStateAction<string>>;
+  readonly remoteLabel: string;
+};
+
+const runReplicaChange = async (
+  event: React.ChangeEvent<HTMLTextAreaElement>,
+  context: ReplicaChangeContext,
+): Promise<void> => {
+  const {
+    localReplica,
+    remoteReplica,
+    localSync,
+    remoteSync,
+    setLocalText,
+    setRemoteText,
+    remoteLabel,
+  } = context;
+
+  const newText = event.target.value;
+  const oldText = localReplica.getText();
+  const edit = computeLocalEdit(oldText, newText);
+
+  if (!edit) {
+    setLocalText(localReplica.getText());
+    setRemoteText(remoteReplica.getText());
+    return;
+  }
+
+  // Capture cursor positions before any state mutation so we can restore the
+  // local cursor and map the remote cursor through the local operation(s).
+  localSync.captureSelection();
+  const remoteSelection = remoteSync.captureSelection();
+
+  edit.apply(localReplica);
+
+  const events = localReplica.exportEventGraph();
+  const newEvents = events.slice(-edit.mappingOperations.length);
+  try {
+    for (const remoteEvent of newEvents) {
+      await remoteReplica.applyRemoteEvent(remoteEvent);
+    }
+  } catch (error) {
+    console.error(`Failed to sync edit to ${remoteLabel}:`, error);
+  }
+
+  setLocalText(localReplica.getText());
+  localSync.restoreSelection();
+
+  setRemoteText(remoteReplica.getText());
+  if (remoteSelection) {
+    remoteSync.restoreSelection(
+      mapSelectionThroughOperations(remoteSelection, edit.mappingOperations),
+    );
+  }
+};
 
 function CollaborativeEditor() {
   const [replica1Text, setReplica1Text] = useState("");
@@ -25,298 +178,35 @@ function CollaborativeEditor() {
   const [api2] = useState(() => new EgWalkerReplica("replica-2"));
   const replica1Ref = useRef<HTMLTextAreaElement>(null);
   const replica2Ref = useRef<HTMLTextAreaElement>(null);
-
-  // Helper to preserve cursor position when updating text from remote changes
-  const updateTextPreservingCursor = useCallback(
-    (
-      textareaRef: React.RefObject<HTMLTextAreaElement | null>,
-      setText: React.Dispatch<React.SetStateAction<string>>,
-      newText: string,
-    ) => {
-      // Save current cursor position before update
-      const currentStart = textareaRef.current?.selectionStart ?? 0;
-      const currentEnd = textareaRef.current?.selectionEnd ?? 0;
-
-      // Update the text
-      setText(newText);
-
-      // Restore cursor position after React re-render
-      setTimeout(() => {
-        if (textareaRef.current) {
-          // Ensure cursor position doesn't exceed new text length
-          const safeStart = Math.min(currentStart, newText.length);
-          const safeEnd = Math.min(currentEnd, newText.length);
-          textareaRef.current.setSelectionRange(safeStart, safeEnd);
-        }
-      }, 0);
-    },
-    [],
-  );
+  const replica1Sync = useTextareaSelectionSync(replica1Ref);
+  const replica2Sync = useTextareaSelectionSync(replica2Ref);
 
   const handleReplica1Change = useCallback(
-    async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newText = e.target.value;
-      const oldText = api1.getText();
-
-      if (newText.length > oldText.length) {
-        // Insertion
-        const insertPos = findInsertPosition(oldText, newText);
-        const insertedText = newText.slice(
-          insertPos,
-          insertPos + (newText.length - oldText.length),
-        );
-        const expectedCursorPos = insertPos + insertedText.length;
-
-        api1.insert(insertPos, insertedText);
-
-        // Get the latest event from replica1 and propagate to replica2 asynchronously
-        const events = api1.exportEventGraph();
-        const latestEvent = events[events.length - 1];
-        if (latestEvent) {
-          try {
-            await api2.applyRemoteEvent(latestEvent);
-            // Update replica2 text while preserving its cursor position
-            updateTextPreservingCursor(
-              replica2Ref,
-              setReplica2Text,
-              api2.getText(),
-            );
-          } catch (error) {
-            console.error("Failed to sync insert to replica2:", error);
-          }
-        }
-
-        // Update local state and preserve cursor position after insertion
-        setReplica1Text(api1.getText());
-        setTimeout(() => {
-          if (replica1Ref.current) {
-            replica1Ref.current.setSelectionRange(
-              expectedCursorPos,
-              expectedCursorPos,
-            );
-          }
-        }, 0);
-        return;
-      } else if (newText.length < oldText.length) {
-        // Deletion
-        const deletePos = findDeletePosition(oldText, newText);
-        const deleteCount = oldText.length - newText.length;
-        const expectedCursorPos = deletePos;
-
-        api1.delete(deletePos, deleteCount);
-
-        // Get the latest event from replica1 and propagate to replica2 asynchronously
-        const events = api1.exportEventGraph();
-        const latestEvent = events[events.length - 1];
-        if (latestEvent) {
-          try {
-            await api2.applyRemoteEvent(latestEvent);
-            // Update replica2 text while preserving its cursor position
-            updateTextPreservingCursor(
-              replica2Ref,
-              setReplica2Text,
-              api2.getText(),
-            );
-          } catch (error) {
-            console.error("Failed to sync delete to replica2:", error);
-          }
-        }
-
-        // Update local state and restore cursor position
-        setReplica1Text(api1.getText());
-        // Use setTimeout to ensure cursor restoration happens after React re-render
-        setTimeout(() => {
-          if (replica1Ref.current) {
-            replica1Ref.current.setSelectionRange(
-              expectedCursorPos,
-              expectedCursorPos,
-            );
-          }
-        }, 0);
-        return; // Early return to avoid duplicate state updates at the end
-      } else if (newText.length === oldText.length && newText !== oldText) {
-        // Replacement (same length, different content)
-        const { start, end } = findDifferingRange(oldText, newText);
-        const deleteCount = end - start + 1;
-        const replacementText = newText.slice(start, end + 1);
-        const expectedCursorPos = end + 1;
-
-        // Perform delete then insert
-        api1.delete(start, deleteCount);
-        api1.insert(start, replacementText);
-
-        // Get the latest two events (delete + insert) and propagate to replica2 asynchronously
-        const events = api1.exportEventGraph();
-        const latestEvents = events.slice(-2);
-        try {
-          for (const event of latestEvents) {
-            await api2.applyRemoteEvent(event);
-          }
-          // Update replica2 text while preserving its cursor position
-          updateTextPreservingCursor(
-            replica2Ref,
-            setReplica2Text,
-            api2.getText(),
-          );
-        } catch (error) {
-          console.error("Failed to sync replacement to replica2:", error);
-        }
-
-        // Update local state and preserve cursor position
-        setReplica1Text(api1.getText());
-        setTimeout(() => {
-          if (replica1Ref.current) {
-            replica1Ref.current.setSelectionRange(
-              expectedCursorPos,
-              expectedCursorPos,
-            );
-          }
-        }, 0);
-        return;
-      }
-
-      // Sync local state with API's getText() to ensure consistency
-      setReplica1Text(api1.getText());
-      setReplica2Text(api2.getText());
-    },
-    [
-      api1,
-      api2, // Update replica2 text while preserving its cursor position
-      updateTextPreservingCursor,
-    ],
+    (event: React.ChangeEvent<HTMLTextAreaElement>) =>
+      runReplicaChange(event, {
+        localReplica: api1,
+        remoteReplica: api2,
+        localSync: replica1Sync,
+        remoteSync: replica2Sync,
+        setLocalText: setReplica1Text,
+        setRemoteText: setReplica2Text,
+        remoteLabel: "replica-2",
+      }),
+    [api1, api2, replica1Sync, replica2Sync],
   );
 
   const handleReplica2Change = useCallback(
-    async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newText = e.target.value;
-      const oldText = api2.getText();
-
-      if (newText.length > oldText.length) {
-        // Insertion
-        const insertPos = findInsertPosition(oldText, newText);
-        const insertedText = newText.slice(
-          insertPos,
-          insertPos + (newText.length - oldText.length),
-        );
-        const expectedCursorPos = insertPos + insertedText.length;
-
-        api2.insert(insertPos, insertedText);
-
-        // Get the latest event from replica2 and propagate to replica1 asynchronously
-        const events = api2.exportEventGraph();
-        const latestEvent = events[events.length - 1];
-        if (latestEvent) {
-          try {
-            await api1.applyRemoteEvent(latestEvent);
-            // Update replica1 text while preserving its cursor position
-            updateTextPreservingCursor(
-              replica1Ref,
-              setReplica1Text,
-              api1.getText(),
-            );
-          } catch (error) {
-            console.error("Failed to sync insert to replica1:", error);
-          }
-        }
-
-        // Update local state and preserve cursor position after insertion
-        setReplica2Text(api2.getText());
-        setTimeout(() => {
-          if (replica2Ref.current) {
-            replica2Ref.current.setSelectionRange(
-              expectedCursorPos,
-              expectedCursorPos,
-            );
-          }
-        }, 0);
-        return;
-      } else if (newText.length < oldText.length) {
-        // Deletion
-        const deletePos = findDeletePosition(oldText, newText);
-        const deleteCount = oldText.length - newText.length;
-        const expectedCursorPos = deletePos;
-
-        api2.delete(deletePos, deleteCount);
-
-        // Get the latest event from replica2 and propagate to replica1 asynchronously
-        const events = api2.exportEventGraph();
-        const latestEvent = events[events.length - 1];
-        if (latestEvent) {
-          try {
-            await api1.applyRemoteEvent(latestEvent);
-            // Update replica1 text while preserving its cursor position
-            updateTextPreservingCursor(
-              replica1Ref,
-              setReplica1Text,
-              api1.getText(),
-            );
-          } catch (error) {
-            console.error("Failed to sync delete to replica1:", error);
-          }
-        }
-
-        // Update local state and restore cursor position
-        setReplica2Text(api2.getText());
-        // Use setTimeout to ensure cursor restoration happens after React re-render
-        setTimeout(() => {
-          if (replica2Ref.current) {
-            replica2Ref.current.setSelectionRange(
-              expectedCursorPos,
-              expectedCursorPos,
-            );
-          }
-        }, 0);
-        return; // Early return to avoid duplicate state updates at the end
-      } else if (newText.length === oldText.length && newText !== oldText) {
-        // Replacement (same length, different content)
-        const { start, end } = findDifferingRange(oldText, newText);
-        const deleteCount = end - start + 1;
-        const replacementText = newText.slice(start, end + 1);
-        const expectedCursorPos = end + 1;
-
-        // Perform delete then insert
-        api2.delete(start, deleteCount);
-        api2.insert(start, replacementText);
-
-        // Get the latest two events (delete + insert) and propagate to replica1 asynchronously
-        const events = api2.exportEventGraph();
-        const latestEvents = events.slice(-2);
-        try {
-          for (const event of latestEvents) {
-            await api1.applyRemoteEvent(event);
-          }
-          // Update replica1 text while preserving its cursor position
-          updateTextPreservingCursor(
-            replica1Ref,
-            setReplica1Text,
-            api1.getText(),
-          );
-        } catch (error) {
-          console.error("Failed to sync replacement to replica1:", error);
-        }
-
-        // Update local state and preserve cursor position
-        setReplica2Text(api2.getText());
-        setTimeout(() => {
-          if (replica2Ref.current) {
-            replica2Ref.current.setSelectionRange(
-              expectedCursorPos,
-              expectedCursorPos,
-            );
-          }
-        }, 0);
-        return;
-      }
-
-      // Sync local state with API's getText() to ensure consistency
-      setReplica2Text(api2.getText());
-      setReplica1Text(api1.getText());
-    },
-    [
-      api1,
-      api2, // Update replica1 text while preserving its cursor position
-      updateTextPreservingCursor,
-    ],
+    (event: React.ChangeEvent<HTMLTextAreaElement>) =>
+      runReplicaChange(event, {
+        localReplica: api2,
+        remoteReplica: api1,
+        localSync: replica2Sync,
+        remoteSync: replica1Sync,
+        setLocalText: setReplica2Text,
+        setRemoteText: setReplica1Text,
+        remoteLabel: "replica-1",
+      }),
+    [api1, api2, replica1Sync, replica2Sync],
   );
 
   return (

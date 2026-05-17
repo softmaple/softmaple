@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCollaborativeEditor } from "@/modules/collaborative-editor/use-collaborative-editor";
 import {
   ReplicaEditorPanel,
   type ReplicaEditorPanelProps,
-} from "./ReplicaEditorPanel";
+} from "@/components/collab-editor/ReplicaEditorPanel";
+import { useCollaborativeEditor } from "@/modules/collaborative-editor/use-collaborative-editor";
 
 export const Route = createFileRoute("/demo/collaborative-editor")({
   component: CollaborativeEditor,

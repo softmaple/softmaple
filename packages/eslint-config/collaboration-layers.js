@@ -8,7 +8,7 @@
  *   editor framework (Lexical, ProseMirror, Slate).
  * - `@softmaple/awareness` MUST NOT import `@softmaple/eg-walker` or any
  *   editor framework. The awareness package enforces this via Biome's
- *   `style/noRestrictedImports` in `packages/awareness/biome.json` —
+ *   `style/noRestrictedImports` in `packages/awareness/biome.jsonc` —
  *   if you change the deny list below, mirror the change there.
  * - Only `apps/*` may combine the two core packages with a concrete
  *   editor framework.

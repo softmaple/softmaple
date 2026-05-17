@@ -153,7 +153,7 @@ same intent is expressed in two formats:
   `slate-*` — including subpath imports like
   `@lexical/react/LexicalComposer`.
 - **`@softmaple/awareness`** (Biome) — wired in via the
-  `style/noRestrictedImports` rule in `packages/awareness/biome.json`.
+  `style/noRestrictedImports` rule in `packages/awareness/biome.jsonc`.
   Forbids `@softmaple/eg-walker`, `lexical`, `prosemirror-*`, and
   `slate` / `slate-*` (including subpath imports). Biome is already the
   lint+format tool of record for this package; adding the boundary
@@ -166,7 +166,8 @@ not cross `/` in either matcher; without them an import like
 `noRestrictedImports` additionally requires bare specifiers
 (`@softmaple/eg-walker`, `lexical`, `slate`) to live in `paths`
 rather than `patterns`, so those are listed separately in
-`biome.json`.
+`biome.jsonc` — the JSONC config also carries an inline comment
+right above the rule restating this gotcha for the next editor.
 
 A unit test in `packages/eslint-config` lints deliberately-bad imports
 (including subpath specifiers) against the eg-walker config and
@@ -178,7 +179,7 @@ already in the `turbo run lint` pipeline.
 If you need to add a new editor framework, extend
 `EDITOR_FRAMEWORK_PATTERNS` in
 `packages/eslint-config/collaboration-layers.js` **and** the matching
-`style/noRestrictedImports` block in `packages/awareness/biome.json`
+`style/noRestrictedImports` block in `packages/awareness/biome.jsonc`
 in the same change. The two configs must stay in sync; the doc above
 describes the contract both implement.
 

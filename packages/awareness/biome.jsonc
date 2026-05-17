@@ -38,6 +38,20 @@
         }
       },
       "style": {
+        // Collaboration-architecture layering (see
+        // docs/design/collaboration-layers.md). Biome's
+        // noRestrictedImports has a load-bearing quirk: bare
+        // specifiers containing `/` (like `@softmaple/eg-walker`,
+        // `lexical`, `slate`) MUST live in `paths`, not `patterns`,
+        // because the pattern matcher is gitignore-style and anchors
+        // around `/`, so an entry like `@softmaple/eg-walker` under
+        // `patterns.group` silently does not match
+        // `import "@softmaple/eg-walker"`. Globs
+        // (`@softmaple/eg-walker/**`, `@lexical/*`, etc.) stay in
+        // `patterns`. Keep this in sync with the matching ESLint rule
+        // in `packages/eslint-config/collaboration-layers.js`; the
+        // regression test in `src/biome-boundary.test.ts` will fail
+        // if the split is broken.
         "noRestrictedImports": {
           "level": "error",
           "options": {

@@ -71,7 +71,7 @@ describe("collaborative editor utilities", () => {
       if (applyCount === 2) {
         throw new Error("sync failed");
       }
-      applyRemoteEvent(event);
+      return applyRemoteEvent(event);
     });
     const consoleError = vi
       .spyOn(console, "error")

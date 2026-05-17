@@ -9,7 +9,10 @@ import {
   POSITION_OPERATION_TYPE,
   type PositionOperation,
 } from "@softmaple/awareness/mapping";
-import { EgWalkerReplica } from "@softmaple/eg-walker";
+import {
+  APPLY_REMOTE_EVENT_STATUS,
+  EgWalkerReplica,
+} from "@softmaple/eg-walker";
 import {
   type ChangeEvent,
   type Dispatch,
@@ -127,11 +130,21 @@ export const runReplicaChange = async (
   const appliedMappingOperations: PositionOperation[] = [];
   try {
     for (const [index, remoteEvent] of newEvents.entries()) {
-      const textBeforeRemoteApply = remoteReplica.getText();
-      await remoteReplica.applyRemoteEvent(remoteEvent);
-      const operation = edit.mappingOperations[index];
-      if (operation && remoteReplica.getText() !== textBeforeRemoteApply) {
-        appliedMappingOperations.push(operation);
+      const result = await remoteReplica.applyRemoteEvent(remoteEvent);
+      if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
+        continue;
+      }
+      // Prefer the engine-attributed PositionOperation: it reflects the
+      // actual effect-index integration on the remote replica, which is
+      // what selection mapping needs. Fall back to the locally-computed
+      // mapping operation only when the engine returned `null` (visible
+      // no-op, multi-op coalesced delete, or partial/full replay path)
+      // — in that case the local mapping op is still the best available
+      // approximation for the simple two-replica scenario.
+      const mappingOperation =
+        result.operation ?? edit.mappingOperations[index] ?? null;
+      if (mappingOperation) {
+        appliedMappingOperations.push(mappingOperation);
       }
     }
   } catch (error) {

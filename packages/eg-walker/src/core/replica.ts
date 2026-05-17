@@ -10,10 +10,12 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { REPLAY_SOURCE, type ReplaySource } from "../constants/replay-source";
 import type {
+  ApplyRemoteEventResult,
   ExternalOperation,
   DocumentState,
   GraphEvent,
   EventId,
+  PositionOperation,
   Version,
   SerializedGraphInput,
   SerializedGraphOutput,
@@ -203,16 +205,26 @@ export class EgWalkerReplica {
       throw error;
     }
 
+    // Local edits don't expose the engine's transformed operation; the
+    // caller already knows what they typed. Discard the helper's return.
     this.advanceWithEvent(event);
   }
 
   /**
    * Apply a remote event. Buffers events with unknown parents until they can
    * be applied in causal order, so callers do not need to deliver in order.
+   *
+   * Returns a structural {@link ApplyRemoteEventResult} so consumers can
+   * react to integration / buffering / duplicate paths without inferring
+   * them from a `getText()` pre/post comparison. When the event is
+   * integrated through the engine's incremental advance path and the
+   * apply produces a single transformed operation, that operation is
+   * surfaced in the `integrated` result; see the type docstring for the
+   * paths where `operation` is `null`.
    */
-  applyRemoteEvent(event: GraphEvent): void {
+  applyRemoteEvent(event: GraphEvent): ApplyRemoteEventResult {
     assertRemoteEventWellFormed(event);
-    this.remoteEvents.tryAccept(event);
+    return this.remoteEvents.tryAccept(event);
   }
 
   /**
@@ -366,7 +378,7 @@ export class EgWalkerReplica {
     return replica;
   }
 
-  private fullReplay(): void {
+  private fullReplay(): ReadonlyArray<ExternalOperation> {
     // Section 3.4 of the paper: walk the event graph in branch-preserving
     // order so each parent transition matches the engine's current version
     // and triggers the non-conflicting-run fast path instead of forcing a
@@ -384,6 +396,10 @@ export class EgWalkerReplica {
     this.engine = engine;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
+    // Returned for the cold-start single-event path in {@link advanceWithEvent};
+    // other callers (constructor seed, retreat-needed full replay) ignore
+    // this because the array spans the whole graph, not a single event.
+    return generated.transformedOperations;
   }
 
   /**
@@ -418,22 +434,39 @@ export class EgWalkerReplica {
    *      Replays only events in `expand(frontier) \ expand(checkpoint)`.
    *   3. Full replay — only when no checkpoint dominates the divergent
    *      region (e.g. concurrent root inserts with no critical ancestor).
+   *
+   * Returns the position operation attributable to {@link event} when
+   * the incremental path is taken and the engine produced a single
+   * transformed operation; `null` otherwise. The partial/full replay
+   * paths return `null` because concurrent integration retransforms
+   * multiple events and there is no single insert/delete on the
+   * pre-event document that captures the visible effect of this one
+   * event. See {@link ApplyRemoteEventResult} for the contract.
    */
-  private advanceWithEvent(event: GraphEvent): void {
+  private advanceWithEvent(event: GraphEvent): PositionOperation | null {
     if (!this.engine) {
-      this.fullReplay();
+      // Cold-start: this code path only fires on a replica that started
+      // with an empty event graph and is now seeing its first event. The
+      // event was already added to the graph before we got here, so the
+      // graph contains exactly that event — `fullReplay` runs the engine
+      // on a single-event trace and its `transformedOperations` is the
+      // visible effect of this one event, which is exactly what we want
+      // to surface to the caller. A replica constructed from a non-empty
+      // prebuilt graph already ran `fullReplay` in the constructor, so
+      // multi-event cold starts cannot reach this branch.
+      const transformed = this.fullReplay();
       this.maybeAdvanceCheckpoint();
-      return;
+      return toPositionOperation(transformed);
     }
 
     if (this.canIncrementallyAdvance(event)) {
-      this.engine.applyEvent(event, this.eventGraph);
+      const applied = this.engine.applyEvent(event, this.eventGraph);
       this.document = this.engine.getText();
       this.currentVersion = this.eventGraph.getFrontier();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.maybeAdvanceCheckpoint();
-      return;
+      return toPositionOperation(applied.transformedOperations);
     }
 
     const checkpoint = this.criticalCheckpoints.pickFor(this.eventGraph);
@@ -443,6 +476,7 @@ export class EgWalkerReplica {
       this.fullReplay();
     }
     this.maybeAdvanceCheckpoint();
+    return null;
   }
 
   /**
@@ -513,4 +547,47 @@ export function createEgWalkerReplica(
   initialText?: string,
 ): EgWalkerReplica {
   return new EgWalkerReplica(replicaId, initialText);
+}
+
+/**
+ * Reduce the engine's per-event transformed operations to a single
+ * editor-agnostic {@link PositionOperation}, or `null` when no single
+ * operation captures the visible effect of the event.
+ *
+ * - Zero ops → `null` (visible no-op: empty insert, zero-length delete,
+ *   or a delete that fully overlaps already-deleted characters).
+ * - Multiple ops → `null` (a delete that coalesced into disjoint runs;
+ *   the caller would need a multi-op API to represent it faithfully).
+ * - One op → mapped to `PositionOperation`. Insert payloads strip the
+ *   `text` field because awareness consumers only need the length in
+ *   UTF-16 code units.
+ */
+function toPositionOperation(
+  transformed: ReadonlyArray<ExternalOperation>,
+): PositionOperation | null {
+  if (transformed.length !== 1) {
+    return null;
+  }
+  const [op] = transformed;
+  if (!op) {
+    return null;
+  }
+  if (op.type === OPERATION_TYPE.INSERT) {
+    if (op.text.length === 0) {
+      return null;
+    }
+    return {
+      type: OPERATION_TYPE.INSERT,
+      index: op.index,
+      length: op.text.length,
+    };
+  }
+  if (op.length === 0) {
+    return null;
+  }
+  return {
+    type: OPERATION_TYPE.DELETE,
+    index: op.index,
+    length: op.length,
+  };
 }

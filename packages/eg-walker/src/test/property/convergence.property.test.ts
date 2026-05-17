@@ -17,6 +17,7 @@ import { EgWalkerReplica } from "../../core/replica";
 import { cloneEvent } from "../test-helpers";
 import { traceParamsArb } from "./arbitraries";
 import { fcParams } from "./run-config";
+import { shuffleWithSeed } from "./shuffle";
 import { runTrace } from "./trace-runner";
 
 describe("property: convergence under randomized delivery", () => {
@@ -65,26 +66,3 @@ describe("property: convergence under randomized delivery", () => {
     );
   });
 });
-
-/**
- * Fisher–Yates shuffle keyed on a 32-bit seed via the same LCG used in
- * `test-helpers.ts`. We do not reuse `createPrng` directly because the
- * inputs here come from fast-check's shrinkable integers, and binding
- * the helper inline keeps the shuffle reproducible from the shrunk
- * inputs alone.
- */
-const shuffleWithSeed = <T>(items: ReadonlyArray<T>, seed: number): T[] => {
-  let state = seed >>> 0;
-  const next = (): number => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-  const result = items.slice();
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    const tmp = result[i]!;
-    result[i] = result[j]!;
-    result[j] = tmp;
-  }
-  return result;
-};

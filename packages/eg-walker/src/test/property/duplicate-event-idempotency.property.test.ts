@@ -15,6 +15,7 @@ import { EgWalkerReplica } from "../../core/replica";
 import { cloneEvent } from "../test-helpers";
 import { traceParamsArb } from "./arbitraries";
 import { fcParams } from "./run-config";
+import { shuffleWithSeed } from "./shuffle";
 import { runTrace } from "./trace-runner";
 
 describe("property: duplicate event delivery is idempotent", () => {
@@ -76,19 +77,3 @@ describe("property: duplicate event delivery is idempotent", () => {
     );
   });
 });
-
-const shuffleWithSeed = <T>(items: ReadonlyArray<T>, seed: number): T[] => {
-  let state = seed >>> 0;
-  const next = (): number => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-  const result = items.slice();
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    const tmp = result[i]!;
-    result[i] = result[j]!;
-    result[j] = tmp;
-  }
-  return result;
-};

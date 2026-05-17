@@ -202,11 +202,15 @@ export const traceParamsArb = (opts: {
  * Explicit small DAG of `GraphEvent`s, used by tests that need to
  * control delivery order independently of replica-driven scripts.
  *
- * Construction: pick a `size` between `minSize` and `maxSize`; for each
- * index `i`, generate 0–2 parents drawn from indices `< i`. Index 0 is
- * always a root (no parents). Every event is an insert at index 0 with
- * a short BMP string, which keeps the generator simple and the prepare
- * state non-empty for downstream events.
+ * Construction: pick a `size` between `minSize` and `maxSize`. Index 0
+ * is the single root (no parents); every non-root index `i` gets 1–2
+ * parents drawn uniquely from `[0, i - 1]`. The ≥1 lower bound is what
+ * lets `missing-parent-buffering.property.test.ts` assert that a
+ * reverse-order delivery actually exercises the `RemoteEventBuffer`
+ * flushing path — a disconnected DAG would let every event apply
+ * cleanly without ever buffering. Every event is an insert at index 0
+ * with a short BMP string, which keeps the generator simple and the
+ * prepare state non-empty for downstream events.
  */
 export const eventDagArb = (opts: {
   readonly minSize?: number;

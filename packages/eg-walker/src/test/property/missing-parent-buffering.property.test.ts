@@ -12,10 +12,10 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { EgWalkerReplica } from "../../core/replica";
-import type { GraphEvent } from "../../types";
 import { cloneEvent } from "../test-helpers";
 import { eventDagArb } from "./arbitraries";
 import { fcParams } from "./run-config";
+import { shuffleWithSeed } from "./shuffle";
 import { canonicalReplay } from "./trace-runner";
 
 describe("property: missing-parent buffering", () => {
@@ -69,22 +69,3 @@ describe("property: missing-parent buffering", () => {
     );
   });
 });
-
-const shuffleWithSeed = (
-  items: ReadonlyArray<GraphEvent>,
-  seed: number,
-): GraphEvent[] => {
-  let state = seed >>> 0;
-  const next = (): number => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-  const result = items.slice();
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    const tmp = result[i]!;
-    result[i] = result[j]!;
-    result[j] = tmp;
-  }
-  return result;
-};

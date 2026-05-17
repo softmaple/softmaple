@@ -90,10 +90,10 @@ function lintImport(specifier: string): { exitCode: number; output: string } {
     );
     return { exitCode: 0, output: stdout };
   } catch (err) {
-    const e = err as { status?: number; stdout?: Buffer; stderr?: Buffer };
+    const e = err as { status?: number; stdout?: string; stderr?: string };
     return {
       exitCode: typeof e.status === "number" ? e.status : 1,
-      output: `${e.stdout?.toString() ?? ""}${e.stderr?.toString() ?? ""}`,
+      output: `${e.stdout ?? ""}${e.stderr ?? ""}`,
     };
   }
 }

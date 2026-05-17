@@ -53,6 +53,15 @@ export class EgWalkerReplica {
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
   private lastReplaySource: ReplaySource | null = null;
+  /**
+   * Replica-lifetime high-water mark for the engine's
+   * `sequenceRecordCount`. The engine's own peak is engine-scoped and
+   * resets whenever a partial or full replay swaps in a fresh engine; we
+   * fold the outgoing engine's peak into this field before each swap so
+   * the value surfaced through {@link getReplayStats} stays monotonic
+   * across the replica's lifetime.
+   */
+  private replicaPeakSequenceRecordCount = 0;
   private readonly criticalAnalyzer = new CriticalVersionAnalyzer();
   private readonly criticalCheckpoints = new CriticalCheckpointStore(
     this.criticalAnalyzer,
@@ -224,6 +233,10 @@ export class EgWalkerReplica {
    *   top of existing engine state via retreat/advance.
    * - `engineRetreats` / `engineAdvances` are the cumulative engine counters,
    *   useful for proving replay work stays bounded to the divergent suffix.
+   * - `peakSequenceRecordCount` is monotonic across the replica's lifetime:
+   *   the engine's own peak resets on every partial/full replay engine swap,
+   *   so we max in {@link replicaPeakSequenceRecordCount} (the peak captured
+   *   from prior engines) here.
    */
   getReplayStats(): {
     readonly fullReplays: number;
@@ -247,7 +260,10 @@ export class EgWalkerReplica {
       engineAdvances: engineStats?.advanceCount ?? 0,
       checkpointCount: this.criticalCheckpoints.count,
       sequenceRecordCount: engineStats?.sequenceRecordCount ?? 0,
-      peakSequenceRecordCount: engineStats?.peakSequenceRecordCount ?? 0,
+      peakSequenceRecordCount: Math.max(
+        this.replicaPeakSequenceRecordCount,
+        engineStats?.peakSequenceRecordCount ?? 0,
+      ),
       criticalCheckpointHits: this.criticalCheckpoints.hits,
       criticalCheckpointMisses: this.criticalCheckpoints.misses,
       lastReplaySource: this.lastReplaySource,
@@ -357,6 +373,7 @@ export class EgWalkerReplica {
     // retreat/advance round-trip across an interleaved Kahn order. The
     // columnar codec keeps using {@link EventGraph.getTopologicalOrder}
     // (Kahn) so persisted on-disk bytes stay stable.
+    this.captureEnginePeakBeforeSwap();
     const sortedEvents = this.eventGraph.getBranchPreservingTopologicalOrder();
     const engine = new EgWalkerEngine();
     const generated = engine.generate(sortedEvents, this.initialText, {
@@ -367,6 +384,24 @@ export class EgWalkerReplica {
     this.engine = engine;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
+  }
+
+  /**
+   * Fold the outgoing engine's `peakSequenceRecordCount` into the
+   * replica-lifetime peak. Must be called before any code path that
+   * replaces {@link engine} with a fresh instance (see {@link fullReplay}
+   * and {@link partialReplayFromCheckpoint}); otherwise the transient
+   * pressure observed during a heavy concurrent merge would silently
+   * disappear from {@link getReplayStats} after the rebuild.
+   */
+  private captureEnginePeakBeforeSwap(): void {
+    if (!this.engine) {
+      return;
+    }
+    const enginePeak = this.engine.getStats().peakSequenceRecordCount;
+    if (enginePeak > this.replicaPeakSequenceRecordCount) {
+      this.replicaPeakSequenceRecordCount = enginePeak;
+    }
   }
 
   /**
@@ -437,6 +472,7 @@ export class EgWalkerReplica {
   }
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
+    this.captureEnginePeakBeforeSwap();
     const frontier = this.eventGraph.getFrontier();
     const result = this.partialReplayer.replayFromCheckpoint(
       this.eventGraph,

@@ -109,8 +109,12 @@ diagnostic fields aimed at benches:
 - `sequenceRecordCount` — live records in the ranked B-tree; a memory
   proxy.
 - `peakSequenceRecordCount` — high-water mark of `sequenceRecordCount`
-  across the engine's lifetime. Survives later deletes/coalescing, so a
-  transient spike during a concurrent merge stays visible.
+  across the **replica's** lifetime. The replica folds the outgoing
+  engine's peak into a monotonic counter before each partial/full
+  replay engine swap, so the value survives later
+  deletes/coalescing *and* engine rebuilds: a transient spike during a
+  concurrent merge stays visible even if the next event triggers a
+  partial replay that creates a fresh engine.
 - `criticalCheckpointHits` / `criticalCheckpointMisses` — how often
   `CriticalCheckpointStore.pickFor` produced a usable starting point
   vs. forced a full replay. A miss means no retained critical version

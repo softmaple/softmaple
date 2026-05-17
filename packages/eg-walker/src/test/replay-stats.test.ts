@@ -65,6 +65,41 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
         peakAfterSplit,
       );
     });
+
+    it("persists across partial-replay engine swaps", () => {
+      // `partialReplayFromCheckpoint` swaps in a fresh engine whose
+      // engine-local peak starts at zero. The replica must fold the
+      // outgoing engine's peak into its own monotonic counter, otherwise
+      // the value surfaced here would silently regress after the rebuild.
+      const api = new EgWalkerReplica("r1", "a".repeat(200));
+      // Spike the engine peak by splitting the seeded placeholder with a
+      // concurrent insert.
+      api.applyRemoteEvent({
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 100, text: "Z" },
+        timestamp: 1,
+      });
+      const peakBefore = api.getReplayStats().peakSequenceRecordCount;
+      expect(peakBefore).toBeGreaterThan(0);
+
+      // Local edit advances the engine past alice:0 so the next remote
+      // event is concurrent with engine state, forcing a retreat.
+      api.insert(api.getText().length, "L");
+
+      // Concurrent remote rooted at alice:0 (parallel to the local L)
+      // routes through `partialReplayFromCheckpoint`, swapping engines.
+      api.applyRemoteEvent({
+        id: "bob:0",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "!" },
+        timestamp: 2,
+      });
+
+      const after = api.getReplayStats();
+      expect(after.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
+      expect(after.peakSequenceRecordCount).toBeGreaterThanOrEqual(peakBefore);
+    });
   });
 
   describe("criticalCheckpointHits / criticalCheckpointMisses", () => {

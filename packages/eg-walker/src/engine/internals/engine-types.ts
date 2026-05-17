@@ -86,12 +86,18 @@ export interface EngineStats {
    */
   readonly sequenceRecordCount: number;
   /**
-   * High-water mark of {@link sequenceRecordCount} across the engine's
-   * lifetime. Sampled after each `apply` (and after the initial-text
-   * placeholder is seeded in `reset`). Useful for benchmarks because the
-   * steady-state `sequenceRecordCount` can hide transient pressure during a
-   * heavy concurrent merge — the peak surfaces that pressure even when
-   * later deletes/coalescing have shrunk the live record set.
+   * High-water mark of {@link sequenceRecordCount} across **this engine
+   * instance's** lifetime. Sampled after each `apply` (and after the
+   * initial-text placeholder is seeded in `reset`). Useful for benchmarks
+   * because the steady-state `sequenceRecordCount` can hide transient
+   * pressure during a heavy concurrent merge — the peak surfaces that
+   * pressure even when later deletes/coalescing have shrunk the live
+   * record set.
+   *
+   * Note: this peak resets on `reset`, so any caller that swaps engines
+   * (e.g. {@link EgWalkerReplica} during partial/full replay) must fold
+   * the outgoing engine's peak into its own monotonic counter before the
+   * swap if it wants a lifetime-of-replica figure.
    */
   readonly peakSequenceRecordCount: number;
 }

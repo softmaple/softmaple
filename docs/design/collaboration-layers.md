@@ -63,7 +63,7 @@ The CRDT runtime. Implements the Eg-walker paper directly.
 - Depend on `@softmaple/awareness` (no presence, no cursors, no
   transport adapters).
 - Depend on any editor framework — `lexical`, `prosemirror-*`,
-  `slate*`, or equivalent.
+  `slate` / `slate-*`, or equivalent.
 - Expose anything but index-based operations on its public API. No
   block IDs, no DOM types, no editor selections.
 
@@ -104,8 +104,8 @@ The presence and cursor layer. Editor-class-agnostic.
   independent concerns; awareness must work even without a CRDT
   document attached.
 - Depend on any editor framework — `lexical`, `prosemirror-*`, or
-  `slate*` — outside the deferred `bindings/<editor>` sub-path that
-  does not yet exist.
+  `slate` / `slate-*` — outside the deferred `bindings/<editor>`
+  sub-path that does not yet exist.
 
 ### Rationale
 

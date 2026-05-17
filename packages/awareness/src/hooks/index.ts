@@ -27,6 +27,10 @@ export {
 } from "./use-presence-cursors";
 export { useSelf, useSelfSelector } from "./use-self";
 export {
+  type UseTextareaSelectionSyncResult,
+  useTextareaSelectionSync,
+} from "./use-textarea-selection-sync";
+export {
   useUpdateCursor,
   useUpdatePresence,
   useUpdateSelection,

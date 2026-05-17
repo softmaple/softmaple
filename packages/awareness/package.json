@@ -142,6 +142,10 @@
     "./hooks/use-peers-in-block": {
       "types": "./dist/hooks/use-peers-in-block.d.ts",
       "import": "./dist/hooks/use-peers-in-block.js"
+    },
+    "./hooks/use-textarea-selection-sync": {
+      "types": "./dist/hooks/use-textarea-selection-sync.d.ts",
+      "import": "./dist/hooks/use-textarea-selection-sync.js"
     }
   },
   "files": [

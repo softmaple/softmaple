@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(__dirname, "..");
 const REAL_BIOME_JSONC = join(PACKAGE_ROOT, "biome.jsonc");
+
+// Resolve the biome CLI directly via @biomejs/biome's package.json so
+// the test does not depend on `pnpm` (or any other launcher) being on
+// PATH inside the test runtime. The bin entry is a Node JS shim that
+// dispatches to the platform-specific native binary, so invoking it
+// with process.execPath works everywhere @biomejs/biome installs.
+const require = createRequire(import.meta.url);
+const BIOME_BIN = join(
+  dirname(require.resolve("@biomejs/biome/package.json")),
+  "bin",
+  "biome",
+);
 
 function stripJsonComments(input: string): string {
   let out = "";
@@ -80,8 +93,8 @@ function lintImport(specifier: string): { exitCode: number; output: string } {
   writeFileSync(fixture, `import "${specifier}";\n`);
   try {
     const stdout = execFileSync(
-      "pnpm",
-      ["exec", "biome", "lint", "--reporter=json", fixture],
+      process.execPath,
+      [BIOME_BIN, "lint", "--reporter=json", fixture],
       {
         cwd: PACKAGE_ROOT,
         encoding: "utf8",

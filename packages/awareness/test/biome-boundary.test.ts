@@ -65,11 +65,13 @@ function lintImport(specifier: string): { exitCode: number; output: string } {
   const fixture = join(workDir, "src", "fixture.ts");
   writeFileSync(fixture, `import "${specifier}";\n`);
   try {
+    // No `cwd` override: biome resolves its config from the linted
+    // file's location (workDir/src/fixture.ts → workDir/biome.json),
+    // so the test runner's cwd is irrelevant.
     const stdout = execFileSync(
       process.execPath,
       [BIOME_BIN, "lint", "--reporter=json", fixture],
       {
-        cwd: PACKAGE_ROOT,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       },

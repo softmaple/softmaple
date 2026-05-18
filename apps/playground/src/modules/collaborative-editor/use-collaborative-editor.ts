@@ -123,27 +123,48 @@ export const useCollaborativeEditor = (): UseCollaborativeEditorResult => {
   // the first callback closes over it.
   const collab1Ref = useRef<UseTextareaCollaborationResult | null>(null);
   const collab2Ref = useRef<UseTextareaCollaborationResult | null>(null);
+  // Per-direction promise chains so two rapid local edits on the same
+  // textarea cannot interleave their `syncLocalOperationsToRemote`
+  // awaits and shuffle the remote-apply order. `applyRemoteEvent` is
+  // currently synchronous so the bug isn't reproducible today, but the
+  // function is `async` and any future async work inside it would
+  // surface this as a race bug. It is cheaper to serialize here than to
+  // catch it later. Errors are caught so the chain keeps running.
+  const pending1To2Ref = useRef<Promise<void>>(Promise.resolve());
+  const pending2To1Ref = useRef<Promise<void>>(Promise.resolve());
 
   const handleReplica1LocalOps = useCallback(
     (operations: readonly TextareaOperation[]) => {
-      void syncLocalOperationsToRemote(operations, {
-        localReplica: api1,
-        remoteReplica: api2,
-        remoteCollaboration: collab2Ref.current,
-        remoteLabel: "replica-2",
-      });
+      pending1To2Ref.current = pending1To2Ref.current
+        .then(() =>
+          syncLocalOperationsToRemote(operations, {
+            localReplica: api1,
+            remoteReplica: api2,
+            remoteCollaboration: collab2Ref.current,
+            remoteLabel: "replica-2",
+          }),
+        )
+        .catch((error) => {
+          console.error("Failed to sync to replica-2:", error);
+        });
     },
     [api1, api2],
   );
 
   const handleReplica2LocalOps = useCallback(
     (operations: readonly TextareaOperation[]) => {
-      void syncLocalOperationsToRemote(operations, {
-        localReplica: api2,
-        remoteReplica: api1,
-        remoteCollaboration: collab1Ref.current,
-        remoteLabel: "replica-1",
-      });
+      pending2To1Ref.current = pending2To1Ref.current
+        .then(() =>
+          syncLocalOperationsToRemote(operations, {
+            localReplica: api2,
+            remoteReplica: api1,
+            remoteCollaboration: collab1Ref.current,
+            remoteLabel: "replica-1",
+          }),
+        )
+        .catch((error) => {
+          console.error("Failed to sync to replica-1:", error);
+        });
     },
     [api1, api2],
   );

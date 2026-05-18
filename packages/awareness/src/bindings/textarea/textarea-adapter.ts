@@ -308,6 +308,13 @@ export const createTextareaAdapter = (
     },
     applyRemoteOperations,
     observeLocalOperations: (callback) => {
+      // Refuse new subscriptions after destroy so a late caller cannot
+      // pin the callback in the closure indefinitely (the adapter's
+      // `destroy` already cleared `subscribers` and removed listeners,
+      // so the callback would never fire anyway).
+      if (destroyed) {
+        return () => undefined;
+      }
       subscribers.add(callback);
       return () => {
         subscribers.delete(callback);

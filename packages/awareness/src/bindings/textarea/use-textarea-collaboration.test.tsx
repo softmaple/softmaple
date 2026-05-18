@@ -1,6 +1,14 @@
 import { act, type JSX, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { POSITION_OPERATION_TYPE } from "../../mapping/position-operation";
 import type { TextareaOperation } from "./textarea-operations";
 import {
@@ -14,11 +22,29 @@ const reactActGlobal = globalThis as typeof globalThis & {
 const previousReactActEnvironment = reactActGlobal.IS_REACT_ACT_ENVIRONMENT;
 reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
 
+afterAll(() => {
+  reactActGlobal.IS_REACT_ACT_ENVIRONMENT = previousReactActEnvironment;
+});
+
+type HarnessProps = {
+  readonly onLocalOperations: (
+    operations: readonly TextareaOperation[],
+  ) => void;
+  readonly textareaKey?: string;
+};
+
 type Harness = {
   readonly api: { current: UseTextareaCollaborationResult | null };
   readonly textarea: () => HTMLTextAreaElement;
-  readonly setOnLocalOperations: (
-    fn: (ops: readonly TextareaOperation[]) => void,
+  /**
+   * Re-render with a fresh `onLocalOperations` callback identity. This
+   * is the path that exercises the hook's ref-update logic. A stable
+   * outer closure that internally reads a mutable variable would
+   * sidestep it and produce a false positive.
+   */
+  readonly rerenderWith: (
+    onLocalOperations: HarnessProps["onLocalOperations"],
+    textareaKey?: string,
   ) => void;
   readonly unmount: () => void;
 };
@@ -26,7 +52,7 @@ type Harness = {
 let mountedHarnesses: Harness[] = [];
 
 const renderHarness = (
-  initialOnLocalOperations: (ops: readonly TextareaOperation[]) => void,
+  initialOnLocalOperations: HarnessProps["onLocalOperations"],
 ): Harness => {
   const container = document.createElement("div");
   document.body.append(container);
@@ -34,19 +60,23 @@ const renderHarness = (
   const api: { current: UseTextareaCollaborationResult | null } = {
     current: null,
   };
-  let currentOnLocal = initialOnLocalOperations;
 
-  const HarnessComponent = (): JSX.Element => {
+  const HarnessComponent = ({
+    onLocalOperations,
+    textareaKey = "textarea",
+  }: HarnessProps): JSX.Element => {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     api.current = useTextareaCollaboration({
       textareaRef,
-      onLocalOperations: (ops) => currentOnLocal(ops),
+      onLocalOperations,
     });
-    return <textarea ref={textareaRef} />;
+    return <textarea key={textareaKey} ref={textareaRef} />;
   };
 
   act(() => {
-    root.render(<HarnessComponent />);
+    root.render(
+      <HarnessComponent onLocalOperations={initialOnLocalOperations} />,
+    );
   });
 
   const textareaEl = container.querySelector("textarea");
@@ -56,9 +86,22 @@ const renderHarness = (
 
   const harness: Harness = {
     api,
-    textarea: () => textareaEl,
-    setOnLocalOperations: (fn) => {
-      currentOnLocal = fn;
+    textarea: () => {
+      const currentTextarea = container.querySelector("textarea");
+      if (!currentTextarea) {
+        throw new Error("expected textarea to be rendered");
+      }
+      return currentTextarea;
+    },
+    rerenderWith: (onLocalOperations, textareaKey) => {
+      act(() => {
+        root.render(
+          <HarnessComponent
+            onLocalOperations={onLocalOperations}
+            textareaKey={textareaKey}
+          />,
+        );
+      });
     },
     unmount: () => {
       act(() => {
@@ -87,14 +130,6 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-if (previousReactActEnvironment === undefined) {
-  // Leave the global flag set for the duration of the test file; reset on
-  // module teardown to avoid leaking into sibling files.
-  globalThis.addEventListener?.("beforeunload", () => {
-    reactActGlobal.IS_REACT_ACT_ENVIRONMENT = previousReactActEnvironment;
-  });
-}
-
 describe("useTextareaCollaboration", () => {
   it("forwards local operations from input events to the callback", () => {
     const onLocal = vi.fn();
@@ -118,6 +153,9 @@ describe("useTextareaCollaboration", () => {
   });
 
   it("uses the most recent onLocalOperations callback without re-creating the adapter", () => {
+    // Re-render with a *different function identity* so we're actually
+    // exercising the hook's ref-update path, not just a closure over a
+    // mutable outer variable.
     const first = vi.fn();
     const second = vi.fn();
     const harness = renderHarness(first);
@@ -129,7 +167,7 @@ describe("useTextareaCollaboration", () => {
     });
     expect(first).toHaveBeenCalledTimes(1);
 
-    harness.setOnLocalOperations(second);
+    harness.rerenderWith(second);
 
     act(() => {
       const textarea = harness.textarea();
@@ -139,6 +177,14 @@ describe("useTextareaCollaboration", () => {
 
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).toHaveBeenCalledTimes(1);
+    expect(second.mock.calls[0]?.[0]).toEqual([
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 1,
+        length: 1,
+        text: "b",
+      },
+    ]);
   });
 
   it("applyRemoteOperations writes through to the textarea", () => {
@@ -194,5 +240,75 @@ describe("useTextareaCollaboration", () => {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(onLocal).not.toHaveBeenCalled();
+  });
+
+  it("reattaches when the textarea element changes", () => {
+    const onLocal = vi.fn();
+    const harness = renderHarness(onLocal);
+    const previousTextarea = harness.textarea();
+
+    harness.rerenderWith(onLocal);
+    harness.rerenderWith(onLocal, "replacement");
+    const nextTextarea = harness.textarea();
+
+    expect(nextTextarea).not.toBe(previousTextarea);
+
+    act(() => {
+      previousTextarea.value = "stale";
+      previousTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      nextTextarea.value = "fresh";
+      nextTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(onLocal).toHaveBeenCalledTimes(1);
+    expect(onLocal.mock.calls[0]?.[0]).toEqual([
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 0,
+        length: 5,
+        text: "fresh",
+      },
+    ]);
+  });
+
+  it("returns defensive defaults before a textarea element is available", () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const api: { current: UseTextareaCollaborationResult | null } = {
+      current: null,
+    };
+
+    const EmptyHarness = (): JSX.Element => {
+      const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+      api.current = useTextareaCollaboration({
+        textareaRef,
+        onLocalOperations: vi.fn(),
+      });
+      return <div />;
+    };
+
+    act(() => {
+      root.render(<EmptyHarness />);
+    });
+
+    const selection = {
+      selectionStart: 1,
+      selectionEnd: 2,
+      selectionDirection: "forward" as const,
+    };
+
+    expect(api.current?.getDocumentSnapshot()).toBe("");
+    expect(api.current?.getSelection()).toBeNull();
+    expect(() => api.current?.restoreSelection(selection)).not.toThrow();
+    expect(api.current?.mapSelectionThroughOperations(selection, [])).toEqual(
+      selection,
+    );
+    expect(api.current?.isComposing()).toBe(false);
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
   });
 });

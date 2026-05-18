@@ -6,14 +6,9 @@
  * re-attach DOM listeners, and exposes the adapter's API as stable
  * function references safe to depend on.
  *
- * Constraint: the mount effect depends on the `textareaRef` *object*
- * identity, not on its `.current` value. If the underlying textarea
- * element is replaced after the component mounts (e.g. via `key`
- * churn or a conditional render that unmounts then remounts the
- * `<textarea>`), the adapter will not re-attach to the new element.
- * Consumers that need that lifecycle should re-mount the component
- * itself (so the hook itself unmounts and remounts) rather than
- * swapping the underlying element through the same ref.
+ * The mount effect reconciles the ref's current DOM node after each
+ * commit so replacing the underlying textarea tears down the old
+ * adapter and attaches to the new element.
  */
 
 import { type RefObject, useCallback, useEffect, useRef } from "react";
@@ -59,6 +54,8 @@ export const useTextareaCollaboration = (
 ): UseTextareaCollaborationResult => {
   const { textareaRef } = options;
   const adapterRef = useRef<TextareaCollaborationAdapter | null>(null);
+  const attachedElementRef = useRef<HTMLTextAreaElement | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
   const onLocalOperationsRef = useRef(options.onLocalOperations);
   const onCompositionChangeRef = useRef(options.onCompositionChange);
 
@@ -67,8 +64,18 @@ export const useTextareaCollaboration = (
   onLocalOperationsRef.current = options.onLocalOperations;
   onCompositionChangeRef.current = options.onCompositionChange;
 
+  const destroyAttachedAdapter = useCallback((): void => {
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+    adapterRef.current?.destroy();
+    adapterRef.current = null;
+    attachedElementRef.current = null;
+  }, []);
+
   useEffect(() => {
     const element = textareaRef.current;
+    if (attachedElementRef.current === element) return;
+    destroyAttachedAdapter();
     if (!element) return;
     const adapter = createTextareaAdapter(element, {
       onCompositionChange: (composing) => {
@@ -79,12 +86,11 @@ export const useTextareaCollaboration = (
     const unsubscribe = adapter.observeLocalOperations((operations) => {
       onLocalOperationsRef.current(operations);
     });
-    return () => {
-      unsubscribe();
-      adapter.destroy();
-      adapterRef.current = null;
-    };
-  }, [textareaRef]);
+    attachedElementRef.current = element;
+    unsubscribeRef.current = unsubscribe;
+  });
+
+  useEffect(() => destroyAttachedAdapter, [destroyAttachedAdapter]);
 
   const applyRemoteOperations = useCallback(
     (operations: readonly TextareaOperation[]) => {

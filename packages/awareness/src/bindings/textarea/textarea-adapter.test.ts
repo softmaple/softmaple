@@ -431,6 +431,33 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
     adapter.destroy();
   });
 
+  it("leaves the DOM untouched when buffered peer ops are semantic no-ops", () => {
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    const received: TextareaOperation[][] = [];
+    adapter.observeLocalOperations((ops) => received.push([...ops]));
+
+    textarea.dispatchEvent(new Event("compositionstart"));
+    adapter.applyRemoteOperations([
+      { type: POSITION_OPERATION_TYPE.Delete, index: 1, length: 0 },
+    ]);
+    textarea.value = "hello!";
+    textarea.dispatchEvent(new Event("compositionend"));
+
+    expect(textarea.value).toBe("hello!");
+    expect(received).toEqual([
+      [
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 5,
+          length: 1,
+          text: "!",
+        },
+      ],
+    ]);
+    adapter.destroy();
+  });
+
   it("ignores an empty operation batch", () => {
     const textarea = mountTextarea("hello");
     const adapter = createTextareaAdapter(textarea);
@@ -441,6 +468,35 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
     expect(textarea.value).toBe("hello");
     expect(textarea.selectionStart).toBe(2);
+    adapter.destroy();
+  });
+
+  it("treats a remote batch with no visible effect as a baseline-only update", () => {
+    // A delete-then-reinsert of the same characters produces
+    // `nextValue === previousValue`, exercising the no-op early-return
+    // branch that updates `lastValue` without touching the DOM or
+    // selection.
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    const received: TextareaOperation[][] = [];
+    adapter.observeLocalOperations((ops) => received.push([...ops]));
+    textarea.focus();
+    textarea.setSelectionRange(1, 4, "forward");
+
+    adapter.applyRemoteOperations([
+      { type: POSITION_OPERATION_TYPE.Delete, index: 2, length: 2 },
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 2,
+        length: 2,
+        text: "ll",
+      },
+    ]);
+
+    expect(textarea.value).toBe("hello");
+    expect(textarea.selectionStart).toBe(1);
+    expect(textarea.selectionEnd).toBe(4);
+    expect(received).toEqual([]);
     adapter.destroy();
   });
 });
@@ -460,6 +516,18 @@ describe("createTextareaAdapter — selection helpers", () => {
     adapter.destroy();
   });
 
+  it("normalizes unsupported DOM selection directions to none", () => {
+    const textarea = mountTextarea("hello");
+    Object.defineProperty(textarea, "selectionDirection", {
+      configurable: true,
+      get: () => "sideways",
+    });
+    const adapter = createTextareaAdapter(textarea);
+
+    expect(adapter.getSelection()?.selectionDirection).toBe("none");
+    adapter.destroy();
+  });
+
   it("restores a selection, clamping to the current value length", () => {
     const textarea = mountTextarea("hello");
     const adapter = createTextareaAdapter(textarea);
@@ -473,6 +541,39 @@ describe("createTextareaAdapter — selection helpers", () => {
 
     expect(textarea.selectionStart).toBe(5);
     expect(textarea.selectionEnd).toBe(5);
+    adapter.destroy();
+  });
+
+  it("flips direction when restoreSelection receives reversed endpoints", () => {
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    textarea.focus();
+
+    adapter.restoreSelection({
+      selectionStart: 5,
+      selectionEnd: 1,
+      selectionDirection: "forward",
+    });
+    expect(textarea.selectionStart).toBe(1);
+    expect(textarea.selectionEnd).toBe(5);
+    expect(textarea.selectionDirection).toBe("backward");
+
+    adapter.restoreSelection({
+      selectionStart: 4,
+      selectionEnd: 2,
+      selectionDirection: "backward",
+    });
+    expect(textarea.selectionStart).toBe(2);
+    expect(textarea.selectionEnd).toBe(4);
+    expect(textarea.selectionDirection).toBe("forward");
+
+    adapter.restoreSelection({
+      selectionStart: 3,
+      selectionEnd: 1,
+    });
+    expect(textarea.selectionStart).toBe(1);
+    expect(textarea.selectionEnd).toBe(3);
+    expect(textarea.selectionDirection).toBe("none");
     adapter.destroy();
   });
 
@@ -553,6 +654,53 @@ describe("createTextareaAdapter — lifecycle", () => {
       },
     ]);
     expect(textarea.value).toBe("hello");
+  });
+
+  it("returns null from getSelection after destroy without throwing", () => {
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    textarea.focus();
+    textarea.setSelectionRange(1, 3);
+    adapter.destroy();
+
+    expect(() => adapter.getSelection()).not.toThrow();
+    expect(adapter.getSelection()).toBeNull();
+  });
+
+  it("treats restoreSelection after destroy as a no-op without throwing", () => {
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+    adapter.destroy();
+
+    expect(() =>
+      adapter.restoreSelection({
+        selectionStart: 0,
+        selectionEnd: 5,
+        selectionDirection: "none",
+      }),
+    ).not.toThrow();
+    // Selection unchanged: destroy left the DOM alone, just stopped
+    // mediating it.
+    expect(textarea.selectionStart).toBe(2);
+    expect(textarea.selectionEnd).toBe(2);
+  });
+
+  it("refuses new subscriptions after destroy and returns a no-op disposer", () => {
+    const textarea = mountTextarea("");
+    const adapter = createTextareaAdapter(textarea);
+    adapter.destroy();
+    const lateSubscriber = vi.fn();
+    const dispose = adapter.observeLocalOperations(lateSubscriber);
+
+    expect(() => dispose()).not.toThrow();
+    // Input events can't reach a destroyed adapter (listeners are
+    // removed), but assert the contract explicitly: a late subscriber
+    // is never invoked.
+    textarea.value = "x";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(lateSubscriber).not.toHaveBeenCalled();
   });
 
   it("applyLocalOperation is a no-op (DOM is canonical for local edits)", () => {

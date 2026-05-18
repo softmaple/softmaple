@@ -16,7 +16,7 @@ export interface CollaborationAdapter<
   getDocumentSnapshot(): unknown;
 
   applyLocalOperation(operation: TOperation): void;
-  applyRemoteOperations(operations: TOperation[]): void;
+  applyRemoteOperations(operations: readonly TOperation[]): void;
 
   getSelection(): TSelection | null;
   restoreSelection(selection: TSelection | null): void;
@@ -24,11 +24,11 @@ export interface CollaborationAdapter<
   // Optional: allows the adapter to adjust the given selection against a set of concurrent remote operations
   mapSelectionThroughOperations?(
     selection: TSelection,
-    operations: TOperation[],
+    operations: readonly TOperation[],
   ): TSelection;
 
   observeLocalOperations(
-    callback: (operations: TOperation[]) => void,
+    callback: (operations: readonly TOperation[]) => void,
   ): AdapterSubscription;
 
   destroy(): void;

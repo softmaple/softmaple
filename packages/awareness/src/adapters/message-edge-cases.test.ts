@@ -786,6 +786,129 @@ describe("WebSocket adapter extra branches", () => {
     expect(types?.[0]).toBe("auth");
   });
 
+  it("waits for the socket buffer to drain before disconnect cleanup", async () => {
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
+    const adapter = createWebSocketAdapter({
+      ...wsConfig,
+      reconnect: {
+        enabled: false,
+        maxAttempts: 0,
+        baseDelayMs: 1,
+        maxDelayMs: 1,
+      },
+    });
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    const socket = fakeSockets[0];
+    if (!socket) throw new Error("expected fake socket");
+    socket.bufferedAmount = 10;
+    const disconnectPromise = adapter.disconnect();
+    expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+
+    socket.bufferedAmount = 0;
+    await vi.advanceTimersByTimeAsync(10);
+    await disconnectPromise;
+
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(adapter.getConnectionState()).toBe("disconnected");
+  });
+
+  it("stops waiting for buffered messages when the socket closes", async () => {
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
+    const adapter = createWebSocketAdapter({
+      ...wsConfig,
+      reconnect: {
+        enabled: false,
+        maxAttempts: 0,
+        baseDelayMs: 1,
+        maxDelayMs: 1,
+      },
+    });
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+
+    const socket = fakeSockets[0];
+    if (!socket) throw new Error("expected fake socket");
+    socket.bufferedAmount = 10;
+    const disconnectPromise = adapter.disconnect();
+    socket.readyState = FakeWebSocket.CLOSED;
+
+    await vi.advanceTimersByTimeAsync(10);
+    await disconnectPromise;
+
+    expect(adapter.getConnectionState()).toBe("disconnected");
+  });
+
+  it("emits presence events for valid LEAVE and SYNC messages", async () => {
+    const { createWebSocketAdapter } = await import("./websocket/websocket");
+    const adapter = createWebSocketAdapter({
+      ...wsConfig,
+      reconnect: {
+        enabled: false,
+        maxAttempts: 0,
+        baseDelayMs: 1,
+        maxDelayMs: 1,
+      },
+    });
+    const events = vi.fn();
+    adapter.onEvent(events);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+    events.mockClear();
+
+    const send = (msg: object): void => {
+      const socket = fakeSockets[0] as unknown as {
+        listeners: Map<string, Set<(e: MessageEvent<string>) => void>>;
+      };
+      for (const listener of socket.listeners.get("message") ?? []) {
+        listener(new MessageEvent("message", { data: JSON.stringify(msg) }));
+      }
+    };
+
+    const peer = createPresenceUser({
+      userId: "peer",
+      name: "Peer",
+      color: "#111",
+    });
+    send({
+      type: WS_MESSAGE.JOIN,
+      roomId: "room-1",
+      senderId: "peer",
+      timestamp: 1,
+      payload: { user: peer },
+    });
+    send({
+      type: WS_MESSAGE.LEAVE,
+      roomId: "room-1",
+      senderId: "peer",
+      timestamp: 2,
+      payload: { userId: "peer" },
+    });
+    send({
+      type: WS_MESSAGE.PRESENCE_SYNC,
+      roomId: "room-1",
+      senderId: "server",
+      timestamp: 3,
+      payload: { users: [peer] },
+    });
+
+    expect(events).toHaveBeenCalledWith(
+      expect.objectContaining({ type: PRESENCE_EVENT.LEAVE }),
+    );
+    expect(events).toHaveBeenCalledWith(
+      expect.objectContaining({ type: PRESENCE_EVENT.SYNC }),
+    );
+
+    await adapter.disconnect();
+  });
+
   it("malformed peer messages do not surface as presence events", async () => {
     const { createWebSocketAdapter } = await import("./websocket/websocket");
     const adapter = createWebSocketAdapter({
@@ -985,6 +1108,40 @@ describe("BroadcastChannel adapter - extra branches", () => {
     const before = MockBC.instances.length;
     await adapter.connect();
     expect(MockBC.instances.length).toBe(before);
+  });
+
+  it("connects and disconnects without window lifecycle hooks when window is unavailable", async () => {
+    vi.stubGlobal("window", undefined);
+    const adapter = createBroadcastChannelAdapter(config);
+
+    await adapter.connect();
+    expect(adapter.getConnectionState()).toBe("connected");
+
+    await adapter.disconnect();
+    expect(adapter.getConnectionState()).toBe("disconnected");
+  });
+
+  it("reports a generic error when BroadcastChannel construction throws a non-Error", async () => {
+    class ThrowingBroadcastChannel {
+      constructor(_name: string) {
+        throw "constructor failed";
+      }
+    }
+    vi.stubGlobal(
+      "BroadcastChannel",
+      ThrowingBroadcastChannel as unknown as typeof BroadcastChannel,
+    );
+    const adapter = createBroadcastChannelAdapter(config);
+    const errors = vi.fn();
+    adapter.onError(errors);
+
+    await expect(adapter.connect()).rejects.toBe("constructor failed");
+    expect(errors).toHaveBeenCalledWith(
+      new Error("Failed to connect to BroadcastChannel"),
+    );
+
+    await adapter.disconnect();
+    expect(adapter.getConnectionState()).toBe("disconnected");
   });
 
   it("disconnect early-returns when already disconnected", async () => {

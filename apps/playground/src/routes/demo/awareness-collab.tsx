@@ -1,16 +1,8 @@
-import {
-  findChangedSpan,
-  POSITION_OPERATION_TYPE,
-  type PositionOperation,
-} from "@softmaple/awareness/mapping";
-import {
-  APPLY_REMOTE_EVENT_STATUS,
-  EgWalkerReplica,
-  type EventId,
-  type GraphEvent,
-} from "@softmaple/eg-walker";
+import { useTextareaCollaboration } from "@softmaple/awareness/bindings/textarea";
+import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { AwarenessOverlay } from "@/components/awareness-collab/AwarenessOverlay";
 import {
   COLLAB_BLOCK_ID,
@@ -19,6 +11,7 @@ import {
 import { TrainerPicker } from "@/components/awareness-collab/TrainerPicker";
 import { getTrainer } from "@/modules/awareness-collab/trainers";
 import { useAwarenessAdapter } from "@/modules/awareness-collab/use-awareness-adapter";
+import { useBroadcastCollabSession } from "@/modules/awareness-collab/use-broadcast-collab-session";
 
 export const Route = createFileRoute("/demo/awareness-collab")({
   component: AwarenessCollabDemo,
@@ -26,51 +19,6 @@ export const Route = createFileRoute("/demo/awareness-collab")({
 
 const ROOM_ID = "awareness-collab-demo";
 const SYNC_CHANNEL = `eg-walker-sync:${ROOM_ID}`;
-
-/**
- * Reconstruct the visible position operation(s) implied by a remote
- * replica's pre/post text. Used as a fallback when
- * `applyRemoteEvent` returns `status: "integrated"` with `operation: null`
- * (partial/full replay, multi-op coalesced delete, or a visible no-op
- * the engine cannot attribute to a single op). Mirrors
- * `apps/playground/src/modules/collaborative-editor/use-collaborative-editor.ts`
- * — same plain-text 1D diff shape, different replica path. Visible
- * no-ops correctly return an empty array because both texts compare
- * equal.
- */
-const computeMappingOperationsFromTextChange = (
-  oldText: string,
-  newText: string,
-): readonly PositionOperation[] => {
-  if (oldText === newText) return [];
-  const { prefix, suffix } = findChangedSpan(oldText, newText);
-  const deletedLength = oldText.length - prefix - suffix;
-  const insertedText = newText.slice(prefix, newText.length - suffix);
-  const operations: PositionOperation[] = [];
-  if (deletedLength > 0) {
-    operations.push({
-      type: POSITION_OPERATION_TYPE.Delete,
-      index: prefix,
-      length: deletedLength,
-    });
-  }
-  if (insertedText.length > 0) {
-    operations.push({
-      type: POSITION_OPERATION_TYPE.Insert,
-      index: prefix,
-      length: insertedText.length,
-    });
-  }
-  return operations;
-};
-
-const isSamePositionOperation = (
-  left: PositionOperation,
-  right: PositionOperation,
-): boolean =>
-  left.type === right.type &&
-  left.index === right.index &&
-  left.length === right.length;
 
 function AwarenessCollabDemo() {
   const [trainer, setTrainer] = useState<string | null>(null);
@@ -81,33 +29,6 @@ function AwarenessCollabDemo() {
 
   return <CollabSession trainerId={trainer} onLeave={() => setTrainer(null)} />;
 }
-
-/**
- * Cross-tab sync protocol. Three message shapes:
- *
- * - `event`     a single newly-produced event, broadcast as it happens.
- * - `request`   a freshly-mounted tab asks peers for their event graph.
- * - `snapshot`  a peer's reply to `request` carrying their full event graph.
- *
- * `recipientId` is set on `snapshot` so other already-synced tabs can ignore
- * it cheaply. `request` and `event` are broadcast to all tabs in the room.
- */
-type SyncMessage =
-  | {
-      readonly type: "event";
-      readonly senderId: string;
-      readonly event: GraphEvent;
-    }
-  | {
-      readonly type: "request";
-      readonly senderId: string;
-    }
-  | {
-      readonly type: "snapshot";
-      readonly senderId: string;
-      readonly recipientId: string;
-      readonly events: ReadonlyArray<GraphEvent>;
-    };
 
 function CollabSession({
   trainerId,
@@ -120,211 +41,38 @@ function CollabSession({
   const trainer = getTrainer(trainerId);
   const [replica] = useState(() => new EgWalkerReplica(userInfo.userId, ""));
   const [text, setText] = useState("");
-  const broadcastRef = useRef<BroadcastChannel | null>(null);
-  // Event IDs we've already published (either broadcast ourselves or
-  // received from a peer). Using IDs — rather than a graph-length index —
-  // means applying a remote event never causes us to re-broadcast it on the
-  // next local edit.
-  const publishedIdsRef = useRef<Set<EventId>>(new Set());
-  // Length of the exported graph prefix the broadcast loop has already
-  // inspected. Lets every keystroke skip the O(N) re-scan and only walk
-  // freshly-appended events. The Set above is still the source of truth for
-  // dedupe — this just bounds the iteration.
-  const scannedPrefixRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Mapping operations accumulated by `acceptRemote` for the events
-  // integrated in the current React tick. The post-commit layout effect
-  // in `EditorSurface` drains and applies them to the captured local
-  // selection so the caret rides through peer inserts/deletes correctly.
-  // Owned here (not in `EditorSurface`) so a snapshot of N events
-  // accumulates ops across the whole batch before the single `setText`
-  // triggers the layout effect.
-  const pendingMappingOperationsRef = useRef<PositionOperation[]>([]);
+  const { collaborationRef, broadcastNewEvents } = useBroadcastCollabSession({
+    replica,
+    userId: userInfo.userId,
+    syncChannel: SYNC_CHANNEL,
+    onTextChange: setText,
+  });
 
-  // Separate BroadcastChannel for CRDT event sync. Awareness adapter
-  // already opens its own channel for presence — keeping them isolated
-  // avoids mixing message shapes and makes the demo easier to reason
-  // about.
-  useEffect(() => {
-    const channel = new BroadcastChannel(SYNC_CHANNEL);
-    broadcastRef.current = channel;
-    const selfId = userInfo.userId;
-    const pendingByMissingParent = new Map<EventId, GraphEvent[]>();
-    const bufferedEventIds = new Set<EventId>();
-
-    const getIntegratedEventIds = (): Set<EventId> =>
-      new Set(replica.exportEventGraph().map((event) => event.id));
-
-    const findMissingParent = (event: GraphEvent): EventId | null => {
-      const integratedIds = getIntegratedEventIds();
-      for (const parentId of event.parentVersion) {
-        if (!integratedIds.has(parentId)) {
-          return parentId;
+  const handleLocalOperations = useCallback<
+    Parameters<typeof useTextareaCollaboration>[0]["onLocalOperations"]
+  >(
+    (operations) => {
+      for (const operation of operations) {
+        if (operation.type === POSITION_OPERATION_TYPE.Delete) {
+          replica.delete(operation.index, operation.length);
+          continue;
         }
+        replica.insert(operation.index, operation.text);
       }
-      return null;
-    };
-
-    const bufferRemote = (event: GraphEvent, missingParent: EventId): void => {
-      if (bufferedEventIds.has(event.id)) return;
-      const waiters = pendingByMissingParent.get(missingParent) ?? [];
-      waiters.push(event);
-      pendingByMissingParent.set(missingParent, waiters);
-      bufferedEventIds.add(event.id);
-    };
-
-    const drainPendingChildren = (parentId: EventId): void => {
-      const waiters = pendingByMissingParent.get(parentId);
-      if (!waiters) return;
-      pendingByMissingParent.delete(parentId);
-      for (const waiter of waiters) {
-        bufferedEventIds.delete(waiter.id);
-        acceptRemote(waiter);
-      }
-    };
-
-    const acceptRemote = (event: GraphEvent): void => {
-      if (getIntegratedEventIds().has(event.id)) return;
-      const missingParent = findMissingParent(event);
-      if (missingParent) {
-        bufferRemote(event, missingParent);
-        return;
-      }
-      const textBefore = replica.getText();
-      const result = replica.applyRemoteEvent(event);
-      const textAfter = replica.getText();
-      // Mark as published-from-elsewhere so our outbound loop doesn't
-      // bounce it back to peers.
-      publishedIdsRef.current.add(event.id);
-      if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) return;
-      const fallbackOperations = computeMappingOperationsFromTextChange(
-        textBefore,
-        textAfter,
-      );
-      const [fallbackOperation] = fallbackOperations;
-      if (
-        result.operation &&
-        fallbackOperations.length === 1 &&
-        fallbackOperation &&
-        isSamePositionOperation(result.operation, fallbackOperation)
-      ) {
-        pendingMappingOperationsRef.current.push(result.operation);
-        drainPendingChildren(event.id);
-        return;
-      }
-      // Engine couldn't attribute a single op (partial/full replay or
-      // multi-op coalesced delete), or `applyRemoteEvent` flushed buffered
-      // child events as a side effect. Reconstruct from pre/post text so
-      // the selection mapping still covers the whole visible commit.
-      pendingMappingOperationsRef.current.push(...fallbackOperations);
-      drainPendingChildren(event.id);
-    };
-
-    channel.onmessage = (e: MessageEvent<SyncMessage>) => {
-      const msg = e.data;
-      if (msg.senderId === selfId) return;
-
-      switch (msg.type) {
-        case "event": {
-          acceptRemote(msg.event);
-          setText(replica.getText());
-          return;
-        }
-        case "request": {
-          // Reply only if we have anything to share. Multiple already-synced
-          // tabs may answer; the requester dedups by event id in the replica.
-          //
-          // Note: `exportEventGraph` returns only events that have been
-          // integrated into the graph. Remote events that are still buffered
-          // in the replica waiting on missing parents won't be in the
-          // snapshot. Convergence still holds — those buffered events were
-          // produced by some peer who is also in the room and will reply to
-          // the same `request` with their own (more complete) graph — but
-          // the requester may briefly observe a graph that lags behind its
-          // most-advanced peer.
-          const events = replica.exportEventGraph();
-          if (events.length === 0) return;
-          channel.postMessage({
-            type: "snapshot",
-            senderId: selfId,
-            recipientId: msg.senderId,
-            events,
-          } satisfies SyncMessage);
-          return;
-        }
-        case "snapshot": {
-          if (msg.recipientId !== selfId) return;
-          for (const event of msg.events) {
-            acceptRemote(event);
-          }
-          setText(replica.getText());
-          return;
-        }
-      }
-    };
-
-    // Ask any open tab for their event graph so we don't start at "".
-    channel.postMessage({
-      type: "request",
-      senderId: selfId,
-    } satisfies SyncMessage);
-
-    return () => {
-      channel.close();
-      broadcastRef.current = null;
-    };
-  }, [replica, userInfo.userId]);
-
-  // Broadcast events the replica has produced that we haven't shared yet.
-  // Resumes from `scannedPrefixRef` so each keystroke walks only freshly-
-  // appended events; the id Set still dedupes inside the suffix in case a
-  // remote event landed at the tail between scans.
-  const broadcastNewEvents = useCallback(() => {
-    const channel = broadcastRef.current;
-    if (!channel) return;
-    const selfId = userInfo.userId;
-    const events = replica.exportEventGraph();
-    // Defensive: if the graph ever shrinks (shouldn't happen with an
-    // append-only CRDT, but guards against future replica behavior), rescan
-    // from the beginning. The id Set keeps us correct either way.
-    if (events.length < scannedPrefixRef.current) {
-      scannedPrefixRef.current = 0;
-    }
-    for (let i = scannedPrefixRef.current; i < events.length; i++) {
-      const event = events[i];
-      if (!event) continue;
-      if (publishedIdsRef.current.has(event.id)) continue;
-      channel.postMessage({
-        type: "event",
-        senderId: selfId,
-        event,
-      } satisfies SyncMessage);
-      publishedIdsRef.current.add(event.id);
-    }
-    scannedPrefixRef.current = events.length;
-  }, [replica, userInfo.userId]);
-
-  const handleTextChange = useCallback(
-    (newText: string) => {
-      const oldText = replica.getText();
-      if (newText === oldText) return;
-
-      const { prefix, suffix } = findChangedSpan(oldText, newText);
-      const deletedLength = oldText.length - prefix - suffix;
-      const insertedText = newText.slice(prefix, newText.length - suffix);
-
-      if (deletedLength > 0) {
-        replica.delete(prefix, deletedLength);
-      }
-      if (insertedText.length > 0) {
-        replica.insert(prefix, insertedText);
-      }
-
       setText(replica.getText());
       broadcastNewEvents();
     },
     [broadcastNewEvents, replica],
   );
+
+  const collaboration = useTextareaCollaboration({
+    textareaRef,
+    onLocalOperations: handleLocalOperations,
+  });
+  useLayoutEffect(() => {
+    collaborationRef.current = collaboration;
+  }, [collaboration, collaborationRef]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 p-4 md:p-8">
@@ -381,10 +129,9 @@ function CollabSession({
           <EditorSurface
             blockId={COLLAB_BLOCK_ID}
             text={text}
-            onTextChange={handleTextChange}
             textareaRef={textareaRef}
             trainerId={trainerId}
-            pendingMappingOperationsRef={pendingMappingOperationsRef}
+            isComposing={collaboration.isComposing}
           />
         </AwarenessOverlay>
 

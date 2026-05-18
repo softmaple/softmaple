@@ -146,6 +146,10 @@
     "./hooks/use-textarea-selection-sync": {
       "types": "./dist/hooks/use-textarea-selection-sync.d.ts",
       "import": "./dist/hooks/use-textarea-selection-sync.js"
+    },
+    "./bindings/textarea": {
+      "types": "./dist/bindings/textarea/index.d.ts",
+      "import": "./dist/bindings/textarea/index.js"
     }
   },
   "files": [

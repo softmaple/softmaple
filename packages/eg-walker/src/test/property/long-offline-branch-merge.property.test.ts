@@ -45,6 +45,7 @@ describe("property: long offline branch merge converges", () => {
           fc.pre(trace.appliedEdits > 0);
 
           // Both live replicas must converge after the final sync.
+          expect(trace.finalTextPerReplica.size).toBe(2);
           for (const finalText of trace.finalTextPerReplica.values()) {
             expect(finalText).toBe(trace.canonicalText);
           }

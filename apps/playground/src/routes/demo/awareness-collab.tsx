@@ -78,7 +78,7 @@ function CollabSession({
         // Defer the flush one microtask so the composition's own ops
         // (emitted synchronously in compositionend, after this callback)
         // reach the replica before we apply the buffered peer events.
-        Promise.resolve().then(flushDuringCompositionEvents);
+        queueMicrotask(flushDuringCompositionEvents);
       }
     },
   });

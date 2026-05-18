@@ -59,6 +59,32 @@ const setEquals = <T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean => {
 };
 
 describe("property: JSON serialize/deserialize round-trip", () => {
+  it("preserves text for concurrent root inserts after JSON round-trip", () => {
+    expectJsonRoundTripToPreserveTrace({
+      initialText: "",
+      scripts: [
+        {
+          replicaId: "carol",
+          edits: [
+            { kind: "insert", offsetSeed: 0, text: " " },
+            { kind: "insert", offsetSeed: 0, text: " " },
+            { kind: "insert", offsetSeed: 0, text: "\uE000" },
+          ],
+        },
+        {
+          replicaId: "bob",
+          edits: [
+            { kind: "delete", offsetSeed: 0, lengthSeed: 0 },
+            { kind: "delete", offsetSeed: 0, lengthSeed: 0 },
+            { kind: "insert", offsetSeed: 0, text: "\uE001" },
+            { kind: "insert", offsetSeed: 0, text: " " },
+          ],
+        },
+      ],
+      syncEveryN: 3,
+    });
+  });
+
   it("preserves text, frontier, and sequence-record count", () => {
     fc.assert(
       fc.property(
@@ -69,31 +95,7 @@ describe("property: JSON serialize/deserialize round-trip", () => {
           maxStepsPerReplica: 5,
         }),
         (params) => {
-          const trace = runTrace(params);
-          const original = new EgWalkerReplica("origin", params.initialText);
-          for (const event of trace.events) {
-            original.applyRemoteEvent(cloneEvent(event));
-          }
-          expect(original.getText()).toBe(trace.canonicalText);
-
-          const serialized = original.serialize();
-          // JSON round-trip — proves the on-wire payload is JSON-safe.
-          const wire = JSON.parse(
-            JSON.stringify(serialized),
-          ) as typeof serialized;
-          const restored = EgWalkerReplica.deserialize(wire, "restored");
-
-          expect(restored.getText()).toBe(original.getText());
-          expect(setEquals(frontierSet(restored), frontierSet(original))).toBe(
-            true,
-          );
-
-          // The restored replica must carry the full event history,
-          // so it can continue to accept new events without losing
-          // causal context.
-          expect(restored.exportEventGraph().length).toBe(
-            original.exportEventGraph().length,
-          );
+          expectJsonRoundTripToPreserveTrace(params);
         },
       ),
       fcParams(),
@@ -139,6 +141,31 @@ describe("property: columnar codec round-trip", () => {
     );
   });
 });
+
+const expectJsonRoundTripToPreserveTrace = (
+  params: Parameters<typeof runTrace>[0],
+): void => {
+  const trace = runTrace(params);
+  const original = new EgWalkerReplica("origin", params.initialText);
+  for (const event of trace.events) {
+    original.applyRemoteEvent(cloneEvent(event));
+  }
+  expect(original.getText()).toBe(trace.canonicalText);
+
+  const serialized = original.serialize();
+  // JSON round-trip — proves the on-wire payload is JSON-safe.
+  const wire = JSON.parse(JSON.stringify(serialized)) as typeof serialized;
+  const restored = EgWalkerReplica.deserialize(wire, "restored");
+
+  expect(restored.getText()).toBe(original.getText());
+  expect(setEquals(frontierSet(restored), frontierSet(original))).toBe(true);
+
+  // The restored replica must carry the full event history,
+  // so it can continue to accept new events without losing causal context.
+  expect(restored.exportEventGraph().length).toBe(
+    original.exportEventGraph().length,
+  );
+};
 
 const replayGraph = (graph: EventGraph, initialText: string): string => {
   const replica = new EgWalkerReplica("replay", initialText);

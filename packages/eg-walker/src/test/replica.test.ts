@@ -351,6 +351,59 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(deserialized.getText()).toBe("Fallback");
   });
 
+  it("infers nextSequenceNumber for metadata-less restores with existing replica ids", () => {
+    const api = new EgWalkerReplica("r1");
+    api.insert(0, "A");
+    api.insert(1, "B");
+    const serialized = api.serialize();
+
+    const restored = EgWalkerReplica.deserialize(
+      {
+        ...serialized,
+        eventGraph: {
+          ...serialized.eventGraph,
+          metadata: {},
+        },
+      },
+      "r1",
+    );
+
+    restored.insert(2, "C");
+
+    expect(restored.getText()).toBe("ABC");
+    expect(restored.exportEventGraph().some((e) => e.id === "r1:2")).toBe(true);
+  });
+
+  it("restores broad concurrent metadata-less graphs with a single replay when text matches", () => {
+    const eventCount = 64;
+    const events = Array.from({ length: eventCount }, (_unused, index) => ({
+      id: `r1:${index}`,
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+      parentVersion: [],
+      timestamp: index,
+    }));
+
+    const restored = EgWalkerReplica.deserialize(
+      {
+        text: "x".repeat(eventCount),
+        eventGraph: {
+          version: events.map((event) => event.id),
+          events,
+          metadata: {},
+        },
+      },
+      "r1",
+    );
+
+    restored.insert(eventCount, "!");
+
+    expect(restored.getReplayStats().fullReplays).toBe(1);
+    expect(restored.getText()).toBe(`${"x".repeat(eventCount)}!`);
+    expect(
+      restored.exportEventGraph().some((event) => event.id === "r1:64"),
+    ).toBe(true);
+  });
+
   it("ignores non-numeric sequence suffixes when inferring nextSequenceNumber", () => {
     // Hits the Number.isInteger=false branch in inferNextSequenceNumber.
     const api = new EgWalkerReplica("r1");

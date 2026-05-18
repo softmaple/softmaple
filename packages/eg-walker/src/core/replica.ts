@@ -74,6 +74,7 @@ export class EgWalkerReplica {
     private readonly replicaId: string,
     initialText: string = "",
     eventGraph?: EventGraph,
+    replayOrder?: ReadonlyArray<GraphEvent>,
   ) {
     assertWellFormedUtf16(initialText, "initial document text");
     this.document = initialText;
@@ -95,7 +96,7 @@ export class EgWalkerReplica {
       for (const event of this.eventGraph.getAllEvents()) {
         assertRemoteEventWellFormed(event);
       }
-      this.fullReplay();
+      this.fullReplay(replayOrder);
     }
     this.maybeAdvanceCheckpoint();
   }
@@ -165,14 +166,29 @@ export class EgWalkerReplica {
 
     const graph = EventGraph.deserialize(serialized.eventGraph);
     const metadata = readReplicaMetadata(graph);
+    const topologicalOrder = graph.getTopologicalOrder();
     const initialText =
       metadata.initialText ??
-      (graph.getAllEvents().length === 0 ? serialized.text : "");
-    const replica = new EgWalkerReplica(replicaId, initialText, graph);
-
-    if (metadata.nextSequenceNumber !== undefined) {
-      replica.nextSequenceNumber = metadata.nextSequenceNumber;
+      (topologicalOrder.length === 0 ? serialized.text : "");
+    let replica = new EgWalkerReplica(
+      replicaId,
+      initialText,
+      graph,
+      topologicalOrder,
+    );
+    // Most restores can rebuild from the persisted graph with one replay.
+    // Older/order-sensitive payloads may still need the live remote-apply
+    // compatibility path to reproduce their persisted text exactly.
+    if (topologicalOrder.length > 0 && replica.getText() !== serialized.text) {
+      replica = new EgWalkerReplica(replicaId, initialText);
+      for (const event of topologicalOrder) {
+        replica.applyRemoteEvent(event);
+      }
+      replica.eventGraph.setMetadata(graph.getMetadata());
     }
+
+    replica.nextSequenceNumber =
+      metadata.nextSequenceNumber ?? replica.inferNextSequenceNumber();
 
     return replica;
   }
@@ -378,7 +394,9 @@ export class EgWalkerReplica {
     return replica;
   }
 
-  private fullReplay(): ReadonlyArray<ExternalOperation> {
+  private fullReplay(
+    replayOrder?: ReadonlyArray<GraphEvent>,
+  ): ReadonlyArray<ExternalOperation> {
     // Section 3.4 of the paper: walk the event graph in branch-preserving
     // order so each parent transition matches the engine's current version
     // and triggers the non-conflicting-run fast path instead of forcing a
@@ -386,7 +404,8 @@ export class EgWalkerReplica {
     // columnar codec keeps using {@link EventGraph.getTopologicalOrder}
     // (Kahn) so persisted on-disk bytes stay stable.
     this.captureEnginePeakBeforeSwap();
-    const sortedEvents = this.eventGraph.getBranchPreservingTopologicalOrder();
+    const sortedEvents =
+      replayOrder ?? this.eventGraph.getBranchPreservingTopologicalOrder();
     const engine = new EgWalkerEngine();
     const generated = engine.generate(sortedEvents, this.initialText, {
       eventGraph: this.eventGraph,

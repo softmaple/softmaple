@@ -5,9 +5,7 @@ import type { EventId, GraphEvent } from "../types";
 import {
   applyInRandomDeliveryOrder,
   canonicalText,
-  cloneEvent,
   createPrng,
-  shuffled,
 } from "./test-helpers";
 
 describe("EgWalkerReplica surrogate-pair boundary cases", () => {

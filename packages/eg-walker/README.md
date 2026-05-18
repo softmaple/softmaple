@@ -64,6 +64,81 @@ pnpm --filter @softmaple/eg-walker build
 pnpm --filter @softmaple/eg-walker lint
 ```
 
+## Validation
+
+### Property / fuzz tests
+
+Property tests live in `src/test/property/` and use
+[fast-check](https://fast-check.dev/) for shrinkable counterexamples.
+They run as part of the normal test suite:
+
+```bash
+# Default — 100 runs per property (suitable for CI).
+pnpm --filter @softmaple/eg-walker test
+
+# Run only property tests.
+pnpm --filter @softmaple/eg-walker test -- --run src/test/property
+
+# Increase runs for a deeper sweep before a release.
+EG_WALKER_PROPERTY_RUNS=500 pnpm --filter @softmaple/eg-walker test
+```
+
+| Property | File |
+| --- | --- |
+| Multi-replica convergence under randomized delivery | `convergence.property.test.ts` |
+| Delivery-order invariance for a fixed event set | `delivery-order-invariance.property.test.ts` |
+| Duplicate event delivery is idempotent | `duplicate-event-idempotency.property.test.ts` |
+| Missing-parent events are buffered then flushed | `missing-parent-buffering.property.test.ts` |
+| JSON serialize / columnar codec round-trip | `serialize-roundtrip.property.test.ts` |
+| UTF-16 surrogate safety | `unicode-surrogate.property.test.ts` |
+| Concurrent same-index inserts converge (YATA tie-breaking) | `concurrent-same-index-inserts.property.test.ts` |
+| Long offline branch merge converges | `long-offline-branch-merge.property.test.ts` |
+
+See [`src/test/property/README.md`](src/test/property/README.md) for how to add new properties.
+
+### Benchmarks
+
+Benchmarks live in `src/bench/` and are separate from the unit-test suite.
+Run them manually — they never fail CI on timing:
+
+```bash
+pnpm --filter @softmaple/eg-walker bench
+```
+
+| Scenario | File | What it stresses |
+| --- | --- | --- |
+| Long linear history (5k sequential inserts) | `long-linear-history.bench.ts` | Section 3.4 non-conflicting-run fast path |
+| Concurrent same-index inserts (200 events) | `concurrent-same-index-inserts.bench.ts` | YATA origin-left tie-breaking |
+| Long offline branch merge (2×1k events) | `long-offline-branch-merge.bench.ts` | Retreat/advance over a stale branch |
+| Delete-heavy workload (2k events, ~70% deletes) | `delete-heavy-workload.bench.ts` | Delete-target-index and placeholder filtering |
+| Checkpoint effectiveness (100 linear + 20 siblings) | `checkpoint-effectiveness.bench.ts` | `CriticalCheckpointStore` partial-replay path |
+
+Each scenario prints one stats line after the benchmark run, for example:
+
+```
+[bench:long-linear-history] events=5000 text=5000 fullReplays=1 partialReplays=0
+  incrementalApplies=4999 retreats=0 advances=0 checkpoints=32
+  sequenceRecords=1 peakSequenceRecords=1
+  checkpointHits=0 checkpointMisses=0 lastReplaySource=incremental
+```
+
+#### Interpreting replay stats
+
+| Field | Meaning |
+| --- | --- |
+| `fullReplays` | Cold-start or recovery replays over the full event graph. Should be 1 for linear workloads. |
+| `partialReplays` | Replays scoped to the divergent suffix using a `CriticalCheckpointStore` anchor. Replaces full replays for concurrent-sibling merges. |
+| `incrementalApplies` | Events applied by advancing the existing engine state with no retreat. The dominant path for sequential editing. |
+| `retreats` / `advances` | Cumulative engine moves. Non-zero for concurrent merges; proportional to the size of the divergent suffix, not the full history. |
+| `checkpoints` | Retained critical-version checkpoints (capped at 32 via LRU). Higher means more reuse opportunities for future merges. |
+| `checkpointHits` | Times `CriticalCheckpointStore.pickFor` found a usable anchor — avoids a full replay. |
+| `checkpointMisses` | Times no retained checkpoint dominated the divergent suffix — forced a full replay. |
+| `sequenceRecords` | Live records in the ranked B-tree at the end of the scenario. Memory proxy. |
+| `peakSequenceRecords` | High-water mark across the replica lifetime; stays visible even after deletes or engine rebuilds. |
+| `lastReplaySource` | `incremental`, `partial`, or `full` — which path handled the last event. |
+
+A healthy concurrent-merge workload shows `partialReplays > 0` and `checkpointHits > 0`, meaning the checkpoint store is being consulted and is avoiding full replays.
+
 ## References
 
 - [Research paper](https://arxiv.org/abs/2409.14252)

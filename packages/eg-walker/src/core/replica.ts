@@ -166,24 +166,22 @@ export class EgWalkerReplica {
 
     const graph = EventGraph.deserialize(serialized.eventGraph);
     const metadata = readReplicaMetadata(graph);
+    const topologicalOrder = graph.getTopologicalOrder();
     const initialText =
       metadata.initialText ??
-      (graph.getAllEvents().length === 0 ? serialized.text : "");
+      (topologicalOrder.length === 0 ? serialized.text : "");
     let replica = new EgWalkerReplica(
       replicaId,
       initialText,
       graph,
-      graph.getTopologicalOrder(),
+      topologicalOrder,
     );
     // Most restores can rebuild from the persisted graph with one replay.
     // Older/order-sensitive payloads may still need the live remote-apply
     // compatibility path to reproduce their persisted text exactly.
-    if (
-      graph.getAllEvents().length > 0 &&
-      replica.getText() !== serialized.text
-    ) {
+    if (topologicalOrder.length > 0 && replica.getText() !== serialized.text) {
       replica = new EgWalkerReplica(replicaId, initialText);
-      for (const event of graph.getTopologicalOrder()) {
+      for (const event of topologicalOrder) {
         replica.applyRemoteEvent(event);
       }
       replica.eventGraph.setMetadata(graph.getMetadata());

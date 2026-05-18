@@ -41,11 +41,11 @@
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "@types/node": "^24.10.4",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/coverage-v8": "^4.1.6",
     "fast-check": "^4.8.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.6"
   },
   "publishConfig": {
     "access": "public"

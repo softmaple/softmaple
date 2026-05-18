@@ -1,4 +1,6 @@
 import type { EventId, GraphEvent, SerializedGraphInput } from "../../types";
+import { compareEventIds } from "../event-id";
+import { MaxHeap } from "./max-heap";
 
 interface MutableEventGraph {
   addEvent(event: GraphEvent): void;
@@ -66,7 +68,9 @@ export const deserializeEventGraph = <TGraph extends MutableEventGraph>(
     }
   }
 
-  const ready: EventId[] = [];
+  const ready = new MaxHeap<EventId>((left, right) =>
+    compareEventIds(right, left),
+  );
   for (const [id, count] of remainingParents) {
     if (count === 0) {
       ready.push(id);
@@ -74,7 +78,7 @@ export const deserializeEventGraph = <TGraph extends MutableEventGraph>(
   }
 
   let added = 0;
-  while (ready.length > 0) {
+  while (ready.size > 0) {
     const id = ready.pop()!;
     const event = eventsById.get(id);
     if (!event) {

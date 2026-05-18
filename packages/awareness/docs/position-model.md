@@ -136,6 +136,15 @@ type PathPosition = {
   readonly path: ReadonlyArray<string | number>;
   readonly offset?: number;
 };
+// `offset` is required when `path` resolves to a text/leaf node and the
+// position lies between characters inside that leaf. It is omitted when
+// `path` targets a container — in that case the position refers to the
+// child element at the last path segment itself (a node-level cursor,
+// not a character-level one). Mapping functions must preserve the
+// omission when the target stays a container, translate or set `offset`
+// when the target becomes a text node, and return `null` (a
+// "not-a-position") when the target no longer has an internal offset
+// space (e.g., the leaf was replaced by a void node).
 
 type Position = LinearPosition | BlockPosition | PathPosition;
 
@@ -160,6 +169,17 @@ type CanvasPosition = {
   readonly handle?: string;
   readonly point?: { readonly x: number; readonly y: number };
 };
+// A `CanvasPosition` with only `shapeId` (both `handle` and `point`
+// absent) is valid and represents a *shape-level cursor*: "this user
+// has the shape selected" with no sub-shape location. Consumers should
+// render shape-level cursors as a selection outline / chrome on the
+// shape itself, not as a caret. When a sub-shape location is needed,
+// `handle` names a known anchor on the shape (e.g., `"top-left"`,
+// `"end"`) and `point` carries shape-local 2D coordinates. If both are
+// present, `handle` wins for hit-testing and `point` is treated as a
+// hint. A future revision may tighten this to a discriminated union
+// (`{ shapeId }` | `{ shapeId, handle }` | `{ shapeId, point }`) once
+// adapter usage clarifies which combinations actually occur.
 
 type LineColumnPosition = {
   readonly kind: "line-column";
@@ -194,6 +214,15 @@ type BlockMove = {
 };
 ```
 
+**Type-tag naming convention.** Legacy linear operations keep their
+short, unprefixed tags (`LinearInsert` → `"insert"`, `LinearDelete` →
+`"delete"`) so existing callers and serialised payloads do not need to
+change. Every operation kind introduced after the linear baseline uses
+a dotted, namespaced tag (`BlockInsert` → `"block.insert"`, `BlockMove`
+→ `"block.move"`, future `CanvasMove` → `"canvas.move"`,
+`PathReplace` → `"path.replace"`, etc.) so new kinds cannot collide
+with each other and stay visually grouped by editor surface.
+
 Each new editor class contributes its own operation variants and its
 own mapping function `(Range, Operation) => Range`. The existing
 `mapCursorThroughOperation` and `mapSelectionThroughOperation` keep
@@ -206,9 +235,90 @@ working for the `linear` kind unchanged.
 - New kinds are added behind their own adapter modules
   (`mapping/block-*`, `mapping/path-*`, etc.) so apps that only use
   textareas pay no bundle cost for block or path support.
-- `@softmaple/eg-walker` is **not** touched. Block IDs, paths, and
-  shape IDs are resolved to / from linear indices inside the awareness
-  adapter or the app, never inside the CRDT runtime.
+- `@softmaple/eg-walker` is **not** touched. The translation between
+  non-linear position kinds and the linear index space that
+  `@softmaple/eg-walker` consumes happens entirely inside the
+  **awareness adapter** (or in `apps/*`), never inside the CRDT
+  runtime. Directionality and scope per kind:
+  - **`block` (`BlockPosition`)** — bidirectional. The adapter keeps a
+    `blockId → linear range` index (built on document mount, updated
+    on each `BlockInsert` / `BlockMove` / `BlockDelete`). `block →
+    linear` looks up the block's start and adds `offset`; `linear →
+    block` does a binary search over the range index. Caveat: under
+    concurrent block moves the index can be stale for one tick, so
+    mappings produced mid-batch must be re-resolved after the batch
+    applies.
+  - **`path` (`PathPosition`)** — bidirectional but lossier. The
+    adapter walks the editor's node tree on demand rather than
+    maintaining a stable table, because paths invalidate on most
+    structural edits. `path → linear` is well-defined when the path
+    still resolves; `linear → path` requires the editor to expose a
+    `linearIndex → path` query (ProseMirror's `doc.resolve`,
+    Lexical's node keys). When the path no longer resolves, the
+    adapter returns `null` rather than guessing a nearby node.
+  - **`canvas` (`CanvasPosition`)** — **not mapped** to linear indices
+    at all. Whiteboard surfaces have no linear document for
+    `@softmaple/eg-walker` to converge over; canvas adapters run
+    against a separate CRDT (or against eg-walker instances scoped to
+    a single shape's text content). Any "canvas → linear" claim in
+    future code is a bug.
+  - **`line-column` (`LineColumnPosition`)** — bidirectional and
+    cheap, computed on demand from a line-start table that the
+    adapter rebuilds incrementally on each `LinearInsert` /
+    `LinearDelete`. No stable identity beyond the current document
+    snapshot.
+
+  In all cases the mapping table (when one exists) is an adapter-local
+  cache, not part of the wire format. Persisting indices across
+  sessions is forbidden — they must be rebuilt from the document on
+  load.
+
+#### `PositionRange` → `Range`
+
+The two range shapes carry different semantics and should not be
+silently aliased:
+
+- `PositionRange` is **ordered**: `from <= to` is an invariant of every
+  helper that returns one (mapping, diffing). It carries no direction —
+  losing the original cursor anchor is intentional, because index-based
+  mapping only needs the span.
+- `Range` is **directional**: `anchor` and `focus` are independent
+  endpoints, `focus` is "where the caret is now", and `focus < anchor`
+  is a legitimate state (a leftward selection).
+
+To bridge them we introduce a thin alias and a one-line converter
+rather than overloading `PositionRange`:
+
+```ts
+type LinearRange = {
+  readonly from: LinearPosition;
+  readonly to: LinearPosition;
+};
+
+// Lossy by design: drops the original caret direction, since
+// `PositionRange` never carried it. Callers that know which endpoint
+// is the caret should build a `Range` directly.
+const positionRangeToRange = (range: PositionRange): Range => ({
+  anchor: { kind: "linear", index: range.from },
+  focus: { kind: "linear", index: range.to },
+});
+
+const rangeToPositionRange = (range: Range): PositionRange | null => {
+  if (range.anchor.kind !== "linear" || range.focus.kind !== "linear") {
+    return null;
+  }
+  const a = range.anchor.index;
+  const f = range.focus.index;
+  return { from: Math.min(a, f), to: Math.max(a, f) };
+};
+```
+
+**Deprecation timeline.** `PositionRange` stays a first-class export
+for the lifetime of the textarea-only API surface — it is not
+deprecated by this design doc. It will only be marked `@deprecated`
+once a non-linear adapter ships and at least one `apps/*` consumer has
+migrated to `Range`; removal happens one minor version after that. The
+`linear` kind itself is permanent.
 
 ## 5. Package boundaries
 

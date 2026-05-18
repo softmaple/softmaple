@@ -85,7 +85,7 @@ describe("mapCursorThroughOperation: boundary — end of document", () => {
   });
 
   it("shifts a cursor at the end left when a delete lands before it", () => {
-    // document "hello world" (length 11), cursor at 11, delete [5, 6) → cursor 10
+    // document "hello world" (length 11), cursor at 11, delete [5, 11) → cursor 5
     expect(mapCursorThroughOperation(11, deleteAt(5, 6))).toBe(5);
   });
 

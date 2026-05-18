@@ -210,15 +210,13 @@ describe("EgWalkerReplica.applyRemoteEvent — structural result", () => {
     expect(replica.getPendingRemoteCount()).toBe(0);
     expect(replica.getText()).toBe("hello world");
 
-    // Serialise and round-trip through JSON (the wire format).
+    // Serialize and round-trip through JSON (the wire format).
     const serialized = replica.serialize();
     const wire = JSON.parse(JSON.stringify(serialized)) as typeof serialized;
     const restored = EgWalkerReplica.deserialize(wire, "restored");
 
     expect(restored.getText()).toBe("hello world");
-    expect(restored.exportEventGraph().length).toBe(
-      replica.exportEventGraph().length,
-    );
+    expect(restored.exportEventGraph()).toEqual(replica.exportEventGraph());
   });
 
   it("result is exhaustively narrowable via discriminated union", () => {

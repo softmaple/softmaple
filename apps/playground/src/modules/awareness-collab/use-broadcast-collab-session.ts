@@ -128,8 +128,10 @@ export const useBroadcastCollabSession = ({
     const getIntegratedEventIds = (): Set<EventId> =>
       new Set(replica.exportEventGraph().map((event) => event.id));
 
-    const findMissingParent = (event: GraphEvent): EventId | null => {
-      const integratedIds = getIntegratedEventIds();
+    const findMissingParent = (
+      event: GraphEvent,
+      integratedIds: Set<EventId>,
+    ): EventId | null => {
       for (const parentId of event.parentVersion) {
         if (!integratedIds.has(parentId)) {
           return parentId;
@@ -156,9 +158,18 @@ export const useBroadcastCollabSession = ({
       }
     };
 
-    const acceptRemote = (event: GraphEvent): void => {
-      if (getIntegratedEventIds().has(event.id)) return;
-      const missingParent = findMissingParent(event);
+    // `knownIntegratedIds` is an optional pre-computed set the caller
+    // can pass when processing events in a batch. It must be mutated in
+    // place (add the new ID after applyRemoteEvent) so subsequent
+    // iterations of the batch loop see fresh data without re-scanning
+    // the graph. When omitted, one fresh scan is done per call.
+    const acceptRemote = (
+      event: GraphEvent,
+      knownIntegratedIds?: Set<EventId>,
+    ): void => {
+      const integratedIds = knownIntegratedIds ?? getIntegratedEventIds();
+      if (integratedIds.has(event.id)) return;
+      const missingParent = findMissingParent(event, integratedIds);
       if (missingParent) {
         bufferRemote(event, missingParent);
         return;
@@ -179,6 +190,7 @@ export const useBroadcastCollabSession = ({
       const result = replica.applyRemoteEvent(event);
       const textAfter = replica.getText();
       publishedIdsRef.current.add(event.id);
+      knownIntegratedIds?.add(event.id);
       if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) return;
       const operations = computeTextareaOperations(textBefore, textAfter);
       collaborationRef.current?.applyRemoteOperations(operations);
@@ -190,8 +202,9 @@ export const useBroadcastCollabSession = ({
       if (events.length === 0) return;
       duringCompositionEventsRef.current = [];
       duringCompositionEventIdsRef.current.clear();
+      const integratedIds = getIntegratedEventIds();
       for (const event of events) {
-        acceptRemote(event);
+        acceptRemote(event, integratedIds);
       }
       onTextChange(replica.getText());
     };
@@ -219,8 +232,9 @@ export const useBroadcastCollabSession = ({
         }
         case "snapshot": {
           if (msg.recipientId !== userId) return;
+          const integratedIds = getIntegratedEventIds();
           for (const event of msg.events) {
-            acceptRemote(event);
+            acceptRemote(event, integratedIds);
           }
           onTextChange(replica.getText());
           return;

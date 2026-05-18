@@ -32,31 +32,35 @@ const BASE_TIMESTAMP = 1_780_000_000_000;
  * Generates `count` concurrent insert events: all target index 0, all have
  * an empty parentVersion, unique IDs, and strictly-ascending timestamps.
  *
- * Using strictly-ascending timestamps keeps the canonical topological order
- * stable (earlier timestamp → earlier in the batch replay), so convergence
- * failures are attributable to the YATA ordering rather than to ambiguous
- * topological ordering.
+ * Each event inserts a unique character derived from its index (`'a'` + i),
+ * so any two distinct YATA orderings produce observably different text. If
+ * characters were drawn with replacement (e.g. two events both inserting
+ * `'a'`), a tie-breaking regression could swap their positions without
+ * changing the final string.
+ *
+ * Strictly-ascending timestamps keep the canonical topological order stable
+ * so convergence failures are attributable to YATA, not to ambiguous ordering.
  */
 const concurrentRootInsertsArb = (opts: {
   readonly minCount?: number;
   readonly maxCount?: number;
 }): fc.Arbitrary<ReadonlyArray<GraphEvent>> =>
   fc
-    .array(
-      fc
-        .integer({ min: 0x61, max: 0x7a })
-        .map((cp): string => String.fromCharCode(cp)),
-      {
-        minLength: opts.minCount ?? 2,
-        maxLength: opts.maxCount ?? 8,
-      },
-    )
-    .map((chars) =>
-      chars.map(
-        (ch, i): GraphEvent => ({
+    .integer({
+      min: opts.minCount ?? 2,
+      max: opts.maxCount ?? 8,
+    })
+    .map((count) =>
+      Array.from(
+        { length: count },
+        (_, i): GraphEvent => ({
           id: `concurrent-r${i}:0`,
           parentVersion: new Set<EventId>(),
-          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: ch },
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 0,
+            text: String.fromCharCode(0x61 + i),
+          },
           timestamp: BASE_TIMESTAMP + i,
         }),
       ),

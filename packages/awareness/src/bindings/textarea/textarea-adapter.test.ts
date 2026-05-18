@@ -311,7 +311,107 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
     adapter.destroy();
   });
 
-  it("skips the write while composing", () => {
+  it("buffers writes while composing and replays them on compositionend before emitting the composition diff", () => {
+    // Regression for #704: peer ops arriving mid-IME-composition must
+    // not silently drop the DOM write, AND must update `lastValue` so
+    // the post-composition diff lines up with the post-peer replica
+    // state. See review thread on PR #755.
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    const received: TextareaOperation[][] = [];
+    adapter.observeLocalOperations((ops) => received.push([...ops]));
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+
+    // User starts composing. Mid-composition, a peer prepends "X".
+    textarea.dispatchEvent(new Event("compositionstart"));
+    adapter.applyRemoteOperations([
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 0,
+        length: 1,
+        text: "X",
+      },
+    ]);
+    // DOM is untouched mid-composition — writing would collapse the IME.
+    expect(textarea.value).toBe("hello");
+
+    // User commits 你 at the cursor position (between "he" and "llo").
+    textarea.value = "he你llo";
+    textarea.dispatchEvent(new Event("compositionend"));
+
+    // After compositionend, the buffered peer op was replayed first.
+    expect(textarea.value).toBe("Xhe你llo");
+    // The emitted composition diff targets the post-peer baseline:
+    // insert "你" at index 3 in "Xhello" gives "Xhe你llo".
+    expect(received).toEqual([
+      [
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 3,
+          length: 1,
+          text: "你",
+        },
+      ],
+    ]);
+    adapter.destroy();
+  });
+
+  it("coalesces multiple buffered peer batches on compositionend", () => {
+    // Multiple peer batches stack sequentially; second batch's indices
+    // are in the post-first-batch space (as the route would produce
+    // them via per-event textBefore/textAfter diffs). The buffer's
+    // replay walks them in order against the evolving DOM, so as long
+    // as no batch's index sits past the user's composition position
+    // the result is well-defined. (Batches that DO straddle the
+    // composition point still hit the underlying rebase problem
+    // tracked in #704 — buffer-and-replay narrows the bug class, it
+    // doesn't eliminate it.)
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    const received: TextareaOperation[][] = [];
+    adapter.observeLocalOperations((ops) => received.push([...ops]));
+
+    textarea.dispatchEvent(new Event("compositionstart"));
+    adapter.applyRemoteOperations([
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 0,
+        length: 1,
+        text: "X",
+      },
+    ]);
+    adapter.applyRemoteOperations([
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 1,
+        length: 1,
+        text: "Y",
+      },
+    ]);
+    expect(textarea.value).toBe("hello");
+
+    // Composition commits 你 between "he" and "llo".
+    textarea.value = "he你llo";
+    textarea.dispatchEvent(new Event("compositionend"));
+
+    // Both peer ops replayed first → baseline becomes "XYhello"; the
+    // composition diff then targets index 4 in that baseline.
+    expect(textarea.value).toBe("XYhe你llo");
+    expect(received).toEqual([
+      [
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 4,
+          length: 1,
+          text: "你",
+        },
+      ],
+    ]);
+    adapter.destroy();
+  });
+
+  it("flushes the buffered peer ops on blur when compositionend never fires", () => {
     const textarea = mountTextarea("hello");
     const adapter = createTextareaAdapter(textarea);
 
@@ -319,13 +419,15 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
     adapter.applyRemoteOperations([
       {
         type: POSITION_OPERATION_TYPE.Insert,
-        index: 5,
+        index: 0,
         length: 1,
-        text: "!",
+        text: "X",
       },
     ]);
+    // Mobile-IME case: focus yanked before compositionend dispatches.
+    textarea.dispatchEvent(new Event("blur"));
 
-    expect(textarea.value).toBe("hello");
+    expect(textarea.value).toBe("Xhello");
     adapter.destroy();
   });
 

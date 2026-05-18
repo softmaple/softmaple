@@ -126,6 +126,13 @@ export const createTextareaAdapter = (
   // ref simply lingers until consumed (and ignored) by a real
   // keystroke.
   let lastCompositionCommit: string | null = null;
+  // Remote operation batches received while `composing` is true. The
+  // adapter cannot write `element.value` mid-composition without
+  // collapsing the IME, so we hold the batches and replay them as a
+  // single coalesced apply when composition ends — before the
+  // composition's own diff is emitted, so the diff baseline reflects
+  // the peer ops.
+  let pendingRemoteOperations: TextareaOperation[] = [];
 
   const setComposing = (next: boolean): void => {
     if (composing === next) return;
@@ -168,6 +175,11 @@ export const createTextareaAdapter = (
 
   const handleCompositionEnd = (): void => {
     setComposing(false);
+    // Replay buffered peer ops first, so the post-composition diff has
+    // a faithful baseline (`lastValue` advanced through peer ops) and
+    // the local subscriber receives composition-only ops at indices
+    // that line up with the post-peer replica.
+    flushPendingRemoteOperations();
     const value = element.value;
     lastCompositionCommit = value;
     diffAndEmit(value);
@@ -177,9 +189,11 @@ export const createTextareaAdapter = (
     // Defensive reset for mobile / older WebKit IMEs that can drop
     // `compositionend` when focus is yanked mid-composition. Without
     // this, `composing` would stay true and every later keystroke
-    // would be silently swallowed.
+    // would be silently swallowed. Buffered peer ops still need to
+    // land somewhere — flush them now that composing is false.
     setComposing(false);
     lastCompositionCommit = null;
+    flushPendingRemoteOperations();
   };
 
   element.addEventListener("input", handleInput);
@@ -225,10 +239,17 @@ export const createTextareaAdapter = (
   ): void => {
     if (destroyed) return;
     if (operations.length === 0) return;
-    // Skip mid-composition: writing element.value would collapse the
-    // in-progress IME composition. Caller can re-send after
-    // compositionend (the next input dispatch will re-diff anyway).
-    if (composing) return;
+    // Mid-composition: writing element.value would collapse the
+    // in-progress IME composition. Buffer the batch and replay it on
+    // compositionend so the baseline (lastValue) reflects the peer ops
+    // before the composition's own diff is emitted — without this,
+    // the next compositionend would diff committed text against a
+    // stale baseline and produce indices that don't line up with the
+    // replica's post-peer state.
+    if (composing) {
+      pendingRemoteOperations.push(...operations);
+      return;
+    }
 
     const previousSelection = getSelection();
     const previousValue = element.value;
@@ -243,6 +264,32 @@ export const createTextareaAdapter = (
 
     element.value = nextValue;
     lastValue = nextValue;
+    if (previousSelection) {
+      const mapped = mapSelectionThroughOperations(
+        previousSelection,
+        operations,
+      );
+      restoreSelection(mapped);
+    }
+  };
+
+  const flushPendingRemoteOperations = (): void => {
+    if (destroyed) return;
+    if (pendingRemoteOperations.length === 0) return;
+    const operations = pendingRemoteOperations;
+    pendingRemoteOperations = [];
+    // Advance the baseline by applying ops to the *previous* lastValue,
+    // not to the live DOM (which holds the committed composition we
+    // haven't diffed yet). This keeps the upcoming compositionend
+    // `diffAndEmit` emitting composition-only ops.
+    lastValue = applyOperationsToText(lastValue, operations);
+    const previousSelection = getSelection();
+    const previousValue = element.value;
+    const nextValue = applyOperationsToText(previousValue, operations);
+    if (nextValue === previousValue) {
+      return;
+    }
+    element.value = nextValue;
     if (previousSelection) {
       const mapped = mapSelectionThroughOperations(
         previousSelection,
@@ -274,6 +321,7 @@ export const createTextareaAdapter = (
       if (destroyed) return;
       destroyed = true;
       subscribers.clear();
+      pendingRemoteOperations = [];
       element.removeEventListener("input", handleInput);
       element.removeEventListener("compositionstart", handleCompositionStart);
       element.removeEventListener("compositionend", handleCompositionEnd);

@@ -25,7 +25,13 @@ import {
   APPLY_REMOTE_EVENT_STATUS,
   EgWalkerReplica,
 } from "@softmaple/eg-walker";
-import { type RefObject, useCallback, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 const applyTextareaOperationToReplica = (
   operation: TextareaOperation,
@@ -150,8 +156,13 @@ export const useCollaborativeEditor = (): UseCollaborativeEditorResult => {
     textareaRef: replica2Ref,
     onLocalOperations: handleReplica2LocalOps,
   });
-  collab1Ref.current = collab1;
-  collab2Ref.current = collab2;
+  // The binding's own DOM listeners only fire after its mount effect
+  // runs, which is after this effect — so the refs are always populated
+  // by the time `handleReplica{1,2}LocalOps` can read them.
+  useEffect(() => {
+    collab1Ref.current = collab1;
+    collab2Ref.current = collab2;
+  }, [collab1, collab2]);
 
   return { replica1Ref, replica2Ref };
 };

@@ -145,7 +145,13 @@ function CollabSession({
     textareaRef,
     onLocalOperations: handleLocalOperations,
   });
-  collaborationRef.current = collaboration;
+  // Mirror the binding result into a ref so the BroadcastChannel
+  // effect below can reach it without re-running on every render. The
+  // binding's DOM listeners only fire after its mount effect runs
+  // (which lands after this one), so any remote handler call is safe.
+  useEffect(() => {
+    collaborationRef.current = collaboration;
+  }, [collaboration]);
 
   // Separate BroadcastChannel for CRDT event sync. Awareness adapter
   // already opens its own channel for presence — keeping them isolated

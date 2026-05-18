@@ -5,6 +5,15 @@
  * subscriber callback fresh via a ref so a parent re-render doesn't
  * re-attach DOM listeners, and exposes the adapter's API as stable
  * function references safe to depend on.
+ *
+ * Constraint: the mount effect depends on the `textareaRef` *object*
+ * identity, not on its `.current` value. If the underlying textarea
+ * element is replaced after the component mounts (e.g. via `key`
+ * churn or a conditional render that unmounts then remounts the
+ * `<textarea>`), the adapter will not re-attach to the new element.
+ * Consumers that need that lifecycle should re-mount the component
+ * itself (so the hook itself unmounts and remounts) rather than
+ * swapping the underlying element through the same ref.
  */
 
 import { type RefObject, useCallback, useEffect, useRef } from "react";

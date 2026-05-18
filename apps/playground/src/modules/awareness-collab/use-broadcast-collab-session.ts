@@ -75,6 +75,10 @@ export const useBroadcastCollabSession = ({
 }: UseBroadcastCollabSessionOptions): BroadcastCollabSession => {
   const channelRef = useRef<BroadcastChannel | null>(null);
   const collaborationRef = useRef<UseTextareaCollaborationResult | null>(null);
+  // True while a microtask is already queued to flush the remote-event
+  // text update. Prevents scheduling multiple `onTextChange` calls when
+  // a peer sends a burst of events in the same JS turn.
+  const remoteFlushScheduledRef = useRef(false);
   // Event IDs we've already published (either broadcast ourselves or received
   // from a peer). Using IDs rather than a graph-length index means applying a
   // remote event never causes us to re-broadcast it on the next local edit.
@@ -216,7 +220,15 @@ export const useBroadcastCollabSession = ({
       switch (msg.type) {
         case "event": {
           acceptRemote(msg.event);
-          onTextChange(replica.getText());
+          if (!remoteFlushScheduledRef.current) {
+            remoteFlushScheduledRef.current = true;
+            queueMicrotask(() => {
+              remoteFlushScheduledRef.current = false;
+              if (channelRef.current) {
+                onTextChange(replica.getText());
+              }
+            });
+          }
           return;
         }
         case "request": {
@@ -271,6 +283,7 @@ export const useBroadcastCollabSession = ({
       processBufferedEventsRef.current = null;
       duringCompositionEventsRef.current = [];
       duringCompositionEventIdsRef.current.clear();
+      remoteFlushScheduledRef.current = false;
     };
   }, [onTextChange, replica, syncChannel, userId]);
 

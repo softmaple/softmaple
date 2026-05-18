@@ -6,7 +6,8 @@ Awareness and presence UI components for real-time collaboration.
 
 This package provides transport-agnostic awareness and presence UI components designed for low-interruption, non-blocking collaborative experiences.
 
-Based on the design principles outlined in [docs/design/awareness-and-presence.md](../../docs/design/awareness-and-presence.md).
+Based on the design principles outlined in [docs/design/awareness-and-presence.md](../../docs/design/awareness-and-presence.md)
+and the [Editor Adapter Contract](docs/editor-adapter-contract.md).
 
 ## Features
 

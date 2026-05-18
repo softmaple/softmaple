@@ -1,81 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
-import { EventGraph } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
-import { cloneEvent, createPrng } from "./test-helpers";
-
-/**
- * Return a Fisher–Yates-shuffled copy of `items`. The input is not
- * mutated, so callers can pass `ReadonlyArray<T>` (including the
- * canonical event list) without having to pre-clone defensively.
- */
-const shuffled = <T>(items: ReadonlyArray<T>, rand: () => number): T[] => {
-  const result = items.slice();
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    const tmp = result[i]!;
-    result[i] = result[j]!;
-    result[j] = tmp;
-  }
-  return result;
-};
-
-/**
- * Canonical text for an event set: topologically sort via
- * {@link EventGraph}, build a replica from that order, and read its
- * text. The replica path is the algorithm under test, so all the
- * randomized delivery-order replicas must converge on the same string.
- *
- * `initialText` lets the caller exercise the non-empty seed path
- * (commit-E placeholder coalescing); it defaults to "" so existing
- * callers do not change behaviour.
- */
-const canonicalText = (
-  events: ReadonlyArray<GraphEvent>,
-  initialText: string = "",
-): string => {
-  const graph = new EventGraph();
-  for (const event of events.map(cloneEvent)) {
-    graph.addEvent(event);
-  }
-  const replica = new EgWalkerReplica("canonical", initialText);
-  for (const event of graph.getTopologicalOrder()) {
-    replica.applyRemoteEvent(cloneEvent(event));
-  }
-  return replica.getText();
-};
-
-/**
- * Apply `events` to a fresh replica in a delivery order chosen by
- * `rand`. The replica's own buffering handles out-of-causal-order
- * arrivals, so the order doesn't have to respect the DAG — it just
- * has to deliver every event eventually.
- *
- * `initialText` mirrors {@link canonicalText} and lets the caller
- * exercise the non-empty seed path.
- */
-const applyInRandomDeliveryOrder = (
-  replicaId: string,
-  events: ReadonlyArray<GraphEvent>,
-  rand: () => number,
-  initialText: string = "",
-): EgWalkerReplica => {
-  const replica = new EgWalkerReplica(replicaId, initialText);
-  // Clone each event before delivery so a replica that mutates the
-  // parentVersion set of an applied event can't bleed back into the
-  // shared canonical event list owned by the caller.
-  const delivery = shuffled(events.map(cloneEvent), rand);
-  for (const event of delivery) {
-    replica.applyRemoteEvent(event);
-  }
-  if (replica.getPendingRemoteCount() !== 0) {
-    throw new Error(
-      `Replica ${replicaId} still has ${replica.getPendingRemoteCount()} buffered events after delivery; trace is not causally closed.`,
-    );
-  }
-  return replica;
-};
+import {
+  applyInRandomDeliveryOrder,
+  canonicalText,
+  cloneEvent,
+  createPrng,
+  shuffled,
+} from "./test-helpers";
 
 interface ReplicaSim {
   readonly id: string;

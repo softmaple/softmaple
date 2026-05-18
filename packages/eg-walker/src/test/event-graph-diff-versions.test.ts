@@ -2,36 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import type { EventId } from "../types";
 import { EventGraph } from "../graph/event-graph";
-
-/**
- * Build a chain `root → e1 → e2 → ... → e{length-1}` and return the graph
- * plus the ordered IDs. Used to construct deep histories whose ancestor set
- * is large compared to typical divergent suffixes.
- */
-const buildLinearHistory = (
-  length: number,
-  prefix = "n",
-): { graph: EventGraph; ids: EventId[] } => {
-  const graph = new EventGraph();
-  const ids: EventId[] = [];
-  let previous: EventId | null = null;
-  for (let i = 0; i < length; i++) {
-    const id = `${prefix}-${i}`;
-    graph.addEvent({
-      id,
-      timestamp: i,
-      parentVersion: new Set<EventId>(previous ? [previous] : []),
-      operation: {
-        type: OPERATION_TYPE.INSERT,
-        index: i,
-        text: prefix.charAt(0),
-      },
-    });
-    ids.push(id);
-    previous = id;
-  }
-  return { graph, ids };
-};
+import { buildLinearHistory } from "./test-helpers";
 
 /**
  * Deterministic pseudo-random generator (mulberry32). Used to drive the

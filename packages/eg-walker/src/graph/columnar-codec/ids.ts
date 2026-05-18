@@ -72,6 +72,9 @@ export const readIdRuns = (reader: BinaryReader): IdRun[] => {
     const packed = reader.readVarint();
     const custom = packed % 2 === 1;
     const runLength = Math.floor(packed / 2);
+    if (runLength === 0) {
+      throw new Error(`ID run must have positive length, got ${runLength}`);
+    }
     // {@link encodeIdRuns} only emits custom runs with `length: 1`
     // (verbatim string IDs are never coalesced). Encoder bugs that
     // violate this invariant would shift every subsequent event ID

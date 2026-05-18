@@ -73,8 +73,11 @@ export const readOperationRuns = (
   let cursor = 0;
 
   for (let i = 0; i < length; i++) {
-    const type =
-      reader.readVarint() === 1 ? OPERATION_TYPE.INSERT : OPERATION_TYPE.DELETE;
+    const marker = reader.readVarint();
+    if (marker !== 1 && marker !== 2) {
+      throw new Error(`Unknown operation type marker ${marker} at run ${i}`);
+    }
+    const type = marker === 1 ? OPERATION_TYPE.INSERT : OPERATION_TYPE.DELETE;
     const runLength = reader.readVarint();
     runs.push({
       type,

@@ -178,6 +178,32 @@ export class ColumnarEventGraphCodec {
     const timestamps = reader.readZigZagDeltaArray();
     const metadata = JSON.parse(reader.readString()) as Record<string, unknown>;
 
+    const expectedEventCount = idRuns.reduce((sum, run) => sum + run.length, 0);
+    const operationRunsTotal = partialOperationRuns.reduce(
+      (sum, run) => sum + run.length,
+      0,
+    );
+    if (operationRunsTotal !== expectedEventCount) {
+      throw new Error(
+        `Column length mismatch: operationRuns covers ${operationRunsTotal} events but idRuns implies ${expectedEventCount}`,
+      );
+    }
+    if (operationIndexes.length !== expectedEventCount) {
+      throw new Error(
+        `Column length mismatch: operationIndexes has ${operationIndexes.length} entries but idRuns implies ${expectedEventCount} events`,
+      );
+    }
+    if (operationLengths.length !== expectedEventCount) {
+      throw new Error(
+        `Column length mismatch: operationLengths has ${operationLengths.length} entries but idRuns implies ${expectedEventCount} events`,
+      );
+    }
+    if (timestamps.length !== expectedEventCount) {
+      throw new Error(
+        `Column length mismatch: timestamps has ${timestamps.length} entries but idRuns implies ${expectedEventCount} events`,
+      );
+    }
+
     return this.decode({
       version,
       operationRuns,

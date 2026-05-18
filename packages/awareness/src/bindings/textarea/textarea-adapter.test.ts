@@ -61,6 +61,30 @@ describe("createTextareaAdapter — local edits", () => {
     adapter.destroy();
   });
 
+  it("emits delete-then-insert when selected text is replaced", () => {
+    // Simulates selecting "ell" in "hello" and typing "xyz" → "hxyzo".
+    // The adapter diffs the before/after value and must emit [delete, insert].
+    const textarea = mountTextarea("hello");
+    const adapter = createTextareaAdapter(textarea);
+    const received: TextareaOperation[][] = [];
+    adapter.observeLocalOperations((ops) => received.push([...ops]));
+
+    fireInput(textarea, "hxyzo");
+
+    expect(received).toEqual([
+      [
+        { type: POSITION_OPERATION_TYPE.Delete, index: 1, length: 3 },
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 1,
+          length: 3,
+          text: "xyz",
+        },
+      ],
+    ]);
+    adapter.destroy();
+  });
+
   it("does not emit for no-op input events", () => {
     const textarea = mountTextarea("hello");
     const adapter = createTextareaAdapter(textarea);

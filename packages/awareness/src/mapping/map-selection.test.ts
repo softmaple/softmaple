@@ -174,4 +174,18 @@ describe("mapSelectionThroughOperation: invariants", () => {
       { from: 3, to: 5 },
     );
   });
+
+  it("handles a collapsed selection at the end of the document through a delete before it", () => {
+    // document length 7, cursor at 7 (end); delete [0, 3) → cursor shifts to 4
+    expect(
+      mapSelectionThroughOperation({ from: 7, to: 7 }, deleteAt(0, 3)),
+    ).toEqual({ from: 4, to: 4 });
+  });
+
+  it("shrinks a selection whose trailing edge is the end of the document when a delete touches it", () => {
+    // selection [3, 7], delete [4, 7) (3 chars from end) → trailing edge collapses to 4
+    expect(
+      mapSelectionThroughOperation({ from: 3, to: 7 }, deleteAt(4, 3)),
+    ).toEqual({ from: 3, to: 4 });
+  });
 });

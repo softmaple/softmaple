@@ -188,6 +188,39 @@ describe("EgWalkerReplica.applyRemoteEvent — structural result", () => {
     expect(alice.getText()).toBe("AabcB");
   });
 
+  it("serialize/deserialize round-trips correctly after remote buffering and flushing", () => {
+    // Build a two-event causal chain on the author.
+    const author = new EgWalkerReplica("author");
+    author.insert(0, "hello");
+    author.insert(5, " world");
+    const [eventA, eventB] = author.exportEventGraph();
+    expect(eventA).toBeDefined();
+    expect(eventB).toBeDefined();
+
+    // Deliver child before parent so the buffer is exercised.
+    const replica = new EgWalkerReplica("replica");
+    expect(replica.applyRemoteEvent(cloneEvent(eventB!)).status).toBe(
+      APPLY_REMOTE_EVENT_STATUS.Buffered,
+    );
+
+    // Parent arrives: child flushes automatically.
+    expect(replica.applyRemoteEvent(cloneEvent(eventA!)).status).toBe(
+      APPLY_REMOTE_EVENT_STATUS.Integrated,
+    );
+    expect(replica.getPendingRemoteCount()).toBe(0);
+    expect(replica.getText()).toBe("hello world");
+
+    // Serialise and round-trip through JSON (the wire format).
+    const serialized = replica.serialize();
+    const wire = JSON.parse(JSON.stringify(serialized)) as typeof serialized;
+    const restored = EgWalkerReplica.deserialize(wire, "restored");
+
+    expect(restored.getText()).toBe("hello world");
+    expect(restored.exportEventGraph().length).toBe(
+      replica.exportEventGraph().length,
+    );
+  });
+
   it("result is exhaustively narrowable via discriminated union", () => {
     // Compile-time guard: the discriminant must cover all branches.
     const author = new EgWalkerReplica("author");

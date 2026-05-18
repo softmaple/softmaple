@@ -72,3 +72,24 @@ describe("mapCursorThroughOperation: delete", () => {
     expect(mapCursorThroughOperation(10, deleteAt(0, 4))).toBe(6);
   });
 });
+
+describe("mapCursorThroughOperation: boundary — end of document", () => {
+  it("shifts a cursor at the end of the document when an insert occurs before it", () => {
+    // document "hello" (length 5), cursor at 5 (after last char), insert 3 chars at 0
+    expect(mapCursorThroughOperation(5, insertAt(0, 3))).toBe(8);
+  });
+
+  it("shifts a cursor at the very end when the insert lands at the same end position", () => {
+    // Cursor at 5 = insert index 5: right-biased, shifts forward
+    expect(mapCursorThroughOperation(5, insertAt(5, 2))).toBe(7);
+  });
+
+  it("shifts a cursor at the end left when a delete lands before it", () => {
+    // document "hello world" (length 11), cursor at 11, delete [5, 6) → cursor 10
+    expect(mapCursorThroughOperation(11, deleteAt(5, 6))).toBe(5);
+  });
+
+  it("handles a cursor at index 0 in an empty document through a zero-length insert", () => {
+    expect(mapCursorThroughOperation(0, insertAt(0, 0))).toBe(0);
+  });
+});

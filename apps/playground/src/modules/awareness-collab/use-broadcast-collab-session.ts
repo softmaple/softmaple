@@ -220,20 +220,31 @@ export const useBroadcastCollabSession = ({
           return;
         }
         case "request": {
-          // Include events queued during an in-progress IME composition:
-          // they have not been applied to the replica yet, so
-          // exportEventGraph() alone would omit them. A peer that joins
-          // while we are composing would then miss those events
-          // permanently if the original sender has gone away before our
-          // flush fires.
+          // Three sources of events that have not yet been applied to the
+          // replica must all be included so a joining peer gets the full
+          // picture even if the original senders are gone:
+          //
+          // 1. appliedEvents — replica.exportEventGraph(), the baseline.
+          // 2. queuedEvents  — events whose parents are integrated but
+          //    that we are holding back until IME composition ends.
+          // 3. pendingEvents — descendants buffered behind a missing
+          //    parent (including children of queuedEvents whose parent
+          //    has not been applied to the replica yet, keyed by the
+          //    missing parent ID at every depth of the causal chain).
           const appliedEvents = replica.exportEventGraph();
           const queuedEvents = duringCompositionEventsRef.current;
-          if (appliedEvents.length === 0 && queuedEvents.length === 0) return;
+          const pendingEvents = [...pendingByMissingParent.values()].flat();
+          if (
+            appliedEvents.length === 0 &&
+            queuedEvents.length === 0 &&
+            pendingEvents.length === 0
+          )
+            return;
           channel.postMessage({
             type: "snapshot",
             senderId: userId,
             recipientId: msg.senderId,
-            events: [...appliedEvents, ...queuedEvents],
+            events: [...appliedEvents, ...queuedEvents, ...pendingEvents],
           } satisfies SyncMessage);
           return;
         }

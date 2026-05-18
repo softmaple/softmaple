@@ -11,6 +11,14 @@ import {
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 /**
+ * A ref to a boolean flag that the caller updates as the textarea's IME
+ * composition state changes. While `isComposingRef.current` is true,
+ * incoming peer events are queued rather than applied immediately.
+ * Flushed after composition ends via `flushDuringCompositionEvents`.
+ */
+type IsComposingRef = RefObject<boolean>;
+
+/**
  * Cross-tab sync protocol. Three message shapes:
  *
  * - `event`     a single newly-produced event, broadcast as it happens.
@@ -42,11 +50,20 @@ type UseBroadcastCollabSessionOptions = {
   readonly userId: string;
   readonly syncChannel: string;
   readonly onTextChange: (text: string) => void;
+  readonly isComposingRef: IsComposingRef;
 };
 
 type BroadcastCollabSession = {
   readonly collaborationRef: RefObject<UseTextareaCollaborationResult | null>;
   readonly broadcastNewEvents: () => void;
+  /**
+   * Process peer events that were queued while the textarea was composing.
+   * Must be called after composition ends and after the local composition
+   * ops have been applied to the replica (i.e. after `onLocalOperations`
+   * returns for the composition commit), so the CRDT sees local ops first
+   * and peer events can be correctly rebased on top.
+   */
+  readonly flushDuringCompositionEvents: () => void;
 };
 
 export const useBroadcastCollabSession = ({
@@ -54,6 +71,7 @@ export const useBroadcastCollabSession = ({
   userId,
   syncChannel,
   onTextChange,
+  isComposingRef,
 }: UseBroadcastCollabSessionOptions): BroadcastCollabSession => {
   const channelRef = useRef<BroadcastChannel | null>(null);
   const collaborationRef = useRef<UseTextareaCollaborationResult | null>(null);
@@ -64,6 +82,16 @@ export const useBroadcastCollabSession = ({
   // Length of the exported graph prefix already inspected by the broadcast
   // loop. The Set above is still the source of truth for dedupe.
   const scannedPrefixRef = useRef(0);
+  // Peer events that arrived while the textarea was composing. We cannot
+  // apply them to the replica immediately because their indices would be
+  // relative to the pre-composition baseline; the composition's own ops
+  // must land first so the CRDT merge is correct. Flushed after
+  // compositionend via flushDuringCompositionEvents.
+  const duringCompositionEventsRef = useRef<GraphEvent[]>([]);
+  const duringCompositionEventIdsRef = useRef<Set<EventId>>(new Set());
+  // Set by the useEffect so flushDuringCompositionEvents (defined outside
+  // the effect) can reach the closure-local acceptRemote.
+  const processBufferedEventsRef = useRef<(() => void) | null>(null);
 
   const broadcastNewEvents = useCallback(() => {
     const channel = channelRef.current;
@@ -86,6 +114,11 @@ export const useBroadcastCollabSession = ({
     scannedPrefixRef.current = events.length;
   }, [replica, userId]);
 
+  const flushDuringCompositionEvents = useCallback(() => {
+    processBufferedEventsRef.current?.();
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: isComposingRef is a stable RefObject; reading .current inside the effect always gives the live value without needing the effect to re-run on composition state changes.
   useEffect(() => {
     const channel = new BroadcastChannel(syncChannel);
     channelRef.current = channel;
@@ -130,6 +163,18 @@ export const useBroadcastCollabSession = ({
         bufferRemote(event, missingParent);
         return;
       }
+      // While the textarea is mid-IME-composition, we cannot apply peer
+      // events to the replica yet. The composition's local ops must land
+      // first (so their indices are correct relative to the
+      // pre-composition baseline); peer events are then applied on top
+      // and the CRDT merge resolves any conflicts. See issue #704.
+      if (isComposingRef.current) {
+        if (!duringCompositionEventIdsRef.current.has(event.id)) {
+          duringCompositionEventsRef.current.push(event);
+          duringCompositionEventIdsRef.current.add(event.id);
+        }
+        return;
+      }
       const textBefore = replica.getText();
       const result = replica.applyRemoteEvent(event);
       const textAfter = replica.getText();
@@ -138,6 +183,17 @@ export const useBroadcastCollabSession = ({
       const operations = computeTextareaOperations(textBefore, textAfter);
       collaborationRef.current?.applyRemoteOperations(operations);
       drainPendingChildren(event.id);
+    };
+
+    processBufferedEventsRef.current = () => {
+      const events = duringCompositionEventsRef.current;
+      if (events.length === 0) return;
+      duringCompositionEventsRef.current = [];
+      duringCompositionEventIdsRef.current.clear();
+      for (const event of events) {
+        acceptRemote(event);
+      }
+      onTextChange(replica.getText());
     };
 
     channel.onmessage = (event: MessageEvent<SyncMessage>) => {
@@ -180,8 +236,11 @@ export const useBroadcastCollabSession = ({
     return () => {
       channel.close();
       channelRef.current = null;
+      processBufferedEventsRef.current = null;
+      duringCompositionEventsRef.current = [];
+      duringCompositionEventIdsRef.current.clear();
     };
   }, [onTextChange, replica, syncChannel, userId]);
 
-  return { collaborationRef, broadcastNewEvents };
+  return { collaborationRef, broadcastNewEvents, flushDuringCompositionEvents };
 };

@@ -37,6 +37,8 @@ up automatically.
 | [`missing-parent-buffering.property.test.ts`](./missing-parent-buffering.property.test.ts) | Events delivered before their parents are buffered and flushed to the canonical text. |
 | [`serialize-roundtrip.property.test.ts`](./serialize-roundtrip.property.test.ts) | JSON `serialize`/`deserialize` and columnar `encodeBinary`/`decodeBinary` preserve text and frontier. |
 | [`unicode-surrogate.property.test.ts`](./unicode-surrogate.property.test.ts) | Surrogate-biased traces stay well-formed UTF-16 and converge under random delivery. |
+| [`concurrent-same-index-inserts.property.test.ts`](./concurrent-same-index-inserts.property.test.ts) | All-concurrent root inserts at the same index converge under any delivery order (YATA tie-breaking). |
+| [`long-offline-branch-merge.property.test.ts`](./long-offline-branch-merge.property.test.ts) | Two replicas that diverge for many steps without syncing converge after full event exchange. |
 
 ## Shared helpers
 

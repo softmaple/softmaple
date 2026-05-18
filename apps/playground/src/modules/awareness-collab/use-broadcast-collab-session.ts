@@ -220,13 +220,20 @@ export const useBroadcastCollabSession = ({
           return;
         }
         case "request": {
-          const events = replica.exportEventGraph();
-          if (events.length === 0) return;
+          // Include events queued during an in-progress IME composition:
+          // they have not been applied to the replica yet, so
+          // exportEventGraph() alone would omit them. A peer that joins
+          // while we are composing would then miss those events
+          // permanently if the original sender has gone away before our
+          // flush fires.
+          const appliedEvents = replica.exportEventGraph();
+          const queuedEvents = duringCompositionEventsRef.current;
+          if (appliedEvents.length === 0 && queuedEvents.length === 0) return;
           channel.postMessage({
             type: "snapshot",
             senderId: userId,
             recipientId: msg.senderId,
-            events,
+            events: [...appliedEvents, ...queuedEvents],
           } satisfies SyncMessage);
           return;
         }

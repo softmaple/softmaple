@@ -27,6 +27,9 @@ export const workspaceAlias: Readonly<Record<string, string>> = {
   "@softmaple/awareness/styles.css": fromPlayground(
     "../../packages/awareness/src/global.css",
   ),
+  "@softmaple/awareness/bindings/textarea": fromPlayground(
+    "../../packages/awareness/src/bindings/textarea/index.ts",
+  ),
   "@softmaple/awareness/mapping": fromPlayground(
     "../../packages/awareness/src/mapping/index.ts",
   ),

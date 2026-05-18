@@ -1,8 +1,9 @@
 import {
-  findChangedSpan,
-  POSITION_OPERATION_TYPE,
-  type PositionOperation,
-} from "@softmaple/awareness/mapping";
+  computeTextareaOperations,
+  type UseTextareaCollaborationResult,
+  useTextareaCollaboration,
+} from "@softmaple/awareness/bindings/textarea";
+import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
 import {
   APPLY_REMOTE_EVENT_STATUS,
   EgWalkerReplica,
@@ -26,51 +27,6 @@ export const Route = createFileRoute("/demo/awareness-collab")({
 
 const ROOM_ID = "awareness-collab-demo";
 const SYNC_CHANNEL = `eg-walker-sync:${ROOM_ID}`;
-
-/**
- * Reconstruct the visible position operation(s) implied by a remote
- * replica's pre/post text. Used as a fallback when
- * `applyRemoteEvent` returns `status: "integrated"` with `operation: null`
- * (partial/full replay, multi-op coalesced delete, or a visible no-op
- * the engine cannot attribute to a single op). Mirrors
- * `apps/playground/src/modules/collaborative-editor/use-collaborative-editor.ts`
- * — same plain-text 1D diff shape, different replica path. Visible
- * no-ops correctly return an empty array because both texts compare
- * equal.
- */
-const computeMappingOperationsFromTextChange = (
-  oldText: string,
-  newText: string,
-): readonly PositionOperation[] => {
-  if (oldText === newText) return [];
-  const { prefix, suffix } = findChangedSpan(oldText, newText);
-  const deletedLength = oldText.length - prefix - suffix;
-  const insertedText = newText.slice(prefix, newText.length - suffix);
-  const operations: PositionOperation[] = [];
-  if (deletedLength > 0) {
-    operations.push({
-      type: POSITION_OPERATION_TYPE.Delete,
-      index: prefix,
-      length: deletedLength,
-    });
-  }
-  if (insertedText.length > 0) {
-    operations.push({
-      type: POSITION_OPERATION_TYPE.Insert,
-      index: prefix,
-      length: insertedText.length,
-    });
-  }
-  return operations;
-};
-
-const isSamePositionOperation = (
-  left: PositionOperation,
-  right: PositionOperation,
-): boolean =>
-  left.type === right.type &&
-  left.index === right.index &&
-  left.length === right.length;
 
 function AwarenessCollabDemo() {
   const [trainer, setTrainer] = useState<string | null>(null);
@@ -132,14 +88,64 @@ function CollabSession({
   // dedupe — this just bounds the iteration.
   const scannedPrefixRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Mapping operations accumulated by `acceptRemote` for the events
-  // integrated in the current React tick. The post-commit layout effect
-  // in `EditorSurface` drains and applies them to the captured local
-  // selection so the caret rides through peer inserts/deletes correctly.
-  // Owned here (not in `EditorSurface`) so a snapshot of N events
-  // accumulates ops across the whole batch before the single `setText`
-  // triggers the layout effect.
-  const pendingMappingOperationsRef = useRef<PositionOperation[]>([]);
+  // The binding wraps the textarea adapter. Captured in a ref so the
+  // long-lived BroadcastChannel effect can reach `applyRemoteOperations`
+  // without re-running whenever the binding's stable function refs are
+  // re-created (in practice they aren't, but the ref keeps the
+  // dependency boundary explicit).
+  const collaborationRef = useRef<UseTextareaCollaborationResult | null>(null);
+
+  // Broadcast events the replica has produced that we haven't shared yet.
+  // Resumes from `scannedPrefixRef` so each keystroke walks only freshly-
+  // appended events; the id Set still dedupes inside the suffix in case a
+  // remote event landed at the tail between scans.
+  const broadcastNewEvents = useCallback(() => {
+    const channel = broadcastRef.current;
+    if (!channel) return;
+    const selfId = userInfo.userId;
+    const events = replica.exportEventGraph();
+    // Defensive: if the graph ever shrinks (shouldn't happen with an
+    // append-only CRDT, but guards against future replica behavior), rescan
+    // from the beginning. The id Set keeps us correct either way.
+    if (events.length < scannedPrefixRef.current) {
+      scannedPrefixRef.current = 0;
+    }
+    for (let i = scannedPrefixRef.current; i < events.length; i++) {
+      const event = events[i];
+      if (!event) continue;
+      if (publishedIdsRef.current.has(event.id)) continue;
+      channel.postMessage({
+        type: "event",
+        senderId: selfId,
+        event,
+      } satisfies SyncMessage);
+      publishedIdsRef.current.add(event.id);
+    }
+    scannedPrefixRef.current = events.length;
+  }, [replica, userInfo.userId]);
+
+  const handleLocalOperations = useCallback<
+    Parameters<typeof useTextareaCollaboration>[0]["onLocalOperations"]
+  >(
+    (operations) => {
+      for (const operation of operations) {
+        if (operation.type === POSITION_OPERATION_TYPE.Delete) {
+          replica.delete(operation.index, operation.length);
+          continue;
+        }
+        replica.insert(operation.index, operation.text);
+      }
+      setText(replica.getText());
+      broadcastNewEvents();
+    },
+    [broadcastNewEvents, replica],
+  );
+
+  const collaboration = useTextareaCollaboration({
+    textareaRef,
+    onLocalOperations: handleLocalOperations,
+  });
+  collaborationRef.current = collaboration;
 
   // Separate BroadcastChannel for CRDT event sync. Awareness adapter
   // already opens its own channel for presence — keeping them isolated
@@ -197,26 +203,14 @@ function CollabSession({
       // bounce it back to peers.
       publishedIdsRef.current.add(event.id);
       if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) return;
-      const fallbackOperations = computeMappingOperationsFromTextChange(
-        textBefore,
-        textAfter,
-      );
-      const [fallbackOperation] = fallbackOperations;
-      if (
-        result.operation &&
-        fallbackOperations.length === 1 &&
-        fallbackOperation &&
-        isSamePositionOperation(result.operation, fallbackOperation)
-      ) {
-        pendingMappingOperationsRef.current.push(result.operation);
-        drainPendingChildren(event.id);
-        return;
-      }
-      // Engine couldn't attribute a single op (partial/full replay or
-      // multi-op coalesced delete), or `applyRemoteEvent` flushed buffered
-      // child events as a side effect. Reconstruct from pre/post text so
-      // the selection mapping still covers the whole visible commit.
-      pendingMappingOperationsRef.current.push(...fallbackOperations);
+      // Derive the textarea operation batch from pre/post text. This
+      // covers both the simple single-op case (which would also match
+      // `result.operation`) and the multi-op coalesced / replay cases
+      // the engine can't attribute to a single op — without us needing
+      // to differentiate them. Visible no-ops produce an empty batch
+      // and the adapter early-exits.
+      const operations = computeTextareaOperations(textBefore, textAfter);
+      collaborationRef.current?.applyRemoteOperations(operations);
       drainPendingChildren(event.id);
     };
 
@@ -275,57 +269,6 @@ function CollabSession({
     };
   }, [replica, userInfo.userId]);
 
-  // Broadcast events the replica has produced that we haven't shared yet.
-  // Resumes from `scannedPrefixRef` so each keystroke walks only freshly-
-  // appended events; the id Set still dedupes inside the suffix in case a
-  // remote event landed at the tail between scans.
-  const broadcastNewEvents = useCallback(() => {
-    const channel = broadcastRef.current;
-    if (!channel) return;
-    const selfId = userInfo.userId;
-    const events = replica.exportEventGraph();
-    // Defensive: if the graph ever shrinks (shouldn't happen with an
-    // append-only CRDT, but guards against future replica behavior), rescan
-    // from the beginning. The id Set keeps us correct either way.
-    if (events.length < scannedPrefixRef.current) {
-      scannedPrefixRef.current = 0;
-    }
-    for (let i = scannedPrefixRef.current; i < events.length; i++) {
-      const event = events[i];
-      if (!event) continue;
-      if (publishedIdsRef.current.has(event.id)) continue;
-      channel.postMessage({
-        type: "event",
-        senderId: selfId,
-        event,
-      } satisfies SyncMessage);
-      publishedIdsRef.current.add(event.id);
-    }
-    scannedPrefixRef.current = events.length;
-  }, [replica, userInfo.userId]);
-
-  const handleTextChange = useCallback(
-    (newText: string) => {
-      const oldText = replica.getText();
-      if (newText === oldText) return;
-
-      const { prefix, suffix } = findChangedSpan(oldText, newText);
-      const deletedLength = oldText.length - prefix - suffix;
-      const insertedText = newText.slice(prefix, newText.length - suffix);
-
-      if (deletedLength > 0) {
-        replica.delete(prefix, deletedLength);
-      }
-      if (insertedText.length > 0) {
-        replica.insert(prefix, insertedText);
-      }
-
-      setText(replica.getText());
-      broadcastNewEvents();
-    },
-    [broadcastNewEvents, replica],
-  );
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -381,10 +324,9 @@ function CollabSession({
           <EditorSurface
             blockId={COLLAB_BLOCK_ID}
             text={text}
-            onTextChange={handleTextChange}
             textareaRef={textareaRef}
             trainerId={trainerId}
-            pendingMappingOperationsRef={pendingMappingOperationsRef}
+            isComposing={collaboration.isComposing}
           />
         </AwarenessOverlay>
 

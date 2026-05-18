@@ -1,237 +1,249 @@
-import type {
-  TextareaSelection,
-  UseTextareaSelectionSyncResult,
-} from "@softmaple/awareness/hooks";
-import { EgWalkerReplica } from "@softmaple/eg-walker";
-import type { ChangeEvent, Dispatch, SetStateAction } from "react";
-import { describe, expect, it, vi } from "vitest";
 import {
-  computeLocalEdit,
-  runReplicaChange,
-} from "../modules/collaborative-editor/use-collaborative-editor";
+  computeTextareaOperations,
+  type TextareaOperation,
+  type UseTextareaCollaborationResult,
+} from "@softmaple/awareness/bindings/textarea";
+import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
+import { describe, expect, it, vi } from "vitest";
+import { syncLocalOperationsToRemote } from "../modules/collaborative-editor/use-collaborative-editor";
 
-const applyLocalEditToReplicaPair = (
-  localReplica: EgWalkerReplica,
-  remoteReplica: EgWalkerReplica,
-  newText: string,
+const mockCollaboration = (): UseTextareaCollaborationResult & {
+  readonly applyRemoteOperations: ReturnType<typeof vi.fn>;
+} => ({
+  applyRemoteOperations:
+    vi.fn<(operations: readonly TextareaOperation[]) => void>(),
+  getDocumentSnapshot: vi.fn(() => ""),
+  getSelection: vi.fn(() => null),
+  restoreSelection: vi.fn(),
+  mapSelectionThroughOperations: vi.fn((selection) => selection),
+  isComposing: vi.fn(() => false),
+});
+
+const seed = (
+  local: EgWalkerReplica,
+  remote: EgWalkerReplica,
+  value: string,
 ): void => {
-  const edit = computeLocalEdit(localReplica.getText(), newText);
-
-  if (!edit) {
-    return;
+  const ops = computeTextareaOperations(local.getText(), value);
+  for (const op of ops) {
+    if (op.type === POSITION_OPERATION_TYPE.Delete) {
+      local.delete(op.index, op.length);
+    } else {
+      local.insert(op.index, op.text);
+    }
   }
-
-  const eventsBeforeApply = localReplica.exportEventGraph().length;
-  edit.apply(localReplica);
-  const newEvents = localReplica.exportEventGraph().slice(eventsBeforeApply);
-  for (const event of newEvents) {
-    remoteReplica.applyRemoteEvent(event);
+  for (const event of local.exportEventGraph()) {
+    remote.applyRemoteEvent(event);
   }
 };
 
-describe("collaborative editor utilities", () => {
-  it("syncs pure insertions between actual replicas", () => {
-    const localReplica = new EgWalkerReplica("local");
-    const remoteReplica = new EgWalkerReplica("remote");
+describe("syncLocalOperationsToRemote", () => {
+  it("does nothing for an empty operation batch", async () => {
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
+    const remoteCollaboration = mockCollaboration();
 
-    applyLocalEditToReplicaPair(localReplica, remoteReplica, "Hello");
+    await syncLocalOperationsToRemote([], {
+      localReplica: local,
+      remoteReplica: remote,
+      remoteCollaboration,
+      remoteLabel: "remote",
+    });
 
-    expect(localReplica.getText()).toBe("Hello");
-    expect(remoteReplica.getText()).toBe("Hello");
+    expect(remoteCollaboration.applyRemoteOperations).not.toHaveBeenCalled();
+    expect(local.getText()).toBe("");
+    expect(remote.getText()).toBe("");
   });
 
-  it("syncs replacements with net length changes between actual replicas", () => {
-    const localReplica = new EgWalkerReplica("local");
-    const remoteReplica = new EgWalkerReplica("remote");
+  it("syncs pure insertions between actual replicas", async () => {
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
+    const remoteCollaboration = mockCollaboration();
 
-    applyLocalEditToReplicaPair(localReplica, remoteReplica, "abcXYZdef");
-    applyLocalEditToReplicaPair(localReplica, remoteReplica, "abc12345def");
+    await syncLocalOperationsToRemote(
+      [
+        {
+          type: POSITION_OPERATION_TYPE.Insert,
+          index: 0,
+          length: 5,
+          text: "Hello",
+        },
+      ],
+      {
+        localReplica: local,
+        remoteReplica: remote,
+        remoteCollaboration,
+        remoteLabel: "remote",
+      },
+    );
 
-    expect(localReplica.getText()).toBe("abc12345def");
-    expect(remoteReplica.getText()).toBe("abc12345def");
+    expect(local.getText()).toBe("Hello");
+    expect(remote.getText()).toBe("Hello");
+    expect(remoteCollaboration.applyRemoteOperations).toHaveBeenCalledTimes(1);
+    const [forwarded] =
+      remoteCollaboration.applyRemoteOperations.mock.calls[0] ?? [];
+    expect(forwarded).toEqual([
+      {
+        type: POSITION_OPERATION_TYPE.Insert,
+        index: 0,
+        length: 5,
+        text: "Hello",
+      },
+    ]);
   });
 
-  it("remaps remote selection only through successfully applied operations", async () => {
-    const localReplica = new EgWalkerReplica("local");
-    const remoteReplica = new EgWalkerReplica("remote");
-    applyLocalEditToReplicaPair(localReplica, remoteReplica, "abcXYZdef");
+  it("syncs replacements with net length changes", async () => {
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
+    const remoteCollaboration = mockCollaboration();
+    seed(local, remote, "abcXYZdef");
 
-    const localSync = createTextareaSelectionSync(null);
-    const remoteSync = createTextareaSelectionSync({
-      selectionStart: 8,
-      selectionEnd: 8,
-      selectionDirection: "none",
-    });
-    const setLocalText: Dispatch<SetStateAction<string>> = vi.fn();
-    const setRemoteText: Dispatch<SetStateAction<string>> = vi.fn();
-    const applyRemoteEvent = remoteReplica.applyRemoteEvent.bind(remoteReplica);
-    let applyCount = 0;
-    vi.spyOn(remoteReplica, "applyRemoteEvent").mockImplementation((event) => {
-      applyCount++;
-      if (applyCount === 2) {
-        throw new Error("sync failed");
-      }
-      return applyRemoteEvent(event);
-    });
+    await syncLocalOperationsToRemote(
+      computeTextareaOperations("abcXYZdef", "abc12345def"),
+      {
+        localReplica: local,
+        remoteReplica: remote,
+        remoteCollaboration,
+        remoteLabel: "remote",
+      },
+    );
+
+    expect(local.getText()).toBe("abc12345def");
+    expect(remote.getText()).toBe("abc12345def");
+  });
+
+  it("does not propagate errors when a remote apply throws", async () => {
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
+    const remoteCollaboration = mockCollaboration();
+    seed(local, remote, "abcXYZdef");
+
+    // Replace directly rather than via `vi.spyOn`: throwing inside the
+    // mocked impl propagates through `await` and is swallowed by the
+    // sync function's `try`/`catch`. We assert only the contract the
+    // route depends on — the function resolves and does not blow up
+    // the caller — not the specific logging side effect, which can
+    // shift between vitest console-intercept versions.
+    const originalApply = remote.applyRemoteEvent.bind(remote);
+    let applyCallCount = 0;
+    remote.applyRemoteEvent = () => {
+      applyCallCount++;
+      throw new Error("sync failed");
+    };
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
     try {
-      await runReplicaChange(
-        {
-          target: { value: "abc12345def" },
-        } as ChangeEvent<HTMLTextAreaElement>,
-        {
-          localReplica,
-          remoteReplica,
-          localSync,
-          remoteSync,
-          setLocalText,
-          setRemoteText,
-          remoteLabel: "remote",
-        },
-      );
+      await expect(
+        syncLocalOperationsToRemote(
+          computeTextareaOperations("abcXYZdef", "abc12345def"),
+          {
+            localReplica: local,
+            remoteReplica: remote,
+            remoteCollaboration,
+            remoteLabel: "remote",
+          },
+        ),
+      ).resolves.toBeUndefined();
     } finally {
+      remote.applyRemoteEvent = originalApply;
       consoleError.mockRestore();
     }
 
-    expect(remoteReplica.getText()).toBe("abcdef");
-    expect(remoteSync.restoreSelection).toHaveBeenCalledWith({
-      selectionStart: 5,
-      selectionEnd: 5,
-      selectionDirection: "none",
-    });
+    expect(applyCallCount).toBeGreaterThan(0);
+    // The walk aborted on the first throw before any remote ops
+    // integrated, so the binding receives an empty batch.
+    const [forwarded] = remoteCollaboration.applyRemoteOperations.mock
+      .calls[0] ?? [[]];
+    expect(forwarded).toEqual([]);
   });
 
-  it("restores the local selection captured at handler-start, not whatever a later capture would return", async () => {
-    // Regression guard for the explicit-pass fix: localSync.captureSelection's
-    // return value is stored in a local var and passed explicitly to
-    // restoreSelection, so a concurrent edit's overwrite of the hook's shared
-    // ref cannot leak into this handler's restore. If someone reverts to
-    // `localSync.restoreSelection()` (no args), the mock receives `undefined`
-    // and this test fails.
-    const localReplica = new EgWalkerReplica("local");
-    const remoteReplica = new EgWalkerReplica("remote");
+  it("forwards no operations to the remote adapter when remote events buffer instead of integrating", async () => {
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
+    const remoteCollaboration = mockCollaboration();
+    // Seed only the local side so the remote will buffer the produced events
+    // until their parents arrive.
+    const initialOps = computeTextareaOperations("", "abcXYZdef");
+    for (const op of initialOps) {
+      if (op.type === POSITION_OPERATION_TYPE.Delete) {
+        local.delete(op.index, op.length);
+      } else {
+        local.insert(op.index, op.text);
+      }
+    }
 
-    const capturedAtHandlerStart: TextareaSelection = {
-      selectionStart: 1,
-      selectionEnd: 1,
-      selectionDirection: "none",
-    };
-    const wouldBeFromAConcurrentEdit: TextareaSelection = {
-      selectionStart: 99,
-      selectionEnd: 99,
-      selectionDirection: "none",
-    };
-    const localCapture = vi
-      .fn<() => TextareaSelection | null>()
-      .mockReturnValueOnce(capturedAtHandlerStart)
-      .mockReturnValue(wouldBeFromAConcurrentEdit);
-    const localRestore = vi.fn();
-    const localSync: UseTextareaSelectionSyncResult = {
-      captureSelection: localCapture,
-      restoreSelection: localRestore,
-      mapAndRestoreSelection: vi.fn(),
-    };
-
-    await runReplicaChange(
+    await syncLocalOperationsToRemote(
+      computeTextareaOperations("abcXYZdef", "abc12345def"),
       {
-        target: { value: "x" },
-      } as ChangeEvent<HTMLTextAreaElement>,
-      {
-        localReplica,
-        remoteReplica,
-        localSync,
-        remoteSync: createTextareaSelectionSync(null),
-        setLocalText: vi.fn(),
-        setRemoteText: vi.fn(),
+        localReplica: local,
+        remoteReplica: remote,
+        remoteCollaboration,
         remoteLabel: "remote",
       },
     );
 
-    expect(localRestore).toHaveBeenCalledTimes(1);
-    expect(localRestore).toHaveBeenCalledWith(capturedAtHandlerStart);
-    expect(localRestore).not.toHaveBeenCalledWith(wouldBeFromAConcurrentEdit);
+    expect(remote.getText()).toBe("");
+    expect(remote.getPendingRemoteCount()).toBeGreaterThan(0);
+    const [forwarded] = remoteCollaboration.applyRemoteOperations.mock
+      .calls[0] ?? [[]];
+    expect(forwarded).toEqual([]);
   });
 
-  it("does not remap remote selection for buffered remote events", async () => {
-    const localReplica = new EgWalkerReplica("local");
-    const remoteReplica = new EgWalkerReplica("remote");
-    const initialEdit = computeLocalEdit("", "abcXYZdef");
-    initialEdit?.apply(localReplica);
+  it("forwards no visible operations when the integrated remote event is a no-op", async () => {
+    const seedReplica = new EgWalkerReplica("seed");
+    seedReplica.insert(0, "abcd");
+    const [seedEvent] = seedReplica.exportEventGraph();
+    if (!seedEvent) throw new Error("expected one seed event");
 
-    const localSync = createTextareaSelectionSync(null);
-    const remoteSync = createTextareaSelectionSync({
-      selectionStart: 0,
-      selectionEnd: 0,
-      selectionDirection: "none",
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
+    local.applyRemoteEvent(seedEvent);
+    remote.applyRemoteEvent(seedEvent);
+    // Pre-emptively delete the same range on the remote so the local
+    // delete will integrate as a visible no-op.
+    remote.delete(1, 2);
+    const remoteCollaboration = mockCollaboration();
+
+    await syncLocalOperationsToRemote(computeTextareaOperations("abcd", "ad"), {
+      localReplica: local,
+      remoteReplica: remote,
+      remoteCollaboration,
+      remoteLabel: "remote",
     });
 
-    await runReplicaChange(
-      {
-        target: { value: "abc12345def" },
-      } as ChangeEvent<HTMLTextAreaElement>,
-      {
-        localReplica,
-        remoteReplica,
-        localSync,
-        remoteSync,
-        setLocalText: vi.fn(),
-        setRemoteText: vi.fn(),
-        remoteLabel: "remote",
-      },
-    );
-
-    expect(remoteReplica.getText()).toBe("");
-    expect(remoteReplica.getPendingRemoteCount()).toBeGreaterThan(0);
-    expect(remoteSync.restoreSelection).not.toHaveBeenCalled();
+    expect(local.getText()).toBe("ad");
+    expect(remote.getText()).toBe("ad");
+    const [forwarded] = remoteCollaboration.applyRemoteOperations.mock
+      .calls[0] ?? [[]];
+    expect(forwarded).toEqual([]);
   });
 
-  it("does not remap remote selection when a null remote operation is a visible no-op", async () => {
-    const seed = new EgWalkerReplica("seed");
-    seed.insert(0, "abcd");
-    const [seedEvent] = seed.exportEventGraph();
-    expect(seedEvent).toBeDefined();
+  it("tolerates a null remoteCollaboration (binding not yet mounted)", async () => {
+    const local = new EgWalkerReplica("local");
+    const remote = new EgWalkerReplica("remote");
 
-    const localReplica = new EgWalkerReplica("local");
-    const remoteReplica = new EgWalkerReplica("remote");
-    localReplica.applyRemoteEvent(seedEvent!);
-    remoteReplica.applyRemoteEvent(seedEvent!);
-
-    remoteReplica.delete(1, 2);
-
-    const remoteSync = createTextareaSelectionSync({
-      selectionStart: 2,
-      selectionEnd: 2,
-      selectionDirection: "none",
-    });
-
-    await runReplicaChange(
-      {
-        target: { value: "ad" },
-      } as ChangeEvent<HTMLTextAreaElement>,
-      {
-        localReplica,
-        remoteReplica,
-        localSync: createTextareaSelectionSync(null),
-        remoteSync,
-        setLocalText: vi.fn(),
-        setRemoteText: vi.fn(),
-        remoteLabel: "remote",
-      },
-    );
-
-    expect(localReplica.getText()).toBe("ad");
-    expect(remoteReplica.getText()).toBe("ad");
-    expect(remoteSync.restoreSelection).not.toHaveBeenCalled();
+    await expect(
+      syncLocalOperationsToRemote(
+        [
+          {
+            type: POSITION_OPERATION_TYPE.Insert,
+            index: 0,
+            length: 1,
+            text: "x",
+          },
+        ],
+        {
+          localReplica: local,
+          remoteReplica: remote,
+          remoteCollaboration: null,
+          remoteLabel: "remote",
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(local.getText()).toBe("x");
+    expect(remote.getText()).toBe("x");
   });
-});
-
-const createTextareaSelectionSync = (
-  selection: TextareaSelection | null,
-): UseTextareaSelectionSyncResult => ({
-  captureSelection: vi.fn(() => selection),
-  restoreSelection: vi.fn((nextSelection = selection) => nextSelection),
-  mapAndRestoreSelection: vi.fn(() => selection),
 });

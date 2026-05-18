@@ -5,17 +5,13 @@ import {
   CardTitle,
 } from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
-import type { ChangeEvent, RefObject } from "react";
+import type { RefObject } from "react";
 
 export type ReplicaEditorPanelProps = {
   readonly editorRef: RefObject<HTMLTextAreaElement | null>;
   readonly label: string;
   readonly labelId: string;
   readonly testId: string;
-  readonly value: string;
-  readonly onChange: (
-    event: ChangeEvent<HTMLTextAreaElement>,
-  ) => Promise<void>;
   readonly placeholder: string;
   readonly focusRingClassName: string;
 };
@@ -25,8 +21,6 @@ export function ReplicaEditorPanel({
   label,
   labelId,
   testId,
-  value,
-  onChange,
   placeholder,
   focusRingClassName,
 }: ReplicaEditorPanelProps) {
@@ -38,11 +32,12 @@ export function ReplicaEditorPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 p-0">
+        {/* Uncontrolled: the textarea adapter owns `value` imperatively
+         *  via the ref so React doesn't re-write the DOM on every commit
+         *  and reset the caret. */}
         <Textarea
           ref={editorRef}
           data-testid={testId}
-          value={value}
-          onChange={onChange}
           placeholder={placeholder}
           aria-labelledby={labelId}
           className={`h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 border-0 rounded-none p-4 ${focusRingClassName}`}

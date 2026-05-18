@@ -128,6 +128,10 @@ export default defineConfig({
           __dirname,
           "src/hooks/use-textarea-selection-sync.ts",
         ),
+        "bindings/textarea/index": path.resolve(
+          __dirname,
+          "src/bindings/textarea/index.ts",
+        ),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,

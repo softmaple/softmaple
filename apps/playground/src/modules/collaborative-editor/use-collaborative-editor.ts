@@ -1,240 +1,157 @@
+/**
+ * Two-replica textarea demo wiring built on the
+ * `@softmaple/awareness/bindings/textarea` reference adapter.
+ *
+ * Responsibilities:
+ * - own the two `EgWalkerReplica` instances
+ * - bridge each adapter's local `TextareaOperation` batches into its
+ *   replica, then walk the resulting events into the peer replica
+ * - hand the resulting batch back to the peer adapter so the peer
+ *   textarea writes the new value and remaps its selection
+ *
+ * Everything CRDT-shaped (replica calls, event walking) lives here
+ * because the binding intentionally has no eg-walker dependency.
+ */
+
 import {
-  mapTextareaSelectionThroughOperation,
-  type TextareaSelection,
-  type UseTextareaSelectionSyncResult,
-  useTextareaSelectionSync,
-} from "@softmaple/awareness/hooks";
-import {
-  findChangedSpan,
-  POSITION_OPERATION_TYPE,
-  type PositionOperation,
-} from "@softmaple/awareness/mapping";
+  computeTextareaOperations,
+  type TextareaOperation,
+  toTextareaOperation,
+  type UseTextareaCollaborationResult,
+  useTextareaCollaboration,
+} from "@softmaple/awareness/bindings/textarea";
+import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
 import {
   APPLY_REMOTE_EVENT_STATUS,
   EgWalkerReplica,
 } from "@softmaple/eg-walker";
-import {
-  type ChangeEvent,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction,
-  useCallback,
-  useRef,
-  useState,
-} from "react";
+import { type RefObject, useCallback, useRef, useState } from "react";
 
-export type LocalEdit = {
-  readonly mappingOperations: readonly PositionOperation[];
-  readonly apply: (replica: EgWalkerReplica) => void;
+const applyTextareaOperationToReplica = (
+  operation: TextareaOperation,
+  replica: EgWalkerReplica,
+): void => {
+  if (operation.type === POSITION_OPERATION_TYPE.Delete) {
+    replica.delete(operation.index, operation.length);
+    return;
+  }
+  replica.insert(operation.index, operation.text);
 };
 
-export const computeLocalEdit = (
-  oldText: string,
-  newText: string,
-): LocalEdit | null => {
-  if (newText === oldText) {
-    return null;
-  }
-
-  const { prefix, suffix } = findChangedSpan(oldText, newText);
-  const deletedLength = oldText.length - prefix - suffix;
-  const insertedText = newText.slice(prefix, newText.length - suffix);
-  const mappingOperations: PositionOperation[] = [];
-
-  if (deletedLength > 0) {
-    mappingOperations.push({
-      type: POSITION_OPERATION_TYPE.Delete,
-      index: prefix,
-      length: deletedLength,
-    });
-  }
-
-  if (insertedText.length > 0) {
-    mappingOperations.push({
-      type: POSITION_OPERATION_TYPE.Insert,
-      index: prefix,
-      length: insertedText.length,
-    });
-  }
-
-  return {
-    mappingOperations,
-    apply: (replica) => {
-      if (deletedLength > 0) {
-        replica.delete(prefix, deletedLength);
-      }
-      if (insertedText.length > 0) {
-        replica.insert(prefix, insertedText);
-      }
-    },
-  };
-};
-
-const mapSelectionThroughOperations = (
-  selection: TextareaSelection,
-  operations: readonly PositionOperation[],
-): TextareaSelection =>
-  operations.reduce<TextareaSelection>(
-    (current, operation) =>
-      mapTextareaSelectionThroughOperation(current, operation),
-    selection,
-  );
-
-/**
- * Derive the mapping operation(s) implied by the remote replica's
- * pre/post text. Reuses `computeLocalEdit` — same plain-text 1D diff
- * shape, different replica — so the engine's `null` cases (partial/full
- * replay, multi-op coalesced delete, visible no-op) still produce a
- * faithful mapping op for selection remap. Visible no-ops correctly
- * return an empty array because both texts compare equal.
- */
-const computeMappingOperationsFromTextChange = (
-  oldText: string,
-  newText: string,
-): readonly PositionOperation[] => {
-  const edit = computeLocalEdit(oldText, newText);
-  return edit?.mappingOperations ?? [];
-};
-
-export type ReplicaChangeContext = {
+export type ReplicaSyncContext = {
   readonly localReplica: EgWalkerReplica;
   readonly remoteReplica: EgWalkerReplica;
-  readonly localSync: UseTextareaSelectionSyncResult;
-  readonly remoteSync: UseTextareaSelectionSyncResult;
-  readonly setLocalText: Dispatch<SetStateAction<string>>;
-  readonly setRemoteText: Dispatch<SetStateAction<string>>;
+  readonly remoteCollaboration: UseTextareaCollaborationResult | null;
   readonly remoteLabel: string;
 };
 
-export const runReplicaChange = async (
-  event: ChangeEvent<HTMLTextAreaElement>,
-  context: ReplicaChangeContext,
+/**
+ * Apply a batch of locally-derived textarea operations to the local
+ * replica, walk the resulting events into the remote replica, and hand
+ * the collected (textarea-shaped) batch to the remote adapter so the
+ * remote textarea writes the new value and remaps its selection.
+ *
+ * Exported for the wiring tests in `apps/playground/src/test/`.
+ */
+export const syncLocalOperationsToRemote = async (
+  operations: readonly TextareaOperation[],
+  context: ReplicaSyncContext,
 ): Promise<void> => {
-  const {
-    localReplica,
-    remoteReplica,
-    localSync,
-    remoteSync,
-    setLocalText,
-    setRemoteText,
-    remoteLabel,
-  } = context;
-
-  const newText = event.target.value;
-  const oldText = localReplica.getText();
-  const edit = computeLocalEdit(oldText, newText);
-
-  if (!edit) {
-    setLocalText(localReplica.getText());
-    setRemoteText(remoteReplica.getText());
+  if (operations.length === 0) {
     return;
   }
+  const { localReplica, remoteReplica, remoteCollaboration, remoteLabel } =
+    context;
 
-  // Capture cursor positions into local vars (not just the hook's shared ref)
-  // so a concurrent edit firing during the await below cannot overwrite the
-  // selection this handler will restore.
-  const localSelection = localSync.captureSelection();
-  const remoteSelection = remoteSync.captureSelection();
-
-  // Snapshot the event graph length before applying so we walk exactly the
-  // events this edit produced, without assuming "one replica call = one
-  // event" or N == mappingOperations.length.
+  // Snapshot the event graph before applying so we walk exactly the
+  // events this batch produced — `operations.length` is not a safe
+  // proxy because the replica may coalesce or split.
   const eventsBeforeApply = localReplica.exportEventGraph().length;
-  edit.apply(localReplica);
+  for (const operation of operations) {
+    applyTextareaOperationToReplica(operation, localReplica);
+  }
   const newEvents = localReplica.exportEventGraph().slice(eventsBeforeApply);
 
-  const appliedMappingOperations: PositionOperation[] = [];
+  const appliedRemoteOperations: TextareaOperation[] = [];
   try {
     for (const remoteEvent of newEvents) {
-      const textBeforeRemoteApply = remoteReplica.getText();
+      const textBefore = remoteReplica.getText();
       const result = await remoteReplica.applyRemoteEvent(remoteEvent);
       if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
         continue;
       }
+      const textAfter = remoteReplica.getText();
       if (result.operation) {
-        appliedMappingOperations.push(result.operation);
+        appliedRemoteOperations.push(
+          toTextareaOperation(result.operation, textAfter),
+        );
         continue;
       }
-      const textAfterRemoteApply = remoteReplica.getText();
-      appliedMappingOperations.push(
-        ...computeMappingOperationsFromTextChange(
-          textBeforeRemoteApply,
-          textAfterRemoteApply,
-        ),
+      // Engine could not attribute a single op (partial/full replay or
+      // multi-op coalesced delete). Reconstruct from pre/post text so
+      // the adapter still gets a faithful batch.
+      appliedRemoteOperations.push(
+        ...computeTextareaOperations(textBefore, textAfter),
       );
     }
   } catch (error) {
     console.error(`Failed to sync edit to ${remoteLabel}:`, error);
   }
 
-  setLocalText(localReplica.getText());
-  localSync.restoreSelection(localSelection);
-
-  setRemoteText(remoteReplica.getText());
-  if (remoteSelection && appliedMappingOperations.length > 0) {
-    remoteSync.restoreSelection(
-      mapSelectionThroughOperations(remoteSelection, appliedMappingOperations),
-    );
-  }
+  remoteCollaboration?.applyRemoteOperations(appliedRemoteOperations);
 };
 
 export type UseCollaborativeEditorResult = {
-  readonly replica1Text: string;
-  readonly replica2Text: string;
   readonly replica1Ref: RefObject<HTMLTextAreaElement | null>;
   readonly replica2Ref: RefObject<HTMLTextAreaElement | null>;
-  readonly handleReplica1Change: (
-    event: ChangeEvent<HTMLTextAreaElement>,
-  ) => Promise<void>;
-  readonly handleReplica2Change: (
-    event: ChangeEvent<HTMLTextAreaElement>,
-  ) => Promise<void>;
 };
 
 export const useCollaborativeEditor = (): UseCollaborativeEditorResult => {
-  const [replica1Text, setReplica1Text] = useState("");
-  const [replica2Text, setReplica2Text] = useState("");
   const [api1] = useState(() => new EgWalkerReplica("replica-1"));
   const [api2] = useState(() => new EgWalkerReplica("replica-2"));
   const replica1Ref = useRef<HTMLTextAreaElement>(null);
   const replica2Ref = useRef<HTMLTextAreaElement>(null);
-  const replica1Sync = useTextareaSelectionSync(replica1Ref);
-  const replica2Sync = useTextareaSelectionSync(replica2Ref);
+  // Cross-reference via refs because each adapter's `onLocalOperations`
+  // calls into the *other* adapter's `applyRemoteOperations`, and the
+  // second `useTextareaCollaboration` result is not yet defined when
+  // the first callback closes over it.
+  const collab1Ref = useRef<UseTextareaCollaborationResult | null>(null);
+  const collab2Ref = useRef<UseTextareaCollaborationResult | null>(null);
 
-  const handleReplica1Change = useCallback(
-    (event: ChangeEvent<HTMLTextAreaElement>) =>
-      runReplicaChange(event, {
+  const handleReplica1LocalOps = useCallback(
+    (operations: readonly TextareaOperation[]) => {
+      void syncLocalOperationsToRemote(operations, {
         localReplica: api1,
         remoteReplica: api2,
-        localSync: replica1Sync,
-        remoteSync: replica2Sync,
-        setLocalText: setReplica1Text,
-        setRemoteText: setReplica2Text,
+        remoteCollaboration: collab2Ref.current,
         remoteLabel: "replica-2",
-      }),
-    [api1, api2, replica1Sync, replica2Sync],
+      });
+    },
+    [api1, api2],
   );
 
-  const handleReplica2Change = useCallback(
-    (event: ChangeEvent<HTMLTextAreaElement>) =>
-      runReplicaChange(event, {
+  const handleReplica2LocalOps = useCallback(
+    (operations: readonly TextareaOperation[]) => {
+      void syncLocalOperationsToRemote(operations, {
         localReplica: api2,
         remoteReplica: api1,
-        localSync: replica2Sync,
-        remoteSync: replica1Sync,
-        setLocalText: setReplica2Text,
-        setRemoteText: setReplica1Text,
+        remoteCollaboration: collab1Ref.current,
         remoteLabel: "replica-1",
-      }),
-    [api1, api2, replica1Sync, replica2Sync],
+      });
+    },
+    [api1, api2],
   );
 
-  return {
-    replica1Text,
-    replica2Text,
-    replica1Ref,
-    replica2Ref,
-    handleReplica1Change,
-    handleReplica2Change,
-  };
+  const collab1 = useTextareaCollaboration({
+    textareaRef: replica1Ref,
+    onLocalOperations: handleReplica1LocalOps,
+  });
+  const collab2 = useTextareaCollaboration({
+    textareaRef: replica2Ref,
+    onLocalOperations: handleReplica2LocalOps,
+  });
+  collab1Ref.current = collab1;
+  collab2Ref.current = collab2;
+
+  return { replica1Ref, replica2Ref };
 };

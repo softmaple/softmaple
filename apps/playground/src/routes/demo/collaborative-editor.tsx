@@ -10,14 +10,7 @@ export const Route = createFileRoute("/demo/collaborative-editor")({
 });
 
 function CollaborativeEditor() {
-  const {
-    replica1Text,
-    replica2Text,
-    replica1Ref,
-    replica2Ref,
-    handleReplica1Change,
-    handleReplica2Change,
-  } = useCollaborativeEditor();
+  const { replica1Ref, replica2Ref } = useCollaborativeEditor();
 
   const replicaEditors: readonly ReplicaEditorPanelProps[] = [
     {
@@ -25,8 +18,6 @@ function CollaborativeEditor() {
       label: "Replica 1",
       labelId: "replica-1-label",
       testId: "replica-1",
-      value: replica1Text,
-      onChange: handleReplica1Change,
       placeholder: "Start typing in Replica 1...",
       focusRingClassName: "focus-visible:ring-blue-400",
     },
@@ -35,8 +26,6 @@ function CollaborativeEditor() {
       label: "Replica 2",
       labelId: "replica-2-label",
       testId: "replica-2",
-      value: replica2Text,
-      onChange: handleReplica2Change,
       placeholder: "Start typing in Replica 2...",
       focusRingClassName: "focus-visible:ring-green-400",
     },

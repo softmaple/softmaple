@@ -42,12 +42,15 @@ function CollabSession({
   const [replica] = useState(() => new EgWalkerReplica(userInfo.userId, ""));
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { collaborationRef, broadcastNewEvents } = useBroadcastCollabSession({
-    replica,
-    userId: userInfo.userId,
-    syncChannel: SYNC_CHANNEL,
-    onTextChange: setText,
-  });
+  const isComposingRef = useRef(false);
+  const { collaborationRef, broadcastNewEvents, flushDuringCompositionEvents } =
+    useBroadcastCollabSession({
+      replica,
+      userId: userInfo.userId,
+      syncChannel: SYNC_CHANNEL,
+      onTextChange: setText,
+      isComposingRef,
+    });
 
   const handleLocalOperations = useCallback<
     Parameters<typeof useTextareaCollaboration>[0]["onLocalOperations"]
@@ -69,6 +72,15 @@ function CollabSession({
   const collaboration = useTextareaCollaboration({
     textareaRef,
     onLocalOperations: handleLocalOperations,
+    onCompositionChange: (composing) => {
+      isComposingRef.current = composing;
+      if (!composing) {
+        // Defer the flush one microtask so the composition's own ops
+        // (emitted synchronously in compositionend, after this callback)
+        // reach the replica before we apply the buffered peer events.
+        queueMicrotask(flushDuringCompositionEvents);
+      }
+    },
   });
   useLayoutEffect(() => {
     collaborationRef.current = collaboration;

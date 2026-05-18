@@ -11,6 +11,14 @@ import {
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 /**
+ * A ref to a boolean flag that the caller updates as the textarea's IME
+ * composition state changes. While `isComposingRef.current` is true,
+ * incoming peer events are queued rather than applied immediately.
+ * Flushed after composition ends via `flushDuringCompositionEvents`.
+ */
+type IsComposingRef = RefObject<boolean>;
+
+/**
  * Cross-tab sync protocol. Three message shapes:
  *
  * - `event`     a single newly-produced event, broadcast as it happens.
@@ -42,11 +50,20 @@ type UseBroadcastCollabSessionOptions = {
   readonly userId: string;
   readonly syncChannel: string;
   readonly onTextChange: (text: string) => void;
+  readonly isComposingRef: IsComposingRef;
 };
 
 type BroadcastCollabSession = {
   readonly collaborationRef: RefObject<UseTextareaCollaborationResult | null>;
   readonly broadcastNewEvents: () => void;
+  /**
+   * Process peer events that were queued while the textarea was composing.
+   * Must be called after composition ends and after the local composition
+   * ops have been applied to the replica (i.e. after `onLocalOperations`
+   * returns for the composition commit), so the CRDT sees local ops first
+   * and peer events can be correctly rebased on top.
+   */
+  readonly flushDuringCompositionEvents: () => void;
 };
 
 export const useBroadcastCollabSession = ({
@@ -54,6 +71,7 @@ export const useBroadcastCollabSession = ({
   userId,
   syncChannel,
   onTextChange,
+  isComposingRef,
 }: UseBroadcastCollabSessionOptions): BroadcastCollabSession => {
   const channelRef = useRef<BroadcastChannel | null>(null);
   const collaborationRef = useRef<UseTextareaCollaborationResult | null>(null);
@@ -64,6 +82,16 @@ export const useBroadcastCollabSession = ({
   // Length of the exported graph prefix already inspected by the broadcast
   // loop. The Set above is still the source of truth for dedupe.
   const scannedPrefixRef = useRef(0);
+  // Peer events that arrived while the textarea was composing. We cannot
+  // apply them to the replica immediately because their indices would be
+  // relative to the pre-composition baseline; the composition's own ops
+  // must land first so the CRDT merge is correct. Flushed after
+  // compositionend via flushDuringCompositionEvents.
+  const duringCompositionEventsRef = useRef<GraphEvent[]>([]);
+  const duringCompositionEventIdsRef = useRef<Set<EventId>>(new Set());
+  // Set by the useEffect so flushDuringCompositionEvents (defined outside
+  // the effect) can reach the closure-local acceptRemote.
+  const processBufferedEventsRef = useRef<(() => void) | null>(null);
 
   const broadcastNewEvents = useCallback(() => {
     const channel = channelRef.current;
@@ -86,6 +114,11 @@ export const useBroadcastCollabSession = ({
     scannedPrefixRef.current = events.length;
   }, [replica, userId]);
 
+  const flushDuringCompositionEvents = useCallback(() => {
+    processBufferedEventsRef.current?.();
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: isComposingRef is a stable RefObject; reading .current inside the effect always gives the live value without needing the effect to re-run on composition state changes.
   useEffect(() => {
     const channel = new BroadcastChannel(syncChannel);
     channelRef.current = channel;
@@ -95,8 +128,10 @@ export const useBroadcastCollabSession = ({
     const getIntegratedEventIds = (): Set<EventId> =>
       new Set(replica.exportEventGraph().map((event) => event.id));
 
-    const findMissingParent = (event: GraphEvent): EventId | null => {
-      const integratedIds = getIntegratedEventIds();
+    const findMissingParent = (
+      event: GraphEvent,
+      integratedIds: Set<EventId>,
+    ): EventId | null => {
       for (const parentId of event.parentVersion) {
         if (!integratedIds.has(parentId)) {
           return parentId;
@@ -123,21 +158,55 @@ export const useBroadcastCollabSession = ({
       }
     };
 
-    const acceptRemote = (event: GraphEvent): void => {
-      if (getIntegratedEventIds().has(event.id)) return;
-      const missingParent = findMissingParent(event);
+    // `knownIntegratedIds` is an optional pre-computed set the caller
+    // can pass when processing events in a batch. It must be mutated in
+    // place (add the new ID after applyRemoteEvent) so subsequent
+    // iterations of the batch loop see fresh data without re-scanning
+    // the graph. When omitted, one fresh scan is done per call.
+    const acceptRemote = (
+      event: GraphEvent,
+      knownIntegratedIds?: Set<EventId>,
+    ): void => {
+      const integratedIds = knownIntegratedIds ?? getIntegratedEventIds();
+      if (integratedIds.has(event.id)) return;
+      const missingParent = findMissingParent(event, integratedIds);
       if (missingParent) {
         bufferRemote(event, missingParent);
+        return;
+      }
+      // While the textarea is mid-IME-composition, we cannot apply peer
+      // events to the replica yet. The composition's local ops must land
+      // first (so their indices are correct relative to the
+      // pre-composition baseline); peer events are then applied on top
+      // and the CRDT merge resolves any conflicts. See issue #704.
+      if (isComposingRef.current) {
+        if (!duringCompositionEventIdsRef.current.has(event.id)) {
+          duringCompositionEventsRef.current.push(event);
+          duringCompositionEventIdsRef.current.add(event.id);
+        }
         return;
       }
       const textBefore = replica.getText();
       const result = replica.applyRemoteEvent(event);
       const textAfter = replica.getText();
       publishedIdsRef.current.add(event.id);
+      knownIntegratedIds?.add(event.id);
       if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) return;
       const operations = computeTextareaOperations(textBefore, textAfter);
       collaborationRef.current?.applyRemoteOperations(operations);
       drainPendingChildren(event.id);
+    };
+
+    processBufferedEventsRef.current = () => {
+      const events = duringCompositionEventsRef.current;
+      if (events.length === 0) return;
+      duringCompositionEventsRef.current = [];
+      duringCompositionEventIdsRef.current.clear();
+      const integratedIds = getIntegratedEventIds();
+      for (const event of events) {
+        acceptRemote(event, integratedIds);
+      }
+      onTextChange(replica.getText());
     };
 
     channel.onmessage = (event: MessageEvent<SyncMessage>) => {
@@ -151,20 +220,39 @@ export const useBroadcastCollabSession = ({
           return;
         }
         case "request": {
-          const events = replica.exportEventGraph();
-          if (events.length === 0) return;
+          // Three sources of events that have not yet been applied to the
+          // replica must all be included so a joining peer gets the full
+          // picture even if the original senders are gone:
+          //
+          // 1. appliedEvents — replica.exportEventGraph(), the baseline.
+          // 2. queuedEvents  — events whose parents are integrated but
+          //    that we are holding back until IME composition ends.
+          // 3. pendingEvents — descendants buffered behind a missing
+          //    parent (including children of queuedEvents whose parent
+          //    has not been applied to the replica yet, keyed by the
+          //    missing parent ID at every depth of the causal chain).
+          const appliedEvents = replica.exportEventGraph();
+          const queuedEvents = duringCompositionEventsRef.current;
+          const pendingEvents = [...pendingByMissingParent.values()].flat();
+          if (
+            appliedEvents.length === 0 &&
+            queuedEvents.length === 0 &&
+            pendingEvents.length === 0
+          )
+            return;
           channel.postMessage({
             type: "snapshot",
             senderId: userId,
             recipientId: msg.senderId,
-            events,
+            events: [...appliedEvents, ...queuedEvents, ...pendingEvents],
           } satisfies SyncMessage);
           return;
         }
         case "snapshot": {
           if (msg.recipientId !== userId) return;
+          const integratedIds = getIntegratedEventIds();
           for (const event of msg.events) {
-            acceptRemote(event);
+            acceptRemote(event, integratedIds);
           }
           onTextChange(replica.getText());
           return;
@@ -180,8 +268,11 @@ export const useBroadcastCollabSession = ({
     return () => {
       channel.close();
       channelRef.current = null;
+      processBufferedEventsRef.current = null;
+      duringCompositionEventsRef.current = [];
+      duringCompositionEventIdsRef.current.clear();
     };
   }, [onTextChange, replica, syncChannel, userId]);
 
-  return { collaborationRef, broadcastNewEvents };
+  return { collaborationRef, broadcastNewEvents, flushDuringCompositionEvents };
 };

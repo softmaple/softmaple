@@ -94,6 +94,12 @@ export {
   getUserById,
   getUsersArray,
 } from "./state/selectors";
+export type {
+  AdapterSubscription,
+  CollaborationAdapter,
+  EditorOperation,
+  EditorSelection,
+} from "./types/editor";
 export {
   ACTIVITY_TYPE,
   type ActivityEvent,

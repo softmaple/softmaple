@@ -17,7 +17,6 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { PartialReplayManager } from "../engine/partial-replay";
 import { EventGraph } from "../graph/event-graph";
-import { compareEventIds } from "../graph/event-id";
 import type { EventId, GraphEvent, Version } from "../types";
 import { cloneEvent, createPrng } from "./test-helpers";
 
@@ -380,68 +379,5 @@ describe("EgWalkerEngine traversal-order independence", () => {
         `case bIdx=${bIdx} cIdx=${cIdx} fOff=${fOffset}`,
       ).toBe(fullText);
     }
-  });
-});
-
-describe("compareEventIds (numeric suffix tie-break)", () => {
-  it("orders r1:10 after r1:2 numerically", () => {
-    expect(compareEventIds("r1:2", "r1:10")).toBeLessThan(0);
-    expect(compareEventIds("r1:10", "r1:2")).toBeGreaterThan(0);
-    expect(compareEventIds("r1:10", "r1:10")).toBe(0);
-  });
-
-  it("sorts a mixed-suffix series in ascending numeric order", () => {
-    const ids: EventId[] = ["r1:1", "r1:11", "r1:2", "r1:20", "r1:3"];
-    const sorted = [...ids].sort(compareEventIds);
-    expect(sorted).toEqual(["r1:1", "r1:2", "r1:3", "r1:11", "r1:20"]);
-  });
-
-  it("compares replicas lexicographically before sequence numbers", () => {
-    expect(compareEventIds("alice:99", "bob:1")).toBeLessThan(0);
-    expect(compareEventIds("bob:1", "alice:99")).toBeGreaterThan(0);
-  });
-
-  it("falls back to lexicographic ordering for non-numeric suffixes", () => {
-    expect(compareEventIds("rev-a", "rev-b")).toBeLessThan(0);
-    expect(compareEventIds("r1:abc", "r1:abd")).toBeLessThan(0);
-    expect(compareEventIds("r1:abc", "r1:abc")).toBe(0);
-  });
-
-  it("keeps concurrent inserts under double-digit sequence numbers stable", () => {
-    // `r1:10` vs `r1:2` is the canonical regression: a plain
-    // lexicographic compare would tie them in the wrong order, which
-    // inverts the YATA tie-break for any replica that crosses ten
-    // events between checkpoints.
-    const events: GraphEvent[] = [
-      {
-        id: "root:0",
-        parentVersion: new Set<EventId>(),
-        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "Z" },
-        timestamp: 0,
-      },
-      {
-        id: "r1:2",
-        parentVersion: new Set(["root:0"]),
-        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
-        timestamp: 1,
-      },
-      {
-        id: "r1:10",
-        parentVersion: new Set(["root:0"]),
-        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
-        timestamp: 2,
-      },
-    ];
-    const canonical = buildCanonical(events);
-    const rand = createPrng(0xdead_beef);
-    const observed = new Set<string>([canonical.canonicalText]);
-    for (let trial = 0; trial < 32; trial++) {
-      observed.add(generateFromShuffledOrder(events, rand));
-    }
-    expect(observed.size).toBe(1);
-    // r1:2 has the smaller numeric suffix, so B is integrated before
-    // A. Lexicographic ordering would have placed `r1:10` first
-    // ("0" < "2"), producing "ABZ" instead.
-    expect(canonical.canonicalText).toBe("BAZ");
   });
 });

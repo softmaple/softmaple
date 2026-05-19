@@ -3,6 +3,27 @@
 `@softmaple/eg-walker` implements the Eg-walker paper architecture directly.
 There is no legacy `crdt/` runtime layer.
 
+## Engine Role
+
+`@softmaple/eg-walker` is the **sequence-model collaboration engine**.
+"Engine" is a role defined in
+[`docs/design/collaboration-models.md`](../../docs/design/collaboration-models.md):
+the convergence implementation for one collaboration model.
+
+This package owns the **sequence model** only — a flat sequence of
+code units / graphemes with index-based `insert(index, text)` and
+`delete(index, length)` operations. The block model (rich text /
+node-tree) and object model (canvas / scene) are separate models with
+separate engines (not yet implemented). They are **siblings, not
+subclasses** of this package, and there is intentionally no shared
+engine base type.
+
+Surfaces never import this package directly; they go through a
+**surface binding** (see
+[`docs/design/surface-bindings.md`](../../docs/design/surface-bindings.md)).
+Awareness and transports are separate concerns and must not be
+imported here.
+
 ## Layering Rules (Source of Truth)
 
 The cross-package boundaries for `@softmaple/eg-walker`,

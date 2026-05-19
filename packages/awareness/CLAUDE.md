@@ -8,10 +8,10 @@ the `style/noRestrictedImports` rule in `biome.jsonc` in this package.
 
 In short, this package MUST NOT depend on `@softmaple/eg-walker` or on
 any editor framework (`lexical`, `prosemirror-*`, `slate` / `slate-*`),
-including subpath imports. Editor bindings are deferred (issue B2)
-and will live in a dedicated `bindings/<editor>` sub-path when
-introduced. Read the layering doc before adding new dependencies or
-sub-path exports.
+including subpath imports. Surface bindings (formerly "editor
+bindings") are deferred (issue B2) and will live in a dedicated
+`bindings/<surface>` sub-path when introduced. Read the layering doc
+before adding new dependencies or sub-path exports.
 
 If you change the deny list, update both `biome.jsonc` here **and**
 the matching ESLint patterns in

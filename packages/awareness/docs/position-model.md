@@ -338,8 +338,9 @@ specifically for the position model.
 
 - Presence state and transport adapters.
 - Cursor / selection mapping across position kinds.
-- Editor bindings (textarea today; block / rich / canvas adapters in
-  future).
+- Surface bindings (textarea today; block / rich / canvas bindings in
+  future). See
+  [`docs/design/surface-bindings.md`](../../../docs/design/surface-bindings.md).
 - Rendering helpers (cursors, selection highlights, presence layer).
 
 ### `apps/*` own

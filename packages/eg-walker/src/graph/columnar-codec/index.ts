@@ -90,7 +90,11 @@ export class ColumnarEventGraphCodec {
     const graph = new EventGraph();
     graph.setMetadata(encoded.metadata ?? {});
 
-    ids.forEach((id, index) => {
+    for (let index = 0; index < ids.length; index++) {
+      const id = ids[index];
+      if (id === undefined) {
+        throw new Error(`Missing ID at index ${index}`);
+      }
       const operation = operations[index];
       if (!operation) {
         throw new Error(`Missing operation for event ${id}`);
@@ -103,7 +107,7 @@ export class ColumnarEventGraphCodec {
         timestamp: encoded.timestamps[index] ?? 0,
       };
       graph.addEvent(event);
-    });
+    }
 
     return graph;
   }
@@ -145,6 +149,24 @@ export class ColumnarEventGraphCodec {
     const partialOperationRuns = readOperationRuns(reader);
     const operationIndexes = reader.readZigZagDeltaArray();
     const operationLengths = reader.readVarintArray();
+
+    // Validate before consuming these arrays so finalizeOperationRuns and
+    // reconstructTextLengths never see undefined values from a short column.
+    const operationRunsTotal = partialOperationRuns.reduce(
+      (sum, run) => sum + run.length,
+      0,
+    );
+    if (operationIndexes.length !== operationRunsTotal) {
+      throw new Error(
+        `Column length mismatch: operationIndexes has ${operationIndexes.length} entries but operationRuns implies ${operationRunsTotal} events`,
+      );
+    }
+    if (operationLengths.length !== operationRunsTotal) {
+      throw new Error(
+        `Column length mismatch: operationLengths has ${operationLengths.length} entries but operationRuns implies ${operationRunsTotal} events`,
+      );
+    }
+
     const operationRuns = finalizeOperationRuns(
       partialOperationRuns,
       operationIndexes,
@@ -178,24 +200,11 @@ export class ColumnarEventGraphCodec {
     const timestamps = reader.readZigZagDeltaArray();
     const metadata = JSON.parse(reader.readString()) as Record<string, unknown>;
 
+    // Cross-check the two independent event-count sources and validate timestamps.
     const expectedEventCount = idRuns.reduce((sum, run) => sum + run.length, 0);
-    const operationRunsTotal = partialOperationRuns.reduce(
-      (sum, run) => sum + run.length,
-      0,
-    );
     if (operationRunsTotal !== expectedEventCount) {
       throw new Error(
         `Column length mismatch: operationRuns covers ${operationRunsTotal} events but idRuns implies ${expectedEventCount}`,
-      );
-    }
-    if (operationIndexes.length !== expectedEventCount) {
-      throw new Error(
-        `Column length mismatch: operationIndexes has ${operationIndexes.length} entries but idRuns implies ${expectedEventCount} events`,
-      );
-    }
-    if (operationLengths.length !== expectedEventCount) {
-      throw new Error(
-        `Column length mismatch: operationLengths has ${operationLengths.length} entries but idRuns implies ${expectedEventCount} events`,
       );
     }
     if (timestamps.length !== expectedEventCount) {

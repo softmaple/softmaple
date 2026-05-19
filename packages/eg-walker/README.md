@@ -93,6 +93,8 @@ EG_WALKER_PROPERTY_RUNS=500 pnpm --filter @softmaple/eg-walker test
 | UTF-16 surrogate safety | `unicode-surrogate.property.test.ts` |
 | Concurrent same-index inserts converge (YATA tie-breaking) | `concurrent-same-index-inserts.property.test.ts` |
 | Long offline branch merge converges | `long-offline-branch-merge.property.test.ts` |
+| `applyRemoteEvent` position operation splice contract | `apply-remote-event-result.property.test.ts` |
+| Event graph `diffVersions` matches causal-set differences | `event-graph-diff.property.test.ts` |
 
 See [`src/test/property/README.md`](src/test/property/README.md) for how to add new properties.
 

@@ -39,6 +39,8 @@ up automatically.
 | [`unicode-surrogate.property.test.ts`](./unicode-surrogate.property.test.ts) | Surrogate-biased traces stay well-formed UTF-16 and converge under random delivery. |
 | [`concurrent-same-index-inserts.property.test.ts`](./concurrent-same-index-inserts.property.test.ts) | All-concurrent root inserts at the same index converge under any delivery order (YATA tie-breaking). |
 | [`long-offline-branch-merge.property.test.ts`](./long-offline-branch-merge.property.test.ts) | Two replicas that diverge for many steps without syncing converge after full event exchange. |
+| [`apply-remote-event-result.property.test.ts`](./apply-remote-event-result.property.test.ts) | `applyRemoteEvent`'s position operation describes the visible splice from pre-event to post-event text. |
+| [`event-graph-diff.property.test.ts`](./event-graph-diff.property.test.ts) | `diffVersions` matches expanded causal-set differences; frontier expansion covers the whole graph. |
 
 ## Shared helpers
 

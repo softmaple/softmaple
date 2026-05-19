@@ -16,7 +16,12 @@ import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import { EgWalkerReplica } from "../../core/replica";
 import { EventGraph } from "../../graph/event-graph";
-import { APPLY_REMOTE_EVENT_STATUS, type PositionOperation } from "../../types";
+import {
+  APPLY_REMOTE_EVENT_STATUS,
+  type ApplyRemoteEventResult,
+  type IntegratedApplyRemoteEventResult,
+  type PositionOperation,
+} from "../../types";
 import { cloneEvent } from "../test-helpers";
 import { traceParamsArb } from "./arbitraries";
 import { fcParams } from "./run-config";
@@ -48,10 +53,7 @@ describe("property: applyRemoteEvent position operation contract", () => {
             const result = replica.applyRemoteEvent(cloneEvent(event));
             const after = replica.getText();
 
-            if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
-              expect(result.status).toBe(APPLY_REMOTE_EVENT_STATUS.Integrated);
-              continue;
-            }
+            expectIntegratedResult(result);
             if (result.operation === null) {
               continue;
             }
@@ -71,6 +73,12 @@ describe("property: applyRemoteEvent position operation contract", () => {
 });
 
 // Helpers
+
+function expectIntegratedResult(
+  result: ApplyRemoteEventResult,
+): asserts result is IntegratedApplyRemoteEventResult {
+  expect(result.status).toBe(APPLY_REMOTE_EVENT_STATUS.Integrated);
+}
 
 const expectPositionOperationToDescribeChange = (
   operation: PositionOperation,

@@ -9,8 +9,8 @@ out
 .turbo
 
 # Agent / skill directories
-.agents
-.claude
+**/.agents
+**/.claude
 
 # Storybook
 storybook-static

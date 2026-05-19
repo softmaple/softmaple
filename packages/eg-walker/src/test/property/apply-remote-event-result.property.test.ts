@@ -48,8 +48,8 @@ describe("property: applyRemoteEvent position operation contract", () => {
             const result = replica.applyRemoteEvent(cloneEvent(event));
             const after = replica.getText();
 
-            expect(result.status).toBe(APPLY_REMOTE_EVENT_STATUS.Integrated);
             if (result.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
+              expect(result.status).toBe(APPLY_REMOTE_EVENT_STATUS.Integrated);
               continue;
             }
             if (result.operation === null) {

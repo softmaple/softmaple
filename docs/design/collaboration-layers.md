@@ -27,7 +27,7 @@ The split is enforced by an ESLint `no-restricted-imports` rule in
     - cursor/selection mapping (issue B1)
     - transport adapters
     - rendering helpers
-    - editor bindings (issue B2, deferred)
+    - surface bindings (issue B2, deferred)
 
 apps/*
     - concrete editor integrations
@@ -90,11 +90,14 @@ The presence and cursor layer. Editor-class-agnostic.
 - **Rendering helpers** — primitives (`PresenceBar`, `LiveCursor`,
   `SelectionHighlight`, `ActivityIndicator`) and React hooks for the
   app shell to compose presence UI.
-- **Editor bindings** — concrete glue from an editor's selection model
-  to the awareness cursor model is **deferred** (issue B2). When it
-  arrives it will live in a sub-path of `@softmaple/awareness` (e.g.
-  `@softmaple/awareness/bindings/<editor>`) and is the only place
-  inside this package allowed to know about an editor framework.
+- **Surface bindings** — concrete glue from a surface's selection
+  model to the awareness cursor model is **deferred** (issue B2). When
+  it arrives it will live in a sub-path of `@softmaple/awareness`
+  (e.g. `@softmaple/awareness/bindings/<surface>`) and is the only
+  place inside this package allowed to know about an editor or canvas
+  framework. The term "surface" (rather than "editor") is intentional;
+  see [`surface-bindings.md`](./surface-bindings.md) for the role
+  definition and naming rationale.
 
 ### Forbidden
 
@@ -104,7 +107,7 @@ The presence and cursor layer. Editor-class-agnostic.
   independent concerns; awareness must work even without a CRDT
   document attached.
 - Depend on any editor framework — `lexical`, `prosemirror-*`, or
-  `slate` / `slate-*` — outside the deferred `bindings/<editor>`
+  `slate` / `slate-*` — outside the deferred `bindings/<surface>`
   sub-path that does not yet exist.
 
 ### Rationale
@@ -312,7 +315,7 @@ found clean — no editor-class assumption has leaked in:
 Update this page whenever any of the following change:
 
 - A layer gains or loses a responsibility (e.g. when issue B2 lands
-  and editor bindings move into `@softmaple/awareness`).
+  and surface bindings move into `@softmaple/awareness`).
 - The set of forbidden dependencies changes (e.g. adding a new editor
   framework to the deny list, or graduating one to an allowed binding
   sub-path).

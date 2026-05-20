@@ -94,12 +94,6 @@ export {
   getUserById,
   getUsersArray,
 } from "./state/selectors";
-export type {
-  AdapterSubscription,
-  CollaborationAdapter,
-  EditorOperation,
-  EditorSelection,
-} from "./types/editor";
 export {
   ACTIVITY_TYPE,
   type ActivityEvent,
@@ -137,6 +131,12 @@ export type {
   PresenceState,
   PresenceStateConfig,
 } from "./types/state";
+export type {
+  SurfaceBinding,
+  SurfaceBindingSubscription,
+  SurfaceOperation,
+  SurfaceSelection,
+} from "./types/surface-binding";
 export {
   getTextareaCaretRect,
   getTextareaSelectionRects,

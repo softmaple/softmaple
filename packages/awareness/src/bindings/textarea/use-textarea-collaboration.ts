@@ -1,22 +1,22 @@
 /**
- * React wrapper around the pure `createTextareaAdapter`.
+ * React wrapper around the pure `createTextareaBinding`.
  *
- * Owns adapter construction/teardown across mounts, keeps the
+ * Owns binding construction/teardown across mounts, keeps the
  * subscriber callback fresh via a ref so a parent re-render doesn't
- * re-attach DOM listeners, and exposes the adapter's API as stable
+ * re-attach DOM listeners, and exposes the binding's API as stable
  * function references safe to depend on.
  *
  * The mount effect reconciles the ref's current DOM node after each
  * commit so replacing the underlying textarea tears down the old
- * adapter and attaches to the new element.
+ * binding and attaches to the new element.
  */
 
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import type { TextareaSelection } from "../../hooks/textarea-selection-sync";
 import {
-  createTextareaAdapter,
-  type TextareaCollaborationAdapter,
-} from "./textarea-adapter";
+  createTextareaBinding,
+  type TextareaSurfaceBinding,
+} from "./textarea-binding";
 import type { TextareaOperation } from "./textarea-operations";
 
 export type UseTextareaCollaborationOptions = {
@@ -53,65 +53,65 @@ export const useTextareaCollaboration = (
   options: UseTextareaCollaborationOptions,
 ): UseTextareaCollaborationResult => {
   const { textareaRef } = options;
-  const adapterRef = useRef<TextareaCollaborationAdapter | null>(null);
+  const bindingRef = useRef<TextareaSurfaceBinding | null>(null);
   const attachedElementRef = useRef<HTMLTextAreaElement | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const onLocalOperationsRef = useRef(options.onLocalOperations);
   const onCompositionChangeRef = useRef(options.onCompositionChange);
 
-  // Keep callback refs fresh so adapter setup does not depend on
+  // Keep callback refs fresh so binding setup does not depend on
   // identity-unstable inline arrows.
   onLocalOperationsRef.current = options.onLocalOperations;
   onCompositionChangeRef.current = options.onCompositionChange;
 
-  const destroyAttachedAdapter = useCallback((): void => {
+  const destroyAttachedBinding = useCallback((): void => {
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
-    adapterRef.current?.destroy();
-    adapterRef.current = null;
+    bindingRef.current?.destroy();
+    bindingRef.current = null;
     attachedElementRef.current = null;
   }, []);
 
   useEffect(() => {
     const element = textareaRef.current;
     if (attachedElementRef.current === element) return;
-    destroyAttachedAdapter();
+    destroyAttachedBinding();
     if (!element) return;
-    const adapter = createTextareaAdapter(element, {
+    const binding = createTextareaBinding(element, {
       onCompositionChange: (composing) => {
         onCompositionChangeRef.current?.(composing);
       },
     });
-    adapterRef.current = adapter;
-    const unsubscribe = adapter.observeLocalOperations((operations) => {
+    bindingRef.current = binding;
+    const unsubscribe = binding.observeLocalOperations((operations) => {
       onLocalOperationsRef.current(operations);
     });
     attachedElementRef.current = element;
     unsubscribeRef.current = unsubscribe;
   });
 
-  useEffect(() => destroyAttachedAdapter, [destroyAttachedAdapter]);
+  useEffect(() => destroyAttachedBinding, [destroyAttachedBinding]);
 
   const applyRemoteOperations = useCallback(
     (operations: readonly TextareaOperation[]) => {
-      adapterRef.current?.applyRemoteOperations(operations);
+      bindingRef.current?.applyRemoteOperations(operations);
     },
     [],
   );
 
   const getDocumentSnapshot = useCallback(
-    () => adapterRef.current?.getDocumentSnapshot() ?? "",
+    () => bindingRef.current?.getDocumentSnapshot() ?? "",
     [],
   );
 
   const getSelection = useCallback(
-    () => adapterRef.current?.getSelection() ?? null,
+    () => bindingRef.current?.getSelection() ?? null,
     [],
   );
 
   const restoreSelection = useCallback(
     (selection: TextareaSelection | null) => {
-      adapterRef.current?.restoreSelection(selection);
+      bindingRef.current?.restoreSelection(selection);
     },
     [],
   );
@@ -121,11 +121,11 @@ export const useTextareaCollaboration = (
       selection: TextareaSelection,
       operations: readonly TextareaOperation[],
     ): TextareaSelection => {
-      const adapter = adapterRef.current;
-      if (adapter) {
-        return adapter.mapSelectionThroughOperations(selection, operations);
+      const binding = bindingRef.current;
+      if (binding) {
+        return binding.mapSelectionThroughOperations(selection, operations);
       }
-      // Adapter not mounted yet (rare: ref not attached). Return
+      // Binding not mounted yet (rare: ref not attached). Return
       // selection unchanged so callers don't get a different result by
       // racing the effect. Practically this only fires on the very
       // first paint before the element is attached, where no remote
@@ -136,7 +136,7 @@ export const useTextareaCollaboration = (
   );
 
   const isComposing = useCallback(
-    () => adapterRef.current?.isComposing() ?? false,
+    () => bindingRef.current?.isComposing() ?? false,
     [],
   );
 

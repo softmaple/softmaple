@@ -1,17 +1,18 @@
-export interface EditorSelection<TPosition> {
+export interface SurfaceSelection<TPosition> {
   anchor: TPosition;
   focus: TPosition;
 }
 
-// Opaque marker for editor operations to avoid over-specifying before the concrete Event Graph implementation
-export type EditorOperation = unknown;
+// Opaque marker for surface operations to avoid over-specifying before
+// the concrete Event Graph implementation.
+export type SurfaceOperation = unknown;
 
-export type AdapterSubscription = () => void;
+export type SurfaceBindingSubscription = () => void;
 
-export interface CollaborationAdapter<
+export interface SurfaceBinding<
   TPosition,
-  TSelection = EditorSelection<TPosition>,
-  TOperation = EditorOperation,
+  TSelection = SurfaceSelection<TPosition>,
+  TOperation = SurfaceOperation,
 > {
   getDocumentSnapshot(): unknown;
 
@@ -21,7 +22,8 @@ export interface CollaborationAdapter<
   getSelection(): TSelection | null;
   restoreSelection(selection: TSelection | null): void;
 
-  // Optional: allows the adapter to adjust the given selection against a set of concurrent remote operations
+  // Optional: allows the binding to adjust the given selection against
+  // a set of concurrent remote operations.
   mapSelectionThroughOperations?(
     selection: TSelection,
     operations: readonly TOperation[],
@@ -29,7 +31,7 @@ export interface CollaborationAdapter<
 
   observeLocalOperations(
     callback: (operations: readonly TOperation[]) => void,
-  ): AdapterSubscription;
+  ): SurfaceBindingSubscription;
 
   destroy(): void;
 

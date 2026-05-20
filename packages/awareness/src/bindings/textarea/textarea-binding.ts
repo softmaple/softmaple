@@ -1,7 +1,7 @@
 /**
- * Textarea reference adapter.
+ * Textarea reference binding.
  *
- * Concrete `CollaborationAdapter` implementation for a plain `<textarea>`.
+ * Concrete `SurfaceBinding` implementation for a plain `<textarea>`.
  * Framework-free: constructed from an `HTMLTextAreaElement`, attaches its
  * own DOM event listeners, and exposes an `observeLocalOperations`
  * callback plus an `applyRemoteOperations` push API. The React hook in
@@ -22,32 +22,32 @@ import {
   type TextareaSelectionDirection,
 } from "../../hooks/textarea-selection-sync";
 import type {
-  AdapterSubscription,
-  CollaborationAdapter,
-} from "../../types/editor";
+  SurfaceBinding,
+  SurfaceBindingSubscription,
+} from "../../types/surface-binding";
 import {
   applyOperationsToText,
   computeTextareaOperations,
   type TextareaOperation,
 } from "./textarea-operations";
 
-export type TextareaAdapterOptions = {
+export type TextareaBindingOptions = {
   /**
-   * Notified whenever the adapter enters or leaves IME composition.
+   * Notified whenever the binding enters or leaves IME composition.
    * Useful for presence wiring that wants to suppress typing/selection
    * broadcasts mid-composition.
    */
   readonly onCompositionChange?: (composing: boolean) => void;
 };
 
-export interface TextareaCollaborationAdapter
-  extends CollaborationAdapter<number, TextareaSelection, TextareaOperation> {
+export interface TextareaSurfaceBinding
+  extends SurfaceBinding<number, TextareaSelection, TextareaOperation> {
   getDocumentSnapshot(): string;
   applyLocalOperation(operation: TextareaOperation): void;
   applyRemoteOperations(operations: readonly TextareaOperation[]): void;
   observeLocalOperations(
     callback: (operations: readonly TextareaOperation[]) => void,
-  ): AdapterSubscription;
+  ): SurfaceBindingSubscription;
   getSelection(): TextareaSelection | null;
   restoreSelection(selection: TextareaSelection | null): void;
   mapSelectionThroughOperations(
@@ -106,10 +106,10 @@ const clampSelection = (
   };
 };
 
-export const createTextareaAdapter = (
+export const createTextareaBinding = (
   element: HTMLTextAreaElement,
-  options: TextareaAdapterOptions = {},
-): TextareaCollaborationAdapter => {
+  options: TextareaBindingOptions = {},
+): TextareaSurfaceBinding => {
   const subscribers = new Set<
     (operations: readonly TextareaOperation[]) => void
   >();
@@ -127,7 +127,7 @@ export const createTextareaAdapter = (
   // keystroke.
   let lastCompositionCommit: string | null = null;
   // Remote operation batches received while `composing` is true. The
-  // adapter cannot write `element.value` mid-composition without
+  // binding cannot write `element.value` mid-composition without
   // collapsing the IME, so we hold the batches and replay them as a
   // single coalesced apply when composition ends — before the
   // composition's own diff is emitted, so the diff baseline reflects
@@ -309,7 +309,7 @@ export const createTextareaAdapter = (
     applyRemoteOperations,
     observeLocalOperations: (callback) => {
       // Refuse new subscriptions after destroy so a late caller cannot
-      // pin the callback in the closure indefinitely (the adapter's
+      // pin the callback in the closure indefinitely (the binding's
       // `destroy` already cleared `subscribers` and removed listeners,
       // so the callback would never fire anyway).
       if (destroyed) {

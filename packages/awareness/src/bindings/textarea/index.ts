@@ -1,8 +1,8 @@
 export {
-  createTextareaAdapter,
-  type TextareaAdapterOptions,
-  type TextareaCollaborationAdapter,
-} from "./textarea-adapter";
+  createTextareaBinding,
+  type TextareaBindingOptions,
+  type TextareaSurfaceBinding,
+} from "./textarea-binding";
 export {
   applyOperationsToText,
   computeTextareaOperations,

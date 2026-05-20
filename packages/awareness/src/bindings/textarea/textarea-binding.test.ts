@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POSITION_OPERATION_TYPE } from "../../mapping/position-operation";
-import { createTextareaAdapter } from "./textarea-adapter";
+import { createTextareaBinding } from "./textarea-binding";
 import type { TextareaOperation } from "./textarea-operations";
 
 const mountTextarea = (initialValue = ""): HTMLTextAreaElement => {
@@ -19,10 +19,10 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("createTextareaAdapter — local edits", () => {
+describe("createTextareaBinding — local edits", () => {
   it("emits insert operations from input events", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -43,7 +43,7 @@ describe("createTextareaAdapter — local edits", () => {
 
   it("emits delete operations from input events", () => {
     const textarea = mountTextarea("hello world");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -65,7 +65,7 @@ describe("createTextareaAdapter — local edits", () => {
     // Simulates selecting "ell" in "hello" and typing "xyz" → "hxyzo".
     // The adapter diffs the before/after value and must emit [delete, insert].
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -87,7 +87,7 @@ describe("createTextareaAdapter — local edits", () => {
 
   it("does not emit for no-op input events", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -98,10 +98,10 @@ describe("createTextareaAdapter — local edits", () => {
   });
 });
 
-describe("createTextareaAdapter — IME composition", () => {
+describe("createTextareaBinding — IME composition", () => {
   it("swallows intermediate input events while composing", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -116,7 +116,7 @@ describe("createTextareaAdapter — IME composition", () => {
 
   it("emits one operation for the whole composition (Chrome ordering: compositionend then input)", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -140,7 +140,7 @@ describe("createTextareaAdapter — IME composition", () => {
 
   it("treats the next input after compositionend as a real keystroke when value differs from the commit", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -172,7 +172,7 @@ describe("createTextareaAdapter — IME composition", () => {
 
   it("resets composing state on blur so a dropped compositionend cannot swallow subsequent keystrokes", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -196,7 +196,7 @@ describe("createTextareaAdapter — IME composition", () => {
   it("notifies onCompositionChange on enter and leave", () => {
     const textarea = mountTextarea("");
     const onCompositionChange = vi.fn();
-    const adapter = createTextareaAdapter(textarea, {
+    const adapter = createTextareaBinding(textarea, {
       onCompositionChange,
     });
 
@@ -212,10 +212,10 @@ describe("createTextareaAdapter — IME composition", () => {
   });
 });
 
-describe("createTextareaAdapter — applyRemoteOperations", () => {
+describe("createTextareaBinding — applyRemoteOperations", () => {
   it("writes the post-image to the textarea value", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
 
     adapter.applyRemoteOperations([
       {
@@ -232,7 +232,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("does not re-emit local operations for the remote write", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -263,7 +263,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("maps the caret through a remote insert before the cursor", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(3, 3);
 
@@ -284,7 +284,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("maps the caret through a remote delete before the cursor", () => {
     const textarea = mountTextarea("hello world");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(5, 5);
 
@@ -300,7 +300,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("collapses the selection when a remote delete overlaps it", () => {
     const textarea = mountTextarea("abcdefg");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(2, 5);
 
@@ -316,7 +316,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("does not expand the selection for a remote insert at selection end", () => {
     const textarea = mountTextarea("abcd");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(1, 3);
 
@@ -341,7 +341,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
     // the post-composition diff lines up with the post-peer replica
     // state. See review thread on PR #755.
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
     textarea.focus();
@@ -392,7 +392,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
     // tracked in #704 — buffer-and-replay narrows the bug class, it
     // doesn't eliminate it.)
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -437,7 +437,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("flushes the buffered peer ops on blur when compositionend never fires", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
 
     textarea.dispatchEvent(new Event("compositionstart"));
     adapter.applyRemoteOperations([
@@ -457,7 +457,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("leaves the DOM untouched when buffered peer ops are semantic no-ops", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -484,7 +484,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
 
   it("ignores an empty operation batch", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(2, 2);
 
@@ -501,7 +501,7 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
     // branch that updates `lastValue` without touching the DOM or
     // selection.
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
     textarea.focus();
@@ -525,10 +525,10 @@ describe("createTextareaAdapter — applyRemoteOperations", () => {
   });
 });
 
-describe("createTextareaAdapter — selection helpers", () => {
+describe("createTextareaBinding — selection helpers", () => {
   it("captures the current DOM selection", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(1, 4, "forward");
 
@@ -546,7 +546,7 @@ describe("createTextareaAdapter — selection helpers", () => {
       configurable: true,
       get: () => "sideways",
     });
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
 
     expect(adapter.getSelection()?.selectionDirection).toBe("none");
     adapter.destroy();
@@ -554,7 +554,7 @@ describe("createTextareaAdapter — selection helpers", () => {
 
   it("restores a selection, clamping to the current value length", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
 
     adapter.restoreSelection({
@@ -570,7 +570,7 @@ describe("createTextareaAdapter — selection helpers", () => {
 
   it("flips direction when restoreSelection receives reversed endpoints", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
 
     adapter.restoreSelection({
@@ -603,7 +603,7 @@ describe("createTextareaAdapter — selection helpers", () => {
 
   it("maps a selection through an operation batch without touching the DOM", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(2, 2);
 
@@ -627,10 +627,10 @@ describe("createTextareaAdapter — selection helpers", () => {
   });
 });
 
-describe("createTextareaAdapter — lifecycle", () => {
+describe("createTextareaBinding — lifecycle", () => {
   it("removes DOM listeners on destroy", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const received: TextareaOperation[][] = [];
     adapter.observeLocalOperations((ops) => received.push([...ops]));
 
@@ -642,7 +642,7 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("returns a disposer that removes a single subscriber", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     const a: TextareaOperation[][] = [];
     const b: TextareaOperation[][] = [];
     const unsubscribeA = adapter.observeLocalOperations((ops) =>
@@ -660,14 +660,14 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("is safe to destroy twice", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     adapter.destroy();
     expect(() => adapter.destroy()).not.toThrow();
   });
 
   it("ignores applyRemoteOperations after destroy", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     adapter.destroy();
     adapter.applyRemoteOperations([
       {
@@ -682,7 +682,7 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("returns null from getSelection after destroy without throwing", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(1, 3);
     adapter.destroy();
@@ -693,7 +693,7 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("treats restoreSelection after destroy as a no-op without throwing", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     textarea.focus();
     textarea.setSelectionRange(2, 2);
     adapter.destroy();
@@ -713,7 +713,7 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("refuses new subscriptions after destroy and returns a no-op disposer", () => {
     const textarea = mountTextarea("");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     adapter.destroy();
     const lateSubscriber = vi.fn();
     const dispose = adapter.observeLocalOperations(lateSubscriber);
@@ -729,7 +729,7 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("applyLocalOperation is a no-op (DOM is canonical for local edits)", () => {
     const textarea = mountTextarea("hello");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     adapter.applyLocalOperation({
       type: POSITION_OPERATION_TYPE.Insert,
       index: 0,
@@ -742,7 +742,7 @@ describe("createTextareaAdapter — lifecycle", () => {
 
   it("exposes the live textarea value via getDocumentSnapshot", () => {
     const textarea = mountTextarea("initial");
-    const adapter = createTextareaAdapter(textarea);
+    const adapter = createTextareaBinding(textarea);
     expect(adapter.getDocumentSnapshot()).toBe("initial");
     fireInput(textarea, "updated");
     expect(adapter.getDocumentSnapshot()).toBe("updated");

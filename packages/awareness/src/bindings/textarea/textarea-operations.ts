@@ -1,12 +1,12 @@
 /**
- * Pure operation helpers for the textarea reference adapter.
+ * Pure operation helpers for the textarea reference binding.
  *
  * `TextareaOperation` is a structural superset of `PositionOperation`:
  * delete ops are identical; insert ops add a `text` field so a batch is
- * self-sufficient (the adapter can reconstruct the post-image without
+ * self-sufficient (the binding can reconstruct the post-image without
  * the caller separately supplying the text). This trades a small extra
- * field for matching the `CollaborationAdapter.applyRemoteOperations`
- * contract exactly — without it the adapter would need an out-of-band
+ * field for matching the `SurfaceBinding.applyRemoteOperations`
+ * contract exactly — without it the binding would need an out-of-band
  * post-image text, which doesn't generalise to non-textarea bindings.
  *
  * Selection mapping helpers in `mapping/` only read `type`/`index`/

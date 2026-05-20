@@ -107,7 +107,7 @@ The presence and cursor layer. Editor-class-agnostic.
   independent concerns; awareness must work even without a CRDT
   document attached.
 - Depend on any editor framework — `lexical`, `prosemirror-*`, or
-  `slate` / `slate-*` — outside the deferred `bindings/<editor>`
+  `slate` / `slate-*` — outside the deferred `bindings/<surface>`
   sub-path that does not yet exist.
 
 ### Rationale

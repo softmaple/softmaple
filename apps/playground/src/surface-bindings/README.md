@@ -26,7 +26,7 @@ promotion rule in
 
 One subdirectory per surface, named after the surface library:
 
-```
+```text
 surface-bindings/
   codemirror/          # planned
   textarea/            # planned — existing in-app glue may migrate here

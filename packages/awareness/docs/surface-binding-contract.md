@@ -4,7 +4,7 @@
 > Contract". It has been renamed to **Surface Binding Contract** because
 > "surface" generalises beyond text editors to canvas / whiteboard tools
 > and other collaborative surfaces. See
-> [`docs/design/surface-bindings.md`](../../../../docs/design/surface-bindings.md)
+> [`docs/design/surface-bindings.md`](../../../docs/design/surface-bindings.md)
 > for the full rationale.
 
 ## Purpose
@@ -28,18 +28,18 @@ The surface binding normalizes the API between the surface and the collaboration
 ### TypeScript Interfaces
 
 ```typescript
-interface EditorSelection<TPosition> {
+interface SurfaceSelection<TPosition> {
   anchor: TPosition;
   focus: TPosition;
 }
 
-interface EditorOperation {
+interface SurfaceOperation {
   /* Opaque type for future expansion */
 }
 
 type SurfaceBindingSubscription = () => void; // dispose function
 
-interface SurfaceBinding<TPosition, TSelection = EditorSelection<TPosition>, TOperation = EditorOperation> {
+interface SurfaceBinding<TPosition, TSelection = SurfaceSelection<TPosition>, TOperation = SurfaceOperation> {
   // Document state
   getDocumentSnapshot(): unknown;
   
@@ -72,7 +72,7 @@ interface SurfaceBinding<TPosition, TSelection = EditorSelection<TPosition>, TOp
 - **`getSelection()`**: Reads the current local selection, returning a surface-independent position model.
 - **`restoreSelection()`**: Restores a previously saved selection back into the surface.
 - **`mapSelectionThroughOperations()`**: (Optional) Adjusts a selection position when remote operations shift the content around.
-- **`observeLocalOperations()`**: Hooks into the surface's change events to capture user intent and translate it into a standard `EditorOperation`.
+- **`observeLocalOperations()`**: Hooks into the surface's change events to capture user intent and translate it into a standard `SurfaceOperation`.
 - **`destroy()`**: Cleans up subscriptions and references when the surface unmounts.
 
 ## Guidance for Surface Families
@@ -81,7 +81,7 @@ interface SurfaceBinding<TPosition, TSelection = EditorSelection<TPosition>, TOp
 Textareas operate on simple 1D strings and integer offsets. Bindings for textareas generally map the 1D offset into the core engine's coordinate system. Text-level diffing might be necessary since the textarea doesn't natively yield delta operations.
 
 ### CodeMirror / Monaco
-These code editors are highly optimized for large documents and provide explicit "transaction" or "edit" objects. The binding translates native surface transactions into `EditorOperation` and vice versa, often leveraging native position mapping utilities provided by the surface.
+These code editors are highly optimized for large documents and provide explicit "transaction" or "edit" objects. The binding translates native surface transactions into `SurfaceOperation` and vice versa, often leveraging native position mapping utilities provided by the surface.
 
 ### Lexical / ProseMirror / Slate
 Rich text and block editors. Positions usually include paths (node hierarchies) and offsets. These bindings require deeper integration to synchronize nested structures. They map block CRDT updates directly into surface node updates.
@@ -90,7 +90,7 @@ Rich text and block editors. Positions usually include paths (node hierarchies) 
 Focus on block-level consistency. The position model might only care about block IDs and local offsets within blocks. The binding's primary role is resolving block ordering and nested block operations.
 
 ### Canvas / Whiteboard Tools
-Spatial surfaces where positions are `(x, y)` coordinates, widths, and heights. Selections are bounding boxes instead of anchor/focus text offsets. The binding for canvas applications synchronizes object properties and z-indexes rather than text characters. Canvas surfaces bind to an **object engine**, not to the sequence engine (`@softmaple/eg-walker`); see [`docs/design/collaboration-models.md`](../../../../docs/design/collaboration-models.md).
+Spatial surfaces where positions are `(x, y)` coordinates, widths, and heights. Selections are bounding boxes instead of anchor/focus text offsets. The binding for canvas applications synchronizes object properties and z-indexes rather than text characters. Canvas surfaces bind to an **object engine**, not to the sequence engine (`@softmaple/eg-walker`); see [`docs/design/collaboration-models.md`](../../../docs/design/collaboration-models.md).
 
 ## Anti-Goals (What NOT to include)
 

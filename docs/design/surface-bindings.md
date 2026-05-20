@@ -128,7 +128,7 @@ not on aspiration.
 
 When promotion happens, the move is mechanical:
 
-```
+```text
 apps/playground/src/surface-bindings/codemirror/
     -> packages/binding-codemirror/src/
 ```

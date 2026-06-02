@@ -1,10 +1,17 @@
-# Awareness & Presence Design Document
+# Awareness & Presence Design
 
 ## 1. Overview
 
-This document describes the design of **Awareness & Presence** in a real-time collaborative editor.
+This document describes the design of **awareness and presence** in a
+real-time collaborative experience. In Softmaple, the package name is
+`@softmaple/awareness`; there is no `@softmaple/presence` package.
 
-**Awareness & Presence** answers four fundamental user questions with minimal cognitive load:
+Presence remains the right term for user-facing concepts like who is
+online, live cursors, selection highlights, and existing API names such
+as `PresenceUser` or `PresenceBar`.
+
+Awareness and presence answer four fundamental user questions with
+minimal cognitive load:
 
 1. **Who** is currently in the room?
 2. **Where** are they in the document?
@@ -18,24 +25,27 @@ The system is designed to be **low-noise, non-blocking, and progressively disclo
 ## 2. Design Principles
 
 ### 2.1 Low Interruption by Default
+
 - Awareness information should be **visible but ignorable**
 - No blocking modals, no toast spam
 - Strong signals only appear on hover, focus, or potential conflict
 
 ### 2.2 Approximation Over Precision
+
 - Presence is **probabilistic**, not authoritative
 - "Someone is editing here" is sufficient
 - Exact keystrokes or real-time character updates are unnecessary
 
 ### 2.3 Layered Awareness
+
 Information is presented in layers from coarse to fine:
 
-| Layer | Question Answered |
-|---|---|
-| Global | Who is online? |
-| Document | Who is in this document? |
-| Section | Who is editing this part? |
-| Action | What just happened? |
+| Layer    | Question Answered         |
+| -------- | ------------------------- |
+| Global   | Who is online?            |
+| Document | Who is in this document?  |
+| Section  | Who is editing this part? |
+| Action   | What just happened?       |
 
 ---
 
@@ -86,11 +96,11 @@ interface PresenceUser {
 
 ### 4.2 Status Rules
 
-| Status | Definition |
-|---|---|
-| `active` | User performed an action in last N seconds |
-| `idle` | Connected but no recent activity |
-| `offline` | Disconnected or heartbeat expired |
+| Status    | Definition                                 |
+| --------- | ------------------------------------------ |
+| `active`  | User performed an action in last N seconds |
+| `idle`    | Connected but no recent activity           |
+| `offline` | Disconnected or heartbeat expired          |
 
 ---
 
@@ -101,7 +111,11 @@ interface PresenceUser {
 **Purpose**  
 Shows who is currently in the room.
 
+The current UI component name is `PresenceBar`. The package that
+exports it is `@softmaple/awareness`.
+
 **Behavior**
+
 - Displays up to N avatars
 - Overflow shown as `+X`
 - Tooltip reveals name and status
@@ -115,6 +129,7 @@ Shows who is currently in the room.
 Indicates where another user is editing.
 
 **Behavior**
+
 - Colored caret
 - Username label appears on movement
 - Label fades out after 2-3 seconds
@@ -128,6 +143,7 @@ Indicates where another user is editing.
 Shows which block or range is being edited by others.
 
 **Behavior**
+
 - Semi-transparent background highlight
 - Same color as user
 - Optional border
@@ -141,6 +157,7 @@ Shows which block or range is being edited by others.
 Communicates recent activity without distraction.
 
 **Examples**
+
 - "Adam is editing this paragraph"
 - "2 people editing here"
 
@@ -174,14 +191,17 @@ Communicates recent activity without distraction.
 ## 9. Progressive Rollout Plan
 
 ### Phase 1
+
 - Presence bar
 - Online count
 
 ### Phase 2
+
 - Live cursors
 - Selection highlights
 
 ### Phase 3
+
 - Minimap / scrollbar indicators
 
 ---
@@ -194,8 +214,21 @@ Communicates recent activity without distraction.
 
 ---
 
-## 11. Summary
+## 11. Architecture Boundary
 
-Awareness & Presence should create **calm confidence**, not excitement.
+Awareness/presence state is ephemeral session state. It must not own
+persistent document merge logic and must remain independent from
+`@softmaple/eg-walker`.
+
+Related docs:
+
+- [Architecture Overview](./architecture-overview.md)
+- [Package Responsibilities](./package-responsibilities.md)
+- [ADR: Collaboration Architecture Boundaries](./adr/collaboration-architecture-boundaries.md)
+
+## 12. Summary
+
+Awareness and presence should create **calm confidence**, not
+excitement.
 
 > "I know who's here, and I'm not surprised by their actions."

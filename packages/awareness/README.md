@@ -1,13 +1,31 @@
 # @softmaple/awareness
 
-Awareness and presence UI components for real-time collaboration.
+Awareness primitives and UI components for realtime collaboration.
 
 ## Overview
 
-This package provides transport-agnostic awareness and presence UI components designed for low-interruption, non-blocking collaborative experiences.
+This package provides awareness primitives and UI components designed
+for low-interruption, non-blocking collaborative experiences.
 
-Based on the design principles outlined in [docs/design/awareness-and-presence.md](../../docs/design/awareness-and-presence.md)
-and the [Surface Binding Contract](docs/surface-binding-contract.md).
+Based on the design principles outlined in
+[docs/design/awareness-and-presence.md](../../docs/design/awareness-and-presence.md).
+
+## Collaboration boundary
+
+`@softmaple/awareness` owns ephemeral user/session state. It
+synchronizes people/session state, not documents.
+
+It must remain independent from `@softmaple/eg-walker` so awareness
+can be reused by rich text editors, code editors, whiteboards, canvas
+apps, React Flow, spreadsheets, and multiplayer UI.
+
+There is no `@softmaple/presence` package.
+
+See the public docs for the full boundary:
+
+- [Architecture Overview](../../docs/design/architecture-overview.md)
+- [Package Responsibilities](../../docs/design/package-responsibilities.md)
+- [ADR: Collaboration Architecture Boundaries](../../docs/design/adr/collaboration-architecture-boundaries.md)
 
 ## Features
 
@@ -75,7 +93,7 @@ export function App() {
 
 ## Adapters
 
-The package supports multiple transport adapters:
+The package includes transport helpers for awareness updates:
 
 - **createWebSocketAdapter**: Standard WebSocket implementation
 - **createBroadcastChannelAdapter**: Local BroadcastChannel for same-origin tabs
@@ -88,6 +106,9 @@ The package supports multiple transport adapters:
 The adapter contract is transport-agnostic, so additional providers such as
 Supabase Realtime or Liveblocks can be implemented without changing the React
 components.
+
+These helpers are transport-focused. They do not own persistent
+document merge logic, awareness merge logic, or editor-specific logic.
 
 ## WebSocket server contract
 
@@ -106,13 +127,13 @@ components.
 
 Payload shapes per message type:
 
-| Type | Payload |
-| --- | --- |
-| `join` | `{ user: PresenceUser }` |
-| `leave` | `{ userId: string }` |
-| `presence_update` | `{ userId: string, updates: Partial<Omit<PresenceUser, "userId">> }` |
-| `presence_sync` / `presence_sync_response` | `{ users: PresenceUser[] }` |
-| `error` | `{ code: string, message: string }` |
+| Type                                       | Payload                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| `join`                                     | `{ user: PresenceUser }`                                             |
+| `leave`                                    | `{ userId: string }`                                                 |
+| `presence_update`                          | `{ userId: string, updates: Partial<Omit<PresenceUser, "userId">> }` |
+| `presence_sync` / `presence_sync_response` | `{ users: PresenceUser[] }`                                          |
+| `error`                                    | `{ code: string, message: string }`                                  |
 
 Every inbound payload is validated by a runtime type guard
 (`src/adapters/websocket/validation.ts`). Malformed frames are dropped and

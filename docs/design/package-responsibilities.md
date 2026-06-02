@@ -44,18 +44,18 @@ Purpose: persistent collaborative document data.
 
 Purpose: ephemeral user/session state.
 
-`@softmaple/awareness` synchronizes people/session state, not
-documents.
+`@softmaple/awareness` synchronizes people/session state, including
+presence, not documents.
 
 ### Responsibilities
 
-- User awareness
+- User awareness / presence
 - Cursor state
 - Selection state
 - Viewport state
 - User metadata
 - Online/offline state
-- Realtime session awareness
+- Realtime session awareness / presence
 
 ### Reuse targets
 

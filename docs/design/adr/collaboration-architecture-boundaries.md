@@ -43,6 +43,10 @@ structures.
 user awareness, cursor state, selection state, viewport state, user
 metadata, online/offline state, and realtime session awareness.
 
+The package is named `@softmaple/awareness`. "Presence" remains valid
+for concepts and API names that describe online users, cursors,
+selections, and collaborator activity.
+
 Providers are transport. They may carry eg-walker document updates and
 awareness updates, but they must not own document merge logic,
 awareness merge logic, or editor-specific logic.
@@ -99,8 +103,8 @@ Awareness should work for rich text editors, code editors,
 whiteboards, canvas apps, React Flow, spreadsheets, and multiplayer
 UI. That requires it to remain independent from eg-walker.
 
-Key principle: awareness synchronizes people/session state, not
-documents.
+Key principle: `@softmaple/awareness` synchronizes people/session
+state, including presence, not documents.
 
 ### awareness should not depend on eg-walker
 
@@ -170,9 +174,9 @@ Tradeoffs:
 - Hosts must compose document updates and awareness updates explicitly.
 - Future editor bindings need their own decision records before they
   become package-level APIs.
-- Some naming in existing UI APIs may still use "presence" for
-  component or type names, but the Softmaple package boundary is
-  `@softmaple/awareness`.
+- The Softmaple package boundary is `@softmaple/awareness`, but
+  presence remains valid for user-facing concepts, component names,
+  type names, and wire protocol names.
 
 ## Roadmap
 

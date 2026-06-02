@@ -1,25 +1,28 @@
 # @softmaple/awareness
 
-Awareness primitives and UI components for realtime collaboration.
+Awareness and presence primitives for realtime collaboration.
 
 ## Overview
 
-This package provides awareness primitives and UI components designed
-for low-interruption, non-blocking collaborative experiences.
+This package provides awareness and presence primitives designed for
+low-interruption, non-blocking collaborative experiences.
 
 Based on the design principles outlined in
 [docs/design/awareness-and-presence.md](../../docs/design/awareness-and-presence.md).
 
 ## Collaboration boundary
 
-`@softmaple/awareness` owns ephemeral user/session state. It
-synchronizes people/session state, not documents.
+`@softmaple/awareness` owns ephemeral user/session state, including
+presence. It synchronizes people/session state, not documents.
 
 It must remain independent from `@softmaple/eg-walker` so awareness
 can be reused by rich text editors, code editors, whiteboards, canvas
 apps, React Flow, spreadsheets, and multiplayer UI.
 
 There is no `@softmaple/presence` package.
+
+"Presence" remains valid for user-facing concepts and existing API
+names such as `PresenceUser`, `PresenceProvider`, and `PresenceBar`.
 
 See the public docs for the full boundary:
 
@@ -93,7 +96,7 @@ export function App() {
 
 ## Adapters
 
-The package includes transport helpers for awareness updates:
+The package includes transport helpers for awareness/presence updates:
 
 - **createWebSocketAdapter**: Standard WebSocket implementation
 - **createBroadcastChannelAdapter**: Local BroadcastChannel for same-origin tabs

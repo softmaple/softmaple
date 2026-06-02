@@ -1,14 +1,17 @@
-# Awareness Design
+# Awareness & Presence Design
 
 ## 1. Overview
 
-This document describes the design of **awareness** in a real-time
-collaborative experience. In Softmaple, awareness is the package-level
-term for ephemeral user/session state. There is no
-`@softmaple/presence` package.
+This document describes the design of **awareness and presence** in a
+real-time collaborative experience. In Softmaple, the package name is
+`@softmaple/awareness`; there is no `@softmaple/presence` package.
 
-Awareness answers four fundamental user questions with minimal
-cognitive load:
+Presence remains the right term for user-facing concepts like who is
+online, live cursors, selection highlights, and existing API names such
+as `PresenceUser` or `PresenceBar`.
+
+Awareness and presence answer four fundamental user questions with
+minimal cognitive load:
 
 1. **Who** is currently in the room?
 2. **Where** are they in the document?
@@ -29,7 +32,7 @@ The system is designed to be **low-noise, non-blocking, and progressively disclo
 
 ### 2.2 Approximation Over Precision
 
-- Awareness is **probabilistic**, not authoritative
+- Presence is **probabilistic**, not authoritative
 - "Someone is editing here" is sufficient
 - Exact keystrokes or real-time character updates are unnecessary
 
@@ -58,9 +61,9 @@ The following are explicitly out of scope for the first iteration:
 
 ---
 
-## 4. Awareness State Model
+## 4. Presence Model
 
-### 4.1 User Awareness State
+### 4.1 User Presence State
 
 ```ts
 type PresenceStatus = "active" | "idle" | "offline";
@@ -103,13 +106,13 @@ interface PresenceUser {
 
 ## 5. UI Components
 
-### 5.1 Awareness Bar (Global Awareness)
+### 5.1 Presence Bar (Global Awareness)
 
 **Purpose**  
 Shows who is currently in the room.
 
-The current UI component name is `PresenceBar`; the architectural
-package term remains awareness.
+The current UI component name is `PresenceBar`. The package that
+exports it is `@softmaple/awareness`.
 
 **Behavior**
 
@@ -173,7 +176,7 @@ Communicates recent activity without distraction.
 
 - Cursor updates throttled (50-100ms)
 - Off-screen cursors not rendered
-- Awareness is eventually consistent
+- Presence is eventually consistent
 
 ---
 
@@ -189,7 +192,7 @@ Communicates recent activity without distraction.
 
 ### Phase 1
 
-- Awareness bar (`PresenceBar`)
+- Presence bar
 - Online count
 
 ### Phase 2
@@ -213,8 +216,8 @@ Communicates recent activity without distraction.
 
 ## 11. Architecture Boundary
 
-Awareness state is ephemeral session state. It must not own persistent
-document merge logic and must remain independent from
+Awareness/presence state is ephemeral session state. It must not own
+persistent document merge logic and must remain independent from
 `@softmaple/eg-walker`.
 
 Related docs:
@@ -225,6 +228,7 @@ Related docs:
 
 ## 12. Summary
 
-Awareness should create **calm confidence**, not excitement.
+Awareness and presence should create **calm confidence**, not
+excitement.
 
 > "I know who's here, and I'm not surprised by their actions."

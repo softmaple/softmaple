@@ -18,6 +18,10 @@ The current collaboration packages are:
 There is no `@softmaple/presence` package. Softmaple uses
 `@softmaple/awareness` for user/session awareness.
 
+This naming rule applies to the package name. "Presence" remains valid
+for user-facing state, UI component names, type names, and wire events
+that describe who is online and where collaborators are working.
+
 ## Boundaries at a glance
 
 ```text
@@ -40,8 +44,8 @@ There is no `@softmaple/presence` package. Softmaple uses
 
 `@softmaple/eg-walker` synchronizes documents, not people.
 
-`@softmaple/awareness` synchronizes people/session state, not
-documents.
+`@softmaple/awareness` synchronizes people/session state, including
+presence, not documents.
 
 Providers transport messages. They may carry both eg-walker document
 updates and awareness updates, but they must not own document merge
@@ -49,11 +53,11 @@ logic, awareness merge logic, or editor-specific behavior.
 
 ## Package roles
 
-| Package                | Owns                                   | Does not own                                                                                                                        |
-| ---------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `@softmaple/eg-walker` | Persistent collaborative document data | Awareness, user metadata, online state, cursor broadcasting, selection broadcasting, transport implementation, editor-specific APIs |
-| `@softmaple/awareness` | Ephemeral user/session awareness state | Persistent document convergence, eg-walker merge rules, editor-specific document APIs                                               |
-| Providers              | Message transport                      | Document merge logic, awareness merge logic, editor-specific logic                                                                  |
+| Package                | Owns                                                | Does not own                                                                                                                        |
+| ---------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `@softmaple/eg-walker` | Persistent collaborative document data              | Awareness, user metadata, online state, cursor broadcasting, selection broadcasting, transport implementation, editor-specific APIs |
+| `@softmaple/awareness` | Ephemeral user/session awareness and presence state | Persistent document convergence, eg-walker merge rules, editor-specific document APIs                                               |
+| Providers              | Message transport                                   | Document merge logic, awareness merge logic, editor-specific logic                                                                  |
 
 See [Package Responsibilities](./package-responsibilities.md) for the
 full responsibility matrix.
@@ -106,8 +110,8 @@ Current architecture scope:
 
 - Keep `@softmaple/eg-walker` focused on persistent collaborative
   document data.
-- Keep `@softmaple/awareness` focused on ephemeral user/session
-  state.
+- Keep `@softmaple/awareness` focused on ephemeral user/session state,
+  including presence.
 - Keep providers focused on transporting opaque update messages.
 - Document and enforce dependency direction.
 

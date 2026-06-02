@@ -69,8 +69,8 @@ The CRDT runtime. Implements the Eg-walker paper directly.
 
 `@softmaple/eg-walker` **MUST NOT**:
 
-- Depend on `@softmaple/awareness` (no awareness, no cursors, no
-  transport adapters).
+- Depend on `@softmaple/awareness` (no presence/awareness state, no
+  cursors, no transport adapters).
 - Depend on any editor framework — `lexical`, `prosemirror-*`,
   `slate` / `slate-*`, or equivalent.
 - Expose anything but index-based operations on its public API. No
@@ -79,18 +79,18 @@ The CRDT runtime. Implements the Eg-walker paper directly.
 ### Rationale
 
 eg-walker is the convergence guarantee for the whole product. Keeping
-it free of editor and awareness concerns lets us reuse it under any
-editor we choose, run it in a worker or on the server, and reason
-about it in isolation when debugging divergence.
+it free of editor and presence/awareness concerns lets us reuse it
+under any editor we choose, run it in a worker or on the server, and
+reason about it in isolation when debugging divergence.
 
 ## Layer 2: `@softmaple/awareness`
 
-The ephemeral user/session awareness layer. Editor-class-agnostic and
-independent from eg-walker.
+The ephemeral user/session presence and awareness layer.
+Editor-class-agnostic and independent from eg-walker.
 
 ### Responsibilities
 
-- **User awareness** — who is online, who is in a realtime session,
+- **Presence state** — who is online, who is in a realtime session,
   status (`active` / `idle` / `offline`), and last-seen timestamps.
 - **Cursor state** — where collaborators are pointing or editing.
 - **Selection state** — the ranges collaborators are focused on.
@@ -98,9 +98,9 @@ independent from eg-walker.
   when a host chooses to publish it.
 - **User metadata** — names, avatars, colors, roles, and other
   session-safe metadata.
-- **Realtime session awareness** — state that helps people understand
-  each other during collaboration, without becoming durable document
-  data.
+- **Realtime session awareness / presence** — state that helps people
+  understand each other during collaboration, without becoming durable
+  document data.
 
 ### Forbidden
 
@@ -120,8 +120,8 @@ gate document convergence and must never assume a particular editor.
 This keeps the package useful for rich text editors, code editors,
 whiteboards, canvas apps, React Flow, spreadsheets, and multiplayer UI.
 
-Key principle: awareness synchronizes people/session state, not
-documents.
+Key principle: `@softmaple/awareness` synchronizes people/session
+state, including presence, not documents.
 
 ## Layer 3: Providers
 

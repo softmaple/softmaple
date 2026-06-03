@@ -7,14 +7,13 @@ description: The three collaboration models Softmaple supports (sequence, block,
 
 This document defines the **collaboration models** Softmaple supports
 and the per-engine contract each model implies. It is a companion to
-[`architecture-overview.md`](./architecture-overview.md),
-[`collaboration-layers.md`](./collaboration-layers.md), and
-[`surface-bindings.md`](./surface-bindings.md) (future integration
-scope).
+[`collaboration-layers.md`](./collaboration-layers.md) (the legal
+layering contract) and [`surface-bindings.md`](./surface-bindings.md)
+(the surface-side glue).
 
 A "collaboration model" is a tuple of three things:
 
-1. **State shape** — what the convergent document _is_.
+1. **State shape** — what the convergent document *is*.
 2. **Op shape** — what local edits and remote events look like.
 3. **Position shape** — how cursors and selections are addressed.
 
@@ -97,9 +96,9 @@ interface BlockTree {
 
 interface Block {
   readonly id: BlockId;
-  readonly type: string; // "paragraph", "heading", "list-item", …
+  readonly type: string;           // "paragraph", "heading", "list-item", …
   readonly children: readonly BlockId[];
-  readonly text?: string; // for leaf blocks with text
+  readonly text?: string;          // for leaf blocks with text
   readonly attrs?: Readonly<Record<string, unknown>>;
 }
 ```
@@ -162,12 +161,12 @@ type ObjectId = string;
 
 interface ObjectScene {
   readonly objects: ReadonlyMap<ObjectId, SceneObject>;
-  readonly zOrder: readonly ObjectId[]; // optional, fractional-indexed in practice
+  readonly zOrder: readonly ObjectId[];   // optional, fractional-indexed in practice
 }
 
 interface SceneObject {
   readonly id: ObjectId;
-  readonly type: string; // "rect", "ellipse", "arrow", "image", …
+  readonly type: string;          // "rect", "ellipse", "arrow", "image", …
   readonly attrs: Readonly<Record<string, unknown>>;
 }
 ```
@@ -189,7 +188,7 @@ fundamentally different from sequence convergence:
 - "Conflict" is two writers setting the same attribute, resolved by
   timestamp + tiebreaker, not by tombstoning a character.
 - Reordering is sometimes a fractional index, occasionally a
-  sequence-CRDT — at the _attribute_ level, not the document level.
+  sequence-CRDT — at the *attribute* level, not the document level.
 
 **Do not force this model through the sequence engine.** A canvas
 demo that hand-rolls convergence on top of `@softmaple/awareness` + a
@@ -218,13 +217,13 @@ Every collaboration engine — present or future — must satisfy this
 informal contract. Each engine spells the types in its own package;
 they are not shared.
 
-| Method                    | Purpose                                               |
-| ------------------------- | ----------------------------------------------------- |
-| `apply(localOp)`          | Translate a local intent into an event, advance state |
-| `applyRemoteEvent(event)` | Integrate, buffer, or dedupe a remote event           |
-| `state()`                 | Read current convergent state                         |
-| `events()`                | Iterate the event graph for sync / replication        |
-| `subscribe(listener)`     | Notify on integrated changes                          |
+| Method | Purpose |
+|---|---|
+| `apply(localOp)` | Translate a local intent into an event, advance state |
+| `applyRemoteEvent(event)` | Integrate, buffer, or dedupe a remote event |
+| `state()` | Read current convergent state |
+| `events()` | Iterate the event graph for sync / replication |
+| `subscribe(listener)` | Notify on integrated changes |
 
 What an engine **must not** do, regardless of model:
 
@@ -241,7 +240,7 @@ the same template.
 
 ## Cross-model reuse
 
-Some plumbing genuinely _is_ shared across models (event ID
+Some plumbing genuinely *is* shared across models (event ID
 generation, columnar codec for the DAG, topological order). Today
 this lives inside `@softmaple/eg-walker/graph`. If and when a second
 engine ships and ends up with a near-identical graph layer, extract a
@@ -250,18 +249,16 @@ expensive than duplication for two consumers.
 
 ## Roadmap
 
-See [`architecture-overview.md`](./architecture-overview.md) and the
-[ADR](./adr/collaboration-architecture-boundaries.md) for the hard
-rules and the project-wide roadmap. In short:
+See [`collaboration-layers.md`](./collaboration-layers.md) for the
+hard rules and the project-wide roadmap. In short:
 
 - **Now** — sequence model only (`@softmaple/eg-walker`).
-- **Now** — `@softmaple/awareness` remains independent from
-  `@softmaple/eg-walker`.
-- **Now** — providers remain transport-focused.
-- **Future** — editor integrations only after concrete requirements
-  are clear.
-- **Future** — block or object engine packages only when a host
-  demands real block-aware or object-aware convergence.
+- **Next** — surface bindings against the sequence model for
+  textarea, CodeMirror, and a lowered Lexical demo.
+- **Later** — block engine package, when a host demands real
+  block-aware convergence.
+- **Later still** — object engine package, after a canvas demo
+  proves the ops shape on raw awareness + transport.
 
 ## When to update this doc
 

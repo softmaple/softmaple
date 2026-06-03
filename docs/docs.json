@@ -40,13 +40,8 @@
       {
         "group": "Design Documents",
         "pages": [
-          "design/architecture-overview",
-          "design/package-responsibilities",
           "design/awareness-and-presence",
-          "design/collaboration-layers",
-          "design/collaboration-models",
-          "design/surface-bindings",
-          "design/adr/collaboration-architecture-boundaries"
+          "design/collaboration-layers"
         ]
       },
       {

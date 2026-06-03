@@ -511,6 +511,19 @@ export class EgWalkerReplica {
     if (!engineVersion || engineVersion.size === 0) {
       return true;
     }
+    let directlyCovered = engineVersion.size <= event.parentVersion.size;
+    if (directlyCovered) {
+      for (const id of engineVersion) {
+        if (!event.parentVersion.has(id)) {
+          directlyCovered = false;
+          break;
+        }
+      }
+    }
+    if (directlyCovered) {
+      return true;
+    }
+
     const parentExpansion = this.eventGraph.expandVersion(event.parentVersion);
     for (const id of engineVersion) {
       if (!parentExpansion.has(id)) {

@@ -50,6 +50,7 @@ export class PartialReplayManager {
     const generated = engine.generate(events, checkpoint.text, {
       initialVersion: checkpoint.version,
       eventGraph: graph,
+      eventOrder: events,
     });
 
     return {

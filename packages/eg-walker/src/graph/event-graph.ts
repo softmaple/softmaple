@@ -137,6 +137,16 @@ export class EventGraph {
   }
 
   /**
+   * Number of events currently stored in the graph.
+   *
+   * Prefer this over `getAllEvents().length` on hot paths because it avoids
+   * materialising a new array.
+   */
+  getEventCount(): number {
+    return this.events.size;
+  }
+
+  /**
    * Store non-CRDT persistence metadata alongside the graph.
    */
   setMetadata(metadata: Record<string, unknown>): void {

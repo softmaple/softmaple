@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { REPLAY_SOURCE } from "../constants/replay-source";
+import { CriticalCheckpointStore } from "../core/internals/critical-checkpoint-store";
 import { EgWalkerReplica } from "../core/replica";
+import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../types";
 
@@ -171,6 +173,37 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
       );
       expect(after.criticalCheckpointHits).toBe(before.criticalCheckpointHits);
       expect(after.fullReplays).toBe(before.fullReplays + 1);
+    });
+
+    it("does not treat a fan-in descendant as proof that a checkpoint stayed critical", () => {
+      const graph = new EventGraph();
+      const checkpoints = new CriticalCheckpointStore(
+        new CriticalVersionAnalyzer(),
+      );
+      graph.addEvent({
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      });
+      checkpoints.maybeAdvance(graph, "A");
+
+      graph.addEvent({
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+        timestamp: 2,
+      });
+      graph.addEvent({
+        id: "merge:0",
+        parentVersion: new Set(["alice:0", "bob:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "!" },
+        timestamp: 3,
+      });
+
+      expect(checkpoints.pickFor(graph)).toBeNull();
+      expect(checkpoints.misses).toBe(1);
+      expect(checkpoints.hits).toBe(0);
     });
   });
 

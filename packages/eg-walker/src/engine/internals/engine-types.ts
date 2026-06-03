@@ -1,5 +1,5 @@
 import type { EventGraph } from "../../graph/event-graph";
-import type { EventId, ExternalOperation } from "../../types";
+import type { EventId, ExternalOperation, GraphEvent } from "../../types";
 
 export const PLACEHOLDER_EVENT_ID = "__placeholder__";
 export const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
@@ -105,6 +105,15 @@ export interface EngineStats {
 export interface GenerateOptions {
   readonly initialVersion?: ReadonlySet<EventId>;
   readonly eventGraph?: EventGraph;
+  /**
+   * Topological rank source for prepare/effect retreat/advance ordering.
+   *
+   * When omitted, the engine uses `eventGraph.getTopologicalOrder()` if a
+   * graph is provided. Partial replay can pass the already-computed divergent
+   * suffix order here so reset does not rebuild full-graph ordering on every
+   * checkpoint replay.
+   */
+  readonly eventOrder?: ReadonlyArray<GraphEvent>;
 }
 
 export interface GeneratedDocument {

@@ -5,7 +5,17 @@ import type { EventId } from "../../types";
 
 const MAX_RETAINED_CHECKPOINTS = 32;
 
-export type CriticalCheckpoint = ReplayCheckpoint;
+export interface CriticalCheckpoint extends ReplayCheckpoint {
+  /**
+   * Number of events present when this checkpoint was captured.
+   *
+   * Checkpoints are currently captured only for singleton frontiers, which
+   * means every event up to this count is causally included by the checkpoint.
+   * Later criticality checks can therefore inspect only events added after this
+   * cut point instead of expanding the checkpoint's full ancestor closure.
+   */
+  readonly eventCount: number;
+}
 
 export class CriticalCheckpointStore {
   private checkpoints: ReadonlyArray<CriticalCheckpoint> = [];
@@ -53,6 +63,7 @@ export class CriticalCheckpointStore {
     this.append({
       version: new Set(frontier),
       text: document,
+      eventCount: graph.getEventCount(),
     });
   }
 
@@ -62,13 +73,60 @@ export class CriticalCheckpointStore {
       if (!candidate) {
         continue;
       }
-      if (this.analyzer.isCritical(graph, candidate.version)) {
+      if (this.isStillCritical(graph, candidate)) {
         this.hitCount++;
         return candidate;
       }
     }
     this.missCount++;
     return null;
+  }
+
+  private isStillCritical(
+    graph: EventGraph,
+    candidate: CriticalCheckpoint,
+  ): boolean {
+    if (candidate.version.size !== 1) {
+      return this.analyzer.isCritical(graph, candidate.version);
+    }
+
+    const [frontierId] = candidate.version;
+    if (frontierId === undefined) {
+      return graph.getEventCount() === 0;
+    }
+
+    const outsideCount = graph.getEventCount() - candidate.eventCount;
+    if (outsideCount <= 0) {
+      return true;
+    }
+
+    let descendantsAfterCheckpoint = 0;
+    const visited = new Set<EventId>();
+    const stack = Array.from(graph.getChildren(frontierId));
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      const rank = graph.getInsertionRank(current);
+      if (rank !== undefined && rank >= candidate.eventCount) {
+        descendantsAfterCheckpoint++;
+        if (descendantsAfterCheckpoint === outsideCount) {
+          return true;
+        }
+      }
+
+      for (const child of graph.getChildren(current)) {
+        if (!visited.has(child)) {
+          stack.push(child);
+        }
+      }
+    }
+
+    return false;
   }
 
   private append(checkpoint: CriticalCheckpoint): void {

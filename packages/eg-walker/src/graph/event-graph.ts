@@ -137,6 +137,26 @@ export class EventGraph {
   }
 
   /**
+   * Number of events currently stored in the graph.
+   *
+   * Prefer this over `getAllEvents().length` on hot paths because it avoids
+   * materialising a new array.
+   */
+  getEventCount(): number {
+    return this.events.size;
+  }
+
+  /**
+   * Stable insertion rank for an event, assigned by {@link addEvent}.
+   *
+   * Ranks are monotonic and parent ranks are always lower than child ranks,
+   * making them useful as cheap topological cut points for replay heuristics.
+   */
+  getInsertionRank(id: EventId): number | undefined {
+    return this.insertionRank.get(id);
+  }
+
+  /**
    * Store non-CRDT persistence metadata alongside the graph.
    */
   setMetadata(metadata: Record<string, unknown>): void {

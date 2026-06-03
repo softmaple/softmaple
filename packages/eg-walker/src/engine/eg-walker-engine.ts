@@ -262,7 +262,8 @@ export class EgWalkerEngine {
     this.peakSequenceRecordCount = 0;
     this.placeholderCounter = 0;
 
-    const graphEvents = options.eventGraph?.getTopologicalOrder() ?? events;
+    const graphEvents =
+      options.eventOrder ?? options.eventGraph?.getTopologicalOrder() ?? events;
     graphEvents.forEach((event, index) => {
       this.eventsById.set(event.id, event);
       this.eventOrder.set(event.id, index);

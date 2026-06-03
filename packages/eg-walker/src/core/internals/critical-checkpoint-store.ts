@@ -42,9 +42,10 @@ export class CriticalCheckpointStore {
     if (frontier.size !== 1) {
       return;
     }
-    if (!this.analyzer.isCritical(graph, frontier)) {
-      return;
-    }
+    // A finite DAG with exactly one frontier has every event causally before
+    // that frontier. The singleton frontier is therefore critical by
+    // definition, so avoid the analyzer's full ancestor expansion on the
+    // sequential hot path.
     const last = this.checkpoints[this.checkpoints.length - 1];
     if (last && versionsEqual(last.version, frontier)) {
       return;

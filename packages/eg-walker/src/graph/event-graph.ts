@@ -147,16 +147,6 @@ export class EventGraph {
   }
 
   /**
-   * Stable insertion rank for an event, assigned by {@link addEvent}.
-   *
-   * Ranks are monotonic and parent ranks are always lower than child ranks,
-   * making them useful as cheap topological cut points for replay heuristics.
-   */
-  getInsertionRank(id: EventId): number | undefined {
-    return this.insertionRank.get(id);
-  }
-
-  /**
    * Store non-CRDT persistence metadata alongside the graph.
    */
   setMetadata(metadata: Record<string, unknown>): void {

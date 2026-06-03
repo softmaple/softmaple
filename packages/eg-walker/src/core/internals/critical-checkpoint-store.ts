@@ -91,9 +91,6 @@ export class CriticalCheckpointStore {
     }
 
     const [frontierId] = candidate.version;
-    if (frontierId === undefined) {
-      return graph.getEventCount() === 0;
-    }
 
     const outsideCount = graph.getEventCount() - candidate.eventCount;
     if (outsideCount <= 0) {
@@ -101,26 +98,22 @@ export class CriticalCheckpointStore {
     }
 
     let descendantsAfterCheckpoint = 0;
-    const visited = new Set<EventId>();
-    const stack = Array.from(graph.getChildren(frontierId));
+    // The checkpoint frontier was singleton and childless when captured.
+    // Therefore every reachable descendant must have been inserted after
+    // `candidate.eventCount`; count unique descendants without checking ranks.
+    const stack = Array.from(graph.getChildren(frontierId!));
+    const visited = new Set<EventId>(stack);
 
     while (stack.length > 0) {
       const current = stack.pop()!;
-      if (visited.has(current)) {
-        continue;
-      }
-      visited.add(current);
-
-      const rank = graph.getInsertionRank(current);
-      if (rank !== undefined && rank >= candidate.eventCount) {
-        descendantsAfterCheckpoint++;
-        if (descendantsAfterCheckpoint === outsideCount) {
-          return true;
-        }
+      descendantsAfterCheckpoint++;
+      if (descendantsAfterCheckpoint === outsideCount) {
+        return true;
       }
 
       for (const child of graph.getChildren(current)) {
         if (!visited.has(child)) {
+          visited.add(child);
           stack.push(child);
         }
       }

@@ -86,7 +86,7 @@ const getBranchPreservingReplayOrder = (
   for (const eventId of replayEventIds) {
     const event = graph.getEvent(eventId);
     if (!event) {
-      continue;
+      throw new Error(`Missing replay event in graph: ${eventId}`);
     }
 
     let parentCount = 0;

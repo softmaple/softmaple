@@ -1,16 +1,13 @@
 ---
 title: Collaboration Architecture Layers
-description: Enforced layering boundaries between @softmaple/eg-walker, @softmaple/awareness, providers, and consumer apps.
+description: Layering boundaries between @softmaple/eg-walker, @softmaple/awareness, and consumer apps.
 ---
 
 # Collaboration Architecture Layers
 
-This document describes the mechanically enforced layering rules for
-Softmaple's real-time collaboration code. For the product-level
-architecture boundary, start with
-[`architecture-overview.md`](./architecture-overview.md), then see
-[`package-responsibilities.md`](./package-responsibilities.md) and the
-[ADR](./adr/collaboration-architecture-boundaries.md).
+This document is the **source of truth** for how Softmaple's real-time
+collaboration code is layered. It defines what each layer owns, what it
+must not depend on, and how the layers compose inside `apps/*`.
 
 The split is enforced by an ESLint `no-restricted-imports` rule in
 `@softmaple/eslint-config` (see [Enforcement](#enforcement) below).
@@ -26,17 +23,11 @@ The split is enforced by an ESLint `no-restricted-imports` rule in
     - index-based operations only
 
 @softmaple/awareness
-    - user/session awareness state
-    - cursor state
-    - selection state
-    - viewport state
-    - user metadata
-    - online/offline state
-
-providers
-    - transport only
-    - may carry eg-walker document updates
-    - may carry awareness updates
+    - presence state
+    - cursor/selection mapping (issue B1)
+    - transport adapters
+    - rendering helpers
+    - surface bindings (issue B2, deferred)
 
 apps/*
     - concrete editor integrations
@@ -69,8 +60,8 @@ The CRDT runtime. Implements the Eg-walker paper directly.
 
 `@softmaple/eg-walker` **MUST NOT**:
 
-- Depend on `@softmaple/awareness` (no presence/awareness state, no
-  cursors, no transport adapters).
+- Depend on `@softmaple/awareness` (no presence, no cursors, no
+  transport adapters).
 - Depend on any editor framework — `lexical`, `prosemirror-*`,
   `slate` / `slate-*`, or equivalent.
 - Expose anything but index-based operations on its public API. No
@@ -79,77 +70,55 @@ The CRDT runtime. Implements the Eg-walker paper directly.
 ### Rationale
 
 eg-walker is the convergence guarantee for the whole product. Keeping
-it free of editor and presence/awareness concerns lets us reuse it
-under any editor we choose, run it in a worker or on the server, and
-reason about it in isolation when debugging divergence.
+it free of editor and presence concerns lets us reuse it under any
+editor we choose, run it in a worker or on the server, and reason
+about it in isolation when debugging divergence.
 
 ## Layer 2: `@softmaple/awareness`
 
-The ephemeral user/session presence and awareness layer.
-Editor-class-agnostic and independent from eg-walker.
+The presence and cursor layer. Editor-class-agnostic.
 
 ### Responsibilities
 
-- **Presence state** — who is online, who is in a realtime session,
-  status (`active` / `idle` / `offline`), and last-seen timestamps.
-- **Cursor state** — where collaborators are pointing or editing.
-- **Selection state** — the ranges collaborators are focused on.
-- **Viewport state** — the visible area or focus area for a session
-  when a host chooses to publish it.
-- **User metadata** — names, avatars, colors, roles, and other
-  session-safe metadata.
-- **Realtime session awareness / presence** — state that helps people
-  understand each other during collaboration, without becoming durable
-  document data.
+- **Presence state** — who is online, who is in this document, status
+  (`active` / `idle` / `offline`), last-seen timestamps.
+- **Cursor and selection mapping** — translates abstract cursor /
+  selection positions to and from a transport-friendly representation
+  (issue B1).
+- **Transport adapters** — pluggable backends (broadcast channel,
+  WebSocket, no-op) under `adapters/`.
+- **Rendering helpers** — primitives (`PresenceBar`, `LiveCursor`,
+  `SelectionHighlight`, `ActivityIndicator`) and React hooks for the
+  app shell to compose presence UI.
+- **Surface bindings** — concrete glue from a surface's selection
+  model to the awareness cursor model is **deferred** (issue B2). When
+  it arrives it will live in a sub-path of `@softmaple/awareness`
+  (e.g. `@softmaple/awareness/bindings/<surface>`) and is the only
+  place inside this package allowed to know about an editor or canvas
+  framework. The term "surface" (rather than "editor") is intentional;
+  see [`surface-bindings.md`](./surface-bindings.md) for the role
+  definition and naming rationale.
 
 ### Forbidden
 
 `@softmaple/awareness` **MUST NOT**:
 
-- Depend on `@softmaple/eg-walker`. Awareness and convergence are
+- Depend on `@softmaple/eg-walker`. Presence and convergence are
   independent concerns; awareness must work even without a CRDT
   document attached.
 - Depend on any editor framework — `lexical`, `prosemirror-*`, or
-  `slate` / `slate-*`.
+  `slate` / `slate-*` — outside the deferred `bindings/<surface>`
+  sub-path that does not yet exist.
 
 ### Rationale
 
 Awareness is approximate by design (see
 [`awareness-and-presence`](./awareness-and-presence)). It must never
 gate document convergence and must never assume a particular editor.
-This keeps the package useful for rich text editors, code editors,
-whiteboards, canvas apps, React Flow, spreadsheets, and multiplayer UI.
+This keeps the package safe to load in a worker, on the server (for
+SSR-friendly presence snapshots), or alongside a non-Lexical editor.
 
-Key principle: `@softmaple/awareness` synchronizes people/session
-state, including presence, not documents.
-
-## Layer 3: Providers
-
-The transport layer.
-
-### Responsibilities
-
-- Move eg-walker document updates between replicas.
-- Move awareness updates between sessions.
-- Handle connection, retry, authentication, routing, and backend
-  protocol details.
-
-### Forbidden
-
-Providers **MUST NOT**:
-
-- Own document merge logic.
-- Own awareness merge logic.
-- Own editor-specific logic.
-
-### Rationale
-
-A provider can carry multiple message types over the same connection,
-but it should treat those messages as transport payloads. Document
-state is interpreted by `@softmaple/eg-walker`; awareness state is
-interpreted by `@softmaple/awareness`.
-
-## Layer 4: `apps/*`
+## Layer 3: `apps/*`
 
 The integration layer. Today that is `apps/web` (Next.js + Lexical)
 and `apps/playground` (CRDT experiments).
@@ -160,7 +129,7 @@ and `apps/playground` (CRDT experiments).
   views, or Slate plugins that translate editor operations to and from
   eg-walker's index-based API.
 - **UI composition** — wiring `@softmaple/awareness` components into
-  the app shell, choosing providers, theming.
+  the app shell, choosing transport adapters, theming.
 - **Identity and auth** — mapping the app's user model onto
   `PresenceUser`.
 - **Routing and persistence** — document IDs, room IDs, hydration from
@@ -221,10 +190,6 @@ implement.
 
 ## Generic position contract
 
-This section records current position-shape conventions used by the
-existing sequence model and awareness mapping helpers. It does not
-define a future editor-binding API.
-
 The collaboration foundation must work for plain text, rich text, block,
 canvas/whiteboard, node-based, and IDE-like editors. To keep the two
 packages editor-class agnostic, positions and ranges flow through the
@@ -249,7 +214,7 @@ following shapes:
   open-ended `[key: string]: unknown` field, and renderer components
   (`LiveCursor`, `SelectionHighlight`) already accept post-resolved
   screen coordinates (`LiveCursorPoint { x, y }`, `HighlightRect { x,
-y, width, height }`) so a canvas integration never has to round-trip
+  y, width, height }`) so a canvas integration never has to round-trip
   through `CursorPosition`.
 
 ### Structural remote-event result (issue [#747](https://github.com/softmaple/softmaple/issues/747))
@@ -298,14 +263,12 @@ inferred integration from a text side effect:
 ```ts
 const before = remoteReplica.getText();
 remoteReplica.applyRemoteEvent(event);
-if (remoteReplica.getText() !== before) {
-  /* assume integrated */
-}
+if (remoteReplica.getText() !== before) { /* assume integrated */ }
 ```
 
 That works in practice but is brittle:
 
-- It is _behavioral_, not _structural_. Any future change that lets an
+- It is *behavioral*, not *structural*. Any future change that lets an
   integrated event produce a zero-width visible change (a delete that
   fully overlaps already-deleted characters, an empty insert sliding
   through a coalescing path, IME compositions in #704) would silently

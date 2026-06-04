@@ -26,7 +26,6 @@
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "bench": "vitest bench --run",
-    "paper-bench": "tsx src/bench/paper-bench.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

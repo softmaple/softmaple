@@ -22,7 +22,7 @@ export interface NativeSnapshot {
   readonly eventGraph: SerializedGraphOutput;
 }
 
-interface NativeSnapshotHeader {
+export interface NativeSnapshotHeader {
   readonly formatVersion: typeof NATIVE_SNAPSHOT_FORMAT_VERSION;
   readonly text: string;
   readonly initialText: string;
@@ -79,11 +79,8 @@ export class NativeSnapshotCodec {
     const graph = columnarCodec.decodeBinary(
       reader.readBytes(reader.readVarint()),
     );
-    const eventGraph = graph.serialize();
-    const snapshot = validateNativeSnapshot({
-      ...header,
-      eventGraph,
-    });
+    validateGraphMatchesHeader(graph, header);
+    const snapshot = createSnapshotWithLazyEventGraph(header, graph);
     decodedGraphCache.set(snapshot, graph);
     return snapshot;
   }
@@ -97,6 +94,49 @@ export const consumeDecodedNativeSnapshotGraph = (
     decodedGraphCache.delete(snapshot);
   }
   return graph;
+};
+
+export const validateNativeSnapshotHeaderOnly = (
+  value: unknown,
+): NativeSnapshotHeader => validateNativeSnapshotHeader(value);
+
+export const validateGraphMatchesSnapshot = (
+  graph: EventGraph,
+  snapshot: NativeSnapshotHeader,
+): void => {
+  validateGraphMatchesHeader(graph, snapshot);
+};
+
+const createSnapshotWithLazyEventGraph = (
+  header: NativeSnapshotHeader,
+  graph: EventGraph,
+): NativeSnapshot => {
+  let eventGraph: SerializedGraphOutput | null = null;
+  return {
+    ...header,
+    get eventGraph(): SerializedGraphOutput {
+      eventGraph ??= graph.serialize();
+      return eventGraph;
+    },
+  };
+};
+
+const validateGraphMatchesHeader = (
+  graph: EventGraph,
+  header: NativeSnapshotHeader,
+): void => {
+  if (graph.getEventCount() !== header.eventCount) {
+    throw new Error(
+      `Invalid native snapshot: eventCount ${header.eventCount} does not match event graph length ${graph.getEventCount()}`,
+    );
+  }
+  const graphFrontier = graph.getFrontier();
+  const snapshotFrontier = new Set(header.currentVersion);
+  if (!versionsEqual(graphFrontier, snapshotFrontier)) {
+    throw new Error(
+      "Invalid native snapshot: currentVersion does not match event graph frontier",
+    );
+  }
 };
 
 const headerFromSnapshot = (
@@ -301,4 +341,19 @@ const expectNonNegativeInteger = (value: unknown, label: string): number => {
     return number;
   }
   throw new Error(`Invalid ${label}: expected non-negative integer`);
+};
+
+const versionsEqual = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const id of left) {
+    if (!right.has(id)) {
+      return false;
+    }
+  }
+  return true;
 };

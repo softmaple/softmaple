@@ -42,7 +42,9 @@ import {
   consumeDecodedNativeSnapshotGraph,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
+  validateGraphMatchesSnapshot,
   validateNativeSnapshot,
+  validateNativeSnapshotHeaderOnly,
 } from "./native-snapshot";
 
 interface ReplicaConstructorOptions {
@@ -244,15 +246,21 @@ export class EgWalkerReplica {
     replicaId: string = "native-snapshot-replica",
   ): EgWalkerReplica {
     const cachedGraph = consumeDecodedNativeSnapshotGraph(snapshot);
-    const validated = validateNativeSnapshot(snapshot);
-    const graph = cachedGraph ?? EventGraph.deserialize(validated.eventGraph);
-    const graphFrontier = graph.getFrontier();
+    const { validated, graph } =
+      cachedGraph === undefined
+        ? (() => {
+            const fullSnapshot = validateNativeSnapshot(snapshot);
+            return {
+              validated: fullSnapshot,
+              graph: EventGraph.deserialize(fullSnapshot.eventGraph),
+            };
+          })()
+        : {
+            validated: validateNativeSnapshotHeaderOnly(snapshot),
+            graph: cachedGraph,
+          };
+    validateGraphMatchesSnapshot(graph, validated);
     const snapshotFrontier = new Set(validated.currentVersion);
-    if (!versionsEqual(graphFrontier, snapshotFrontier)) {
-      throw new Error(
-        "Invalid native snapshot: currentVersion does not match event graph frontier",
-      );
-    }
 
     graph.setMetadata({
       ...graph.getMetadata(),
@@ -698,19 +706,4 @@ function toPositionOperation(
     index: op.index,
     length: op.length,
   };
-}
-
-function versionsEqual(
-  left: ReadonlySet<EventId>,
-  right: ReadonlySet<EventId>,
-): boolean {
-  if (left.size !== right.size) {
-    return false;
-  }
-  for (const id of left) {
-    if (!right.has(id)) {
-      return false;
-    }
-  }
-  return true;
 }

@@ -31,6 +31,7 @@ import {
 } from "./invariants";
 import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import type { EngineSequenceRecord } from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { PartialReplayManager } from "../engine/partial-replay";
 import {
@@ -56,6 +57,7 @@ interface ReplicaConstructorOptions {
   readonly nextSequenceNumber?: number;
   readonly lazyEventGraph?: LazyEventGraphSource;
   readonly deferLocalReplay?: boolean;
+  readonly restoredSequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
 }
 
 /**
@@ -75,6 +77,8 @@ export class EgWalkerReplica {
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
   private readonly deferLocalReplay: boolean;
+  private restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null =
+    null;
   private lastReplaySource: ReplaySource | null = null;
   /**
    * Replica-lifetime high-water mark for the engine's
@@ -105,6 +109,7 @@ export class EgWalkerReplica {
     this.document = options.restoredText ?? initialText;
     this.initialText = initialText;
     this.deferLocalReplay = options.deferLocalReplay ?? false;
+    this.restoredSequenceRecords = options.restoredSequenceRecords ?? null;
     this.eventGraph =
       eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
     this.lazyEventGraph = options.lazyEventGraph ?? null;
@@ -209,6 +214,7 @@ export class EgWalkerReplica {
       eventCount: graph.getEventCount(),
       nextSequenceNumber: this.nextSequenceNumber,
       metadata: graph.getMetadata(),
+      sequenceRecords: this.sequenceRecordsForSnapshot(graph),
       eventGraph: graph.serialize(),
     };
   }
@@ -303,6 +309,7 @@ export class EgWalkerReplica {
       nextSequenceNumber: validated.nextSequenceNumber,
       lazyEventGraph,
       deferLocalReplay: true,
+      restoredSequenceRecords: validated.sequenceRecords,
     });
   }
 
@@ -337,6 +344,7 @@ export class EgWalkerReplica {
     if (this.shouldDeferLocalReplay()) {
       this.applyPlainDocumentOperation(validatedOperation);
       this.currentVersion = new Set([event.id]);
+      this.restoredSequenceRecords = null;
       this.maybeAdvanceCheckpoint();
       return;
     }
@@ -577,12 +585,35 @@ export class EgWalkerReplica {
     this.document = generated.text;
     this.currentVersion = graph.getFrontier();
     this.engine = engine;
+    this.restoredSequenceRecords = null;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     // Returned for the cold-start single-event path in {@link advanceWithEvent};
     // other callers (constructor seed, retreat-needed full replay) ignore
     // this because the array spans the whole graph, not a single event.
     return generated.transformedOperations;
+  }
+
+  private sequenceRecordsForSnapshot(
+    graph: EventGraph,
+  ): ReadonlyArray<EngineSequenceRecord> {
+    if (this.engine) {
+      return this.engine.getSequenceRecords();
+    }
+    if (this.restoredSequenceRecords) {
+      return this.restoredSequenceRecords;
+    }
+    if (graph.getEventCount() === 0) {
+      return [];
+    }
+
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(
+      graph.getBranchPreservingTopologicalOrder(),
+      this.initialText,
+      { eventGraph: graph },
+    );
+    return generated.text === this.document ? engine.getSequenceRecords() : [];
   }
 
   /**

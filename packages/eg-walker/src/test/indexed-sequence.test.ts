@@ -132,7 +132,11 @@ describe("IndexedSequence", () => {
     const prepareWeight = (item: (typeof items)[number]): number =>
       item.prepare;
     const effectWeight = (item: (typeof items)[number]): number => item.effect;
-    const bulk = new IndexedSequence(prepareWeight, effectWeight, items);
+    const bulk = IndexedSequence.fromRecords(
+      items,
+      prepareWeight,
+      effectWeight,
+    );
     const incremental = new IndexedSequence(prepareWeight, effectWeight);
 
     for (const item of items) {

@@ -8,6 +8,7 @@ import type {
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
+import type { EngineSequenceRecord } from "../engine/sequence-records";
 
 export const NATIVE_SNAPSHOT_FORMAT_VERSION = "EGWS1" as const;
 
@@ -19,6 +20,7 @@ export interface NativeSnapshot {
   readonly eventCount: number;
   readonly nextSequenceNumber: number;
   readonly metadata?: Record<string, unknown>;
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
   readonly eventGraph: SerializedGraphOutput;
 }
 
@@ -30,6 +32,7 @@ export interface NativeSnapshotHeader {
   readonly eventCount: number;
   readonly nextSequenceNumber: number;
   readonly metadata?: Record<string, unknown>;
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
 }
 
 const encoder = new TextEncoder();
@@ -169,6 +172,7 @@ const headerFromSnapshot = (
   eventCount: snapshot.eventCount,
   nextSequenceNumber: snapshot.nextSequenceNumber,
   metadata: snapshot.metadata,
+  sequenceRecords: snapshot.sequenceRecords,
 });
 
 const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
@@ -203,6 +207,7 @@ const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
       snapshot.metadata === undefined
         ? undefined
         : expectRecord(snapshot.metadata, "native snapshot metadata"),
+    sequenceRecords: expectSequenceRecords(snapshot.sequenceRecords),
   };
 };
 
@@ -236,6 +241,7 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
     snapshot.metadata === undefined
       ? undefined
       : expectRecord(snapshot.metadata, "native snapshot metadata");
+  const sequenceRecords = expectSequenceRecords(snapshot.sequenceRecords);
   const eventGraph = expectSerializedGraph(snapshot.eventGraph);
 
   if (eventGraph.events.length !== eventCount) {
@@ -252,7 +258,74 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
     eventCount,
     nextSequenceNumber,
     metadata,
+    sequenceRecords,
     eventGraph,
+  };
+};
+
+const expectSequenceRecords = (
+  value: unknown,
+): ReadonlyArray<EngineSequenceRecord> => {
+  if (value === undefined) {
+    return [];
+  }
+  return expectArray(value, "native snapshot sequenceRecords").map(
+    expectSequenceRecord,
+  );
+};
+
+const expectSequenceRecord = (value: unknown): EngineSequenceRecord => {
+  const record = expectRecord(value, "native snapshot sequence record");
+  return {
+    id: expectString(record.id, "native snapshot sequence record id"),
+    eventId: expectString(
+      record.eventId,
+      "native snapshot sequence record eventId",
+    ),
+    content: expectString(
+      record.content,
+      "native snapshot sequence record content",
+    ),
+    originLeft:
+      record.originLeft === null
+        ? null
+        : expectString(
+            record.originLeft,
+            "native snapshot sequence record originLeft",
+          ),
+    originRight:
+      record.originRight === null
+        ? null
+        : expectString(
+            record.originRight,
+            "native snapshot sequence record originRight",
+          ),
+    everDeleted: expectBoolean(
+      record.everDeleted,
+      "native snapshot sequence record everDeleted",
+    ),
+    prepareState: expectNonNegativeInteger(
+      record.prepareState,
+      "native snapshot sequence record prepareState",
+    ),
+    run:
+      record.run === null
+        ? null
+        : expectTypedRun(record.run, "native snapshot sequence record run"),
+  };
+};
+
+const expectTypedRun = (
+  value: unknown,
+  label: string,
+): EngineSequenceRecord["run"] => {
+  const run = expectRecord(value, label);
+  return {
+    replicaId: expectString(run.replicaId, `${label}.replicaId`),
+    startSequence: expectNonNegativeInteger(
+      run.startSequence,
+      `${label}.startSequence`,
+    ),
   };
 };
 
@@ -353,6 +426,13 @@ const expectNumber = (value: unknown, label: string): number => {
     return value;
   }
   throw new Error(`Invalid ${label}: expected finite number`);
+};
+
+const expectBoolean = (value: unknown, label: string): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  throw new Error(`Invalid ${label}: expected boolean`);
 };
 
 const expectNonNegativeInteger = (value: unknown, label: string): number => {

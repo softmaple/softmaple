@@ -48,6 +48,21 @@ export class IndexedSequence<T extends object> {
   private root: IndexedNode<T> | null = null;
   private readonly locationsByItem = new WeakMap<T, ItemLocation<T>>();
 
+  /**
+   * Build a ranked sequence from an already ordered record list in linear time.
+   *
+   * Snapshot restore should use this entry point once serialized sequence
+   * records are available: it preserves the same public behavior as passing
+   * `items` to the constructor while making the bulk-restore intent explicit.
+   */
+  static fromRecords<T extends object>(
+    records: ReadonlyArray<T>,
+    prepareWeight: (item: T) => number,
+    effectWeight: (item: T) => number,
+  ): IndexedSequence<T> {
+    return new IndexedSequence(prepareWeight, effectWeight, records);
+  }
+
   constructor(
     private readonly prepareWeight: (item: T) => number,
     private readonly effectWeight: (item: T) => number,

@@ -24,6 +24,10 @@ import {
 import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import { RecordSplitter } from "./internals/record-splitter";
+import {
+  recordsFromItems,
+  type EngineSequenceRecord,
+} from "./internals/sequence-records";
 import { spliceText } from "./internals/text-utils";
 
 export type {
@@ -158,6 +162,11 @@ export class EgWalkerEngine {
       sequenceRecordCount: this.itemsById.size,
       peakSequenceRecordCount: this.peakSequenceRecordCount,
     };
+  }
+
+  getSequenceRecords(): EngineSequenceRecord[] {
+    this.flushPendingInsert();
+    return recordsFromItems(this.sequence.toArray());
   }
 
   private processEvent(event: GraphEvent): ExternalOperation[] {

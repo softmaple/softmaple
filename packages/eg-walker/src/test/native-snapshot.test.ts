@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   NativeSnapshotCodec,
-  type NativeSnapshot,
 } from "../core/native-snapshot";
 import { EgWalkerReplica } from "../core/replica";
+import { sequenceFromRecords } from "../engine/sequence-records";
+import { EventGraph } from "../graph/event-graph";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { BinaryWriter } from "../graph/internals/binary-io";
 
 describe("EgWalkerReplica native snapshots", () => {
   it("should restore readable document state without replaying history", () => {
@@ -115,16 +118,23 @@ describe("EgWalkerReplica native snapshots", () => {
   it("should decode length-prefixed binary snapshots whose header length starts with a JSON object byte", () => {
     // Arrange
     const codec = new NativeSnapshotCodec();
-    const snapshot: NativeSnapshot = {
+    const header = {
       formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
       text: "x".repeat(13),
       initialText: "",
       currentVersion: [],
       eventCount: 0,
       nextSequenceNumber: 0,
-      eventGraph: { version: [], events: [] },
     };
-    const bytes = codec.encode(snapshot);
+    const body = new BinaryWriter();
+    body.writeBytes(new TextEncoder().encode(JSON.stringify(header)));
+    body.writeBytes(
+      new ColumnarEventGraphCodec().encodeBinary(new EventGraph()),
+    );
+    const payload = body.toUint8Array();
+    const bytes = new Uint8Array(5 + payload.byteLength);
+    bytes.set(new TextEncoder().encode(NATIVE_SNAPSHOT_FORMAT_VERSION));
+    bytes.set(payload, 5);
 
     // Act
     const decoded = codec.decode(bytes);
@@ -133,6 +143,56 @@ describe("EgWalkerReplica native snapshots", () => {
     // Assert
     expect(bytes[5]).toBe(0x7b);
     expect(restored.getText()).toBe("x".repeat(13));
+  });
+
+  it("should persist sequence records for bulk ranked-sequence restore", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const sequence = sequenceFromRecords(decoded.sequenceRecords);
+
+    // Assert
+    expect(decoded.sequenceRecords).toEqual([
+      {
+        id: "alice:0:0",
+        eventId: "alice:0",
+        content: "AB",
+        originLeft: null,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: { replicaId: "alice", startSequence: 0 },
+      },
+    ]);
+    expect(sequence.toArray()).toHaveLength(1);
+    expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(2);
+  });
+
+  it("should carry sequence records through read-only snapshot restore and refresh them after local edits", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Act
+    const readOnlySnapshot = restored.createNativeSnapshot();
+    restored.insert(2, "C");
+    const editedSnapshot = restored.createNativeSnapshot();
+
+    // Assert
+    expect(readOnlySnapshot.sequenceRecords).toEqual(decoded.sequenceRecords);
+    expect(
+      editedSnapshot.sequenceRecords.map((record) => record.content),
+    ).toEqual(["ABC"]);
+    expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
   it("should not share a decoded snapshot graph across restored replicas", () => {

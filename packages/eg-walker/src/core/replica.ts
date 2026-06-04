@@ -38,6 +38,19 @@ import {
   writeReplicaMetadata,
 } from "./internals/persistence-metadata";
 import { RemoteEventBuffer } from "./internals/remote-event-buffer";
+import {
+  consumeDecodedNativeSnapshotGraph,
+  NATIVE_SNAPSHOT_FORMAT_VERSION,
+  type NativeSnapshot,
+  validateNativeSnapshot,
+} from "./native-snapshot";
+
+interface ReplicaConstructorOptions {
+  readonly skipReplay?: boolean;
+  readonly restoredText?: string;
+  readonly currentVersion?: Version;
+  readonly nextSequenceNumber?: number;
+}
 
 /**
  * Public replica for Eg-walker.
@@ -75,17 +88,25 @@ export class EgWalkerReplica {
     initialText: string = "",
     eventGraph?: EventGraph,
     replayOrder?: ReadonlyArray<GraphEvent>,
+    options: ReplicaConstructorOptions = {},
   ) {
     assertWellFormedUtf16(initialText, "initial document text");
-    this.document = initialText;
+    if (options.restoredText !== undefined) {
+      assertWellFormedUtf16(options.restoredText, "restored document text");
+    }
+    this.document = options.restoredText ?? initialText;
     this.initialText = initialText;
     this.eventGraph = eventGraph ?? new EventGraph();
     this.remoteEvents = new RemoteEventBuffer({
       graph: this.eventGraph,
       advanceWithEvent: (event) => this.advanceWithEvent(event),
     });
-    this.currentVersion = this.eventGraph.getFrontier();
-    this.nextSequenceNumber = this.inferNextSequenceNumber();
+    this.currentVersion =
+      options.currentVersion !== undefined
+        ? new Set(options.currentVersion)
+        : this.eventGraph.getFrontier();
+    this.nextSequenceNumber =
+      options.nextSequenceNumber ?? this.inferNextSequenceNumber();
     if (this.eventGraph.getAllEvents().length > 0) {
       // A prebuilt graph bypasses {@link applyRemoteEvent}, so its event
       // payloads have never been screened by
@@ -96,7 +117,9 @@ export class EgWalkerReplica {
       for (const event of this.eventGraph.getAllEvents()) {
         assertRemoteEventWellFormed(event);
       }
-      this.fullReplay(replayOrder);
+      if (!options.skipReplay) {
+        this.fullReplay(replayOrder);
+      }
     }
     this.maybeAdvanceCheckpoint();
   }
@@ -153,6 +176,29 @@ export class EgWalkerReplica {
     };
   }
 
+  /**
+   * Create a versioned native snapshot. Phase 1 stores the materialized text
+   * and persistent event graph so snapshot load can answer reads immediately;
+   * the engine is restored lazily before the first post-load edit.
+   */
+  createNativeSnapshot(): NativeSnapshot {
+    writeReplicaMetadata(this.eventGraph, {
+      initialText: this.initialText,
+      nextSequenceNumber: this.nextSequenceNumber,
+    });
+
+    return {
+      formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
+      text: this.document,
+      initialText: this.initialText,
+      currentVersion: Array.from(this.eventGraph.getFrontier()),
+      eventCount: this.eventGraph.getEventCount(),
+      nextSequenceNumber: this.nextSequenceNumber,
+      metadata: this.eventGraph.getMetadata(),
+      eventGraph: this.eventGraph.serialize(),
+    };
+  }
+
   static deserialize(
     serialized: {
       text: string;
@@ -191,6 +237,36 @@ export class EgWalkerReplica {
       metadata.nextSequenceNumber ?? replica.inferNextSequenceNumber();
 
     return replica;
+  }
+
+  static fromNativeSnapshot(
+    snapshot: NativeSnapshot,
+    replicaId: string = "native-snapshot-replica",
+  ): EgWalkerReplica {
+    const cachedGraph = consumeDecodedNativeSnapshotGraph(snapshot);
+    const validated = validateNativeSnapshot(snapshot);
+    const graph = cachedGraph ?? EventGraph.deserialize(validated.eventGraph);
+    const graphFrontier = graph.getFrontier();
+    const snapshotFrontier = new Set(validated.currentVersion);
+    if (!versionsEqual(graphFrontier, snapshotFrontier)) {
+      throw new Error(
+        "Invalid native snapshot: currentVersion does not match event graph frontier",
+      );
+    }
+
+    graph.setMetadata({
+      ...graph.getMetadata(),
+      ...(validated.metadata ?? {}),
+      initialText: validated.initialText,
+      nextSequenceNumber: validated.nextSequenceNumber,
+    });
+
+    return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
+      skipReplay: true,
+      restoredText: validated.text,
+      currentVersion: snapshotFrontier,
+      nextSequenceNumber: validated.nextSequenceNumber,
+    });
   }
 
   /**
@@ -622,4 +698,19 @@ function toPositionOperation(
     index: op.index,
     length: op.length,
   };
+}
+
+function versionsEqual(
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const id of left) {
+    if (!right.has(id)) {
+      return false;
+    }
+  }
+  return true;
 }

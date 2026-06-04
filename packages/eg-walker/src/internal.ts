@@ -28,3 +28,8 @@ export {
   type OperationRun,
   type ParentOverride,
 } from "./graph/columnar-codec";
+export {
+  NativeSnapshotCodec,
+  NATIVE_SNAPSHOT_FORMAT_VERSION,
+  type NativeSnapshot,
+} from "./core/native-snapshot";

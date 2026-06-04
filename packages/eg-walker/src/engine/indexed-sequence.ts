@@ -53,8 +53,8 @@ export class IndexedSequence<T extends object> {
     private readonly effectWeight: (item: T) => number,
     items: ReadonlyArray<T> = [],
   ) {
-    for (const item of items) {
-      this.push(item);
+    if (items.length > 0) {
+      this.bulkLoad(items);
     }
   }
 
@@ -270,6 +270,54 @@ export class IndexedSequence<T extends object> {
       return null;
     }
     return this.weightIndexToPosition(before - 1, false, "prepare");
+  }
+
+  private bulkLoad(items: ReadonlyArray<T>): void {
+    const leaves: LeafNode<T>[] = [];
+    for (let start = 0; start < items.length; start += LEAF_CAPACITY) {
+      const leaf = createLeaf<T>();
+      const end = Math.min(start + LEAF_CAPACITY, items.length);
+      for (let index = start; index < end; index++) {
+        const item = items[index];
+        if (!item) {
+          continue;
+        }
+        const prepare = this.prepareWeight(item);
+        const effect = this.effectWeight(item);
+        const offset = leaf.items.length;
+        leaf.items.push(item);
+        leaf.prepareWeights.push(prepare);
+        leaf.effectWeights.push(effect);
+        leaf.size++;
+        leaf.prepareSum += prepare;
+        leaf.effectSum += effect;
+        this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
+      }
+      leaves.push(leaf);
+    }
+
+    this.root = this.buildBalancedTree(leaves);
+  }
+
+  private buildBalancedTree(
+    nodes: ReadonlyArray<IndexedNode<T>>,
+  ): IndexedNode<T> | null {
+    if (nodes.length === 0) {
+      return null;
+    }
+
+    let level = [...nodes];
+    while (level.length > 1) {
+      const nextLevel: InternalNode<T>[] = [];
+      for (let start = 0; start < level.length; start += BRANCH_FACTOR) {
+        nextLevel.push(
+          createInternal(level.slice(start, start + BRANCH_FACTOR)),
+        );
+      }
+      level = nextLevel;
+    }
+
+    return level[0] ?? null;
   }
 
   private insertIntoLeaf(leaf: LeafNode<T>, offset: number, item: T): void {

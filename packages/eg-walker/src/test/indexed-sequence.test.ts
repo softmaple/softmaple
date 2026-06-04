@@ -123,6 +123,57 @@ describe("IndexedSequence", () => {
     expect(sequence.positionOf(items[2_000]!)).toBe(2_000);
   });
 
+  it("bulk-builds the same ranked indexes as incremental insertion", () => {
+    const items = Array.from({ length: 5_000 }, (_, index) => ({
+      id: `bulk-built-${index}`,
+      prepare: index % 4 === 0 ? 0 : 1,
+      effect: index % 7 === 0 ? 0 : 1,
+    }));
+    const prepareWeight = (item: (typeof items)[number]): number =>
+      item.prepare;
+    const effectWeight = (item: (typeof items)[number]): number => item.effect;
+    const bulk = new IndexedSequence(prepareWeight, effectWeight, items);
+    const incremental = new IndexedSequence(prepareWeight, effectWeight);
+
+    for (const item of items) {
+      incremental.push(item);
+    }
+
+    for (const index of [0, 63, 64, 511, 2_047, 4_999]) {
+      expect(bulk.at(index)).toBe(incremental.at(index));
+      expect(bulk.positionOf(items[index]!)).toBe(
+        incremental.positionOf(items[index]!),
+      );
+    }
+    for (const prepareIndex of [0, 128, 1_024, 3_000]) {
+      expect(bulk.prepareIndexToPosition(prepareIndex, false)).toBe(
+        incremental.prepareIndexToPosition(prepareIndex, false),
+      );
+    }
+    for (const position of [0, 65, 1_700, 5_000]) {
+      expect(bulk.effectIndexBeforePosition(position)).toBe(
+        incremental.effectIndexBeforePosition(position),
+      );
+    }
+
+    const inserted = { id: "after-bulk-insert", prepare: 1, effect: 1 };
+    bulk.insert(2_500, inserted);
+    incremental.insert(2_500, inserted);
+    items[2_600]!.prepare = 1;
+    items[2_600]!.effect = 0;
+    bulk.updateItem(items[2_600]!);
+    incremental.updateItem(items[2_600]!);
+
+    expect(bulk.toArray()).toEqual(incremental.toArray());
+    expect(bulk.positionOf(inserted)).toBe(2_500);
+    expect(bulk.prepareIndexToPosition(1_900, false)).toBe(
+      incremental.prepareIndexToPosition(1_900, false),
+    );
+    expect(bulk.effectIndexBeforePosition(3_000)).toBe(
+      incremental.effectIndexBeforePosition(3_000),
+    );
+  });
+
   it("matches an array model across deterministic B-tree inserts and updates", () => {
     const random = createPrng(13_337);
     const model: SequenceModelItem[] = [];

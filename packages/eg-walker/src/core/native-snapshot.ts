@@ -65,11 +65,20 @@ export class NativeSnapshotCodec {
     }
 
     const body = bytes.subarray(MAGIC_BYTES.byteLength);
-    if (body[0] === 0x7b) {
-      const parsed: unknown = JSON.parse(decoder.decode(body)) as unknown;
-      return validateNativeSnapshot(parsed);
+    const decoded = decodeLengthPrefixedNativeSnapshotBody(body);
+    if (decoded) {
+      return decoded;
     }
 
+    const parsed: unknown = JSON.parse(decoder.decode(body)) as unknown;
+    return validateNativeSnapshot(parsed);
+  }
+}
+
+const decodeLengthPrefixedNativeSnapshotBody = (
+  body: Uint8Array,
+): NativeSnapshot | null => {
+  try {
     const reader = new BinaryReader(body);
     const header = validateNativeSnapshotHeader(
       JSON.parse(
@@ -81,8 +90,13 @@ export class NativeSnapshotCodec {
     const snapshot = createSnapshotWithLazyEventGraph(header, graphSource);
     decodedGraphSourceCache.set(snapshot, graphSource);
     return snapshot;
+  } catch (error) {
+    if (body[0] === 0x7b) {
+      return null;
+    }
+    throw error;
   }
-}
+};
 
 export const consumeDecodedNativeSnapshotGraphSource = (
   snapshot: NativeSnapshot,

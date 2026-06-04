@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { NativeSnapshotCodec } from "../core/native-snapshot";
+import {
+  NATIVE_SNAPSHOT_FORMAT_VERSION,
+  NativeSnapshotCodec,
+  type NativeSnapshot,
+} from "../core/native-snapshot";
 import { EgWalkerReplica } from "../core/replica";
 
 describe("EgWalkerReplica native snapshots", () => {
@@ -106,6 +110,29 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(decoded.text).toBe("Hello snapshot");
     expect(decoded.eventCount).toBe(2);
     expect(restored.getText()).toBe("Hello snapshot");
+  });
+
+  it("should decode length-prefixed binary snapshots whose header length starts with a JSON object byte", () => {
+    // Arrange
+    const codec = new NativeSnapshotCodec();
+    const snapshot: NativeSnapshot = {
+      formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
+      text: "x".repeat(13),
+      initialText: "",
+      currentVersion: [],
+      eventCount: 0,
+      nextSequenceNumber: 0,
+      eventGraph: { version: [], events: [] },
+    };
+    const bytes = codec.encode(snapshot);
+
+    // Act
+    const decoded = codec.decode(bytes);
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Assert
+    expect(bytes[5]).toBe(0x7b);
+    expect(restored.getText()).toBe("x".repeat(13));
   });
 
   it("should not share a decoded snapshot graph across restored replicas", () => {

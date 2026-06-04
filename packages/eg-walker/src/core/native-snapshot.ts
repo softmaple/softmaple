@@ -36,7 +36,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAGIC_BYTES = encoder.encode(NATIVE_SNAPSHOT_FORMAT_VERSION);
 const columnarCodec = new ColumnarEventGraphCodec();
-const decodedGraphCache = new WeakMap<NativeSnapshot, EventGraph>();
+const decodedGraphSourceCache = new WeakMap<NativeSnapshot, () => EventGraph>();
 
 export class NativeSnapshotCodec {
   encode(snapshot: NativeSnapshot): Uint8Array {
@@ -76,24 +76,22 @@ export class NativeSnapshotCodec {
         decoder.decode(reader.readBytes(reader.readVarint())),
       ) as unknown,
     );
-    const graph = columnarCodec.decodeBinary(
-      reader.readBytes(reader.readVarint()),
-    );
-    validateGraphMatchesHeader(graph, header);
-    const snapshot = createSnapshotWithLazyEventGraph(header, graph);
-    decodedGraphCache.set(snapshot, graph);
+    const graphBytes = reader.readBytes(reader.readVarint());
+    const graphSource = createMemoizedGraphSource(graphBytes);
+    const snapshot = createSnapshotWithLazyEventGraph(header, graphSource);
+    decodedGraphSourceCache.set(snapshot, graphSource);
     return snapshot;
   }
 }
 
-export const consumeDecodedNativeSnapshotGraph = (
+export const consumeDecodedNativeSnapshotGraphSource = (
   snapshot: NativeSnapshot,
-): EventGraph | undefined => {
-  const graph = decodedGraphCache.get(snapshot);
-  if (graph) {
-    decodedGraphCache.delete(snapshot);
+): (() => EventGraph) | undefined => {
+  const graphSource = decodedGraphSourceCache.get(snapshot);
+  if (graphSource) {
+    decodedGraphSourceCache.delete(snapshot);
   }
-  return graph;
+  return graphSource;
 };
 
 export const validateNativeSnapshotHeaderOnly = (
@@ -109,15 +107,23 @@ export const validateGraphMatchesSnapshot = (
 
 const createSnapshotWithLazyEventGraph = (
   header: NativeSnapshotHeader,
-  graph: EventGraph,
+  graphSource: () => EventGraph,
 ): NativeSnapshot => {
   let eventGraph: SerializedGraphOutput | null = null;
   return {
     ...header,
     get eventGraph(): SerializedGraphOutput {
-      eventGraph ??= graph.serialize();
+      eventGraph ??= graphSource().serialize();
       return eventGraph;
     },
+  };
+};
+
+const createMemoizedGraphSource = (bytes: Uint8Array): (() => EventGraph) => {
+  let graph: EventGraph | null = null;
+  return () => {
+    graph ??= columnarCodec.decodeBinary(bytes);
+    return graph;
   };
 };
 

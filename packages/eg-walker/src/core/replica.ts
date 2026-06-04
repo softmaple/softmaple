@@ -39,7 +39,7 @@ import {
 } from "./internals/persistence-metadata";
 import { RemoteEventBuffer } from "./internals/remote-event-buffer";
 import {
-  consumeDecodedNativeSnapshotGraph,
+  consumeDecodedNativeSnapshotGraphSource,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
   validateGraphMatchesSnapshot,
@@ -47,11 +47,14 @@ import {
   validateNativeSnapshotHeaderOnly,
 } from "./native-snapshot";
 
+type LazyEventGraphSource = () => EventGraph;
+
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;
   readonly restoredText?: string;
   readonly currentVersion?: Version;
   readonly nextSequenceNumber?: number;
+  readonly lazyEventGraph?: LazyEventGraphSource;
 }
 
 /**
@@ -61,11 +64,12 @@ interface ReplicaConstructorOptions {
 export class EgWalkerReplica {
   private document: string = "";
   private readonly initialText: string;
-  private readonly eventGraph: EventGraph;
+  private eventGraph: EventGraph | null = null;
+  private lazyEventGraph: LazyEventGraphSource | null = null;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
-  private readonly remoteEvents: RemoteEventBuffer;
+  private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
@@ -98,18 +102,19 @@ export class EgWalkerReplica {
     }
     this.document = options.restoredText ?? initialText;
     this.initialText = initialText;
-    this.eventGraph = eventGraph ?? new EventGraph();
-    this.remoteEvents = new RemoteEventBuffer({
-      graph: this.eventGraph,
-      advanceWithEvent: (event) => this.advanceWithEvent(event),
-    });
+    this.eventGraph =
+      eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
+    this.lazyEventGraph = options.lazyEventGraph ?? null;
+    if (this.eventGraph) {
+      this.remoteEvents = this.createRemoteEventBuffer(this.eventGraph);
+    }
     this.currentVersion =
       options.currentVersion !== undefined
         ? new Set(options.currentVersion)
-        : this.eventGraph.getFrontier();
+        : this.ensureEventGraph().getFrontier();
     this.nextSequenceNumber =
       options.nextSequenceNumber ?? this.inferNextSequenceNumber();
-    if (this.eventGraph.getAllEvents().length > 0) {
+    if (this.eventGraph && this.eventGraph.getAllEvents().length > 0) {
       // A prebuilt graph bypasses {@link applyRemoteEvent}, so its event
       // payloads have never been screened by
       // {@link assertRemoteEventWellFormed}. Validate them here before
@@ -123,7 +128,9 @@ export class EgWalkerReplica {
         this.fullReplay(replayOrder);
       }
     }
-    this.maybeAdvanceCheckpoint();
+    if (this.eventGraph) {
+      this.maybeAdvanceCheckpoint();
+    }
   }
 
   /**
@@ -167,14 +174,15 @@ export class EgWalkerReplica {
    * Serialize the document state (text + event graph)
    */
   serialize(): { text: string; eventGraph: SerializedGraphOutput } {
-    writeReplicaMetadata(this.eventGraph, {
+    const graph = this.ensureEventGraph();
+    writeReplicaMetadata(graph, {
       initialText: this.initialText,
       nextSequenceNumber: this.nextSequenceNumber,
     });
 
     return {
       text: this.document,
-      eventGraph: this.eventGraph.serialize(),
+      eventGraph: graph.serialize(),
     };
   }
 
@@ -184,7 +192,8 @@ export class EgWalkerReplica {
    * the engine is restored lazily before the first post-load edit.
    */
   createNativeSnapshot(): NativeSnapshot {
-    writeReplicaMetadata(this.eventGraph, {
+    const graph = this.ensureEventGraph();
+    writeReplicaMetadata(graph, {
       initialText: this.initialText,
       nextSequenceNumber: this.nextSequenceNumber,
     });
@@ -193,11 +202,11 @@ export class EgWalkerReplica {
       formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
       text: this.document,
       initialText: this.initialText,
-      currentVersion: Array.from(this.eventGraph.getFrontier()),
-      eventCount: this.eventGraph.getEventCount(),
+      currentVersion: Array.from(graph.getFrontier()),
+      eventCount: graph.getEventCount(),
       nextSequenceNumber: this.nextSequenceNumber,
-      metadata: this.eventGraph.getMetadata(),
-      eventGraph: this.eventGraph.serialize(),
+      metadata: graph.getMetadata(),
+      eventGraph: graph.serialize(),
     };
   }
 
@@ -232,7 +241,7 @@ export class EgWalkerReplica {
       for (const event of topologicalOrder) {
         replica.applyRemoteEvent(event);
       }
-      replica.eventGraph.setMetadata(graph.getMetadata());
+      replica.ensureEventGraph().setMetadata(graph.getMetadata());
     }
 
     replica.nextSequenceNumber =
@@ -245,35 +254,51 @@ export class EgWalkerReplica {
     snapshot: NativeSnapshot,
     replicaId: string = "native-snapshot-replica",
   ): EgWalkerReplica {
-    const cachedGraph = consumeDecodedNativeSnapshotGraph(snapshot);
-    const { validated, graph } =
-      cachedGraph === undefined
+    const graphSource = consumeDecodedNativeSnapshotGraphSource(snapshot);
+    const { validated, graph, lazyEventGraph } =
+      graphSource === undefined
         ? (() => {
             const fullSnapshot = validateNativeSnapshot(snapshot);
+            const graph = EventGraph.deserialize(fullSnapshot.eventGraph);
+            validateGraphMatchesSnapshot(graph, fullSnapshot);
             return {
               validated: fullSnapshot,
-              graph: EventGraph.deserialize(fullSnapshot.eventGraph),
+              graph,
+              lazyEventGraph: undefined,
             };
           })()
         : {
             validated: validateNativeSnapshotHeaderOnly(snapshot),
-            graph: cachedGraph,
+            graph: undefined,
+            lazyEventGraph: (): EventGraph => {
+              const graph = graphSource();
+              validateGraphMatchesSnapshot(graph, validated);
+              graph.setMetadata({
+                ...graph.getMetadata(),
+                ...(validated.metadata ?? {}),
+                initialText: validated.initialText,
+                nextSequenceNumber: validated.nextSequenceNumber,
+              });
+              return graph;
+            },
           };
-    validateGraphMatchesSnapshot(graph, validated);
     const snapshotFrontier = new Set(validated.currentVersion);
 
-    graph.setMetadata({
-      ...graph.getMetadata(),
-      ...(validated.metadata ?? {}),
-      initialText: validated.initialText,
-      nextSequenceNumber: validated.nextSequenceNumber,
-    });
+    if (graph) {
+      graph.setMetadata({
+        ...graph.getMetadata(),
+        ...(validated.metadata ?? {}),
+        initialText: validated.initialText,
+        nextSequenceNumber: validated.nextSequenceNumber,
+      });
+    }
 
     return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
       skipReplay: true,
       restoredText: validated.text,
       currentVersion: snapshotFrontier,
       nextSequenceNumber: validated.nextSequenceNumber,
+      lazyEventGraph,
     });
   }
 
@@ -297,7 +322,7 @@ export class EgWalkerReplica {
     };
 
     try {
-      this.eventGraph.addEvent(event);
+      this.ensureEventGraph().addEvent(event);
     } catch (error) {
       if (error instanceof EventAlreadyExistsError) {
         return;
@@ -324,7 +349,7 @@ export class EgWalkerReplica {
    */
   applyRemoteEvent(event: GraphEvent): ApplyRemoteEventResult {
     assertRemoteEventWellFormed(event);
-    return this.remoteEvents.tryAccept(event);
+    return this.ensureRemoteEvents().tryAccept(event);
   }
 
   /**
@@ -332,7 +357,7 @@ export class EgWalkerReplica {
    * Exposed primarily for tests and diagnostics.
    */
   getPendingRemoteCount(): number {
-    return this.remoteEvents.pendingCount;
+    return this.remoteEvents?.pendingCount ?? 0;
   }
 
   /**
@@ -380,6 +405,34 @@ export class EgWalkerReplica {
       criticalCheckpointMisses: this.criticalCheckpoints.misses,
       lastReplaySource: this.lastReplaySource,
     };
+  }
+
+  private ensureEventGraph(): EventGraph {
+    if (!this.eventGraph) {
+      const source = this.lazyEventGraph;
+      if (!source) {
+        throw new Error("Replica event graph is unavailable");
+      }
+      const graph = source();
+      this.eventGraph = graph;
+      this.lazyEventGraph = null;
+      this.remoteEvents = this.createRemoteEventBuffer(graph);
+    }
+    return this.eventGraph;
+  }
+
+  private ensureRemoteEvents(): RemoteEventBuffer {
+    if (!this.remoteEvents) {
+      this.remoteEvents = this.createRemoteEventBuffer(this.ensureEventGraph());
+    }
+    return this.remoteEvents;
+  }
+
+  private createRemoteEventBuffer(graph: EventGraph): RemoteEventBuffer {
+    return new RemoteEventBuffer({
+      graph,
+      advanceWithEvent: (event) => this.advanceWithEvent(event),
+    });
   }
 
   /**
@@ -458,7 +511,7 @@ export class EgWalkerReplica {
    * This is what gets saved to disk - no CRDT metadata
    */
   exportEventGraph(): ReadonlyArray<GraphEvent> {
-    return this.eventGraph.getAllEvents();
+    return this.ensureEventGraph().getAllEvents();
   }
 
   /**
@@ -481,6 +534,7 @@ export class EgWalkerReplica {
   private fullReplay(
     replayOrder?: ReadonlyArray<GraphEvent>,
   ): ReadonlyArray<ExternalOperation> {
+    const graph = this.ensureEventGraph();
     // Section 3.4 of the paper: walk the event graph in branch-preserving
     // order so each parent transition matches the engine's current version
     // and triggers the non-conflicting-run fast path instead of forcing a
@@ -489,13 +543,13 @@ export class EgWalkerReplica {
     // (Kahn) so persisted on-disk bytes stay stable.
     this.captureEnginePeakBeforeSwap();
     const sortedEvents =
-      replayOrder ?? this.eventGraph.getBranchPreservingTopologicalOrder();
+      replayOrder ?? graph.getBranchPreservingTopologicalOrder();
     const engine = new EgWalkerEngine();
     const generated = engine.generate(sortedEvents, this.initialText, {
-      eventGraph: this.eventGraph,
+      eventGraph: graph,
     });
     this.document = generated.text;
-    this.currentVersion = this.eventGraph.getFrontier();
+    this.currentVersion = graph.getFrontier();
     this.engine = engine;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
@@ -563,16 +617,18 @@ export class EgWalkerReplica {
     }
 
     if (this.canIncrementallyAdvance(event)) {
-      const applied = this.engine.applyEvent(event, this.eventGraph);
+      const graph = this.ensureEventGraph();
+      const applied = this.engine.applyEvent(event, graph);
       this.document = this.engine.getText();
-      this.currentVersion = this.eventGraph.getFrontier();
+      this.currentVersion = graph.getFrontier();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.maybeAdvanceCheckpoint();
       return toPositionOperation(applied.transformedOperations);
     }
 
-    const checkpoint = this.criticalCheckpoints.pickFor(this.eventGraph);
+    const graph = this.ensureEventGraph();
+    const checkpoint = this.criticalCheckpoints.pickFor(graph);
     if (checkpoint) {
       this.partialReplayFromCheckpoint(checkpoint);
     } else {
@@ -608,7 +664,9 @@ export class EgWalkerReplica {
       return true;
     }
 
-    const parentExpansion = this.eventGraph.expandVersion(event.parentVersion);
+    const parentExpansion = this.ensureEventGraph().expandVersion(
+      event.parentVersion,
+    );
     for (const id of engineVersion) {
       if (!parentExpansion.has(id)) {
         return false;
@@ -618,14 +676,18 @@ export class EgWalkerReplica {
   }
 
   private maybeAdvanceCheckpoint(): void {
-    this.criticalCheckpoints.maybeAdvance(this.eventGraph, this.document);
+    this.criticalCheckpoints.maybeAdvance(
+      this.ensureEventGraph(),
+      this.document,
+    );
   }
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
+    const graph = this.ensureEventGraph();
     this.captureEnginePeakBeforeSwap();
-    const frontier = this.eventGraph.getFrontier();
+    const frontier = graph.getFrontier();
     const result = this.partialReplayer.replayFromCheckpoint(
-      this.eventGraph,
+      graph,
       checkpoint,
       frontier,
     );
@@ -640,7 +702,7 @@ export class EgWalkerReplica {
     let maxSequenceNumber = -1;
     const prefix = `${this.replicaId}:`;
 
-    for (const event of this.eventGraph.getAllEvents()) {
+    for (const event of this.ensureEventGraph().getAllEvents()) {
       if (!event.id.startsWith(prefix)) {
         continue;
       }

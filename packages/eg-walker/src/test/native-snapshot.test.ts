@@ -44,6 +44,26 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().fullReplays).toBe(1);
   });
 
+  it("should continue local editing after restoring from decoded snapshot bytes", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Act
+    restored.insert(2, "C");
+
+    // Assert
+    expect(restored.getText()).toBe("ABC");
+    expect(restored.exportEventGraph().map((event) => event.id)).toContain(
+      "alice:2",
+    );
+    expect(restored.getReplayStats().fullReplays).toBe(1);
+  });
+
   it("should round-trip through the versioned native snapshot codec", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");

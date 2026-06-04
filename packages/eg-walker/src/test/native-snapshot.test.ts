@@ -41,7 +41,7 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.exportEventGraph().map((event) => event.id)).toContain(
       "alice:2",
     );
-    expect(restored.getReplayStats().fullReplays).toBe(1);
+    expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
   it("should continue local editing after restoring from decoded snapshot bytes", () => {
@@ -61,6 +61,31 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.exportEventGraph().map((event) => event.id)).toContain(
       "alice:2",
     );
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+  });
+
+  it("should materialize replay state when remote edits arrive after deferred local edits", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    restored.insert(2, "L");
+
+    // Act
+    restored.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(["alice:1"]),
+      operation: { type: "insert", index: 2, text: "R" },
+      timestamp: 3,
+    });
+
+    // Assert
+    expect(restored.getText().startsWith("AB")).toBe(true);
+    expect(restored.getText()).toContain("L");
+    expect(restored.getText()).toContain("R");
     expect(restored.getReplayStats().fullReplays).toBe(1);
   });
 

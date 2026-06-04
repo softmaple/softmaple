@@ -55,6 +55,7 @@ interface ReplicaConstructorOptions {
   readonly currentVersion?: Version;
   readonly nextSequenceNumber?: number;
   readonly lazyEventGraph?: LazyEventGraphSource;
+  readonly deferLocalReplay?: boolean;
 }
 
 /**
@@ -73,6 +74,7 @@ export class EgWalkerReplica {
   private fullReplayCount = 0;
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
+  private readonly deferLocalReplay: boolean;
   private lastReplaySource: ReplaySource | null = null;
   /**
    * Replica-lifetime high-water mark for the engine's
@@ -102,6 +104,7 @@ export class EgWalkerReplica {
     }
     this.document = options.restoredText ?? initialText;
     this.initialText = initialText;
+    this.deferLocalReplay = options.deferLocalReplay ?? false;
     this.eventGraph =
       eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
     this.lazyEventGraph = options.lazyEventGraph ?? null;
@@ -299,6 +302,7 @@ export class EgWalkerReplica {
       currentVersion: snapshotFrontier,
       nextSequenceNumber: validated.nextSequenceNumber,
       lazyEventGraph,
+      deferLocalReplay: true,
     });
   }
 
@@ -330,8 +334,15 @@ export class EgWalkerReplica {
       throw error;
     }
 
-    // Local edits don't expose the engine's transformed operation; the
-    // caller already knows what they typed. Discard the helper's return.
+    if (this.shouldDeferLocalReplay()) {
+      this.applyPlainDocumentOperation(validatedOperation);
+      this.currentVersion = new Set([event.id]);
+      this.maybeAdvanceCheckpoint();
+      return;
+    }
+
+    // Local edits don't expose the engine's transformed operation; the caller
+    // already knows what they typed. Discard the helper's return.
     this.advanceWithEvent(event);
   }
 
@@ -433,6 +444,21 @@ export class EgWalkerReplica {
       graph,
       advanceWithEvent: (event) => this.advanceWithEvent(event),
     });
+  }
+
+  private shouldDeferLocalReplay(): boolean {
+    return this.deferLocalReplay && this.engine === null;
+  }
+
+  private applyPlainDocumentOperation(operation: ExternalOperation): void {
+    const before = this.document.slice(0, operation.index);
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      const after = this.document.slice(operation.index);
+      this.document = `${before}${operation.text}${after}`;
+      return;
+    }
+    const after = this.document.slice(operation.index + operation.length);
+    this.document = `${before}${after}`;
   }
 
   /**

@@ -17,6 +17,12 @@ export interface CriticalCheckpoint extends ReplayCheckpoint {
   readonly eventCount: number;
 }
 
+export interface CriticalCheckpointSnapshot {
+  readonly version: ReadonlyArray<EventId>;
+  readonly text: string;
+  readonly eventCount: number;
+}
+
 export class CriticalCheckpointStore {
   private checkpoints: ReadonlyArray<CriticalCheckpoint> = [];
   private hitCount = 0;
@@ -45,6 +51,26 @@ export class CriticalCheckpointStore {
    */
   get misses(): number {
     return this.missCount;
+  }
+
+  toSnapshot(): ReadonlyArray<CriticalCheckpointSnapshot> {
+    return this.checkpoints.map((checkpoint) => ({
+      version: Array.from(checkpoint.version),
+      text: checkpoint.text,
+      eventCount: checkpoint.eventCount,
+    }));
+  }
+
+  restore(checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>): void {
+    this.checkpoints = checkpoints
+      .slice(-MAX_RETAINED_CHECKPOINTS)
+      .map((checkpoint) => ({
+        version: new Set(checkpoint.version),
+        text: checkpoint.text,
+        eventCount: checkpoint.eventCount,
+      }));
+    this.hitCount = 0;
+    this.missCount = 0;
   }
 
   maybeAdvance(graph: EventGraph, document: string): void {

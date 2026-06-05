@@ -10,6 +10,7 @@ import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
 import type { EngineSequenceRecord } from "../engine/sequence-records";
 import type { DeleteTargetRecord } from "../engine/eg-walker-engine";
+import type { CriticalCheckpointSnapshot } from "./internals/critical-checkpoint-store";
 
 export const NATIVE_SNAPSHOT_FORMAT_VERSION = "EGWS1" as const;
 
@@ -23,6 +24,7 @@ export interface NativeSnapshot {
   readonly metadata?: Record<string, unknown>;
   readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
   readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  readonly checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>;
   readonly eventGraph: SerializedGraphOutput;
 }
 
@@ -36,6 +38,7 @@ export interface NativeSnapshotHeader {
   readonly metadata?: Record<string, unknown>;
   readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
   readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  readonly checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>;
 }
 
 const encoder = new TextEncoder();
@@ -177,6 +180,7 @@ const headerFromSnapshot = (
   metadata: snapshot.metadata,
   sequenceRecords: snapshot.sequenceRecords,
   deleteTargets: snapshot.deleteTargets,
+  checkpoints: snapshot.checkpoints,
 });
 
 const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
@@ -213,6 +217,7 @@ const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
         : expectRecord(snapshot.metadata, "native snapshot metadata"),
     sequenceRecords: expectSequenceRecords(snapshot.sequenceRecords),
     deleteTargets: expectDeleteTargets(snapshot.deleteTargets),
+    checkpoints: expectCheckpoints(snapshot.checkpoints),
   };
 };
 
@@ -248,6 +253,7 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
       : expectRecord(snapshot.metadata, "native snapshot metadata");
   const sequenceRecords = expectSequenceRecords(snapshot.sequenceRecords);
   const deleteTargets = expectDeleteTargets(snapshot.deleteTargets);
+  const checkpoints = expectCheckpoints(snapshot.checkpoints);
   const eventGraph = expectSerializedGraph(snapshot.eventGraph);
 
   if (eventGraph.events.length !== eventCount) {
@@ -266,6 +272,7 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
     metadata,
     sequenceRecords,
     deleteTargets,
+    checkpoints,
     eventGraph,
   };
 };
@@ -357,6 +364,32 @@ const expectDeleteTarget = (value: unknown): DeleteTargetRecord => {
     targetIds: expectStringArray(
       record.targetIds,
       "native snapshot delete target targetIds",
+    ),
+  };
+};
+
+const expectCheckpoints = (
+  value: unknown,
+): ReadonlyArray<CriticalCheckpointSnapshot> => {
+  if (value === undefined) {
+    return [];
+  }
+  return expectArray(value, "native snapshot checkpoints").map(
+    expectCheckpoint,
+  );
+};
+
+const expectCheckpoint = (value: unknown): CriticalCheckpointSnapshot => {
+  const checkpoint = expectRecord(value, "native snapshot checkpoint");
+  return {
+    version: expectStringArray(
+      checkpoint.version,
+      "native snapshot checkpoint version",
+    ),
+    text: expectString(checkpoint.text, "native snapshot checkpoint text"),
+    eventCount: expectNonNegativeInteger(
+      checkpoint.eventCount,
+      "native snapshot checkpoint eventCount",
     ),
   };
 };

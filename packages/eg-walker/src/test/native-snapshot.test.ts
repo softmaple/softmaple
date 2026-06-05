@@ -127,6 +127,42 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
   });
 
+  it("should restore retained checkpoints for older bounded concurrent remote edits", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    replica.insert(2, "C");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    restored.insert(3, "L");
+
+    // Act
+    restored.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(["alice:1"]),
+      operation: { type: "insert", index: 2, text: "R" },
+      timestamp: 4,
+    });
+
+    // Assert
+    const stats = restored.getReplayStats();
+    expect(decoded.checkpoints.map((checkpoint) => checkpoint.text)).toEqual([
+      "A",
+      "AB",
+      "ABC",
+    ]);
+    expect(restored.getText().startsWith("AB")).toBe(true);
+    expect(restored.getText()).toContain("C");
+    expect(restored.getText()).toContain("L");
+    expect(restored.getText()).toContain("R");
+    expect(stats.fullReplays).toBe(0);
+    expect(stats.partialReplays).toBe(1);
+    expect(stats.criticalCheckpointHits).toBe(1);
+    expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
+  });
+
   it("should round-trip through the versioned native snapshot codec", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");

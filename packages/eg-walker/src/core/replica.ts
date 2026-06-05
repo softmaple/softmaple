@@ -23,6 +23,7 @@ import type {
 import {
   CriticalCheckpointStore,
   type CriticalCheckpoint,
+  type CriticalCheckpointSnapshot,
 } from "./internals/critical-checkpoint-store";
 import {
   assertRemoteEventWellFormed,
@@ -62,6 +63,7 @@ interface ReplicaConstructorOptions {
   readonly deferLocalReplay?: boolean;
   readonly restoredSequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
   readonly restoredEngine?: EgWalkerEngine;
+  readonly restoredCheckpoints?: ReadonlyArray<CriticalCheckpointSnapshot>;
 }
 
 /**
@@ -140,6 +142,9 @@ export class EgWalkerReplica {
       if (!options.skipReplay) {
         this.fullReplay(replayOrder);
       }
+    }
+    if (options.restoredCheckpoints) {
+      this.criticalCheckpoints.restore(options.restoredCheckpoints);
     }
     if (this.eventGraph) {
       this.maybeAdvanceCheckpoint();
@@ -223,6 +228,7 @@ export class EgWalkerReplica {
       metadata: graph.getMetadata(),
       sequenceRecords: engineState.sequenceRecords,
       deleteTargets: engineState.deleteTargets,
+      checkpoints: this.criticalCheckpoints.toSnapshot(),
       eventGraph: graph.serialize(),
     };
   }
@@ -333,6 +339,7 @@ export class EgWalkerReplica {
       deferLocalReplay: restoredEngine === undefined,
       restoredSequenceRecords: validated.sequenceRecords,
       restoredEngine,
+      restoredCheckpoints: validated.checkpoints,
     });
   }
 

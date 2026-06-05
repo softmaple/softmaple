@@ -111,6 +111,10 @@ export class BinaryReader {
 
   constructor(private readonly bytes: Uint8Array) {}
 
+  get remainingByteLength(): number {
+    return this.bytes.length - this.offset;
+  }
+
   readVarint(): number {
     let value = 0;
     let multiplier = 1;

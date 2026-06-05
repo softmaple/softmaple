@@ -5,6 +5,59 @@ export interface DeleteTargetRecord {
   readonly targetIds: ReadonlyArray<EventId>;
 }
 
+export interface CompactDeleteTargetRecords {
+  readonly idTable: ReadonlyArray<EventId>;
+  readonly deleteEventRefs: Uint32Array;
+  readonly targetOffsets: Uint32Array;
+  readonly targetRefs: Uint32Array;
+}
+
+export const recordsFromCompactDeleteTargets = (
+  records: CompactDeleteTargetRecords,
+): DeleteTargetRecord[] =>
+  Array.from({ length: records.deleteEventRefs.length }, (_, index) => {
+    const start = records.targetOffsets[index] ?? 0;
+    const end = records.targetOffsets[index + 1] ?? start;
+    return {
+      deleteEventId: readIdRef(
+        records.idTable,
+        records.deleteEventRefs[index] ?? 0,
+      ),
+      targetIds: Array.from(records.targetRefs.subarray(start, end), (ref) =>
+        readIdRef(records.idTable, ref),
+      ),
+    };
+  });
+
+export function* iterateCompactDeleteTargets(
+  records: CompactDeleteTargetRecords,
+): IterableIterator<DeleteTargetRecord> {
+  for (let index = 0; index < records.deleteEventRefs.length; index++) {
+    const start = records.targetOffsets[index] ?? 0;
+    const end = records.targetOffsets[index + 1] ?? start;
+    yield {
+      deleteEventId: readIdRef(
+        records.idTable,
+        records.deleteEventRefs[index] ?? 0,
+      ),
+      targetIds: Array.from(records.targetRefs.subarray(start, end), (ref) =>
+        readIdRef(records.idTable, ref),
+      ),
+    };
+  }
+}
+
+const readIdRef = (
+  table: ReadonlyArray<EventId>,
+  zeroBasedRef: number,
+): EventId => {
+  const value = table[zeroBasedRef];
+  if (value === undefined) {
+    throw new Error(`Invalid compact delete target id ref ${zeroBasedRef}`);
+  }
+  return value;
+};
+
 /**
  * Bidirectional index of delete events and the CRDT records they targeted.
  *

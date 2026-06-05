@@ -8,8 +8,16 @@ import type {
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
-import type { EngineSequenceRecord } from "../engine/sequence-records";
-import type { DeleteTargetRecord } from "../engine/eg-walker-engine";
+import {
+  recordsFromCompactDeleteTargets,
+  type CompactDeleteTargetRecords,
+  type DeleteTargetRecord,
+} from "../engine/eg-walker-engine";
+import {
+  recordsFromCompactRecords,
+  type CompactEngineSequenceRecords,
+  type EngineSequenceRecord,
+} from "../engine/sequence-records";
 import type { CriticalCheckpointSnapshot } from "./internals/critical-checkpoint-store";
 
 export const NATIVE_SNAPSHOT_FORMAT_VERSION = "EGWS1" as const;
@@ -36,20 +44,22 @@ export interface NativeSnapshotHeader {
   readonly eventCount: number;
   readonly nextSequenceNumber: number;
   readonly metadata?: Record<string, unknown>;
-  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
-  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
   readonly checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>;
 }
 
-type NativeSnapshotWireHeader = Omit<
-  NativeSnapshotHeader,
-  "sequenceRecords" | "deleteTargets"
-> &
-  Partial<Pick<NativeSnapshotHeader, "sequenceRecords" | "deleteTargets">>;
+type NativeSnapshotWireHeader = NativeSnapshotHeader & {
+  readonly sequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets?: ReadonlyArray<DeleteTargetRecord>;
+};
 
 interface NativeRuntimeState {
   readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
   readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+}
+
+export interface NativeSnapshotRuntimeState {
+  readonly sequenceRecords: CompactEngineSequenceRecords;
+  readonly deleteTargets: CompactDeleteTargetRecords;
 }
 
 const encoder = new TextEncoder();
@@ -57,6 +67,10 @@ const decoder = new TextDecoder();
 const MAGIC_BYTES = encoder.encode(NATIVE_SNAPSHOT_FORMAT_VERSION);
 const columnarCodec = new ColumnarEventGraphCodec();
 const decodedGraphSourceCache = new WeakMap<NativeSnapshot, () => EventGraph>();
+const decodedRuntimeStateCache = new WeakMap<
+  NativeSnapshot,
+  NativeSnapshotRuntimeState
+>();
 
 export class NativeSnapshotCodec {
   encode(snapshot: NativeSnapshot): Uint8Array {
@@ -106,32 +120,37 @@ const decodeLengthPrefixedNativeSnapshotBody = (
 ): NativeSnapshot | null => {
   try {
     const reader = new BinaryReader(body);
-    const header = validateNativeSnapshotHeader(
+    const headerPayload = validateNativeSnapshotHeaderPayload(
       JSON.parse(
         decoder.decode(reader.readBytes(reader.readVarint())),
       ) as unknown,
     );
     const graphBytes = reader.readBytes(reader.readVarint());
-    const runtimeState =
+    const compactRuntimeState =
       reader.remainingByteLength === 0
-        ? {
-            sequenceRecords: header.sequenceRecords,
-            deleteTargets: header.deleteTargets,
-          }
+        ? undefined
         : decodeRuntimeState(reader.readBytes(reader.readVarint()));
+    const legacyRuntimeState =
+      compactRuntimeState === undefined
+        ? {
+            sequenceRecords: headerPayload.sequenceRecords,
+            deleteTargets: headerPayload.deleteTargets,
+          }
+        : { sequenceRecords: [], deleteTargets: [] };
     if (reader.remainingByteLength !== 0) {
       throw new Error("Invalid native snapshot: unexpected trailing bytes");
     }
     const graphSource = createMemoizedGraphSource(graphBytes);
-    const snapshot = createSnapshotWithLazyEventGraph(
-      {
-        ...header,
-        sequenceRecords: runtimeState.sequenceRecords,
-        deleteTargets: runtimeState.deleteTargets,
-      },
+    const snapshot = createSnapshotWithLazySections(
+      headerPayload.header,
       graphSource,
+      compactRuntimeState,
+      legacyRuntimeState,
     );
     decodedGraphSourceCache.set(snapshot, graphSource);
+    if (compactRuntimeState) {
+      decodedRuntimeStateCache.set(snapshot, compactRuntimeState);
+    }
     return snapshot;
   } catch (error) {
     if (body[0] === 0x7b) {
@@ -151,6 +170,16 @@ export const consumeDecodedNativeSnapshotGraphSource = (
   return graphSource;
 };
 
+export const consumeDecodedNativeSnapshotRuntimeState = (
+  snapshot: NativeSnapshot,
+): NativeSnapshotRuntimeState | undefined => {
+  const runtimeState = decodedRuntimeStateCache.get(snapshot);
+  if (runtimeState) {
+    decodedRuntimeStateCache.delete(snapshot);
+  }
+  return runtimeState;
+};
+
 export const validateNativeSnapshotHeaderOnly = (
   value: unknown,
 ): NativeSnapshotHeader => validateNativeSnapshotHeader(value);
@@ -162,13 +191,29 @@ export const validateGraphMatchesSnapshot = (
   validateGraphMatchesHeader(graph, snapshot);
 };
 
-const createSnapshotWithLazyEventGraph = (
+const createSnapshotWithLazySections = (
   header: NativeSnapshotHeader,
   graphSource: () => EventGraph,
+  runtimeState: NativeSnapshotRuntimeState | undefined,
+  legacyRuntimeState: NativeRuntimeState,
 ): NativeSnapshot => {
   let eventGraph: SerializedGraphOutput | null = null;
+  let sequenceRecords: ReadonlyArray<EngineSequenceRecord> | null = null;
+  let deleteTargets: ReadonlyArray<DeleteTargetRecord> | null = null;
   return {
     ...header,
+    get sequenceRecords(): ReadonlyArray<EngineSequenceRecord> {
+      sequenceRecords ??= runtimeState
+        ? recordsFromCompactRecords(runtimeState.sequenceRecords)
+        : legacyRuntimeState.sequenceRecords;
+      return sequenceRecords;
+    },
+    get deleteTargets(): ReadonlyArray<DeleteTargetRecord> {
+      deleteTargets ??= runtimeState
+        ? recordsFromCompactDeleteTargets(runtimeState.deleteTargets)
+        : legacyRuntimeState.deleteTargets;
+      return deleteTargets;
+    },
     get eventGraph(): SerializedGraphOutput {
       eventGraph ??= graphSource().serialize();
       return eventGraph;
@@ -228,7 +273,7 @@ const encodeRuntimeState = (state: NativeRuntimeState): Uint8Array => {
   return writer.toUint8Array();
 };
 
-const decodeRuntimeState = (bytes: Uint8Array): NativeRuntimeState => {
+const decodeRuntimeState = (bytes: Uint8Array): NativeSnapshotRuntimeState => {
   const reader = new BinaryReader(bytes);
   const idTable = reader.readStringArray();
   const replicaTable = reader.readStringArray();
@@ -338,77 +383,65 @@ const readSequenceRecords = (
   reader: BinaryReader,
   idTable: ReadonlyArray<string>,
   replicaTable: ReadonlyArray<string>,
-): EngineSequenceRecord[] => {
+): CompactEngineSequenceRecords => {
   const count = reader.readVarint();
-  const ids = expectColumnLength(reader.readVarintArray(), count, "record ids");
+  const idRefs = expectColumnLength(
+    reader.readVarintUint32Array(),
+    count,
+    "record ids",
+  );
   const eventIds = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record event ids",
   );
   const originLefts = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record originLeft ids",
   );
   const originRights = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record originRight ids",
   );
   const everDeleted = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record deletion flags",
   );
   const prepareStates = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record prepare states",
   );
   const runReplicas = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record run replicas",
   );
   const runStartSequences = expectColumnLength(
-    reader.readVarintArray(),
+    reader.readVarintUint32Array(),
     count,
     "record run start sequences",
   );
-  const contents = readContentBlob(reader, count);
+  const content = readContentBlob(reader, count);
 
-  return Array.from({ length: count }, (_, index) => {
-    const runReplica = runReplicas[index]!;
-    return {
-      id: stringAt(idTable, ids[index]!, "record id"),
-      eventId: stringAt(idTable, eventIds[index]!, "record eventId"),
-      content: contents[index]!,
-      originLeft: optionalStringAt(
-        idTable,
-        originLefts[index]!,
-        "record originLeft",
-      ),
-      originRight: optionalStringAt(
-        idTable,
-        originRights[index]!,
-        "record originRight",
-      ),
-      everDeleted: everDeleted[index] === 1,
-      prepareState: prepareStates[index]!,
-      run:
-        runReplica === 0
-          ? null
-          : {
-              replicaId: stringAt(
-                replicaTable,
-                runReplica - 1,
-                "record run replicaId",
-              ),
-              startSequence: runStartSequences[index]!,
-            },
-    };
-  });
+  return {
+    count,
+    idTable,
+    replicaTable,
+    idRefs,
+    eventIdRefs: eventIds,
+    originLeftRefs: originLefts,
+    originRightRefs: originRights,
+    everDeleted,
+    prepareStates,
+    runReplicaRefs: runReplicas,
+    runStartSequences,
+    contentOffsets: content.offsets,
+    contentBytes: content.bytes,
+  };
 };
 
 const writeContentBlob = (
@@ -433,9 +466,9 @@ const writeContentBlob = (
 const readContentBlob = (
   reader: BinaryReader,
   recordCount: number,
-): string[] => {
+): { readonly offsets: Uint32Array; readonly bytes: Uint8Array } => {
   const offsets = expectColumnLength(
-    reader.readZigZagDeltaArray(),
+    Uint32Array.from(reader.readZigZagDeltaArray()),
     recordCount + 1,
     "record content offsets",
   );
@@ -445,7 +478,7 @@ const readContentBlob = (
     );
   }
   const blob = reader.readBytes(reader.readVarint());
-  return Array.from({ length: recordCount }, (_, index) => {
+  for (let index = 0; index < recordCount; index++) {
     const start = offsets[index]!;
     const end = offsets[index + 1]!;
     if (start > end || end > blob.byteLength) {
@@ -453,8 +486,8 @@ const readContentBlob = (
         "Invalid native snapshot runtime state: content offset out of bounds",
       );
     }
-    return decoder.decode(blob.subarray(start, end));
-  });
+  }
+  return { offsets, bytes: blob };
 };
 
 const writeDeleteTargets = (
@@ -474,18 +507,26 @@ const writeDeleteTargets = (
 const readDeleteTargets = (
   reader: BinaryReader,
   idTable: ReadonlyArray<string>,
-): DeleteTargetRecord[] => {
+): CompactDeleteTargetRecords => {
   const count = reader.readVarint();
-  return Array.from({ length: count }, () => ({
-    deleteEventId: stringAt(
-      idTable,
-      reader.readVarint(),
-      "delete target event id",
-    ),
-    targetIds: reader
-      .readVarintArray()
-      .map((id) => stringAt(idTable, id, "delete target item id")),
-  }));
+  const deleteEventRefs = new Uint32Array(count);
+  const targetOffsets = new Uint32Array(count + 1);
+  const targetRefs: number[] = [];
+  for (let index = 0; index < count; index++) {
+    deleteEventRefs[index] = reader.readVarint();
+    const refs = reader.readVarintUint32Array();
+    targetOffsets[index] = targetRefs.length;
+    for (const ref of refs) {
+      targetRefs.push(ref);
+    }
+  }
+  targetOffsets[count] = targetRefs.length;
+  return {
+    idTable,
+    deleteEventRefs,
+    targetOffsets,
+    targetRefs: Uint32Array.from(targetRefs),
+  };
 };
 
 const idIndex = (table: StringTable, value: string): number => {
@@ -507,30 +548,11 @@ const replicaIndex = (table: StringTable, value: string): number => {
   return index;
 };
 
-const stringAt = (
-  table: ReadonlyArray<string>,
-  index: number,
-  label: string,
-): string => {
-  const value = table[index];
-  if (value === undefined) {
-    throw new Error(`Invalid native snapshot runtime state: missing ${label}`);
-  }
-  return value;
-};
-
-const optionalStringAt = (
-  table: ReadonlyArray<string>,
-  encodedIndex: number,
-  label: string,
-): string | null =>
-  encodedIndex === 0 ? null : stringAt(table, encodedIndex - 1, label);
-
 const expectColumnLength = (
-  values: number[],
+  values: Uint32Array,
   expected: number,
   label: string,
-): number[] => {
+): Uint32Array => {
   if (values.length !== expected) {
     throw new Error(
       `Invalid native snapshot runtime state: ${label} has ${values.length} entries but expected ${expected}`,
@@ -539,8 +561,29 @@ const expectColumnLength = (
   return values;
 };
 
-const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
+const validateNativeSnapshotHeaderPayload = (
+  value: unknown,
+): {
+  readonly header: NativeSnapshotHeader;
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+} => {
   const snapshot = expectRecord(value, "native snapshot header");
+  return {
+    header: validateNativeSnapshotHeaderRecord(snapshot),
+    sequenceRecords: expectSequenceRecords(snapshot.sequenceRecords),
+    deleteTargets: expectDeleteTargets(snapshot.deleteTargets),
+  };
+};
+
+const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader =>
+  validateNativeSnapshotHeaderRecord(
+    expectRecord(value, "native snapshot header"),
+  );
+
+const validateNativeSnapshotHeaderRecord = (
+  snapshot: Record<string, unknown>,
+): NativeSnapshotHeader => {
   const formatVersion = snapshot.formatVersion;
   if (formatVersion !== NATIVE_SNAPSHOT_FORMAT_VERSION) {
     throw new Error(
@@ -571,8 +614,6 @@ const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
       snapshot.metadata === undefined
         ? undefined
         : expectRecord(snapshot.metadata, "native snapshot metadata"),
-    sequenceRecords: expectSequenceRecords(snapshot.sequenceRecords),
-    deleteTargets: expectDeleteTargets(snapshot.deleteTargets),
     checkpoints: expectCheckpoints(snapshot.checkpoints),
   };
 };

@@ -45,6 +45,7 @@ import {
 import { RemoteEventBuffer } from "./internals/remote-event-buffer";
 import {
   consumeDecodedNativeSnapshotGraphSource,
+  consumeDecodedNativeSnapshotRuntimeState,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
   validateGraphMatchesSnapshot,
@@ -278,12 +279,17 @@ export class EgWalkerReplica {
     replicaId: string = "native-snapshot-replica",
   ): EgWalkerReplica {
     const graphSource = consumeDecodedNativeSnapshotGraphSource(snapshot);
+    const runtimeState = consumeDecodedNativeSnapshotRuntimeState(snapshot);
     let lazyEventGraph: LazyEventGraphSource | undefined;
     let graph: EventGraph | undefined;
+    let sequenceRecords: ReadonlyArray<EngineSequenceRecord> = [];
+    let deleteTargets: ReadonlyArray<DeleteTargetRecord> = [];
     const validated =
       graphSource === undefined
         ? (() => {
             const fullSnapshot = validateNativeSnapshot(snapshot);
+            sequenceRecords = fullSnapshot.sequenceRecords;
+            deleteTargets = fullSnapshot.deleteTargets;
             graph = EventGraph.deserialize(fullSnapshot.eventGraph);
             validateGraphMatchesSnapshot(graph, fullSnapshot);
             return fullSnapshot;
@@ -303,6 +309,10 @@ export class EgWalkerReplica {
             };
             return header;
           })();
+    if (graphSource !== undefined && runtimeState === undefined) {
+      sequenceRecords = snapshot.sequenceRecords;
+      deleteTargets = snapshot.deleteTargets;
+    }
     const snapshotFrontier = new Set(validated.currentVersion);
 
     if (graph) {
@@ -315,7 +325,11 @@ export class EgWalkerReplica {
     }
 
     let restoredEngine: EgWalkerEngine | undefined;
-    if (validated.sequenceRecords.length > 0) {
+    const hasSequenceRecords =
+      runtimeState !== undefined
+        ? runtimeState.sequenceRecords.count > 0
+        : sequenceRecords.length > 0;
+    if (hasSequenceRecords) {
       graph ??= lazyEventGraph?.();
       lazyEventGraph = undefined;
       if (!graph) {
@@ -325,8 +339,10 @@ export class EgWalkerReplica {
         graph,
         currentVersion: snapshotFrontier,
         text: validated.text,
-        sequenceRecords: validated.sequenceRecords,
-        deleteTargets: validated.deleteTargets,
+        sequenceRecords,
+        compactSequenceRecords: runtimeState?.sequenceRecords,
+        deleteTargets,
+        compactDeleteTargets: runtimeState?.deleteTargets,
       });
     }
 
@@ -337,7 +353,7 @@ export class EgWalkerReplica {
       nextSequenceNumber: validated.nextSequenceNumber,
       lazyEventGraph,
       deferLocalReplay: restoredEngine === undefined,
-      restoredSequenceRecords: validated.sequenceRecords,
+      restoredSequenceRecords: sequenceRecords,
       restoredEngine,
       restoredCheckpoints: validated.checkpoints,
     });

@@ -9,7 +9,7 @@ import { REPLAY_SOURCE } from "../constants/replay-source";
 import { sequenceFromRecords } from "../engine/sequence-records";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { BinaryWriter } from "../graph/internals/binary-io";
+import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
 
 describe("EgWalkerReplica native snapshots", () => {
   it("should restore readable document state without replaying history", () => {
@@ -238,6 +238,78 @@ describe("EgWalkerReplica native snapshots", () => {
     ]);
     expect(sequence.toArray()).toHaveLength(1);
     expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(2);
+  });
+
+  it("should store runtime records outside the JSON header", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    replica.delete(0, 1);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const bytes = codec.encode(replica.createNativeSnapshot());
+    const body = bytes.subarray(NATIVE_SNAPSHOT_FORMAT_VERSION.length);
+    const reader = new BinaryReader(body);
+    const header = JSON.parse(
+      new TextDecoder().decode(reader.readBytes(reader.readVarint())),
+    ) as Record<string, unknown>;
+    const decoded = codec.decode(bytes);
+
+    // Assert
+    expect(header.sequenceRecords).toBeUndefined();
+    expect(header.deleteTargets).toBeUndefined();
+    expect(decoded.sequenceRecords.map((record) => record.content)).toEqual([
+      "A",
+      "B",
+    ]);
+    expect(decoded.deleteTargets).toEqual([
+      { deleteEventId: "alice:2", targetIds: ["alice:0:0"] },
+    ]);
+  });
+
+  it("should decode legacy length-prefixed snapshots with JSON runtime records", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const snapshot = replica.createNativeSnapshot();
+    const header = {
+      formatVersion: snapshot.formatVersion,
+      text: snapshot.text,
+      initialText: snapshot.initialText,
+      currentVersion: snapshot.currentVersion,
+      eventCount: snapshot.eventCount,
+      nextSequenceNumber: snapshot.nextSequenceNumber,
+      metadata: snapshot.metadata,
+      sequenceRecords: snapshot.sequenceRecords,
+      deleteTargets: snapshot.deleteTargets,
+      checkpoints: snapshot.checkpoints,
+    };
+    const body = new BinaryWriter();
+    body.writeBytes(new TextEncoder().encode(JSON.stringify(header)));
+    body.writeBytes(
+      new ColumnarEventGraphCodec().encodeBinary(
+        EventGraph.deserialize(snapshot.eventGraph),
+      ),
+    );
+    const payload = body.toUint8Array();
+    const bytes = new Uint8Array(
+      NATIVE_SNAPSHOT_FORMAT_VERSION.length + payload.byteLength,
+    );
+    bytes.set(new TextEncoder().encode(NATIVE_SNAPSHOT_FORMAT_VERSION));
+    bytes.set(payload, NATIVE_SNAPSHOT_FORMAT_VERSION.length);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const decoded = codec.decode(bytes);
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Assert
+    expect(decoded.sequenceRecords).toEqual(snapshot.sequenceRecords);
+    expect(restored.getText()).toBe("AB");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
   it("should persist delete targets for restored engine resume state", () => {

@@ -41,6 +41,17 @@ export interface NativeSnapshotHeader {
   readonly checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>;
 }
 
+type NativeSnapshotWireHeader = Omit<
+  NativeSnapshotHeader,
+  "sequenceRecords" | "deleteTargets"
+> &
+  Partial<Pick<NativeSnapshotHeader, "sequenceRecords" | "deleteTargets">>;
+
+interface NativeRuntimeState {
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAGIC_BYTES = encoder.encode(NATIVE_SNAPSHOT_FORMAT_VERSION);
@@ -55,6 +66,12 @@ export class NativeSnapshotCodec {
     const body = new BinaryWriter();
     body.writeBytes(encoder.encode(JSON.stringify(header)));
     body.writeBytes(columnarCodec.encodeBinary(graph));
+    body.writeBytes(
+      encodeRuntimeState({
+        sequenceRecords: validated.sequenceRecords,
+        deleteTargets: validated.deleteTargets,
+      }),
+    );
 
     const payload = body.toUint8Array();
     const out = new Uint8Array(MAGIC_BYTES.byteLength + payload.byteLength);
@@ -95,8 +112,25 @@ const decodeLengthPrefixedNativeSnapshotBody = (
       ) as unknown,
     );
     const graphBytes = reader.readBytes(reader.readVarint());
+    const runtimeState =
+      reader.remainingByteLength === 0
+        ? {
+            sequenceRecords: header.sequenceRecords,
+            deleteTargets: header.deleteTargets,
+          }
+        : decodeRuntimeState(reader.readBytes(reader.readVarint()));
+    if (reader.remainingByteLength !== 0) {
+      throw new Error("Invalid native snapshot: unexpected trailing bytes");
+    }
     const graphSource = createMemoizedGraphSource(graphBytes);
-    const snapshot = createSnapshotWithLazyEventGraph(header, graphSource);
+    const snapshot = createSnapshotWithLazyEventGraph(
+      {
+        ...header,
+        sequenceRecords: runtimeState.sequenceRecords,
+        deleteTargets: runtimeState.deleteTargets,
+      },
+      graphSource,
+    );
     decodedGraphSourceCache.set(snapshot, graphSource);
     return snapshot;
   } catch (error) {
@@ -170,7 +204,7 @@ const validateGraphMatchesHeader = (
 
 const headerFromSnapshot = (
   snapshot: NativeSnapshot,
-): NativeSnapshotHeader => ({
+): NativeSnapshotWireHeader => ({
   formatVersion: snapshot.formatVersion,
   text: snapshot.text,
   initialText: snapshot.initialText,
@@ -178,10 +212,332 @@ const headerFromSnapshot = (
   eventCount: snapshot.eventCount,
   nextSequenceNumber: snapshot.nextSequenceNumber,
   metadata: snapshot.metadata,
-  sequenceRecords: snapshot.sequenceRecords,
-  deleteTargets: snapshot.deleteTargets,
   checkpoints: snapshot.checkpoints,
 });
+
+const encodeRuntimeState = (state: NativeRuntimeState): Uint8Array => {
+  const idTable = createIdTable(state);
+  const replicaTable = createReplicaTable(state.sequenceRecords);
+  const writer = new BinaryWriter();
+
+  writer.writeStringArray(idTable.values);
+  writer.writeStringArray(replicaTable.values);
+  writeSequenceRecords(writer, state.sequenceRecords, idTable, replicaTable);
+  writeDeleteTargets(writer, state.deleteTargets, idTable);
+
+  return writer.toUint8Array();
+};
+
+const decodeRuntimeState = (bytes: Uint8Array): NativeRuntimeState => {
+  const reader = new BinaryReader(bytes);
+  const idTable = reader.readStringArray();
+  const replicaTable = reader.readStringArray();
+  const sequenceRecords = readSequenceRecords(reader, idTable, replicaTable);
+  const deleteTargets = readDeleteTargets(reader, idTable);
+  if (reader.remainingByteLength !== 0) {
+    throw new Error("Invalid native snapshot runtime state: trailing bytes");
+  }
+  return { sequenceRecords, deleteTargets };
+};
+
+interface StringTable {
+  readonly values: ReadonlyArray<string>;
+  readonly ids: ReadonlyMap<string, number>;
+}
+
+const createIdTable = (state: NativeRuntimeState): StringTable => {
+  const ids = new Map<string, number>();
+  const values: string[] = [];
+  const add = (value: string | null): void => {
+    if (value === null || ids.has(value)) {
+      return;
+    }
+    ids.set(value, values.length);
+    values.push(value);
+  };
+
+  for (const record of state.sequenceRecords) {
+    add(record.id);
+    add(record.eventId);
+    add(record.originLeft);
+    add(record.originRight);
+  }
+  for (const target of state.deleteTargets) {
+    add(target.deleteEventId);
+    for (const targetId of target.targetIds) {
+      add(targetId);
+    }
+  }
+
+  return { values, ids };
+};
+
+const createReplicaTable = (
+  sequenceRecords: ReadonlyArray<EngineSequenceRecord>,
+): StringTable => {
+  const ids = new Map<string, number>();
+  const values: string[] = [];
+  for (const record of sequenceRecords) {
+    if (record.run === null || ids.has(record.run.replicaId)) {
+      continue;
+    }
+    ids.set(record.run.replicaId, values.length);
+    values.push(record.run.replicaId);
+  }
+  return { values, ids };
+};
+
+const writeSequenceRecords = (
+  writer: BinaryWriter,
+  records: ReadonlyArray<EngineSequenceRecord>,
+  idTable: StringTable,
+  replicaTable: StringTable,
+): void => {
+  writer.writeVarint(records.length);
+  writeMappedVarintArray(writer, records, (record) =>
+    idIndex(idTable, record.id),
+  );
+  writeMappedVarintArray(writer, records, (record) =>
+    idIndex(idTable, record.eventId),
+  );
+  writeMappedVarintArray(writer, records, (record) =>
+    optionalIdIndex(idTable, record.originLeft),
+  );
+  writeMappedVarintArray(writer, records, (record) =>
+    optionalIdIndex(idTable, record.originRight),
+  );
+  writeMappedVarintArray(writer, records, (record) =>
+    record.everDeleted ? 1 : 0,
+  );
+  writeMappedVarintArray(writer, records, (record) => record.prepareState);
+  writeMappedVarintArray(writer, records, (record) =>
+    record.run === null
+      ? 0
+      : replicaIndex(replicaTable, record.run.replicaId) + 1,
+  );
+  writeMappedVarintArray(
+    writer,
+    records,
+    (record) => record.run?.startSequence ?? 0,
+  );
+  writeContentBlob(writer, records);
+};
+
+const writeMappedVarintArray = <T>(
+  writer: BinaryWriter,
+  values: ReadonlyArray<T>,
+  mapValue: (value: T) => number,
+): void => {
+  writer.writeVarint(values.length);
+  for (const value of values) {
+    writer.writeVarint(mapValue(value));
+  }
+};
+
+const readSequenceRecords = (
+  reader: BinaryReader,
+  idTable: ReadonlyArray<string>,
+  replicaTable: ReadonlyArray<string>,
+): EngineSequenceRecord[] => {
+  const count = reader.readVarint();
+  const ids = expectColumnLength(reader.readVarintArray(), count, "record ids");
+  const eventIds = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record event ids",
+  );
+  const originLefts = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record originLeft ids",
+  );
+  const originRights = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record originRight ids",
+  );
+  const everDeleted = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record deletion flags",
+  );
+  const prepareStates = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record prepare states",
+  );
+  const runReplicas = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record run replicas",
+  );
+  const runStartSequences = expectColumnLength(
+    reader.readVarintArray(),
+    count,
+    "record run start sequences",
+  );
+  const contents = readContentBlob(reader, count);
+
+  return Array.from({ length: count }, (_, index) => {
+    const runReplica = runReplicas[index]!;
+    return {
+      id: stringAt(idTable, ids[index]!, "record id"),
+      eventId: stringAt(idTable, eventIds[index]!, "record eventId"),
+      content: contents[index]!,
+      originLeft: optionalStringAt(
+        idTable,
+        originLefts[index]!,
+        "record originLeft",
+      ),
+      originRight: optionalStringAt(
+        idTable,
+        originRights[index]!,
+        "record originRight",
+      ),
+      everDeleted: everDeleted[index] === 1,
+      prepareState: prepareStates[index]!,
+      run:
+        runReplica === 0
+          ? null
+          : {
+              replicaId: stringAt(
+                replicaTable,
+                runReplica - 1,
+                "record run replicaId",
+              ),
+              startSequence: runStartSequences[index]!,
+            },
+    };
+  });
+};
+
+const writeContentBlob = (
+  writer: BinaryWriter,
+  records: ReadonlyArray<EngineSequenceRecord>,
+): void => {
+  const encoded = records.map((record) => encoder.encode(record.content));
+  const offsets: number[] = [0];
+  for (const content of encoded) {
+    offsets.push(offsets[offsets.length - 1]! + content.byteLength);
+  }
+  const blob = new Uint8Array(offsets[offsets.length - 1]!);
+  encoded.reduce((offset, content) => {
+    blob.set(content, offset);
+    return offset + content.byteLength;
+  }, 0);
+
+  writer.writeZigZagDeltaArray(offsets);
+  writer.writeBytes(blob);
+};
+
+const readContentBlob = (
+  reader: BinaryReader,
+  recordCount: number,
+): string[] => {
+  const offsets = expectColumnLength(
+    reader.readZigZagDeltaArray(),
+    recordCount + 1,
+    "record content offsets",
+  );
+  if (offsets[0] !== 0) {
+    throw new Error(
+      "Invalid native snapshot runtime state: content offsets must start at zero",
+    );
+  }
+  const blob = reader.readBytes(reader.readVarint());
+  return Array.from({ length: recordCount }, (_, index) => {
+    const start = offsets[index]!;
+    const end = offsets[index + 1]!;
+    if (start > end || end > blob.byteLength) {
+      throw new Error(
+        "Invalid native snapshot runtime state: content offset out of bounds",
+      );
+    }
+    return decoder.decode(blob.subarray(start, end));
+  });
+};
+
+const writeDeleteTargets = (
+  writer: BinaryWriter,
+  targets: ReadonlyArray<DeleteTargetRecord>,
+  idTable: StringTable,
+): void => {
+  writer.writeVarint(targets.length);
+  for (const target of targets) {
+    writer.writeVarint(idIndex(idTable, target.deleteEventId));
+    writeMappedVarintArray(writer, target.targetIds, (targetId) =>
+      idIndex(idTable, targetId),
+    );
+  }
+};
+
+const readDeleteTargets = (
+  reader: BinaryReader,
+  idTable: ReadonlyArray<string>,
+): DeleteTargetRecord[] => {
+  const count = reader.readVarint();
+  return Array.from({ length: count }, () => ({
+    deleteEventId: stringAt(
+      idTable,
+      reader.readVarint(),
+      "delete target event id",
+    ),
+    targetIds: reader
+      .readVarintArray()
+      .map((id) => stringAt(idTable, id, "delete target item id")),
+  }));
+};
+
+const idIndex = (table: StringTable, value: string): number => {
+  const index = table.ids.get(value);
+  if (index === undefined) {
+    throw new Error(`Missing native snapshot id table entry for ${value}`);
+  }
+  return index;
+};
+
+const optionalIdIndex = (table: StringTable, value: string | null): number =>
+  value === null ? 0 : idIndex(table, value) + 1;
+
+const replicaIndex = (table: StringTable, value: string): number => {
+  const index = table.ids.get(value);
+  if (index === undefined) {
+    throw new Error(`Missing native snapshot replica table entry for ${value}`);
+  }
+  return index;
+};
+
+const stringAt = (
+  table: ReadonlyArray<string>,
+  index: number,
+  label: string,
+): string => {
+  const value = table[index];
+  if (value === undefined) {
+    throw new Error(`Invalid native snapshot runtime state: missing ${label}`);
+  }
+  return value;
+};
+
+const optionalStringAt = (
+  table: ReadonlyArray<string>,
+  encodedIndex: number,
+  label: string,
+): string | null =>
+  encodedIndex === 0 ? null : stringAt(table, encodedIndex - 1, label);
+
+const expectColumnLength = (
+  values: number[],
+  expected: number,
+  label: string,
+): number[] => {
+  if (values.length !== expected) {
+    throw new Error(
+      `Invalid native snapshot runtime state: ${label} has ${values.length} entries but expected ${expected}`,
+    );
+  }
+  return values;
+};
 
 const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
   const snapshot = expectRecord(value, "native snapshot header");

@@ -294,31 +294,44 @@ const writeSequenceRecords = (
   replicaTable: StringTable,
 ): void => {
   writer.writeVarint(records.length);
-  writer.writeVarintArray(records.map((record) => idIndex(idTable, record.id)));
-  writer.writeVarintArray(
-    records.map((record) => idIndex(idTable, record.eventId)),
+  writeMappedVarintArray(writer, records, (record) =>
+    idIndex(idTable, record.id),
   );
-  writer.writeVarintArray(
-    records.map((record) => optionalIdIndex(idTable, record.originLeft)),
+  writeMappedVarintArray(writer, records, (record) =>
+    idIndex(idTable, record.eventId),
   );
-  writer.writeVarintArray(
-    records.map((record) => optionalIdIndex(idTable, record.originRight)),
+  writeMappedVarintArray(writer, records, (record) =>
+    optionalIdIndex(idTable, record.originLeft),
   );
-  writer.writeVarintArray(
-    records.map((record) => (record.everDeleted ? 1 : 0)),
+  writeMappedVarintArray(writer, records, (record) =>
+    optionalIdIndex(idTable, record.originRight),
   );
-  writer.writeVarintArray(records.map((record) => record.prepareState));
-  writer.writeVarintArray(
-    records.map((record) =>
-      record.run === null
-        ? 0
-        : replicaIndex(replicaTable, record.run.replicaId) + 1,
-    ),
+  writeMappedVarintArray(writer, records, (record) =>
+    record.everDeleted ? 1 : 0,
   );
-  writer.writeVarintArray(
-    records.map((record) => record.run?.startSequence ?? 0),
+  writeMappedVarintArray(writer, records, (record) => record.prepareState);
+  writeMappedVarintArray(writer, records, (record) =>
+    record.run === null
+      ? 0
+      : replicaIndex(replicaTable, record.run.replicaId) + 1,
+  );
+  writeMappedVarintArray(
+    writer,
+    records,
+    (record) => record.run?.startSequence ?? 0,
   );
   writeContentBlob(writer, records);
+};
+
+const writeMappedVarintArray = <T>(
+  writer: BinaryWriter,
+  values: ReadonlyArray<T>,
+  mapValue: (value: T) => number,
+): void => {
+  writer.writeVarint(values.length);
+  for (const value of values) {
+    writer.writeVarint(mapValue(value));
+  }
 };
 
 const readSequenceRecords = (
@@ -452,8 +465,8 @@ const writeDeleteTargets = (
   writer.writeVarint(targets.length);
   for (const target of targets) {
     writer.writeVarint(idIndex(idTable, target.deleteEventId));
-    writer.writeVarintArray(
-      target.targetIds.map((targetId) => idIndex(idTable, targetId)),
+    writeMappedVarintArray(writer, target.targetIds, (targetId) =>
+      idIndex(idTable, targetId),
     );
   }
 };

@@ -49,6 +49,16 @@ export class BinaryWriter {
     }
   }
 
+  writeMappedVarintArray(
+    length: number,
+    valueAt: (index: number) => number,
+  ): void {
+    this.writeVarint(length);
+    for (let index = 0; index < length; index++) {
+      this.writeVarint(valueAt(index));
+    }
+  }
+
   writeZigZagVarint(value: number): void {
     if (!Number.isSafeInteger(value)) {
       throw new Error(`Cannot encode invalid zigzag varint value ${value}`);
@@ -152,6 +162,15 @@ export class BinaryReader {
     return Array.from({ length }, () => this.readVarint());
   }
 
+  readVarintUint32Array(): Uint32Array {
+    const length = this.readVarint();
+    const values = new Uint32Array(length);
+    for (let index = 0; index < length; index++) {
+      values[index] = this.readVarint();
+    }
+    return values;
+  }
+
   readZigZagVarint(): number {
     return zigzagDecode(this.readVarint());
   }
@@ -184,5 +203,9 @@ export class BinaryReader {
     const result = this.bytes.slice(this.offset, this.offset + length);
     this.offset += length;
     return result;
+  }
+
+  hasRemaining(): boolean {
+    return this.offset < this.bytes.length;
   }
 }

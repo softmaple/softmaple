@@ -9,7 +9,7 @@ import { REPLAY_SOURCE } from "../constants/replay-source";
 import { sequenceFromRecords } from "../engine/sequence-records";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { BinaryWriter } from "../graph/internals/binary-io";
+import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
 
 describe("EgWalkerReplica native snapshots", () => {
   it("should restore readable document state without replaying history", () => {
@@ -240,6 +240,38 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(2);
   });
 
+  it("should keep runtime records out of the JSON header", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const bytes = codec.encode(replica.createNativeSnapshot());
+    const reader = new BinaryReader(bytes.subarray(5));
+    const header = JSON.parse(
+      new TextDecoder().decode(reader.readBytes(reader.readVarint())),
+    ) as Record<string, unknown>;
+    const decoded = codec.decode(bytes);
+
+    // Assert
+    expect(header.sequenceRecords).toBeUndefined();
+    expect(header.deleteTargets).toBeUndefined();
+    expect(decoded.sequenceRecords).toEqual([
+      {
+        id: "alice:0:0",
+        eventId: "alice:0",
+        content: "AB",
+        originLeft: null,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: { replicaId: "alice", startSequence: 0 },
+      },
+    ]);
+  });
+
   it("should persist delete targets for restored engine resume state", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
@@ -316,6 +348,34 @@ describe("EgWalkerReplica native snapshots", () => {
       configurable: true,
       get: () => {
         throw new Error("eventGraph should stay lazy on fast restore");
+      },
+    });
+
+    // Act
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Assert
+    expect(restored.getText()).toBe("AB");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+  });
+
+  it("should restore decoded snapshots without materializing public runtime record arrays", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    Object.defineProperty(decoded, "sequenceRecords", {
+      configurable: true,
+      get: () => {
+        throw new Error("sequenceRecords should stay compact on fast restore");
+      },
+    });
+    Object.defineProperty(decoded, "deleteTargets", {
+      configurable: true,
+      get: () => {
+        throw new Error("deleteTargets should stay compact on fast restore");
       },
     });
 

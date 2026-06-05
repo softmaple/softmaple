@@ -40,7 +40,7 @@ export function* iterateCompactDeleteTargets(
         records.idTable,
         records.deleteEventRefs[index] ?? 0,
       ),
-      targetIds: Array.from(records.targetRefs.slice(start, end), (ref) =>
+      targetIds: Array.from(records.targetRefs.subarray(start, end), (ref) =>
         readIdRef(records.idTable, ref),
       ),
     };

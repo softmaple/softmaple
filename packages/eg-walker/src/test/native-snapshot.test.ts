@@ -399,6 +399,34 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
+  it("should restore decoded snapshots without materializing public runtime record arrays", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    Object.defineProperty(decoded, "sequenceRecords", {
+      configurable: true,
+      get: () => {
+        throw new Error("sequenceRecords should stay compact on fast restore");
+      },
+    });
+    Object.defineProperty(decoded, "deleteTargets", {
+      configurable: true,
+      get: () => {
+        throw new Error("deleteTargets should stay compact on fast restore");
+      },
+    });
+
+    // Act
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Assert
+    expect(restored.getText()).toBe("AB");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+  });
+
   it("should reject snapshots whose frontier does not match the event graph", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");

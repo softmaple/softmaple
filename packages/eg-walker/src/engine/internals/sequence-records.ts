@@ -2,6 +2,8 @@ import type { EventId } from "../../types";
 import { IndexedSequence } from "../indexed-sequence";
 import type { AugmentedCRDTItem, TypedRun } from "./engine-types";
 
+const decoder = new TextDecoder();
+
 export interface EngineSequenceRecord {
   readonly id: EventId;
   readonly eventId: EventId;
@@ -11,6 +13,22 @@ export interface EngineSequenceRecord {
   readonly everDeleted: boolean;
   readonly prepareState: number;
   readonly run: TypedRun | null;
+}
+
+export interface CompactEngineSequenceRecords {
+  readonly count: number;
+  readonly idTable: ReadonlyArray<EventId>;
+  readonly replicaTable: ReadonlyArray<string>;
+  readonly idRefs: Uint32Array;
+  readonly eventIdRefs: Uint32Array;
+  readonly originLeftRefs: Uint32Array;
+  readonly originRightRefs: Uint32Array;
+  readonly everDeleted: Uint32Array;
+  readonly prepareStates: Uint32Array;
+  readonly runReplicaRefs: Uint32Array;
+  readonly runStartSequences: Uint32Array;
+  readonly contentOffsets: Uint32Array;
+  readonly contentBytes: Uint8Array;
 }
 
 export const recordFromItem = (
@@ -47,6 +65,20 @@ export const itemsFromRecords = (
   records: ReadonlyArray<EngineSequenceRecord>,
 ): AugmentedCRDTItem[] => records.map(itemFromRecord);
 
+export const recordsFromCompactRecords = (
+  records: CompactEngineSequenceRecords,
+): EngineSequenceRecord[] =>
+  Array.from({ length: records.count }, (_, index) =>
+    recordFromCompactRecord(records, index),
+  );
+
+export const itemsFromCompactRecords = (
+  records: CompactEngineSequenceRecords,
+): AugmentedCRDTItem[] =>
+  Array.from({ length: records.count }, (_, index) =>
+    itemFromCompactRecord(records, index),
+  );
+
 export const sequenceFromRecords = (
   records: ReadonlyArray<EngineSequenceRecord>,
 ): IndexedSequence<AugmentedCRDTItem> =>
@@ -61,6 +93,90 @@ const prepareWeight = (item: AugmentedCRDTItem): number =>
 
 const effectWeight = (item: AugmentedCRDTItem): number =>
   item.everDeleted ? 0 : item.content.length;
+
+const recordFromCompactRecord = (
+  records: CompactEngineSequenceRecords,
+  index: number,
+): EngineSequenceRecord => ({
+  id: readIdRef(records.idTable, records.idRefs[index] ?? 0),
+  eventId: readIdRef(records.idTable, records.eventIdRefs[index] ?? 0),
+  content: decodeContent(records, index),
+  originLeft: readOptionalIdRef(
+    records.idTable,
+    records.originLeftRefs[index] ?? 0,
+  ),
+  originRight: readOptionalIdRef(
+    records.idTable,
+    records.originRightRefs[index] ?? 0,
+  ),
+  everDeleted: (records.everDeleted[index] ?? 0) === 1,
+  prepareState: records.prepareStates[index] ?? 0,
+  run: readRun(records, index),
+});
+
+const itemFromCompactRecord = (
+  records: CompactEngineSequenceRecords,
+  index: number,
+): AugmentedCRDTItem => ({
+  id: readIdRef(records.idTable, records.idRefs[index] ?? 0),
+  eventId: readIdRef(records.idTable, records.eventIdRefs[index] ?? 0),
+  content: decodeContent(records, index),
+  originLeft: readOptionalIdRef(
+    records.idTable,
+    records.originLeftRefs[index] ?? 0,
+  ),
+  originRight: readOptionalIdRef(
+    records.idTable,
+    records.originRightRefs[index] ?? 0,
+  ),
+  everDeleted: (records.everDeleted[index] ?? 0) === 1,
+  prepareState: records.prepareStates[index] ?? 0,
+  run: readRun(records, index),
+});
+
+const decodeContent = (
+  records: CompactEngineSequenceRecords,
+  index: number,
+): string => {
+  const start = records.contentOffsets[index] ?? 0;
+  const end = records.contentOffsets[index + 1] ?? start;
+  return decoder.decode(records.contentBytes.subarray(start, end));
+};
+
+const readIdRef = (
+  table: ReadonlyArray<EventId>,
+  zeroBasedRef: number,
+): EventId => {
+  const value = table[zeroBasedRef];
+  if (value === undefined) {
+    throw new Error(`Invalid compact sequence id ref ${zeroBasedRef}`);
+  }
+  return value;
+};
+
+const readOptionalIdRef = (
+  table: ReadonlyArray<EventId>,
+  oneBasedRef: number,
+): EventId | null =>
+  oneBasedRef === 0 ? null : readIdRef(table, oneBasedRef - 1);
+
+const readRun = (
+  records: CompactEngineSequenceRecords,
+  index: number,
+): TypedRun | null => {
+  const replicaRef = records.runReplicaRefs[index] ?? 0;
+  if (replicaRef === 0) {
+    return null;
+  }
+  const replicaId = records.replicaTable[replicaRef - 1];
+  if (replicaId === undefined) {
+    throw new Error(`Invalid compact sequence replica ref ${replicaRef}`);
+  }
+  return {
+    replicaId,
+    startSequence: records.runStartSequences[index] ?? 0,
+  };
+};
 
 const cloneRun = (run: TypedRun | null): TypedRun | null =>
   run === null

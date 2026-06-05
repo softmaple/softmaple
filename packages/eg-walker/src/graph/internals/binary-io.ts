@@ -156,6 +156,15 @@ export class BinaryReader {
     return Array.from({ length }, () => this.readVarint());
   }
 
+  readVarintUint32Array(): Uint32Array {
+    const length = this.readVarint();
+    const values = new Uint32Array(length);
+    for (let index = 0; index < length; index++) {
+      values[index] = this.readVarint();
+    }
+    return values;
+  }
+
   readZigZagVarint(): number {
     return zigzagDecode(this.readVarint());
   }

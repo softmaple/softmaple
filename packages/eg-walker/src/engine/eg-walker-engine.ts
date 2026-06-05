@@ -5,6 +5,8 @@ import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
 import {
   DeleteTargetIndex,
+  iterateCompactDeleteTargets,
+  type CompactDeleteTargetRecords,
   type DeleteTargetRecord,
 } from "./internals/delete-target-index";
 import {
@@ -28,8 +30,10 @@ import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import { RecordSplitter } from "./internals/record-splitter";
 import {
+  itemsFromCompactRecords,
   itemsFromRecords,
   recordsFromItems,
+  type CompactEngineSequenceRecords,
   type EngineSequenceRecord,
 } from "./internals/sequence-records";
 import { spliceText } from "./internals/text-utils";
@@ -40,14 +44,20 @@ export type {
   GenerateOptions,
   IncrementalApplyResult,
 } from "./internals/engine-types";
-export type { DeleteTargetRecord } from "./internals/delete-target-index";
+export {
+  recordsFromCompactDeleteTargets,
+  type CompactDeleteTargetRecords,
+  type DeleteTargetRecord,
+} from "./internals/delete-target-index";
 
 export interface EngineSnapshotState {
   readonly graph: EventGraph;
   readonly currentVersion: ReadonlySet<EventId>;
   readonly text: string;
-  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
-  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  readonly sequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
+  readonly compactSequenceRecords?: CompactEngineSequenceRecords;
+  readonly deleteTargets?: ReadonlyArray<DeleteTargetRecord>;
+  readonly compactDeleteTargets?: CompactDeleteTargetRecords;
 }
 
 /**
@@ -193,7 +203,9 @@ export class EgWalkerEngine {
   }
 
   private restoreSnapshotState(state: EngineSnapshotState): void {
-    const items = itemsFromRecords(state.sequenceRecords);
+    const items = state.compactSequenceRecords
+      ? itemsFromCompactRecords(state.compactSequenceRecords)
+      : itemsFromRecords(state.sequenceRecords ?? []);
 
     this.eventsById.clear();
     this.eventOrder.clear();
@@ -224,7 +236,10 @@ export class EgWalkerEngine {
       this.trackEventItems(item);
     }
 
-    for (const target of state.deleteTargets) {
+    const deleteTargets = state.compactDeleteTargets
+      ? iterateCompactDeleteTargets(state.compactDeleteTargets)
+      : (state.deleteTargets ?? []);
+    for (const target of deleteTargets) {
       this.deleteTargets.record(target.deleteEventId, target.targetIds);
     }
   }

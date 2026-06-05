@@ -325,11 +325,10 @@ export class EgWalkerReplica {
     }
 
     let restoredEngine: EgWalkerEngine | undefined;
-    const hasCompactSequenceRecords =
-      runtimeState !== undefined && runtimeState.sequenceRecords.count > 0;
-    const hasSequenceRecords = hasCompactSequenceRecords
-      ? true
-      : sequenceRecords.length > 0;
+    const hasSequenceRecords =
+      runtimeState !== undefined
+        ? runtimeState.sequenceRecords.count > 0
+        : sequenceRecords.length > 0;
     if (hasSequenceRecords) {
       graph ??= lazyEventGraph?.();
       lazyEventGraph = undefined;

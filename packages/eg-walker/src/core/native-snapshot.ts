@@ -9,6 +9,7 @@ import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
 import type { EngineSequenceRecord } from "../engine/sequence-records";
+import type { DeleteTargetRecord } from "../engine/eg-walker-engine";
 
 export const NATIVE_SNAPSHOT_FORMAT_VERSION = "EGWS1" as const;
 
@@ -21,6 +22,7 @@ export interface NativeSnapshot {
   readonly nextSequenceNumber: number;
   readonly metadata?: Record<string, unknown>;
   readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
   readonly eventGraph: SerializedGraphOutput;
 }
 
@@ -33,6 +35,7 @@ export interface NativeSnapshotHeader {
   readonly nextSequenceNumber: number;
   readonly metadata?: Record<string, unknown>;
   readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
 }
 
 const encoder = new TextEncoder();
@@ -173,6 +176,7 @@ const headerFromSnapshot = (
   nextSequenceNumber: snapshot.nextSequenceNumber,
   metadata: snapshot.metadata,
   sequenceRecords: snapshot.sequenceRecords,
+  deleteTargets: snapshot.deleteTargets,
 });
 
 const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
@@ -208,6 +212,7 @@ const validateNativeSnapshotHeader = (value: unknown): NativeSnapshotHeader => {
         ? undefined
         : expectRecord(snapshot.metadata, "native snapshot metadata"),
     sequenceRecords: expectSequenceRecords(snapshot.sequenceRecords),
+    deleteTargets: expectDeleteTargets(snapshot.deleteTargets),
   };
 };
 
@@ -242,6 +247,7 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
       ? undefined
       : expectRecord(snapshot.metadata, "native snapshot metadata");
   const sequenceRecords = expectSequenceRecords(snapshot.sequenceRecords);
+  const deleteTargets = expectDeleteTargets(snapshot.deleteTargets);
   const eventGraph = expectSerializedGraph(snapshot.eventGraph);
 
   if (eventGraph.events.length !== eventCount) {
@@ -259,6 +265,7 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
     nextSequenceNumber,
     metadata,
     sequenceRecords,
+    deleteTargets,
     eventGraph,
   };
 };
@@ -325,6 +332,31 @@ const expectTypedRun = (
     startSequence: expectNonNegativeInteger(
       run.startSequence,
       `${label}.startSequence`,
+    ),
+  };
+};
+
+const expectDeleteTargets = (
+  value: unknown,
+): ReadonlyArray<DeleteTargetRecord> => {
+  if (value === undefined) {
+    return [];
+  }
+  return expectArray(value, "native snapshot deleteTargets").map(
+    expectDeleteTarget,
+  );
+};
+
+const expectDeleteTarget = (value: unknown): DeleteTargetRecord => {
+  const record = expectRecord(value, "native snapshot delete target");
+  return {
+    deleteEventId: expectString(
+      record.deleteEventId,
+      "native snapshot delete target deleteEventId",
+    ),
+    targetIds: expectStringArray(
+      record.targetIds,
+      "native snapshot delete target targetIds",
     ),
   };
 };

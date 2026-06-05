@@ -135,6 +135,13 @@ export class IndexedSequence<T extends object> {
     this.root = null;
   }
 
+  resetFromRecords(records: ReadonlyArray<T>): void {
+    this.clear();
+    if (records.length > 0) {
+      this.bulkLoad(records);
+    }
+  }
+
   insert(index: number, item: T): void {
     if (index < 0 || index > this.length) {
       throw new Error(`Insert index ${index} out of bounds`);

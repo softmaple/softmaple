@@ -3,7 +3,10 @@ import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
-import { DeleteTargetIndex } from "./internals/delete-target-index";
+import {
+  DeleteTargetIndex,
+  type DeleteTargetRecord,
+} from "./internals/delete-target-index";
 import {
   applyDelete,
   type DeleteHandlerDeps,
@@ -25,6 +28,7 @@ import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import { RecordSplitter } from "./internals/record-splitter";
 import {
+  itemsFromRecords,
   recordsFromItems,
   type EngineSequenceRecord,
 } from "./internals/sequence-records";
@@ -36,6 +40,15 @@ export type {
   GenerateOptions,
   IncrementalApplyResult,
 } from "./internals/engine-types";
+export type { DeleteTargetRecord } from "./internals/delete-target-index";
+
+export interface EngineSnapshotState {
+  readonly graph: EventGraph;
+  readonly currentVersion: ReadonlySet<EventId>;
+  readonly text: string;
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+}
 
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
@@ -110,6 +123,12 @@ export class EgWalkerEngine {
     };
   }
 
+  static fromSnapshotState(state: EngineSnapshotState): EgWalkerEngine {
+    const engine = new EgWalkerEngine();
+    engine.restoreSnapshotState(state);
+    return engine;
+  }
+
   /**
    * Apply a single new event on top of the current engine state without
    * resetting. The caller must ensure {@link graph} is the up-to-date event
@@ -167,6 +186,47 @@ export class EgWalkerEngine {
   getSequenceRecords(): EngineSequenceRecord[] {
     this.flushPendingInsert();
     return recordsFromItems(this.sequence.toArray());
+  }
+
+  getDeleteTargetRecords(): DeleteTargetRecord[] {
+    return this.deleteTargets.entries();
+  }
+
+  private restoreSnapshotState(state: EngineSnapshotState): void {
+    const items = itemsFromRecords(state.sequenceRecords);
+
+    this.eventsById.clear();
+    this.eventOrder.clear();
+    this.graph = state.graph;
+    this.eventItems.clear();
+    this.deleteTargets.clear();
+    this.itemsById.clear();
+    this.originLeftIndex.clear();
+    this.sequence.resetFromRecords(items);
+    this.currentVersion = new Set(state.currentVersion);
+    this.resultingText = state.text;
+    this.pendingInsert.reset();
+    this.retreatCount = 0;
+    this.advanceCount = 0;
+    this.nonConflictingRunCount = 0;
+    this.fullReplayCount = 0;
+    this.peakSequenceRecordCount = items.length;
+    this.placeholderCounter = inferNextPlaceholderCounter(items);
+
+    state.graph.getTopologicalOrder().forEach((event, index) => {
+      this.eventsById.set(event.id, event);
+      this.eventOrder.set(event.id, index);
+    });
+
+    for (const item of items) {
+      this.itemsById.set(item.id, item);
+      this.originLeftIndex.track(item.id, item.originLeft);
+      this.trackEventItems(item);
+    }
+
+    for (const target of state.deleteTargets) {
+      this.deleteTargets.record(target.deleteEventId, target.targetIds);
+    }
   }
 
   private processEvent(event: GraphEvent): ExternalOperation[] {
@@ -317,6 +377,31 @@ export class EgWalkerEngine {
 
   private nextPlaceholderId(): EventId {
     return `${PLACEHOLDER_ID_PREFIX}${this.placeholderCounter++}`;
+  }
+
+  private trackEventItems(item: AugmentedCRDTItem): void {
+    if (item.run !== null) {
+      for (let offset = 0; offset < item.content.length; offset++) {
+        this.addEventItem(
+          `${item.run.replicaId}:${item.run.startSequence + offset}`,
+          item.id,
+        );
+      }
+      return;
+    }
+
+    if (item.eventId !== PLACEHOLDER_EVENT_ID) {
+      this.addEventItem(item.eventId, item.id);
+    }
+  }
+
+  private addEventItem(eventId: EventId, itemId: EventId): void {
+    const items = this.eventItems.get(eventId);
+    if (items) {
+      items.push(itemId);
+      return;
+    }
+    this.eventItems.set(eventId, [itemId]);
   }
 
   private apply(event: GraphEvent): ExternalOperation[] {
@@ -487,3 +572,19 @@ export class EgWalkerEngine {
     return item;
   }
 }
+
+const inferNextPlaceholderCounter = (
+  items: ReadonlyArray<AugmentedCRDTItem>,
+): number => {
+  let next = 0;
+  for (const item of items) {
+    if (!item.id.startsWith(PLACEHOLDER_ID_PREFIX)) {
+      continue;
+    }
+    const suffix = Number(item.id.slice(PLACEHOLDER_ID_PREFIX.length));
+    if (Number.isInteger(suffix) && suffix >= next) {
+      next = suffix + 1;
+    }
+  }
+  return next;
+};

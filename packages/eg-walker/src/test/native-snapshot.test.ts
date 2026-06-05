@@ -5,6 +5,7 @@ import {
   NativeSnapshotCodec,
 } from "../core/native-snapshot";
 import { EgWalkerReplica } from "../core/replica";
+import { REPLAY_SOURCE } from "../constants/replay-source";
 import { sequenceFromRecords } from "../engine/sequence-records";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
@@ -71,7 +72,33 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
-  it("should materialize replay state when remote edits arrive after deferred local edits", () => {
+  it("should incrementally apply remote edits after local edits on a restored snapshot", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    restored.insert(2, "L");
+
+    // Act
+    restored.applyRemoteEvent({
+      id: "bob:0",
+      parentVersion: new Set(["alice:2"]),
+      operation: { type: "insert", index: 3, text: "R" },
+      timestamp: 3,
+    });
+
+    // Assert
+    expect(restored.getText().startsWith("AB")).toBe(true);
+    expect(restored.getText()).toContain("L");
+    expect(restored.getText()).toContain("R");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+    expect(restored.getReplayStats().incrementalApplies).toBe(2);
+  });
+
+  it("should partial replay bounded concurrent remote edits after snapshot restore", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
     replica.insert(0, "A");
@@ -90,10 +117,14 @@ describe("EgWalkerReplica native snapshots", () => {
     });
 
     // Assert
+    const stats = restored.getReplayStats();
     expect(restored.getText().startsWith("AB")).toBe(true);
     expect(restored.getText()).toContain("L");
     expect(restored.getText()).toContain("R");
-    expect(restored.getReplayStats().fullReplays).toBe(1);
+    expect(stats.fullReplays).toBe(0);
+    expect(stats.partialReplays).toBe(1);
+    expect(stats.criticalCheckpointHits).toBe(1);
+    expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
   });
 
   it("should round-trip through the versioned native snapshot codec", () => {
@@ -171,6 +202,29 @@ describe("EgWalkerReplica native snapshots", () => {
     ]);
     expect(sequence.toArray()).toHaveLength(1);
     expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(2);
+  });
+
+  it("should persist delete targets for restored engine resume state", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    replica.delete(0, 1);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    restored.insert(1, "C");
+    const editedSnapshot = restored.createNativeSnapshot();
+
+    // Assert
+    expect(decoded.deleteTargets).toEqual([
+      { deleteEventId: "alice:2", targetIds: ["alice:0:0"] },
+    ]);
+    expect(restored.getText()).toBe("BC");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+    expect(editedSnapshot.deleteTargets).toEqual(decoded.deleteTargets);
   });
 
   it("should carry sequence records through read-only snapshot restore and refresh them after local edits", () => {

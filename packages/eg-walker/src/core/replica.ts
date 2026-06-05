@@ -30,7 +30,10 @@ import {
   createDocumentState,
 } from "./invariants";
 import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
-import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import {
+  EgWalkerEngine,
+  type DeleteTargetRecord,
+} from "../engine/eg-walker-engine";
 import type { EngineSequenceRecord } from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { PartialReplayManager } from "../engine/partial-replay";
@@ -58,6 +61,7 @@ interface ReplicaConstructorOptions {
   readonly lazyEventGraph?: LazyEventGraphSource;
   readonly deferLocalReplay?: boolean;
   readonly restoredSequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
+  readonly restoredEngine?: EgWalkerEngine;
 }
 
 /**
@@ -110,6 +114,7 @@ export class EgWalkerReplica {
     this.initialText = initialText;
     this.deferLocalReplay = options.deferLocalReplay ?? false;
     this.restoredSequenceRecords = options.restoredSequenceRecords ?? null;
+    this.engine = options.restoredEngine ?? null;
     this.eventGraph =
       eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
     this.lazyEventGraph = options.lazyEventGraph ?? null;
@@ -206,6 +211,8 @@ export class EgWalkerReplica {
       nextSequenceNumber: this.nextSequenceNumber,
     });
 
+    const engineState = this.engineStateForSnapshot(graph);
+
     return {
       formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
       text: this.document,
@@ -214,7 +221,8 @@ export class EgWalkerReplica {
       eventCount: graph.getEventCount(),
       nextSequenceNumber: this.nextSequenceNumber,
       metadata: graph.getMetadata(),
-      sequenceRecords: this.sequenceRecordsForSnapshot(graph),
+      sequenceRecords: engineState.sequenceRecords,
+      deleteTargets: engineState.deleteTargets,
       eventGraph: graph.serialize(),
     };
   }
@@ -264,33 +272,31 @@ export class EgWalkerReplica {
     replicaId: string = "native-snapshot-replica",
   ): EgWalkerReplica {
     const graphSource = consumeDecodedNativeSnapshotGraphSource(snapshot);
-    const { validated, graph, lazyEventGraph } =
+    let lazyEventGraph: LazyEventGraphSource | undefined;
+    let graph: EventGraph | undefined;
+    const validated =
       graphSource === undefined
         ? (() => {
             const fullSnapshot = validateNativeSnapshot(snapshot);
-            const graph = EventGraph.deserialize(fullSnapshot.eventGraph);
+            graph = EventGraph.deserialize(fullSnapshot.eventGraph);
             validateGraphMatchesSnapshot(graph, fullSnapshot);
-            return {
-              validated: fullSnapshot,
-              graph,
-              lazyEventGraph: undefined,
-            };
+            return fullSnapshot;
           })()
-        : {
-            validated: validateNativeSnapshotHeaderOnly(snapshot),
-            graph: undefined,
-            lazyEventGraph: (): EventGraph => {
+        : (() => {
+            const header = validateNativeSnapshotHeaderOnly(snapshot);
+            lazyEventGraph = (): EventGraph => {
               const graph = graphSource();
-              validateGraphMatchesSnapshot(graph, validated);
+              validateGraphMatchesSnapshot(graph, header);
               graph.setMetadata({
                 ...graph.getMetadata(),
-                ...(validated.metadata ?? {}),
-                initialText: validated.initialText,
-                nextSequenceNumber: validated.nextSequenceNumber,
+                ...(header.metadata ?? {}),
+                initialText: header.initialText,
+                nextSequenceNumber: header.nextSequenceNumber,
               });
               return graph;
-            },
-          };
+            };
+            return header;
+          })();
     const snapshotFrontier = new Set(validated.currentVersion);
 
     if (graph) {
@@ -302,14 +308,31 @@ export class EgWalkerReplica {
       });
     }
 
+    let restoredEngine: EgWalkerEngine | undefined;
+    if (validated.sequenceRecords.length > 0) {
+      graph ??= lazyEventGraph?.();
+      lazyEventGraph = undefined;
+      if (!graph) {
+        throw new Error("Invalid native snapshot: event graph is unavailable");
+      }
+      restoredEngine = EgWalkerEngine.fromSnapshotState({
+        graph,
+        currentVersion: snapshotFrontier,
+        text: validated.text,
+        sequenceRecords: validated.sequenceRecords,
+        deleteTargets: validated.deleteTargets,
+      });
+    }
+
     return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
       skipReplay: true,
       restoredText: validated.text,
       currentVersion: snapshotFrontier,
       nextSequenceNumber: validated.nextSequenceNumber,
       lazyEventGraph,
-      deferLocalReplay: true,
+      deferLocalReplay: restoredEngine === undefined,
       restoredSequenceRecords: validated.sequenceRecords,
+      restoredEngine,
     });
   }
 
@@ -594,17 +617,24 @@ export class EgWalkerReplica {
     return generated.transformedOperations;
   }
 
-  private sequenceRecordsForSnapshot(
-    graph: EventGraph,
-  ): ReadonlyArray<EngineSequenceRecord> {
+  private engineStateForSnapshot(graph: EventGraph): {
+    readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+    readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  } {
     if (this.engine) {
-      return this.engine.getSequenceRecords();
+      return {
+        sequenceRecords: this.engine.getSequenceRecords(),
+        deleteTargets: this.engine.getDeleteTargetRecords(),
+      };
     }
     if (this.restoredSequenceRecords) {
-      return this.restoredSequenceRecords;
+      return {
+        sequenceRecords: this.restoredSequenceRecords,
+        deleteTargets: [],
+      };
     }
     if (graph.getEventCount() === 0) {
-      return [];
+      return { sequenceRecords: [], deleteTargets: [] };
     }
 
     const engine = new EgWalkerEngine();
@@ -613,7 +643,12 @@ export class EgWalkerReplica {
       this.initialText,
       { eventGraph: graph },
     );
-    return generated.text === this.document ? engine.getSequenceRecords() : [];
+    return generated.text === this.document
+      ? {
+          sequenceRecords: engine.getSequenceRecords(),
+          deleteTargets: engine.getDeleteTargetRecords(),
+        }
+      : { sequenceRecords: [], deleteTargets: [] };
   }
 
   /**

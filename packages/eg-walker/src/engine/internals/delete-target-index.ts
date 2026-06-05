@@ -1,5 +1,10 @@
 import type { EventId } from "../../types";
 
+export interface DeleteTargetRecord {
+  readonly deleteEventId: EventId;
+  readonly targetIds: ReadonlyArray<EventId>;
+}
+
 /**
  * Bidirectional index of delete events and the CRDT records they targeted.
  *
@@ -21,6 +26,13 @@ export class DeleteTargetIndex {
   clear(): void {
     this.targets.clear();
     this.byItem.clear();
+  }
+
+  entries(): DeleteTargetRecord[] {
+    return Array.from(this.targets, ([deleteEventId, targetIds]) => ({
+      deleteEventId,
+      targetIds: [...targetIds],
+    }));
   }
 
   targetsOf(deleteEventId: EventId): ReadonlyArray<EventId> | undefined {

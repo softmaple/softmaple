@@ -65,6 +65,7 @@ export interface NativeSnapshotRuntimeState {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAGIC_BYTES = encoder.encode(NATIVE_SNAPSHOT_FORMAT_VERSION);
+const RUNTIME_STATE_MAGIC = encoder.encode("EGWR2");
 const columnarCodec = new ColumnarEventGraphCodec();
 const decodedGraphSourceCache = new WeakMap<NativeSnapshot, () => EventGraph>();
 const decodedRuntimeStateCache = new WeakMap<
@@ -270,19 +271,72 @@ const encodeRuntimeState = (state: NativeRuntimeState): Uint8Array => {
   writeSequenceRecords(writer, state.sequenceRecords, idTable, replicaTable);
   writeDeleteTargets(writer, state.deleteTargets, idTable);
 
-  return writer.toUint8Array();
+  const payload = writer.toUint8Array();
+  const out = new Uint8Array(RUNTIME_STATE_MAGIC.byteLength + payload.length);
+  out.set(RUNTIME_STATE_MAGIC, 0);
+  out.set(payload, RUNTIME_STATE_MAGIC.byteLength);
+  return out;
 };
 
 const decodeRuntimeState = (bytes: Uint8Array): NativeSnapshotRuntimeState => {
+  if (hasPrefix(bytes, RUNTIME_STATE_MAGIC)) {
+    try {
+      return decodeVersionedRuntimeState(
+        bytes.subarray(RUNTIME_STATE_MAGIC.byteLength),
+      );
+    } catch {
+      // Legacy runtime-state is unversioned and can legally begin with EGWR2.
+    }
+  }
+  return decodeLegacyRuntimeState(bytes);
+};
+
+const decodeVersionedRuntimeState = (
+  bytes: Uint8Array,
+): NativeSnapshotRuntimeState => {
   const reader = new BinaryReader(bytes);
   const idTable = reader.readStringArray();
   const replicaTable = reader.readStringArray();
-  const sequenceRecords = readSequenceRecords(reader, idTable, replicaTable);
-  const deleteTargets = readDeleteTargets(reader, idTable);
+  const sequenceRecords = readDeltaSequenceRecords(
+    reader,
+    idTable,
+    replicaTable,
+  );
+  const deleteTargets = readDeltaDeleteTargets(reader, idTable);
   if (reader.remainingByteLength !== 0) {
     throw new Error("Invalid native snapshot runtime state: trailing bytes");
   }
   return { sequenceRecords, deleteTargets };
+};
+
+const decodeLegacyRuntimeState = (
+  bytes: Uint8Array,
+): NativeSnapshotRuntimeState => {
+  const reader = new BinaryReader(bytes);
+  const idTable = reader.readStringArray();
+  const replicaTable = reader.readStringArray();
+  const sequenceRecords = readLegacySequenceRecords(
+    reader,
+    idTable,
+    replicaTable,
+  );
+  const deleteTargets = readLegacyDeleteTargets(reader, idTable);
+  if (reader.remainingByteLength !== 0) {
+    throw new Error("Invalid native snapshot runtime state: trailing bytes");
+  }
+  return { sequenceRecords, deleteTargets };
+};
+
+const hasPrefix = (bytes: Uint8Array, prefix: Uint8Array): boolean => {
+  if (bytes.byteLength < prefix.byteLength) {
+    return false;
+  }
+  for (let index = 0; index < prefix.byteLength; index++) {
+    if (bytes[index] !== prefix[index]) {
+      return false;
+    }
+  }
+  return true;
 };
 
 interface StringTable {
@@ -339,28 +393,28 @@ const writeSequenceRecords = (
   replicaTable: StringTable,
 ): void => {
   writer.writeVarint(records.length);
-  writeMappedVarintArray(writer, records, (record) =>
+  writeMappedZigZagDeltaArray(writer, records, (record) =>
     idIndex(idTable, record.id),
   );
-  writeMappedVarintArray(writer, records, (record) =>
+  writeMappedZigZagDeltaArray(writer, records, (record) =>
     idIndex(idTable, record.eventId),
   );
-  writeMappedVarintArray(writer, records, (record) =>
+  writeMappedZigZagDeltaArray(writer, records, (record) =>
     optionalIdIndex(idTable, record.originLeft),
   );
-  writeMappedVarintArray(writer, records, (record) =>
+  writeMappedZigZagDeltaArray(writer, records, (record) =>
     optionalIdIndex(idTable, record.originRight),
   );
   writeMappedVarintArray(writer, records, (record) =>
     record.everDeleted ? 1 : 0,
   );
   writeMappedVarintArray(writer, records, (record) => record.prepareState);
-  writeMappedVarintArray(writer, records, (record) =>
+  writeMappedZigZagDeltaArray(writer, records, (record) =>
     record.run === null
       ? 0
       : replicaIndex(replicaTable, record.run.replicaId) + 1,
   );
-  writeMappedVarintArray(
+  writeMappedZigZagDeltaArray(
     writer,
     records,
     (record) => record.run?.startSequence ?? 0,
@@ -379,7 +433,86 @@ const writeMappedVarintArray = <T>(
   }
 };
 
-const readSequenceRecords = (
+const writeMappedZigZagDeltaArray = <T>(
+  writer: BinaryWriter,
+  values: ReadonlyArray<T>,
+  mapValue: (value: T) => number,
+): void => {
+  writer.writeVarint(values.length);
+  let previous = 0;
+  for (const value of values) {
+    const next = mapValue(value);
+    writer.writeZigZagVarint(next - previous);
+    previous = next;
+  }
+};
+
+const readDeltaSequenceRecords = (
+  reader: BinaryReader,
+  idTable: ReadonlyArray<string>,
+  replicaTable: ReadonlyArray<string>,
+): CompactEngineSequenceRecords => {
+  const count = reader.readVarint();
+  const idRefs = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "record ids",
+  );
+  const eventIds = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "record event ids",
+  );
+  const originLefts = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "record originLeft ids",
+  );
+  const originRights = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "record originRight ids",
+  );
+  const everDeleted = expectColumnLength(
+    reader.readVarintUint32Array(),
+    count,
+    "record deletion flags",
+  );
+  const prepareStates = expectColumnLength(
+    reader.readVarintUint32Array(),
+    count,
+    "record prepare states",
+  );
+  const runReplicas = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "record run replicas",
+  );
+  const runStartSequences = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "record run start sequences",
+  );
+  const content = readContentBlob(reader, count);
+
+  return {
+    count,
+    idTable,
+    replicaTable,
+    idRefs,
+    eventIdRefs: eventIds,
+    originLeftRefs: originLefts,
+    originRightRefs: originRights,
+    everDeleted,
+    prepareStates,
+    runReplicaRefs: runReplicas,
+    runStartSequences,
+    contentOffsets: content.offsets,
+    contentBytes: content.bytes,
+  };
+};
+
+const readLegacySequenceRecords = (
   reader: BinaryReader,
   idTable: ReadonlyArray<string>,
   replicaTable: ReadonlyArray<string>,
@@ -496,15 +629,47 @@ const writeDeleteTargets = (
   idTable: StringTable,
 ): void => {
   writer.writeVarint(targets.length);
+  writeMappedZigZagDeltaArray(writer, targets, (target) =>
+    idIndex(idTable, target.deleteEventId),
+  );
+  const offsets: number[] = [0];
+  const targetRefs: number[] = [];
   for (const target of targets) {
-    writer.writeVarint(idIndex(idTable, target.deleteEventId));
-    writeMappedVarintArray(writer, target.targetIds, (targetId) =>
-      idIndex(idTable, targetId),
-    );
+    for (const targetId of target.targetIds) {
+      targetRefs.push(idIndex(idTable, targetId));
+    }
+    offsets.push(targetRefs.length);
   }
+  writer.writeZigZagDeltaArray(offsets);
+  writer.writeZigZagDeltaArray(targetRefs);
 };
 
-const readDeleteTargets = (
+const readDeltaDeleteTargets = (
+  reader: BinaryReader,
+  idTable: ReadonlyArray<string>,
+): CompactDeleteTargetRecords => {
+  const count = reader.readVarint();
+  const deleteEventRefs = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count,
+    "delete target event ids",
+  );
+  const targetOffsets = expectColumnLength(
+    reader.readZigZagDeltaUint32Array(),
+    count + 1,
+    "delete target offsets",
+  );
+  const targetRefs = reader.readZigZagDeltaUint32Array();
+  validateDeleteTargetOffsets(targetOffsets, targetRefs.length);
+  return {
+    idTable,
+    deleteEventRefs,
+    targetOffsets,
+    targetRefs,
+  };
+};
+
+const readLegacyDeleteTargets = (
   reader: BinaryReader,
   idTable: ReadonlyArray<string>,
 ): CompactDeleteTargetRecords => {
@@ -527,6 +692,31 @@ const readDeleteTargets = (
     targetOffsets,
     targetRefs: Uint32Array.from(targetRefs),
   };
+};
+
+const validateDeleteTargetOffsets = (
+  offsets: Uint32Array,
+  targetCount: number,
+): void => {
+  if (offsets[0] !== 0) {
+    throw new Error(
+      "Invalid native snapshot runtime state: delete target offsets must start at zero",
+    );
+  }
+  let previous = 0;
+  for (const offset of offsets) {
+    if (offset < previous || offset > targetCount) {
+      throw new Error(
+        "Invalid native snapshot runtime state: delete target offset out of bounds",
+      );
+    }
+    previous = offset;
+  }
+  if (offsets[offsets.length - 1] !== targetCount) {
+    throw new Error(
+      "Invalid native snapshot runtime state: delete target offsets must end at target count",
+    );
+  }
 };
 
 const idIndex = (table: StringTable, value: string): number => {

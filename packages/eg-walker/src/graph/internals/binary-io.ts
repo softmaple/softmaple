@@ -181,6 +181,19 @@ export class BinaryReader {
     return values;
   }
 
+  readZigZagDeltaUint32Array(): Uint32Array {
+    const values = this.readZigZagDeltaArray();
+    const out = new Uint32Array(values.length);
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index] ?? 0;
+      if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+        throw new Error(`Invalid uint32 delta value ${value}`);
+      }
+      out[index] = value;
+    }
+    return out;
+  }
+
   readString(): string {
     return decodeText(this.readBytes(this.readVarint()));
   }

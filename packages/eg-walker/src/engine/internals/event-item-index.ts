@@ -122,12 +122,8 @@ export class EventItemIndex {
     let candidate: AugmentedCRDTItem | null = null;
     while (low <= high) {
       const mid = low + Math.floor((high - low) / 2);
-      const item = items[mid];
-      const start = item?.run?.startSequence;
-      if (item === undefined || start === undefined) {
-        high = mid - 1;
-        continue;
-      }
+      const item = items[mid]!;
+      const start = item.run!.startSequence;
       if (start <= sequence) {
         candidate = item;
         low = mid + 1;
@@ -150,8 +146,7 @@ export class EventItemIndex {
       return;
     }
     items.sort(
-      (left, right) =>
-        (left.run?.startSequence ?? 0) - (right.run?.startSequence ?? 0),
+      (left, right) => left.run!.startSequence - right.run!.startSequence,
     );
     this.sortedRunReplicas.add(replicaId);
   }

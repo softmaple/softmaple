@@ -279,20 +279,48 @@ const encodeRuntimeState = (state: NativeRuntimeState): Uint8Array => {
 };
 
 const decodeRuntimeState = (bytes: Uint8Array): NativeSnapshotRuntimeState => {
-  const isVersionedRuntimeState = hasPrefix(bytes, RUNTIME_STATE_MAGIC);
-  const reader = new BinaryReader(
-    isVersionedRuntimeState
-      ? bytes.subarray(RUNTIME_STATE_MAGIC.byteLength)
-      : bytes,
-  );
+  if (hasPrefix(bytes, RUNTIME_STATE_MAGIC)) {
+    try {
+      return decodeVersionedRuntimeState(
+        bytes.subarray(RUNTIME_STATE_MAGIC.byteLength),
+      );
+    } catch {
+      // Legacy runtime-state is unversioned and can legally begin with EGWR2.
+    }
+  }
+  return decodeLegacyRuntimeState(bytes);
+};
+
+const decodeVersionedRuntimeState = (
+  bytes: Uint8Array,
+): NativeSnapshotRuntimeState => {
+  const reader = new BinaryReader(bytes);
   const idTable = reader.readStringArray();
   const replicaTable = reader.readStringArray();
-  const sequenceRecords = isVersionedRuntimeState
-    ? readDeltaSequenceRecords(reader, idTable, replicaTable)
-    : readLegacySequenceRecords(reader, idTable, replicaTable);
-  const deleteTargets = isVersionedRuntimeState
-    ? readDeltaDeleteTargets(reader, idTable)
-    : readLegacyDeleteTargets(reader, idTable);
+  const sequenceRecords = readDeltaSequenceRecords(
+    reader,
+    idTable,
+    replicaTable,
+  );
+  const deleteTargets = readDeltaDeleteTargets(reader, idTable);
+  if (reader.remainingByteLength !== 0) {
+    throw new Error("Invalid native snapshot runtime state: trailing bytes");
+  }
+  return { sequenceRecords, deleteTargets };
+};
+
+const decodeLegacyRuntimeState = (
+  bytes: Uint8Array,
+): NativeSnapshotRuntimeState => {
+  const reader = new BinaryReader(bytes);
+  const idTable = reader.readStringArray();
+  const replicaTable = reader.readStringArray();
+  const sequenceRecords = readLegacySequenceRecords(
+    reader,
+    idTable,
+    replicaTable,
+  );
+  const deleteTargets = readLegacyDeleteTargets(reader, idTable);
   if (reader.remainingByteLength !== 0) {
     throw new Error("Invalid native snapshot runtime state: trailing bytes");
   }

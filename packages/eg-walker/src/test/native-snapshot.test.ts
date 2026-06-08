@@ -392,6 +392,43 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
+  it("should fall back to legacy runtime state when legacy bytes collide with EGWR2", () => {
+    // Arrange
+    const header = {
+      formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
+      text: "",
+      initialText: "",
+      currentVersion: [],
+      eventCount: 0,
+      nextSequenceNumber: 0,
+      checkpoints: [],
+    };
+    const runtimeBytes = encodeCollidingLegacyRuntimeState();
+    const body = new BinaryWriter();
+    body.writeBytes(new TextEncoder().encode(JSON.stringify(header)));
+    body.writeBytes(
+      new ColumnarEventGraphCodec().encodeBinary(new EventGraph()),
+    );
+    body.writeBytes(runtimeBytes);
+    const payload = body.toUint8Array();
+    const bytes = new Uint8Array(
+      NATIVE_SNAPSHOT_FORMAT_VERSION.length + payload.byteLength,
+    );
+    bytes.set(new TextEncoder().encode(NATIVE_SNAPSHOT_FORMAT_VERSION));
+    bytes.set(payload, NATIVE_SNAPSHOT_FORMAT_VERSION.length);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const decoded = codec.decode(bytes);
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Assert
+    expect(new TextDecoder().decode(runtimeBytes.subarray(0, 5))).toBe("EGWR2");
+    expect(decoded.sequenceRecords).toEqual([]);
+    expect(decoded.deleteTargets).toEqual([]);
+    expect(restored.getText()).toBe("");
+  });
+
   it("should persist delete targets for restored engine resume state", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
@@ -618,6 +655,22 @@ const encodeLegacyRuntimeState = (
       target.targetIds.map((targetId) => idTable.ids.get(targetId) ?? 0),
     );
   }
+  return writer.toUint8Array();
+};
+
+const encodeCollidingLegacyRuntimeState = (): Uint8Array => {
+  const writer = new BinaryWriter();
+  writer.writeStringArray([
+    `WR2${"x".repeat(68)}`,
+    ...Array.from({ length: 68 }, (_, index) => `id-${index}`),
+  ]);
+  writer.writeStringArray([]);
+  writer.writeVarint(0);
+  for (let index = 0; index < 8; index++) {
+    writer.writeVarintArray([]);
+  }
+  writeLegacyContentBlob(writer, []);
+  writer.writeVarint(0);
   return writer.toUint8Array();
 };
 

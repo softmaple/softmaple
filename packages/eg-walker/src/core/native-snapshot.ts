@@ -1,4 +1,5 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
+import lz4 from "lz4js";
 import type {
   EventId,
   ExternalOperation,
@@ -7,7 +8,11 @@ import type {
 } from "../types";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
+import {
+  BinaryReader,
+  BinaryWriter,
+  toUint8Array,
+} from "../graph/internals/binary-io";
 import {
   recordsFromCompactDeleteTargets,
   type CompactDeleteTargetRecords,
@@ -66,6 +71,8 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAGIC_BYTES = encoder.encode(NATIVE_SNAPSHOT_FORMAT_VERSION);
 const RUNTIME_STATE_MAGIC = encoder.encode("EGWR2");
+const COMPRESSED_SECTION_MAGIC = encoder.encode("EGWC1");
+const MIN_COMPRESSIBLE_SECTION_BYTES = 512;
 const columnarCodec = new ColumnarEventGraphCodec();
 const decodedGraphSourceCache = new WeakMap<NativeSnapshot, () => EventGraph>();
 const decodedRuntimeStateCache = new WeakMap<
@@ -79,8 +86,12 @@ export class NativeSnapshotCodec {
     const graph = EventGraph.deserialize(validated.eventGraph);
     const header = headerFromSnapshot(validated);
     const body = new BinaryWriter();
-    body.writeBytes(encoder.encode(JSON.stringify(header)));
-    body.writeBytes(columnarCodec.encodeBinary(graph));
+    body.writeBytes(
+      encodeCompressedSectionIfSmaller(encoder.encode(JSON.stringify(header))),
+    );
+    body.writeBytes(
+      encodeCompressedSectionIfSmaller(columnarCodec.encodeBinary(graph)),
+    );
     body.writeBytes(
       encodeRuntimeState({
         sequenceRecords: validated.sequenceRecords,
@@ -123,14 +134,18 @@ const decodeLengthPrefixedNativeSnapshotBody = (
     const reader = new BinaryReader(body);
     const headerPayload = validateNativeSnapshotHeaderPayload(
       JSON.parse(
-        decoder.decode(reader.readBytes(reader.readVarint())),
+        decoder.decode(
+          decodeCompressedSection(reader.readBytes(reader.readVarint())),
+        ),
       ) as unknown,
     );
     const graphBytes = reader.readBytes(reader.readVarint());
     const compactRuntimeState =
       reader.remainingByteLength === 0
         ? undefined
-        : decodeRuntimeState(reader.readBytes(reader.readVarint()));
+        : decodeRuntimeState(
+            decodeCompressedSection(reader.readBytes(reader.readVarint())),
+          );
     const legacyRuntimeState =
       compactRuntimeState === undefined
         ? {
@@ -141,7 +156,10 @@ const decodeLengthPrefixedNativeSnapshotBody = (
     if (reader.remainingByteLength !== 0) {
       throw new Error("Invalid native snapshot: unexpected trailing bytes");
     }
-    const graphSource = createMemoizedGraphSource(graphBytes);
+    const graphSource = createMemoizedGraphSource(
+      graphBytes,
+      headerPayload.header,
+    );
     const snapshot = createSnapshotWithLazySections(
       headerPayload.header,
       graphSource,
@@ -222,12 +240,60 @@ const createSnapshotWithLazySections = (
   };
 };
 
-const createMemoizedGraphSource = (bytes: Uint8Array): (() => EventGraph) => {
+const createMemoizedGraphSource = (
+  sectionBytes: Uint8Array,
+  header: NativeSnapshotHeader,
+): (() => EventGraph) => {
+  let graphBytes: Uint8Array | null = null;
   let graph: EventGraph | null = null;
   return () => {
-    graph ??= columnarCodec.decodeBinary(bytes);
+    graphBytes ??= decodeCompressedSection(sectionBytes);
+    if (graph === null) {
+      graph = columnarCodec.decodeBinary(graphBytes);
+      validateGraphMatchesHeader(graph, header);
+    }
     return graph;
   };
+};
+
+const encodeCompressedSectionIfSmaller = (bytes: Uint8Array): Uint8Array => {
+  if (bytes.byteLength < MIN_COMPRESSIBLE_SECTION_BYTES) {
+    return bytes;
+  }
+  const compressed = toUint8Array(lz4.compress(bytes));
+  const payload = new BinaryWriter();
+  payload.writeVarint(bytes.byteLength);
+  payload.writeBytes(compressed);
+  const payloadBytes = payload.toUint8Array();
+  const out = new Uint8Array(
+    COMPRESSED_SECTION_MAGIC.byteLength + payloadBytes.byteLength,
+  );
+  out.set(COMPRESSED_SECTION_MAGIC, 0);
+  out.set(payloadBytes, COMPRESSED_SECTION_MAGIC.byteLength);
+  return out.byteLength < bytes.byteLength ? out : bytes;
+};
+
+const decodeCompressedSection = (bytes: Uint8Array): Uint8Array => {
+  if (!hasPrefix(bytes, COMPRESSED_SECTION_MAGIC)) {
+    return bytes;
+  }
+  const reader = new BinaryReader(
+    bytes.subarray(COMPRESSED_SECTION_MAGIC.byteLength),
+  );
+  const expectedLength = reader.readVarint();
+  const compressed = reader.readBytes(reader.readVarint());
+  if (reader.remainingByteLength !== 0) {
+    throw new Error(
+      "Invalid native snapshot compressed section: trailing bytes",
+    );
+  }
+  const decoded = toUint8Array(lz4.decompress(compressed, expectedLength));
+  if (decoded.byteLength !== expectedLength) {
+    throw new Error(
+      `Invalid native snapshot compressed section: expected ${expectedLength} bytes, got ${decoded.byteLength}`,
+    );
+  }
+  return decoded;
 };
 
 const validateGraphMatchesHeader = (
@@ -842,12 +908,23 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
   const deleteTargets = expectDeleteTargets(snapshot.deleteTargets);
   const checkpoints = expectCheckpoints(snapshot.checkpoints);
   const eventGraph = expectSerializedGraph(snapshot.eventGraph);
+  const header = {
+    formatVersion,
+    text,
+    initialText,
+    currentVersion,
+    eventCount,
+    nextSequenceNumber,
+    metadata,
+    checkpoints,
+  };
 
   if (eventGraph.events.length !== eventCount) {
     throw new Error(
       `Invalid native snapshot: eventCount ${eventCount} does not match event graph length ${eventGraph.events.length}`,
     );
   }
+  validateGraphMatchesHeader(EventGraph.deserialize(eventGraph), header);
 
   return {
     formatVersion,

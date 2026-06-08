@@ -35,7 +35,10 @@ import {
   EgWalkerEngine,
   type DeleteTargetRecord,
 } from "../engine/eg-walker-engine";
-import type { EngineSequenceRecord } from "../engine/sequence-records";
+import type {
+  CompactEngineSequenceRecords,
+  EngineSequenceRecord,
+} from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { PartialReplayManager } from "../engine/partial-replay";
 import {
@@ -329,7 +332,15 @@ export class EgWalkerReplica {
       runtimeState !== undefined
         ? runtimeState.sequenceRecords.count > 0
         : sequenceRecords.length > 0;
-    if (hasSequenceRecords) {
+    // Restored engines can accept public local indexes directly only while
+    // prepare-visible length matches plain document length. Once deletes or
+    // retreated records are present, keep the records for re-snapshotting but
+    // defer engine replay until the next non-local integration needs it.
+    const canRestoreEngine =
+      runtimeState !== undefined
+        ? compactRecordsUsePlainIndexes(runtimeState.sequenceRecords)
+        : recordsUsePlainIndexes(sequenceRecords);
+    if (hasSequenceRecords && canRestoreEngine) {
       graph ??= lazyEventGraph?.();
       lazyEventGraph = undefined;
       if (!graph) {
@@ -344,6 +355,9 @@ export class EgWalkerReplica {
         deleteTargets,
         compactDeleteTargets: runtimeState?.deleteTargets,
       });
+    } else if (hasSequenceRecords && runtimeState !== undefined) {
+      sequenceRecords = snapshot.sequenceRecords;
+      deleteTargets = snapshot.deleteTargets;
     }
 
     return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
@@ -479,6 +493,9 @@ export class EgWalkerReplica {
         throw new Error("Replica event graph is unavailable");
       }
       const graph = source();
+      for (const event of graph.getAllEvents()) {
+        assertRemoteEventWellFormed(event);
+      }
       this.eventGraph = graph;
       this.lazyEventGraph = null;
       this.remoteEvents = this.createRemoteEventBuffer(graph);
@@ -644,7 +661,10 @@ export class EgWalkerReplica {
     readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
     readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
   } {
-    if (this.engine) {
+    if (
+      this.engine &&
+      versionsEqual(this.engine.getCurrentVersion(), graph.getFrontier())
+    ) {
       return {
         sequenceRecords: this.engine.getSequenceRecords(),
         deleteTargets: this.engine.getDeleteTargetRecords(),
@@ -660,6 +680,13 @@ export class EgWalkerReplica {
       return { sequenceRecords: [], deleteTargets: [] };
     }
 
+    return this.rebuildEngineStateForSnapshot(graph);
+  }
+
+  private rebuildEngineStateForSnapshot(graph: EventGraph): {
+    readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+    readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  } {
     const engine = new EgWalkerEngine();
     const generated = engine.generate(
       graph.getBranchPreservingTopologicalOrder(),
@@ -884,3 +911,37 @@ function toPositionOperation(
     length: op.length,
   };
 }
+
+const versionsEqual = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const id of left) {
+    if (!right.has(id)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const recordsUsePlainIndexes = (
+  records: ReadonlyArray<EngineSequenceRecord>,
+): boolean =>
+  records.every((record) => record.prepareState === 1 && !record.everDeleted);
+
+const compactRecordsUsePlainIndexes = (
+  records: CompactEngineSequenceRecords,
+): boolean => {
+  for (let index = 0; index < records.count; index++) {
+    if (
+      (records.prepareStates[index] ?? 0) !== 1 ||
+      (records.everDeleted[index] ?? 0) !== 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+};

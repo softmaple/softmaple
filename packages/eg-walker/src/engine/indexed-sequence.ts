@@ -46,7 +46,7 @@ export class IndexOutOfRangeError extends Error {
  */
 export class IndexedSequence<T extends object> {
   private root: IndexedNode<T> | null = null;
-  private readonly locationsByItem = new WeakMap<T, ItemLocation<T>>();
+  private locationsByItem = new WeakMap<T, ItemLocation<T>>();
 
   /**
    * Build a ranked sequence from an already ordered record list in linear time.
@@ -133,6 +133,7 @@ export class IndexedSequence<T extends object> {
 
   clear(): void {
     this.root = null;
+    this.locationsByItem = new WeakMap<T, ItemLocation<T>>();
   }
 
   resetFromRecords(records: ReadonlyArray<T>): void {

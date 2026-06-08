@@ -158,9 +158,16 @@ export class BinaryReader {
 
   readVarintUint32Array(): Uint32Array {
     const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of varint array");
+    }
     const values = new Uint32Array(length);
     for (let index = 0; index < length; index++) {
-      values[index] = this.readVarint();
+      const value = this.readVarint();
+      if (value > 0xffffffff) {
+        throw new Error("Varint exceeds Uint32 range");
+      }
+      values[index] = value;
     }
     return values;
   }

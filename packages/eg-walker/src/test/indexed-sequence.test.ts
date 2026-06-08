@@ -82,6 +82,24 @@ describe("IndexedSequence", () => {
     );
   });
 
+  it("drops stale item locations when resetting from records", () => {
+    const original = { id: "old", prepare: 1, effect: 1 };
+    const replacement = { id: "new", prepare: 1, effect: 1 };
+    const sequence = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      [original],
+    );
+
+    sequence.resetFromRecords([replacement]);
+    original.prepare = 0;
+    sequence.updateItem(original);
+
+    expect(sequence.positionOf(original)).toBe(-1);
+    expect(sequence.positionOf(replacement)).toBe(0);
+    expect(sequence.prepareIndexToPosition(0, false)).toBe(0);
+  });
+
   it("keeps ranked B-tree indexes correct across leaf and internal splits", () => {
     const items = Array.from({ length: 2_200 }, (_, index) => ({
       id: `item-${index}`,

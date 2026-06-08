@@ -35,7 +35,7 @@ export class EventItemIndex {
       return;
     }
     if (Array.isArray(items)) {
-      items.push(itemId);
+      this.direct.set(eventId, [...items, itemId]);
       return;
     }
     this.direct.set(eventId, [items, itemId]);
@@ -62,7 +62,7 @@ export class EventItemIndex {
     }
     const items = this.runItemsByReplica.get(item.run.replicaId);
     if (items) {
-      items.push(item);
+      this.runItemsByReplica.set(item.run.replicaId, [...items, item]);
       this.sortedRunReplicas.delete(item.run.replicaId);
       return;
     }
@@ -115,14 +115,14 @@ export class EventItemIndex {
     if (!items || items.length === 0) {
       return null;
     }
-    this.sortRunItems(replicaId, items);
+    const sortedItems = this.sortRunItems(replicaId, items);
 
     let low = 0;
-    let high = items.length - 1;
+    let high = sortedItems.length - 1;
     let candidate: AugmentedCRDTItem | null = null;
     while (low <= high) {
       const mid = low + Math.floor((high - low) / 2);
-      const item = items[mid]!;
+      const item = sortedItems[mid]!;
       const start = item.run!.startSequence;
       if (start <= sequence) {
         candidate = item;
@@ -141,13 +141,18 @@ export class EventItemIndex {
     return null;
   }
 
-  private sortRunItems(replicaId: string, items: AugmentedCRDTItem[]): void {
+  private sortRunItems(
+    replicaId: string,
+    items: AugmentedCRDTItem[],
+  ): AugmentedCRDTItem[] {
     if (this.sortedRunReplicas.has(replicaId)) {
-      return;
+      return items;
     }
-    items.sort(
+    const sorted = [...items].sort(
       (left, right) => left.run!.startSequence - right.run!.startSequence,
     );
+    this.runItemsByReplica.set(replicaId, sorted);
     this.sortedRunReplicas.add(replicaId);
+    return sorted;
   }
 }

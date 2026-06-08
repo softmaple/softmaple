@@ -219,6 +219,45 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getText()).toBe("x".repeat(13));
   });
 
+  it("should reject lazy binary snapshot graphs whose frontier does not match the header", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    const snapshot = replica.createNativeSnapshot();
+    const header = {
+      formatVersion: snapshot.formatVersion,
+      text: snapshot.text,
+      initialText: snapshot.initialText,
+      currentVersion: ["missing"],
+      eventCount: snapshot.eventCount,
+      nextSequenceNumber: snapshot.nextSequenceNumber,
+      metadata: snapshot.metadata,
+      checkpoints: snapshot.checkpoints,
+    };
+    const body = new BinaryWriter();
+    body.writeBytes(new TextEncoder().encode(JSON.stringify(header)));
+    body.writeBytes(
+      new ColumnarEventGraphCodec().encodeBinary(
+        EventGraph.deserialize(snapshot.eventGraph),
+      ),
+    );
+    const payload = body.toUint8Array();
+    const bytes = new Uint8Array(
+      NATIVE_SNAPSHOT_FORMAT_VERSION.length + payload.byteLength,
+    );
+    bytes.set(new TextEncoder().encode(NATIVE_SNAPSHOT_FORMAT_VERSION));
+    bytes.set(payload, NATIVE_SNAPSHOT_FORMAT_VERSION.length);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const decoded = codec.decode(bytes);
+
+    // Assert
+    expect(() => decoded.eventGraph).toThrow(
+      "Invalid native snapshot: currentVersion does not match event graph frontier",
+    );
+  });
+
   it("should persist sequence records for bulk ranked-sequence restore", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
@@ -274,6 +313,38 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(decoded.deleteTargets).toEqual([
       { deleteEventId: "alice:2", targetIds: ["alice:0:0"] },
     ]);
+  });
+
+  it("should optionally compress cold snapshot sections while keeping runtime state hot", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    for (let index = 0; index < 80; index++) {
+      replica.insert(replica.getText().length, "x");
+    }
+    const snapshot = {
+      ...replica.createNativeSnapshot(),
+      metadata: {
+        cold: "metadata/checkpoint section ".repeat(500),
+      },
+    };
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const bytes = codec.encode(snapshot);
+    const body = bytes.subarray(NATIVE_SNAPSHOT_FORMAT_VERSION.length);
+    const reader = new BinaryReader(body);
+    const headerBytes = reader.readBytes(reader.readVarint());
+    reader.readBytes(reader.readVarint());
+    const runtimeBytes = reader.readBytes(reader.readVarint());
+    const decoded = codec.decode(bytes);
+    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+
+    // Assert
+    expect(new TextDecoder().decode(headerBytes.subarray(0, 5))).toBe("EGWC1");
+    expect(new TextDecoder().decode(runtimeBytes.subarray(0, 5))).toBe("EGWR2");
+    expect(decoded.metadata).toEqual(snapshot.metadata);
+    expect(restored.getText()).toBe(replica.getText());
+    expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
   it("should encode runtime state with a versioned compact binary section", () => {

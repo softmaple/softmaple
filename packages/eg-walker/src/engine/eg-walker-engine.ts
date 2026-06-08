@@ -22,6 +22,7 @@ import {
   type GenerateOptions,
   type IncrementalApplyResult,
 } from "./internals/engine-types";
+import { EventItemIndex } from "./internals/event-item-index";
 import {
   applyInsert,
   type InsertHandlerDeps,
@@ -71,7 +72,7 @@ export class EgWalkerEngine {
   private readonly eventsById = new Map<EventId, GraphEvent>();
   private readonly eventOrder = new Map<EventId, number>();
   private graph = new EventGraph();
-  private readonly eventItems = new Map<EventId, EventId[]>();
+  private readonly eventItems = new EventItemIndex();
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
   private readonly originLeftIndex = new OriginLeftIndex();
   private readonly deleteTargets = new DeleteTargetIndex();
@@ -396,27 +397,13 @@ export class EgWalkerEngine {
 
   private trackEventItems(item: AugmentedCRDTItem): void {
     if (item.run !== null) {
-      for (let offset = 0; offset < item.content.length; offset++) {
-        this.addEventItem(
-          `${item.run.replicaId}:${item.run.startSequence + offset}`,
-          item.id,
-        );
-      }
+      this.eventItems.registerRunItem(item);
       return;
     }
 
     if (item.eventId !== PLACEHOLDER_EVENT_ID) {
-      this.addEventItem(item.eventId, item.id);
+      this.eventItems.add(item.eventId, item.id);
     }
-  }
-
-  private addEventItem(eventId: EventId, itemId: EventId): void {
-    const items = this.eventItems.get(eventId);
-    if (items) {
-      items.push(itemId);
-      return;
-    }
-    this.eventItems.set(eventId, [itemId]);
   }
 
   private apply(event: GraphEvent): ExternalOperation[] {

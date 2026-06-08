@@ -3,12 +3,13 @@ import type { EventId } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
+import { EventItemIndex } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 
 interface RecordSplitterDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
   readonly itemsById: Map<EventId, AugmentedCRDTItem>;
-  readonly eventItems: Map<EventId, EventId[]>;
+  readonly eventItems: EventItemIndex;
   readonly originLeftIndex: OriginLeftIndex;
   readonly deleteTargets: DeleteTargetIndex;
   readonly nextPlaceholderId: () => EventId;
@@ -221,30 +222,13 @@ export class RecordSplitter {
     if (left.run === null) {
       return;
     }
-    // Each sequence in `[startSequence + offsetInRecord, startSequence + N)`
-    // is a single-character INSERT whose `eventItems` entry currently lists
-    // `left.id`. Repoint those entries to `right.id` so retreat / advance
-    // visit the half that actually holds the slice.
-    const runStart = left.run.startSequence + offsetInRecord;
-    const runEnd = left.run.startSequence + leftOriginalLength;
     const { eventItems } = this.deps;
-    for (let sequence = runStart; sequence < runEnd; sequence++) {
-      const eventId: EventId = `${left.run.replicaId}:${sequence}`;
-      const items = eventItems.get(eventId);
-      if (!items) {
-        continue;
-      }
-      let mutated = false;
-      const next = items.map((id) => {
-        if (id === left.id) {
-          mutated = true;
-          return right.id;
-        }
-        return id;
-      });
-      if (mutated) {
-        eventItems.set(eventId, next);
-      }
-    }
+    eventItems.rewriteDirectReferencesForRunSplit(
+      left,
+      right,
+      offsetInRecord,
+      leftOriginalLength,
+    );
+    eventItems.registerRunItem(right);
   }
 }

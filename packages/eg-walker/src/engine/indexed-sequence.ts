@@ -46,15 +46,30 @@ export class IndexOutOfRangeError extends Error {
  */
 export class IndexedSequence<T extends object> {
   private root: IndexedNode<T> | null = null;
-  private readonly locationsByItem = new WeakMap<T, ItemLocation<T>>();
+  private locationsByItem = new WeakMap<T, ItemLocation<T>>();
+
+  /**
+   * Build a ranked sequence from an already ordered record list in linear time.
+   *
+   * Snapshot restore should use this entry point once serialized sequence
+   * records are available: it preserves the same public behavior as passing
+   * `items` to the constructor while making the bulk-restore intent explicit.
+   */
+  static fromRecords<T extends object>(
+    records: ReadonlyArray<T>,
+    prepareWeight: (item: T) => number,
+    effectWeight: (item: T) => number,
+  ): IndexedSequence<T> {
+    return new IndexedSequence(prepareWeight, effectWeight, records);
+  }
 
   constructor(
     private readonly prepareWeight: (item: T) => number,
     private readonly effectWeight: (item: T) => number,
     items: ReadonlyArray<T> = [],
   ) {
-    for (const item of items) {
-      this.push(item);
+    if (items.length > 0) {
+      this.bulkLoad(items);
     }
   }
 
@@ -118,6 +133,14 @@ export class IndexedSequence<T extends object> {
 
   clear(): void {
     this.root = null;
+    this.locationsByItem = new WeakMap<T, ItemLocation<T>>();
+  }
+
+  resetFromRecords(records: ReadonlyArray<T>): void {
+    this.clear();
+    if (records.length > 0) {
+      this.bulkLoad(records);
+    }
   }
 
   insert(index: number, item: T): void {
@@ -270,6 +293,54 @@ export class IndexedSequence<T extends object> {
       return null;
     }
     return this.weightIndexToPosition(before - 1, false, "prepare");
+  }
+
+  private bulkLoad(items: ReadonlyArray<T>): void {
+    const leaves: LeafNode<T>[] = [];
+    for (let start = 0; start < items.length; start += LEAF_CAPACITY) {
+      const leaf = createLeaf<T>();
+      const end = Math.min(start + LEAF_CAPACITY, items.length);
+      for (let index = start; index < end; index++) {
+        const item = items[index];
+        if (!item) {
+          continue;
+        }
+        const prepare = this.prepareWeight(item);
+        const effect = this.effectWeight(item);
+        const offset = leaf.items.length;
+        leaf.items.push(item);
+        leaf.prepareWeights.push(prepare);
+        leaf.effectWeights.push(effect);
+        leaf.size++;
+        leaf.prepareSum += prepare;
+        leaf.effectSum += effect;
+        this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
+      }
+      leaves.push(leaf);
+    }
+
+    this.root = this.buildBalancedTree(leaves);
+  }
+
+  private buildBalancedTree(
+    nodes: ReadonlyArray<IndexedNode<T>>,
+  ): IndexedNode<T> | null {
+    if (nodes.length === 0) {
+      return null;
+    }
+
+    let level = [...nodes];
+    while (level.length > 1) {
+      const nextLevel: InternalNode<T>[] = [];
+      for (let start = 0; start < level.length; start += BRANCH_FACTOR) {
+        nextLevel.push(
+          createInternal(level.slice(start, start + BRANCH_FACTOR)),
+        );
+      }
+      level = nextLevel;
+    }
+
+    return level[0] ?? null;
   }
 
   private insertIntoLeaf(leaf: LeafNode<T>, offset: number, item: T): void {

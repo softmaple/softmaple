@@ -82,6 +82,24 @@ describe("IndexedSequence", () => {
     );
   });
 
+  it("drops stale item locations when resetting from records", () => {
+    const original = { id: "old", prepare: 1, effect: 1 };
+    const replacement = { id: "new", prepare: 1, effect: 1 };
+    const sequence = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      [original],
+    );
+
+    sequence.resetFromRecords([replacement]);
+    original.prepare = 0;
+    sequence.updateItem(original);
+
+    expect(sequence.positionOf(original)).toBe(-1);
+    expect(sequence.positionOf(replacement)).toBe(0);
+    expect(sequence.prepareIndexToPosition(0, false)).toBe(0);
+  });
+
   it("keeps ranked B-tree indexes correct across leaf and internal splits", () => {
     const items = Array.from({ length: 2_200 }, (_, index) => ({
       id: `item-${index}`,
@@ -121,6 +139,61 @@ describe("IndexedSequence", () => {
 
     expect(sequence.nextPrepareVisiblePosition(1_499)).toBe(1_499);
     expect(sequence.positionOf(items[2_000]!)).toBe(2_000);
+  });
+
+  it("bulk-builds the same ranked indexes as incremental insertion", () => {
+    const items = Array.from({ length: 5_000 }, (_, index) => ({
+      id: `bulk-built-${index}`,
+      prepare: index % 4 === 0 ? 0 : 1,
+      effect: index % 7 === 0 ? 0 : 1,
+    }));
+    const prepareWeight = (item: (typeof items)[number]): number =>
+      item.prepare;
+    const effectWeight = (item: (typeof items)[number]): number => item.effect;
+    const bulk = IndexedSequence.fromRecords(
+      items,
+      prepareWeight,
+      effectWeight,
+    );
+    const incremental = new IndexedSequence(prepareWeight, effectWeight);
+
+    for (const item of items) {
+      incremental.push(item);
+    }
+
+    for (const index of [0, 63, 64, 511, 2_047, 4_999]) {
+      expect(bulk.at(index)).toBe(incremental.at(index));
+      expect(bulk.positionOf(items[index]!)).toBe(
+        incremental.positionOf(items[index]!),
+      );
+    }
+    for (const prepareIndex of [0, 128, 1_024, 3_000]) {
+      expect(bulk.prepareIndexToPosition(prepareIndex, false)).toBe(
+        incremental.prepareIndexToPosition(prepareIndex, false),
+      );
+    }
+    for (const position of [0, 65, 1_700, 5_000]) {
+      expect(bulk.effectIndexBeforePosition(position)).toBe(
+        incremental.effectIndexBeforePosition(position),
+      );
+    }
+
+    const inserted = { id: "after-bulk-insert", prepare: 1, effect: 1 };
+    bulk.insert(2_500, inserted);
+    incremental.insert(2_500, inserted);
+    items[2_600]!.prepare = 1;
+    items[2_600]!.effect = 0;
+    bulk.updateItem(items[2_600]!);
+    incremental.updateItem(items[2_600]!);
+
+    expect(bulk.toArray()).toEqual(incremental.toArray());
+    expect(bulk.positionOf(inserted)).toBe(2_500);
+    expect(bulk.prepareIndexToPosition(1_900, false)).toBe(
+      incremental.prepareIndexToPosition(1_900, false),
+    );
+    expect(bulk.effectIndexBeforePosition(3_000)).toBe(
+      incremental.effectIndexBeforePosition(3_000),
+    );
   });
 
   it("matches an array model across deterministic B-tree inserts and updates", () => {

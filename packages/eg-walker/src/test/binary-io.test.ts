@@ -60,4 +60,22 @@ describe("BinaryReader.readVarint hardening", () => {
       );
     }
   });
+
+  it("rejects impossible Uint32 array lengths before allocating", () => {
+    const lengthThreeWithOnePayloadByte = new Uint8Array([3, 0]);
+
+    expect(() =>
+      new BinaryReader(lengthThreeWithOnePayloadByte).readVarintUint32Array(),
+    ).toThrow(/Unexpected end of varint array/);
+  });
+
+  it("rejects varint Uint32 array values that would truncate", () => {
+    const writer = new BinaryWriter();
+    writer.writeVarint(1);
+    writer.writeVarint(2 ** 32);
+
+    expect(() =>
+      new BinaryReader(writer.toUint8Array()).readVarintUint32Array(),
+    ).toThrow(/Uint32 range/);
+  });
 });

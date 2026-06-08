@@ -3,6 +3,7 @@ import { parseEventId } from "../../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import type { AugmentedCRDTItem, TypedRun } from "./engine-types";
+import { EventItemIndex } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
@@ -17,7 +18,7 @@ type InsertOperation = Extract<
 export interface InsertHandlerDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
   readonly itemsById: Map<EventId, AugmentedCRDTItem>;
-  readonly eventItems: Map<EventId, EventId[]>;
+  readonly eventItems: EventItemIndex;
   readonly originLeftIndex: OriginLeftIndex;
   readonly recordSplitter: RecordSplitter;
   readonly pendingInsert: PendingInsertBuffer;

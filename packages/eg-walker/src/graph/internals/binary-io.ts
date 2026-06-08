@@ -111,6 +111,10 @@ export class BinaryReader {
 
   constructor(private readonly bytes: Uint8Array) {}
 
+  get remainingByteLength(): number {
+    return this.bytes.length - this.offset;
+  }
+
   readVarint(): number {
     let value = 0;
     let multiplier = 1;
@@ -152,6 +156,22 @@ export class BinaryReader {
     return Array.from({ length }, () => this.readVarint());
   }
 
+  readVarintUint32Array(): Uint32Array {
+    const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of varint array");
+    }
+    const values = new Uint32Array(length);
+    for (let index = 0; index < length; index++) {
+      const value = this.readVarint();
+      if (value > 0xffffffff) {
+        throw new Error("Varint exceeds Uint32 range");
+      }
+      values[index] = value;
+    }
+    return values;
+  }
+
   readZigZagVarint(): number {
     return zigzagDecode(this.readVarint());
   }
@@ -166,6 +186,19 @@ export class BinaryReader {
       previous = value;
     }
     return values;
+  }
+
+  readZigZagDeltaUint32Array(): Uint32Array {
+    const values = this.readZigZagDeltaArray();
+    const out = new Uint32Array(values.length);
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index] ?? 0;
+      if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+        throw new Error(`Invalid uint32 delta value ${value}`);
+      }
+      out[index] = value;
+    }
+    return out;
   }
 
   readString(): string {

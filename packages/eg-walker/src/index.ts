@@ -8,6 +8,11 @@
  */
 
 export { EgWalkerReplica, createEgWalkerReplica } from "./core/replica";
+export {
+  NativeSnapshotCodec,
+  NATIVE_SNAPSHOT_FORMAT_VERSION,
+  type NativeSnapshot,
+} from "./core/native-snapshot";
 export { ReplayWalker } from "./core/replay-walker";
 export type { WalkerConfig, WalkResult } from "./core/replay-walker";
 export { EventGraph } from "./graph/event-graph";

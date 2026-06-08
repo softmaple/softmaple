@@ -3,7 +3,12 @@ import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
 import { IndexedSequence } from "./indexed-sequence";
-import { DeleteTargetIndex } from "./internals/delete-target-index";
+import {
+  DeleteTargetIndex,
+  iterateCompactDeleteTargets,
+  type CompactDeleteTargetRecords,
+  type DeleteTargetRecord,
+} from "./internals/delete-target-index";
 import {
   applyDelete,
   type DeleteHandlerDeps,
@@ -17,6 +22,7 @@ import {
   type GenerateOptions,
   type IncrementalApplyResult,
 } from "./internals/engine-types";
+import { EventItemIndex } from "./internals/event-item-index";
 import {
   applyInsert,
   type InsertHandlerDeps,
@@ -24,6 +30,13 @@ import {
 import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import { RecordSplitter } from "./internals/record-splitter";
+import {
+  itemsFromCompactRecords,
+  itemsFromRecords,
+  recordsFromItems,
+  type CompactEngineSequenceRecords,
+  type EngineSequenceRecord,
+} from "./internals/sequence-records";
 import { spliceText } from "./internals/text-utils";
 
 export type {
@@ -32,6 +45,21 @@ export type {
   GenerateOptions,
   IncrementalApplyResult,
 } from "./internals/engine-types";
+export {
+  recordsFromCompactDeleteTargets,
+  type CompactDeleteTargetRecords,
+  type DeleteTargetRecord,
+} from "./internals/delete-target-index";
+
+export interface EngineSnapshotState {
+  readonly graph: EventGraph;
+  readonly currentVersion: ReadonlySet<EventId>;
+  readonly text: string;
+  readonly sequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
+  readonly compactSequenceRecords?: CompactEngineSequenceRecords;
+  readonly deleteTargets?: ReadonlyArray<DeleteTargetRecord>;
+  readonly compactDeleteTargets?: CompactDeleteTargetRecords;
+}
 
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
@@ -44,7 +72,7 @@ export class EgWalkerEngine {
   private readonly eventsById = new Map<EventId, GraphEvent>();
   private readonly eventOrder = new Map<EventId, number>();
   private graph = new EventGraph();
-  private readonly eventItems = new Map<EventId, EventId[]>();
+  private readonly eventItems = new EventItemIndex();
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
   private readonly originLeftIndex = new OriginLeftIndex();
   private readonly deleteTargets = new DeleteTargetIndex();
@@ -106,6 +134,12 @@ export class EgWalkerEngine {
     };
   }
 
+  static fromSnapshotState(state: EngineSnapshotState): EgWalkerEngine {
+    const engine = new EgWalkerEngine();
+    engine.restoreSnapshotState(state);
+    return engine;
+  }
+
   /**
    * Apply a single new event on top of the current engine state without
    * resetting. The caller must ensure {@link graph} is the up-to-date event
@@ -158,6 +192,57 @@ export class EgWalkerEngine {
       sequenceRecordCount: this.itemsById.size,
       peakSequenceRecordCount: this.peakSequenceRecordCount,
     };
+  }
+
+  getSequenceRecords(): EngineSequenceRecord[] {
+    this.flushPendingInsert();
+    return recordsFromItems(this.sequence.toArray());
+  }
+
+  getDeleteTargetRecords(): DeleteTargetRecord[] {
+    return this.deleteTargets.entries();
+  }
+
+  private restoreSnapshotState(state: EngineSnapshotState): void {
+    const items = state.compactSequenceRecords
+      ? itemsFromCompactRecords(state.compactSequenceRecords)
+      : itemsFromRecords(state.sequenceRecords ?? []);
+
+    this.eventsById.clear();
+    this.eventOrder.clear();
+    this.graph = state.graph;
+    this.eventItems.clear();
+    this.deleteTargets.clear();
+    this.itemsById.clear();
+    this.originLeftIndex.clear();
+    this.sequence.resetFromRecords(items);
+    this.currentVersion = new Set(state.currentVersion);
+    this.resultingText = state.text;
+    this.pendingInsert.reset();
+    this.retreatCount = 0;
+    this.advanceCount = 0;
+    this.nonConflictingRunCount = 0;
+    this.fullReplayCount = 0;
+    this.peakSequenceRecordCount = items.length;
+    this.placeholderCounter = inferNextPlaceholderCounter(items);
+
+    state.graph.getTopologicalOrder().forEach((event, index) => {
+      this.eventsById.set(event.id, event);
+      this.eventOrder.set(event.id, index);
+    });
+
+    for (const item of items) {
+      this.itemsById.set(item.id, item);
+      this.originLeftIndex.track(item.id, item.originLeft);
+      this.trackEventItems(item);
+    }
+
+    const deleteTargets = state.compactDeleteTargets
+      ? iterateCompactDeleteTargets(state.compactDeleteTargets)
+      : (state.deleteTargets ?? []);
+    for (const target of deleteTargets) {
+      this.deleteTargets.record(target.deleteEventId, target.targetIds);
+    }
   }
 
   private processEvent(event: GraphEvent): ExternalOperation[] {
@@ -308,6 +393,17 @@ export class EgWalkerEngine {
 
   private nextPlaceholderId(): EventId {
     return `${PLACEHOLDER_ID_PREFIX}${this.placeholderCounter++}`;
+  }
+
+  private trackEventItems(item: AugmentedCRDTItem): void {
+    if (item.run !== null) {
+      this.eventItems.registerRunItem(item);
+      return;
+    }
+
+    if (item.eventId !== PLACEHOLDER_EVENT_ID) {
+      this.eventItems.add(item.eventId, item.id);
+    }
   }
 
   private apply(event: GraphEvent): ExternalOperation[] {
@@ -478,3 +574,19 @@ export class EgWalkerEngine {
     return item;
   }
 }
+
+const inferNextPlaceholderCounter = (
+  items: ReadonlyArray<AugmentedCRDTItem>,
+): number => {
+  let next = 0;
+  for (const item of items) {
+    if (!item.id.startsWith(PLACEHOLDER_ID_PREFIX)) {
+      continue;
+    }
+    const suffix = Number(item.id.slice(PLACEHOLDER_ID_PREFIX.length));
+    if (Number.isInteger(suffix) && suffix >= next) {
+      next = suffix + 1;
+    }
+  }
+  return next;
+};

@@ -79,6 +79,93 @@ describe("EgWalkerEngine", () => {
     ]);
   });
 
+  it("exports sequence records for snapshot restore plumbing", () => {
+    const engine = new EgWalkerEngine();
+    engine.generate([
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      },
+      {
+        id: "bob:0",
+        parentVersion: new Set(["alice:1"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+        timestamp: 3,
+      },
+    ]);
+
+    const records = engine.getSequenceRecords();
+
+    expect(records).toEqual([
+      {
+        id: "alice:0:0",
+        eventId: "alice:0",
+        content: "AB",
+        originLeft: null,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: { replicaId: "alice", startSequence: 0 },
+      },
+      {
+        id: "bob:0:0",
+        eventId: "bob:0",
+        content: "C",
+        originLeft: "alice:0:0",
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: { replicaId: "bob", startSequence: 0 },
+      },
+    ]);
+
+    engine.applyEvent(
+      {
+        id: "bob:1",
+        parentVersion: new Set(["bob:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "D" },
+        timestamp: 4,
+      },
+      EventGraph.fromEvents([
+        {
+          id: "alice:0",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+          timestamp: 1,
+        },
+        {
+          id: "alice:1",
+          parentVersion: new Set(["alice:0"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+          timestamp: 2,
+        },
+        {
+          id: "bob:0",
+          parentVersion: new Set(["alice:1"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+          timestamp: 3,
+        },
+        {
+          id: "bob:1",
+          parentVersion: new Set(["bob:0"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "D" },
+          timestamp: 4,
+        },
+      ]),
+    );
+
+    expect(records[1]?.content).toBe("C");
+    expect(engine.getSequenceRecords()[1]?.content).toBe("CD");
+  });
+
   it("retreats and advances delete events while walking divergent versions", () => {
     const events: GraphEvent[] = [
       {

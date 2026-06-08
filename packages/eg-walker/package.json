@@ -40,6 +40,7 @@
     "@fast-check/vitest": "^0.4.1",
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
+    "@types/lz4js": "^0.2.2",
     "@types/node": "^24.10.4",
     "@vitest/coverage-v8": "^4.1.6",
     "fast-check": "^4.8.0",

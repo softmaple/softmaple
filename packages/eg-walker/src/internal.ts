@@ -13,6 +13,14 @@ export {
 } from "./engine/eg-walker-engine";
 export { IndexedSequence } from "./engine/indexed-sequence";
 export {
+  itemFromRecord,
+  itemsFromRecords,
+  recordFromItem,
+  recordsFromItems,
+  sequenceFromRecords,
+  type EngineSequenceRecord,
+} from "./engine/sequence-records";
+export {
   CriticalVersionAnalyzer,
   type CriticalCheckpoint,
 } from "./engine/critical-version";
@@ -28,3 +36,8 @@ export {
   type OperationRun,
   type ParentOverride,
 } from "./graph/columnar-codec";
+export {
+  NativeSnapshotCodec,
+  NATIVE_SNAPSHOT_FORMAT_VERSION,
+  type NativeSnapshot,
+} from "./core/native-snapshot";

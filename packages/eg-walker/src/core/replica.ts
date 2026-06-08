@@ -23,6 +23,7 @@ import type {
 import {
   CriticalCheckpointStore,
   type CriticalCheckpoint,
+  type CriticalCheckpointSnapshot,
 } from "./internals/critical-checkpoint-store";
 import {
   assertRemoteEventWellFormed,
@@ -30,7 +31,14 @@ import {
   createDocumentState,
 } from "./invariants";
 import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
-import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import {
+  EgWalkerEngine,
+  type DeleteTargetRecord,
+} from "../engine/eg-walker-engine";
+import type {
+  CompactEngineSequenceRecords,
+  EngineSequenceRecord,
+} from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { PartialReplayManager } from "../engine/partial-replay";
 import {
@@ -38,6 +46,29 @@ import {
   writeReplicaMetadata,
 } from "./internals/persistence-metadata";
 import { RemoteEventBuffer } from "./internals/remote-event-buffer";
+import {
+  consumeDecodedNativeSnapshotGraphSource,
+  consumeDecodedNativeSnapshotRuntimeState,
+  NATIVE_SNAPSHOT_FORMAT_VERSION,
+  type NativeSnapshot,
+  validateGraphMatchesSnapshot,
+  validateNativeSnapshot,
+  validateNativeSnapshotHeaderOnly,
+} from "./native-snapshot";
+
+type LazyEventGraphSource = () => EventGraph;
+
+interface ReplicaConstructorOptions {
+  readonly skipReplay?: boolean;
+  readonly restoredText?: string;
+  readonly currentVersion?: Version;
+  readonly nextSequenceNumber?: number;
+  readonly lazyEventGraph?: LazyEventGraphSource;
+  readonly deferLocalReplay?: boolean;
+  readonly restoredSequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
+  readonly restoredEngine?: EgWalkerEngine;
+  readonly restoredCheckpoints?: ReadonlyArray<CriticalCheckpointSnapshot>;
+}
 
 /**
  * Public replica for Eg-walker.
@@ -46,14 +77,18 @@ import { RemoteEventBuffer } from "./internals/remote-event-buffer";
 export class EgWalkerReplica {
   private document: string = "";
   private readonly initialText: string;
-  private readonly eventGraph: EventGraph;
+  private eventGraph: EventGraph | null = null;
+  private lazyEventGraph: LazyEventGraphSource | null = null;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
-  private readonly remoteEvents: RemoteEventBuffer;
+  private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
   private partialReplayCount = 0;
   private incrementalApplyCount = 0;
+  private readonly deferLocalReplay: boolean;
+  private restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null =
+    null;
   private lastReplaySource: ReplaySource | null = null;
   /**
    * Replica-lifetime high-water mark for the engine's
@@ -75,18 +110,30 @@ export class EgWalkerReplica {
     initialText: string = "",
     eventGraph?: EventGraph,
     replayOrder?: ReadonlyArray<GraphEvent>,
+    options: ReplicaConstructorOptions = {},
   ) {
     assertWellFormedUtf16(initialText, "initial document text");
-    this.document = initialText;
+    if (options.restoredText !== undefined) {
+      assertWellFormedUtf16(options.restoredText, "restored document text");
+    }
+    this.document = options.restoredText ?? initialText;
     this.initialText = initialText;
-    this.eventGraph = eventGraph ?? new EventGraph();
-    this.remoteEvents = new RemoteEventBuffer({
-      graph: this.eventGraph,
-      advanceWithEvent: (event) => this.advanceWithEvent(event),
-    });
-    this.currentVersion = this.eventGraph.getFrontier();
-    this.nextSequenceNumber = this.inferNextSequenceNumber();
-    if (this.eventGraph.getAllEvents().length > 0) {
+    this.deferLocalReplay = options.deferLocalReplay ?? false;
+    this.restoredSequenceRecords = options.restoredSequenceRecords ?? null;
+    this.engine = options.restoredEngine ?? null;
+    this.eventGraph =
+      eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
+    this.lazyEventGraph = options.lazyEventGraph ?? null;
+    if (this.eventGraph) {
+      this.remoteEvents = this.createRemoteEventBuffer(this.eventGraph);
+    }
+    this.currentVersion =
+      options.currentVersion !== undefined
+        ? new Set(options.currentVersion)
+        : this.ensureEventGraph().getFrontier();
+    this.nextSequenceNumber =
+      options.nextSequenceNumber ?? this.inferNextSequenceNumber();
+    if (this.eventGraph && this.eventGraph.getAllEvents().length > 0) {
       // A prebuilt graph bypasses {@link applyRemoteEvent}, so its event
       // payloads have never been screened by
       // {@link assertRemoteEventWellFormed}. Validate them here before
@@ -96,9 +143,16 @@ export class EgWalkerReplica {
       for (const event of this.eventGraph.getAllEvents()) {
         assertRemoteEventWellFormed(event);
       }
-      this.fullReplay(replayOrder);
+      if (!options.skipReplay) {
+        this.fullReplay(replayOrder);
+      }
     }
-    this.maybeAdvanceCheckpoint();
+    if (options.restoredCheckpoints) {
+      this.criticalCheckpoints.restore(options.restoredCheckpoints);
+    }
+    if (this.eventGraph) {
+      this.maybeAdvanceCheckpoint();
+    }
   }
 
   /**
@@ -142,14 +196,44 @@ export class EgWalkerReplica {
    * Serialize the document state (text + event graph)
    */
   serialize(): { text: string; eventGraph: SerializedGraphOutput } {
-    writeReplicaMetadata(this.eventGraph, {
+    const graph = this.ensureEventGraph();
+    writeReplicaMetadata(graph, {
       initialText: this.initialText,
       nextSequenceNumber: this.nextSequenceNumber,
     });
 
     return {
       text: this.document,
-      eventGraph: this.eventGraph.serialize(),
+      eventGraph: graph.serialize(),
+    };
+  }
+
+  /**
+   * Create a versioned native snapshot. Phase 1 stores the materialized text
+   * and persistent event graph so snapshot load can answer reads immediately;
+   * the engine is restored lazily before the first post-load edit.
+   */
+  createNativeSnapshot(): NativeSnapshot {
+    const graph = this.ensureEventGraph();
+    writeReplicaMetadata(graph, {
+      initialText: this.initialText,
+      nextSequenceNumber: this.nextSequenceNumber,
+    });
+
+    const engineState = this.engineStateForSnapshot(graph);
+
+    return {
+      formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
+      text: this.document,
+      initialText: this.initialText,
+      currentVersion: Array.from(graph.getFrontier()),
+      eventCount: graph.getEventCount(),
+      nextSequenceNumber: this.nextSequenceNumber,
+      metadata: graph.getMetadata(),
+      sequenceRecords: engineState.sequenceRecords,
+      deleteTargets: engineState.deleteTargets,
+      checkpoints: this.criticalCheckpoints.toSnapshot(),
+      eventGraph: graph.serialize(),
     };
   }
 
@@ -184,13 +268,109 @@ export class EgWalkerReplica {
       for (const event of topologicalOrder) {
         replica.applyRemoteEvent(event);
       }
-      replica.eventGraph.setMetadata(graph.getMetadata());
+      replica.ensureEventGraph().setMetadata(graph.getMetadata());
     }
 
     replica.nextSequenceNumber =
       metadata.nextSequenceNumber ?? replica.inferNextSequenceNumber();
 
     return replica;
+  }
+
+  static fromNativeSnapshot(
+    snapshot: NativeSnapshot,
+    replicaId: string = "native-snapshot-replica",
+  ): EgWalkerReplica {
+    const graphSource = consumeDecodedNativeSnapshotGraphSource(snapshot);
+    const runtimeState = consumeDecodedNativeSnapshotRuntimeState(snapshot);
+    let lazyEventGraph: LazyEventGraphSource | undefined;
+    let graph: EventGraph | undefined;
+    let sequenceRecords: ReadonlyArray<EngineSequenceRecord> = [];
+    let deleteTargets: ReadonlyArray<DeleteTargetRecord> = [];
+    const validated =
+      graphSource === undefined
+        ? (() => {
+            const fullSnapshot = validateNativeSnapshot(snapshot);
+            sequenceRecords = fullSnapshot.sequenceRecords;
+            deleteTargets = fullSnapshot.deleteTargets;
+            graph = EventGraph.deserialize(fullSnapshot.eventGraph);
+            validateGraphMatchesSnapshot(graph, fullSnapshot);
+            return fullSnapshot;
+          })()
+        : (() => {
+            const header = validateNativeSnapshotHeaderOnly(snapshot);
+            lazyEventGraph = (): EventGraph => {
+              const graph = graphSource();
+              validateGraphMatchesSnapshot(graph, header);
+              graph.setMetadata({
+                ...graph.getMetadata(),
+                ...(header.metadata ?? {}),
+                initialText: header.initialText,
+                nextSequenceNumber: header.nextSequenceNumber,
+              });
+              return graph;
+            };
+            return header;
+          })();
+    if (graphSource !== undefined && runtimeState === undefined) {
+      sequenceRecords = snapshot.sequenceRecords;
+      deleteTargets = snapshot.deleteTargets;
+    }
+    const snapshotFrontier = new Set(validated.currentVersion);
+
+    if (graph) {
+      graph.setMetadata({
+        ...graph.getMetadata(),
+        ...(validated.metadata ?? {}),
+        initialText: validated.initialText,
+        nextSequenceNumber: validated.nextSequenceNumber,
+      });
+    }
+
+    let restoredEngine: EgWalkerEngine | undefined;
+    const hasSequenceRecords =
+      runtimeState !== undefined
+        ? runtimeState.sequenceRecords.count > 0
+        : sequenceRecords.length > 0;
+    // Restored engines can accept public local indexes directly only while
+    // prepare-visible length matches plain document length. Once deletes or
+    // retreated records are present, keep the records for re-snapshotting but
+    // defer engine replay until the next non-local integration needs it.
+    const canRestoreEngine =
+      runtimeState !== undefined
+        ? compactRecordsUsePlainIndexes(runtimeState.sequenceRecords)
+        : recordsUsePlainIndexes(sequenceRecords);
+    if (hasSequenceRecords && canRestoreEngine) {
+      graph ??= lazyEventGraph?.();
+      lazyEventGraph = undefined;
+      if (!graph) {
+        throw new Error("Invalid native snapshot: event graph is unavailable");
+      }
+      restoredEngine = EgWalkerEngine.fromSnapshotState({
+        graph,
+        currentVersion: snapshotFrontier,
+        text: validated.text,
+        sequenceRecords,
+        compactSequenceRecords: runtimeState?.sequenceRecords,
+        deleteTargets,
+        compactDeleteTargets: runtimeState?.deleteTargets,
+      });
+    } else if (hasSequenceRecords && runtimeState !== undefined) {
+      sequenceRecords = snapshot.sequenceRecords;
+      deleteTargets = snapshot.deleteTargets;
+    }
+
+    return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
+      skipReplay: true,
+      restoredText: validated.text,
+      currentVersion: snapshotFrontier,
+      nextSequenceNumber: validated.nextSequenceNumber,
+      lazyEventGraph,
+      deferLocalReplay: restoredEngine === undefined,
+      restoredSequenceRecords: sequenceRecords,
+      restoredEngine,
+      restoredCheckpoints: validated.checkpoints,
+    });
   }
 
   /**
@@ -213,7 +393,7 @@ export class EgWalkerReplica {
     };
 
     try {
-      this.eventGraph.addEvent(event);
+      this.ensureEventGraph().addEvent(event);
     } catch (error) {
       if (error instanceof EventAlreadyExistsError) {
         return;
@@ -221,8 +401,16 @@ export class EgWalkerReplica {
       throw error;
     }
 
-    // Local edits don't expose the engine's transformed operation; the
-    // caller already knows what they typed. Discard the helper's return.
+    if (this.shouldDeferLocalReplay()) {
+      this.applyPlainDocumentOperation(validatedOperation);
+      this.currentVersion = new Set([event.id]);
+      this.restoredSequenceRecords = null;
+      this.maybeAdvanceCheckpoint();
+      return;
+    }
+
+    // Local edits don't expose the engine's transformed operation; the caller
+    // already knows what they typed. Discard the helper's return.
     this.advanceWithEvent(event);
   }
 
@@ -240,7 +428,7 @@ export class EgWalkerReplica {
    */
   applyRemoteEvent(event: GraphEvent): ApplyRemoteEventResult {
     assertRemoteEventWellFormed(event);
-    return this.remoteEvents.tryAccept(event);
+    return this.ensureRemoteEvents().tryAccept(event);
   }
 
   /**
@@ -248,7 +436,7 @@ export class EgWalkerReplica {
    * Exposed primarily for tests and diagnostics.
    */
   getPendingRemoteCount(): number {
-    return this.remoteEvents.pendingCount;
+    return this.remoteEvents?.pendingCount ?? 0;
   }
 
   /**
@@ -296,6 +484,52 @@ export class EgWalkerReplica {
       criticalCheckpointMisses: this.criticalCheckpoints.misses,
       lastReplaySource: this.lastReplaySource,
     };
+  }
+
+  private ensureEventGraph(): EventGraph {
+    if (!this.eventGraph) {
+      const source = this.lazyEventGraph;
+      if (!source) {
+        throw new Error("Replica event graph is unavailable");
+      }
+      const graph = source();
+      for (const event of graph.getAllEvents()) {
+        assertRemoteEventWellFormed(event);
+      }
+      this.eventGraph = graph;
+      this.lazyEventGraph = null;
+      this.remoteEvents = this.createRemoteEventBuffer(graph);
+    }
+    return this.eventGraph;
+  }
+
+  private ensureRemoteEvents(): RemoteEventBuffer {
+    if (!this.remoteEvents) {
+      this.remoteEvents = this.createRemoteEventBuffer(this.ensureEventGraph());
+    }
+    return this.remoteEvents;
+  }
+
+  private createRemoteEventBuffer(graph: EventGraph): RemoteEventBuffer {
+    return new RemoteEventBuffer({
+      graph,
+      advanceWithEvent: (event) => this.advanceWithEvent(event),
+    });
+  }
+
+  private shouldDeferLocalReplay(): boolean {
+    return this.deferLocalReplay && this.engine === null;
+  }
+
+  private applyPlainDocumentOperation(operation: ExternalOperation): void {
+    const before = this.document.slice(0, operation.index);
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      const after = this.document.slice(operation.index);
+      this.document = `${before}${operation.text}${after}`;
+      return;
+    }
+    const after = this.document.slice(operation.index + operation.length);
+    this.document = `${before}${after}`;
   }
 
   /**
@@ -374,7 +608,7 @@ export class EgWalkerReplica {
    * This is what gets saved to disk - no CRDT metadata
    */
   exportEventGraph(): ReadonlyArray<GraphEvent> {
-    return this.eventGraph.getAllEvents();
+    return this.ensureEventGraph().getAllEvents();
   }
 
   /**
@@ -397,6 +631,7 @@ export class EgWalkerReplica {
   private fullReplay(
     replayOrder?: ReadonlyArray<GraphEvent>,
   ): ReadonlyArray<ExternalOperation> {
+    const graph = this.ensureEventGraph();
     // Section 3.4 of the paper: walk the event graph in branch-preserving
     // order so each parent transition matches the engine's current version
     // and triggers the non-conflicting-run fast path instead of forcing a
@@ -405,20 +640,65 @@ export class EgWalkerReplica {
     // (Kahn) so persisted on-disk bytes stay stable.
     this.captureEnginePeakBeforeSwap();
     const sortedEvents =
-      replayOrder ?? this.eventGraph.getBranchPreservingTopologicalOrder();
+      replayOrder ?? graph.getBranchPreservingTopologicalOrder();
     const engine = new EgWalkerEngine();
     const generated = engine.generate(sortedEvents, this.initialText, {
-      eventGraph: this.eventGraph,
+      eventGraph: graph,
     });
     this.document = generated.text;
-    this.currentVersion = this.eventGraph.getFrontier();
+    this.currentVersion = graph.getFrontier();
     this.engine = engine;
+    this.restoredSequenceRecords = null;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     // Returned for the cold-start single-event path in {@link advanceWithEvent};
     // other callers (constructor seed, retreat-needed full replay) ignore
     // this because the array spans the whole graph, not a single event.
     return generated.transformedOperations;
+  }
+
+  private engineStateForSnapshot(graph: EventGraph): {
+    readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+    readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  } {
+    if (
+      this.engine &&
+      versionsEqual(this.engine.getCurrentVersion(), graph.getFrontier())
+    ) {
+      return {
+        sequenceRecords: this.engine.getSequenceRecords(),
+        deleteTargets: this.engine.getDeleteTargetRecords(),
+      };
+    }
+    if (this.restoredSequenceRecords) {
+      return {
+        sequenceRecords: this.restoredSequenceRecords,
+        deleteTargets: [],
+      };
+    }
+    if (graph.getEventCount() === 0) {
+      return { sequenceRecords: [], deleteTargets: [] };
+    }
+
+    return this.rebuildEngineStateForSnapshot(graph);
+  }
+
+  private rebuildEngineStateForSnapshot(graph: EventGraph): {
+    readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+    readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  } {
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(
+      graph.getBranchPreservingTopologicalOrder(),
+      this.initialText,
+      { eventGraph: graph },
+    );
+    return generated.text === this.document
+      ? {
+          sequenceRecords: engine.getSequenceRecords(),
+          deleteTargets: engine.getDeleteTargetRecords(),
+        }
+      : { sequenceRecords: [], deleteTargets: [] };
   }
 
   /**
@@ -479,16 +759,18 @@ export class EgWalkerReplica {
     }
 
     if (this.canIncrementallyAdvance(event)) {
-      const applied = this.engine.applyEvent(event, this.eventGraph);
+      const graph = this.ensureEventGraph();
+      const applied = this.engine.applyEvent(event, graph);
       this.document = this.engine.getText();
-      this.currentVersion = this.eventGraph.getFrontier();
+      this.currentVersion = graph.getFrontier();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.maybeAdvanceCheckpoint();
       return toPositionOperation(applied.transformedOperations);
     }
 
-    const checkpoint = this.criticalCheckpoints.pickFor(this.eventGraph);
+    const graph = this.ensureEventGraph();
+    const checkpoint = this.criticalCheckpoints.pickFor(graph);
     if (checkpoint) {
       this.partialReplayFromCheckpoint(checkpoint);
     } else {
@@ -524,7 +806,9 @@ export class EgWalkerReplica {
       return true;
     }
 
-    const parentExpansion = this.eventGraph.expandVersion(event.parentVersion);
+    const parentExpansion = this.ensureEventGraph().expandVersion(
+      event.parentVersion,
+    );
     for (const id of engineVersion) {
       if (!parentExpansion.has(id)) {
         return false;
@@ -534,14 +818,18 @@ export class EgWalkerReplica {
   }
 
   private maybeAdvanceCheckpoint(): void {
-    this.criticalCheckpoints.maybeAdvance(this.eventGraph, this.document);
+    this.criticalCheckpoints.maybeAdvance(
+      this.ensureEventGraph(),
+      this.document,
+    );
   }
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
+    const graph = this.ensureEventGraph();
     this.captureEnginePeakBeforeSwap();
-    const frontier = this.eventGraph.getFrontier();
+    const frontier = graph.getFrontier();
     const result = this.partialReplayer.replayFromCheckpoint(
-      this.eventGraph,
+      graph,
       checkpoint,
       frontier,
     );
@@ -556,7 +844,7 @@ export class EgWalkerReplica {
     let maxSequenceNumber = -1;
     const prefix = `${this.replicaId}:`;
 
-    for (const event of this.eventGraph.getAllEvents()) {
+    for (const event of this.ensureEventGraph().getAllEvents()) {
       if (!event.id.startsWith(prefix)) {
         continue;
       }
@@ -623,3 +911,37 @@ function toPositionOperation(
     length: op.length,
   };
 }
+
+const versionsEqual = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const id of left) {
+    if (!right.has(id)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const recordsUsePlainIndexes = (
+  records: ReadonlyArray<EngineSequenceRecord>,
+): boolean =>
+  records.every((record) => record.prepareState === 1 && !record.everDeleted);
+
+const compactRecordsUsePlainIndexes = (
+  records: CompactEngineSequenceRecords,
+): boolean => {
+  for (let index = 0; index < records.count; index++) {
+    if (
+      (records.prepareStates[index] ?? 0) !== 1 ||
+      (records.everDeleted[index] ?? 0) !== 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+};

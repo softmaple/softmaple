@@ -636,6 +636,7 @@ describe("EgWalkerReplica native snapshots", () => {
       // Assert
       expect(restored.getText()).toBe("ABC");
       expect(restored.getReplayStats().fullReplays).toBe(0);
+      expect(restored.getReplayStats().incrementalApplies).toBe(1);
     } finally {
       EventGraph.prototype.getTopologicalOrder = originalGetTopologicalOrder;
     }

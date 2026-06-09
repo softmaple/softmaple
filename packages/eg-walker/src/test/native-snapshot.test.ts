@@ -615,6 +615,33 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
+  it("should defer restored event indexes for linear local edits", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const originalGetTopologicalOrder =
+      EventGraph.prototype.getTopologicalOrder;
+    EventGraph.prototype.getTopologicalOrder = () => {
+      throw new Error("topological order should stay lazy on linear restore");
+    };
+
+    try {
+      // Act
+      const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+      restored.insert(2, "C");
+
+      // Assert
+      expect(restored.getText()).toBe("ABC");
+      expect(restored.getReplayStats().fullReplays).toBe(0);
+      expect(restored.getReplayStats().incrementalApplies).toBe(1);
+    } finally {
+      EventGraph.prototype.getTopologicalOrder = originalGetTopologicalOrder;
+    }
+  });
+
   it("should use restored typed-run event ranges for retreating concurrent edits", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");

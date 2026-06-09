@@ -71,6 +71,7 @@ export interface EngineSnapshotState {
 export class EgWalkerEngine {
   private readonly eventsById = new Map<EventId, GraphEvent>();
   private readonly eventOrder = new Map<EventId, number>();
+  private eventIndexesComplete = false;
   private graph = new EventGraph();
   private readonly eventItems = new EventItemIndex();
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
@@ -146,7 +147,7 @@ export class EgWalkerEngine {
    * graph that already contains {@link event}.
    */
   applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
-    if (!this.eventsById.has(event.id)) {
+    if (this.eventIndexesComplete && !this.eventsById.has(event.id)) {
       this.eventsById.set(event.id, event);
       this.eventOrder.set(event.id, this.eventOrder.size);
     }
@@ -186,7 +187,9 @@ export class EgWalkerEngine {
     return {
       retreatCount: this.retreatCount,
       advanceCount: this.advanceCount,
-      eventsProcessed: this.eventsById.size,
+      eventsProcessed: this.eventIndexesComplete
+        ? this.eventsById.size
+        : this.graph.getEventCount(),
       nonConflictingRunCount: this.nonConflictingRunCount,
       fullReplayCount: this.fullReplayCount,
       sequenceRecordCount: this.itemsById.size,
@@ -210,6 +213,7 @@ export class EgWalkerEngine {
 
     this.eventsById.clear();
     this.eventOrder.clear();
+    this.eventIndexesComplete = false;
     this.graph = state.graph;
     this.eventItems.clear();
     this.deleteTargets.clear();
@@ -225,11 +229,6 @@ export class EgWalkerEngine {
     this.fullReplayCount = 0;
     this.peakSequenceRecordCount = items.length;
     this.placeholderCounter = inferNextPlaceholderCounter(items);
-
-    state.graph.getTopologicalOrder().forEach((event, index) => {
-      this.eventsById.set(event.id, event);
-      this.eventOrder.set(event.id, index);
-    });
 
     for (const item of items) {
       this.itemsById.set(item.id, item);
@@ -331,6 +330,7 @@ export class EgWalkerEngine {
   ): void {
     this.eventsById.clear();
     this.eventOrder.clear();
+    this.eventIndexesComplete = false;
     this.graph = options.eventGraph ?? new EventGraph();
     this.eventItems.clear();
     this.deleteTargets.clear();
@@ -356,6 +356,7 @@ export class EgWalkerEngine {
         this.graph.addEvent(event);
       }
     });
+    this.eventIndexesComplete = true;
 
     if (initialText.length === 0) {
       return;
@@ -532,6 +533,7 @@ export class EgWalkerEngine {
     currentVersion: ReadonlySet<EventId>,
     targetVersion: ReadonlySet<EventId>,
   ): { retreat: EventId[]; advance: EventId[] } {
+    this.ensureEventIndexes();
     const { onlyInLeft, onlyInRight } = this.graph.diffVersions(
       currentVersion,
       targetVersion,
@@ -564,6 +566,19 @@ export class EgWalkerEngine {
         : compareEventIds(left.id, right.id);
     });
     return ranked.map(({ id }) => id);
+  }
+
+  private ensureEventIndexes(): void {
+    if (this.eventIndexesComplete) {
+      return;
+    }
+    this.eventsById.clear();
+    this.eventOrder.clear();
+    this.graph.getTopologicalOrder().forEach((event, index) => {
+      this.eventsById.set(event.id, event);
+      this.eventOrder.set(event.id, index);
+    });
+    this.eventIndexesComplete = true;
   }
 
   private requireItem(itemId: EventId): AugmentedCRDTItem {

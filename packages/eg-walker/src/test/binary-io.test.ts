@@ -78,4 +78,33 @@ describe("BinaryReader.readVarint hardening", () => {
       new BinaryReader(writer.toUint8Array()).readVarintUint32Array(),
     ).toThrow(/Uint32 range/);
   });
+
+  it("can read a byte view without copying", () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const view = new BinaryReader(bytes).readByteView(2);
+
+    bytes[0] = 9;
+
+    expect(view[0]).toBe(9);
+  });
+
+  it("keeps readBytes isolated from later source mutations", () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const copy = new BinaryReader(bytes).readBytes(2);
+
+    bytes[0] = 9;
+
+    expect(copy[0]).toBe(1);
+  });
+
+  it("reads zigzag delta Uint32 arrays without changing the wire format", () => {
+    const writer = new BinaryWriter();
+    writer.writeZigZagDeltaArray([10, 8, 20]);
+
+    expect(
+      Array.from(
+        new BinaryReader(writer.toUint8Array()).readZigZagDeltaUint32Array(),
+      ),
+    ).toEqual([10, 8, 20]);
+  });
 });

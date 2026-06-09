@@ -189,14 +189,16 @@ export class BinaryReader {
   }
 
   readZigZagDeltaUint32Array(): Uint32Array {
-    const values = this.readZigZagDeltaArray();
-    const out = new Uint32Array(values.length);
-    for (let index = 0; index < values.length; index++) {
-      const value = values[index] ?? 0;
+    const length = this.readVarint();
+    const out = new Uint32Array(length);
+    let previous = 0;
+    for (let index = 0; index < length; index++) {
+      const value = previous + this.readZigZagVarint();
       if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
         throw new Error(`Invalid uint32 delta value ${value}`);
       }
       out[index] = value;
+      previous = value;
     }
     return out;
   }
@@ -211,10 +213,14 @@ export class BinaryReader {
   }
 
   readBytes(length: number): Uint8Array {
+    return this.readByteView(length).slice();
+  }
+
+  readByteView(length: number): Uint8Array {
     if (this.offset + length > this.bytes.length) {
       throw new Error("Unexpected end of binary eg-walker graph");
     }
-    const result = this.bytes.slice(this.offset, this.offset + length);
+    const result = this.bytes.subarray(this.offset, this.offset + length);
     this.offset += length;
     return result;
   }

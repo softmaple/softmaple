@@ -135,16 +135,16 @@ const decodeLengthPrefixedNativeSnapshotBody = (
     const headerPayload = validateNativeSnapshotHeaderPayload(
       JSON.parse(
         decoder.decode(
-          decodeCompressedSection(reader.readBytes(reader.readVarint())),
+          decodeCompressedSection(reader.readByteView(reader.readVarint())),
         ),
       ) as unknown,
     );
-    const graphBytes = reader.readBytes(reader.readVarint());
+    const graphBytes = reader.readByteView(reader.readVarint());
     const compactRuntimeState =
       reader.remainingByteLength === 0
         ? undefined
         : decodeRuntimeState(
-            decodeCompressedSection(reader.readBytes(reader.readVarint())),
+            decodeCompressedSection(reader.readByteView(reader.readVarint())),
           );
     const legacyRuntimeState =
       compactRuntimeState === undefined
@@ -281,7 +281,7 @@ const decodeCompressedSection = (bytes: Uint8Array): Uint8Array => {
     bytes.subarray(COMPRESSED_SECTION_MAGIC.byteLength),
   );
   const expectedLength = reader.readVarint();
-  const compressed = reader.readBytes(reader.readVarint());
+  const compressed = reader.readByteView(reader.readVarint());
   if (reader.remainingByteLength !== 0) {
     throw new Error(
       "Invalid native snapshot compressed section: trailing bytes",
@@ -667,7 +667,7 @@ const readContentBlob = (
   recordCount: number,
 ): { readonly offsets: Uint32Array; readonly bytes: Uint8Array } => {
   const offsets = expectColumnLength(
-    Uint32Array.from(reader.readZigZagDeltaArray()),
+    reader.readZigZagDeltaUint32Array(),
     recordCount + 1,
     "record content offsets",
   );
@@ -676,7 +676,7 @@ const readContentBlob = (
       "Invalid native snapshot runtime state: content offsets must start at zero",
     );
   }
-  const blob = reader.readBytes(reader.readVarint());
+  const blob = reader.readByteView(reader.readVarint());
   for (let index = 0; index < recordCount; index++) {
     const start = offsets[index]!;
     const end = offsets[index + 1]!;

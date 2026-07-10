@@ -22,6 +22,11 @@ interface BranchNode {
 
 type RopeNode = LeafNode | BranchNode;
 
+interface DeleteResult {
+  readonly node: RopeNode | null;
+  readonly hasUnderfilledLeaf: boolean;
+}
+
 export interface Utf16RopeInstrumentation {
   readonly nodeVisits: number;
   readonly nodeAllocations: number;
@@ -139,8 +144,14 @@ export class PersistentUtf16Rope {
     if (length === this.length) {
       return new PersistentUtf16Rope(EMPTY_LEAF);
     }
-    const next = deleteFromNode(this.root, index, index + length);
-    return new PersistentUtf16Rope(collapseRoot(next ?? EMPTY_LEAF));
+    const deleted = deleteFromNode(this.root, index, index + length);
+    const next = collapseRoot(deleted.node ?? EMPTY_LEAF);
+    if (!deleted.hasUnderfilledLeaf || next.kind === "leaf") {
+      return new PersistentUtf16Rope(next);
+    }
+    return new PersistentUtf16Rope(
+      buildTree(rebalanceLeafList(collectLeaves(next))),
+    );
   }
 
   slice(start: number, end: number = this.length): string {
@@ -280,17 +291,22 @@ const deleteFromNode = (
   node: RopeNode,
   start: number,
   end: number,
-): RopeNode | null => {
+): DeleteResult => {
   counters.nodeVisits++;
   if (start <= 0 && end >= node.length) {
-    return null;
+    return { node: null, hasUnderfilledLeaf: false };
   }
   if (node.kind === "leaf") {
     const remaining = `${node.text.slice(0, Math.max(0, start))}${node.text.slice(Math.min(node.length, end))}`;
-    return remaining.length === 0 ? null : leaf(remaining);
+    return {
+      node: remaining.length === 0 ? null : leaf(remaining),
+      hasUnderfilledLeaf:
+        remaining.length > 0 && remaining.length < UTF16_ROPE_MIN_LEAF,
+    };
   }
 
   const children: RopeNode[] = [];
+  let hasUnderfilledLeaf = false;
   let childStart = 0;
   for (const child of node.children) {
     const childEnd = childStart + child.length;
@@ -302,13 +318,36 @@ const deleteFromNode = (
         Math.max(0, start - childStart),
         Math.min(child.length, end - childStart),
       );
-      if (retained !== null) {
-        children.push(retained);
+      hasUnderfilledLeaf ||= retained.hasUnderfilledLeaf;
+      if (retained.node !== null) {
+        children.push(retained.node);
       }
     }
     childStart = childEnd;
   }
-  return children.length === 0 ? null : branch(children, false);
+  return {
+    node: children.length === 0 ? null : branch(children, false),
+    hasUnderfilledLeaf,
+  };
+};
+
+const rebalanceLeafList = (
+  leaves: ReadonlyArray<LeafNode>,
+): ReadonlyArray<LeafNode> => {
+  const balanced: LeafNode[] = [];
+  for (const candidate of leaves) {
+    balanced.push(candidate);
+    while (
+      balanced.length >= 2 &&
+      (balanced.at(-1)!.length < UTF16_ROPE_MIN_LEAF ||
+        balanced.at(-2)!.length < UTF16_ROPE_MIN_LEAF)
+    ) {
+      const right = balanced.pop()!;
+      const left = balanced.pop()!;
+      balanced.push(...chunkText(`${left.text}${right.text}`));
+    }
+  }
+  return balanced;
 };
 
 const partitionLevel = (

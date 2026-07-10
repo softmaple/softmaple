@@ -46,6 +46,19 @@ describe("PersistentUtf16Rope", () => {
     expect(original.toString()).toBe(originalText);
   });
 
+  it("rebalances underfilled boundary leaves after deletion", () => {
+    const original = PersistentUtf16Rope.from("x".repeat(5_000));
+    const edited = original.delete(0, 1_000);
+
+    expect(edited.toString()).toBe("x".repeat(4_000));
+    expect(Math.min(...edited.getLeafLengths())).toBeGreaterThanOrEqual(
+      UTF16_ROPE_MIN_LEAF,
+    );
+    expect(Math.max(...edited.getLeafLengths())).toBeLessThanOrEqual(
+      UTF16_ROPE_MAX_LEAF,
+    );
+  });
+
   it("uses multi-level fan-out and shares untouched leaves", () => {
     const text = "x".repeat(
       UTF16_ROPE_TARGET_LEAF * (UTF16_ROPE_BRANCH_FACTOR + 2),

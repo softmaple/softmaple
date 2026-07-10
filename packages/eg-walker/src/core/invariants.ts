@@ -8,6 +8,82 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import type { DocumentState, GraphEvent, ExternalOperation } from "../types";
 
 /**
+ * Validate and detach a caller-owned event before it can enter replica state.
+ */
+export const cloneRemoteEvent = (event: GraphEvent): GraphEvent => {
+  const candidate = event as unknown as Record<string, unknown>;
+  if (typeof candidate.id !== "string" || candidate.id.length === 0) {
+    throw new Error("remote event id must be a non-empty string");
+  }
+  if (!(candidate.parentVersion instanceof Set)) {
+    throw new Error(
+      `remote event ${candidate.id} parentVersion must be a Set of event IDs`,
+    );
+  }
+  const parents = new Set<string>();
+  for (const parent of candidate.parentVersion) {
+    if (typeof parent !== "string" || parent.length === 0) {
+      throw new Error(
+        `remote event ${candidate.id} has a non-string parent event ID`,
+      );
+    }
+    if (parent === candidate.id) {
+      throw new Error(`remote event ${candidate.id} cannot parent itself`);
+    }
+    parents.add(parent);
+  }
+  if (
+    typeof candidate.timestamp !== "number" ||
+    !Number.isFinite(candidate.timestamp)
+  ) {
+    throw new Error(`remote event ${candidate.id} has an invalid timestamp`);
+  }
+  if (candidate.operation === null || typeof candidate.operation !== "object") {
+    throw new Error(`remote event ${candidate.id} has an invalid operation`);
+  }
+  const operation = candidate.operation as Record<string, unknown>;
+  let clonedOperation: ExternalOperation;
+  if (operation.type === OPERATION_TYPE.INSERT) {
+    if (
+      typeof operation.index !== "number" ||
+      typeof operation.text !== "string"
+    ) {
+      throw new Error(`remote event ${candidate.id} has an invalid insert`);
+    }
+    clonedOperation = {
+      type: OPERATION_TYPE.INSERT,
+      index: operation.index,
+      text: operation.text,
+    };
+  } else if (operation.type === OPERATION_TYPE.DELETE) {
+    if (
+      typeof operation.index !== "number" ||
+      typeof operation.length !== "number"
+    ) {
+      throw new Error(`remote event ${candidate.id} has an invalid delete`);
+    }
+    clonedOperation = {
+      type: OPERATION_TYPE.DELETE,
+      index: operation.index,
+      length: operation.length,
+    };
+  } else {
+    throw new Error(
+      `remote event ${candidate.id} has an unknown operation type`,
+    );
+  }
+
+  const cloned: GraphEvent = {
+    id: candidate.id,
+    operation: clonedOperation,
+    parentVersion: parents,
+    timestamp: candidate.timestamp,
+  };
+  assertRemoteEventWellFormed(cloned);
+  return cloned;
+};
+
+/**
  * Reject strings whose UTF-16 code-unit sequence contains a lone surrogate.
  *
  * The CRDT layer stores one item per UTF-16 code unit, so a lone high or low
@@ -70,6 +146,13 @@ export const assertWellFormedUtf16 = (text: string, context: string): void => {
  * crash the prepare-index walk with an opaque error.
  */
 export const assertRemoteEventWellFormed = (event: GraphEvent): void => {
+  const index = event.operation.index;
+  if (!Number.isSafeInteger(index) || index < 0) {
+    throw new Error(
+      `remote event ${event.id} has invalid operation index ${index}`,
+    );
+  }
+
   if (event.operation.type === OPERATION_TYPE.INSERT) {
     assertWellFormedUtf16(
       event.operation.text,
@@ -78,7 +161,7 @@ export const assertRemoteEventWellFormed = (event: GraphEvent): void => {
     return;
   }
   const length = event.operation.length;
-  if (!Number.isFinite(length) || length < 0) {
+  if (!Number.isSafeInteger(length) || length < 0) {
     throw new Error(
       `remote event ${event.id} has invalid delete length ${length}`,
     );

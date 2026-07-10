@@ -197,6 +197,15 @@ export class EgWalkerEngine {
     };
   }
 
+  /** Restore diagnostic counters after an exceptional replica rollback. */
+  restoreStats(stats: EngineStats): void {
+    this.retreatCount = stats.retreatCount;
+    this.advanceCount = stats.advanceCount;
+    this.nonConflictingRunCount = stats.nonConflictingRunCount;
+    this.fullReplayCount = stats.fullReplayCount;
+    this.peakSequenceRecordCount = stats.peakSequenceRecordCount;
+  }
+
   getSequenceRecords(): EngineSequenceRecord[] {
     this.flushPendingInsert();
     return recordsFromItems(this.sequence.toArray());

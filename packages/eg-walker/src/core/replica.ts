@@ -9,8 +9,10 @@
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { REPLAY_SOURCE, type ReplaySource } from "../constants/replay-source";
+import { APPLY_REMOTE_EVENT_STATUS } from "../types";
 import type {
   ApplyRemoteEventResult,
+  ApplyRemoteEventsResult,
   ExternalOperation,
   DocumentState,
   GraphEvent,
@@ -20,20 +22,24 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
+import { compareEventIds } from "../graph/event-id";
 import {
   CriticalCheckpointStore,
   type CriticalCheckpoint,
   type CriticalCheckpointSnapshot,
+  type CriticalCheckpointStoreSnapshot,
 } from "./internals/critical-checkpoint-store";
 import {
   assertRemoteEventWellFormed,
   assertWellFormedUtf16,
+  cloneRemoteEvent,
   createDocumentState,
 } from "./invariants";
 import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
 import {
   EgWalkerEngine,
   type DeleteTargetRecord,
+  type EngineStats,
 } from "../engine/eg-walker-engine";
 import type {
   CompactEngineSequenceRecords,
@@ -45,7 +51,11 @@ import {
   readReplicaMetadata,
   writeReplicaMetadata,
 } from "./internals/persistence-metadata";
-import { RemoteEventBuffer } from "./internals/remote-event-buffer";
+import {
+  RemoteEventBuffer,
+  type RemoteEventBufferSnapshot,
+  type RemoteIntegrationEffect,
+} from "./internals/remote-event-buffer";
 import {
   consumeDecodedNativeSnapshotGraphSource,
   consumeDecodedNativeSnapshotRuntimeState,
@@ -70,6 +80,32 @@ interface ReplicaConstructorOptions {
   readonly restoredCheckpoints?: ReadonlyArray<CriticalCheckpointSnapshot>;
 }
 
+interface RemoteBatchCandidate {
+  readonly event: GraphEvent;
+  readonly inputIndex: number;
+}
+
+interface PreparedRemoteBatch {
+  readonly candidates: ReadonlyArray<RemoteBatchCandidate>;
+  readonly results: ApplyRemoteEventResult[];
+  readonly firstInputIndexById: ReadonlyMap<EventId, number>;
+}
+
+interface RemoteBatchSnapshot {
+  readonly document: string;
+  readonly currentVersion: Version;
+  readonly engineStats: EngineStats | null;
+  readonly engineStatsOverride: EngineStats | null;
+  readonly remoteBuffer: RemoteEventBufferSnapshot;
+  readonly checkpoints: CriticalCheckpointStoreSnapshot;
+  readonly fullReplayCount: number;
+  readonly partialReplayCount: number;
+  readonly incrementalApplyCount: number;
+  readonly lastReplaySource: ReplaySource | null;
+  readonly replicaPeakSequenceRecordCount: number;
+  readonly restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null;
+}
+
 /**
  * Public replica for Eg-walker.
  * Strictly index-based, no CRDT exposure.
@@ -82,6 +118,8 @@ export class EgWalkerReplica {
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
+  /** Exact diagnostic view retained across an exceptional engine rebuild. */
+  private engineStatsOverride: EngineStats | null = null;
   private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
   private partialReplayCount = 0;
@@ -427,8 +465,65 @@ export class EgWalkerReplica {
    * paths where `operation` is `null`.
    */
   applyRemoteEvent(event: GraphEvent): ApplyRemoteEventResult {
-    assertRemoteEventWellFormed(event);
-    return this.ensureRemoteEvents().tryAccept(event);
+    return this.applyRemoteEvents([event]).results[0]!;
+  }
+
+  /**
+   * Atomically validate and accept a remote event batch.
+   *
+   * Events are detached from caller-owned objects, causally ordered, and then
+   * appended through one transaction. Any integration failure rolls back the
+   * graph, document, pending queues, replay state, checkpoints, and counters.
+   */
+  applyRemoteEvents(
+    events: ReadonlyArray<GraphEvent>,
+  ): ApplyRemoteEventsResult {
+    const clonedEvents = events.map(cloneRemoteEvent);
+    const graph = this.ensureEventGraph();
+    const remoteEvents = this.ensureRemoteEvents();
+    const prepared = prepareRemoteBatch(clonedEvents, graph, remoteEvents);
+    if (prepared.candidates.length === 0) {
+      return { results: prepared.results, operations: [] };
+    }
+
+    const snapshot = this.captureRemoteBatchSnapshot(remoteEvents);
+    const transaction = graph.beginAppendTransaction();
+    const operations: PositionOperation[] = [];
+    let operationsAreExact = true;
+
+    try {
+      for (const candidate of prepared.candidates) {
+        const acceptance = remoteEvents.tryAcceptDetailed(candidate.event);
+        prepared.results[candidate.inputIndex] = acceptance.directResult;
+
+        for (const integration of acceptance.integrations) {
+          const inputIndex = prepared.firstInputIndexById.get(
+            integration.eventId,
+          );
+          if (inputIndex !== undefined && inputIndex !== candidate.inputIndex) {
+            prepared.results[inputIndex] = {
+              status: APPLY_REMOTE_EVENT_STATUS.Integrated,
+              operation: integration.effect.operation,
+            };
+          }
+          if (!integration.effect.exact) {
+            operationsAreExact = false;
+          } else if (integration.effect.operation !== null) {
+            operations.push(integration.effect.operation);
+          }
+        }
+      }
+
+      transaction.commit();
+      return {
+        results: prepared.results,
+        operations: operationsAreExact ? operations : null,
+      };
+    } catch (error) {
+      transaction.rollback();
+      this.restoreRemoteBatchSnapshot(snapshot, graph, remoteEvents);
+      throw error;
+    }
   }
 
   /**
@@ -467,7 +562,7 @@ export class EgWalkerReplica {
     readonly criticalCheckpointMisses: number;
     readonly lastReplaySource: ReplaySource | null;
   } {
-    const engineStats = this.engine?.getStats();
+    const engineStats = this.engineStatsOverride ?? this.engine?.getStats();
     return {
       fullReplays: this.fullReplayCount,
       partialReplays: this.partialReplayCount,
@@ -517,6 +612,60 @@ export class EgWalkerReplica {
     });
   }
 
+  private captureRemoteBatchSnapshot(
+    remoteEvents: RemoteEventBuffer,
+  ): RemoteBatchSnapshot {
+    return {
+      document: this.document,
+      currentVersion: new Set(this.currentVersion),
+      engineStats: this.engine?.getStats() ?? null,
+      engineStatsOverride: this.engineStatsOverride,
+      remoteBuffer: remoteEvents.snapshot(),
+      checkpoints: this.criticalCheckpoints.snapshotForTransaction(),
+      fullReplayCount: this.fullReplayCount,
+      partialReplayCount: this.partialReplayCount,
+      incrementalApplyCount: this.incrementalApplyCount,
+      lastReplaySource: this.lastReplaySource,
+      replicaPeakSequenceRecordCount: this.replicaPeakSequenceRecordCount,
+      restoredSequenceRecords: this.restoredSequenceRecords,
+    };
+  }
+
+  private restoreRemoteBatchSnapshot(
+    snapshot: RemoteBatchSnapshot,
+    graph: EventGraph,
+    remoteEvents: RemoteEventBuffer,
+  ): void {
+    remoteEvents.restore(snapshot.remoteBuffer);
+    this.criticalCheckpoints.restoreTransaction(snapshot.checkpoints);
+    this.fullReplayCount = snapshot.fullReplayCount;
+    this.partialReplayCount = snapshot.partialReplayCount;
+    this.incrementalApplyCount = snapshot.incrementalApplyCount;
+    this.lastReplaySource = snapshot.lastReplaySource;
+    this.replicaPeakSequenceRecordCount =
+      snapshot.replicaPeakSequenceRecordCount;
+    this.restoredSequenceRecords = snapshot.restoredSequenceRecords;
+    this.currentVersion = new Set(snapshot.currentVersion);
+    this.document = snapshot.document;
+    this.engineStatsOverride = snapshot.engineStatsOverride;
+
+    if (snapshot.engineStats === null) {
+      this.engine = null;
+      return;
+    }
+
+    const restoredEngine = new EgWalkerEngine();
+    restoredEngine.generate(
+      graph.getBranchPreservingTopologicalOrder(),
+      this.initialText,
+      { eventGraph: graph },
+    );
+    restoredEngine.restoreStats(snapshot.engineStats);
+    this.engine = restoredEngine;
+    this.engineStatsOverride =
+      snapshot.engineStatsOverride ?? snapshot.engineStats;
+  }
+
   private shouldDeferLocalReplay(): boolean {
     return this.deferLocalReplay && this.engine === null;
   }
@@ -540,6 +689,9 @@ export class EgWalkerReplica {
   }
 
   private validateIndex(index: number, allowEnd: boolean): void {
+    if (!Number.isSafeInteger(index)) {
+      throw new Error(`Index ${index} must be a safe integer`);
+    }
     const max = allowEnd ? this.document.length : this.document.length - 1;
     if (index < 0 || index > max) {
       throw new Error(
@@ -584,6 +736,12 @@ export class EgWalkerReplica {
       this.validateIndex(operation.index, true);
       this.assertNotMidSurrogate(operation.index);
       return operation;
+    }
+
+    if (!Number.isSafeInteger(operation.length)) {
+      throw new Error(
+        `Delete length ${operation.length} must be a safe integer`,
+      );
     }
 
     // Zero/negative-length deletes are no-ops; skip index validation.
@@ -742,7 +900,8 @@ export class EgWalkerReplica {
    * pre-event document that captures the visible effect of this one
    * event. See {@link ApplyRemoteEventResult} for the contract.
    */
-  private advanceWithEvent(event: GraphEvent): PositionOperation | null {
+  private advanceWithEvent(event: GraphEvent): RemoteIntegrationEffect {
+    this.engineStatsOverride = null;
     if (!this.engine) {
       // Cold-start: this code path only fires on a replica that started
       // with an empty event graph and is now seeing its first event. The
@@ -755,7 +914,7 @@ export class EgWalkerReplica {
       // multi-event cold starts cannot reach this branch.
       const transformed = this.fullReplay();
       this.maybeAdvanceCheckpoint();
-      return toPositionOperation(transformed);
+      return toRemoteIntegrationEffect(transformed);
     }
 
     if (this.canIncrementallyAdvance(event)) {
@@ -766,7 +925,7 @@ export class EgWalkerReplica {
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.maybeAdvanceCheckpoint();
-      return toPositionOperation(applied.transformedOperations);
+      return toRemoteIntegrationEffect(applied.transformedOperations);
     }
 
     const graph = this.ensureEventGraph();
@@ -777,7 +936,7 @@ export class EgWalkerReplica {
       this.fullReplay();
     }
     this.maybeAdvanceCheckpoint();
-    return null;
+    return { operation: null, exact: false };
   }
 
   /**
@@ -882,35 +1041,175 @@ export function createEgWalkerReplica(
  *   `text` to `length` (UTF-16 code units) because awareness consumers
  *   address positions by length, not by inserted string.
  */
-function toPositionOperation(
+function toRemoteIntegrationEffect(
   transformed: ReadonlyArray<ExternalOperation>,
-): PositionOperation | null {
-  if (transformed.length !== 1) {
-    return null;
+): RemoteIntegrationEffect {
+  if (transformed.length === 0) {
+    return { operation: null, exact: true };
+  }
+  if (transformed.length > 1) {
+    return { operation: null, exact: false };
   }
   const [op] = transformed;
   if (!op) {
-    return null;
+    return { operation: null, exact: true };
   }
   if (op.type === OPERATION_TYPE.INSERT) {
     if (op.text.length === 0) {
-      return null;
+      return { operation: null, exact: true };
     }
     return {
-      type: OPERATION_TYPE.INSERT,
-      index: op.index,
-      length: op.text.length,
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: op.index,
+        length: op.text.length,
+      },
+      exact: true,
     };
   }
   if (op.length === 0) {
-    return null;
+    return { operation: null, exact: true };
   }
   return {
-    type: OPERATION_TYPE.DELETE,
-    index: op.index,
-    length: op.length,
+    operation: {
+      type: OPERATION_TYPE.DELETE,
+      index: op.index,
+      length: op.length,
+    },
+    exact: true,
   };
 }
+
+const prepareRemoteBatch = (
+  events: ReadonlyArray<GraphEvent>,
+  graph: EventGraph,
+  remoteEvents: RemoteEventBuffer,
+): PreparedRemoteBatch => {
+  const results: ApplyRemoteEventResult[] = events.map(() => ({
+    status: APPLY_REMOTE_EVENT_STATUS.Duplicate,
+  }));
+  const firstById = new Map<
+    EventId,
+    { readonly event: GraphEvent; readonly inputIndex: number }
+  >();
+  const candidates: RemoteBatchCandidate[] = [];
+
+  for (let inputIndex = 0; inputIndex < events.length; inputIndex++) {
+    const event = events[inputIndex]!;
+    const known =
+      graph.getEvent(event.id) ?? remoteEvents.getBufferedEvent(event.id);
+    if (known !== undefined) {
+      assertMatchingDuplicate(known, event);
+      continue;
+    }
+
+    const first = firstById.get(event.id);
+    if (first !== undefined) {
+      assertMatchingDuplicate(first.event, event);
+      continue;
+    }
+
+    firstById.set(event.id, { event, inputIndex });
+    candidates.push({ event, inputIndex });
+  }
+
+  assertAcyclicRemoteCandidates([
+    ...remoteEvents.getBufferedEvents(),
+    ...candidates.map((candidate) => candidate.event),
+  ]);
+
+  return {
+    candidates: topologicallyOrderRemoteCandidates(candidates),
+    results,
+    firstInputIndexById: new Map(
+      Array.from(firstById, ([eventId, value]) => [eventId, value.inputIndex]),
+    ),
+  };
+};
+
+const topologicallyOrderRemoteCandidates = (
+  candidates: ReadonlyArray<RemoteBatchCandidate>,
+): ReadonlyArray<RemoteBatchCandidate> => {
+  const byId = new Map(
+    candidates.map((candidate) => [candidate.event.id, candidate]),
+  );
+  const indegree = new Map<EventId, number>();
+  const children = new Map<EventId, EventId[]>();
+
+  for (const candidate of candidates) {
+    let degree = 0;
+    for (const parentId of candidate.event.parentVersion) {
+      if (!byId.has(parentId)) {
+        continue;
+      }
+      degree++;
+      const siblings = children.get(parentId) ?? [];
+      siblings.push(candidate.event.id);
+      children.set(parentId, siblings);
+    }
+    indegree.set(candidate.event.id, degree);
+  }
+
+  const ready = candidates
+    .filter((candidate) => indegree.get(candidate.event.id) === 0)
+    .sort((left, right) => compareEventIds(left.event.id, right.event.id));
+  const ordered: RemoteBatchCandidate[] = [];
+  while (ready.length > 0) {
+    const next = ready.shift()!;
+    ordered.push(next);
+    for (const childId of children.get(next.event.id) ?? []) {
+      const remaining = (indegree.get(childId) ?? 0) - 1;
+      indegree.set(childId, remaining);
+      if (remaining === 0) {
+        ready.push(byId.get(childId)!);
+        ready.sort((left, right) =>
+          compareEventIds(left.event.id, right.event.id),
+        );
+      }
+    }
+  }
+
+  if (ordered.length !== candidates.length) {
+    throw new Error("remote event batch contains a causal cycle");
+  }
+  return ordered;
+};
+
+const assertAcyclicRemoteCandidates = (
+  events: ReadonlyArray<GraphEvent>,
+): void => {
+  const candidates = events.map((event, inputIndex) => ({ event, inputIndex }));
+  topologicallyOrderRemoteCandidates(candidates);
+};
+
+const assertMatchingDuplicate = (
+  known: GraphEvent,
+  candidate: GraphEvent,
+): void => {
+  if (!eventsEqual(known, candidate)) {
+    throw new Error(
+      `remote event ${candidate.id} conflicts with an existing ID`,
+    );
+  }
+};
+
+const eventsEqual = (left: GraphEvent, right: GraphEvent): boolean => {
+  if (
+    left.id !== right.id ||
+    left.timestamp !== right.timestamp ||
+    left.operation.type !== right.operation.type ||
+    left.operation.index !== right.operation.index ||
+    !versionsEqual(left.parentVersion, right.parentVersion)
+  ) {
+    return false;
+  }
+  return left.operation.type === OPERATION_TYPE.INSERT &&
+    right.operation.type === OPERATION_TYPE.INSERT
+    ? left.operation.text === right.operation.text
+    : left.operation.type === OPERATION_TYPE.DELETE &&
+        right.operation.type === OPERATION_TYPE.DELETE &&
+        left.operation.length === right.operation.length;
+};
 
 const versionsEqual = (
   left: ReadonlySet<EventId>,

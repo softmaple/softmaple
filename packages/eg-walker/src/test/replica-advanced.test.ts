@@ -267,8 +267,20 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
       expect(api.getText()).toBe("😀");
     });
 
-    it("rejects remote events with non-finite or negative delete lengths", () => {
+    it("rejects remote events with unsafe indexes or delete lengths before graph mutation", () => {
       const api = new EgWalkerReplica("r1", "hello");
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:index",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: 1.5,
+            text: "X",
+          },
+          timestamp: 0,
+        }),
+      ).toThrow(/remote event bob:index has invalid operation index 1.5/);
       expect(() =>
         api.applyRemoteEvent({
           id: "bob:0",
@@ -293,6 +305,33 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
           timestamp: 2,
         }),
       ).toThrow(/remote event bob:1 has invalid delete length -1/);
+      expect(() =>
+        api.applyRemoteEvent({
+          id: "bob:2",
+          parentVersion: new Set(),
+          operation: {
+            type: OPERATION_TYPE.DELETE,
+            index: 0,
+            length: 1.5,
+          },
+          timestamp: 3,
+        }),
+      ).toThrow(/remote event bob:2 has invalid delete length 1.5/);
+
+      expect(api.exportEventGraph()).toHaveLength(0);
+      expect(api.getText()).toBe("hello");
+
+      api.applyRemoteEvent({
+        id: "bob:3",
+        parentVersion: new Set(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 5,
+          text: "!",
+        },
+        timestamp: 4,
+      });
+      expect(api.getText()).toBe("hello!");
     });
 
     it("keeps concurrent emoji operations from splitting surrogate pairs", () => {

@@ -1,6 +1,13 @@
 import { EgWalkerReplica } from "@softmaple/eg-walker";
 import { storage } from "./storage";
 import { SyncAdapter } from "./sync-adapter";
+import {
+  createSyncState,
+  decodeWireEvent,
+  decodeWireEvents,
+  encodeWireEvent,
+  selectMissingWireEvents,
+} from "./sync-protocol";
 import type { Document, Room, SyncMessage, User } from "./types";
 
 /**
@@ -12,7 +19,6 @@ export class RoomManager {
   private currentRoom: Room | null = null;
   private currentUser: User | null = null;
   private participants = new Map<string, User>();
-  private lastSyncedVersion = 0;
   private disableSync: boolean;
   private contentChangeListeners = new Set<() => void>();
   private participantsChangeListeners = new Set<() => void>();
@@ -63,15 +69,11 @@ export class RoomManager {
     // Load existing document
     const doc = await storage.getDocument(roomId);
     if (doc?.events) {
-      // Apply existing events
-      for (const event of doc.events) {
-        try {
-          await this.api.applyRemoteEvent(event);
-        } catch (error) {
-          console.error("Failed to apply event:", error);
-        }
+      try {
+        this.api.applyRemoteEvents(decodeWireEvents(doc.events));
+      } catch (error) {
+        console.error("Failed to apply stored events:", error);
       }
-      this.lastSyncedVersion = doc.version;
     }
 
     // Initialize sync adapter
@@ -91,7 +93,7 @@ export class RoomManager {
       type: "sync-request",
       roomId,
       userId: user.id,
-      data: { version: this.lastSyncedVersion },
+      data: createSyncState(this.api.exportEventGraph()),
       timestamp: Date.now(),
     });
 
@@ -133,7 +135,7 @@ export class RoomManager {
     this.syncAdapter.on("remote-event", async (msg: SyncMessage) => {
       if (msg.userId !== user.id && this.api && msg.type === "event") {
         try {
-          await this.api.applyRemoteEvent(msg.data);
+          this.api.applyRemoteEvents([decodeWireEvent(msg.data)]);
           this.notifyContentChange();
           await this.saveDocument();
         } catch (error) {
@@ -160,20 +162,17 @@ export class RoomManager {
     if (msg.type !== "sync-request") return;
 
     const events = this.api.exportEventGraph();
-    const requestVersion = msg.data.version || 0;
-
-    // Send only events after the requested version
-    const newEvents = events.slice(requestVersion);
-
-    if (newEvents.length > 0) {
-      this.syncAdapter?.send({
-        type: "sync-response",
-        roomId: this.currentRoom.id,
-        userId: this.currentUser?.id ?? "",
-        data: { events: newEvents, version: events.length },
-        timestamp: Date.now(),
-      });
-    }
+    const state = createSyncState(events);
+    this.syncAdapter?.send({
+      type: "sync-response",
+      roomId: this.currentRoom.id,
+      userId: this.currentUser?.id ?? "",
+      data: {
+        frontier: state.frontier,
+        events: selectMissingWireEvents(events, msg.data.knownEventIds),
+      },
+      timestamp: Date.now(),
+    });
 
     // Also send our user info as part of sync
     if (this.currentUser) {
@@ -191,17 +190,14 @@ export class RoomManager {
     if (!this.api) return;
     if (msg.type !== "sync-response") return;
 
-    const { events, version } = msg.data;
+    const { events } = msg.data;
     if (events && Array.isArray(events)) {
-      for (const event of events) {
-        try {
-          await this.api.applyRemoteEvent(event);
-        } catch (error) {
-          console.error("Failed to apply sync event:", error);
-        }
+      try {
+        this.api.applyRemoteEvents(decodeWireEvents(events));
+      } catch (error) {
+        console.error("Failed to apply sync batch:", error);
+        return;
       }
-
-      this.lastSyncedVersion = version;
       this.notifyContentChange();
       await this.saveDocument();
     }
@@ -235,7 +231,7 @@ export class RoomManager {
         type: "event",
         roomId: this.currentRoom.id,
         userId: this.currentUser?.id ?? "",
-        data: latestEvent,
+        data: encodeWireEvent(latestEvent),
         timestamp: Date.now(),
       });
 
@@ -248,11 +244,13 @@ export class RoomManager {
     if (!this.api || !this.currentRoom) return;
 
     const events = this.api.exportEventGraph();
+    const state = createSyncState(events);
     const doc: Document = {
       roomId: this.currentRoom.id,
       content: this.api.getText(),
       version: events.length,
-      events: Array.from(events),
+      frontier: state.frontier,
+      events: events.map(encodeWireEvent),
       lastModified: Date.now(),
     };
 

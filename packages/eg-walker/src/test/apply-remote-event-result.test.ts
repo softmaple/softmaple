@@ -93,18 +93,15 @@ describe("EgWalkerReplica.applyRemoteEvent — structural result", () => {
     expect(reBuffered.status).toBe(APPLY_REMOTE_EVENT_STATUS.Duplicate);
     expect(replica.getPendingRemoteCount()).toBe(1);
 
-    // Parent arrives: caller's event integrates, buffered child flushes
-    // as a side effect (not reported by this call).
+    // Parent arrives: caller's event integrates and the buffered child flushes.
+    // The call changed text through two events, so it cannot report the
+    // parent's single-character operation as the full visible delta.
     const parentResult = replica.applyRemoteEvent(cloneEvent(first!));
     expect(parentResult.status).toBe(APPLY_REMOTE_EVENT_STATUS.Integrated);
     if (parentResult.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
       throw new Error("status narrowing");
     }
-    expect(parentResult.operation).toEqual({
-      type: OPERATION_TYPE.INSERT,
-      index: 0,
-      length: 1,
-    });
+    expect(parentResult.operation).toBeNull();
     expect(replica.getPendingRemoteCount()).toBe(0);
     expect(replica.getText()).toBe("ab");
   });
@@ -150,6 +147,37 @@ describe("EgWalkerReplica.applyRemoteEvent — structural result", () => {
     expect(replica.getPendingRemoteCount()).toBe(0);
     expect(replica.getText()).toBe("abc");
   });
+
+  it("iteratively flushes a deeply buffered causal chain", () => {
+    // Arrange
+    const eventCount = 4_000;
+    const events = Array.from({ length: eventCount }, (_, index) => ({
+      id: `deep:${index}`,
+      parentVersion: new Set(index === 0 ? [] : [`deep:${index - 1}`]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index,
+        text: "x",
+      } as const,
+      timestamp: index,
+    }));
+    const replica = new EgWalkerReplica("deep-buffer");
+
+    // Act
+    for (let index = events.length - 1; index > 0; index--) {
+      replica.applyRemoteEvent(cloneEvent(events[index]!));
+    }
+    const rootResult = replica.applyRemoteEvent(cloneEvent(events[0]!));
+
+    // Assert
+    expect(rootResult.status).toBe(APPLY_REMOTE_EVENT_STATUS.Integrated);
+    if (rootResult.status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
+      throw new Error("status narrowing");
+    }
+    expect(rootResult.operation).toBeNull();
+    expect(replica.getPendingRemoteCount()).toBe(0);
+    expect(replica.getText()).toBe("x".repeat(eventCount));
+  }, 15_000);
 
   it("a partial/full replay returns `integrated` with operation === null", () => {
     // Two replicas branch from the same root then merge. The merge event

@@ -23,6 +23,12 @@ export interface CriticalCheckpointSnapshot {
   readonly eventCount: number;
 }
 
+export interface CriticalCheckpointStoreSnapshot {
+  readonly checkpoints: ReadonlyArray<CriticalCheckpoint>;
+  readonly hits: number;
+  readonly misses: number;
+}
+
 export class CriticalCheckpointStore {
   private checkpoints: ReadonlyArray<CriticalCheckpoint> = [];
   private hitCount = 0;
@@ -51,6 +57,26 @@ export class CriticalCheckpointStore {
    */
   get misses(): number {
     return this.missCount;
+  }
+
+  snapshotForTransaction(): CriticalCheckpointStoreSnapshot {
+    return {
+      checkpoints: this.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        version: new Set(checkpoint.version),
+      })),
+      hits: this.hitCount,
+      misses: this.missCount,
+    };
+  }
+
+  restoreTransaction(snapshot: CriticalCheckpointStoreSnapshot): void {
+    this.checkpoints = snapshot.checkpoints.map((checkpoint) => ({
+      ...checkpoint,
+      version: new Set(checkpoint.version),
+    }));
+    this.hitCount = snapshot.hits;
+    this.missCount = snapshot.misses;
   }
 
   toSnapshot(): ReadonlyArray<CriticalCheckpointSnapshot> {

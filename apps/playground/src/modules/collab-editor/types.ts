@@ -6,15 +6,22 @@ export interface Room {
   createdBy?: string;
 }
 
-// Re-import and re-export GraphEvent from eg-walker
-import type { GraphEvent as EgWalkerGraphEvent } from "@softmaple/eg-walker";
+// Re-import and re-export graph types from eg-walker.
+import type {
+  GraphEvent as EgWalkerGraphEvent,
+  EventId,
+  SerializedGraphEventOutput,
+} from "@softmaple/eg-walker";
 export type GraphEvent = EgWalkerGraphEvent;
+export type WireGraphEvent = SerializedGraphEventOutput;
 
 export interface Document {
   roomId: string;
   content: string;
-  version: number;
-  events: GraphEvent[]; // eg-walker events
+  /** Legacy event-count field; retained only for old IndexedDB rows. */
+  version?: number;
+  frontier: EventId[];
+  events: WireGraphEvent[];
   lastModified: number; // Unix timestamp
 }
 
@@ -35,9 +42,15 @@ export interface Participant {
 export type SyncMessageData =
   | { type: "join"; data: User }
   | { type: "leave"; data?: undefined }
-  | { type: "event"; data: GraphEvent }
-  | { type: "sync-request"; data: { version: number } }
-  | { type: "sync-response"; data: { events: GraphEvent[]; version: number } }
+  | { type: "event"; data: WireGraphEvent }
+  | {
+      type: "sync-request";
+      data: { frontier: EventId[]; knownEventIds: EventId[] };
+    }
+  | {
+      type: "sync-response";
+      data: { frontier: EventId[]; events: WireGraphEvent[] };
+    }
   | {
       type: "presence";
       data: { cursor?: number; selection?: { start: number; end: number } };

@@ -22,6 +22,7 @@ export {
   type IntegratedApplyRemoteEventResult,
   type BufferedApplyRemoteEventResult,
   type DuplicateApplyRemoteEventResult,
+  type ApplyRemoteEventsResult,
 } from "./apply-remote-event-result";
 // ============================================================================
 // External API Types (Index-based, no CRDT exposure)

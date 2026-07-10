@@ -27,6 +27,11 @@ export {
   MissingParentError,
 } from "./event-graph-errors";
 
+export interface EventGraphAppendTransaction {
+  commit(): void;
+  rollback(): void;
+}
+
 /**
  * Event graph for storing operation history
  * This is what gets persisted to disk
@@ -84,6 +89,27 @@ export class EventGraph {
   }
 
   /**
+   * Open an append-only transaction. Rollback removes only events appended
+   * after this call; the normal success path is constant-time.
+   */
+  beginAppendTransaction(): EventGraphAppendTransaction {
+    const startingEventCount = this.events.size;
+    let active = true;
+    return {
+      commit: (): void => {
+        active = false;
+      },
+      rollback: (): void => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        this.rollbackAppendedEvents(startingEventCount);
+      },
+    };
+  }
+
+  /**
    * Add an event to the graph
    */
   addEvent(event: GraphEvent): void {
@@ -112,6 +138,32 @@ export class EventGraph {
       this.parentsMap.set(event.id, parents);
     }
 
+    this.invalidateDerivedCaches();
+  }
+
+  private rollbackAppendedEvents(startingEventCount: number): void {
+    const appended = Array.from(this.events.keys()).slice(startingEventCount);
+    for (let index = appended.length - 1; index >= 0; index--) {
+      const eventId = appended[index]!;
+      const parents = this.parentsMap.get(eventId) ?? new Set<EventId>();
+
+      this.frontier.delete(eventId);
+      this.childrenMap.delete(eventId);
+      this.parentsMap.delete(eventId);
+      this.insertionRank.delete(eventId);
+      this.events.delete(eventId);
+
+      for (const parentId of parents) {
+        const siblings = this.childrenMap.get(parentId);
+        siblings?.delete(eventId);
+        if (siblings !== undefined && siblings.size === 0) {
+          this.childrenMap.delete(parentId);
+          if (this.events.has(parentId)) {
+            this.frontier.add(parentId);
+          }
+        }
+      }
+    }
     this.invalidateDerivedCaches();
   }
 

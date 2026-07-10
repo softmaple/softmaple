@@ -11,20 +11,30 @@ import {
   type PositionOperation,
 } from "../../types";
 
+export interface RemoteIntegrationEffect {
+  readonly operation: PositionOperation | null;
+  readonly exact: boolean;
+}
+
+export interface RemoteIntegration {
+  readonly eventId: EventId;
+  readonly effect: RemoteIntegrationEffect;
+}
+
+export interface RemoteAcceptance {
+  readonly directResult: ApplyRemoteEventResult;
+  readonly integrations: ReadonlyArray<RemoteIntegration>;
+}
+
+export interface RemoteEventBufferSnapshot {
+  readonly pending: ReadonlyArray<
+    readonly [missingParent: EventId, events: ReadonlyArray<GraphEvent>]
+  >;
+}
+
 interface RemoteEventBufferDeps {
   readonly graph: EventGraph;
-  /**
-   * Apply the event on top of existing replica state. The dependency
-   * returns the position operation produced by the integration when the
-   * engine can attribute one to this event in isolation: the incremental
-   * advance path and the cold-start single-event full replay both
-   * surface the single transformed op. Returns `null` for partial/full
-   * replay on an existing engine (concurrent integration retransforms
-   * multiple events), multi-op coalesced deletes, and visible no-ops.
-   *
-   * See `IntegratedApplyRemoteEventResult.operation` for the contract.
-   */
-  readonly advanceWithEvent: (event: GraphEvent) => PositionOperation | null;
+  readonly advanceWithEvent: (event: GraphEvent) => RemoteIntegrationEffect;
 }
 
 const BUFFERED_RESULT = {
@@ -37,74 +47,95 @@ const DUPLICATE_RESULT = {
 
 export class RemoteEventBuffer {
   private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
-  private readonly bufferedEventIds = new Set<EventId>();
+  private readonly bufferedEventsById = new Map<EventId, GraphEvent>();
 
   constructor(private readonly deps: RemoteEventBufferDeps) {}
 
-  /**
-   * Number of remote events currently held back awaiting their causal parents.
-   *
-   * @returns {number} count of buffered events.
-   */
   get pendingCount(): number {
-    return this.bufferedEventIds.size;
+    return this.bufferedEventsById.size;
+  }
+
+  getBufferedEvent(eventId: EventId): GraphEvent | undefined {
+    return this.bufferedEventsById.get(eventId);
+  }
+
+  getBufferedEvents(): ReadonlyArray<GraphEvent> {
+    return Array.from(this.bufferedEventsById.values());
+  }
+
+  snapshot(): RemoteEventBufferSnapshot {
+    return {
+      pending: Array.from(this.pendingByMissingParent, ([parent, events]) => [
+        parent,
+        [...events],
+      ]),
+    };
+  }
+
+  restore(snapshot: RemoteEventBufferSnapshot): void {
+    this.pendingByMissingParent.clear();
+    this.bufferedEventsById.clear();
+    for (const [parent, events] of snapshot.pending) {
+      const restored = [...events];
+      this.pendingByMissingParent.set(parent, restored);
+      for (const event of restored) {
+        this.bufferedEventsById.set(event.id, event);
+      }
+    }
+  }
+
+  tryAccept(event: GraphEvent): ApplyRemoteEventResult {
+    return this.tryAcceptDetailed(event).directResult;
   }
 
   /**
-   * Apply a remote event, or buffer it until its missing parents arrive.
-   *
-   * If `event` is already in the graph or already buffered the call is a
-   * no-op and reports `"duplicate"`. If any parent is unknown the event
-   * is queued against the missing parent id and reports `"buffered"`;
-   * the queue is flushed when that parent is later accepted. Otherwise
-   * the event is added to the graph, `deps.advanceWithEvent` is invoked,
-   * any waiters queued on this event's id are recursively accepted as a
-   * side effect (not reported), and the call reports `"integrated"` with
-   * the engine-attributed position operation (or `null`; see the type
-   * docstring for when).
-   *
-   * @param {GraphEvent} event remote event to accept or buffer.
-   * @returns {ApplyRemoteEventResult} structural integration status.
+   * Accept one ready-or-buffered event and report every integration caused by
+   * draining its pending descendants. The drain is iterative so adversarial
+   * reverse-order chains cannot exhaust the JavaScript stack.
    */
-  tryAccept(event: GraphEvent): ApplyRemoteEventResult {
-    const { graph } = this.deps;
-    if (graph.hasEvent(event.id) || this.bufferedEventIds.has(event.id)) {
-      return DUPLICATE_RESULT;
+  tryAcceptDetailed(event: GraphEvent): RemoteAcceptance {
+    if (
+      this.deps.graph.hasEvent(event.id) ||
+      this.bufferedEventsById.has(event.id)
+    ) {
+      return { directResult: DUPLICATE_RESULT, integrations: [] };
     }
 
     const missingParent = this.findMissingParent(event);
     if (missingParent !== null) {
-      const queue = this.pendingByMissingParent.get(missingParent) ?? [];
-      queue.push(event);
-      this.pendingByMissingParent.set(missingParent, queue);
-      this.bufferedEventIds.add(event.id);
-      return BUFFERED_RESULT;
+      this.bufferAgainst(event, missingParent);
+      return { directResult: BUFFERED_RESULT, integrations: [] };
     }
 
+    const effect = this.integrateReadyEvent(event);
+    if (effect === null) {
+      return { directResult: DUPLICATE_RESULT, integrations: [] };
+    }
+    const descendants = this.flushPendingChildrenOf(event.id);
+    return {
+      directResult: {
+        status: APPLY_REMOTE_EVENT_STATUS.Integrated,
+        operation: descendants.length === 0 ? effect.operation : null,
+      },
+      integrations: [{ eventId: event.id, effect }, ...descendants],
+    };
+  }
+
+  private integrateReadyEvent(
+    event: GraphEvent,
+  ): RemoteIntegrationEffect | null {
     try {
-      graph.addEvent(event);
+      this.deps.graph.addEvent(event);
     } catch (error) {
-      // `EventAlreadyExistsError` overlaps with the fast-path check at
-      // the top of this method; the graph is the source of truth.
-      // `MissingParentError` here would be a race (we just checked
-      // every parent via `findMissingParent` and found none missing) —
-      // there is no useful new status to surface, so we coalesce it
-      // into `DUPLICATE_RESULT` rather than letting it propagate.
       if (
         error instanceof EventAlreadyExistsError ||
         error instanceof MissingParentError
       ) {
-        return DUPLICATE_RESULT;
+        return null;
       }
       throw error;
     }
-
-    const operation = this.deps.advanceWithEvent(event);
-    this.flushPendingChildrenOf(event.id);
-    return {
-      status: APPLY_REMOTE_EVENT_STATUS.Integrated,
-      operation,
-    };
+    return this.deps.advanceWithEvent(event);
   }
 
   private findMissingParent(event: GraphEvent): EventId | null {
@@ -116,15 +147,51 @@ export class RemoteEventBuffer {
     return null;
   }
 
-  private flushPendingChildrenOf(parentId: EventId): void {
-    const waiters = this.pendingByMissingParent.get(parentId);
-    if (!waiters) {
-      return;
+  private flushPendingChildrenOf(parentId: EventId): RemoteIntegration[] {
+    const stack: GraphEvent[] = [];
+    pushReversed(stack, this.takePendingChildrenOf(parentId));
+    const integrations: RemoteIntegration[] = [];
+
+    while (stack.length > 0) {
+      const waiter = stack.pop()!;
+      this.bufferedEventsById.delete(waiter.id);
+
+      if (this.deps.graph.hasEvent(waiter.id)) {
+        continue;
+      }
+      const missingParent = this.findMissingParent(waiter);
+      if (missingParent !== null) {
+        this.bufferAgainst(waiter, missingParent);
+        continue;
+      }
+
+      const effect = this.integrateReadyEvent(waiter);
+      if (effect === null) {
+        continue;
+      }
+      integrations.push({ eventId: waiter.id, effect });
+      pushReversed(stack, this.takePendingChildrenOf(waiter.id));
     }
+
+    return integrations;
+  }
+
+  private bufferAgainst(event: GraphEvent, missingParent: EventId): void {
+    const queue = this.pendingByMissingParent.get(missingParent) ?? [];
+    queue.push(event);
+    this.pendingByMissingParent.set(missingParent, queue);
+    this.bufferedEventsById.set(event.id, event);
+  }
+
+  private takePendingChildrenOf(parentId: EventId): GraphEvent[] {
+    const waiters = this.pendingByMissingParent.get(parentId) ?? [];
     this.pendingByMissingParent.delete(parentId);
-    for (const waiter of waiters) {
-      this.bufferedEventIds.delete(waiter.id);
-      this.tryAccept(waiter);
-    }
+    return waiters;
   }
 }
+
+const pushReversed = <T>(target: T[], values: ReadonlyArray<T>): void => {
+  for (let index = values.length - 1; index >= 0; index--) {
+    target.push(values[index]!);
+  }
+};

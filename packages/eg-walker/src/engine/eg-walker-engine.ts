@@ -24,6 +24,7 @@ import {
   type IncrementalApplyResult,
 } from "./internals/engine-types";
 import { EventItemIndex } from "./internals/event-item-index";
+import { FugueOrderIndex } from "./internals/fugue-order-index";
 import {
   applyInsert,
   type InsertHandlerDeps,
@@ -82,6 +83,10 @@ export class EgWalkerEngine {
     (item) => (item.prepareState === 1 ? item.content.length : 0),
     (item) => (item.everDeleted ? 0 : item.content.length),
   );
+  private readonly fugueOrder = new FugueOrderIndex(
+    this.sequence,
+    this.itemsById,
+  );
   private readonly recordSplitter = new RecordSplitter({
     sequence: this.sequence,
     itemsById: this.itemsById,
@@ -89,6 +94,8 @@ export class EgWalkerEngine {
     originLeftIndex: this.originLeftIndex,
     deleteTargets: this.deleteTargets,
     nextPlaceholderId: () => this.nextPlaceholderId(),
+    onRecordSplit: (left, right) =>
+      this.fugueOrder.handleRecordSplit(left, right, this.sequence.toArray()),
   });
   private readonly pendingInsert = new PendingInsertBuffer();
   private currentVersion = new Set<EventId>();
@@ -99,6 +106,7 @@ export class EgWalkerEngine {
   private fullReplayCount = 0;
   private peakSequenceRecordCount = 0;
   private placeholderCounter = 0;
+  private integrationProbeCount = 0;
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -122,6 +130,7 @@ export class EgWalkerEngine {
     this.flushPendingInsert();
 
     const textBuffer = this.resultingText;
+    const fugueStats = this.fugueOrder.getStats();
     return {
       get text(): string {
         return textBuffer.toString();
@@ -136,6 +145,12 @@ export class EgWalkerEngine {
         fullReplayCount: this.fullReplayCount,
         sequenceRecordCount: this.itemsById.size,
         peakSequenceRecordCount: this.peakSequenceRecordCount,
+        integrationProbeCount: this.integrationProbeCount,
+        fugueComparisons: fugueStats.comparisons,
+        fugueMarkerOperations: fugueStats.markerOperations,
+        fugueRotations: fugueStats.rotations,
+        fugueRebuilds: fugueStats.rebuilds,
+        sequenceTreeOperations: this.sequence.getStructuralOperationCount(),
       },
     };
   }
@@ -198,6 +213,7 @@ export class EgWalkerEngine {
   }
 
   getStats(): EngineStats {
+    const fugueStats = this.fugueOrder.getStats();
     return {
       retreatCount: this.retreatCount,
       advanceCount: this.advanceCount,
@@ -208,6 +224,12 @@ export class EgWalkerEngine {
       fullReplayCount: this.fullReplayCount,
       sequenceRecordCount: this.itemsById.size,
       peakSequenceRecordCount: this.peakSequenceRecordCount,
+      integrationProbeCount: this.integrationProbeCount,
+      fugueComparisons: fugueStats.comparisons,
+      fugueMarkerOperations: fugueStats.markerOperations,
+      fugueRotations: fugueStats.rotations,
+      fugueRebuilds: fugueStats.rebuilds,
+      sequenceTreeOperations: this.sequence.getStructuralOperationCount(),
     };
   }
 
@@ -218,6 +240,7 @@ export class EgWalkerEngine {
     this.nonConflictingRunCount = stats.nonConflictingRunCount;
     this.fullReplayCount = stats.fullReplayCount;
     this.peakSequenceRecordCount = stats.peakSequenceRecordCount;
+    this.integrationProbeCount = stats.integrationProbeCount;
   }
 
   getSequenceRecords(): EngineSequenceRecord[] {
@@ -242,6 +265,7 @@ export class EgWalkerEngine {
     this.deleteTargets.clear();
     this.itemsById.clear();
     this.originLeftIndex.clear();
+    this.fugueOrder.clear();
     this.sequence.resetFromRecords(items);
     this.currentVersion = new Set(state.currentVersion);
     this.resultingText =
@@ -252,6 +276,7 @@ export class EgWalkerEngine {
     this.nonConflictingRunCount = 0;
     this.fullReplayCount = 0;
     this.peakSequenceRecordCount = items.length;
+    this.integrationProbeCount = 0;
     this.placeholderCounter = inferNextPlaceholderCounter(items);
 
     for (const item of items) {
@@ -259,6 +284,7 @@ export class EgWalkerEngine {
       this.originLeftIndex.track(item.id, item.originLeft);
       this.trackEventItems(item);
     }
+    this.fugueOrder.rebuild(items);
 
     const deleteTargets = state.compactDeleteTargets
       ? iterateCompactDeleteTargets(state.compactDeleteTargets)
@@ -360,6 +386,7 @@ export class EgWalkerEngine {
     this.deleteTargets.clear();
     this.itemsById.clear();
     this.originLeftIndex.clear();
+    this.fugueOrder.clear();
     this.sequence.clear();
     this.currentVersion = new Set(options.initialVersion ?? []);
     this.resultingText =
@@ -370,6 +397,7 @@ export class EgWalkerEngine {
     this.nonConflictingRunCount = 0;
     this.fullReplayCount = 0;
     this.peakSequenceRecordCount = 0;
+    this.integrationProbeCount = 0;
     this.placeholderCounter = 0;
 
     const graphEvents =
@@ -412,7 +440,8 @@ export class EgWalkerEngine {
       prepareState: 1,
       run: null,
     };
-    this.sequence.push(placeholder);
+    const placeholderPosition = this.fugueOrder.integrate(placeholder) ?? 0;
+    this.sequence.insert(placeholderPosition, placeholder);
     this.itemsById.set(placeholder.id, placeholder);
     this.samplePeakSequenceRecordCount();
   }
@@ -526,6 +555,7 @@ export class EgWalkerEngine {
     eventItems: this.eventItems,
     originLeftIndex: this.originLeftIndex,
     recordSplitter: this.recordSplitter,
+    fugueOrder: this.fugueOrder,
     pendingInsert: this.pendingInsert,
     applyPendingSplice: this.applyPendingSplice,
     flushPendingInsert: () => this.flushPendingInsert(),
@@ -534,6 +564,10 @@ export class EgWalkerEngine {
     insertText: (index, text) => {
       this.resultingText = this.resultingText.insert(index, text);
     },
+    recordIntegrationProbe: () => {
+      this.integrationProbeCount++;
+    },
+    hasRecordedDeletes: () => this.deleteTargets.hasRecordedDeletes,
   };
 
   private readonly deleteDeps: DeleteHandlerDeps = {

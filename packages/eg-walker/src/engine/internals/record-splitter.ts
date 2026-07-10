@@ -13,6 +13,10 @@ interface RecordSplitterDeps {
   readonly originLeftIndex: OriginLeftIndex;
   readonly deleteTargets: DeleteTargetIndex;
   readonly nextPlaceholderId: () => EventId;
+  readonly onRecordSplit?: (
+    left: AugmentedCRDTItem,
+    right: AugmentedCRDTItem,
+  ) => void;
 }
 
 /**
@@ -83,6 +87,7 @@ export class RecordSplitter {
       offsetInRecord,
       leftOriginalLength,
     );
+    this.deps.onRecordSplit?.(left, right);
     return position + 1;
   }
 

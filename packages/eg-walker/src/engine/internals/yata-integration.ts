@@ -23,6 +23,7 @@ export const findIntegrationPosition = (
   item: AugmentedCRDTItem,
   sequence: IndexedSequence<AugmentedCRDTItem>,
   itemsById: ReadonlyMap<EventId, AugmentedCRDTItem>,
+  recordProbe: () => void = () => undefined,
 ): number => {
   const leftItem = item.originLeft ? itemsById.get(item.originLeft) : null;
   const rightItem = item.originRight ? itemsById.get(item.originRight) : null;
@@ -35,6 +36,7 @@ export const findIntegrationPosition = (
   let scanning = false;
 
   while (scanPos < rightPos) {
+    recordProbe();
     const other = sequence.at(scanPos);
     if (!other) {
       break;

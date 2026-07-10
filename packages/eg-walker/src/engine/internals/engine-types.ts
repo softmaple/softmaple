@@ -101,6 +101,12 @@ export interface EngineStats {
    * swap if it wants a lifetime-of-replica figure.
    */
   readonly peakSequenceRecordCount: number;
+  readonly integrationProbeCount: number;
+  readonly fugueComparisons: number;
+  readonly fugueMarkerOperations: number;
+  readonly fugueRotations: number;
+  readonly fugueRebuilds: number;
+  readonly sequenceTreeOperations: number;
 }
 
 export interface GenerateOptions {

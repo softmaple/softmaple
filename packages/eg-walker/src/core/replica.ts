@@ -593,6 +593,12 @@ export class EgWalkerReplica {
     readonly replayCacheBytes: number;
     readonly textBufferNodeCount: number;
     readonly checkpointUniqueTextBytes: number;
+    readonly integrationProbeCount: number;
+    readonly fugueComparisons: number;
+    readonly fugueMarkerOperations: number;
+    readonly fugueRotations: number;
+    readonly fugueRebuilds: number;
+    readonly sequenceTreeOperations: number;
   } {
     const engineStats = this.engineStatsOverride ?? this.engine?.getStats();
     return {
@@ -614,6 +620,12 @@ export class EgWalkerReplica {
       replayCacheBytes: this.replayCacheBytes,
       textBufferNodeCount: this.documentBuffer.nodeCount,
       checkpointUniqueTextBytes: this.criticalCheckpoints.uniqueTextBytes,
+      integrationProbeCount: engineStats?.integrationProbeCount ?? 0,
+      fugueComparisons: engineStats?.fugueComparisons ?? 0,
+      fugueMarkerOperations: engineStats?.fugueMarkerOperations ?? 0,
+      fugueRotations: engineStats?.fugueRotations ?? 0,
+      fugueRebuilds: engineStats?.fugueRebuilds ?? 0,
+      sequenceTreeOperations: engineStats?.sequenceTreeOperations ?? 0,
     };
   }
 

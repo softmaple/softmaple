@@ -47,6 +47,7 @@ export class IndexOutOfRangeError extends Error {
 export class IndexedSequence<T extends object> {
   private root: IndexedNode<T> | null = null;
   private locationsByItem = new WeakMap<T, ItemLocation<T>>();
+  private structuralOperationCount = 0;
 
   /**
    * Build a ranked sequence from an already ordered record list in linear time.
@@ -75,6 +76,10 @@ export class IndexedSequence<T extends object> {
 
   get length(): number {
     return this.root?.size ?? 0;
+  }
+
+  getStructuralOperationCount(): number {
+    return this.structuralOperationCount;
   }
 
   toArray(): T[] {
@@ -134,6 +139,7 @@ export class IndexedSequence<T extends object> {
   clear(): void {
     this.root = null;
     this.locationsByItem = new WeakMap<T, ItemLocation<T>>();
+    this.structuralOperationCount = 0;
   }
 
   resetFromRecords(records: ReadonlyArray<T>): void {
@@ -144,6 +150,7 @@ export class IndexedSequence<T extends object> {
   }
 
   insert(index: number, item: T): void {
+    this.structuralOperationCount++;
     if (index < 0 || index > this.length) {
       throw new Error(`Insert index ${index} out of bounds`);
     }
@@ -167,6 +174,7 @@ export class IndexedSequence<T extends object> {
   }
 
   updateItem(item: T): void {
+    this.structuralOperationCount++;
     const location = this.locationsByItem.get(item);
     if (!location) {
       return;
@@ -371,6 +379,7 @@ export class IndexedSequence<T extends object> {
   }
 
   private splitLeaf(leaf: LeafNode<T>): void {
+    this.structuralOperationCount++;
     const midpoint = Math.ceil(leaf.items.length / 2);
     const sibling = createLeaf<T>();
 
@@ -407,6 +416,7 @@ export class IndexedSequence<T extends object> {
   }
 
   private splitInternal(node: InternalNode<T>): void {
+    this.structuralOperationCount++;
     const midpoint = Math.ceil(node.children.length / 2);
     const movedChildren = node.children.splice(midpoint);
 
@@ -473,6 +483,7 @@ export class IndexedSequence<T extends object> {
     while (node.kind === "internal") {
       let child: IndexedNode<T> | undefined;
       for (const candidate of node.children) {
+        this.structuralOperationCount++;
         if (remaining < candidate.size) {
           child = candidate;
           break;
@@ -498,6 +509,7 @@ export class IndexedSequence<T extends object> {
 
     let node = this.root;
     while (node.kind === "internal") {
+      this.structuralOperationCount++;
       const child = node.children[node.children.length - 1];
       if (!child) {
         throw new Error("Encountered empty internal node");
@@ -513,9 +525,11 @@ export class IndexedSequence<T extends object> {
     let current: IndexedNode<T> = node;
 
     while (current.parent) {
+      this.structuralOperationCount++;
       const parent = current.parent;
       const childIndex = current.childIndex;
       for (let index = 0; index < childIndex; index++) {
+        this.structuralOperationCount++;
         position += parent.children[index]?.size ?? 0;
       }
       current = parent;
@@ -536,6 +550,7 @@ export class IndexedSequence<T extends object> {
     while (node.kind === "internal") {
       let child: IndexedNode<T> | undefined;
       for (const candidate of node.children) {
+        this.structuralOperationCount++;
         if (remaining <= candidate.size) {
           child = candidate;
           break;
@@ -550,6 +565,7 @@ export class IndexedSequence<T extends object> {
     }
 
     for (let offset = 0; offset < remaining; offset++) {
+      this.structuralOperationCount++;
       total += this.leafWeight(node, offset, kind);
     }
 
@@ -594,6 +610,7 @@ export class IndexedSequence<T extends object> {
     while (node.kind === "internal") {
       let child: IndexedNode<T> | undefined;
       for (const candidate of node.children) {
+        this.structuralOperationCount++;
         const childSum = this.weightSum(candidate, kind);
         if (remaining < childSum) {
           child = candidate;
@@ -615,6 +632,7 @@ export class IndexedSequence<T extends object> {
     }
 
     for (let offset = 0; offset < node.items.length; offset++) {
+      this.structuralOperationCount++;
       const weight = this.leafWeight(node, offset, kind);
       if (remaining < weight) {
         return { position: position + offset, offsetInRecord: remaining };
@@ -650,6 +668,7 @@ export class IndexedSequence<T extends object> {
   ): void {
     let current: IndexedNode<T> | null = start;
     while (current) {
+      this.structuralOperationCount++;
       current.size += sizeDelta;
       current.prepareSum += prepareDelta;
       current.effectSum += effectDelta;

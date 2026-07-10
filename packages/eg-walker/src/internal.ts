@@ -13,6 +13,10 @@ export {
 } from "./engine/eg-walker-engine";
 export { IndexedSequence } from "./engine/indexed-sequence";
 export {
+  FugueOrderIndex,
+  type FugueOrderStats,
+} from "./engine/internals/fugue-order-index";
+export {
   itemFromRecord,
   itemsFromRecords,
   recordFromItem,

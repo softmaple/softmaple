@@ -8,6 +8,7 @@ import { OriginLeftIndex } from "./origin-left-index";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
 import { stringCodeUnits } from "./text-utils";
+import { FugueOrderIndex } from "./fugue-order-index";
 import { findIntegrationPosition } from "./yata-integration";
 
 type InsertOperation = Extract<
@@ -21,12 +22,15 @@ export interface InsertHandlerDeps {
   readonly eventItems: EventItemIndex;
   readonly originLeftIndex: OriginLeftIndex;
   readonly recordSplitter: RecordSplitter;
+  readonly fugueOrder: FugueOrderIndex;
   readonly pendingInsert: PendingInsertBuffer;
   readonly applyPendingSplice: (effectIndex: number, text: string) => void;
   readonly flushPendingInsert: () => void;
   readonly itemToEffectIndex: (target: AugmentedCRDTItem) => number;
   readonly requireItem: (itemId: EventId) => AugmentedCRDTItem;
   readonly insertText: (index: number, text: string) => void;
+  readonly recordIntegrationProbe: () => void;
+  readonly hasRecordedDeletes: () => boolean;
 }
 
 export const applyInsert = (
@@ -40,12 +44,15 @@ export const applyInsert = (
     eventItems,
     originLeftIndex,
     recordSplitter,
+    fugueOrder,
     pendingInsert,
     applyPendingSplice,
     flushPendingInsert,
     itemToEffectIndex,
     requireItem,
     insertText,
+    recordIntegrationProbe,
+    hasRecordedDeletes,
   } = deps;
 
   if (operation.text.length === 0) {
@@ -78,24 +85,33 @@ export const applyInsert = (
   // ordering anchor. Using the next prepare-visible record here skips such
   // anchors and makes the origin tuple depend on which valid topological order
   // happened to build the sequence.
+  const anchorSearchStart = (originLeftPosition ?? -1) + 1;
   let originRightPosition: number | null = null;
-  for (
-    // The position lookup for insert index `i` lands on the next
-    // prepare-visible record. Start immediately after `originLeft` instead so
-    // deleted records between the two visible neighbours remain eligible as
-    // ordering anchors, exactly like the reference cursor walk.
-    let position = (originLeftPosition ?? -1) + 1;
-    position < sequence.length;
-    position++
-  ) {
-    const candidate = sequence.at(position);
-    if (candidate !== undefined && candidate.prepareState !== 0) {
-      // The artifact's active Fugue rule retains the right anchor only for a
-      // sibling of this insertion boundary; otherwise `null` is the open END
-      // bound consumed by the integration scan.
-      originRightPosition =
-        candidate.originLeft === originLeft ? position : null;
-      break;
+  if (!hasRecordedDeletes()) {
+    // Without delete history, `prepareState !== 0` is exactly the ranked
+    // tree's prepare-visible predicate. Jump to the next anchor in O(log n).
+    const candidatePosition =
+      sequence.nextPrepareVisiblePosition(anchorSearchStart);
+    const candidate =
+      candidatePosition === null ? undefined : sequence.at(candidatePosition);
+    originRightPosition =
+      candidate !== undefined && candidate.originLeft === originLeft
+        ? candidatePosition
+        : null;
+  } else {
+    // Deleted anchors may carry prepareState=2 while having zero prepare
+    // width. Preserve the scalar oracle for that uncommon mixed case.
+    for (
+      let position = anchorSearchStart;
+      position < sequence.length;
+      position++
+    ) {
+      const candidate = sequence.at(position);
+      if (candidate !== undefined && candidate.prepareState !== 0) {
+        originRightPosition =
+          candidate.originLeft === originLeft ? position : null;
+        break;
+      }
     }
   }
   const originRight =
@@ -199,18 +215,26 @@ export const applyInsert = (
     prepareState: 1,
     run: firstRun,
   };
-  let actualFirstPosition: number;
-  if (conflictRegionEmpty) {
-    actualFirstPosition = firstInsertPosition;
-    sequence.insert(actualFirstPosition, firstItem);
-  } else {
-    actualFirstPosition = findIntegrationPosition(
-      firstItem,
-      sequence,
-      itemsById,
-    );
-    sequence.insert(actualFirstPosition, firstItem);
+  const indexedFirstPosition = fugueOrder.integrate(firstItem);
+  const oracleFirstPosition =
+    indexedFirstPosition === null && !conflictRegionEmpty
+      ? findIntegrationPosition(
+          firstItem,
+          sequence,
+          itemsById,
+          recordIntegrationProbe,
+        )
+      : null;
+  const actualFirstPosition = conflictRegionEmpty
+    ? firstInsertPosition
+    : (indexedFirstPosition ?? oracleFirstPosition!);
+  if (
+    indexedFirstPosition !== null &&
+    indexedFirstPosition !== actualFirstPosition
+  ) {
+    fugueOrder.invalidate();
   }
+  sequence.insert(actualFirstPosition, firstItem);
   itemsById.set(firstItem.id, firstItem);
   originLeftIndex.track(firstItem.id, firstItem.originLeft);
   insertedIds.push(firstItem.id);
@@ -237,6 +261,7 @@ export const applyInsert = (
       prepareState: 1,
       run: null,
     };
+    fugueOrder.invalidate();
     sequence.insert(actualFirstPosition + offset, item);
     itemsById.set(item.id, item);
     originLeftIndex.track(item.id, item.originLeft);

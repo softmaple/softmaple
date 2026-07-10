@@ -182,6 +182,69 @@ const diamondHistory = (): GraphEvent[] => {
 };
 
 /**
+ * Regression for a YjsMod/Fugue conflict region whose right origin is deleted
+ * in the prepare version. Every insert has a distinct canonical author, so
+ * this exercises the integration scan independently of typed-run coalescing.
+ */
+const deletedRightOriginHistory = (): GraphEvent[] => [
+  {
+    id: "A:0",
+    parentVersion: new Set<EventId>(),
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+    timestamp: 0,
+  },
+  {
+    id: "B:0",
+    parentVersion: new Set(["A:0"]),
+    operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "a" },
+    timestamp: 1,
+  },
+  {
+    id: "C:0",
+    parentVersion: new Set(["B:0"]),
+    operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+    timestamp: 2,
+  },
+  {
+    id: "D:0",
+    parentVersion: new Set(["C:0"]),
+    operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "a" },
+    timestamp: 3,
+  },
+  {
+    id: "H:0",
+    parentVersion: new Set(["A:0"]),
+    operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+    timestamp: 4,
+  },
+  {
+    id: "K:0",
+    parentVersion: new Set(["H:0", "B:0"]),
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "c" },
+    timestamp: 5,
+  },
+];
+
+const generateFromExplicitOrder = (
+  events: ReadonlyArray<GraphEvent>,
+  ids: ReadonlyArray<EventId>,
+): string => {
+  const eventsById = new Map(events.map((event) => [event.id, event]));
+  const order = ids.map((id) => {
+    const event = eventsById.get(id);
+    if (!event) {
+      throw new Error(`Unknown event ${id}`);
+    }
+    return cloneEvent(event);
+  });
+  const graph = new EventGraph();
+  for (const event of order) {
+    graph.addEvent(event);
+  }
+  return new EgWalkerEngine().generate(order, "", { eventGraph: graph }).text;
+};
+
+/**
  * Random branching DAG: starts with a shared root, then forks into
  * `branchCount` chains where each chain repeatedly inserts a character
  * at a random index. Branches occasionally merge by extending an event
@@ -272,6 +335,29 @@ describe("EgWalkerEngine traversal-order independence", () => {
       observed.add(generateFromShuffledOrder(events, rand));
     }
     expect(observed.size).toBe(1);
+  });
+
+  it("converges when a different right origin is deleted in prepare", () => {
+    const events = deletedRightOriginHistory();
+    const branchFirst = generateFromExplicitOrder(events, [
+      "A:0",
+      "H:0",
+      "B:0",
+      "K:0",
+      "C:0",
+      "D:0",
+    ]);
+    const chainFirst = generateFromExplicitOrder(events, [
+      "A:0",
+      "B:0",
+      "C:0",
+      "H:0",
+      "D:0",
+      "K:0",
+    ]);
+
+    expect(branchFirst).toBe("ca");
+    expect(chainFirst).toBe(branchFirst);
   });
 
   it("keeps concurrent multi-character inserts non-interleaving", () => {

@@ -67,6 +67,10 @@ export class RecordSplitter {
     // references over. `originRight = left.id` references still point
     // at the left edge of the original record, which is unchanged.
     originLeftIndex.rewriteReferences(left.id, right.id, itemsById);
+    // A typed-run right half is the causal continuation of the left half.
+    // Track it only after rewriting old right-boundary references; tracking it
+    // first would make the rewrite move its own originLeft to itself.
+    originLeftIndex.track(right.id, right.originLeft);
     // Extend any prior delete-target memberships to cover {@link right}
     // as well. The pre-split record was already part of `deleteTargets`
     // for every event in this set; both halves now share the same
@@ -191,8 +195,13 @@ export class RecordSplitter {
         id: `${left.run.replicaId}:${startSequence}:0`,
         eventId: `${left.run.replicaId}:${startSequence}`,
         content: rightContent,
-        originLeft: null,
-        originRight: null,
+        // A typed run compresses a chain of per-event CRDT records. Splitting
+        // must restore the chain boundary instead of erasing it, otherwise the
+        // two halves can be integrated in different orders for the same DAG.
+        // At record granularity `left.id` is the stable name of that boundary;
+        // every event that lands there recomputes the same anchor after split.
+        originLeft: left.id,
+        originRight: left.originRight,
         everDeleted: left.everDeleted,
         prepareState: left.prepareState,
         run: {

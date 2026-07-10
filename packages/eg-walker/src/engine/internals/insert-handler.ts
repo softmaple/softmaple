@@ -63,20 +63,43 @@ export const applyInsert = (
     landing.offsetInRecord > 0
       ? recordSplitter.splitRecordAt(landing.position, landing.offsetInRecord)
       : landing.position;
-  // YATA-style origins: anchor against the records visible in the event's
-  // parent version (prepare-state >= 1), NOT against whichever concurrent
-  // records happen to be sitting in the sequence right now. Without this
-  // filter the engine would assign different origins to the same event
-  // depending on which concurrent siblings were integrated first, breaking
-  // traversal-order independence.
+  // YATA-style origins are derived from the event's parent (prepare) version,
+  // NOT from whichever concurrent records happen to be sitting in the
+  // sequence right now. Without this filter the engine would assign different
+  // origins to the same event depending on which concurrent siblings were
+  // integrated first, breaking traversal-order independence.
   const originLeftPosition =
     sequence.previousPrepareVisiblePosition(firstInsertPosition);
   const originLeft =
     originLeftPosition === null
       ? null
       : (sequence.at(originLeftPosition)?.id ?? null);
-  const originRightPosition =
-    sequence.nextPrepareVisiblePosition(firstInsertPosition);
+  // The paper artifact's YjsMod/Fugue right-origin search starts at the first
+  // record that exists in the prepare version, including a record deleted in
+  // that version. A deleted record has zero prepare *width* but is still an
+  // ordering anchor. Using the next prepare-visible record here skips such
+  // anchors and makes the origin tuple depend on which valid topological order
+  // happened to build the sequence.
+  let originRightPosition: number | null = null;
+  for (
+    // The position lookup for insert index `i` lands on the next
+    // prepare-visible record. Start immediately after `originLeft` instead so
+    // deleted records between the two visible neighbours remain eligible as
+    // ordering anchors, exactly like the reference cursor walk.
+    let position = (originLeftPosition ?? -1) + 1;
+    position < sequence.length;
+    position++
+  ) {
+    const candidate = sequence.at(position);
+    if (candidate !== undefined && candidate.prepareState !== 0) {
+      // The artifact's active Fugue rule retains the right anchor only for a
+      // sibling of this insertion boundary; otherwise `null` is the open END
+      // bound consumed by the integration scan.
+      originRightPosition =
+        candidate.originLeft === originLeft ? position : null;
+      break;
+    }
+  }
   const originRight =
     originRightPosition === null
       ? null

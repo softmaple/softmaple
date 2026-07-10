@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, GraphEvent } from "../types";
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { EgWalkerReplica } from "../core/replica";
 import { EventGraph } from "../graph/event-graph";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { cloneEvent, createPrng } from "./test-helpers";
@@ -105,6 +106,64 @@ describe("compareEventIds (numeric suffix tie-break)", () => {
     expect(compareEventIds("rev-a", "rev-b")).toBeLessThan(0);
     expect(compareEventIds("r1:abc", "r1:abd")).toBeLessThan(0);
     expect(compareEventIds("r1:abc", "r1:abc")).toBe(0);
+  });
+
+  it("defines a transitive total order across canonical and custom IDs", () => {
+    // Arrange
+    const ids: EventId[] = ["a:1x", "a:10", "a:2"];
+
+    // Act
+    const sorted = [...ids].sort(compareEventIds);
+
+    // Assert
+    expect(sorted).toEqual(["a:2", "a:10", "a:1x"]);
+    expect(compareEventIds("a:2", "a:10")).toBeLessThan(0);
+    expect(compareEventIds("a:10", "a:1x")).toBeLessThan(0);
+    expect(compareEventIds("a:2", "a:1x")).toBeLessThan(0);
+  });
+
+  it("keeps mixed-ID concurrent inserts convergent across delivery orders", () => {
+    // Arrange
+    const events: GraphEvent[] = [
+      {
+        id: "a:2",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 0,
+      },
+      {
+        id: "a:10",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+        timestamp: 1,
+      },
+      {
+        id: "a:1x",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "C" },
+        timestamp: 2,
+      },
+    ];
+    const deliveryOrders = [
+      events,
+      [events[1]!, events[2]!, events[0]!],
+      [events[2]!, events[0]!, events[1]!],
+      [events[0]!, events[2]!, events[1]!],
+      [events[1]!, events[0]!, events[2]!],
+      [events[2]!, events[1]!, events[0]!],
+    ];
+
+    // Act
+    const observed = new Set(
+      deliveryOrders.map((order) => {
+        const replica = new EgWalkerReplica("mixed-id-order");
+        order.forEach((event) => replica.applyRemoteEvent(cloneEvent(event)));
+        return replica.getText();
+      }),
+    );
+
+    // Assert
+    expect(observed).toEqual(new Set(["ABC"]));
   });
 
   it("keeps concurrent inserts under double-digit sequence numbers stable", () => {

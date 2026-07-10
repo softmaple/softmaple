@@ -10,11 +10,11 @@
  * tie-breaks in {@link EventGraph.getTopologicalOrder} /
  * {@link EventGraph.getBranchPreservingTopologicalOrder}.
  *
- * This helper compares the prefix (everything up to the last `:`)
- * lexicographically and then the suffix numerically when both suffixes
- * parse as non-negative integers. Custom or legacy IDs that do not match
- * the `prefix:numericSuffix` shape fall back to lexicographic ordering
- * end-to-end so that pre-existing event graphs remain comparable.
+ * This helper compares canonical IDs by prefix and then numeric sequence.
+ * Canonical IDs sort before custom / legacy IDs, which are ordered
+ * lexicographically. Keeping the two shapes in disjoint sort partitions is
+ * load-bearing: switching pair-by-pair between numeric and raw string
+ * comparison produces a non-transitive comparator for mixed ID sets.
  */
 
 import type { EventId } from "../types";
@@ -42,6 +42,13 @@ export const compareEventIds = (left: EventId, right: EventId): number => {
       return leftSplit.sequence < rightSplit.sequence ? -1 : 1;
     }
     return 0;
+  }
+
+  if (leftSplit) {
+    return -1;
+  }
+  if (rightSplit) {
+    return 1;
   }
 
   return left < right ? -1 : 1;

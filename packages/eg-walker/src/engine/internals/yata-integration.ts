@@ -4,7 +4,8 @@ import type { IndexedSequence } from "../indexed-sequence";
 import type { AugmentedCRDTItem } from "./engine-types";
 
 /**
- * YATA-style integration scan (Nicolaescu et al., 2016; Yjs `Item.integrate`).
+ * YjsMod / Fugue-family integration scan used by the paper's reference
+ * implementation.
  *
  * The destination range is the slice of the sequence strictly between
  * `originLeft` and `originRight`. Walk it left-to-right and decide,
@@ -30,46 +31,67 @@ export const findIntegrationPosition = (
 
   let insertPos = leftPos + 1;
   let scanPos = leftPos + 1;
-  const scanned = new Set<EventId>();
-  let conflicting = new Set<EventId>();
+  let scanCandidate = scanPos;
+  let scanning = false;
 
   while (scanPos < rightPos) {
     const other = sequence.at(scanPos);
     if (!other) {
       break;
     }
-    scanned.add(other.id);
-    conflicting.add(other.id);
 
-    if (other.originLeft === item.originLeft) {
-      // Same left anchor: tie-break by event ID (smaller wins, goes
-      // first). If `other` has a larger event ID and shares our right
-      // anchor, the new item is placed immediately before it. If the
-      // right anchors differ, fall through and continue scanning.
-      if (compareEventIds(other.eventId, item.eventId) < 0) {
-        insertPos = scanPos + 1;
-        conflicting = new Set();
-      } else if (other.originRight === item.originRight) {
-        break;
-      }
-    } else if (
-      other.originLeft !== null &&
-      scanned.has(other.originLeft) &&
-      !conflicting.has(other.originLeft)
-    ) {
-      // `other`'s left anchor is a record we have already accepted as
-      // belonging to the left of the new item, so the new item must
-      // continue past `other` too.
-      insertPos = scanPos + 1;
-      conflicting = new Set();
-    } else if (other.originLeft === null || !scanned.has(other.originLeft)) {
-      // `other`'s left anchor sits outside the conflict region (either
-      // null or a record we have not passed yet), so `other` dominates
-      // the remaining slice and the new item stays before it.
+    // The scan only crosses concurrent records that were not inserted yet in
+    // this event's prepare version. `originRight` and any other record already
+    // present in prepare bound the conflict interval.
+    if (other.id === item.originRight || other.prepareState !== 0) {
       break;
     }
+
+    if (other.originLeft === item.originLeft) {
+      if (other.originRight === item.originRight) {
+        // Identical origin tuples are truly concurrent siblings. Their stable
+        // event-id order is the final tie-break.
+        if (compareEventIds(item.eventId, other.eventId) < 0) {
+          break;
+        }
+        scanning = false;
+      } else {
+        // Same left origin but different right origins: order the nested
+        // ranges by the positions of their right anchors. `scanCandidate`
+        // remembers the start of a nested region in case a later neighbour
+        // proves that the new item belongs before the whole region.
+        const otherRight =
+          other.originRight === null ? null : itemsById.get(other.originRight);
+        const otherRightPos =
+          otherRight === undefined || otherRight === null
+            ? sequence.length
+            : sequence.positionOf(otherRight);
+        if (otherRightPos < rightPos) {
+          if (!scanning) {
+            scanning = true;
+            scanCandidate = scanPos;
+          }
+        } else {
+          scanning = false;
+        }
+      }
+    } else {
+      const otherLeft =
+        other.originLeft === null ? null : itemsById.get(other.originLeft);
+      const otherLeftPos =
+        otherLeft === undefined || otherLeft === null
+          ? -1
+          : sequence.positionOf(otherLeft);
+      if (otherLeftPos < leftPos) {
+        break;
+      }
+    }
+
     scanPos++;
+    if (!scanning) {
+      insertPos = scanPos;
+    }
   }
 
-  return insertPos;
+  return scanning ? scanCandidate : insertPos;
 };

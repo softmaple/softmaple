@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
@@ -85,6 +85,28 @@ describe("PortableSnapshot", () => {
     expect(restored.getText()).toBe("base🙂xy");
   });
 
+  it("answers text reads before lazily decoding the EGW3 graph", () => {
+    const source = createConcurrentReplica();
+    const codec = new PortableSnapshotCodec();
+    const bytes = codec.encode(source.createPortableSnapshot());
+    const decode = vi
+      .spyOn(ColumnarEventGraphCodec.prototype, "decodeBinary")
+      .mockImplementation(() => {
+        throw new Error("portable graph decoded");
+      });
+
+    try {
+      const decoded = codec.decode(bytes);
+      const restored = EgWalkerReplica.fromPortableSnapshot(decoded);
+      expect(restored.getText()).toBe(source.getText());
+      expect(() => restored.exportEventGraph()).toThrow(
+        /portable graph decoded/,
+      );
+    } finally {
+      decode.mockRestore();
+    }
+  });
+
   it("excludes all native runtime state from the object and EGW3 graph", () => {
     const source = createConcurrentReplica();
     const snapshot = source.createPortableSnapshot();
@@ -116,6 +138,22 @@ describe("PortableSnapshot", () => {
       expect(snapshot).not.toHaveProperty(runtimeKey);
       expect(encodedText).not.toContain(runtimeKey);
     }
+  });
+
+  it("is smaller than the equivalent JSON graph on a maintained fixture", () => {
+    const replica = new EgWalkerReplica("author");
+    for (let index = 0; index < 1_000; index++) {
+      replica.insert(index, String.fromCharCode(0x61 + (index % 26)));
+    }
+
+    const portableBytes = new PortableSnapshotCodec().encode(
+      replica.createPortableSnapshot(),
+    ).byteLength;
+    const jsonBytes = new TextEncoder().encode(
+      JSON.stringify(replica.serialize()),
+    ).byteLength;
+
+    expect(portableBytes).toBeLessThan(jsonBytes);
   });
 
   it("rejects header, graph, frontier, count, and text tampering", () => {

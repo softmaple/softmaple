@@ -122,6 +122,22 @@ describe("serialization", () => {
     expect(reSerialized.metadata?.customField).toBe("test-value");
   });
 
+  it("rejects a serialized version that is not the graph frontier", () => {
+    expect(() =>
+      EventGraph.deserialize({
+        version: [],
+        events: [
+          {
+            id: "root",
+            timestamp: 1,
+            parentVersion: [],
+            operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+          },
+        ],
+      }),
+    ).toThrow(/serialized version does not match graph frontier/);
+  });
+
   it("should reject serialized graphs whose parents cannot be resolved", () => {
     const invalidData: SerializedGraphInput = {
       version: new Set<EventId>(["event-2"]),

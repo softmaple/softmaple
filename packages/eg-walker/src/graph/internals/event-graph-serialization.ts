@@ -46,7 +46,9 @@ export const deserializeEventGraph = <TGraph extends MutableEventGraph>(
   if (!Array.isArray(input.events)) {
     throw new Error("Cannot deserialize event graph: events must be an array");
   }
-  normalizeEventIds(input.version, "serialized graph version");
+  const serializedVersion = new Set(
+    normalizeEventIds(input.version, "serialized graph version"),
+  );
   if (
     input.metadata !== undefined &&
     (input.metadata === null ||
@@ -132,7 +134,26 @@ export const deserializeEventGraph = <TGraph extends MutableEventGraph>(
     );
   }
 
+  const actualVersion = new Set(eventsById.keys());
+  for (const event of eventsById.values()) {
+    for (const parent of event.parentVersion) actualVersion.delete(parent);
+  }
+  if (!sameEventIds(serializedVersion, actualVersion)) {
+    throw new Error(
+      "Cannot deserialize event graph: serialized version does not match graph frontier",
+    );
+  }
+
   return graph;
+};
+
+const sameEventIds = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean => {
+  if (left.size !== right.size) return false;
+  for (const id of left) if (!right.has(id)) return false;
+  return true;
 };
 
 const normalizeSerializedEvent = (

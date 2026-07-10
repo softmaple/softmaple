@@ -426,7 +426,11 @@ export class EventGraph {
    * pre-sort. Throws if the input contains unresolvable parent references.
    */
   static fromEvents(events: ReadonlyArray<GraphEvent>): EventGraph {
-    return EventGraph.deserialize({ version: [], events });
+    const version = new Set(events.map(({ id }) => id));
+    for (const event of events) {
+      for (const parent of event.parentVersion) version.delete(parent);
+    }
+    return EventGraph.deserialize({ version, events });
   }
 
   /**

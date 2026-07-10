@@ -68,8 +68,10 @@ import {
   validateNativeSnapshotHeaderOnly,
 } from "./native-snapshot";
 import {
+  consumeDecodedPortableSnapshotGraphSource,
+  createPortableSnapshotGraphSource,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
-  validatePortableSnapshot,
+  validatePortableSnapshotHeaderOnly,
   type PortableSnapshot,
 } from "./portable-snapshot";
 
@@ -476,18 +478,26 @@ export class EgWalkerReplica {
     snapshot: PortableSnapshot,
     replicaId: string = "portable-snapshot-replica",
   ): EgWalkerReplica {
-    const validated = validatePortableSnapshot(snapshot);
-    const graph = new ColumnarEventGraphCodec().decodeBinary(
-      validated.eventGraph,
-    );
+    const decodedGraphSource =
+      consumeDecodedPortableSnapshotGraphSource(snapshot);
+    const validated = validatePortableSnapshotHeaderOnly(snapshot);
+    const lazyEventGraph =
+      decodedGraphSource ?? createPortableSnapshotGraphSource(validated);
 
-    return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
-      skipReplay: true,
-      restoredText: validated.text,
-      currentVersion: new Set(validated.currentVersion),
-      nextSequenceNumber: validated.nextSequenceNumber,
-      deferLocalReplay: true,
-    });
+    return new EgWalkerReplica(
+      replicaId,
+      validated.initialText,
+      undefined,
+      [],
+      {
+        skipReplay: true,
+        restoredText: validated.text,
+        currentVersion: new Set(validated.currentVersion),
+        nextSequenceNumber: validated.nextSequenceNumber,
+        lazyEventGraph,
+        deferLocalReplay: true,
+      },
+    );
   }
 
   /**

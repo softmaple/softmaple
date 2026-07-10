@@ -1,5 +1,6 @@
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import type { EventGraph } from "../graph/event-graph";
 import {
   BinaryReader,
   BinaryWriter,
@@ -32,6 +33,10 @@ interface PortableSnapshotHeader {
 
 const MAGIC = encodeText(PORTABLE_SNAPSHOT_FORMAT_VERSION);
 const codec = new ColumnarEventGraphCodec();
+const decodedGraphSourceCache = new WeakMap<
+  PortableSnapshot,
+  () => EventGraph
+>();
 const FORBIDDEN_RUNTIME_METADATA = new Set([
   "sequenceRecords",
   "deleteTargets",
@@ -78,11 +83,28 @@ export class PortableSnapshotCodec {
     if (reader.remainingByteLength !== 0) {
       throw new Error("Invalid portable snapshot: trailing bytes");
     }
-    return validatePortableSnapshot({ ...header, eventGraph });
+    const snapshot = validatePortableSnapshotHeaderOnly({
+      ...header,
+      eventGraph,
+    });
+    decodedGraphSourceCache.set(
+      snapshot,
+      createPortableSnapshotGraphSource(snapshot),
+    );
+    return snapshot;
   }
 }
 
 export const validatePortableSnapshot = (
+  snapshot: PortableSnapshot,
+): PortableSnapshot => {
+  const validated = validatePortableSnapshotHeaderOnly(snapshot);
+  const graph = codec.decodeBinary(validated.eventGraph);
+  validatePortableSnapshotGraph(graph, validated);
+  return validated;
+};
+
+export const validatePortableSnapshotHeaderOnly = (
   snapshot: PortableSnapshot,
 ): PortableSnapshot => {
   if (
@@ -125,11 +147,46 @@ export const validatePortableSnapshot = (
     throw new Error("Invalid portable snapshot: eventGraph must be EGW3 bytes");
   }
 
-  const graph = codec.decodeBinary(value.eventGraph);
-  if (graph.getEventCount() !== value.eventCount) {
+  return {
+    formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
+    text: value.text,
+    initialText: value.initialText,
+    currentVersion,
+    eventCount: value.eventCount as number,
+    nextSequenceNumber: value.nextSequenceNumber as number,
+    eventGraph: value.eventGraph.slice(),
+  };
+};
+
+export const consumeDecodedPortableSnapshotGraphSource = (
+  snapshot: PortableSnapshot,
+): (() => EventGraph) | undefined => {
+  const source = decodedGraphSourceCache.get(snapshot);
+  if (source !== undefined) decodedGraphSourceCache.delete(snapshot);
+  return source;
+};
+
+export const createPortableSnapshotGraphSource = (
+  snapshot: PortableSnapshot,
+): (() => EventGraph) => {
+  let graph: EventGraph | null = null;
+  return () => {
+    if (graph === null) {
+      graph = codec.decodeBinary(snapshot.eventGraph);
+      validatePortableSnapshotGraph(graph, snapshot);
+    }
+    return graph;
+  };
+};
+
+const validatePortableSnapshotGraph = (
+  graph: EventGraph,
+  snapshot: PortableSnapshot,
+): void => {
+  if (graph.getEventCount() !== snapshot.eventCount) {
     throw new Error("Invalid portable snapshot: event count mismatch");
   }
-  if (!sameIds(graph.getFrontier(), new Set(currentVersion))) {
+  if (!sameIds(graph.getFrontier(), new Set(snapshot.currentVersion))) {
     throw new Error("Invalid portable snapshot: frontier mismatch");
   }
   for (const key of Object.keys(graph.getMetadata())) {
@@ -141,22 +198,12 @@ export const validatePortableSnapshot = (
   }
   const generated = new EgWalkerEngine().generate(
     graph.getBranchPreservingTopologicalOrder(),
-    value.initialText,
+    snapshot.initialText,
     { eventGraph: graph },
   );
-  if (generated.text !== value.text) {
+  if (generated.text !== snapshot.text) {
     throw new Error("Invalid portable snapshot: materialized text mismatch");
   }
-
-  return {
-    formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
-    text: value.text,
-    initialText: value.initialText,
-    currentVersion,
-    eventCount: value.eventCount as number,
-    nextSequenceNumber: value.nextSequenceNumber as number,
-    eventGraph: value.eventGraph.slice(),
-  };
 };
 
 const parseHeader = (json: string): PortableSnapshotHeader => {

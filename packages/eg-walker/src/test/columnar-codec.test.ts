@@ -4,7 +4,6 @@ import lz4 from "lz4js";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import type { GraphEvent } from "../types";
 
 describe("ColumnarEventGraphCodec", () => {
   it("round-trips the event graph through the columnar codec", () => {
@@ -103,6 +102,27 @@ describe("ColumnarEventGraphCodec", () => {
     );
     expect(() => codec.decodeBinary(new Uint8Array([4, 0x45, 0x47]))).toThrow(
       "Unexpected end of binary eg-walker graph",
+    );
+
+    const graph = new EventGraph();
+    const valid = codec.encodeBinary(graph);
+    const trailing = new Uint8Array(valid.length + 1);
+    trailing.set(valid);
+    expect(() => codec.decodeBinary(trailing)).toThrow(/trailing bytes/);
+  });
+
+  it("rejects a columnar version that is not the graph frontier", () => {
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "root",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 1,
+    });
+    const codec = new ColumnarEventGraphCodec();
+
+    expect(() => codec.decode({ ...codec.encode(graph), version: [] })).toThrow(
+      /version does not match its frontier/,
     );
   });
 

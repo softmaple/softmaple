@@ -79,14 +79,12 @@ export type SerializedVersionOutput = ReadonlyArray<EventId>;
 
 /**
  * Serialized version input: shape accepted by `EventGraph.deserialize()`.
- * Covers the JSON-safe array form, in-memory `Set` instances, and generic
- * iterables. (`Set` and `ReadonlyArray` are themselves `Iterable`; the three
- * entries are listed separately for documentation.)
+ * Covers the JSON-safe array form and in-memory `Set` instances. Other
+ * iterables are rejected so malformed wire shapes cannot silently normalize.
  */
 export type SerializedVersionInput =
   | ReadonlyArray<EventId>
-  | ReadonlySet<EventId>
-  | Iterable<EventId>;
+  | ReadonlySet<EventId>;
 
 export interface SerializedGraphEventOutput {
   readonly id: EventId;

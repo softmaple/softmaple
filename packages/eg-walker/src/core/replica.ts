@@ -37,6 +37,7 @@ import {
   createDocumentState,
 } from "./invariants";
 import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import {
   EgWalkerEngine,
   type DeleteTargetRecord,
@@ -66,6 +67,11 @@ import {
   validateNativeSnapshot,
   validateNativeSnapshotHeaderOnly,
 } from "./native-snapshot";
+import {
+  PORTABLE_SNAPSHOT_FORMAT_VERSION,
+  validatePortableSnapshot,
+  type PortableSnapshot,
+} from "./portable-snapshot";
 
 type LazyEventGraphSource = () => EventGraph;
 
@@ -303,6 +309,27 @@ export class EgWalkerReplica {
     };
   }
 
+  /**
+   * Create the paper-style persistence boundary: materialized text plus the
+   * EGW3 event graph and the minimum metadata needed to continue authoring.
+   * Runtime sequence records, delete targets, checkpoints, and replay caches
+   * are deliberately excluded.
+   */
+  createPortableSnapshot(): PortableSnapshot {
+    const graph = EventGraph.fromEvents(this.ensureEventGraph().getAllEvents());
+    graph.setMetadata({});
+
+    return {
+      formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
+      text: this.getText(),
+      initialText: this.initialText,
+      currentVersion: Array.from(graph.getFrontier()),
+      eventCount: graph.getEventCount(),
+      nextSequenceNumber: this.nextSequenceNumber,
+      eventGraph: new ColumnarEventGraphCodec().encodeBinary(graph),
+    };
+  }
+
   static deserialize(
     serialized: {
       text: string;
@@ -436,6 +463,30 @@ export class EgWalkerReplica {
       restoredSequenceRecords: sequenceRecords,
       restoredEngine,
       restoredCheckpoints: validated.checkpoints,
+    });
+  }
+
+  /**
+   * Restore from the portable paper-style snapshot without retaining replay
+   * state. Validation replays the graph once at this persistence boundary;
+   * the live replica starts from plain text and builds transient state only
+   * if a later divergent event requires it.
+   */
+  static fromPortableSnapshot(
+    snapshot: PortableSnapshot,
+    replicaId: string = "portable-snapshot-replica",
+  ): EgWalkerReplica {
+    const validated = validatePortableSnapshot(snapshot);
+    const graph = new ColumnarEventGraphCodec().decodeBinary(
+      validated.eventGraph,
+    );
+
+    return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
+      skipReplay: true,
+      restoredText: validated.text,
+      currentVersion: new Set(validated.currentVersion),
+      nextSequenceNumber: validated.nextSequenceNumber,
+      deferLocalReplay: true,
     });
   }
 

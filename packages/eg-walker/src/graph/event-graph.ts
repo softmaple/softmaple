@@ -123,19 +123,20 @@ export class EventGraph {
       }
     }
 
-    this.events.set(event.id, event);
-    this.insertionRank.set(event.id, this.insertionRank.size);
-    this.frontier.add(event.id);
+    const stored = cloneGraphEvent(event);
+    this.events.set(stored.id, stored);
+    this.insertionRank.set(stored.id, this.insertionRank.size);
+    this.frontier.add(stored.id);
 
-    for (const parentId of event.parentVersion) {
+    for (const parentId of stored.parentVersion) {
       const children = this.childrenMap.get(parentId) ?? new Set();
-      children.add(event.id);
+      children.add(stored.id);
       this.childrenMap.set(parentId, children);
       this.frontier.delete(parentId);
 
-      const parents = this.parentsMap.get(event.id) ?? new Set();
+      const parents = this.parentsMap.get(stored.id) ?? new Set();
       parents.add(parentId);
-      this.parentsMap.set(event.id, parents);
+      this.parentsMap.set(stored.id, parents);
     }
 
     this.invalidateDerivedCaches();
@@ -171,7 +172,8 @@ export class EventGraph {
    * Get an event by ID
    */
   getEvent(id: EventId): GraphEvent | undefined {
-    return this.events.get(id);
+    const event = this.events.get(id);
+    return event === undefined ? undefined : cloneGraphEvent(event);
   }
 
   /**
@@ -185,7 +187,7 @@ export class EventGraph {
    * Get all events
    */
   getAllEvents(): ReadonlyArray<GraphEvent> {
-    return Array.from(this.events.values());
+    return Array.from(this.events.values(), cloneGraphEvent);
   }
 
   /**
@@ -303,7 +305,7 @@ export class EventGraph {
       computeTopologicalOrder({
         events: this.events,
         childrenMap: this.childrenMap,
-      }),
+      }).map(cloneReadonlyGraphEvent),
     );
     return this.cachedTopologicalOrder;
   }
@@ -350,7 +352,7 @@ export class EventGraph {
       computeBranchPreservingTopologicalOrder({
         events: this.events,
         childrenMap: this.childrenMap,
-      }),
+      }).map(cloneReadonlyGraphEvent),
     );
     return this.cachedBranchPreservingOrder;
   }
@@ -359,14 +361,14 @@ export class EventGraph {
    * Get children of an event
    */
   getChildren(id: EventId): ReadonlySet<EventId> {
-    return this.childrenMap.get(id) ?? new Set();
+    return new Set(this.childrenMap.get(id) ?? []);
   }
 
   /**
    * Get parents of an event
    */
   getParents(id: EventId): ReadonlySet<EventId> {
-    return this.parentsMap.get(id) ?? new Set();
+    return new Set(this.parentsMap.get(id) ?? []);
   }
 
   /**
@@ -414,7 +416,7 @@ export class EventGraph {
         ...e,
         parentVersion: Array.from(e.parentVersion),
       })),
-      metadata: this.metadata,
+      metadata: { ...this.metadata },
     };
   }
 
@@ -434,3 +436,32 @@ export class EventGraph {
     return deserializeEventGraph(data, () => new EventGraph());
   }
 }
+
+const cloneGraphEvent = (event: GraphEvent): GraphEvent => ({
+  id: event.id,
+  operation: { ...event.operation },
+  parentVersion: new Set(event.parentVersion),
+  timestamp: event.timestamp,
+});
+
+const cloneReadonlyGraphEvent = (event: GraphEvent): GraphEvent =>
+  Object.freeze({
+    id: event.id,
+    operation: Object.freeze({ ...event.operation }),
+    parentVersion: runtimeReadonlySet(event.parentVersion),
+    timestamp: event.timestamp,
+  });
+
+const runtimeReadonlySet = <T>(values: Iterable<T>): ReadonlySet<T> => {
+  const result = new Set(values);
+  Object.defineProperties(result, {
+    add: { value: rejectReadonlySetMutation },
+    delete: { value: rejectReadonlySetMutation },
+    clear: { value: rejectReadonlySetMutation },
+  });
+  return Object.freeze(result);
+};
+
+const rejectReadonlySetMutation = (): never => {
+  throw new TypeError("Cannot mutate a read-only event graph view");
+};

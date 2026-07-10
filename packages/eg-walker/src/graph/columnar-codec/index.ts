@@ -80,6 +80,11 @@ export class ColumnarEventGraphCodec {
   }
 
   decode(encoded: ColumnarEventGraph): EventGraph {
+    const expectedFrontier = strictEventIdSet(
+      encoded.version,
+      "columnar graph version",
+    );
+    const metadata = strictMetadata(encoded.metadata);
     const ids = decodeIds(encoded.idRuns);
     const operations = decodeOperations(
       encoded,
@@ -88,7 +93,7 @@ export class ColumnarEventGraphCodec {
     );
     const parents = decodeParents(encoded.parentOverrides, ids);
     const graph = new EventGraph();
-    graph.setMetadata(encoded.metadata ?? {});
+    graph.setMetadata(metadata);
 
     for (let index = 0; index < ids.length; index++) {
       const id = ids[index];
@@ -107,6 +112,10 @@ export class ColumnarEventGraphCodec {
         timestamp: encoded.timestamps[index] ?? 0,
       };
       graph.addEvent(event);
+    }
+
+    if (!sameEventIds(graph.getFrontier(), expectedFrontier)) {
+      throw new Error("Columnar graph version does not match its frontier");
     }
 
     return graph;
@@ -198,7 +207,10 @@ export class ColumnarEventGraphCodec {
     const parentOverrides = readParentOverrides(reader);
     const idRuns = readIdRuns(reader);
     const timestamps = reader.readZigZagDeltaArray();
-    const metadata = JSON.parse(reader.readString()) as Record<string, unknown>;
+    const metadata = JSON.parse(reader.readString()) as unknown;
+    if (reader.remainingByteLength !== 0) {
+      throw new Error("Invalid eg-walker columnar graph: trailing bytes");
+    }
 
     // Cross-check the two independent event-count sources and validate timestamps.
     const expectedEventCount = idRuns.reduce((sum, run) => sum + run.length, 0);
@@ -223,7 +235,38 @@ export class ColumnarEventGraphCodec {
       parentOverrides,
       idRuns,
       timestamps,
-      metadata,
+      metadata: strictMetadata(metadata),
     });
   }
 }
+
+const strictEventIdSet = (value: unknown, context: string): Set<string> => {
+  if (!Array.isArray(value)) {
+    throw new Error(`${context} must be an array`);
+  }
+  const result = new Set<string>();
+  for (const id of value) {
+    if (typeof id !== "string" || id.length === 0 || result.has(id)) {
+      throw new Error(`${context} contains an invalid event ID`);
+    }
+    result.add(id);
+  }
+  return result;
+};
+
+const strictMetadata = (value: unknown): Record<string, unknown> => {
+  if (value === undefined) return {};
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Columnar graph metadata must be an object");
+  }
+  return { ...(value as Record<string, unknown>) };
+};
+
+const sameEventIds = (
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean => {
+  if (left.size !== right.size) return false;
+  for (const id of left) if (!right.has(id)) return false;
+  return true;
+};

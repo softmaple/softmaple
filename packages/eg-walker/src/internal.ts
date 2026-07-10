@@ -46,6 +46,11 @@ export {
   type NativeSnapshot,
 } from "./core/native-snapshot";
 export {
+  PortableSnapshotCodec,
+  PORTABLE_SNAPSHOT_FORMAT_VERSION,
+  type PortableSnapshot,
+} from "./core/portable-snapshot";
+export {
   PersistentUtf16Rope,
   UTF16_ROPE_BRANCH_FACTOR,
   UTF16_ROPE_MAX_LEAF,
@@ -53,3 +58,8 @@ export {
   UTF16_ROPE_TARGET_LEAF,
   type Utf16RopeInstrumentation,
 } from "./text/persistent-utf16-rope";
+export {
+  PaperEventAdapter,
+  type PaperEventExpansion,
+  type PaperEventIdentity,
+} from "./conformance/paper-event-adapter";

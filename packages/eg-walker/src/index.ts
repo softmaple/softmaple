@@ -13,6 +13,11 @@ export {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
 } from "./core/native-snapshot";
+export {
+  PortableSnapshotCodec,
+  PORTABLE_SNAPSHOT_FORMAT_VERSION,
+  type PortableSnapshot,
+} from "./core/portable-snapshot";
 export { ReplayWalker } from "./core/replay-walker";
 export type { WalkerConfig, WalkResult } from "./core/replay-walker";
 export { EventGraph } from "./graph/event-graph";

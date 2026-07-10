@@ -369,15 +369,13 @@ describe("Section 3.4 non-conflicting-run fast path", () => {
     const graph = EventGraph.fromEvents(events);
     const ordered = graph.getTopologicalOrder();
 
-    const generated = new EgWalkerEngine().generate(ordered, "", {
+    const generated = new EgWalkerEngine().generate(ordered, "a", {
       eventGraph: graph,
     });
 
-    // The delete event is concurrent to the typed-run prefix; its parent
-    // version is empty, so when the engine retreats the run-events back to
-    // that parent the document the delete observes is empty. The delete
-    // therefore produces no characters removed (the slot it targets is
-    // entirely retreated), and the final text is just the typed run.
+    // The delete event is concurrent to the typed-run prefix and valid in its
+    // empty event frontier because the initial document contains "a". It
+    // removes that initial character after the pending run has been flushed.
     expect(generated.text).toBe("x".repeat(1_000));
   });
 

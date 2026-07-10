@@ -76,16 +76,24 @@ export class FugueOrderIndex {
     };
   }
 
+  restoreStats(stats: FugueOrderStats): void {
+    this.comparisons = stats.comparisons;
+    this.markerOperations = stats.markerOperations;
+    this.rotations = stats.rotations;
+    this.rebuilds = stats.rebuilds;
+  }
+
   /** Insert and return the record position of the new item's VISIT marker. */
   integrate(item: AugmentedCRDTItem): number | null {
-    // The double-sided root sibling case is the dominant quadratic workload
-    // (large sets of mutually concurrent inserts). Record splitting rewrites
-    // logical boundaries; until those boundary objects are represented
-    // directly, invalidate the live index and let the scalar oracle handle
-    // that rare transition without risking ordering drift.
-    if (!this.valid || item.originLeft !== null || item.originRight !== null) {
-      this.valid = false;
-      return null;
+    // Record splitting rewrites logical boundaries; until those boundary
+    // objects are represented directly, let the scalar oracle handle the
+    // post-split transition without risking ordering drift. Ordinary anchored
+    // siblings are fully represented by the Euler tree and stay indexed.
+    if (!this.valid) {
+      this.rebuild(this.sequence.toArray());
+      if (!this.valid) {
+        return null;
+      }
     }
     const forcedParentId = this.forcedParentById.get(item.id);
     const rightAnchor =
@@ -129,8 +137,58 @@ export class FugueOrderIndex {
   /** Rebuild after a typed-run/placeholder split rewrites origin boundaries. */
   rebuild(records: ReadonlyArray<AugmentedCRDTItem>): void {
     this.rebuilds++;
-    void records;
-    this.valid = false;
+    let previousPlaceholderId: EventId | null = null;
+    for (const item of records) {
+      if (item.eventId !== PLACEHOLDER_EVENT_ID) {
+        continue;
+      }
+      if (
+        previousPlaceholderId !== null &&
+        !this.forcedParentById.has(item.id)
+      ) {
+        this.forcedParentById.set(item.id, previousPlaceholderId);
+      }
+      previousPlaceholderId = item.id;
+    }
+    this.reset(false);
+    this.valid = true;
+
+    const recordIds = new Set(records.map(({ id }) => id));
+    const childrenByParent = new Map<EventId | null, AugmentedCRDTItem[]>();
+    for (const item of records) {
+      const parentId = this.fugueParentId(item);
+      if (parentId !== null && !recordIds.has(parentId)) {
+        this.valid = false;
+        return;
+      }
+      const children = childrenByParent.get(parentId) ?? [];
+      children.push(item);
+      childrenByParent.set(parentId, children);
+    }
+
+    const queue = [...(childrenByParent.get(null) ?? [])];
+    let integrated = 0;
+    for (let index = 0; index < queue.length; index++) {
+      const item = queue[index]!;
+      if (this.integrate(item) === null) {
+        this.valid = false;
+        return;
+      }
+      integrated++;
+      queue.push(...(childrenByParent.get(item.id) ?? []));
+    }
+    if (integrated !== records.length) {
+      this.valid = false;
+      return;
+    }
+
+    for (let index = 0; index < records.length; index++) {
+      const node = this.nodesById.get(records[index]!.id);
+      if (node === undefined || weightBefore(node.visit) !== index) {
+        this.valid = false;
+        return;
+      }
+    }
   }
 
   handleRecordSplit(
@@ -138,8 +196,9 @@ export class FugueOrderIndex {
     right: AugmentedCRDTItem,
     records: ReadonlyArray<AugmentedCRDTItem>,
   ): void {
-    void left;
-    void right;
+    if (right.eventId === PLACEHOLDER_EVENT_ID) {
+      this.forcedParentById.set(right.id, left.id);
+    }
     this.rebuild(records);
   }
 
@@ -226,7 +285,10 @@ export class FugueOrderIndex {
       const leftPlaceholder = left.item!.eventId === PLACEHOLDER_EVENT_ID;
       const rightPlaceholder = right.item!.eventId === PLACEHOLDER_EVENT_ID;
       if (leftPlaceholder !== rightPlaceholder) {
-        return leftPlaceholder ? -1 : 1;
+        // A split placeholder is the untouched suffix of checkpoint/initial
+        // text. New children anchored at the split boundary belong before
+        // that suffix, so the continuation sorts last in the right region.
+        return leftPlaceholder ? 1 : -1;
       }
       const leftRank = this.rightAnchorRank(left.item!.originRight);
       const rightRank = this.rightAnchorRank(right.item!.originRight);

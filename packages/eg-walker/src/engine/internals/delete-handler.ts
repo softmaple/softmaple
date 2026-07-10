@@ -52,21 +52,10 @@ export const applyDelete = (
   let remaining = operation.length;
 
   while (remaining > 0) {
-    // A delete event whose `length` runs past the prepare-visible items at
-    // the engine's current parent version legitimately stops short — this is
-    // exercised by the "deletes that run past visible prepare items" test.
-    // The previous implementation wrapped the throwing
-    // `prepareIndexToPositionAndOffset` in a catch-all try/catch, which also
-    // swallowed real bugs (e.g. ranked-B-tree aggregate corruption). Use the
-    // explicit non-throwing variant for the expected end-of-text case, and
-    // let other errors surface.
-    const landing = sequence.tryPrepareIndexToPositionAndOffset(
+    const landing = sequence.prepareIndexToPositionAndOffset(
       operation.index,
       false,
     );
-    if (!landing) {
-      break;
-    }
     const candidate = sequence.at(landing.position);
     if (!candidate) {
       // The ranked B-tree just told us the prepare-weight prefix sum lands

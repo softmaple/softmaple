@@ -13,6 +13,7 @@ interface NodeBase<T extends object> {
   size: number;
   prepareSum: number;
   effectSum: number;
+  anchorSum: number;
 }
 
 export interface LeafNode<T extends object> extends NodeBase<T> {
@@ -20,6 +21,7 @@ export interface LeafNode<T extends object> extends NodeBase<T> {
   readonly items: T[];
   readonly prepareWeights: number[];
   readonly effectWeights: number[];
+  readonly anchorWeights: number[];
 }
 
 export interface InternalNode<T extends object> extends NodeBase<T> {
@@ -43,9 +45,11 @@ export const createLeaf = <T extends object>(): LeafNode<T> => ({
   items: [],
   prepareWeights: [],
   effectWeights: [],
+  anchorWeights: [],
   size: 0,
   prepareSum: 0,
   effectSum: 0,
+  anchorSum: 0,
 });
 
 export const createInternal = <T extends object>(
@@ -54,10 +58,12 @@ export const createInternal = <T extends object>(
   let size = 0;
   let prepareSum = 0;
   let effectSum = 0;
+  let anchorSum = 0;
   for (const child of children) {
     size += child.size;
     prepareSum += child.prepareSum;
     effectSum += child.effectSum;
+    anchorSum += child.anchorSum;
   }
   const node: InternalNode<T> = {
     kind: "internal",
@@ -67,6 +73,7 @@ export const createInternal = <T extends object>(
     size,
     prepareSum,
     effectSum,
+    anchorSum,
   };
   for (let index = 0; index < children.length; index++) {
     const child = children[index];

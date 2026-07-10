@@ -60,14 +60,22 @@ export class IndexedSequence<T extends object> {
     records: ReadonlyArray<T>,
     prepareWeight: (item: T) => number,
     effectWeight: (item: T) => number,
+    anchorWeight?: (item: T) => number,
   ): IndexedSequence<T> {
-    return new IndexedSequence(prepareWeight, effectWeight, records);
+    return new IndexedSequence(
+      prepareWeight,
+      effectWeight,
+      records,
+      anchorWeight,
+    );
   }
 
   constructor(
     private readonly prepareWeight: (item: T) => number,
     private readonly effectWeight: (item: T) => number,
     items: ReadonlyArray<T> = [],
+    private readonly anchorWeight: (item: T) => number = (item) =>
+      prepareWeight(item) > 0 ? 1 : 0,
   ) {
     if (items.length > 0) {
       this.bulkLoad(items);
@@ -78,8 +86,17 @@ export class IndexedSequence<T extends object> {
     return this.root?.size ?? 0;
   }
 
+  /** UTF-16 width visible in the engine's current prepare view. */
+  get prepareLength(): number {
+    return this.root?.prepareSum ?? 0;
+  }
+
   getStructuralOperationCount(): number {
     return this.structuralOperationCount;
+  }
+
+  restoreStructuralOperationCount(count: number): void {
+    this.structuralOperationCount = count;
   }
 
   toArray(): T[] {
@@ -193,17 +210,21 @@ export class IndexedSequence<T extends object> {
 
     const oldPrepare = leaf.prepareWeights[offset] ?? 0;
     const oldEffect = leaf.effectWeights[offset] ?? 0;
+    const oldAnchor = leaf.anchorWeights[offset] ?? 0;
     const newPrepare = this.prepareWeight(item);
     const newEffect = this.effectWeight(item);
+    const newAnchor = this.anchorWeight(item);
     const prepareDelta = newPrepare - oldPrepare;
     const effectDelta = newEffect - oldEffect;
-    if (prepareDelta === 0 && effectDelta === 0) {
+    const anchorDelta = newAnchor - oldAnchor;
+    if (prepareDelta === 0 && effectDelta === 0 && anchorDelta === 0) {
       return;
     }
 
     leaf.prepareWeights[offset] = newPrepare;
     leaf.effectWeights[offset] = newEffect;
-    this.propagateDelta(leaf, 0, prepareDelta, effectDelta);
+    leaf.anchorWeights[offset] = newAnchor;
+    this.propagateDelta(leaf, 0, prepareDelta, effectDelta, anchorDelta);
   }
 
   updateWeights(): void {
@@ -281,6 +302,19 @@ export class IndexedSequence<T extends object> {
     return this.weightIndexToPosition(before, false, "prepare");
   }
 
+  /** Next record that exists in the current prepare version, including a
+   * delete-hidden ordering anchor whose visible width is zero. */
+  nextPrepareAnchorPosition(start: number): number | null {
+    if (start < 0 || start > this.length || !this.root) {
+      return null;
+    }
+    const before = this.prefixSum(start, "anchor");
+    if (before >= this.root.anchorSum) {
+      return null;
+    }
+    return this.weightIndexToPosition(before, false, "anchor");
+  }
+
   /**
    * Position of the prepare-visible record immediately to the left of
    * {@link end}, or `null` when no such record exists.
@@ -315,13 +349,16 @@ export class IndexedSequence<T extends object> {
         }
         const prepare = this.prepareWeight(item);
         const effect = this.effectWeight(item);
+        const anchor = this.anchorWeight(item);
         const offset = leaf.items.length;
         leaf.items.push(item);
         leaf.prepareWeights.push(prepare);
         leaf.effectWeights.push(effect);
+        leaf.anchorWeights.push(anchor);
         leaf.size++;
         leaf.prepareSum += prepare;
         leaf.effectSum += effect;
+        leaf.anchorSum += anchor;
         this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
       }
       leaves.push(leaf);
@@ -354,10 +391,12 @@ export class IndexedSequence<T extends object> {
   private insertIntoLeaf(leaf: LeafNode<T>, offset: number, item: T): void {
     const prepare = this.prepareWeight(item);
     const effect = this.effectWeight(item);
+    const anchor = this.anchorWeight(item);
 
     leaf.items.splice(offset, 0, item);
     leaf.prepareWeights.splice(offset, 0, prepare);
     leaf.effectWeights.splice(offset, 0, effect);
+    leaf.anchorWeights.splice(offset, 0, anchor);
 
     this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
     for (let index = offset + 1; index < leaf.items.length; index++) {
@@ -371,7 +410,7 @@ export class IndexedSequence<T extends object> {
       }
     }
 
-    this.propagateDelta(leaf, 1, prepare, effect);
+    this.propagateDelta(leaf, 1, prepare, effect, anchor);
 
     if (leaf.items.length > LEAF_CAPACITY) {
       this.splitLeaf(leaf);
@@ -386,19 +425,24 @@ export class IndexedSequence<T extends object> {
     const movedItems = leaf.items.splice(midpoint);
     const movedPrepareWeights = leaf.prepareWeights.splice(midpoint);
     const movedEffectWeights = leaf.effectWeights.splice(midpoint);
+    const movedAnchorWeights = leaf.anchorWeights.splice(midpoint);
 
     sibling.items.push(...movedItems);
     sibling.prepareWeights.push(...movedPrepareWeights);
     sibling.effectWeights.push(...movedEffectWeights);
+    sibling.anchorWeights.push(...movedAnchorWeights);
 
     let movedPrepareSum = 0;
     let movedEffectSum = 0;
+    let movedAnchorSum = 0;
     for (let index = 0; index < movedItems.length; index++) {
       const item = movedItems[index];
       const prepare = movedPrepareWeights[index] ?? 0;
       const effect = movedEffectWeights[index] ?? 0;
+      const anchor = movedAnchorWeights[index] ?? 0;
       movedPrepareSum += prepare;
       movedEffectSum += effect;
+      movedAnchorSum += anchor;
       if (item) {
         this.locationsByItem.set(item, { leaf: sibling, offsetInLeaf: index });
       }
@@ -407,10 +451,12 @@ export class IndexedSequence<T extends object> {
     leaf.size = leaf.items.length;
     leaf.prepareSum -= movedPrepareSum;
     leaf.effectSum -= movedEffectSum;
+    leaf.anchorSum -= movedAnchorSum;
 
     sibling.size = sibling.items.length;
     sibling.prepareSum = movedPrepareSum;
     sibling.effectSum = movedEffectSum;
+    sibling.anchorSum = movedAnchorSum;
 
     this.insertSiblingAfter(leaf, sibling);
   }
@@ -423,15 +469,18 @@ export class IndexedSequence<T extends object> {
     let movedSize = 0;
     let movedPrepareSum = 0;
     let movedEffectSum = 0;
+    let movedAnchorSum = 0;
     for (const child of movedChildren) {
       movedSize += child.size;
       movedPrepareSum += child.prepareSum;
       movedEffectSum += child.effectSum;
+      movedAnchorSum += child.anchorSum;
     }
 
     node.size -= movedSize;
     node.prepareSum -= movedPrepareSum;
     node.effectSum -= movedEffectSum;
+    node.anchorSum -= movedAnchorSum;
 
     const sibling = createInternal(movedChildren);
     this.insertSiblingAfter(node, sibling);
@@ -538,7 +587,10 @@ export class IndexedSequence<T extends object> {
     return position;
   }
 
-  private prefixSum(position: number, kind: "prepare" | "effect"): number {
+  private prefixSum(
+    position: number,
+    kind: "prepare" | "effect" | "anchor",
+  ): number {
     if (!this.root) {
       return 0;
     }
@@ -575,7 +627,7 @@ export class IndexedSequence<T extends object> {
   private weightIndexToPosition(
     index: number,
     allowEnd: boolean,
-    kind: "prepare" | "effect",
+    kind: "prepare" | "effect" | "anchor",
   ): number {
     return this.weightIndexToPositionAndOffset(index, allowEnd, kind).position;
   }
@@ -583,7 +635,7 @@ export class IndexedSequence<T extends object> {
   private weightIndexToPositionAndOffset(
     index: number,
     allowEnd: boolean,
-    kind: "prepare" | "effect",
+    kind: "prepare" | "effect" | "anchor",
   ): { readonly position: number; readonly offsetInRecord: number } {
     if (index < 0) {
       throw new IndexOutOfRangeError(`Index ${index} out of bounds`);
@@ -646,18 +698,27 @@ export class IndexedSequence<T extends object> {
     );
   }
 
-  private weightSum(node: IndexedNode<T>, kind: "prepare" | "effect"): number {
-    return kind === "prepare" ? node.prepareSum : node.effectSum;
+  private weightSum(
+    node: IndexedNode<T>,
+    kind: "prepare" | "effect" | "anchor",
+  ): number {
+    return kind === "prepare"
+      ? node.prepareSum
+      : kind === "effect"
+        ? node.effectSum
+        : node.anchorSum;
   }
 
   private leafWeight(
     node: LeafNode<T>,
     offset: number,
-    kind: "prepare" | "effect",
+    kind: "prepare" | "effect" | "anchor",
   ): number {
     return kind === "prepare"
       ? (node.prepareWeights[offset] ?? 0)
-      : (node.effectWeights[offset] ?? 0);
+      : kind === "effect"
+        ? (node.effectWeights[offset] ?? 0)
+        : (node.anchorWeights[offset] ?? 0);
   }
 
   private propagateDelta(
@@ -665,6 +726,7 @@ export class IndexedSequence<T extends object> {
     sizeDelta: number,
     prepareDelta: number,
     effectDelta: number,
+    anchorDelta: number,
   ): void {
     let current: IndexedNode<T> | null = start;
     while (current) {
@@ -672,6 +734,7 @@ export class IndexedSequence<T extends object> {
       current.size += sizeDelta;
       current.prepareSum += prepareDelta;
       current.effectSum += effectDelta;
+      current.anchorSum += anchorDelta;
       current = current.parent;
     }
   }
@@ -686,6 +749,7 @@ export class IndexedSequence<T extends object> {
     if (node.kind === "leaf") {
       let prepareSum = 0;
       let effectSum = 0;
+      let anchorSum = 0;
       for (let index = 0; index < node.items.length; index++) {
         const item = node.items[index];
         if (!item) {
@@ -693,31 +757,39 @@ export class IndexedSequence<T extends object> {
         }
         const prepare = this.prepareWeight(item);
         const effect = this.effectWeight(item);
+        const anchor = this.anchorWeight(item);
         node.prepareWeights[index] = prepare;
         node.effectWeights[index] = effect;
+        node.anchorWeights[index] = anchor;
         prepareSum += prepare;
         effectSum += effect;
+        anchorSum += anchor;
       }
       node.prepareWeights.length = node.items.length;
       node.effectWeights.length = node.items.length;
+      node.anchorWeights.length = node.items.length;
       node.size = node.items.length;
       node.prepareSum = prepareSum;
       node.effectSum = effectSum;
+      node.anchorSum = anchorSum;
       return;
     }
 
     let size = 0;
     let prepareSum = 0;
     let effectSum = 0;
+    let anchorSum = 0;
     for (const child of node.children) {
       this.refreshAll(child);
       size += child.size;
       prepareSum += child.prepareSum;
       effectSum += child.effectSum;
+      anchorSum += child.anchorSum;
     }
     node.size = size;
     node.prepareSum = prepareSum;
     node.effectSum = effectSum;
+    node.anchorSum = anchorSum;
   }
 
   private visit(node: IndexedNode<T>, visitor: (item: T) => void): void {

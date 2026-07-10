@@ -30,7 +30,7 @@ export interface InsertHandlerDeps {
   readonly requireItem: (itemId: EventId) => AugmentedCRDTItem;
   readonly insertText: (index: number, text: string) => void;
   readonly recordIntegrationProbe: () => void;
-  readonly hasRecordedDeletes: () => boolean;
+  readonly useLinearIntegrationOracle: () => boolean;
 }
 
 export const applyInsert = (
@@ -52,7 +52,7 @@ export const applyInsert = (
     requireItem,
     insertText,
     recordIntegrationProbe,
-    hasRecordedDeletes,
+    useLinearIntegrationOracle,
   } = deps;
 
   if (operation.text.length === 0) {
@@ -87,33 +87,14 @@ export const applyInsert = (
   // happened to build the sequence.
   const anchorSearchStart = (originLeftPosition ?? -1) + 1;
   let originRightPosition: number | null = null;
-  if (!hasRecordedDeletes()) {
-    // Without delete history, `prepareState !== 0` is exactly the ranked
-    // tree's prepare-visible predicate. Jump to the next anchor in O(log n).
-    const candidatePosition =
-      sequence.nextPrepareVisiblePosition(anchorSearchStart);
-    const candidate =
-      candidatePosition === null ? undefined : sequence.at(candidatePosition);
-    originRightPosition =
-      candidate !== undefined && candidate.originLeft === originLeft
-        ? candidatePosition
-        : null;
-  } else {
-    // Deleted anchors may carry prepareState=2 while having zero prepare
-    // width. Preserve the scalar oracle for that uncommon mixed case.
-    for (
-      let position = anchorSearchStart;
-      position < sequence.length;
-      position++
-    ) {
-      const candidate = sequence.at(position);
-      if (candidate !== undefined && candidate.prepareState !== 0) {
-        originRightPosition =
-          candidate.originLeft === originLeft ? position : null;
-        break;
-      }
-    }
-  }
+  const candidatePosition =
+    sequence.nextPrepareAnchorPosition(anchorSearchStart);
+  const candidate =
+    candidatePosition === null ? undefined : sequence.at(candidatePosition);
+  originRightPosition =
+    candidate !== undefined && candidate.originLeft === originLeft
+      ? candidatePosition
+      : null;
   const originRight =
     originRightPosition === null
       ? null
@@ -215,9 +196,12 @@ export const applyInsert = (
     prepareState: 1,
     run: firstRun,
   };
-  const indexedFirstPosition = fugueOrder.integrate(firstItem);
+  const useOracle = useLinearIntegrationOracle();
+  const indexedFirstPosition = useOracle
+    ? null
+    : fugueOrder.integrate(firstItem);
   const oracleFirstPosition =
-    indexedFirstPosition === null && !conflictRegionEmpty
+    useOracle && !conflictRegionEmpty
       ? findIntegrationPosition(
           firstItem,
           sequence,
@@ -225,9 +209,14 @@ export const applyInsert = (
           recordIntegrationProbe,
         )
       : null;
+  if (!useOracle && indexedFirstPosition === null) {
+    throw new Error(`Fugue order index unavailable for event ${event.id}`);
+  }
   const actualFirstPosition = conflictRegionEmpty
     ? firstInsertPosition
-    : (indexedFirstPosition ?? oracleFirstPosition!);
+    : useOracle
+      ? oracleFirstPosition!
+      : indexedFirstPosition!;
   if (
     indexedFirstPosition !== null &&
     indexedFirstPosition !== actualFirstPosition
@@ -261,8 +250,15 @@ export const applyInsert = (
       prepareState: 1,
       run: null,
     };
-    fugueOrder.invalidate();
-    sequence.insert(actualFirstPosition + offset, item);
+    const expectedPosition = actualFirstPosition + offset;
+    const indexedPosition = useOracle ? null : fugueOrder.integrate(item);
+    if (!useOracle && indexedPosition === null) {
+      throw new Error(`Fugue order index unavailable for event ${event.id}`);
+    }
+    if (indexedPosition !== null && indexedPosition !== expectedPosition) {
+      fugueOrder.invalidate();
+    }
+    sequence.insert(expectedPosition, item);
     itemsById.set(item.id, item);
     originLeftIndex.track(item.id, item.originLeft);
     insertedIds.push(item.id);

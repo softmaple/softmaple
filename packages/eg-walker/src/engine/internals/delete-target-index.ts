@@ -81,10 +81,6 @@ export class DeleteTargetIndex {
     this.byItem.clear();
   }
 
-  get hasRecordedDeletes(): boolean {
-    return this.targets.size > 0;
-  }
-
   entries(): DeleteTargetRecord[] {
     return Array.from(this.targets, ([deleteEventId, targetIds]) => ({
       deleteEventId,

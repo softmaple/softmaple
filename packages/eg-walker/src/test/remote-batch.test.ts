@@ -17,6 +17,18 @@ const insertEvent = (
   timestamp: Number(id.split(":").at(-1) ?? 0),
 });
 
+const deleteEvent = (
+  id: string,
+  parents: ReadonlyArray<string>,
+  index: number,
+  length: number,
+): GraphEvent => ({
+  id,
+  parentVersion: new Set(parents),
+  operation: { type: OPERATION_TYPE.DELETE, index, length },
+  timestamp: Number(id.split(":").at(-1) ?? 0),
+});
+
 describe("EgWalkerReplica.applyRemoteEvents", () => {
   it("causally orders a reversed batch while aligning results to input", () => {
     const root = insertEvent("alice:0", [], 0, "a");
@@ -112,6 +124,69 @@ describe("EgWalkerReplica.applyRemoteEvents", () => {
     expect(replica.getText()).toBe(before.text);
     expect(replica.getPendingRemoteCount()).toBe(before.pending);
     expect(replica.getReplayStats()).toEqual(before.stats);
+  });
+
+  it("rejects a divergent delete that exceeds its parent view atomically", () => {
+    const replica = new EgWalkerReplica("receiver");
+    const root = insertEvent("root:0", [], 0, "a");
+    const left = insertEvent("left:0", [root.id], 1, "b");
+    replica.applyRemoteEvents([root, left]);
+    const before = {
+      serialized: replica.serialize(),
+      text: replica.getText(),
+      pending: replica.getPendingRemoteCount(),
+      stats: replica.getReplayStats(),
+    };
+
+    expect(() =>
+      replica.applyRemoteEvent(deleteEvent("bad:0", [root.id], 0, 2)),
+    ).toThrow(/exceeds parent document length 1/);
+    expect(replica.serialize()).toEqual(before.serialized);
+    expect(replica.getText()).toBe(before.text);
+    expect(replica.getPendingRemoteCount()).toBe(before.pending);
+    expect(replica.getReplayStats()).toEqual(before.stats);
+  });
+
+  it("rejects a divergent edit inside a parent-view surrogate pair atomically", () => {
+    const replica = new EgWalkerReplica("receiver");
+    const root = insertEvent("root:0", [], 0, "😀");
+    const left = insertEvent("left:0", [root.id], 2, "x");
+    replica.applyRemoteEvents([root, left]);
+    const before = {
+      serialized: replica.serialize(),
+      text: replica.getText(),
+      pending: replica.getPendingRemoteCount(),
+      stats: replica.getReplayStats(),
+    };
+
+    expect(() =>
+      replica.applyRemoteEvent(insertEvent("bad:0", [root.id], 1, "!")),
+    ).toThrow(/splits a Unicode scalar/);
+    expect(replica.serialize()).toEqual(before.serialized);
+    expect(replica.getText()).toBe(before.text);
+    expect(replica.getPendingRemoteCount()).toBe(before.pending);
+    expect(replica.getReplayStats()).toEqual(before.stats);
+  });
+
+  it("preserves structural counters for the next event after rollback", () => {
+    const subject = new EgWalkerReplica("subject");
+    const control = new EgWalkerReplica("control");
+    const root = insertEvent("root:0", [], 0, "a");
+    const left = insertEvent("left:0", [root.id], 1, "b");
+    subject.applyRemoteEvents([root, left]);
+    control.applyRemoteEvents([root, left]);
+
+    expect(() =>
+      subject.applyRemoteEvent(insertEvent("bad:0", [root.id], 99, "!")),
+    ).toThrow();
+
+    const next = insertEvent("left:1", [left.id], 2, "c");
+    subject.applyRemoteEvent(next);
+    control.applyRemoteEvent(next);
+
+    expect(subject.getText()).toBe(control.getText());
+    expect(subject.exportEventGraph()).toEqual(control.exportEventGraph());
+    expect(subject.getReplayStats()).toEqual(control.getReplayStats());
   });
 
   it("restores pending descendants flushed before a later batch failure", () => {

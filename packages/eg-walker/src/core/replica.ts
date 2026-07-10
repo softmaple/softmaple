@@ -775,8 +775,7 @@ export class EgWalkerReplica {
     );
     restoredEngine.restoreStats(snapshot.engineStats);
     this.engine = restoredEngine;
-    this.engineStatsOverride =
-      snapshot.engineStatsOverride ?? snapshot.engineStats;
+    this.engineStatsOverride = snapshot.engineStatsOverride;
   }
 
   private shouldDeferLocalReplay(): boolean {

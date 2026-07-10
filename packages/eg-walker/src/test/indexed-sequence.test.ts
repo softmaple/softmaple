@@ -45,6 +45,28 @@ describe("IndexedSequence", () => {
     expect(sequence.effectIndexBeforePosition(4)).toBe(4);
   });
 
+  it("indexes zero-width delete anchors independently of prepare visibility", () => {
+    const items = [
+      { id: "retreated", state: 0, effect: 1 },
+      { id: "deleted", state: 2, effect: 0 },
+      { id: "visible", state: 1, effect: 1 },
+    ];
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => (item.state === 1 ? 1 : 0),
+      (item: (typeof items)[number]) => item.effect,
+      items,
+      (item) => (item.state === 0 ? 0 : 1),
+    );
+
+    expect(sequence.nextPrepareVisiblePosition(0)).toBe(2);
+    expect(sequence.nextPrepareAnchorPosition(0)).toBe(1);
+    expect(sequence.nextPrepareAnchorPosition(2)).toBe(2);
+
+    items[1]!.state = 0;
+    sequence.updateItem(items[1]!);
+    expect(sequence.nextPrepareAnchorPosition(0)).toBe(2);
+  });
+
   it("distinguishes out-of-range lookups from structural errors via tryPrepareIndexToPositionAndOffset", () => {
     const items = [
       { id: "a", prepare: 1, effect: 1 },

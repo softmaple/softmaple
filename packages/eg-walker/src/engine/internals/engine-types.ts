@@ -122,6 +122,8 @@ export interface GenerateOptions {
    * checkpoint replay.
    */
   readonly eventOrder?: ReadonlyArray<GraphEvent>;
+  /** Test-only slow oracle; production always uses FugueOrderIndex. */
+  readonly integrationMode?: "indexed" | "linear-oracle";
 }
 
 export interface GeneratedDocument {

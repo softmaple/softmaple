@@ -82,6 +82,8 @@ export class EgWalkerEngine {
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
     (item) => (item.prepareState === 1 ? item.content.length : 0),
     (item) => (item.everDeleted ? 0 : item.content.length),
+    [],
+    (item) => (item.prepareState === 0 ? 0 : 1),
   );
   private readonly fugueOrder = new FugueOrderIndex(
     this.sequence,
@@ -107,6 +109,7 @@ export class EgWalkerEngine {
   private peakSequenceRecordCount = 0;
   private placeholderCounter = 0;
   private integrationProbeCount = 0;
+  private useLinearIntegrationOracle = false;
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -241,6 +244,13 @@ export class EgWalkerEngine {
     this.fullReplayCount = stats.fullReplayCount;
     this.peakSequenceRecordCount = stats.peakSequenceRecordCount;
     this.integrationProbeCount = stats.integrationProbeCount;
+    this.fugueOrder.restoreStats({
+      comparisons: stats.fugueComparisons,
+      markerOperations: stats.fugueMarkerOperations,
+      rotations: stats.fugueRotations,
+      rebuilds: stats.fugueRebuilds,
+    });
+    this.sequence.restoreStructuralOperationCount(stats.sequenceTreeOperations);
   }
 
   getSequenceRecords(): EngineSequenceRecord[] {
@@ -277,6 +287,7 @@ export class EgWalkerEngine {
     this.fullReplayCount = 0;
     this.peakSequenceRecordCount = items.length;
     this.integrationProbeCount = 0;
+    this.useLinearIntegrationOracle = false;
     this.placeholderCounter = inferNextPlaceholderCounter(items);
 
     for (const item of items) {
@@ -398,6 +409,8 @@ export class EgWalkerEngine {
     this.fullReplayCount = 0;
     this.peakSequenceRecordCount = 0;
     this.integrationProbeCount = 0;
+    this.useLinearIntegrationOracle =
+      options.integrationMode === "linear-oracle";
     this.placeholderCounter = 0;
 
     const graphEvents =
@@ -463,12 +476,72 @@ export class EgWalkerEngine {
 
   private apply(event: GraphEvent): ExternalOperation[] {
     const operation = event.operation;
+    this.assertOperationInPrepareView(event);
 
     if (operation.type === OPERATION_TYPE.INSERT) {
       return applyInsert(event, operation, this.insertDeps);
     }
 
     return applyDelete(event, operation, this.deleteDeps);
+  }
+
+  /**
+   * Validate ranges against the document at the event's parent version after
+   * retreat/advance, before any sequence, text, or delete-target mutation.
+   */
+  private assertOperationInPrepareView(event: GraphEvent): void {
+    const { operation } = event;
+    const prepareLength = this.sequence.prepareLength;
+    const end =
+      operation.type === OPERATION_TYPE.INSERT
+        ? operation.index
+        : operation.index + operation.length;
+    if (
+      operation.index > prepareLength ||
+      end > prepareLength ||
+      !Number.isSafeInteger(end)
+    ) {
+      throw new Error(
+        `Event ${event.id} operation range ${operation.index}..${end} exceeds parent document length ${prepareLength}`,
+      );
+    }
+
+    this.assertPrepareScalarBoundary(operation.index, event.id);
+    if (operation.type === OPERATION_TYPE.DELETE) {
+      this.assertPrepareScalarBoundary(end, event.id);
+    }
+  }
+
+  private assertPrepareScalarBoundary(index: number, eventId: EventId): void {
+    if (index <= 0 || index >= this.sequence.prepareLength) {
+      return;
+    }
+    const beforeLanding = this.sequence.prepareIndexToPositionAndOffset(
+      index - 1,
+      false,
+    );
+    const afterLanding = this.sequence.prepareIndexToPositionAndOffset(
+      index,
+      false,
+    );
+    const before = this.sequence
+      .at(beforeLanding.position)
+      ?.content.charCodeAt(beforeLanding.offsetInRecord);
+    const after = this.sequence
+      .at(afterLanding.position)
+      ?.content.charCodeAt(afterLanding.offsetInRecord);
+    if (
+      before !== undefined &&
+      after !== undefined &&
+      before >= 0xd800 &&
+      before <= 0xdbff &&
+      after >= 0xdc00 &&
+      after <= 0xdfff
+    ) {
+      throw new Error(
+        `Event ${eventId} index ${index} splits a Unicode scalar in its parent document`,
+      );
+    }
   }
 
   private retreat(eventId: EventId): void {
@@ -567,7 +640,7 @@ export class EgWalkerEngine {
     recordIntegrationProbe: () => {
       this.integrationProbeCount++;
     },
-    hasRecordedDeletes: () => this.deleteTargets.hasRecordedDeletes,
+    useLinearIntegrationOracle: () => this.useLinearIntegrationOracle,
   };
 
   private readonly deleteDeps: DeleteHandlerDeps = {

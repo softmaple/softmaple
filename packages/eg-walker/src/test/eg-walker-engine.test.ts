@@ -54,29 +54,26 @@ describe("EgWalkerEngine", () => {
     expect(generated.text).toBe("aef");
   });
 
-  it("handles empty inserts and deletes that run past visible prepare items", () => {
-    const generated = new EgWalkerEngine().generate(
-      [
-        {
-          id: "noop:0",
-          parentVersion: new Set(),
-          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
-          timestamp: 1,
-        },
-        {
-          id: "delete:0",
-          parentVersion: new Set(["noop:0"]),
-          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 4 },
-          timestamp: 2,
-        },
-      ],
-      "a",
-    );
-
-    expect(generated.text).toBe("");
-    expect(generated.transformedOperations).toEqual([
-      { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
-    ]);
+  it("rejects deletes that run past the parent document", () => {
+    expect(() =>
+      new EgWalkerEngine().generate(
+        [
+          {
+            id: "noop:0",
+            parentVersion: new Set(),
+            operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+            timestamp: 1,
+          },
+          {
+            id: "delete:0",
+            parentVersion: new Set(["noop:0"]),
+            operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 4 },
+            timestamp: 2,
+          },
+        ],
+        "a",
+      ),
+    ).toThrow(/exceeds parent document length 1/);
   });
 
   it("exports sequence records for snapshot restore plumbing", () => {

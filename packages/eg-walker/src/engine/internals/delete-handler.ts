@@ -5,7 +5,7 @@ import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
-import { coalesceDeleteRuns, deleteText } from "./text-utils";
+import { coalesceDeleteRuns } from "./text-utils";
 
 type DeleteOperation = Extract<
   ExternalOperation,
@@ -19,8 +19,7 @@ export interface DeleteHandlerDeps {
   readonly pendingInsert: PendingInsertBuffer;
   readonly flushPendingInsert: () => void;
   readonly itemToEffectIndex: (target: AugmentedCRDTItem) => number;
-  readonly getResultingText: () => string;
-  readonly setResultingText: (text: string) => void;
+  readonly deleteText: (index: number, length: number) => void;
 }
 
 export const applyDelete = (
@@ -35,8 +34,7 @@ export const applyDelete = (
     pendingInsert,
     flushPendingInsert,
     itemToEffectIndex,
-    getResultingText,
-    setResultingText,
+    deleteText,
   } = deps;
 
   // Any concurrent insert or delete breaks the typed-run we may have been
@@ -109,7 +107,7 @@ export const applyDelete = (
         for (let k = 0; k < toDelete; k++) {
           outputDeleteIndexes.push(effectIndex);
         }
-        setResultingText(deleteText(getResultingText(), effectIndex, toDelete));
+        deleteText(effectIndex, toDelete);
       }
 
       middle.everDeleted = true;
@@ -123,7 +121,7 @@ export const applyDelete = (
     if (!candidate.everDeleted) {
       const effectIndex = itemToEffectIndex(candidate);
       outputDeleteIndexes.push(effectIndex);
-      setResultingText(deleteText(getResultingText(), effectIndex, 1));
+      deleteText(effectIndex, 1);
     }
     candidate.everDeleted = true;
     candidate.prepareState += 1;

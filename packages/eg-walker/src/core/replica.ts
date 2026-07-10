@@ -23,6 +23,7 @@ import type {
   SerializedGraphOutput,
 } from "../types";
 import { compareEventIds } from "../graph/event-id";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import {
   CriticalCheckpointStore,
   type CriticalCheckpoint,
@@ -68,6 +69,10 @@ import {
 
 type LazyEventGraphSource = () => EventGraph;
 
+const MAX_REPLAY_CACHE_EVENTS = 4_096;
+const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
+const ESTIMATED_REPLAY_RECORD_BYTES = 256;
+
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;
   readonly restoredText?: string;
@@ -92,7 +97,8 @@ interface PreparedRemoteBatch {
 }
 
 interface RemoteBatchSnapshot {
-  readonly document: string;
+  readonly documentBuffer: PersistentUtf16Rope;
+  readonly documentCache: string | null;
   readonly currentVersion: Version;
   readonly engineStats: EngineStats | null;
   readonly engineStatsOverride: EngineStats | null;
@@ -104,6 +110,9 @@ interface RemoteBatchSnapshot {
   readonly lastReplaySource: ReplaySource | null;
   readonly replicaPeakSequenceRecordCount: number;
   readonly restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null;
+  readonly replayCacheBaseVersion: Version | null;
+  readonly replayCacheEvents: number;
+  readonly replayCacheBytes: number;
 }
 
 /**
@@ -111,7 +120,8 @@ interface RemoteBatchSnapshot {
  * Strictly index-based, no CRDT exposure.
  */
 export class EgWalkerReplica {
-  private document: string = "";
+  private documentBuffer = PersistentUtf16Rope.from("");
+  private documentCache: string | null = "";
   private readonly initialText: string;
   private eventGraph: EventGraph | null = null;
   private lazyEventGraph: LazyEventGraphSource | null = null;
@@ -120,6 +130,9 @@ export class EgWalkerReplica {
   private engine: EgWalkerEngine | null = null;
   /** Exact diagnostic view retained across an exceptional engine rebuild. */
   private engineStatsOverride: EngineStats | null = null;
+  private replayCacheBaseVersion: Version | null = null;
+  private replayCacheEvents = 0;
+  private replayCacheBytes = 0;
   private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
   private partialReplayCount = 0;
@@ -154,7 +167,9 @@ export class EgWalkerReplica {
     if (options.restoredText !== undefined) {
       assertWellFormedUtf16(options.restoredText, "restored document text");
     }
-    this.document = options.restoredText ?? initialText;
+    const restoredDocument = options.restoredText ?? initialText;
+    this.documentBuffer = PersistentUtf16Rope.from(restoredDocument);
+    this.documentCache = restoredDocument;
     this.initialText = initialText;
     this.deferLocalReplay = options.deferLocalReplay ?? false;
     this.restoredSequenceRecords = options.restoredSequenceRecords ?? null;
@@ -169,6 +184,16 @@ export class EgWalkerReplica {
       options.currentVersion !== undefined
         ? new Set(options.currentVersion)
         : this.ensureEventGraph().getFrontier();
+    if (this.engine !== null) {
+      // Native resume state is guaranteed only for forward continuation from
+      // its captured frontier. A divergent suffix falls back to a retained
+      // checkpoint instead of treating restored runtime indexes as a cold
+      // full-graph cache.
+      this.replayCacheBaseVersion = new Set(this.currentVersion);
+      this.replayCacheEvents = 0;
+      this.refreshReplayCacheMetrics();
+      this.evictReplayCacheIfNeeded();
+    }
     this.nextSequenceNumber =
       options.nextSequenceNumber ?? this.inferNextSequenceNumber();
     if (this.eventGraph && this.eventGraph.getAllEvents().length > 0) {
@@ -223,11 +248,14 @@ export class EgWalkerReplica {
    * Returns only plain text, no CRDT metadata
    */
   getDocument(): DocumentState {
-    return createDocumentState(this.document);
+    return createDocumentState(this.getText());
   }
 
   getText(): string {
-    return this.document;
+    if (this.documentCache === null) {
+      this.documentCache = this.documentBuffer.toString();
+    }
+    return this.documentCache;
   }
 
   /**
@@ -241,7 +269,7 @@ export class EgWalkerReplica {
     });
 
     return {
-      text: this.document,
+      text: this.getText(),
       eventGraph: graph.serialize(),
     };
   }
@@ -262,7 +290,7 @@ export class EgWalkerReplica {
 
     return {
       formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
-      text: this.document,
+      text: this.getText(),
       initialText: this.initialText,
       currentVersion: Array.from(graph.getFrontier()),
       eventCount: graph.getEventCount(),
@@ -561,6 +589,10 @@ export class EgWalkerReplica {
     readonly criticalCheckpointHits: number;
     readonly criticalCheckpointMisses: number;
     readonly lastReplaySource: ReplaySource | null;
+    readonly replayCacheEvents: number;
+    readonly replayCacheBytes: number;
+    readonly textBufferNodeCount: number;
+    readonly checkpointUniqueTextBytes: number;
   } {
     const engineStats = this.engineStatsOverride ?? this.engine?.getStats();
     return {
@@ -578,6 +610,10 @@ export class EgWalkerReplica {
       criticalCheckpointHits: this.criticalCheckpoints.hits,
       criticalCheckpointMisses: this.criticalCheckpoints.misses,
       lastReplaySource: this.lastReplaySource,
+      replayCacheEvents: this.replayCacheEvents,
+      replayCacheBytes: this.replayCacheBytes,
+      textBufferNodeCount: this.documentBuffer.nodeCount,
+      checkpointUniqueTextBytes: this.criticalCheckpoints.uniqueTextBytes,
     };
   }
 
@@ -616,7 +652,8 @@ export class EgWalkerReplica {
     remoteEvents: RemoteEventBuffer,
   ): RemoteBatchSnapshot {
     return {
-      document: this.document,
+      documentBuffer: this.documentBuffer,
+      documentCache: this.documentCache,
       currentVersion: new Set(this.currentVersion),
       engineStats: this.engine?.getStats() ?? null,
       engineStatsOverride: this.engineStatsOverride,
@@ -628,6 +665,12 @@ export class EgWalkerReplica {
       lastReplaySource: this.lastReplaySource,
       replicaPeakSequenceRecordCount: this.replicaPeakSequenceRecordCount,
       restoredSequenceRecords: this.restoredSequenceRecords,
+      replayCacheBaseVersion:
+        this.replayCacheBaseVersion === null
+          ? null
+          : new Set(this.replayCacheBaseVersion),
+      replayCacheEvents: this.replayCacheEvents,
+      replayCacheBytes: this.replayCacheBytes,
     };
   }
 
@@ -646,8 +689,15 @@ export class EgWalkerReplica {
       snapshot.replicaPeakSequenceRecordCount;
     this.restoredSequenceRecords = snapshot.restoredSequenceRecords;
     this.currentVersion = new Set(snapshot.currentVersion);
-    this.document = snapshot.document;
+    this.documentBuffer = snapshot.documentBuffer;
+    this.documentCache = snapshot.documentCache;
     this.engineStatsOverride = snapshot.engineStatsOverride;
+    this.replayCacheBaseVersion =
+      snapshot.replayCacheBaseVersion === null
+        ? null
+        : new Set(snapshot.replayCacheBaseVersion);
+    this.replayCacheEvents = snapshot.replayCacheEvents;
+    this.replayCacheBytes = snapshot.replayCacheBytes;
 
     if (snapshot.engineStats === null) {
       this.engine = null;
@@ -671,14 +721,19 @@ export class EgWalkerReplica {
   }
 
   private applyPlainDocumentOperation(operation: ExternalOperation): void {
-    const before = this.document.slice(0, operation.index);
     if (operation.type === OPERATION_TYPE.INSERT) {
-      const after = this.document.slice(operation.index);
-      this.document = `${before}${operation.text}${after}`;
+      this.documentBuffer = this.documentBuffer.insert(
+        operation.index,
+        operation.text,
+      );
+      this.documentCache = null;
       return;
     }
-    const after = this.document.slice(operation.index + operation.length);
-    this.document = `${before}${after}`;
+    this.documentBuffer = this.documentBuffer.delete(
+      operation.index,
+      operation.length,
+    );
+    this.documentCache = null;
   }
 
   /**
@@ -692,10 +747,12 @@ export class EgWalkerReplica {
     if (!Number.isSafeInteger(index)) {
       throw new Error(`Index ${index} must be a safe integer`);
     }
-    const max = allowEnd ? this.document.length : this.document.length - 1;
+    const max = allowEnd
+      ? this.documentBuffer.length
+      : this.documentBuffer.length - 1;
     if (index < 0 || index > max) {
       throw new Error(
-        `Index ${index} out of bounds [0, ${max}] for document of length ${this.document.length}`,
+        `Index ${index} out of bounds [0, ${max}] for document of length ${this.documentBuffer.length}`,
       );
     }
   }
@@ -709,14 +766,14 @@ export class EgWalkerReplica {
    * the CRDT layer free of mid-surrogate operations.
    */
   private assertNotMidSurrogate(index: number): void {
-    if (index <= 0 || index >= this.document.length) {
+    if (index <= 0 || index >= this.documentBuffer.length) {
       return;
     }
-    const high = this.document.charCodeAt(index - 1);
+    const high = this.documentBuffer.codeUnitAt(index - 1)!;
     if (high < 0xd800 || high > 0xdbff) {
       return;
     }
-    const low = this.document.charCodeAt(index);
+    const low = this.documentBuffer.codeUnitAt(index)!;
     if (low >= 0xdc00 && low <= 0xdfff) {
       throw new Error(
         `Index ${index} falls between surrogate halves of a single code point`,
@@ -751,9 +808,9 @@ export class EgWalkerReplica {
     this.validateIndex(operation.index, false);
     this.assertNotMidSurrogate(operation.index);
 
-    if (operation.index + operation.length > this.document.length) {
+    if (operation.index + operation.length > this.documentBuffer.length) {
       throw new Error(
-        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.document.length}`,
+        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.documentBuffer.length}`,
       );
     }
     this.assertNotMidSurrogate(operation.index + operation.length);
@@ -803,12 +860,17 @@ export class EgWalkerReplica {
     const generated = engine.generate(sortedEvents, this.initialText, {
       eventGraph: graph,
     });
-    this.document = generated.text;
+    this.documentBuffer = generated.textBuffer;
+    this.documentCache = null;
     this.currentVersion = graph.getFrontier();
     this.engine = engine;
+    this.replayCacheBaseVersion = new Set();
+    this.replayCacheEvents = graph.getEventCount();
     this.restoredSequenceRecords = null;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
+    this.refreshReplayCacheMetrics();
+    this.evictReplayCacheIfNeeded();
     // Returned for the cold-start single-event path in {@link advanceWithEvent};
     // other callers (constructor seed, retreat-needed full replay) ignore
     // this because the array spans the whole graph, not a single event.
@@ -851,7 +913,7 @@ export class EgWalkerReplica {
       this.initialText,
       { eventGraph: graph },
     );
-    return generated.text === this.document
+    return generated.text === this.getText()
       ? {
           sequenceRecords: engine.getSequenceRecords(),
           deleteTargets: engine.getDeleteTargetRecords(),
@@ -902,33 +964,42 @@ export class EgWalkerReplica {
    */
   private advanceWithEvent(event: GraphEvent): RemoteIntegrationEffect {
     this.engineStatsOverride = null;
-    if (!this.engine) {
-      // Cold-start: this code path only fires on a replica that started
-      // with an empty event graph and is now seeing its first event. The
-      // event was already added to the graph before we got here, so the
-      // graph contains exactly that event — `fullReplay` runs the engine
-      // on a single-event trace and its `transformedOperations` is the
-      // visible effect of this one event, which is exactly what we want
-      // to surface to the caller. A replica constructed from a non-empty
-      // prebuilt graph already ran `fullReplay` in the constructor, so
-      // multi-event cold starts cannot reach this branch.
-      const transformed = this.fullReplay();
-      this.maybeAdvanceCheckpoint();
-      return toRemoteIntegrationEffect(transformed);
-    }
+    const graph = this.ensureEventGraph();
 
-    if (this.canIncrementallyAdvance(event)) {
-      const graph = this.ensureEventGraph();
-      const applied = this.engine.applyEvent(event, graph);
-      this.document = this.engine.getText();
+    // Paper fast path: a causal extension is already expressed in indexes of
+    // the current plain document, so no CRDT replay state is needed at all.
+    if (
+      !this.engine &&
+      versionsEqual(event.parentVersion, this.currentVersion)
+    ) {
+      const operation = this.validateLocalOperation(event.operation);
+      if (operation !== null) {
+        this.applyPlainDocumentOperation(operation);
+      }
       this.currentVersion = graph.getFrontier();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.maybeAdvanceCheckpoint();
+      return toRemoteIntegrationEffect(operation === null ? [] : [operation]);
+    }
+
+    // A retained replay engine can retreat as well as advance. Reuse it for a
+    // concurrent burst while its seed checkpoint remains an ancestor of the
+    // incoming prepare version.
+    if (this.engine && this.replayCacheCovers(event.parentVersion)) {
+      const applied = this.engine.applyEvent(event, graph);
+      this.documentBuffer = applied.textBuffer;
+      this.documentCache = null;
+      this.currentVersion = graph.getFrontier();
+      this.incrementalApplyCount++;
+      this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
+      this.replayCacheEvents++;
+      this.refreshReplayCacheMetrics();
+      this.evictReplayCacheIfNeeded();
+      this.maybeAdvanceCheckpoint();
       return toRemoteIntegrationEffect(applied.transformedOperations);
     }
 
-    const graph = this.ensureEventGraph();
     const checkpoint = this.criticalCheckpoints.pickFor(graph);
     if (checkpoint) {
       this.partialReplayFromCheckpoint(checkpoint);
@@ -939,37 +1010,17 @@ export class EgWalkerReplica {
     return { operation: null, exact: false };
   }
 
-  /**
-   * Incremental apply is safe iff the engine's current version is causally
-   * ≤ the new event's parent version — i.e. the engine only needs to advance
-   * (no retreat). When retreat would be needed, the new event is concurrent
-   * with state already applied; the engine's bucket-based integration is
-   * order-sensitive for concurrent items (#668), so we re-process the
-   * divergent suffix in topological order via partial replay instead.
-   */
-  private canIncrementallyAdvance(event: GraphEvent): boolean {
-    const engineVersion = this.engine?.getCurrentVersion();
-    if (!engineVersion || engineVersion.size === 0) {
+  private replayCacheCovers(parentVersion: Version): boolean {
+    const base = this.replayCacheBaseVersion;
+    if (base === null) {
+      return false;
+    }
+    if (base.size === 0) {
       return true;
     }
-    let directlyCovered = engineVersion.size <= event.parentVersion.size;
-    if (directlyCovered) {
-      for (const id of engineVersion) {
-        if (!event.parentVersion.has(id)) {
-          directlyCovered = false;
-          break;
-        }
-      }
-    }
-    if (directlyCovered) {
-      return true;
-    }
-
-    const parentExpansion = this.ensureEventGraph().expandVersion(
-      event.parentVersion,
-    );
-    for (const id of engineVersion) {
-      if (!parentExpansion.has(id)) {
+    const expandedParent = this.ensureEventGraph().expandVersion(parentVersion);
+    for (const eventId of base) {
+      if (!expandedParent.has(eventId)) {
         return false;
       }
     }
@@ -979,8 +1030,35 @@ export class EgWalkerReplica {
   private maybeAdvanceCheckpoint(): void {
     this.criticalCheckpoints.maybeAdvance(
       this.ensureEventGraph(),
-      this.document,
+      this.documentBuffer,
     );
+  }
+
+  private refreshReplayCacheMetrics(): void {
+    if (this.engine === null) {
+      this.replayCacheEvents = 0;
+      this.replayCacheBytes = 0;
+      return;
+    }
+    this.replayCacheBytes =
+      this.documentBuffer.length * 2 +
+      this.engine.getStats().sequenceRecordCount *
+        ESTIMATED_REPLAY_RECORD_BYTES;
+  }
+
+  private evictReplayCacheIfNeeded(): void {
+    if (
+      this.replayCacheEvents <= MAX_REPLAY_CACHE_EVENTS &&
+      this.replayCacheBytes <= MAX_REPLAY_CACHE_BYTES
+    ) {
+      return;
+    }
+    this.captureEnginePeakBeforeSwap();
+    this.engine = null;
+    this.engineStatsOverride = null;
+    this.replayCacheBaseVersion = null;
+    this.replayCacheEvents = 0;
+    this.replayCacheBytes = 0;
   }
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
@@ -993,10 +1071,15 @@ export class EgWalkerReplica {
       frontier,
     );
     this.engine = result.engine;
-    this.document = result.text;
+    this.replayCacheBaseVersion = new Set(checkpoint.version);
+    this.replayCacheEvents = result.replayedEventIds.length;
+    this.documentBuffer = result.textBuffer;
+    this.documentCache = null;
     this.currentVersion = frontier;
     this.partialReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
+    this.refreshReplayCacheMetrics();
+    this.evictReplayCacheIfNeeded();
   }
 
   private inferNextSequenceNumber(): number {

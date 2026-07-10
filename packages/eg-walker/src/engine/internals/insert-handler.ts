@@ -7,7 +7,7 @@ import { EventItemIndex } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
-import { spliceText, stringCodeUnits } from "./text-utils";
+import { stringCodeUnits } from "./text-utils";
 import { findIntegrationPosition } from "./yata-integration";
 
 type InsertOperation = Extract<
@@ -26,8 +26,7 @@ export interface InsertHandlerDeps {
   readonly flushPendingInsert: () => void;
   readonly itemToEffectIndex: (target: AugmentedCRDTItem) => number;
   readonly requireItem: (itemId: EventId) => AugmentedCRDTItem;
-  readonly getResultingText: () => string;
-  readonly setResultingText: (text: string) => void;
+  readonly insertText: (index: number, text: string) => void;
 }
 
 export const applyInsert = (
@@ -46,8 +45,7 @@ export const applyInsert = (
     flushPendingInsert,
     itemToEffectIndex,
     requireItem,
-    getResultingText,
-    setResultingText,
+    insertText,
   } = deps;
 
   if (operation.text.length === 0) {
@@ -259,7 +257,7 @@ export const applyInsert = (
   if (!pendingInsert.isEmpty()) {
     flushPendingInsert();
   }
-  setResultingText(spliceText(getResultingText(), effectIndex, operation.text));
+  insertText(effectIndex, operation.text);
 
   return [
     {

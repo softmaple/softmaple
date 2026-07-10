@@ -2,10 +2,12 @@ import { EgWalkerEngine, type GeneratedDocument } from "./eg-walker-engine";
 import type { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, Version } from "../types";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 
 export interface ReplayCheckpoint {
   readonly version: Version;
-  readonly text: string;
+  readonly text?: string;
+  readonly textBuffer?: PersistentUtf16Rope;
 }
 
 export interface PartialReplayResult extends GeneratedDocument {
@@ -47,14 +49,23 @@ export class PartialReplayManager {
         (event): event is NonNullable<typeof event> => event !== undefined,
       );
     const engine = new EgWalkerEngine();
-    const generated = engine.generate(events, checkpoint.text, {
+    const initialTextBuffer =
+      checkpoint.textBuffer ?? PersistentUtf16Rope.from(checkpoint.text ?? "");
+    const generated = engine.generate(events, initialTextBuffer.toString(), {
       initialVersion: checkpoint.version,
+      initialTextBuffer,
       eventGraph: graph,
       eventOrder: events,
     });
+    const textBuffer = generated.textBuffer;
 
     return {
-      ...generated,
+      get text(): string {
+        return textBuffer.toString();
+      },
+      textBuffer,
+      transformedOperations: generated.transformedOperations,
+      stats: generated.stats,
       replayedEventIds,
       engine,
     };

@@ -401,16 +401,10 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
     // single event.
     expect(result.frontierSize).toBe(1);
 
-    // Replay shape: the first event cold-starts the replica (so
-    // `fullReplays >= 1` is trivially true for any non-empty
-    // trace). To actually witness divergent-suffix replay work,
-    // require at least one *partial* replay on top of the cold
-    // start, plus a strictly-greater-than-1 sum so a future change
-    // that quietly collapses to a single full replay also fails.
+    // One divergent suffix seeds the bounded replay cache; the rest of the
+    // burst retreats/advances that engine without rebuilding it.
     expect(result.partialReplays).toBeGreaterThanOrEqual(1);
-    expect(result.partialReplays + result.fullReplays).toBeGreaterThanOrEqual(
-      2,
-    );
+    expect(result.partialReplays + result.fullReplays).toBe(1);
     // Engine retreat/advance churn must scale linearly with the
     // concurrent suffix, not quadratically. A conservative upper
     // bound: at most 8x the event count. (The naive pre-fast-path
@@ -453,17 +447,8 @@ describe("EgWalkerReplica replay & storage benchmarks (issue #673)", () => {
     expect(result.partialReplays + result.fullReplays).toBeLessThan(
       result.events / 4,
     );
-    // Each merge event has two genuinely concurrent parents (the
-    // post-fork main-chain event and the fork tip), so it must
-    // trigger a partial replay from a checkpoint. With one
-    // fork+merge group every `FORK_EVERY_N` main events we expect
-    // ~`MAIN / FORK_EVERY_N` partial replays; require a strictly
-    // positive count plus a sensible lower bound so a future
-    // change that quietly turns the fork into a no-op linear chain
-    // also fails.
-    expect(result.partialReplays).toBeGreaterThanOrEqual(
-      Math.floor(forkSections / 2),
-    );
+    // The first fork seeds a cache and later fork/merge groups reuse it.
+    expect(result.partialReplays).toBe(1);
 
     // Storage signal still well under JSON.
     expect(result.binaryBytes).toBeLessThan(result.jsonBytes);

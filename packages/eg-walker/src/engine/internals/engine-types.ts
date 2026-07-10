@@ -1,4 +1,5 @@
 import type { EventGraph } from "../../graph/event-graph";
+import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
 
 export const PLACEHOLDER_EVENT_ID = "__placeholder__";
@@ -104,6 +105,7 @@ export interface EngineStats {
 
 export interface GenerateOptions {
   readonly initialVersion?: ReadonlySet<EventId>;
+  readonly initialTextBuffer?: PersistentUtf16Rope;
   readonly eventGraph?: EventGraph;
   /**
    * Topological rank source for prepare/effect retreat/advance ordering.
@@ -118,11 +120,13 @@ export interface GenerateOptions {
 
 export interface GeneratedDocument {
   readonly text: string;
+  readonly textBuffer: PersistentUtf16Rope;
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
   readonly stats: EngineStats;
 }
 
 export interface IncrementalApplyResult {
   readonly text: string;
+  readonly textBuffer: PersistentUtf16Rope;
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
 }

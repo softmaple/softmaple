@@ -2,6 +2,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent } from "../types";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import { IndexedSequence } from "./indexed-sequence";
 import {
   DeleteTargetIndex,
@@ -37,7 +38,6 @@ import {
   type CompactEngineSequenceRecords,
   type EngineSequenceRecord,
 } from "./internals/sequence-records";
-import { spliceText } from "./internals/text-utils";
 
 export type {
   EngineStats,
@@ -55,6 +55,7 @@ export interface EngineSnapshotState {
   readonly graph: EventGraph;
   readonly currentVersion: ReadonlySet<EventId>;
   readonly text: string;
+  readonly textBuffer?: PersistentUtf16Rope;
   readonly sequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
   readonly compactSequenceRecords?: CompactEngineSequenceRecords;
   readonly deleteTargets?: ReadonlyArray<DeleteTargetRecord>;
@@ -91,7 +92,7 @@ export class EgWalkerEngine {
   });
   private readonly pendingInsert = new PendingInsertBuffer();
   private currentVersion = new Set<EventId>();
-  private resultingText = "";
+  private resultingText = PersistentUtf16Rope.from("");
   private retreatCount = 0;
   private advanceCount = 0;
   private nonConflictingRunCount = 0;
@@ -120,8 +121,12 @@ export class EgWalkerEngine {
     // `applyEvent` return flush below is what `EgWalkerReplica` relies on.
     this.flushPendingInsert();
 
+    const textBuffer = this.resultingText;
     return {
-      text: this.resultingText,
+      get text(): string {
+        return textBuffer.toString();
+      },
+      textBuffer,
       transformedOperations,
       stats: {
         retreatCount: this.retreatCount,
@@ -161,8 +166,12 @@ export class EgWalkerEngine {
     // `getText` call will see an empty buffer and short-circuit on the
     // function's internal early-out.
     this.flushPendingInsert();
+    const textBuffer = this.resultingText;
     return {
-      text: this.resultingText,
+      get text(): string {
+        return textBuffer.toString();
+      },
+      textBuffer,
       transformedOperations: transformed,
     };
   }
@@ -175,6 +184,11 @@ export class EgWalkerEngine {
     // incremental hot path. The flush is load-bearing for direct callers
     // that drive `apply*` themselves without going through `applyEvent`
     // (tests, serializers, ad-hoc inspection between `generate` calls).
+    this.flushPendingInsert();
+    return this.resultingText.toString();
+  }
+
+  getTextBuffer(): PersistentUtf16Rope {
     this.flushPendingInsert();
     return this.resultingText;
   }
@@ -230,7 +244,8 @@ export class EgWalkerEngine {
     this.originLeftIndex.clear();
     this.sequence.resetFromRecords(items);
     this.currentVersion = new Set(state.currentVersion);
-    this.resultingText = state.text;
+    this.resultingText =
+      state.textBuffer ?? PersistentUtf16Rope.from(state.text);
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -347,7 +362,8 @@ export class EgWalkerEngine {
     this.originLeftIndex.clear();
     this.sequence.clear();
     this.currentVersion = new Set(options.initialVersion ?? []);
-    this.resultingText = initialText;
+    this.resultingText =
+      options.initialTextBuffer ?? PersistentUtf16Rope.from(initialText);
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -496,7 +512,7 @@ export class EgWalkerEngine {
     effectIndex: number,
     text: string,
   ): void => {
-    this.resultingText = spliceText(this.resultingText, effectIndex, text);
+    this.resultingText = this.resultingText.insert(effectIndex, text);
   };
 
   // Built once per engine instance so {@link processEvent} doesn't allocate a
@@ -515,9 +531,8 @@ export class EgWalkerEngine {
     flushPendingInsert: () => this.flushPendingInsert(),
     itemToEffectIndex: (target) => this.itemToEffectIndex(target),
     requireItem: (itemId) => this.requireItem(itemId),
-    getResultingText: () => this.resultingText,
-    setResultingText: (text) => {
-      this.resultingText = text;
+    insertText: (index, text) => {
+      this.resultingText = this.resultingText.insert(index, text);
     },
   };
 
@@ -528,9 +543,8 @@ export class EgWalkerEngine {
     pendingInsert: this.pendingInsert,
     flushPendingInsert: () => this.flushPendingInsert(),
     itemToEffectIndex: (target) => this.itemToEffectIndex(target),
-    getResultingText: () => this.resultingText,
-    setResultingText: (text) => {
-      this.resultingText = text;
+    deleteText: (index, length) => {
+      this.resultingText = this.resultingText.delete(index, length);
     },
   };
 

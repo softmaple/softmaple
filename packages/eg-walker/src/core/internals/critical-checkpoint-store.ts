@@ -2,10 +2,12 @@ import type { CriticalVersionAnalyzer } from "../../engine/critical-version";
 import type { ReplayCheckpoint } from "../../engine/partial-replay";
 import type { EventGraph } from "../../graph/event-graph";
 import type { EventId } from "../../types";
+import { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 
 const MAX_RETAINED_CHECKPOINTS = 32;
 
 export interface CriticalCheckpoint extends ReplayCheckpoint {
+  readonly textBuffer: PersistentUtf16Rope;
   /**
    * Number of events present when this checkpoint was captured.
    *
@@ -59,6 +61,15 @@ export class CriticalCheckpointStore {
     return this.missCount;
   }
 
+  get uniqueTextBytes(): number {
+    const seen = new Set<object>();
+    return this.checkpoints.reduce(
+      (bytes, checkpoint) =>
+        bytes + checkpoint.textBuffer.collectUniqueLeafBytes(seen),
+      0,
+    );
+  }
+
   snapshotForTransaction(): CriticalCheckpointStoreSnapshot {
     return {
       checkpoints: this.checkpoints.map((checkpoint) => ({
@@ -82,7 +93,7 @@ export class CriticalCheckpointStore {
   toSnapshot(): ReadonlyArray<CriticalCheckpointSnapshot> {
     return this.checkpoints.map((checkpoint) => ({
       version: Array.from(checkpoint.version),
-      text: checkpoint.text,
+      text: checkpoint.textBuffer.toString(),
       eventCount: checkpoint.eventCount,
     }));
   }
@@ -92,14 +103,17 @@ export class CriticalCheckpointStore {
       .slice(-MAX_RETAINED_CHECKPOINTS)
       .map((checkpoint) => ({
         version: new Set(checkpoint.version),
-        text: checkpoint.text,
+        textBuffer: PersistentUtf16Rope.from(checkpoint.text),
         eventCount: checkpoint.eventCount,
       }));
     this.hitCount = 0;
     this.missCount = 0;
   }
 
-  maybeAdvance(graph: EventGraph, document: string): void {
+  maybeAdvance(
+    graph: EventGraph,
+    document: string | PersistentUtf16Rope,
+  ): void {
     const frontier = graph.getFrontier();
     if (frontier.size !== 1) {
       return;
@@ -114,7 +128,10 @@ export class CriticalCheckpointStore {
     }
     this.append({
       version: new Set(frontier),
-      text: document,
+      textBuffer:
+        typeof document === "string"
+          ? PersistentUtf16Rope.from(document)
+          : document,
       eventCount: graph.getEventCount(),
     });
   }

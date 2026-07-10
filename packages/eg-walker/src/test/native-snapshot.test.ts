@@ -129,9 +129,10 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getText()).toContain("L");
     expect(restored.getText()).toContain("R");
     expect(stats.fullReplays).toBe(0);
-    expect(stats.partialReplays).toBe(1);
-    expect(stats.criticalCheckpointHits).toBe(1);
-    expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
+    expect(stats.partialReplays).toBe(0);
+    expect(stats.criticalCheckpointHits).toBe(0);
+    expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.INCREMENTAL);
+    expect(stats.replayCacheEvents).toBe(2);
   });
 
   it("should restore retained checkpoints for older bounded concurrent remote edits", () => {

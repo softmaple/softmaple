@@ -29,10 +29,12 @@ describe("EgWalkerReplica replay path selection", () => {
     }
 
     const stats = api.getReplayStats();
-    // Only the very first event cold-starts the engine via fullReplay; every
-    // subsequent event extends the current frontier and applies incrementally.
-    expect(stats.fullReplays).toBe(1);
-    expect(stats.incrementalApplies).toBe(history.length - 1);
+    // Exact-parent events edit the persistent text buffer directly and never
+    // construct replay state.
+    expect(stats.fullReplays).toBe(0);
+    expect(stats.incrementalApplies).toBe(history.length);
+    expect(stats.sequenceRecordCount).toBe(0);
+    expect(stats.replayCacheEvents).toBe(0);
     // No retreats on a strictly-forward linear history.
     expect(stats.engineRetreats).toBe(0);
     expect(api.getText()).toBe("x".repeat(history.length));

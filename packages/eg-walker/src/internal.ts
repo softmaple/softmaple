@@ -41,3 +41,11 @@ export {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
 } from "./core/native-snapshot";
+export {
+  PersistentUtf16Rope,
+  UTF16_ROPE_BRANCH_FACTOR,
+  UTF16_ROPE_MAX_LEAF,
+  UTF16_ROPE_MIN_LEAF,
+  UTF16_ROPE_TARGET_LEAF,
+  type Utf16RopeInstrumentation,
+} from "./text/persistent-utf16-rope";

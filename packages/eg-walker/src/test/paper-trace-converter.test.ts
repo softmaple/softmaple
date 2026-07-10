@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   convertPaperTraceToAtomicEvents,
   type AtomicPaperTrace,
 } from "../conformance/paper-trace-converter";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 describe("convertPaperTraceToAtomicEvents", () => {
   it("should convert scalar offsets to UTF-16 operation offsets", () => {
@@ -96,5 +97,44 @@ describe("convertPaperTraceToAtomicEvents", () => {
     expect(() => convertPaperTraceToAtomicEvents("invalid", trace)).toThrow(
       /converted final text mismatch/,
     );
+  });
+
+  it("validates with an independent scalar oracle, not EgWalkerEngine", () => {
+    const trace: AtomicPaperTrace = {
+      endContent: "A😀B",
+      txns: [
+        {
+          parents: [],
+          agent: "alice",
+          patches: [[0, 0, "😀"]],
+          _dtSpan: [0, 1],
+        },
+        {
+          parents: [0],
+          agent: "bob",
+          patches: [[0, 0, "A"]],
+          _dtSpan: [1, 2],
+        },
+        {
+          parents: [0],
+          agent: "carol",
+          patches: [[1, 0, "B"]],
+          _dtSpan: [2, 3],
+        },
+      ],
+    };
+    const engine = vi
+      .spyOn(EgWalkerEngine.prototype, "generate")
+      .mockImplementation(() => {
+        throw new Error("implementation under test must not be called");
+      });
+
+    try {
+      expect(
+        convertPaperTraceToAtomicEvents("independent", trace),
+      ).toHaveLength(3);
+    } finally {
+      engine.mockRestore();
+    }
   });
 });

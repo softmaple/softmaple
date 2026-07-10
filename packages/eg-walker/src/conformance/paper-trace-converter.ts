@@ -1,7 +1,9 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
-import { EgWalkerEngine } from "../engine/eg-walker-engine";
-import { EventGraph } from "../graph/event-graph";
 import type { EventId, GraphEvent, Version } from "../types";
+import {
+  materializeScalarReferenceVersion,
+  scalarReferenceFrontier,
+} from "./scalar-reference-replay";
 
 export interface AtomicPaperTrace {
   readonly endContent: string;
@@ -155,9 +157,9 @@ export const convertPaperTraceToAtomicEvents = (
   }
 
   if (options.validateFinalText ?? true) {
-    const actual = materializeVersionText(
+    const actual = materializeScalarReferenceVersion(
       events,
-      EventGraph.fromEvents(events).getFrontier(),
+      scalarReferenceFrontier(events),
     );
     if (actual !== trace.endContent) {
       throw new Error(
@@ -208,26 +210,9 @@ const unicodeStateForParentVersion = (
       };
     }
   }
-  return unicodeStateFromText(materializeVersionText(events, version));
-};
-
-const materializeVersionText = (
-  allEvents: ReadonlyArray<GraphEvent>,
-  version: Version,
-): string => {
-  if (version.size === 0) {
-    return "";
-  }
-  const graph = EventGraph.fromEvents(allEvents);
-  const included = graph.expandVersion(version);
-  const order = graph
-    .getBranchPreservingTopologicalOrder()
-    .filter((event) => included.has(event.id));
-  const versionGraph = EventGraph.fromEvents(order);
-  return new EgWalkerEngine().generate(order, "", {
-    eventGraph: versionGraph,
-    eventOrder: order,
-  }).text;
+  return unicodeStateFromText(
+    materializeScalarReferenceVersion(events, version),
+  );
 };
 
 const unicodeStateFromText = (text: string): UnicodeOffsetState => ({

@@ -25,7 +25,7 @@
       "outputLogs": "full"
     },
     "test": {
-      "env": ["EG_WALKER_PROPERTY_RUNS"]
+      "env": ["EG_WALKER_PROPERTY_RUNS", "EG_WALKER_REFERENCE_ROOT"]
     },
     "dev": {
       "dependsOn": ["^db:generate"],

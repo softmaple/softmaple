@@ -26,6 +26,7 @@
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "bench": "vitest bench --run",
+    "test:conformance": "vitest run --config vitest.reference.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

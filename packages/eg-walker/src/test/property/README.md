@@ -8,19 +8,18 @@ script + delivery permutation instead of an opaque seed.
 ## Run count
 
 Every property uses a shared run-count knob defined in
-[`run-config.ts`](./run-config.ts). The default is **100 runs per
-property** (the acceptance criterion on softmaple/softmaple issue
-`#722`). Override it from the shell:
+[`run-config.ts`](./run-config.ts). The paper-conformance default is **1,000
+runs per property**. Override it from the shell:
 
 ```bash
-# Default — 100 runs per property.
+# Default — 1,000 runs per property.
 pnpm --filter @softmaple/eg-walker test
 
 # Cheap smoke run — 10 runs per property. Useful when iterating.
 EG_WALKER_PROPERTY_RUNS=10 pnpm --filter @softmaple/eg-walker test --run src/test/property
 
-# Recommended pre-release sweep — 500 runs per property.
-EG_WALKER_PROPERTY_RUNS=500 pnpm --filter @softmaple/eg-walker test
+# Explicit paper-conformance sweep.
+EG_WALKER_PROPERTY_RUNS=1000 pnpm --filter @softmaple/eg-walker test
 ```
 
 The variable is declared on the turbo `test` task in `turbo.json`, so
@@ -29,27 +28,27 @@ up automatically.
 
 ## Layout
 
-| File | Property |
-| --- | --- |
-| [`convergence.property.test.ts`](./convergence.property.test.ts) | Every shuffled delivery order of a trace matches the canonical replay text. |
-| [`delivery-order-invariance.property.test.ts`](./delivery-order-invariance.property.test.ts) | For a *fixed* event set, every permutation lands on the canonical text. |
-| [`duplicate-event-idempotency.property.test.ts`](./duplicate-event-idempotency.property.test.ts) | Re-applying every event leaves replica state unchanged. |
-| [`missing-parent-buffering.property.test.ts`](./missing-parent-buffering.property.test.ts) | Events delivered before their parents are buffered and flushed to the canonical text. |
-| [`serialize-roundtrip.property.test.ts`](./serialize-roundtrip.property.test.ts) | JSON `serialize`/`deserialize` and columnar `encodeBinary`/`decodeBinary` preserve text and frontier. |
-| [`unicode-surrogate.property.test.ts`](./unicode-surrogate.property.test.ts) | Surrogate-biased traces stay well-formed UTF-16 and converge under random delivery. |
-| [`concurrent-same-index-inserts.property.test.ts`](./concurrent-same-index-inserts.property.test.ts) | All-concurrent root inserts at the same index converge under any delivery order (YATA tie-breaking). |
-| [`long-offline-branch-merge.property.test.ts`](./long-offline-branch-merge.property.test.ts) | Two replicas that diverge for many steps without syncing converge after full event exchange. |
-| [`apply-remote-event-result.property.test.ts`](./apply-remote-event-result.property.test.ts) | `applyRemoteEvent`'s position operation describes the visible splice from pre-event to post-event text. |
-| [`event-graph-diff.property.test.ts`](./event-graph-diff.property.test.ts) | `diffVersions` matches expanded causal-set differences; frontier expansion covers the whole graph. |
+| File                                                                                                 | Property                                                                                                |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [`convergence.property.test.ts`](./convergence.property.test.ts)                                     | Every shuffled delivery order of a trace matches the canonical replay text.                             |
+| [`delivery-order-invariance.property.test.ts`](./delivery-order-invariance.property.test.ts)         | For a _fixed_ event set, every permutation lands on the canonical text.                                 |
+| [`duplicate-event-idempotency.property.test.ts`](./duplicate-event-idempotency.property.test.ts)     | Re-applying every event leaves replica state unchanged.                                                 |
+| [`missing-parent-buffering.property.test.ts`](./missing-parent-buffering.property.test.ts)           | Events delivered before their parents are buffered and flushed to the canonical text.                   |
+| [`serialize-roundtrip.property.test.ts`](./serialize-roundtrip.property.test.ts)                     | JSON `serialize`/`deserialize` and columnar `encodeBinary`/`decodeBinary` preserve text and frontier.   |
+| [`unicode-surrogate.property.test.ts`](./unicode-surrogate.property.test.ts)                         | Surrogate-biased traces stay well-formed UTF-16 and converge under random delivery.                     |
+| [`concurrent-same-index-inserts.property.test.ts`](./concurrent-same-index-inserts.property.test.ts) | All-concurrent root inserts at the same index converge under any delivery order (YATA tie-breaking).    |
+| [`long-offline-branch-merge.property.test.ts`](./long-offline-branch-merge.property.test.ts)         | Two replicas that diverge for many steps without syncing converge after full event exchange.            |
+| [`apply-remote-event-result.property.test.ts`](./apply-remote-event-result.property.test.ts)         | `applyRemoteEvent`'s position operation describes the visible splice from pre-event to post-event text. |
+| [`event-graph-diff.property.test.ts`](./event-graph-diff.property.test.ts)                           | `diffVersions` matches expanded causal-set differences; frontier expansion covers the whole graph.      |
 
 ## Shared helpers
 
-| File | Purpose |
-| --- | --- |
-| [`arbitraries.ts`](./arbitraries.ts) | Shared `fast-check` arbitraries (replica ids, BMP/surrogate-biased text, edit instructions, multi-replica `TraceParams`, explicit DAGs). |
+| File                                   | Purpose                                                                                                                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`arbitraries.ts`](./arbitraries.ts)   | Shared `fast-check` arbitraries (replica ids, BMP/surrogate-biased text, edit instructions, multi-replica `TraceParams`, explicit DAGs).                                                      |
 | [`trace-runner.ts`](./trace-runner.ts) | Drives a fleet of `EgWalkerReplica` instances through a `TraceParams` script, returns the deduplicated event list, canonical replay text, per-replica final text, and the applied-edit count. |
-| [`run-config.ts`](./run-config.ts) | Centralises the `numRuns` knob and the `EG_WALKER_PROPERTY_RUNS` override. |
-| [`utf16.ts`](./utf16.ts) | UTF-16 well-formedness predicate for the surrogate test. |
+| [`run-config.ts`](./run-config.ts)     | Centralises the `numRuns` knob and the `EG_WALKER_PROPERTY_RUNS` override.                                                                                                                    |
+| [`utf16.ts`](./utf16.ts)               | UTF-16 well-formedness predicate for the surrogate test.                                                                                                                                      |
 
 ## Adding a new property test
 

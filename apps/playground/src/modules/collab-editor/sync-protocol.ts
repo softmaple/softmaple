@@ -34,6 +34,31 @@ export const decodeWireEvents = (
   events: ReadonlyArray<WireGraphEvent>,
 ): GraphEvent[] => events.map(decodeWireEvent);
 
+/**
+ * Decode IndexedDB rows written before parent versions became JSON-safe.
+ * Structured cloning preserved those parent versions as Set instances; the
+ * next save rewrites them through encodeWireEvent and completes the migration.
+ */
+export const decodeStoredEvents = (
+  events: ReadonlyArray<WireGraphEvent | GraphEvent>,
+): GraphEvent[] =>
+  events.map((event) => {
+    if (Array.isArray(event.parentVersion)) {
+      return decodeWireEvent(event as WireGraphEvent);
+    }
+    if (event.parentVersion instanceof Set) {
+      return {
+        id: event.id,
+        operation: { ...event.operation },
+        parentVersion: new Set(event.parentVersion),
+        timestamp: event.timestamp,
+      };
+    }
+    throw new Error(
+      `stored event ${event.id} parentVersion must be an array or Set`,
+    );
+  });
+
 export const createSyncState = (
   events: ReadonlyArray<GraphEvent>,
 ): SyncState => {

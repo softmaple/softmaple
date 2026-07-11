@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createSyncState,
+  decodeStoredEvents,
   decodeWireEvents,
   encodeWireEvent,
   selectMissingWireEvents,
@@ -36,6 +37,18 @@ describe("collab sync protocol", () => {
 
     expect(decoded).toEqual(original);
     expect(decoded?.parentVersion).toEqual(new Set(["left:1", "right:1"]));
+  });
+
+  it("migrates parent Sets from legacy IndexedDB rows", () => {
+    const root = event("root:0", [], 0, "r");
+    const child = event("child:0", [root.id], 1, "c");
+    const replica = new EgWalkerReplica("receiver");
+
+    const decoded = decodeStoredEvents([root, child]);
+    replica.applyRemoteEvents(decoded);
+
+    expect(replica.getText()).toBe("rc");
+    expect(decoded[1]?.parentVersion).toEqual(new Set([root.id]));
   });
 
   it("computes a branched frontier and full known-ID causal state", () => {

@@ -3,6 +3,7 @@ import { storage } from "./storage";
 import { SyncAdapter } from "./sync-adapter";
 import {
   createSyncState,
+  decodeStoredEvents,
   decodeWireEvent,
   decodeWireEvents,
   encodeWireEvent,
@@ -70,7 +71,7 @@ export class RoomManager {
     const doc = await storage.getDocument(roomId);
     if (doc?.events) {
       try {
-        this.api.applyRemoteEvents(decodeWireEvents(doc.events));
+        this.api.applyRemoteEvents(decodeStoredEvents(doc.events));
       } catch (error) {
         console.error("Failed to apply stored events:", error);
       }

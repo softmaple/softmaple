@@ -172,8 +172,9 @@ export const createPortableSnapshotGraphSource = (
   let graph: EventGraph | null = null;
   return () => {
     if (graph === null) {
-      graph = codec.decodeBinary(snapshot.eventGraph);
-      validatePortableSnapshotGraph(graph, snapshot);
+      const decoded = codec.decodeBinary(snapshot.eventGraph);
+      validatePortableSnapshotGraph(decoded, snapshot);
+      graph = decoded;
     }
     return graph;
   };

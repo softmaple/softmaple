@@ -107,6 +107,23 @@ describe("PortableSnapshot", () => {
     }
   });
 
+  it("keeps rejecting a lazy graph after validation fails", () => {
+    const source = createConcurrentReplica();
+    const snapshot = source.createPortableSnapshot();
+    const restored = EgWalkerReplica.fromPortableSnapshot({
+      ...snapshot,
+      text: `${snapshot.text}!`,
+    });
+
+    expect(restored.getText()).toBe(`${snapshot.text}!`);
+    expect(() => restored.exportEventGraph()).toThrow(
+      /materialized text mismatch/,
+    );
+    expect(() => restored.exportEventGraph()).toThrow(
+      /materialized text mismatch/,
+    );
+  });
+
   it("excludes all native runtime state from the object and EGW3 graph", () => {
     const source = createConcurrentReplica();
     const snapshot = source.createPortableSnapshot();

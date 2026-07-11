@@ -23,6 +23,7 @@ import type {
   SerializedGraphOutput,
 } from "../types";
 import { compareEventIds } from "../graph/event-id";
+import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import {
   CriticalCheckpointStore,
@@ -59,6 +60,7 @@ import {
   type RemoteEventBufferSnapshot,
   type RemoteIntegrationEffect,
 } from "./internals/remote-event-buffer";
+import { assertPendingCandidatesAcyclic } from "./internals/pending-causality";
 import {
   consumeDecodedNativeSnapshotGraphSource,
   consumeDecodedNativeSnapshotRuntimeState,
@@ -1313,10 +1315,10 @@ const prepareRemoteBatch = (
     candidates.push({ event, inputIndex });
   }
 
-  assertAcyclicRemoteCandidates([
-    ...remoteEvents.getBufferedEvents(),
-    ...candidates.map((candidate) => candidate.event),
-  ]);
+  assertPendingCandidatesAcyclic(
+    candidates.map((candidate) => candidate.event),
+    (eventId) => remoteEvents.getBufferedEvent(eventId),
+  );
 
   return {
     candidates: topologicallyOrderRemoteCandidates(candidates),
@@ -1350,21 +1352,23 @@ const topologicallyOrderRemoteCandidates = (
     indegree.set(candidate.event.id, degree);
   }
 
-  const ready = candidates
-    .filter((candidate) => indegree.get(candidate.event.id) === 0)
-    .sort((left, right) => compareEventIds(left.event.id, right.event.id));
+  const ready = new MaxHeap<RemoteBatchCandidate>((left, right) =>
+    compareEventIds(right.event.id, left.event.id),
+  );
+  for (const candidate of candidates) {
+    if (indegree.get(candidate.event.id) === 0) {
+      ready.push(candidate);
+    }
+  }
   const ordered: RemoteBatchCandidate[] = [];
-  while (ready.length > 0) {
-    const next = ready.shift()!;
+  while (ready.size > 0) {
+    const next = ready.pop()!;
     ordered.push(next);
     for (const childId of children.get(next.event.id) ?? []) {
       const remaining = (indegree.get(childId) ?? 0) - 1;
       indegree.set(childId, remaining);
       if (remaining === 0) {
         ready.push(byId.get(childId)!);
-        ready.sort((left, right) =>
-          compareEventIds(left.event.id, right.event.id),
-        );
       }
     }
   }
@@ -1373,13 +1377,6 @@ const topologicallyOrderRemoteCandidates = (
     throw new Error("remote event batch contains a causal cycle");
   }
   return ordered;
-};
-
-const assertAcyclicRemoteCandidates = (
-  events: ReadonlyArray<GraphEvent>,
-): void => {
-  const candidates = events.map((event, inputIndex) => ({ event, inputIndex }));
-  topologicallyOrderRemoteCandidates(candidates);
 };
 
 const assertMatchingDuplicate = (

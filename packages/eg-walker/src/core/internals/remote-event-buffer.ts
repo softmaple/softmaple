@@ -59,10 +59,6 @@ export class RemoteEventBuffer {
     return this.bufferedEventsById.get(eventId);
   }
 
-  getBufferedEvents(): ReadonlyArray<GraphEvent> {
-    return Array.from(this.bufferedEventsById.values());
-  }
-
   snapshot(): RemoteEventBufferSnapshot {
     return {
       pending: Array.from(this.pendingByMissingParent, ([parent, events]) => [

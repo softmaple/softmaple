@@ -247,6 +247,18 @@ describe("EgWalkerReplica.applyRemoteEvents", () => {
     expect(replica.getText()).toBe("");
   });
 
+  it("rejects a cycle introduced through an existing buffered event", () => {
+    const replica = new EgWalkerReplica("receiver");
+    const buffered = insertEvent("buffered:0", ["candidate:0"], 0, "b");
+    const candidate = insertEvent("candidate:0", [buffered.id], 0, "c");
+    replica.applyRemoteEvent(buffered);
+
+    expect(() => replica.applyRemoteEvent(candidate)).toThrow(/causal cycle/);
+    expect(replica.getPendingRemoteCount()).toBe(1);
+    expect(replica.exportEventGraph()).toEqual([]);
+    expect(replica.getText()).toBe("");
+  });
+
   it("copies accepted events and handles a 4,000-event reverse chain", () => {
     const events = Array.from({ length: 4_000 }, (_, index) =>
       insertEvent(

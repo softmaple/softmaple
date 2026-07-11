@@ -189,6 +189,34 @@ describe("EgWalkerReplica.applyRemoteEvents", () => {
     expect(subject.getReplayStats()).toEqual(control.getReplayStats());
   });
 
+  it("preserves checkpoint-seeded replay state metrics after rollback", () => {
+    const subject = new EgWalkerReplica("subject");
+    const control = new EgWalkerReplica("control");
+    const root = insertEvent("root:0", [], 0, "abcdef");
+    const deletion = deleteEvent("delete:0", [root.id], 0, 5);
+    const left = insertEvent("left:0", [root.id], 6, "L");
+    subject.applyRemoteEvents([root, deletion, left]);
+    control.applyRemoteEvents([root, deletion, left]);
+    const before = subject.getReplayStats();
+    const valid = insertEvent("right:0", [root.id], 0, "R");
+    const invalid = insertEvent("bad:0", [valid.id], 99, "!");
+
+    expect(before.sequenceRecordCount).toBe(3);
+    expect(() => subject.applyRemoteEvents([valid, invalid])).toThrow(
+      /exceeds parent document length/,
+    );
+    expect(subject.getReplayStats()).toEqual(before);
+    expect(subject.getText()).toBe("fL");
+
+    const merge = insertEvent("merge:0", [deletion.id, left.id], 2, "M");
+    subject.applyRemoteEvent(merge);
+    control.applyRemoteEvent(merge);
+
+    expect(subject.getText()).toBe(control.getText());
+    expect(subject.exportEventGraph()).toEqual(control.exportEventGraph());
+    expect(subject.getReplayStats()).toEqual(control.getReplayStats());
+  });
+
   it("restores pending descendants flushed before a later batch failure", () => {
     const replica = new EgWalkerReplica("receiver");
     const root = insertEvent("a:0", [], 0, "a");

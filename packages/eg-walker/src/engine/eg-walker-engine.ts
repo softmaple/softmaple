@@ -63,6 +63,16 @@ export interface EngineSnapshotState {
   readonly compactDeleteTargets?: CompactDeleteTargetRecords;
 }
 
+export interface EngineRecoveryState {
+  readonly currentVersion: Version;
+  readonly textBuffer: PersistentUtf16Rope;
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  readonly eventOrder: ReadonlyArray<EventId>;
+  readonly eventIndexesComplete: boolean;
+  readonly stats: EngineStats;
+}
+
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
  *
@@ -164,6 +174,34 @@ export class EgWalkerEngine {
     return engine;
   }
 
+  static fromRecoveryState(
+    state: EngineRecoveryState,
+    graph: EventGraph,
+  ): EgWalkerEngine {
+    const engine = new EgWalkerEngine();
+    engine.restoreSnapshotState({
+      graph,
+      currentVersion: state.currentVersion,
+      text: "",
+      textBuffer: state.textBuffer,
+      sequenceRecords: state.sequenceRecords,
+      deleteTargets: state.deleteTargets,
+    });
+    engine.eventsById.clear();
+    engine.eventOrder.clear();
+    state.eventOrder.forEach((eventId, index) => {
+      const event = graph.getEvent(eventId);
+      if (event === undefined) {
+        throw new Error(`Recovery state references missing event ${eventId}`);
+      }
+      engine.eventsById.set(eventId, event);
+      engine.eventOrder.set(eventId, index);
+    });
+    engine.eventIndexesComplete = state.eventIndexesComplete;
+    engine.restoreStats(state.stats);
+    return engine;
+  }
+
   /**
    * Apply a single new event on top of the current engine state without
    * resetting. The caller must ensure {@link graph} is the up-to-date event
@@ -260,6 +298,25 @@ export class EgWalkerEngine {
 
   getDeleteTargetRecords(): DeleteTargetRecord[] {
     return this.deleteTargets.entries();
+  }
+
+  captureRecoveryState(): EngineRecoveryState {
+    this.flushPendingInsert();
+    const eventOrder = Array.from(this.eventOrder, ([eventId, index]) => ({
+      eventId,
+      index,
+    }))
+      .sort((left, right) => left.index - right.index)
+      .map(({ eventId }) => eventId);
+    return {
+      currentVersion: new Set(this.currentVersion),
+      textBuffer: this.resultingText,
+      sequenceRecords: this.getSequenceRecords(),
+      deleteTargets: this.getDeleteTargetRecords(),
+      eventOrder,
+      eventIndexesComplete: this.eventIndexesComplete,
+      stats: this.getStats(),
+    };
   }
 
   private restoreSnapshotState(state: EngineSnapshotState): void {

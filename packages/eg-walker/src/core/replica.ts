@@ -41,6 +41,7 @@ import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import {
   EgWalkerEngine,
   type DeleteTargetRecord,
+  type EngineRecoveryState,
   type EngineStats,
 } from "../engine/eg-walker-engine";
 import type {
@@ -80,6 +81,7 @@ type LazyEventGraphSource = () => EventGraph;
 const MAX_REPLAY_CACHE_EVENTS = 4_096;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
 const ESTIMATED_REPLAY_RECORD_BYTES = 256;
+const ESTIMATED_DELETE_TARGET_BYTES = 32;
 
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;
@@ -121,6 +123,13 @@ interface RemoteBatchSnapshot {
   readonly replayCacheBaseVersion: Version | null;
   readonly replayCacheEvents: number;
   readonly replayCacheBytes: number;
+  readonly engineRecoveryAnchor: EngineRecoveryAnchor | null;
+}
+
+interface EngineRecoveryAnchor {
+  readonly state: EngineRecoveryState;
+  readonly graphEventCount: number;
+  readonly estimatedBytes: number;
 }
 
 /**
@@ -141,6 +150,7 @@ export class EgWalkerReplica {
   private replayCacheBaseVersion: Version | null = null;
   private replayCacheEvents = 0;
   private replayCacheBytes = 0;
+  private engineRecoveryAnchor: EngineRecoveryAnchor | null = null;
   private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
   private partialReplayCount = 0;
@@ -199,6 +209,7 @@ export class EgWalkerReplica {
       // full-graph cache.
       this.replayCacheBaseVersion = new Set(this.currentVersion);
       this.replayCacheEvents = 0;
+      this.captureEngineRecoveryAnchor(this.engine, this.ensureEventGraph());
       this.refreshReplayCacheMetrics();
       this.evictReplayCacheIfNeeded();
     }
@@ -744,6 +755,7 @@ export class EgWalkerReplica {
           : new Set(this.replayCacheBaseVersion),
       replayCacheEvents: this.replayCacheEvents,
       replayCacheBytes: this.replayCacheBytes,
+      engineRecoveryAnchor: this.engineRecoveryAnchor,
     };
   }
 
@@ -771,21 +783,25 @@ export class EgWalkerReplica {
         : new Set(snapshot.replayCacheBaseVersion);
     this.replayCacheEvents = snapshot.replayCacheEvents;
     this.replayCacheBytes = snapshot.replayCacheBytes;
+    this.engineRecoveryAnchor = snapshot.engineRecoveryAnchor;
 
     if (snapshot.engineStats === null) {
       this.engine = null;
       return;
     }
-
-    const restoredEngine = new EgWalkerEngine();
-    restoredEngine.generate(
-      graph.getBranchPreservingTopologicalOrder(),
-      this.initialText,
-      { eventGraph: graph },
+    const anchor = snapshot.engineRecoveryAnchor;
+    if (anchor === null) {
+      throw new Error("Missing replay-engine recovery anchor");
+    }
+    const restoredEngine = EgWalkerEngine.fromRecoveryState(
+      anchor.state,
+      graph,
     );
+    for (const event of graph.getAllEvents().slice(anchor.graphEventCount)) {
+      restoredEngine.applyEvent(event, graph);
+    }
     restoredEngine.restoreStats(snapshot.engineStats);
     this.engine = restoredEngine;
-    this.engineStatsOverride = snapshot.engineStatsOverride;
   }
 
   private shouldDeferLocalReplay(): boolean {
@@ -936,6 +952,7 @@ export class EgWalkerReplica {
     this.documentCache = null;
     this.currentVersion = graph.getFrontier();
     this.engine = engine;
+    this.captureEngineRecoveryAnchor(engine, graph);
     this.replayCacheBaseVersion = new Set();
     this.replayCacheEvents = graph.getEventCount();
     this.restoredSequenceRecords = null;
@@ -1106,6 +1123,26 @@ export class EgWalkerReplica {
     );
   }
 
+  private captureEngineRecoveryAnchor(
+    engine: EgWalkerEngine,
+    graph: EventGraph,
+  ): void {
+    const state = engine.captureRecoveryState();
+    const deleteTargetEntries = state.deleteTargets.reduce(
+      (count, target) => count + target.targetIds.length + 1,
+      0,
+    );
+    this.engineRecoveryAnchor = {
+      state,
+      graphEventCount: graph.getEventCount(),
+      estimatedBytes:
+        state.textBuffer.length * 2 +
+        state.sequenceRecords.length * ESTIMATED_REPLAY_RECORD_BYTES +
+        (deleteTargetEntries + state.eventOrder.length) *
+          ESTIMATED_DELETE_TARGET_BYTES,
+    };
+  }
+
   private refreshReplayCacheMetrics(): void {
     if (this.engine === null) {
       this.replayCacheEvents = 0;
@@ -1115,7 +1152,8 @@ export class EgWalkerReplica {
     this.replayCacheBytes =
       this.documentBuffer.length * 2 +
       this.engine.getStats().sequenceRecordCount *
-        ESTIMATED_REPLAY_RECORD_BYTES;
+        ESTIMATED_REPLAY_RECORD_BYTES +
+      (this.engineRecoveryAnchor?.estimatedBytes ?? 0);
   }
 
   private evictReplayCacheIfNeeded(): void {
@@ -1128,6 +1166,7 @@ export class EgWalkerReplica {
     this.captureEnginePeakBeforeSwap();
     this.engine = null;
     this.engineStatsOverride = null;
+    this.engineRecoveryAnchor = null;
     this.replayCacheBaseVersion = null;
     this.replayCacheEvents = 0;
     this.replayCacheBytes = 0;
@@ -1143,6 +1182,7 @@ export class EgWalkerReplica {
       frontier,
     );
     this.engine = result.engine;
+    this.captureEngineRecoveryAnchor(result.engine, graph);
     this.replayCacheBaseVersion = new Set(checkpoint.version);
     this.replayCacheEvents = result.replayedEventIds.length;
     this.documentBuffer = result.textBuffer;

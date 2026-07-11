@@ -87,6 +87,20 @@ describe("PersistentUtf16Rope", () => {
     expect(stats.nodeAllocations).toBeLessThanOrEqual(rope.height * 2 + 3);
   });
 
+  it("rebalances a deletion seam without scanning all leaves", () => {
+    const rope = PersistentUtf16Rope.from("x".repeat(2_048 * 2_000));
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const edited = rope.delete(100, 1_500);
+    const stats = PersistentUtf16Rope.getInstrumentation();
+    const leaves = edited.getLeafLengths();
+
+    expect(edited.length).toBe(rope.length - 1_500);
+    expect(stats.nodeVisits).toBeLessThan(rope.height * 12 + 20);
+    expect(Math.min(...leaves)).toBeGreaterThanOrEqual(UTF16_ROPE_MIN_LEAF);
+    expect(Math.max(...leaves)).toBeLessThanOrEqual(UTF16_ROPE_MAX_LEAF);
+  });
+
   it("matches JavaScript strings under generated UTF-16 operations", () => {
     fc.assert(
       fc.property(

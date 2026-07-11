@@ -149,9 +149,17 @@ export class PersistentUtf16Rope {
     if (!deleted.hasUnderfilledLeaf || next.kind === "leaf") {
       return new PersistentUtf16Rope(next);
     }
-    return new PersistentUtf16Rope(
-      buildTree(rebalanceLeafList(collectLeaves(next))),
+    let rebalanced = rebalanceLeafContaining(
+      next,
+      Math.min(index, next.length - 1),
     );
+    if (index > 0) {
+      rebalanced = rebalanceLeafContaining(
+        rebalanced,
+        Math.min(index - 1, rebalanced.length - 1),
+      );
+    }
+    return new PersistentUtf16Rope(rebalanced);
   }
 
   slice(start: number, end: number = this.length): string {
@@ -331,23 +339,47 @@ const deleteFromNode = (
   };
 };
 
-const rebalanceLeafList = (
-  leaves: ReadonlyArray<LeafNode>,
-): ReadonlyArray<LeafNode> => {
-  const balanced: LeafNode[] = [];
-  for (const candidate of leaves) {
-    balanced.push(candidate);
-    while (
-      balanced.length >= 2 &&
-      (balanced.at(-1)!.length < UTF16_ROPE_MIN_LEAF ||
-        balanced.at(-2)!.length < UTF16_ROPE_MIN_LEAF)
-    ) {
-      const right = balanced.pop()!;
-      const left = balanced.pop()!;
-      balanced.push(...chunkText(`${left.text}${right.text}`));
-    }
+const rebalanceLeafContaining = (root: RopeNode, index: number): RopeNode => {
+  if (root.kind === "leaf" || index < 0 || index >= root.length) {
+    return root;
   }
-  return balanced;
+  const target = locateLeaf(root, index);
+  if (target.leaf.length >= UTF16_ROPE_MIN_LEAF) {
+    return root;
+  }
+
+  const targetEnd = target.start + target.leaf.length;
+  const left =
+    targetEnd < root.length ? target : locateLeaf(root, target.start - 1);
+  const right = targetEnd < root.length ? locateLeaf(root, targetEnd) : target;
+  const rangeStart = left.start;
+  const rangeEnd = right.start + right.leaf.length;
+  const combined = `${left.leaf.text}${right.leaf.text}`;
+  const removed = collapseRoot(
+    deleteFromNode(root, rangeStart, rangeEnd).node ?? EMPTY_LEAF,
+  );
+  const replacements = insertIntoNode(removed, rangeStart, combined);
+  return buildFromSameHeightNodes(replacements);
+};
+
+const locateLeaf = (
+  root: RopeNode,
+  index: number,
+): { readonly leaf: LeafNode; readonly start: number } => {
+  let node = root;
+  let offset = index;
+  let start = 0;
+  while (node.kind === "branch") {
+    counters.nodeVisits++;
+    const childIndex = lowerBound(node.cumulativeEnds, offset + 1);
+    const previousEnd =
+      childIndex === 0 ? 0 : node.cumulativeEnds[childIndex - 1]!;
+    start += previousEnd;
+    offset -= previousEnd;
+    node = node.children[childIndex]!;
+  }
+  counters.nodeVisits++;
+  return { leaf: node, start };
 };
 
 const partitionLevel = (

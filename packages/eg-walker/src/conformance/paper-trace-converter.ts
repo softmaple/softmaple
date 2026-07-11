@@ -43,6 +43,7 @@ export const convertPaperTraceToAtomicEvents = (
   );
   const transactionUnicodeStates: Array<UnicodeOffsetState | undefined> =
     new Array(trace.txns.length);
+  const nextSequenceByAgent = new Map<string, number>();
 
   for (
     let transactionIndex = 0;
@@ -66,7 +67,9 @@ export const convertPaperTraceToAtomicEvents = (
       transactionUnicodeStates,
       events,
     );
-    let localVersion = transaction._dtSpan?.[0] ?? 0;
+    const agentKey = paperAgentKey(transaction.agent);
+    let agentSequence = nextSequenceByAgent.get(agentKey) ?? 0;
+    let traceVersion = transaction._dtSpan?.[0] ?? 0;
     let operationOffset = 0;
 
     for (
@@ -93,14 +96,7 @@ export const convertPaperTraceToAtomicEvents = (
         const utf16Index = utf16IndexForScalarIndex(unicodeState, index);
         const utf16Length =
           utf16IndexForScalarIndex(unicodeState, index + 1) - utf16Index;
-        const id = paperEventId(
-          dataset,
-          transactionIndex,
-          patchIndex,
-          "delete",
-          deleteOffset,
-          transaction._dtSpan === undefined ? undefined : localVersion,
-        );
+        const id = paperEventId(dataset, agentKey, agentSequence++);
         events.push({
           id,
           parentVersion: new Set(currentVersion),
@@ -113,21 +109,14 @@ export const convertPaperTraceToAtomicEvents = (
         });
         unicodeState = deleteScalarRange(unicodeState, index, 1);
         currentVersion = new Set([id]);
-        localVersion++;
+        traceVersion++;
         operationOffset++;
       }
 
       let insertOffset = 0;
       for (const character of insertedText) {
         const scalarIndex = index + insertOffset;
-        const id = paperEventId(
-          dataset,
-          transactionIndex,
-          patchIndex,
-          "insert",
-          insertOffset,
-          transaction._dtSpan === undefined ? undefined : localVersion,
-        );
+        const id = paperEventId(dataset, agentKey, agentSequence++);
         events.push({
           id,
           parentVersion: new Set(currentVersion),
@@ -140,18 +129,19 @@ export const convertPaperTraceToAtomicEvents = (
         });
         unicodeState = insertScalar(unicodeState, scalarIndex, character);
         currentVersion = new Set([id]);
-        localVersion++;
+        traceVersion++;
         operationOffset++;
         insertOffset++;
       }
     }
 
     const expectedEnd = transaction._dtSpan?.[1];
-    if (expectedEnd !== undefined && localVersion !== expectedEnd) {
+    if (expectedEnd !== undefined && traceVersion !== expectedEnd) {
       throw new Error(
-        `${dataset}: transaction ${transactionIndex} emitted through local version ${localVersion}, expected ${expectedEnd}`,
+        `${dataset}: transaction ${transactionIndex} emitted through trace version ${traceVersion}, expected ${expectedEnd}`,
       );
     }
+    nextSequenceByAgent.set(agentKey, agentSequence);
     transactionVersions[transactionIndex] = currentVersion;
     transactionUnicodeStates[transactionIndex] = unicodeState;
   }
@@ -299,12 +289,17 @@ const lowerBound = (values: ReadonlyArray<number>, target: number): number => {
 
 const paperEventId = (
   dataset: string,
-  transactionIndex: number,
-  patchIndex: number,
-  kind: "delete" | "insert",
-  offset: number,
-  localVersion: number | undefined,
+  agentKey: string,
+  sequence: number,
 ): EventId =>
-  localVersion === undefined
-    ? `paper:${dataset}:txn:${transactionIndex}:patch:${patchIndex}:${kind}:${offset}`
-    : `paper:${dataset}:lv:${localVersion}`;
+  `paper:${encodeURIComponent(dataset)}:agent:${agentKey}:${sequence}`;
+
+const paperAgentKey = (agent: number | string): string => {
+  if (typeof agent === "string") {
+    return `string:${agent}`;
+  }
+  if (!Number.isSafeInteger(agent) || agent < 0) {
+    throw new Error(`paper trace contains an invalid numeric agent ${agent}`);
+  }
+  return `number:${agent.toString().padStart(16, "0")}`;
+};

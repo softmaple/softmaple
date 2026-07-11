@@ -80,6 +80,64 @@ describe("convertPaperTraceToAtomicEvents", () => {
     });
   });
 
+  it("should preserve agent ordering for concurrent transactions", () => {
+    // Arrange
+    const trace: AtomicPaperTrace = {
+      endContent: "AZ",
+      txns: [
+        {
+          parents: [],
+          agent: "z",
+          patches: [[0, 0, "Z"]],
+          _dtSpan: [0, 1],
+        },
+        {
+          parents: [],
+          agent: "a",
+          patches: [[0, 0, "A"]],
+          _dtSpan: [1, 2],
+        },
+      ],
+    };
+
+    // Act
+    const events = convertPaperTraceToAtomicEvents("agent-order", trace);
+
+    // Assert
+    expect(events.map(({ id }) => id)).toEqual([
+      "paper:agent-order:agent:string:z:0",
+      "paper:agent-order:agent:string:a:0",
+    ]);
+  });
+
+  it("should order numeric agents by value", () => {
+    // Arrange
+    const trace: AtomicPaperTrace = {
+      endContent: "BA",
+      txns: [
+        {
+          parents: [],
+          agent: 10,
+          patches: [[0, 0, "A"]],
+        },
+        {
+          parents: [],
+          agent: 2,
+          patches: [[0, 0, "B"]],
+        },
+      ],
+    };
+
+    // Act
+    const events = convertPaperTraceToAtomicEvents("numeric-agent", trace);
+
+    // Assert
+    expect(events.map(({ id }) => id)).toEqual([
+      "paper:numeric-agent:agent:number:0000000000000010:0",
+      "paper:numeric-agent:agent:number:0000000000000002:0",
+    ]);
+  });
+
   it("should reject a converted trace whose final text is incorrect", () => {
     // Arrange
     const trace: AtomicPaperTrace = {

@@ -1,7 +1,7 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
-import type { EventId, ExternalOperation, GraphEvent } from "../types";
+import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import { IndexedSequence } from "./indexed-sequence";
 import {
@@ -254,6 +254,80 @@ export class EgWalkerEngine {
 
   getCurrentVersion(): ReadonlySet<EventId> {
     return this.currentVersion;
+  }
+
+  /** Move the transient prepare view without applying a new event. */
+  transitionPrepareView(version: Version, graph: EventGraph): void {
+    this.flushPendingInsert();
+    this.graph = graph;
+    const { retreat, advance } = this.diffVersions(
+      this.currentVersion,
+      version,
+    );
+    for (const eventId of retreat) {
+      this.retreat(eventId);
+    }
+    for (const eventId of advance) {
+      this.advance(eventId);
+    }
+    this.currentVersion = new Set(version);
+  }
+
+  getPrepareLength(): number {
+    return this.sequence.prepareLength;
+  }
+
+  getPrepareCodeUnitAt(index: number): number | undefined {
+    const landing = this.sequence.tryPrepareIndexToPositionAndOffset(
+      index,
+      false,
+    );
+    if (landing === undefined) {
+      return undefined;
+    }
+    return this.sequence
+      .at(landing.position)
+      ?.content.charCodeAt(landing.offsetInRecord);
+  }
+
+  getPrepareSlice(start: number, end: number): string {
+    const prepareLength = this.sequence.prepareLength;
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      end < start ||
+      end > prepareLength
+    ) {
+      throw new Error(
+        `Invalid prepare slice [${start}, ${end}) for length ${prepareLength}`,
+      );
+    }
+
+    const parts: string[] = [];
+    let index = start;
+    while (index < end) {
+      const landing = this.sequence.prepareIndexToPositionAndOffset(
+        index,
+        false,
+      );
+      const item = this.sequence.at(landing.position);
+      if (item === undefined) {
+        throw new Error(`Missing prepare record at index ${index}`);
+      }
+      const length = Math.min(
+        end - index,
+        item.content.length - landing.offsetInRecord,
+      );
+      parts.push(
+        item.content.slice(
+          landing.offsetInRecord,
+          landing.offsetInRecord + length,
+        ),
+      );
+      index += length;
+    }
+    return parts.join("");
   }
 
   getStats(): EngineStats {

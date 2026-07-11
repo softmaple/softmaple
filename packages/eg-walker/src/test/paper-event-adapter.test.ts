@@ -1,5 +1,5 @@
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { PaperEventAdapter } from "../conformance/paper-event-adapter";
@@ -104,6 +104,53 @@ describe("PaperEventAdapter.expand", () => {
         firstExpansion.identities.get(id)?.sourceEventId === "merge:0",
     );
     expect(mergeScalars[0]?.parentVersion.size).toBe(2);
+  });
+
+  it("should stream a long linear expansion through one engine", () => {
+    // Arrange
+    const eventCount = 2_000;
+    const events = Array.from({ length: eventCount }, (_, index) =>
+      insertEvent(
+        `author:${index}`,
+        index === 0 ? [] : [`author:${index - 1}`],
+        index,
+        "x",
+      ),
+    );
+    const generate = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const expansion = new PaperEventAdapter().expand(events);
+
+      // Assert
+      expect(expansion.events).toHaveLength(eventCount);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("should stream a Unicode merge through an empty-event alias", () => {
+    // Arrange
+    const events: GraphEvent[] = [
+      insertEvent("root:0", [], 0, "😀"),
+      insertEvent("a:0", ["root:0"], 0, "A"),
+      insertEvent("a:1", ["a:0"], 3, ""),
+      insertEvent("b:0", ["root:0"], 2, "B"),
+      deleteEvent("merge:0", ["a:1", "b:0"], 1, 2),
+    ];
+
+    // Act
+    const expansion = new PaperEventAdapter().expand(events);
+
+    // Assert
+    expect(materialize(expansion.events)).toBe("AB");
+    expect(materialize(expansion.events)).toBe(materialize(events));
+    expect(expansion.events.some(({ id }) => id === "a:1")).toBe(false);
+    expect(
+      expansion.events.find(({ id }) => id === "merge:0")?.parentVersion,
+    ).toEqual(new Set(["a:0", "b:0"]));
   });
 
   it("should preserve causality while removing empty compound events", () => {

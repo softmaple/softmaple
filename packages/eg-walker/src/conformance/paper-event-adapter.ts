@@ -43,15 +43,17 @@ export class PaperEventAdapter {
     const expandedEvents: GraphEvent[] = [];
     const identities = new Map<EventId, PaperEventIdentity>();
     const terminalVersions = new Map<EventId, ReadonlySet<EventId>>();
+    const expandedGraph = new EventGraph();
+    const engine = new EgWalkerEngine();
+    engine.generate([], this.initialText, {
+      eventGraph: expandedGraph,
+      eventOrder: [],
+    });
 
     for (const sourceEvent of orderedSources) {
       const parentVersion = remapParentVersion(sourceEvent, terminalVersions);
-      const parentText = materializeVersionText(
-        expandedEvents,
-        parentVersion,
-        this.initialText,
-      );
-      const operations = expandOperation(sourceEvent, parentText);
+      engine.transitionPrepareView(parentVersion, expandedGraph);
+      const operations = expandOperation(sourceEvent, engine);
 
       let atomicParentVersion = parentVersion;
       for (let offset = 0; offset < operations.length; offset++) {
@@ -70,6 +72,8 @@ export class PaperEventAdapter {
           timestamp: sourceEvent.timestamp,
         };
         expandedEvents.push(event);
+        expandedGraph.addEvent(event);
+        engine.applyEvent(event, expandedGraph);
         identities.set(id, identity);
         atomicParentVersion = new Set([id]);
       }
@@ -122,10 +126,10 @@ const remapParentVersion = (
 
 const expandOperation = (
   event: GraphEvent,
-  parentText: string,
+  parentView: PrepareTextView,
 ): ExternalOperation[] => {
   const { operation } = event;
-  assertIndexAtScalarBoundary(parentText, operation.index, event.id);
+  assertIndexAtScalarBoundary(parentView, operation.index, event.id);
 
   if (operation.type === OPERATION_TYPE.INSERT) {
     assertWellFormedUtf16(
@@ -150,13 +154,15 @@ const expandOperation = (
     );
   }
   const end = operation.index + operation.length;
-  if (!Number.isSafeInteger(end) || end > parentText.length) {
+  if (!Number.isSafeInteger(end) || end > parentView.getPrepareLength()) {
     throw new Error(
-      `PaperEventAdapter source event ${event.id} delete range ${operation.index}..${end} exceeds parent text length ${parentText.length}`,
+      `PaperEventAdapter source event ${event.id} delete range ${operation.index}..${end} exceeds parent text length ${parentView.getPrepareLength()}`,
     );
   }
-  assertIndexAtScalarBoundary(parentText, end, event.id);
-  const deletedScalars = Array.from(parentText.slice(operation.index, end));
+  assertIndexAtScalarBoundary(parentView, end, event.id);
+  const deletedScalars = Array.from(
+    parentView.getPrepareSlice(operation.index, end),
+  );
   return deletedScalars.map((scalar) => ({
     type: OPERATION_TYPE.DELETE,
     index: operation.index,
@@ -165,20 +171,21 @@ const expandOperation = (
 };
 
 const assertIndexAtScalarBoundary = (
-  text: string,
+  view: PrepareTextView,
   index: number,
   eventId: EventId,
 ): void => {
-  if (!Number.isSafeInteger(index) || index < 0 || index > text.length) {
+  const length = view.getPrepareLength();
+  if (!Number.isSafeInteger(index) || index < 0 || index > length) {
     throw new Error(
       `PaperEventAdapter source event ${eventId} has invalid UTF-16 index ${index}`,
     );
   }
-  if (index === 0 || index === text.length) {
+  if (index === 0 || index === length) {
     return;
   }
-  const before = text.charCodeAt(index - 1);
-  const after = text.charCodeAt(index);
+  const before = view.getPrepareCodeUnitAt(index - 1)!;
+  const after = view.getPrepareCodeUnitAt(index)!;
   if (
     before >= 0xd800 &&
     before <= 0xdbff &&
@@ -191,22 +198,8 @@ const assertIndexAtScalarBoundary = (
   }
 };
 
-const materializeVersionText = (
-  events: ReadonlyArray<GraphEvent>,
-  version: ReadonlySet<EventId>,
-  initialText: string,
-): string => {
-  if (events.length === 0 || version.size === 0) {
-    return initialText;
-  }
-  const graph = EventGraph.fromEvents(events);
-  const included = graph.expandVersion(version);
-  const ordered = graph
-    .getBranchPreservingTopologicalOrder()
-    .filter(({ id }) => included.has(id));
-  const versionGraph = EventGraph.fromEvents(ordered);
-  return new EgWalkerEngine().generate(ordered, initialText, {
-    eventGraph: versionGraph,
-    eventOrder: ordered,
-  }).text;
-};
+interface PrepareTextView {
+  getPrepareLength(): number;
+  getPrepareCodeUnitAt(index: number): number | undefined;
+  getPrepareSlice(start: number, end: number): string;
+}

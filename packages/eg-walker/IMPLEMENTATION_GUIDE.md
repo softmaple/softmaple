@@ -34,32 +34,42 @@ src/
 
 ## Paper Mapping
 
-| Paper section               | Implementation                                                                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| 3.1 Characteristics         | `core/replica.ts`, `core/invariants.ts`, `engine/eg-walker-engine.ts`                                                                     |
-| 3.2 Walking the event graph | `core/replay-walker.ts`, `graph/event-graph.ts`, `engine/eg-walker-engine.ts`                                                             |
-| 3.3 Prepare/effect versions | `engine/eg-walker-engine.ts`, `engine/internals/yata-integration.ts`                                                                      |
-| 3.4 Index mapping           | `engine/indexed-sequence.ts`, `engine/internals/record-splitter.ts`, `engine/internals/pending-insert-buffer.ts`                          |
-| 3.5 Critical versions       | `engine/critical-version.ts`                                                                                                              |
-| 3.6 Partial replay          | `engine/partial-replay.ts`                                                                                                                |
-| 3.8 Event graph storage     | `graph/columnar-codec.ts`                                                                                                                 |
+| Paper section               | Implementation                                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 3.1 Characteristics         | `core/replica.ts`, `core/invariants.ts`, `engine/eg-walker-engine.ts`                                            |
+| 3.2 Walking the event graph | `core/replay-walker.ts`, `graph/event-graph.ts`, `engine/eg-walker-engine.ts`                                    |
+| 3.3 Prepare/effect versions | `engine/eg-walker-engine.ts`, `engine/internals/yata-integration.ts`                                             |
+| 3.4 Index mapping           | `engine/indexed-sequence.ts`, `engine/internals/record-splitter.ts`, `engine/internals/pending-insert-buffer.ts` |
+| 3.5 Critical versions       | `engine/critical-version.ts`                                                                                     |
+| 3.6 Partial replay          | `engine/partial-replay.ts`                                                                                       |
+| 3.8 Event graph storage     | `graph/columnar-codec.ts`                                                                                        |
 
 ## Runtime Model
 
-Persistent state:
+Portable persistent state (`serialize()`):
 
 - Plain document text.
 - Immutable event graph.
 
-Temporary state:
+Replay working state:
 
 - Augmented replay items in `EgWalkerEngine`.
 - Prepare state as numeric states: `0`, `1`, `2+`.
 - Effect state via `everDeleted`.
 - Ranked B-tree leaves with prepare/effect/count aggregates for index mapping.
 
-The temporary replay state is not exported, serialized, or retained by
-`EgWalkerReplica`.
+`EgWalkerReplica` currently retains this working state between edits to make
+the linear/incremental path cheap. It is excluded from portable `serialize()`,
+but the optional native-snapshot format stores sequence records, delete-target
+records, and retained checkpoint texts as an implementation-specific fast-load
+cache. This is an intentional engineering extension; it is not the paper's
+strict "discard CRDT state at a critical version" storage architecture.
+
+The implementation also uses UTF-16 code-unit indexes and allows one graph
+event to carry a multi-code-unit insert or range delete. The paper's semantic
+model uses one Unicode scalar insert/delete per event. These representations
+agree for atomic BMP traces, while adapters for paper datasets must convert
+both index units and event granularity explicitly.
 
 ## Section 3.4 Internal-Document Fast Path
 

@@ -47,6 +47,37 @@ const concurrentBeforeBase = (count: number): GraphEvent[] => [
   })),
 ];
 
+const splitInitialPlaceholder = (count: number): GraphEvent[] =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `placeholder-split:${index}`,
+    parentVersion: new Set(),
+    operation: {
+      type: OPERATION_TYPE.INSERT,
+      index: index + 1,
+      text: "x",
+    },
+    timestamp: index,
+  }));
+
+const splitTypedRunWithRootFork = (count: number): GraphEvent[] => [
+  ...Array.from({ length: count }, (_, index) => ({
+    id: `author:${index}`,
+    parentVersion: new Set(index === 0 ? [] : [`author:${index - 1}`]),
+    operation: {
+      type: OPERATION_TYPE.INSERT,
+      index,
+      text: "a",
+    },
+    timestamp: index,
+  })),
+  {
+    id: "fork:0",
+    parentVersion: new Set(),
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "b" },
+    timestamp: count,
+  },
+];
+
 describe("FugueOrderIndex structural bounds", () => {
   it("integrates concurrent root siblings without linear conflict probes", () => {
     const events = concurrentRoots(1_600);
@@ -127,6 +158,68 @@ describe("FugueOrderIndex structural bounds", () => {
     expect(measurements[2]!.work / measurements[1]!.work).toBeLessThan(2.75);
   });
 
+  it("updates repeated placeholder splits without rebuilding", () => {
+    // Arrange
+    const count = 64;
+    const events = splitInitialPlaceholder(count);
+    const graph = EventGraph.fromEvents(events);
+    const initialText = "a".repeat(count + 1);
+    const indexedEngine = new EgWalkerEngine();
+    const oracleEngine = new EgWalkerEngine();
+
+    // Act
+    const indexed = indexedEngine.generate(events, initialText, {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    const oracle = oracleEngine.generate(events, initialText, {
+      eventGraph: graph,
+      eventOrder: events,
+      integrationMode: "linear-oracle",
+    });
+
+    // Assert
+    expect(indexed.text).toBe(oracle.text);
+    expect(indexed.transformedOperations).toEqual(oracle.transformedOperations);
+    expect(indexedEngine.getSequenceRecords()).toEqual(
+      oracleEngine.getSequenceRecords(),
+    );
+    expect(indexed.stats.fugueRebuilds).toBe(0);
+    expect(indexed.stats.fugueMarkerOperations).toBe(6 * count + 3);
+  });
+
+  it("updates typed-run isolation splits without rebuilding", () => {
+    // Arrange
+    const count = 64;
+    const events = splitTypedRunWithRootFork(count);
+    const graph = EventGraph.fromEvents(events);
+    const indexedEngine = new EgWalkerEngine();
+    const oracleEngine = new EgWalkerEngine();
+
+    // Act
+    const indexed = indexedEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    const oracle = oracleEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+      integrationMode: "linear-oracle",
+    });
+
+    // Assert
+    expect(indexed.text).toBe(oracle.text);
+    expect(indexed.transformedOperations).toEqual(oracle.transformedOperations);
+    expect(indexedEngine.getSequenceRecords()).toEqual(
+      oracleEngine.getSequenceRecords(),
+    );
+    expect(indexedEngine.getDeleteTargetRecords()).toEqual(
+      oracleEngine.getDeleteTargetRecords(),
+    );
+    expect(indexed.stats.fugueRebuilds).toBe(0);
+    expect(indexed.stats.fugueMarkerOperations).toBe(3 * count + 3);
+  });
+
   it("matches generated compound traces without production conflict scans", () => {
     fc.assert(
       fc.property(
@@ -164,6 +257,7 @@ describe("FugueOrderIndex structural bounds", () => {
             oracleEngine.getDeleteTargetRecords(),
           );
           expect(generated.stats.integrationProbeCount).toBe(0);
+          expect(generated.stats.fugueRebuilds).toBe(0);
         },
       ),
       fcParams(),

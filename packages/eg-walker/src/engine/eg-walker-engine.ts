@@ -106,8 +106,11 @@ export class EgWalkerEngine {
     originLeftIndex: this.originLeftIndex,
     deleteTargets: this.deleteTargets,
     nextPlaceholderId: () => this.nextPlaceholderId(),
-    onRecordSplit: (left, right) =>
-      this.fugueOrder.handleRecordSplit(left, right, this.sequence.toArray()),
+    onRecordSplit: (left, right, rightPosition) => {
+      if (!this.useLinearIntegrationOracle) {
+        this.fugueOrder.handleRecordSplit(left, right, rightPosition);
+      }
+    },
   });
   private readonly pendingInsert = new PendingInsertBuffer();
   private currentVersion = new Set<EventId>();

@@ -49,6 +49,7 @@ export class FugueOrderIndex {
   private readonly nodesById = new Map<EventId, FugueNode>();
   private readonly siblingRoots = new Map<string, SiblingNode | null>();
   private readonly forcedParentById = new Map<EventId, EventId>();
+  private readonly forcedChildByParentId = new Map<EventId, EventId>();
   private rootNode!: FugueNode;
   private comparisons = 0;
   private markerOperations = 0;
@@ -118,7 +119,7 @@ export class FugueOrderIndex {
     }
     const side: Side = isLeftChild ? "left" : "right";
     const node = createFugueNode(item);
-    const siblingKey = `${parent.item?.id ?? "ROOT"}:${side}`;
+    const siblingKey = keyForSiblings(parent, side);
     const insertion = this.insertSibling(
       this.siblingRoots.get(siblingKey) ?? null,
       node,
@@ -134,19 +135,18 @@ export class FugueOrderIndex {
     return weightBefore(node.visit);
   }
 
-  /** Rebuild after a typed-run/placeholder split rewrites origin boundaries. */
+  /** Rebuild restored records or repair an explicitly invalidated index. */
   rebuild(records: ReadonlyArray<AugmentedCRDTItem>): void {
     this.rebuilds++;
+    this.forcedParentById.clear();
+    this.forcedChildByParentId.clear();
     let previousPlaceholderId: EventId | null = null;
     for (const item of records) {
       if (item.eventId !== PLACEHOLDER_EVENT_ID) {
         continue;
       }
-      if (
-        previousPlaceholderId !== null &&
-        !this.forcedParentById.has(item.id)
-      ) {
-        this.forcedParentById.set(item.id, previousPlaceholderId);
+      if (previousPlaceholderId !== null) {
+        this.setForcedParent(item.id, previousPlaceholderId);
       }
       previousPlaceholderId = item.id;
     }
@@ -194,12 +194,52 @@ export class FugueOrderIndex {
   handleRecordSplit(
     left: AugmentedCRDTItem,
     right: AugmentedCRDTItem,
-    records: ReadonlyArray<AugmentedCRDTItem>,
+    rightPosition: number,
   ): void {
-    if (right.eventId === PLACEHOLDER_EVENT_ID) {
-      this.forcedParentById.set(right.id, left.id);
+    if (!this.valid) {
+      throw new Error("Cannot update an invalid Fugue order index");
     }
-    this.rebuild(records);
+    const leftNode = this.nodesById.get(left.id);
+    if (leftNode === undefined) {
+      throw new Error(`Fugue index missing split record ${left.id}`);
+    }
+    if (this.nodesById.has(right.id)) {
+      throw new Error(`Fugue index already contains split record ${right.id}`);
+    }
+    if (
+      weightBefore(leftNode.visit) + 1 !== rightPosition ||
+      this.sequence.positionOf(right) !== rightPosition
+    ) {
+      throw new Error(`Fugue split position mismatch for ${right.id}`);
+    }
+
+    const rightNode = createFugueNode(right);
+    const leftChildrenKey = keyForSiblings(leftNode, "right");
+    const rightChildrenKey = keyForSiblings(rightNode, "right");
+    const previousRightChildren =
+      this.siblingRoots.get(leftChildrenKey) ?? null;
+    this.siblingRoots.set(rightChildrenKey, previousRightChildren);
+    this.siblingRoots.set(leftChildrenKey, createSiblingNode(rightNode));
+
+    const previousForcedChild = this.forcedChildByParentId.get(left.id);
+    if (previousForcedChild !== undefined) {
+      this.forcedChildByParentId.delete(left.id);
+      this.forcedParentById.set(previousForcedChild, right.id);
+      this.forcedChildByParentId.set(right.id, previousForcedChild);
+    }
+    if (right.eventId === PLACEHOLDER_EVENT_ID) {
+      this.setForcedParent(right.id, left.id);
+    }
+
+    this.insertMarkersAt(markerRank(leftNode.visit) + 1, [
+      rightNode.start,
+      rightNode.visit,
+    ]);
+    this.insertMarkersBefore(leftNode.end, [rightNode.end]);
+    this.nodesById.set(right.id, rightNode);
+    if (weightBefore(rightNode.visit) !== rightPosition) {
+      throw new Error(`Fugue split rank mismatch for ${right.id}`);
+    }
   }
 
   invalidate(): void {
@@ -231,6 +271,7 @@ export class FugueOrderIndex {
     );
     if (resetStats) {
       this.forcedParentById.clear();
+      this.forcedChildByParentId.clear();
       this.comparisons = 0;
       this.markerOperations = 0;
       this.rotations = 0;
@@ -245,12 +286,7 @@ export class FugueOrderIndex {
     side: Side,
   ): { readonly root: SiblingNode; readonly successor: FugueNode | null } {
     let successor: FugueNode | null = null;
-    const node: SiblingNode = {
-      value,
-      priority: stablePriority(`${value.item!.id}:sibling`),
-      left: null,
-      right: null,
-    };
+    const node = createSiblingNode(value);
     const insert = (current: SiblingNode | null): SiblingNode => {
       if (current === null) {
         return node;
@@ -313,10 +349,13 @@ export class FugueOrderIndex {
     target: Marker,
     markers: ReadonlyArray<Marker>,
   ): void {
+    this.insertMarkersAt(markerRank(target), markers);
+  }
+
+  private insertMarkersAt(rank: number, markers: ReadonlyArray<Marker>): void {
     if (this.markerRoot === null) {
       throw new Error("Fugue marker root is unavailable");
     }
-    const rank = markerRank(target);
     const [left, right] = splitMarkers(this.markerRoot, rank);
     let block: Marker | null = null;
     for (const marker of markers) {
@@ -328,7 +367,26 @@ export class FugueOrderIndex {
     }
     this.markerOperations += markers.length;
   }
+
+  private setForcedParent(childId: EventId, parentId: EventId): void {
+    const existingChild = this.forcedChildByParentId.get(parentId);
+    if (existingChild !== undefined && existingChild !== childId) {
+      throw new Error(`Fugue forced parent ${parentId} has multiple children`);
+    }
+    this.forcedParentById.set(childId, parentId);
+    this.forcedChildByParentId.set(parentId, childId);
+  }
 }
+
+const keyForSiblings = (parent: FugueNode, side: Side): string =>
+  `${parent.item?.id ?? "ROOT"}:${side}`;
+
+const createSiblingNode = (value: FugueNode): SiblingNode => ({
+  value,
+  priority: stablePriority(`${value.item!.id}:sibling`),
+  left: null,
+  right: null,
+});
 
 const createFugueNode = (item: AugmentedCRDTItem | null): FugueNode => {
   const id = item?.id ?? "ROOT";

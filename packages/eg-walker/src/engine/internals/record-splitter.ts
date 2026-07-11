@@ -16,6 +16,7 @@ interface RecordSplitterDeps {
   readonly onRecordSplit?: (
     left: AugmentedCRDTItem,
     right: AugmentedCRDTItem,
+    rightPosition: number,
   ) => void;
 }
 
@@ -87,7 +88,7 @@ export class RecordSplitter {
       offsetInRecord,
       leftOriginalLength,
     );
-    this.deps.onRecordSplit?.(left, right);
+    this.deps.onRecordSplit?.(left, right, position + 1);
     return position + 1;
   }
 

@@ -26,7 +26,7 @@
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "bench": "vitest bench --run",
-    "paper-bench": "jiti src/bench/paper-bench.ts",
+    "paper-bench": "node scripts/run-paper-bench.mjs",
     "test:conformance": "vitest run --config vitest.reference.config.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -47,7 +47,6 @@
     "@vitest/coverage-v8": "^4.1.6",
     "fast-check": "^4.8.0",
     "tsup": "^8.5.1",
-    "jiti": "^2.7.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.6"
   },

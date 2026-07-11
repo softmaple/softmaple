@@ -22,6 +22,9 @@ import { runTrace } from "./trace-runner";
 
 describe("property: convergence under randomized delivery", () => {
   it("every shuffled delivery order matches the canonical replay text", () => {
+    // This performs 1,000 generated traces with three delivery permutations
+    // each. V8 coverage and shared CI runners can exceed Vitest's default 5s
+    // ceiling, so retain the full sweep with an explicit timeout backstop.
     fc.assert(
       fc.property(
         traceParamsArb({
@@ -64,5 +67,5 @@ describe("property: convergence under randomized delivery", () => {
       ),
       fcParams(),
     );
-  });
+  }, 15_000);
 });

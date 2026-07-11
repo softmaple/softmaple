@@ -557,6 +557,9 @@ importers:
       fast-check:
         specifier: ^4.8.0
         version: 4.8.0
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@24.10.4))(jiti@2.7.0)(postcss@8.5.14)(typescript@5.9.3)(yaml@2.8.1)

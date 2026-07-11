@@ -47,6 +47,9 @@ const snapshotSuffixArb = traceParamsArb({
 
 describe("property: native snapshot suffix restore", () => {
   it("matches full replay after random local and remote suffixes", () => {
+    // The default 1,000-run sweep completes near Vitest's 5s ceiling once V8
+    // coverage instrumentation is enabled. Keep the property strength intact
+    // and use an explicit backstop for slower coverage/CI execution.
     fc.assert(
       fc.property(snapshotSuffixArb, ({ base, localSuffix, remoteSuffix }) => {
         const baseTrace = runTrace(base);
@@ -90,7 +93,7 @@ describe("property: native snapshot suffix restore", () => {
       }),
       fcParams(),
     );
-  });
+  }, 15_000);
 });
 
 const prefixEventIds = (

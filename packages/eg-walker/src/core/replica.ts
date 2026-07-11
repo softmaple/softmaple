@@ -828,7 +828,12 @@ export class EgWalkerReplica {
    * Generate unique event ID
    */
   private generateEventId(): EventId {
-    return `${this.replicaId}:${this.nextSequenceNumber++}`;
+    const graph = this.ensureEventGraph();
+    let eventId: EventId;
+    do {
+      eventId = `${this.replicaId}:${this.nextSequenceNumber++}`;
+    } while (graph.hasEvent(eventId));
+    return eventId;
   }
 
   private validateIndex(index: number, allowEnd: boolean): void {

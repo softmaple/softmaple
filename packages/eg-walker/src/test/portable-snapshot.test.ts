@@ -85,6 +85,25 @@ describe("PortableSnapshot", () => {
     expect(restored.getText()).toBe("base🙂xy");
   });
 
+  it("skips IDs owned by the replica selected at restore time", () => {
+    const source = new EgWalkerReplica("receiver");
+    source.applyRemoteEvent({
+      id: "alice:0",
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      parentVersion: new Set(),
+      timestamp: 1,
+    });
+    const restored = EgWalkerReplica.fromPortableSnapshot(
+      source.createPortableSnapshot(),
+      "alice",
+    );
+
+    restored.insert(1, "B");
+
+    expect(restored.getText()).toBe("AB");
+    expect(restored.exportEventGraph().at(-1)?.id).toBe("alice:1");
+  });
+
   it("answers text reads before lazily decoding the EGW3 graph", () => {
     const source = createConcurrentReplica();
     const codec = new PortableSnapshotCodec();

@@ -157,6 +157,32 @@ describe("convertPaperTraceToAtomicEvents", () => {
     );
   });
 
+  it("should stop atomic expansion as soon as maxEvents is reached", () => {
+    // Arrange
+    const trace: AtomicPaperTrace = {
+      endContent: "abcdef",
+      txns: [
+        {
+          parents: [],
+          agent: 0,
+          patches: [[0, 0, "abcdef"]],
+          _dtSpan: [0, 6],
+        },
+      ],
+    };
+
+    // Act
+    const events = convertPaperTraceToAtomicEvents("bounded", trace, {
+      maxEvents: 2,
+    });
+
+    // Assert
+    expect(events.map((event) => event.operation)).toEqual([
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+      { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
+    ]);
+  });
+
   it("validates with an independent scalar oracle, not EgWalkerEngine", () => {
     const trace: AtomicPaperTrace = {
       endContent: "A😀B",

@@ -155,18 +155,18 @@ type PaperPatch = [index: number, deleteLength: number, insertedText: string];
 
 `parents` contains transaction indexes. It does not contain SoftMaple event IDs.
 
-## Patch-Level Conversion
+## Patch-Level Import-Stress Conversion
 
-The current implementation supports patch-level conversion:
+The trace converter retains a programmatic patch-level import-stress mode:
 
 ```text
 paper txn patch -> one delete event, one insert event, or both
 ```
 
-Patch-level conversion keeps the benchmark practical and is sufficient for a
-package-level ingest and replay stress test on the sequential datasets
-(`S1`, `S2`, `S3`) and bounded concurrent samples. It is not faithful enough for
-every asynchronous trace; see [Operation-Level Conversion](#operation-level-conversion).
+Patch-level conversion is useful for package-level compound-event stress tests,
+but it is not accepted by `paper-bench` and its output must not be reported as
+paper-conformant timing, memory, or storage data. See
+[Operation-Level Conversion](#operation-level-conversion).
 
 Conversion rules:
 
@@ -318,14 +318,14 @@ pnpm --filter @softmaple/eg-walker paper-bench -- \
 
 ## Operation-Level Conversion
 
-Patch-level conversion is fast enough to start with, but it is not faithful
-enough for every concurrent/asynchronous trace. In particular, a patch that
+Patch-level import stress is faster, but it is not faithful enough for
+paper-aligned concurrent/asynchronous measurements. In particular, a patch that
 inserts a long string collapses many paper event-graph nodes into one SoftMaple
 event. Later concurrent operations may depend on positions inside that inserted
 run. Collapsing the run can make a later operation's parent-version index invalid
 during replay.
 
-Use operation-level conversion for faithful paper semantics:
+`paper-bench` therefore always uses operation-level conversion:
 
 ```bash
 pnpm --filter @softmaple/eg-walker paper-bench -- \
@@ -341,6 +341,10 @@ SoftMaple event per paper keystroke:
 - an inserted string emits one insert event per character;
 - event IDs use the paper logical version: `paper:{dataset}:lv:{number}`;
 - a transaction's child frontier is the last emitted operation in its span.
+
+`--max-events` stops operation expansion at the requested event instead of
+materializing the rest of a large trace and slicing afterward. This keeps
+bounded smoke runs bounded in both time and memory.
 
 This mode is much slower, but it is the right mode for correctness checks on
 traces where patch-level indexes depend on positions inside a long inserted run.
@@ -673,11 +677,11 @@ Done:
 
 1. `paper-traces.ts` implements patch-level and operation-level conversion.
 2. `paper-bench.ts` supports `--datasets`, `--runs`, `--paper-root`,
-   `--max-txns`, `--max-events`, and `--granularity`.
-3. `S1,S2,S3 --runs 1` passes in patch mode.
-4. `A1 --runs 1` passes in patch mode.
+   `--max-txns`, `--max-events`, and operation-only `--granularity`.
+3. `S1,S2,S3 --runs 1` has separate patch import-stress baselines.
+4. `A1 --runs 1` has a separate patch import-stress baseline.
 5. `C1` and `C2` pass bounded `--max-txns 3000` and `--max-txns 10000`
-   patch-mode samples.
+   patch import-stress samples.
 6. `A2 --max-txns 300 --granularity operation` passes.
 7. Bounded `C1`/`C2 --max-txns 3000` apply time improved from roughly
    4.4-4.5s to roughly 1.4-1.5s through checkpoint criticality and partial

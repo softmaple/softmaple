@@ -11,7 +11,7 @@ import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { EventGraph } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
 
-const REFERENCE_COMMIT = "7287f4bc2c054984838b3582a27b4fea8f6d8161";
+const REFERENCE_COMMIT = "4d9bef55e4f2e3b3b8b0efe8f91cd35d34ed35a8";
 const CONFORMANCE_SHA256 =
   "95bdb544deca513441a50ea26a1c3ecbad116061c1d0fd6dde3175ea1e0bffd7";
 const EXPECTED_RUN_COUNT = 1_000;

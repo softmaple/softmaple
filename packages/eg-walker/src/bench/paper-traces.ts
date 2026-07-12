@@ -210,10 +210,12 @@ export const convertPaperTraceToEvents = (
   dataset: PaperDataset,
   trace: PaperTrace,
   granularity: PaperTraceGranularity = "patch",
+  maxEvents?: number,
 ): GraphEvent[] => {
   if (granularity === "operation") {
     return convertPaperTraceToAtomicEvents(dataset, trace, {
       validateFinalText: false,
+      maxEvents,
     });
   }
 
@@ -335,6 +337,7 @@ export const loadPaperTrace = (
     dataset,
     limitedTrace,
     options.granularity,
+    options.maxEvents,
   );
   const events =
     options.maxEvents === undefined
@@ -349,6 +352,7 @@ export const loadPaperTrace = (
     patchCount,
     limited:
       txns.length !== trace.txns.length ||
-      events.length !== convertedEvents.length,
+      events.length !== convertedEvents.length ||
+      (options.maxEvents !== undefined && events.length === options.maxEvents),
   };
 };

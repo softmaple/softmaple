@@ -14,6 +14,10 @@ import {
   type PaperDataset,
   type PaperTraceGranularity,
 } from "./paper-traces";
+import {
+  PAPER_BENCHMARK_GRANULARITY,
+  parsePaperBenchmarkGranularity,
+} from "./paper-bench-options";
 
 const DEFAULT_PAPER_ROOT = "../egwalker-paper";
 
@@ -124,7 +128,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   let paperRoot = DEFAULT_PAPER_ROOT;
   let maxTxns: number | undefined;
   let maxEvents: number | undefined;
-  let granularity: PaperTraceGranularity = "patch";
+  let granularity: PaperTraceGranularity = PAPER_BENCHMARK_GRANULARITY;
   let memory = false;
   let memoryWorker = false;
   let memoryRun: number | undefined;
@@ -182,12 +186,16 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
       continue;
     }
     if (arg === "--granularity") {
-      granularity = parseGranularity(readOptionValue(args, index, arg));
+      granularity = parsePaperBenchmarkGranularity(
+        readOptionValue(args, index, arg),
+      );
       index++;
       continue;
     }
     if (arg?.startsWith("--granularity=")) {
-      granularity = parseGranularity(arg.slice("--granularity=".length));
+      granularity = parsePaperBenchmarkGranularity(
+        arg.slice("--granularity=".length),
+      );
       continue;
     }
     if (arg === "--memory") {
@@ -260,13 +268,6 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   };
 };
 
-const parseGranularity = (value: string): PaperTraceGranularity => {
-  if (value === "patch" || value === "operation") {
-    return value;
-  }
-  throw new Error(`--granularity must be "patch" or "operation", got ${value}`);
-};
-
 const printUsage = (): void => {
   console.log(`Usage:
   pnpm --filter @softmaple/eg-walker paper-bench -- [options]
@@ -277,12 +278,12 @@ Options:
   --paper-root PATH  Path to egwalker-paper. Default: ${DEFAULT_PAPER_ROOT}
   --max-txns 100     Limit each dataset to the first N txns; skips final text check
   --max-events 1000  Limit each dataset to the first N converted events; skips final text check
-  --granularity MODE patch or operation. Default: patch
+  --granularity MODE Paper benchmarks require operation. Default: operation
   --memory           Also measure native decode/load heap deltas in a separate --expose-gc process
   --plan-phase0      Run the native snapshot guardrail suite:
                      S1/S2/S3/A1 full, plus C1/C2 bounded 3k and 10k
   --phase6-gates     Run Phase 6 snapshot gates:
-                     S1/S2/S3/A1 full, C1/C2 bounded 3k and 10k, A2 300 txns operation mode
+                     operation-granularity release cases configured below
 
 Known datasets: ${PAPER_DATASETS.join(", ")}`);
 };
@@ -754,7 +755,7 @@ const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
 const MB = 1024 * 1024;
 
 const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
-  "S1-full-patch": {
+  "S1-full-operation": {
     maxSnapshotBytes: 50 * MB,
     maxSnapshotDecodeMs: 800,
     maxSnapshotRestoreMs: 500,
@@ -762,7 +763,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 180 * MB,
     maxSnapshotHeapBytes: 280 * MB,
   },
-  "S2-full-patch": {
+  "S2-full-operation": {
     maxSnapshotBytes: 50 * MB,
     maxSnapshotDecodeMs: 900,
     maxSnapshotRestoreMs: 500,
@@ -770,7 +771,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 180 * MB,
     maxSnapshotHeapBytes: 280 * MB,
   },
-  "S3-full-patch": {
+  "S3-full-operation": {
     maxSnapshotBytes: 80 * MB,
     maxSnapshotDecodeMs: 1_500,
     maxSnapshotRestoreMs: 700,
@@ -778,7 +779,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 300 * MB,
     maxSnapshotHeapBytes: 450 * MB,
   },
-  "A1-full-patch": {
+  "A1-full-operation": {
     maxSnapshotBytes: 35 * MB,
     maxSnapshotDecodeMs: 600,
     maxSnapshotRestoreMs: 400,
@@ -786,7 +787,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 160 * MB,
     maxSnapshotHeapBytes: 240 * MB,
   },
-  "C1-events-3000-patch": {
+  "C1-events-3000-operation": {
     maxSnapshotBytes: 5 * MB,
     maxSnapshotDecodeMs: 200,
     maxSnapshotRestoreMs: 200,
@@ -794,7 +795,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 32 * MB,
     maxSnapshotHeapBytes: 64 * MB,
   },
-  "C1-events-10000-patch": {
+  "C1-events-10000-operation": {
     maxSnapshotBytes: 5 * MB,
     maxSnapshotDecodeMs: 200,
     maxSnapshotRestoreMs: 200,
@@ -802,7 +803,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 32 * MB,
     maxSnapshotHeapBytes: 64 * MB,
   },
-  "C2-events-3000-patch": {
+  "C2-events-3000-operation": {
     maxSnapshotBytes: 5 * MB,
     maxSnapshotDecodeMs: 200,
     maxSnapshotRestoreMs: 200,
@@ -810,7 +811,7 @@ const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
     maxSnapshotRestoreHeapBytes: 32 * MB,
     maxSnapshotHeapBytes: 64 * MB,
   },
-  "C2-events-10000-patch": {
+  "C2-events-10000-operation": {
     maxSnapshotBytes: 5 * MB,
     maxSnapshotDecodeMs: 200,
     maxSnapshotRestoreMs: 200,
@@ -936,7 +937,7 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
         phase6GateCase(dataset, {
           maxTxns: undefined,
           maxEvents: undefined,
-          granularity: "patch",
+          granularity: PAPER_BENCHMARK_GRANULARITY,
         }),
       ),
       ...(["C1", "C2"] as const).flatMap((dataset) =>
@@ -944,14 +945,14 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
           phase6GateCase(dataset, {
             maxTxns: undefined,
             maxEvents,
-            granularity: "patch",
+            granularity: PAPER_BENCHMARK_GRANULARITY,
           }),
         ),
       ),
       phase6GateCase("A2", {
         maxTxns: 300,
         maxEvents: undefined,
-        granularity: "operation",
+        granularity: PAPER_BENCHMARK_GRANULARITY,
       }),
     ];
   }

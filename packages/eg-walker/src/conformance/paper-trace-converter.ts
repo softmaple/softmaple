@@ -25,6 +25,7 @@ export type AtomicPaperPatch = readonly [
 
 export interface ConvertAtomicPaperTraceOptions {
   readonly validateFinalText?: boolean;
+  readonly maxEvents?: number;
 }
 
 interface UnicodeOffsetState {
@@ -37,6 +38,14 @@ export const convertPaperTraceToAtomicEvents = (
   trace: AtomicPaperTrace,
   options: ConvertAtomicPaperTraceOptions = {},
 ): GraphEvent[] => {
+  if (
+    options.maxEvents !== undefined &&
+    (!Number.isSafeInteger(options.maxEvents) || options.maxEvents <= 0)
+  ) {
+    throw new Error(
+      `maxEvents must be a positive safe integer, got ${options.maxEvents}`,
+    );
+  }
   const events: GraphEvent[] = [];
   const transactionVersions: Array<Version | undefined> = new Array(
     trace.txns.length,
@@ -107,6 +116,9 @@ export const convertPaperTraceToAtomicEvents = (
           },
           timestamp: transactionIndex + operationOffset,
         });
+        if (events.length === options.maxEvents) {
+          return events;
+        }
         unicodeState = deleteScalarRange(unicodeState, index, 1);
         currentVersion = new Set([id]);
         traceVersion++;
@@ -127,6 +139,9 @@ export const convertPaperTraceToAtomicEvents = (
           },
           timestamp: transactionIndex + operationOffset,
         });
+        if (events.length === options.maxEvents) {
+          return events;
+        }
         unicodeState = insertScalar(unicodeState, scalarIndex, character);
         currentVersion = new Set([id]);
         traceVersion++;

@@ -22,7 +22,7 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
-import { compareEventIds } from "../graph/event-id";
+import { compareEventIds, parseEventId } from "../graph/event-id";
 import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import {
@@ -831,11 +831,27 @@ export class EgWalkerReplica {
    */
   private generateEventId(): EventId {
     const graph = this.ensureEventGraph();
-    let eventId: EventId;
-    do {
-      eventId = `${this.replicaId}:${this.nextSequenceNumber++}`;
-    } while (graph.hasEvent(eventId));
-    return eventId;
+    while (true) {
+      const sequenceNumber = this.nextSequenceNumber;
+      if (!Number.isSafeInteger(sequenceNumber) || sequenceNumber < 0) {
+        throw new RangeError(
+          `event ID sequence for ${this.replicaId} is exhausted`,
+        );
+      }
+      const eventId = `${this.replicaId}:${sequenceNumber}`;
+      if (!graph.hasEvent(eventId)) {
+        if (sequenceNumber < Number.MAX_SAFE_INTEGER) {
+          this.nextSequenceNumber = sequenceNumber + 1;
+        }
+        return eventId;
+      }
+      if (sequenceNumber === Number.MAX_SAFE_INTEGER) {
+        throw new RangeError(
+          `event ID sequence for ${this.replicaId} is exhausted`,
+        );
+      }
+      this.nextSequenceNumber = sequenceNumber + 1;
+    }
   }
 
   private validateIndex(index: number, allowEnd: boolean): void {
@@ -1203,20 +1219,16 @@ export class EgWalkerReplica {
 
   private inferNextSequenceNumber(): number {
     let maxSequenceNumber = -1;
-    const prefix = `${this.replicaId}:`;
-
     for (const event of this.ensureEventGraph().getAllEvents()) {
-      if (!event.id.startsWith(prefix)) {
-        continue;
-      }
-
-      const sequenceNumber = Number(event.id.slice(prefix.length));
-      if (Number.isInteger(sequenceNumber)) {
-        maxSequenceNumber = Math.max(maxSequenceNumber, sequenceNumber);
+      const parsed = parseEventId(event.id);
+      if (parsed?.replicaId === this.replicaId) {
+        maxSequenceNumber = Math.max(maxSequenceNumber, parsed.sequence);
       }
     }
 
-    return maxSequenceNumber + 1;
+    return maxSequenceNumber === Number.MAX_SAFE_INTEGER
+      ? Number.MAX_SAFE_INTEGER
+      : maxSequenceNumber + 1;
   }
 }
 

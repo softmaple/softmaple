@@ -195,6 +195,65 @@ describe("EgWalkerReplica - Edge cases and error handling", () => {
     expect(restored.exportEventGraph().some((e) => e.id === "r1:0")).toBe(true);
   });
 
+  it("should fail atomically when the event ID sequence is exhausted", () => {
+    // Arrange
+    const source = new EgWalkerReplica("r1");
+    const restored = EgWalkerReplica.fromPortableSnapshot(
+      {
+        ...source.createPortableSnapshot(),
+        nextSequenceNumber: Number.MAX_SAFE_INTEGER,
+      },
+      "r1",
+    );
+
+    // Act
+    restored.insert(0, "A");
+    const insertAfterExhaustion = () => restored.insert(1, "B");
+
+    // Assert
+    expect(restored.exportEventGraph().map(({ id }) => id)).toEqual([
+      `r1:${Number.MAX_SAFE_INTEGER}`,
+    ]);
+    expect(insertAfterExhaustion).toThrow(/event ID sequence.*exhausted/);
+    expect(restored.getText()).toBe("A");
+    expect(restored.exportEventGraph()).toHaveLength(1);
+  });
+
+  it("should detect exhaustion inferred from a metadata-less graph", () => {
+    // Arrange
+    const eventId = `r1:${Number.MAX_SAFE_INTEGER}`;
+    const restored = EgWalkerReplica.deserialize(
+      {
+        text: "A",
+        eventGraph: {
+          version: [eventId],
+          events: [
+            {
+              id: eventId,
+              parentVersion: [],
+              operation: {
+                type: OPERATION_TYPE.INSERT,
+                index: 0,
+                text: "A",
+              },
+              timestamp: 0,
+            },
+          ],
+          metadata: {},
+        },
+      },
+      "r1",
+    );
+
+    // Act
+    const insert = () => restored.insert(1, "B");
+
+    // Assert
+    expect(insert).toThrow(/event ID sequence.*exhausted/);
+    expect(restored.getText()).toBe("A");
+    expect(restored.exportEventGraph()).toHaveLength(1);
+  });
+
   describe("surrogate pair boundaries", () => {
     it("rejects inserts that land between surrogate halves", () => {
       const api = new EgWalkerReplica("r1", "😀");

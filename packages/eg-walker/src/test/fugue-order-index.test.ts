@@ -158,6 +158,36 @@ describe("FugueOrderIndex structural bounds", () => {
     expect(measurements[2]!.work / measurements[1]!.work).toBeLessThan(2.75);
   });
 
+  it("keeps logarithmic bounds for IDs that degenerated the legacy treap", () => {
+    // Arrange
+    const events = adversarialConcurrentRoots(400);
+    const graph = EventGraph.fromEvents(events);
+    const indexedEngine = new EgWalkerEngine();
+    const oracleEngine = new EgWalkerEngine();
+
+    // Act
+    const indexed = indexedEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    const oracle = oracleEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+      integrationMode: "linear-oracle",
+    });
+
+    // Assert
+    expect(indexed.text).toBe(oracle.text);
+    expect(indexedEngine.getSequenceRecords()).toEqual(
+      oracleEngine.getSequenceRecords(),
+    );
+    expect(indexed.stats.integrationProbeCount).toBe(0);
+    expect(indexed.stats.fugueRotations).toBeGreaterThan(0);
+    expect(indexed.stats.fugueComparisons).toBeLessThan(
+      events.length * Math.ceil(Math.log2(events.length)) * 2,
+    );
+  });
+
   it("updates repeated placeholder splits without rebuilding", () => {
     // Arrange
     const count = 64;
@@ -264,3 +294,66 @@ describe("FugueOrderIndex structural bounds", () => {
     );
   });
 });
+
+// Helpers
+
+const adversarialConcurrentRoots = (count: number): GraphEvent[] => {
+  const candidateCount = 65_536;
+  const priorities = new Uint32Array(candidateCount);
+  const tails = new Int32Array(candidateCount);
+  const previous = new Int32Array(candidateCount);
+  previous.fill(-1);
+  let longestLength = 0;
+
+  for (let index = 0; index < candidateCount; index++) {
+    const priority = legacySiblingPriority(`root:${index}`);
+    priorities[index] = priority;
+    let low = 0;
+    let high = longestLength;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (priorities[tails[middle]!]! > priority) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    if (low > 0) {
+      previous[index] = tails[low - 1]!;
+    }
+    tails[low] = index;
+    if (low === longestLength) {
+      longestLength++;
+    }
+  }
+
+  const sequenceNumbers: number[] = [];
+  let cursor = tails[longestLength - 1] ?? -1;
+  while (cursor >= 0) {
+    sequenceNumbers.push(cursor);
+    cursor = previous[cursor] ?? -1;
+  }
+  sequenceNumbers.reverse();
+  if (sequenceNumbers.length < count) {
+    throw new Error(
+      `Only found ${sequenceNumbers.length} adversarial IDs; expected ${count}`,
+    );
+  }
+
+  return sequenceNumbers.slice(0, count).map((sequence) => ({
+    id: `root:${sequence}`,
+    parentVersion: new Set(),
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+    timestamp: sequence,
+  }));
+};
+
+const legacySiblingPriority = (eventId: string): number => {
+  const value = `${eventId}:0:sibling`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+};

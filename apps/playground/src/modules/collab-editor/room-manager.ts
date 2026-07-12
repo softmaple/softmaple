@@ -2,12 +2,12 @@ import { EgWalkerReplica } from "@softmaple/eg-walker";
 import { storage } from "./storage";
 import { SyncAdapter } from "./sync-adapter";
 import {
+  createSyncResponseState,
   createSyncState,
   decodeStoredEvents,
   decodeWireEvent,
   decodeWireEvents,
   encodeWireEvent,
-  selectMissingWireEvents,
 } from "./sync-protocol";
 import type { Document, Room, SyncMessage, User } from "./types";
 
@@ -163,14 +163,15 @@ export class RoomManager {
     if (msg.type !== "sync-request") return;
 
     const events = this.api.exportEventGraph();
-    const state = createSyncState(events);
+    const state = createSyncResponseState(events, msg.data.knownEventIds);
     this.syncAdapter?.send({
       type: "sync-response",
       roomId: this.currentRoom.id,
       userId: this.currentUser?.id ?? "",
       data: {
         frontier: state.frontier,
-        events: selectMissingWireEvents(events, msg.data.knownEventIds),
+        knownEventIds: state.knownEventIds,
+        events: state.events,
       },
       timestamp: Date.now(),
     });
@@ -201,6 +202,24 @@ export class RoomManager {
       }
       this.notifyContentChange();
       await this.saveDocument();
+
+      const requesterKnownEventIds = msg.data.knownEventIds;
+      if (Array.isArray(requesterKnownEventIds)) {
+        const localEvents = this.api.exportEventGraph();
+        const reply = createSyncResponseState(
+          localEvents,
+          requesterKnownEventIds,
+        );
+        if (reply.events.length > 0 && this.currentRoom) {
+          this.syncAdapter?.send({
+            type: "sync-response",
+            roomId: this.currentRoom.id,
+            userId: this.currentUser?.id ?? "",
+            data: reply,
+            timestamp: Date.now(),
+          });
+        }
+      }
     }
   }
 

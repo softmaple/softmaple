@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  createSyncResponseState,
   createSyncState,
   decodeStoredEvents,
   decodeWireEvents,
@@ -73,6 +74,37 @@ describe("collab sync protocol", () => {
     );
 
     expect(missing.map((candidate) => candidate.id)).toEqual([left.id]);
+  });
+
+  it("should exchange both offline branches without response ping-pong", () => {
+    // Arrange
+    const root = event("root:0", [], 0, "r");
+    const left = event("left:0", [root.id], 1, "l");
+    const right = event("right:0", [root.id], 1, "r");
+    const leftReplica = EgWalkerReplica.fromEventGraph("left", [root, left]);
+    const rightReplica = EgWalkerReplica.fromEventGraph("right", [root, right]);
+
+    // Act
+    const responseToLeft = createSyncResponseState(
+      rightReplica.exportEventGraph(),
+      createSyncState(leftReplica.exportEventGraph()).knownEventIds,
+    );
+    leftReplica.applyRemoteEvents(decodeWireEvents(responseToLeft.events));
+    const responseToRight = createSyncResponseState(
+      leftReplica.exportEventGraph(),
+      responseToLeft.knownEventIds,
+    );
+    rightReplica.applyRemoteEvents(decodeWireEvents(responseToRight.events));
+    const finalResponse = createSyncResponseState(
+      rightReplica.exportEventGraph(),
+      responseToRight.knownEventIds,
+    );
+
+    // Assert
+    expect(responseToLeft.events.map(({ id }) => id)).toEqual([right.id]);
+    expect(responseToRight.events.map(({ id }) => id)).toEqual([left.id]);
+    expect(finalResponse.events).toEqual([]);
+    expect(leftReplica.getText()).toBe(rightReplica.getText());
   });
 
   it("keeps response events parent-before-child", () => {

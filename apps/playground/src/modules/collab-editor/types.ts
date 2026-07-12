@@ -49,7 +49,11 @@ export type SyncMessageData =
     }
   | {
       type: "sync-response";
-      data: { frontier: EventId[]; events: WireGraphEvent[] };
+      data: {
+        frontier: EventId[];
+        knownEventIds?: EventId[];
+        events: WireGraphEvent[];
+      };
     }
   | {
       type: "presence";

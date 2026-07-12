@@ -11,6 +11,10 @@ export interface SyncState {
   readonly knownEventIds: EventId[];
 }
 
+export interface SyncResponseState extends SyncState {
+  readonly events: WireGraphEvent[];
+}
+
 export const encodeWireEvent = (event: GraphEvent): WireGraphEvent => ({
   id: event.id,
   operation: { ...event.operation },
@@ -88,3 +92,11 @@ export const selectMissingWireEvents = (
     .filter((event) => !known.has(event.id))
     .map(encodeWireEvent);
 };
+
+export const createSyncResponseState = (
+  localEvents: ReadonlyArray<GraphEvent>,
+  requesterKnownEventIds: ReadonlyArray<EventId>,
+): SyncResponseState => ({
+  ...createSyncState(localEvents),
+  events: selectMissingWireEvents(localEvents, requesterKnownEventIds),
+});

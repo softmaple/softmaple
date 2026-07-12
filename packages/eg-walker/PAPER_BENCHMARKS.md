@@ -119,15 +119,19 @@ The closest current APIs are:
 - `ColumnarEventGraphCodec.encodeBinary(...)`
 - `ColumnarEventGraphCodec.decodeBinary(...)`
 
-The current native snapshot benchmark records this mode in two forms:
+The current persistence benchmark records this mode in three forms:
 
 - `nativeDecodeMs` / `nativeLoadMs`: the old EGW3 columnar graph path followed
   by `new EgWalkerReplica(..., decodedGraph)`, which still replays history.
-- `snapshotEncodeMs` / `snapshotDecodeMs` / `snapshotRestoreMs`: the native
-  snapshot path. `snapshotRestoreMs` is expected to avoid historical replay and
-  restore enough engine state for subsequent local edits, frontier-extending
-  remote edits, and bounded concurrent remote edits to continue from the
-  snapshot.
+- `portableSnapshotEncodeMs` / `portableSnapshotDecodeMs` /
+  `portableSnapshotRestoreMs` / `portableSnapshotMaterializeMs`: the `EGWP1`
+  portable path. Restore constructs the lazy persisted representation;
+  materialization explicitly loads the event graph so the two costs are not
+  conflated.
+- `nativeSnapshotEncodeMs` / `nativeSnapshotDecodeMs` /
+  `nativeSnapshotRestoreMs`: the optional `EGWS1` resume-state extension. It
+  includes runtime CRDT state and is reported separately from paper-style
+  portable persistence.
 
 ## Paper JSON Shape
 
@@ -255,19 +259,23 @@ Important output fields:
 
 - `jsonBytes`: JSON `serialize()` payload size.
 - `binaryBytes`: EGW3 columnar graph payload size.
-- `snapshotBytes`: native snapshot payload size.
 - `nativeDecodeMs`: EGW3 graph decode time.
 - `nativeLoadMs`: old graph-backed replica load time, including replay.
-- `snapshotEncodeMs`: native snapshot encode time.
-- `snapshotDecodeMs`: native snapshot byte decode time.
-- `snapshotRestoreMs`: replica construction from decoded snapshot, without
-  historical replay for read-only load.
-- `snapshotFullReplays` / `snapshotPartialReplays` /
-  `snapshotIncrementalApplies`: replay counters observed on the restored
-  snapshot replica. `snapshotFullReplays` must stay `0` for native snapshot
-  restore.
-- `snapshotDecodeHeapBytes` / `snapshotRestoreHeapBytes`: memory deltas from
-  the explicit memory worker.
+- `portableSnapshotBytes`: `EGWP1` portable payload size.
+- `portableSnapshotEncodeMs` / `portableSnapshotDecodeMs` /
+  `portableSnapshotRestoreMs`: portable encode, byte decode, and lazy replica
+  construction time.
+- `portableSnapshotMaterializeMs`: explicit event-graph materialization after
+  lazy portable restore. The timer triggers the restored replica's lazy source
+  without retaining the caller-facing clone returned by `exportEventGraph()`.
+- `nativeSnapshotBytes`: optional `EGWS1` resume-state payload size.
+- `nativeSnapshotEncodeMs` / `nativeSnapshotDecodeMs` /
+  `nativeSnapshotRestoreMs`: native resume-state timings.
+- `nativeSnapshotFullReplays` / `nativeSnapshotPartialReplays` /
+  `nativeSnapshotIncrementalApplies`: replay counters observed on the restored
+  native snapshot replica. `nativeSnapshotFullReplays` must stay `0`.
+- `portableSnapshot*HeapBytes` / `nativeSnapshot*HeapBytes`: separate memory
+  deltas from the explicit memory worker.
 
 Do not use full `--datasets all` as the first routine check. Full `C1` and
 `C2` are currently dominated by replay cost. Use bounded concurrent/asynchronous
@@ -306,7 +314,7 @@ pnpm --filter @softmaple/eg-walker paper-bench -- \
   --paper-root /path/to/egwalker-paper
 ```
 
-Optional native-load memory measurement runs a second isolated process with
+Optional persistence memory measurement runs a second isolated process with
 `node --expose-gc` and prints a `paper-bench-memory` line:
 
 ```bash
@@ -377,12 +385,18 @@ jsonBytes
 binaryBytes
 nativeDecodeMs
 nativeLoadMs
-snapshotEncodeMs
-snapshotDecodeMs
-snapshotRestoreMs
-snapshotFullReplays
-snapshotPartialReplays
-snapshotIncrementalApplies
+portableSnapshotEncodeMs
+portableSnapshotDecodeMs
+portableSnapshotRestoreMs
+portableSnapshotMaterializeMs
+portableSnapshotBytes
+nativeSnapshotEncodeMs
+nativeSnapshotDecodeMs
+nativeSnapshotRestoreMs
+nativeSnapshotBytes
+nativeSnapshotFullReplays
+nativeSnapshotPartialReplays
+nativeSnapshotIncrementalApplies
 fullReplays
 partialReplays
 incrementalApplies
@@ -408,6 +422,13 @@ heapAfterDecodeBytes
 heapAfterLoadBytes
 nativeDecodeHeapBytes
 nativeLoadHeapBytes
+portableSnapshotDecodeHeapBytes
+portableSnapshotRestoreHeapBytes
+portableSnapshotMaterializeHeapBytes
+portableSnapshotHeapBytes
+nativeSnapshotDecodeHeapBytes
+nativeSnapshotRestoreHeapBytes
+nativeSnapshotHeapBytes
 ```
 
 These are collected in a separate `node --expose-gc` process after building the
@@ -428,11 +449,26 @@ The benchmark must fail if:
 - any remote events remain buffered;
 - `replica.getText() !== trace.endContent` for unbounded runs where the chosen
   granularity is expected to be faithful;
-- snapshot restore performs a full replay;
+- portable snapshot round-trip or explicit materialization changes the text or
+  event count;
+- native snapshot restore performs a full replay;
 - binary encode/decode round-trip fails once native payload measurement is
   added.
 
 ## Expected Runtime
+
+The historical results below predate portable/native metric separation. Bare
+`snapshot*` names in those dated result blocks refer to the native `EGWS1`
+resume-state extension, not the portable `EGWP1` format. New runs print both
+names explicitly, and Phase 6 gates constrain only `portableSnapshot*` fields.
+
+Current `--phase6-gates` thresholds were calibrated on 2026-07-12 with Node
+v24.12.0 on an Apple M1 from three S1 operation runs at 1,000, 2,000, and 4,000
+events. They constrain portable bytes, encode, decode, lazy restore, explicit
+materialization, and heap. Full S1/S2/S3/A1 operation traces are intentionally
+not gated yet: their 779k-2.34m atomic-event workloads need separate
+fixed-machine baselines, and the historical patch/native numbers below are not
+valid thresholds for them.
 
 Current local baseline for patch-level raw ingest on this Mac / Node v24:
 
@@ -700,9 +736,9 @@ Done:
     decode/restore/heap data after compact runtime-state adoption.
 13. The remaining old Phase 6 split items are implemented: large cold native
     snapshot header/graph sections can use `EGWC1` LZ4 wrapping, the runtime
-    state path stays hot/uncompressed as `EGWR2`, and `paper-bench
---phase6-gates` codifies S1/S2/S3/A1, bounded C1/C2, and A2 operation
-    smoke budgets.
+    state path stays hot/uncompressed as `EGWR2`. Its historical patch/native
+    gate numbers are retained below only as dated results, not reused for
+    portable operation workloads.
 14. `native-snapshot-suffix.property.test.ts` now compares compact snapshot
     restore plus random local/remote suffixes against a full replay of the
     final event graph. This caught and fixed a non-empty-initial-text case
@@ -719,6 +755,11 @@ Done:
     snapshot decode is now about 0.79s in the main process, restore is about
     0.19s, snapshot decode heap is about 89MB, restore heap is about 135MB, and
     `snapshotFullReplays=0` across the gate suite.
+18. Current benchmark output separates paper-style portable `EGWP1` bytes,
+    decode, lazy restore, explicit materialization, and heap from optional
+    native `EGWS1` resume-state metrics. Calibrated S1 1k/2k/4k operation gates
+    cover every portable stage; native replay counters remain a resume-state
+    regression signal. Full operation gates remain disabled until measured.
 
 Next:
 

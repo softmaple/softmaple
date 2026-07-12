@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 
 import { EgWalkerReplica } from "../core/replica";
 import { NativeSnapshotCodec } from "../core/native-snapshot";
+import { PortableSnapshotCodec } from "../core/portable-snapshot";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import type { GraphEvent } from "../types";
@@ -18,6 +19,7 @@ import {
   PAPER_BENCHMARK_GRANULARITY,
   parsePaperBenchmarkGranularity,
 } from "./paper-bench-options";
+import { measurePersistenceMetrics } from "./persistence-metrics";
 
 const DEFAULT_PAPER_ROOT = "../egwalker-paper";
 
@@ -28,12 +30,15 @@ type BenchCase = Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity"> & {
 };
 
 interface Phase6GateBudget {
-  readonly maxSnapshotBytes: number;
-  readonly maxSnapshotDecodeMs: number;
-  readonly maxSnapshotRestoreMs: number;
-  readonly maxSnapshotDecodeHeapBytes?: number;
-  readonly maxSnapshotRestoreHeapBytes?: number;
-  readonly maxSnapshotHeapBytes?: number;
+  readonly maxPortableSnapshotBytes: number;
+  readonly maxPortableSnapshotEncodeMs: number;
+  readonly maxPortableSnapshotDecodeMs: number;
+  readonly maxPortableSnapshotRestoreMs: number;
+  readonly maxPortableSnapshotMaterializeMs: number;
+  readonly maxPortableSnapshotDecodeHeapBytes?: number;
+  readonly maxPortableSnapshotRestoreHeapBytes?: number;
+  readonly maxPortableSnapshotMaterializeHeapBytes?: number;
+  readonly maxPortableSnapshotHeapBytes?: number;
 }
 
 interface CliOptions {
@@ -68,14 +73,18 @@ interface BenchResult {
   readonly binaryBytes: number;
   readonly nativeDecodeMs: number;
   readonly nativeLoadMs: number;
-  readonly snapshotEncodeMs: number;
-  readonly snapshotDecodeMs: number;
-  readonly snapshotRestoreMs: number;
-  readonly snapshotBytes: number;
-  readonly snapshotHeapBytes: number;
-  readonly snapshotFullReplays: number;
-  readonly snapshotPartialReplays: number;
-  readonly snapshotIncrementalApplies: number;
+  readonly portableSnapshotEncodeMs: number;
+  readonly portableSnapshotDecodeMs: number;
+  readonly portableSnapshotRestoreMs: number;
+  readonly portableSnapshotMaterializeMs: number;
+  readonly portableSnapshotBytes: number;
+  readonly nativeSnapshotEncodeMs: number;
+  readonly nativeSnapshotDecodeMs: number;
+  readonly nativeSnapshotRestoreMs: number;
+  readonly nativeSnapshotBytes: number;
+  readonly nativeSnapshotFullReplays: number;
+  readonly nativeSnapshotPartialReplays: number;
+  readonly nativeSnapshotIncrementalApplies: number;
   readonly fullReplays: number;
   readonly partialReplays: number;
   readonly incrementalApplies: number;
@@ -97,17 +106,27 @@ interface MemoryResult {
   readonly heapBeforeBytes: number;
   readonly heapAfterDecodeBytes: number;
   readonly heapAfterLoadBytes: number;
-  readonly heapAfterSnapshotDecodeBytes: number;
-  readonly heapAfterSnapshotRestoreBytes: number;
+  readonly heapAfterPortableSnapshotDecodeBytes: number;
+  readonly heapAfterPortableSnapshotRestoreBytes: number;
+  readonly heapAfterPortableSnapshotMaterializeBytes: number;
+  readonly heapAfterNativeSnapshotDecodeBytes: number;
+  readonly heapAfterNativeSnapshotRestoreBytes: number;
   readonly nativeDecodeHeapBytes: number;
   readonly nativeLoadHeapBytes: number;
-  readonly snapshotDecodeHeapBytes: number;
-  readonly snapshotRestoreHeapBytes: number;
+  readonly portableSnapshotDecodeHeapBytes: number;
+  readonly portableSnapshotRestoreHeapBytes: number;
+  readonly portableSnapshotMaterializeHeapBytes: number;
+  readonly portableSnapshotHeapBytes: number;
+  readonly nativeSnapshotDecodeHeapBytes: number;
+  readonly nativeSnapshotRestoreHeapBytes: number;
+  readonly nativeSnapshotHeapBytes: number;
   readonly nativeDecodeMs: number;
   readonly nativeLoadMs: number;
-  readonly snapshotDecodeMs: number;
-  readonly snapshotRestoreMs: number;
-  readonly snapshotHeapBytes: number;
+  readonly portableSnapshotDecodeMs: number;
+  readonly portableSnapshotRestoreMs: number;
+  readonly portableSnapshotMaterializeMs: number;
+  readonly nativeSnapshotDecodeMs: number;
+  readonly nativeSnapshotRestoreMs: number;
 }
 
 const readOptionValue = (
@@ -279,11 +298,12 @@ Options:
   --max-txns 100     Limit each dataset to the first N txns; skips final text check
   --max-events 1000  Limit each dataset to the first N converted events; skips final text check
   --granularity MODE Paper benchmarks require operation. Default: operation
-  --memory           Also measure native decode/load heap deltas in a separate --expose-gc process
-  --plan-phase0      Run the native snapshot guardrail suite:
+  --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
+                     in a separate --expose-gc process
+  --plan-phase0      Run the persistence guardrail suite:
                      S1/S2/S3/A1 full, plus C1/C2 bounded 3k and 10k
-  --phase6-gates     Run Phase 6 snapshot gates:
-                     operation-granularity release cases configured below
+  --phase6-gates     Run calibrated Phase 6 portable-persistence gates:
+                     S1 operation-granularity 1k, 2k, and 4k events
 
 Known datasets: ${PAPER_DATASETS.join(", ")}`);
 };
@@ -335,14 +355,18 @@ const printResult = (result: BenchResult): void => {
       `binaryBytes=${result.binaryBytes}`,
       `nativeDecodeMs=${formatNumber(result.nativeDecodeMs)}`,
       `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
-      `snapshotEncodeMs=${formatNumber(result.snapshotEncodeMs)}`,
-      `snapshotDecodeMs=${formatNumber(result.snapshotDecodeMs)}`,
-      `snapshotRestoreMs=${formatNumber(result.snapshotRestoreMs)}`,
-      `snapshotBytes=${result.snapshotBytes}`,
-      `snapshotHeapBytes=${result.snapshotHeapBytes}`,
-      `snapshotFullReplays=${result.snapshotFullReplays}`,
-      `snapshotPartialReplays=${result.snapshotPartialReplays}`,
-      `snapshotIncrementalApplies=${result.snapshotIncrementalApplies}`,
+      `portableSnapshotEncodeMs=${formatNumber(result.portableSnapshotEncodeMs)}`,
+      `portableSnapshotDecodeMs=${formatNumber(result.portableSnapshotDecodeMs)}`,
+      `portableSnapshotRestoreMs=${formatNumber(result.portableSnapshotRestoreMs)}`,
+      `portableSnapshotMaterializeMs=${formatNumber(result.portableSnapshotMaterializeMs)}`,
+      `portableSnapshotBytes=${result.portableSnapshotBytes}`,
+      `nativeSnapshotEncodeMs=${formatNumber(result.nativeSnapshotEncodeMs)}`,
+      `nativeSnapshotDecodeMs=${formatNumber(result.nativeSnapshotDecodeMs)}`,
+      `nativeSnapshotRestoreMs=${formatNumber(result.nativeSnapshotRestoreMs)}`,
+      `nativeSnapshotBytes=${result.nativeSnapshotBytes}`,
+      `nativeSnapshotFullReplays=${result.nativeSnapshotFullReplays}`,
+      `nativeSnapshotPartialReplays=${result.nativeSnapshotPartialReplays}`,
+      `nativeSnapshotIncrementalApplies=${result.nativeSnapshotIncrementalApplies}`,
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
       `incrementalApplies=${result.incrementalApplies}`,
@@ -369,17 +393,27 @@ const printMemoryResult = (result: MemoryResult): void => {
       `heapBeforeBytes=${result.heapBeforeBytes}`,
       `heapAfterDecodeBytes=${result.heapAfterDecodeBytes}`,
       `heapAfterLoadBytes=${result.heapAfterLoadBytes}`,
-      `heapAfterSnapshotDecodeBytes=${result.heapAfterSnapshotDecodeBytes}`,
-      `heapAfterSnapshotRestoreBytes=${result.heapAfterSnapshotRestoreBytes}`,
+      `heapAfterPortableSnapshotDecodeBytes=${result.heapAfterPortableSnapshotDecodeBytes}`,
+      `heapAfterPortableSnapshotRestoreBytes=${result.heapAfterPortableSnapshotRestoreBytes}`,
+      `heapAfterPortableSnapshotMaterializeBytes=${result.heapAfterPortableSnapshotMaterializeBytes}`,
+      `heapAfterNativeSnapshotDecodeBytes=${result.heapAfterNativeSnapshotDecodeBytes}`,
+      `heapAfterNativeSnapshotRestoreBytes=${result.heapAfterNativeSnapshotRestoreBytes}`,
       `nativeDecodeHeapBytes=${result.nativeDecodeHeapBytes}`,
       `nativeLoadHeapBytes=${result.nativeLoadHeapBytes}`,
-      `snapshotDecodeHeapBytes=${result.snapshotDecodeHeapBytes}`,
-      `snapshotRestoreHeapBytes=${result.snapshotRestoreHeapBytes}`,
+      `portableSnapshotDecodeHeapBytes=${result.portableSnapshotDecodeHeapBytes}`,
+      `portableSnapshotRestoreHeapBytes=${result.portableSnapshotRestoreHeapBytes}`,
+      `portableSnapshotMaterializeHeapBytes=${result.portableSnapshotMaterializeHeapBytes}`,
+      `portableSnapshotHeapBytes=${result.portableSnapshotHeapBytes}`,
+      `nativeSnapshotDecodeHeapBytes=${result.nativeSnapshotDecodeHeapBytes}`,
+      `nativeSnapshotRestoreHeapBytes=${result.nativeSnapshotRestoreHeapBytes}`,
+      `nativeSnapshotHeapBytes=${result.nativeSnapshotHeapBytes}`,
       `nativeDecodeMs=${formatNumber(result.nativeDecodeMs)}`,
       `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
-      `snapshotDecodeMs=${formatNumber(result.snapshotDecodeMs)}`,
-      `snapshotRestoreMs=${formatNumber(result.snapshotRestoreMs)}`,
-      `snapshotHeapBytes=${result.snapshotHeapBytes}`,
+      `portableSnapshotDecodeMs=${formatNumber(result.portableSnapshotDecodeMs)}`,
+      `portableSnapshotRestoreMs=${formatNumber(result.portableSnapshotRestoreMs)}`,
+      `portableSnapshotMaterializeMs=${formatNumber(result.portableSnapshotMaterializeMs)}`,
+      `nativeSnapshotDecodeMs=${formatNumber(result.nativeSnapshotDecodeMs)}`,
+      `nativeSnapshotRestoreMs=${formatNumber(result.nativeSnapshotRestoreMs)}`,
     ].join(" "),
   );
 };
@@ -476,28 +510,11 @@ const runDatasetOnce = (
       `${benchCase.dataset}: native load text mismatch, got ${nativeReplica.getText().length} UTF-16 code units, expected ${text.length}`,
     );
   }
-  const snapshotCodec = new NativeSnapshotCodec();
-  const snapshotEncodeStartedAt = performance.now();
-  const snapshotBinary = snapshotCodec.encode(replica.createNativeSnapshot());
-  const snapshotEncodedAt = performance.now();
-  const decodedSnapshot = snapshotCodec.decode(snapshotBinary);
-  const snapshotDecodedAt = performance.now();
-  const snapshotReplica = EgWalkerReplica.fromNativeSnapshot(
-    decodedSnapshot,
-    `paper-snapshot-load:${benchCase.dataset}:${benchCase.label}:${run}`,
+  const persistence = measurePersistenceMetrics(
+    replica,
+    text,
+    `${benchCase.dataset}:${benchCase.label}:${run}`,
   );
-  const snapshotRestoredAt = performance.now();
-  if (snapshotReplica.getText() !== text) {
-    throw new Error(
-      `${benchCase.dataset}: snapshot load text mismatch, got ${snapshotReplica.getText().length} UTF-16 code units, expected ${text.length}`,
-    );
-  }
-  const snapshotStats = snapshotReplica.getReplayStats();
-  if (snapshotStats.fullReplays !== 0) {
-    throw new Error(
-      `${benchCase.dataset}: snapshot restore unexpectedly performed ${snapshotStats.fullReplays} full replay(s)`,
-    );
-  }
   const stats = replica.getReplayStats();
 
   return {
@@ -518,14 +535,7 @@ const runDatasetOnce = (
     binaryBytes: binary.byteLength,
     nativeDecodeMs: loadedAt - decodedAt,
     nativeLoadMs: nativeLoadedAt - loadedAt,
-    snapshotEncodeMs: snapshotEncodedAt - snapshotEncodeStartedAt,
-    snapshotDecodeMs: snapshotDecodedAt - snapshotEncodedAt,
-    snapshotRestoreMs: snapshotRestoredAt - snapshotDecodedAt,
-    snapshotBytes: snapshotBinary.byteLength,
-    snapshotHeapBytes: 0,
-    snapshotFullReplays: snapshotStats.fullReplays,
-    snapshotPartialReplays: snapshotStats.partialReplays,
-    snapshotIncrementalApplies: snapshotStats.incrementalApplies,
+    ...persistence,
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
     incrementalApplies: stats.incrementalApplies,
@@ -538,14 +548,15 @@ const runDatasetOnce = (
   };
 };
 
-const buildNativePayload = (
+const buildPersistencePayload = (
   paperRoot: string,
   dataset: PaperDataset,
   run: number,
   options: Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity">,
 ): {
   readonly binary: Uint8Array;
-  readonly snapshotBinary: Uint8Array;
+  readonly portableSnapshotBinary: Uint8Array;
+  readonly nativeSnapshotBinary: Uint8Array;
   readonly text: string;
 } => {
   const { replica, text } = applyPaperTrace(paperRoot, dataset, run, options);
@@ -553,25 +564,25 @@ const buildNativePayload = (
     replica.exportEventGraph().map((event) => cloneEvent(event)),
   );
   const binary = new ColumnarEventGraphCodec().encodeBinary(graph);
-  const snapshotBinary = new NativeSnapshotCodec().encode(
+  const portableSnapshotBinary = new PortableSnapshotCodec().encode(
+    replica.createPortableSnapshot(),
+  );
+  const nativeSnapshotBinary = new NativeSnapshotCodec().encode(
     replica.createNativeSnapshot(),
   );
-  return { binary, snapshotBinary, text };
+  return { binary, portableSnapshotBinary, nativeSnapshotBinary, text };
 };
 
-const measureNativeMemory = (
+const measurePersistenceMemory = (
   paperRoot: string,
   run: number,
   benchCase: BenchCase,
 ): MemoryResult => {
-  const { binary, snapshotBinary, text } = buildNativePayload(
-    paperRoot,
-    benchCase.dataset,
-    run,
-    benchCase,
-  );
+  const { binary, portableSnapshotBinary, nativeSnapshotBinary, text } =
+    buildPersistencePayload(paperRoot, benchCase.dataset, run, benchCase);
   const codec = new ColumnarEventGraphCodec();
-  const snapshotCodec = new NativeSnapshotCodec();
+  const portableSnapshotCodec = new PortableSnapshotCodec();
+  const nativeSnapshotCodec = new NativeSnapshotCodec();
 
   runGc();
   const heapBeforeBytes = usedHeap();
@@ -597,31 +608,57 @@ const measureNativeMemory = (
   const heapAfterLoadBytes = usedHeap();
 
   runGc();
-  const snapshotHeapBeforeBytes = usedHeap();
-  const snapshotDecodeStartedAt = performance.now();
-  const decodedSnapshot = snapshotCodec.decode(snapshotBinary);
-  const snapshotDecodedAt = performance.now();
-  runGc();
-  const heapAfterSnapshotDecodeBytes = usedHeap();
-
-  const snapshotReplica = EgWalkerReplica.fromNativeSnapshot(
-    decodedSnapshot,
-    `paper-snapshot-memory:${benchCase.dataset}:${benchCase.label}:${run}`,
+  const portableSnapshotHeapBeforeBytes = usedHeap();
+  const portableSnapshotDecodeStartedAt = performance.now();
+  const decodedPortableSnapshot = portableSnapshotCodec.decode(
+    portableSnapshotBinary,
   );
-  const snapshotRestoredAt = performance.now();
-  if (snapshotReplica.getText() !== text) {
-    throw new Error(
-      `${benchCase.dataset}: snapshot memory load text mismatch, got ${snapshotReplica.getText().length} UTF-16 code units, expected ${text.length}`,
-    );
+  const portableSnapshotDecodedAt = performance.now();
+  runGc();
+  const heapAfterPortableSnapshotDecodeBytes = usedHeap();
+  const portableSnapshotReplica = EgWalkerReplica.fromPortableSnapshot(
+    decodedPortableSnapshot,
+    `paper-portable-snapshot-memory:${benchCase.dataset}:${benchCase.label}:${run}`,
+  );
+  const portableSnapshotRestoredAt = performance.now();
+  runGc();
+  const heapAfterPortableSnapshotRestoreBytes = usedHeap();
+  portableSnapshotReplica.applyRemoteEvents([]);
+  const portableSnapshotMaterializedAt = performance.now();
+  if (
+    portableSnapshotReplica.getText() !== text ||
+    portableSnapshotReplica.exportEventGraph().length !==
+      decodedGraph.getEventCount()
+  ) {
+    throw new Error(`${benchCase.dataset}: portable snapshot memory mismatch`);
   }
-  const snapshotStats = snapshotReplica.getReplayStats();
-  if (snapshotStats.fullReplays !== 0) {
+  runGc();
+  const heapAfterPortableSnapshotMaterializeBytes = usedHeap();
+
+  runGc();
+  const nativeSnapshotHeapBeforeBytes = usedHeap();
+  const nativeSnapshotDecodeStartedAt = performance.now();
+  const decodedNativeSnapshot =
+    nativeSnapshotCodec.decode(nativeSnapshotBinary);
+  const nativeSnapshotDecodedAt = performance.now();
+  runGc();
+  const heapAfterNativeSnapshotDecodeBytes = usedHeap();
+  const nativeSnapshotReplica = EgWalkerReplica.fromNativeSnapshot(
+    decodedNativeSnapshot,
+    `paper-native-snapshot-memory:${benchCase.dataset}:${benchCase.label}:${run}`,
+  );
+  const nativeSnapshotRestoredAt = performance.now();
+  if (nativeSnapshotReplica.getText() !== text) {
+    throw new Error(`${benchCase.dataset}: native snapshot memory mismatch`);
+  }
+  const nativeSnapshotStats = nativeSnapshotReplica.getReplayStats();
+  if (nativeSnapshotStats.fullReplays !== 0) {
     throw new Error(
-      `${benchCase.dataset}: snapshot memory restore unexpectedly performed ${snapshotStats.fullReplays} full replay(s)`,
+      `${benchCase.dataset}: native snapshot memory restore unexpectedly performed ${nativeSnapshotStats.fullReplays} full replay(s)`,
     );
   }
   runGc();
-  const heapAfterSnapshotRestoreBytes = usedHeap();
+  const heapAfterNativeSnapshotRestoreBytes = usedHeap();
 
   return {
     dataset: benchCase.dataset,
@@ -633,19 +670,41 @@ const measureNativeMemory = (
     heapBeforeBytes,
     heapAfterDecodeBytes,
     heapAfterLoadBytes,
-    heapAfterSnapshotDecodeBytes,
-    heapAfterSnapshotRestoreBytes,
+    heapAfterPortableSnapshotDecodeBytes,
+    heapAfterPortableSnapshotRestoreBytes,
+    heapAfterPortableSnapshotMaterializeBytes,
+    heapAfterNativeSnapshotDecodeBytes,
+    heapAfterNativeSnapshotRestoreBytes,
     nativeDecodeHeapBytes: heapAfterDecodeBytes - heapBeforeBytes,
     nativeLoadHeapBytes: heapAfterLoadBytes - heapAfterDecodeBytes,
-    snapshotDecodeHeapBytes:
-      heapAfterSnapshotDecodeBytes - snapshotHeapBeforeBytes,
-    snapshotRestoreHeapBytes:
-      heapAfterSnapshotRestoreBytes - heapAfterSnapshotDecodeBytes,
+    portableSnapshotDecodeHeapBytes:
+      heapAfterPortableSnapshotDecodeBytes - portableSnapshotHeapBeforeBytes,
+    portableSnapshotRestoreHeapBytes:
+      heapAfterPortableSnapshotRestoreBytes -
+      heapAfterPortableSnapshotDecodeBytes,
+    portableSnapshotMaterializeHeapBytes:
+      heapAfterPortableSnapshotMaterializeBytes -
+      heapAfterPortableSnapshotRestoreBytes,
+    portableSnapshotHeapBytes:
+      heapAfterPortableSnapshotMaterializeBytes -
+      portableSnapshotHeapBeforeBytes,
+    nativeSnapshotDecodeHeapBytes:
+      heapAfterNativeSnapshotDecodeBytes - nativeSnapshotHeapBeforeBytes,
+    nativeSnapshotRestoreHeapBytes:
+      heapAfterNativeSnapshotRestoreBytes - heapAfterNativeSnapshotDecodeBytes,
+    nativeSnapshotHeapBytes:
+      heapAfterNativeSnapshotRestoreBytes - nativeSnapshotHeapBeforeBytes,
     nativeDecodeMs: decodedAt - decodeStartedAt,
     nativeLoadMs: loadedAt - loadStartedAt,
-    snapshotDecodeMs: snapshotDecodedAt - snapshotDecodeStartedAt,
-    snapshotRestoreMs: snapshotRestoredAt - snapshotDecodedAt,
-    snapshotHeapBytes: heapAfterSnapshotRestoreBytes - snapshotHeapBeforeBytes,
+    portableSnapshotDecodeMs:
+      portableSnapshotDecodedAt - portableSnapshotDecodeStartedAt,
+    portableSnapshotRestoreMs:
+      portableSnapshotRestoredAt - portableSnapshotDecodedAt,
+    portableSnapshotMaterializeMs:
+      portableSnapshotMaterializedAt - portableSnapshotRestoredAt,
+    nativeSnapshotDecodeMs:
+      nativeSnapshotDecodedAt - nativeSnapshotDecodeStartedAt,
+    nativeSnapshotRestoreMs: nativeSnapshotRestoredAt - nativeSnapshotDecodedAt,
   };
 };
 
@@ -718,13 +777,18 @@ const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
       (result) => result.nativeDecodeMs,
     );
     const nativeLoadTimes = datasetResults.map((result) => result.nativeLoadMs);
-    const snapshotDecodeTimes = datasetResults.map(
-      (result) => result.snapshotDecodeMs,
+    const portableSnapshotDecodeTimes = datasetResults.map(
+      (result) => result.portableSnapshotDecodeMs,
     );
-    const snapshotRestoreTimes = datasetResults.map(
-      (result) => result.snapshotRestoreMs,
+    const portableSnapshotRestoreTimes = datasetResults.map(
+      (result) => result.portableSnapshotRestoreMs,
     );
-    const snapshotBytes = datasetResults.map((result) => result.snapshotBytes);
+    const portableSnapshotMaterializeTimes = datasetResults.map(
+      (result) => result.portableSnapshotMaterializeMs,
+    );
+    const portableSnapshotBytes = datasetResults.map(
+      (result) => result.portableSnapshotBytes,
+    );
     console.log(
       [
         "paper-bench-summary",
@@ -740,13 +804,14 @@ const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
         `meanTotalMs=${formatNumber(mean(totalTimes))}`,
         `meanNativeDecodeMs=${formatNumber(mean(nativeDecodeTimes))}`,
         `meanNativeLoadMs=${formatNumber(mean(nativeLoadTimes))}`,
-        `meanSnapshotDecodeMs=${formatNumber(mean(snapshotDecodeTimes))}`,
-        `minSnapshotDecodeMs=${formatNumber(Math.min(...snapshotDecodeTimes))}`,
-        `maxSnapshotDecodeMs=${formatNumber(Math.max(...snapshotDecodeTimes))}`,
-        `meanSnapshotRestoreMs=${formatNumber(mean(snapshotRestoreTimes))}`,
-        `minSnapshotRestoreMs=${formatNumber(Math.min(...snapshotRestoreTimes))}`,
-        `maxSnapshotRestoreMs=${formatNumber(Math.max(...snapshotRestoreTimes))}`,
-        `meanSnapshotBytes=${formatNumber(mean(snapshotBytes))}`,
+        `meanPortableSnapshotDecodeMs=${formatNumber(mean(portableSnapshotDecodeTimes))}`,
+        `minPortableSnapshotDecodeMs=${formatNumber(Math.min(...portableSnapshotDecodeTimes))}`,
+        `maxPortableSnapshotDecodeMs=${formatNumber(Math.max(...portableSnapshotDecodeTimes))}`,
+        `meanPortableSnapshotRestoreMs=${formatNumber(mean(portableSnapshotRestoreTimes))}`,
+        `minPortableSnapshotRestoreMs=${formatNumber(Math.min(...portableSnapshotRestoreTimes))}`,
+        `maxPortableSnapshotRestoreMs=${formatNumber(Math.max(...portableSnapshotRestoreTimes))}`,
+        `meanPortableSnapshotMaterializeMs=${formatNumber(mean(portableSnapshotMaterializeTimes))}`,
+        `meanPortableSnapshotBytes=${formatNumber(mean(portableSnapshotBytes))}`,
       ].join(" "),
     );
   }
@@ -755,77 +820,38 @@ const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
 const MB = 1024 * 1024;
 
 const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
-  "S1-full-operation": {
-    maxSnapshotBytes: 50 * MB,
-    maxSnapshotDecodeMs: 800,
-    maxSnapshotRestoreMs: 500,
-    maxSnapshotDecodeHeapBytes: 160 * MB,
-    maxSnapshotRestoreHeapBytes: 180 * MB,
-    maxSnapshotHeapBytes: 280 * MB,
+  "S1-events-1000-operation": {
+    maxPortableSnapshotBytes: 12 * 1024,
+    maxPortableSnapshotEncodeMs: 40,
+    maxPortableSnapshotDecodeMs: 10,
+    maxPortableSnapshotRestoreMs: 10,
+    maxPortableSnapshotMaterializeMs: 25,
+    maxPortableSnapshotDecodeHeapBytes: 8 * MB,
+    maxPortableSnapshotRestoreHeapBytes: 8 * MB,
+    maxPortableSnapshotMaterializeHeapBytes: 16 * MB,
+    maxPortableSnapshotHeapBytes: 24 * MB,
   },
-  "S2-full-operation": {
-    maxSnapshotBytes: 50 * MB,
-    maxSnapshotDecodeMs: 900,
-    maxSnapshotRestoreMs: 500,
-    maxSnapshotDecodeHeapBytes: 160 * MB,
-    maxSnapshotRestoreHeapBytes: 180 * MB,
-    maxSnapshotHeapBytes: 280 * MB,
+  "S1-events-2000-operation": {
+    maxPortableSnapshotBytes: 24 * 1024,
+    maxPortableSnapshotEncodeMs: 60,
+    maxPortableSnapshotDecodeMs: 10,
+    maxPortableSnapshotRestoreMs: 10,
+    maxPortableSnapshotMaterializeMs: 50,
+    maxPortableSnapshotDecodeHeapBytes: 8 * MB,
+    maxPortableSnapshotRestoreHeapBytes: 8 * MB,
+    maxPortableSnapshotMaterializeHeapBytes: 32 * MB,
+    maxPortableSnapshotHeapBytes: 48 * MB,
   },
-  "S3-full-operation": {
-    maxSnapshotBytes: 80 * MB,
-    maxSnapshotDecodeMs: 1_500,
-    maxSnapshotRestoreMs: 700,
-    maxSnapshotDecodeHeapBytes: 250 * MB,
-    maxSnapshotRestoreHeapBytes: 300 * MB,
-    maxSnapshotHeapBytes: 450 * MB,
-  },
-  "A1-full-operation": {
-    maxSnapshotBytes: 35 * MB,
-    maxSnapshotDecodeMs: 600,
-    maxSnapshotRestoreMs: 400,
-    maxSnapshotDecodeHeapBytes: 120 * MB,
-    maxSnapshotRestoreHeapBytes: 160 * MB,
-    maxSnapshotHeapBytes: 240 * MB,
-  },
-  "C1-events-3000-operation": {
-    maxSnapshotBytes: 5 * MB,
-    maxSnapshotDecodeMs: 200,
-    maxSnapshotRestoreMs: 200,
-    maxSnapshotDecodeHeapBytes: 32 * MB,
-    maxSnapshotRestoreHeapBytes: 32 * MB,
-    maxSnapshotHeapBytes: 64 * MB,
-  },
-  "C1-events-10000-operation": {
-    maxSnapshotBytes: 5 * MB,
-    maxSnapshotDecodeMs: 200,
-    maxSnapshotRestoreMs: 200,
-    maxSnapshotDecodeHeapBytes: 32 * MB,
-    maxSnapshotRestoreHeapBytes: 32 * MB,
-    maxSnapshotHeapBytes: 64 * MB,
-  },
-  "C2-events-3000-operation": {
-    maxSnapshotBytes: 5 * MB,
-    maxSnapshotDecodeMs: 200,
-    maxSnapshotRestoreMs: 200,
-    maxSnapshotDecodeHeapBytes: 32 * MB,
-    maxSnapshotRestoreHeapBytes: 32 * MB,
-    maxSnapshotHeapBytes: 64 * MB,
-  },
-  "C2-events-10000-operation": {
-    maxSnapshotBytes: 5 * MB,
-    maxSnapshotDecodeMs: 200,
-    maxSnapshotRestoreMs: 200,
-    maxSnapshotDecodeHeapBytes: 32 * MB,
-    maxSnapshotRestoreHeapBytes: 32 * MB,
-    maxSnapshotHeapBytes: 64 * MB,
-  },
-  "A2-txns-300-operation": {
-    maxSnapshotBytes: 5 * MB,
-    maxSnapshotDecodeMs: 200,
-    maxSnapshotRestoreMs: 200,
-    maxSnapshotDecodeHeapBytes: 64 * MB,
-    maxSnapshotRestoreHeapBytes: 64 * MB,
-    maxSnapshotHeapBytes: 128 * MB,
+  "S1-events-4000-operation": {
+    maxPortableSnapshotBytes: 40 * 1024,
+    maxPortableSnapshotEncodeMs: 100,
+    maxPortableSnapshotDecodeMs: 10,
+    maxPortableSnapshotRestoreMs: 10,
+    maxPortableSnapshotMaterializeMs: 100,
+    maxPortableSnapshotDecodeHeapBytes: 8 * MB,
+    maxPortableSnapshotRestoreHeapBytes: 8 * MB,
+    maxPortableSnapshotMaterializeHeapBytes: 64 * MB,
+    maxPortableSnapshotHeapBytes: 96 * MB,
   },
 };
 
@@ -875,21 +901,33 @@ const assertPhase6BenchGate = (
   }
   assertUnderBudget(
     result.label,
-    "snapshotBytes",
-    result.snapshotBytes,
-    budget.maxSnapshotBytes,
+    "portableSnapshotBytes",
+    result.portableSnapshotBytes,
+    budget.maxPortableSnapshotBytes,
   );
   assertUnderBudget(
     result.label,
-    "snapshotDecodeMs",
-    result.snapshotDecodeMs,
-    budget.maxSnapshotDecodeMs,
+    "portableSnapshotEncodeMs",
+    result.portableSnapshotEncodeMs,
+    budget.maxPortableSnapshotEncodeMs,
   );
   assertUnderBudget(
     result.label,
-    "snapshotRestoreMs",
-    result.snapshotRestoreMs,
-    budget.maxSnapshotRestoreMs,
+    "portableSnapshotDecodeMs",
+    result.portableSnapshotDecodeMs,
+    budget.maxPortableSnapshotDecodeMs,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotRestoreMs",
+    result.portableSnapshotRestoreMs,
+    budget.maxPortableSnapshotRestoreMs,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotMaterializeMs",
+    result.portableSnapshotMaterializeMs,
+    budget.maxPortableSnapshotMaterializeMs,
   );
 };
 
@@ -902,21 +940,27 @@ const assertPhase6MemoryGate = (
   }
   assertUnderBudget(
     result.label,
-    "snapshotDecodeHeapBytes",
-    result.snapshotDecodeHeapBytes,
-    budget.maxSnapshotDecodeHeapBytes,
+    "portableSnapshotDecodeHeapBytes",
+    result.portableSnapshotDecodeHeapBytes,
+    budget.maxPortableSnapshotDecodeHeapBytes,
   );
   assertUnderBudget(
     result.label,
-    "snapshotRestoreHeapBytes",
-    result.snapshotRestoreHeapBytes,
-    budget.maxSnapshotRestoreHeapBytes,
+    "portableSnapshotRestoreHeapBytes",
+    result.portableSnapshotRestoreHeapBytes,
+    budget.maxPortableSnapshotRestoreHeapBytes,
   );
   assertUnderBudget(
     result.label,
-    "snapshotHeapBytes",
-    result.snapshotHeapBytes,
-    budget.maxSnapshotHeapBytes,
+    "portableSnapshotMaterializeHeapBytes",
+    result.portableSnapshotMaterializeHeapBytes,
+    budget.maxPortableSnapshotMaterializeHeapBytes,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotHeapBytes",
+    result.portableSnapshotHeapBytes,
+    budget.maxPortableSnapshotHeapBytes,
   );
 };
 
@@ -932,29 +976,13 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
   }
 
   if (options.phase6Gates) {
-    return [
-      ...(["S1", "S2", "S3", "A1"] as const).map((dataset) =>
-        phase6GateCase(dataset, {
-          maxTxns: undefined,
-          maxEvents: undefined,
-          granularity: PAPER_BENCHMARK_GRANULARITY,
-        }),
-      ),
-      ...(["C1", "C2"] as const).flatMap((dataset) =>
-        [3_000, 10_000].map((maxEvents) =>
-          phase6GateCase(dataset, {
-            maxTxns: undefined,
-            maxEvents,
-            granularity: PAPER_BENCHMARK_GRANULARITY,
-          }),
-        ),
-      ),
-      phase6GateCase("A2", {
-        maxTxns: 300,
-        maxEvents: undefined,
+    return [1_000, 2_000, 4_000].map((maxEvents) =>
+      phase6GateCase("S1", {
+        maxTxns: undefined,
+        maxEvents,
         granularity: PAPER_BENCHMARK_GRANULARITY,
       }),
-    ];
+    );
   }
 
   if (!options.planPhase0) {
@@ -1013,7 +1041,7 @@ const main = (): void => {
     if (!benchCase) {
       throw new Error("Memory worker requires one benchmark case");
     }
-    const memoryResult = measureNativeMemory(
+    const memoryResult = measurePersistenceMemory(
       options.paperRoot,
       options.memoryRun ?? 1,
       benchCase,

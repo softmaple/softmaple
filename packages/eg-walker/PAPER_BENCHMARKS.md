@@ -299,10 +299,12 @@ pnpm --filter @softmaple/eg-walker paper-bench -- \
   --granularity operation
 ```
 
-The script defaults to the local paper artifact root:
+The script defaults to the `egwalker-paper` artifact beside the repository. The
+path is derived from the `packages/eg-walker` location, so it does not depend on
+the process working directory:
 
 ```text
-../egwalker-paper
+/path/to/egwalker-paper
 ```
 
 It also accepts an override:

@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { EgWalkerReplica } from "../core/replica";
 import { NativeSnapshotCodec } from "../core/native-snapshot";
@@ -19,9 +20,14 @@ import {
   PAPER_BENCHMARK_GRANULARITY,
   parsePaperBenchmarkGranularity,
 } from "./paper-bench-options";
+import { paperRootFromPackageRoot } from "./paper-bench-paths";
 import { measurePersistenceMetrics } from "./persistence-metrics";
 
-const DEFAULT_PAPER_ROOT = "../egwalker-paper";
+const sourcePackageRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const DEFAULT_PAPER_ROOT = paperRootFromPackageRoot(sourcePackageRoot);
 
 type BenchCase = Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity"> & {
   readonly dataset: PaperDataset;
@@ -53,6 +59,7 @@ interface CliOptions {
   readonly memoryRun?: number;
   readonly planPhase0: boolean;
   readonly phase6Gates: boolean;
+  readonly help: boolean;
 }
 
 interface BenchResult {
@@ -153,6 +160,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   let memoryRun: number | undefined;
   let planPhase0 = false;
   let phase6Gates = false;
+  let help = false;
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -243,8 +251,8 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      printUsage();
-      process.exit(0);
+      help = true;
+      continue;
     }
     throw new Error(`Unknown argument: ${arg}`);
   }
@@ -284,17 +292,18 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
     memoryRun,
     planPhase0,
     phase6Gates,
+    help,
   };
 };
 
-const printUsage = (): void => {
+const printUsage = (defaultPaperRoot = DEFAULT_PAPER_ROOT): void => {
   console.log(`Usage:
   pnpm --filter @softmaple/eg-walker paper-bench -- [options]
 
 Options:
   --datasets S1,S2   Comma-separated datasets, or "all". Default: S1
   --runs 3           Number of runs per dataset. Default: 1
-  --paper-root PATH  Path to egwalker-paper. Default: ${DEFAULT_PAPER_ROOT}
+  --paper-root PATH  Path to egwalker-paper. Default: ${defaultPaperRoot}
   --max-txns 100     Limit each dataset to the first N txns; skips final text check
   --max-events 1000  Limit each dataset to the first N converted events; skips final text check
   --granularity MODE Paper benchmarks require operation. Default: operation
@@ -1035,6 +1044,10 @@ const labelForCase = (
 
 const main = (): void => {
   const options = parseCliOptions(process.argv.slice(2));
+  if (options.help) {
+    printUsage(options.paperRoot);
+    return;
+  }
   const benchCases = buildBenchCases(options);
   if (options.memoryWorker) {
     const benchCase = benchCases[0];

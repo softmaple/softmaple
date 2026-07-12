@@ -1,11 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build } from "tsup";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const defaultPaperRoot = resolve(packageRoot, "../../..", "egwalker-paper");
+process.argv.splice(2, 0, "--paper-root", defaultPaperRoot);
 const outputDirectory = await mkdtemp(join(tmpdir(), "eg-walker-paper-bench-"));
 const outputFile = join(outputDirectory, "paper-bench.mjs");
 

@@ -71,7 +71,6 @@ import {
   validateNativeSnapshotHeaderOnly,
 } from "./native-snapshot";
 import {
-  consumeDecodedPortableSnapshotGraphSource,
   createPortableSnapshotGraphSource,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
   validatePortableSnapshotHeaderOnly,
@@ -491,11 +490,8 @@ export class EgWalkerReplica {
     snapshot: PortableSnapshot,
     replicaId: string = "portable-snapshot-replica",
   ): EgWalkerReplica {
-    const decodedGraphSource =
-      consumeDecodedPortableSnapshotGraphSource(snapshot);
     const validated = validatePortableSnapshotHeaderOnly(snapshot);
-    const lazyEventGraph =
-      decodedGraphSource ?? createPortableSnapshotGraphSource(validated);
+    const lazyEventGraph = createPortableSnapshotGraphSource(validated);
 
     return new EgWalkerReplica(
       replicaId,

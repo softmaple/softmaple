@@ -4,10 +4,12 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
   PortableSnapshotCodec,
+  validatePortableSnapshotHeaderOnly,
   type PortableSnapshot,
 } from "../core/portable-snapshot";
 import { EgWalkerReplica } from "../core/replica";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { BinaryWriter, encodeText } from "../graph/internals/binary-io";
 import type { GraphEvent } from "../types";
 
 const ROOT_TEXT = "👩‍💻e\u0301";
@@ -126,6 +128,21 @@ describe("PortableSnapshot", () => {
     }
   });
 
+  it("detaches lazy graph bytes from the decoded snapshot", () => {
+    // Arrange
+    const source = createConcurrentReplica();
+    const codec = new PortableSnapshotCodec();
+    const decoded = codec.decode(codec.encode(source.createPortableSnapshot()));
+
+    // Act
+    const restored = EgWalkerReplica.fromPortableSnapshot(decoded);
+    decoded.eventGraph.fill(0);
+
+    // Assert
+    expect(restored.getText()).toBe(source.getText());
+    expect(restored.exportEventGraph()).toEqual(source.exportEventGraph());
+  });
+
   it("keeps rejecting a lazy graph after validation fails", () => {
     const source = createConcurrentReplica();
     const snapshot = source.createPortableSnapshot();
@@ -223,6 +240,20 @@ describe("PortableSnapshot", () => {
     );
 
     const encoded = codec.encode(snapshot);
+    expect(() => codec.decode(new Uint8Array())).toThrow(
+      /missing EGWP1 header/,
+    );
+    const malformedWriter = new BinaryWriter();
+    malformedWriter.writeString("{");
+    malformedWriter.writeBytes(new Uint8Array());
+    const malformedBody = malformedWriter.toUint8Array();
+    const magic = encodeText(PORTABLE_SNAPSHOT_FORMAT_VERSION);
+    const malformedHeader = new Uint8Array(magic.length + malformedBody.length);
+    malformedHeader.set(magic);
+    malformedHeader.set(malformedBody, magic.length);
+    expect(() => codec.decode(malformedHeader)).toThrow(
+      /malformed JSON header/,
+    );
     const badMagic = encoded.slice();
     badMagic[0] = badMagic[0]! ^ 0xff;
     expect(() => codec.decode(badMagic)).toThrow(/missing EGWP1 header/);
@@ -230,5 +261,26 @@ describe("PortableSnapshot", () => {
     const trailing = new Uint8Array(encoded.length + 1);
     trailing.set(encoded);
     expect(() => codec.decode(trailing)).toThrow(/trailing bytes/);
+  });
+
+  it("rejects malformed portable header fields before graph decoding", () => {
+    // Arrange
+    const snapshot = createConcurrentReplica().createPortableSnapshot();
+    const validate = (change: Readonly<Record<string, unknown>>) => () =>
+      validatePortableSnapshotHeaderOnly({
+        ...snapshot,
+        ...change,
+      } as PortableSnapshot);
+
+    // Act and assert
+    expect(validate({ formatVersion: "EGWP0" })).toThrow(/format version/);
+    expect(validate({ text: 1 })).toThrow(/text fields/);
+    expect(validate({ eventCount: -1 })).toThrow(/eventCount/);
+    expect(validate({ nextSequenceNumber: -1 })).toThrow(/nextSequenceNumber/);
+    expect(validate({ eventGraph: [] })).toThrow(/eventGraph/);
+    expect(validate({ currentVersion: "remote:0" })).toThrow(
+      /must be an array/,
+    );
+    expect(validate({ currentVersion: [root.id, root.id] })).toThrow(/invalid/);
   });
 });

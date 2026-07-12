@@ -33,10 +33,6 @@ interface PortableSnapshotHeader {
 
 const MAGIC = encodeText(PORTABLE_SNAPSHOT_FORMAT_VERSION);
 const codec = new ColumnarEventGraphCodec();
-const decodedGraphSourceCache = new WeakMap<
-  PortableSnapshot,
-  () => EventGraph
->();
 const FORBIDDEN_RUNTIME_METADATA = new Set([
   "sequenceRecords",
   "deleteTargets",
@@ -87,10 +83,6 @@ export class PortableSnapshotCodec {
       ...header,
       eventGraph,
     });
-    decodedGraphSourceCache.set(
-      snapshot,
-      createPortableSnapshotGraphSource(snapshot),
-    );
     return snapshot;
   }
 }
@@ -156,14 +148,6 @@ export const validatePortableSnapshotHeaderOnly = (
     nextSequenceNumber: value.nextSequenceNumber as number,
     eventGraph: value.eventGraph.slice(),
   };
-};
-
-export const consumeDecodedPortableSnapshotGraphSource = (
-  snapshot: PortableSnapshot,
-): (() => EventGraph) | undefined => {
-  const source = decodedGraphSourceCache.get(snapshot);
-  if (source !== undefined) decodedGraphSourceCache.delete(snapshot);
-  return source;
 };
 
 export const createPortableSnapshotGraphSource = (

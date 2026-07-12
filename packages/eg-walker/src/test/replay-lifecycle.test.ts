@@ -74,4 +74,48 @@ describe("paper-style replay lifecycle", () => {
     expect(stats.checkpointCount).toBe(32);
     expect(stats.checkpointUniqueTextBytes).toBeLessThan(copiedUpperBound / 4);
   });
+
+  it("should keep replica partial replay and recovery anchoring rope-backed", () => {
+    // Arrange
+    const checkpointText = "x".repeat(256 * 1024);
+    const root: GraphEvent = {
+      id: "checkpoint:0",
+      parentVersion: new Set(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: checkpointText,
+      },
+      timestamp: 0,
+    };
+    const left: GraphEvent = {
+      id: "left:0",
+      parentVersion: new Set([root.id]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: checkpointText.length,
+        text: "L",
+      },
+      timestamp: 1,
+    };
+    const right: GraphEvent = {
+      id: "right:0",
+      parentVersion: new Set([root.id]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+      timestamp: 2,
+    };
+    const replica = new EgWalkerReplica("receiver");
+    replica.applyRemoteEvents([root, left]);
+    PersistentUtf16Rope.resetInstrumentation();
+
+    // Act
+    replica.applyRemoteEvent(right);
+
+    // Assert
+    expect(replica.getReplayStats().partialReplays).toBe(1);
+    expect(PersistentUtf16Rope.getInstrumentation()).toMatchObject({
+      flattenCount: 0,
+      flattenedCodeUnits: 0,
+    });
+  });
 });

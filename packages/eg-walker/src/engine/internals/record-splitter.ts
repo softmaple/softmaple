@@ -5,6 +5,7 @@ import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 import { EventItemIndex } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
+import type { RecordContent } from "./record-content";
 
 interface RecordSplitterDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
@@ -193,9 +194,12 @@ export class RecordSplitter {
   private buildSplitRightHalf(
     left: AugmentedCRDTItem,
     offsetInRecord: number,
-    rightContent: string,
+    rightContent: RecordContent,
   ): AugmentedCRDTItem {
     if (left.run !== null) {
+      if (typeof rightContent !== "string") {
+        throw new Error("Typed-run split content must be materialized text");
+      }
       const startSequence = left.run.startSequence + offsetInRecord;
       return {
         id: `${left.run.replicaId}:${startSequence}:0`,

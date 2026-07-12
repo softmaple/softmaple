@@ -31,6 +31,10 @@ import {
 } from "./internals/insert-handler";
 import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
+import {
+  materializeRecordContent,
+  RopeRecordContent,
+} from "./internals/record-content";
 import { RecordSplitter } from "./internals/record-splitter";
 import {
   itemsFromCompactRecords,
@@ -320,7 +324,8 @@ export class EgWalkerEngine {
         item.content.length - landing.offsetInRecord,
       );
       parts.push(
-        item.content.slice(
+        materializeRecordContent(
+          item.content,
           landing.offsetInRecord,
           landing.offsetInRecord + length,
         ),
@@ -558,7 +563,7 @@ export class EgWalkerEngine {
     });
     this.eventIndexesComplete = true;
 
-    if (initialText.length === 0) {
+    if (this.resultingText.length === 0) {
       return;
     }
 
@@ -580,7 +585,10 @@ export class EgWalkerEngine {
     const placeholder: AugmentedCRDTItem = {
       id: this.nextPlaceholderId(),
       eventId: PLACEHOLDER_EVENT_ID,
-      content: initialText,
+      content:
+        options.initialTextBuffer === undefined
+          ? initialText
+          : RopeRecordContent.from(options.initialTextBuffer),
       originLeft: null,
       originRight: null,
       everDeleted: false,

@@ -1,6 +1,7 @@
 import type { EventGraph } from "../../graph/event-graph";
 import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
+import type { RecordContent } from "./record-content";
 
 export const PLACEHOLDER_EVENT_ID = "__placeholder__";
 export const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
@@ -39,14 +40,15 @@ export interface TypedRun {
  * `run === null` and a real `eventId`); we do not coalesce them, since the
  * per-code-unit IDs already serve as anchors for concurrent siblings.
  *
- * `content` is mutable to support in-place run extension and splits
- * without invalidating the `WeakMap` location index in
- * `IndexedSequence`.
+ * `content` is mutable to support in-place run extension and splits without
+ * invalidating the `WeakMap` location index in `IndexedSequence`. Ordinary
+ * and typed-run records use strings; checkpoint placeholders use immutable
+ * rope views that split without materializing the retained document.
  */
 export interface AugmentedCRDTItem {
   readonly id: EventId;
   readonly eventId: EventId;
-  content: string;
+  content: RecordContent;
   originLeft: EventId | null;
   readonly originRight: EventId | null;
   everDeleted: boolean;

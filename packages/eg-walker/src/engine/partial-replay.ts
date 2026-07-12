@@ -51,7 +51,7 @@ export class PartialReplayManager {
     const engine = new EgWalkerEngine();
     const initialTextBuffer =
       checkpoint.textBuffer ?? PersistentUtf16Rope.from(checkpoint.text ?? "");
-    const generated = engine.generate(events, initialTextBuffer.toString(), {
+    const generated = engine.generate(events, "", {
       initialVersion: checkpoint.version,
       initialTextBuffer,
       eventGraph: graph,

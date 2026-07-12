@@ -150,6 +150,9 @@ export const applyInsert = (
       // the content would shift the boundary they were anchored to.
       !originLeftIndex.has(leftRecord.id)
     ) {
+      if (typeof leftRecord.content !== "string") {
+        throw new Error("Typed-run content must be materialized text");
+      }
       const effectIndex =
         itemToEffectIndex(leftRecord) + leftRecord.content.length;
       leftRecord.content += operation.text;

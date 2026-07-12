@@ -125,11 +125,22 @@ interface RemoteBatchSnapshot {
   readonly engineRecoveryAnchor: EngineRecoveryAnchor | null;
 }
 
-interface EngineRecoveryAnchor {
+interface StateEngineRecoveryAnchor {
+  readonly kind: "state";
   readonly state: EngineRecoveryState;
   readonly graphEventCount: number;
   readonly estimatedBytes: number;
 }
+
+interface CheckpointEngineRecoveryAnchor {
+  readonly kind: "checkpoint";
+  readonly checkpoint: CriticalCheckpoint;
+  readonly estimatedBytes: 0;
+}
+
+type EngineRecoveryAnchor =
+  | StateEngineRecoveryAnchor
+  | CheckpointEngineRecoveryAnchor;
 
 /**
  * Public replica for Eg-walker.
@@ -787,12 +798,18 @@ export class EgWalkerReplica {
     if (anchor === null) {
       throw new Error("Missing replay-engine recovery anchor");
     }
-    const restoredEngine = EgWalkerEngine.fromRecoveryState(
-      anchor.state,
-      graph,
-    );
-    for (const event of graph.getAllEvents().slice(anchor.graphEventCount)) {
-      restoredEngine.applyEvent(event, graph);
+    let restoredEngine: EgWalkerEngine;
+    if (anchor.kind === "checkpoint") {
+      restoredEngine = this.partialReplayer.replayFromCheckpoint(
+        graph,
+        anchor.checkpoint,
+        snapshot.currentVersion,
+      ).engine;
+    } else {
+      restoredEngine = EgWalkerEngine.fromRecoveryState(anchor.state, graph);
+      for (const event of graph.getAllEvents().slice(anchor.graphEventCount)) {
+        restoredEngine.applyEvent(event, graph);
+      }
     }
     restoredEngine.restoreStats(snapshot.engineStats);
     this.engine = restoredEngine;
@@ -1148,6 +1165,7 @@ export class EgWalkerReplica {
       0,
     );
     this.engineRecoveryAnchor = {
+      kind: "state",
       state,
       graphEventCount: graph.getEventCount(),
       estimatedBytes:
@@ -1197,7 +1215,11 @@ export class EgWalkerReplica {
       frontier,
     );
     this.engine = result.engine;
-    this.captureEngineRecoveryAnchor(result.engine, graph);
+    this.engineRecoveryAnchor = {
+      kind: "checkpoint",
+      checkpoint,
+      estimatedBytes: 0,
+    };
     this.replayCacheBaseVersion = new Set(checkpoint.version);
     this.replayCacheEvents = result.replayedEventIds.length;
     this.documentBuffer = result.textBuffer;

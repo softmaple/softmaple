@@ -30,6 +30,56 @@ const deleteEvent = (
 });
 
 describe("EgWalkerReplica.applyRemoteEvents", () => {
+  it("rejects malformed event fields before mutating any batch state", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("receiver");
+    const valid = insertEvent("valid:0", [], 0, "v");
+    const malformed: ReadonlyArray<
+      readonly [event: GraphEvent, expected: RegExp]
+    > = [
+      [{ ...valid, id: "bad:timestamp", timestamp: Number.NaN }, /timestamp/],
+      [
+        {
+          ...valid,
+          id: "bad:operation",
+          operation: null,
+        } as unknown as GraphEvent,
+        /operation/,
+      ],
+      [
+        {
+          ...valid,
+          id: "bad:insert",
+          operation: { type: OPERATION_TYPE.INSERT, index: "0", text: "x" },
+        } as unknown as GraphEvent,
+        /invalid insert/,
+      ],
+      [
+        {
+          ...valid,
+          id: "bad:delete",
+          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: "1" },
+        } as unknown as GraphEvent,
+        /invalid delete/,
+      ],
+      [
+        {
+          ...valid,
+          id: "bad:type",
+          operation: { type: "replace", index: 0, text: "x" },
+        } as unknown as GraphEvent,
+        /unknown operation type/,
+      ],
+    ];
+
+    // Act and assert
+    for (const [event, expected] of malformed) {
+      expect(() => replica.applyRemoteEvents([valid, event])).toThrow(expected);
+      expect(replica.getText()).toBe("");
+      expect(replica.exportEventGraph()).toEqual([]);
+    }
+  });
+
   it("causally orders a reversed batch while aligning results to input", () => {
     const root = insertEvent("alice:0", [], 0, "a");
     const child = insertEvent("alice:1", [root.id], 1, "b");

@@ -26,10 +26,20 @@ export interface RemoteAcceptance {
   readonly integrations: ReadonlyArray<RemoteIntegration>;
 }
 
-export interface RemoteEventBufferSnapshot {
-  readonly pending: ReadonlyArray<
-    readonly [missingParent: EventId, events: ReadonlyArray<GraphEvent>]
-  >;
+export interface RemoteEventBufferTransaction {
+  readonly touchedEntryCount: number;
+  commit(): void;
+  rollback(): void;
+}
+
+interface RemoteEventBufferTransactionState {
+  readonly pendingBefore: Map<EventId, PendingQueueBefore>;
+  readonly bufferedBefore: Map<EventId, GraphEvent | undefined>;
+}
+
+interface PendingQueueBefore {
+  readonly queue: GraphEvent[] | undefined;
+  readonly length: number;
 }
 
 interface RemoteEventBufferDeps {
@@ -48,6 +58,7 @@ const DUPLICATE_RESULT = {
 export class RemoteEventBuffer {
   private readonly pendingByMissingParent = new Map<EventId, GraphEvent[]>();
   private readonly bufferedEventsById = new Map<EventId, GraphEvent>();
+  private activeTransaction: RemoteEventBufferTransactionState | null = null;
 
   constructor(private readonly deps: RemoteEventBufferDeps) {}
 
@@ -59,25 +70,38 @@ export class RemoteEventBuffer {
     return this.bufferedEventsById.get(eventId);
   }
 
-  snapshot(): RemoteEventBufferSnapshot {
-    return {
-      pending: Array.from(this.pendingByMissingParent, ([parent, events]) => [
-        parent,
-        [...events],
-      ]),
-    };
-  }
-
-  restore(snapshot: RemoteEventBufferSnapshot): void {
-    this.pendingByMissingParent.clear();
-    this.bufferedEventsById.clear();
-    for (const [parent, events] of snapshot.pending) {
-      const restored = [...events];
-      this.pendingByMissingParent.set(parent, restored);
-      for (const event of restored) {
-        this.bufferedEventsById.set(event.id, event);
-      }
+  beginTransaction(): RemoteEventBufferTransaction {
+    if (this.activeTransaction !== null) {
+      throw new Error("Remote event buffer transaction is already active");
     }
+    const state: RemoteEventBufferTransactionState = {
+      pendingBefore: new Map(),
+      bufferedBefore: new Map(),
+    };
+    this.activeTransaction = state;
+    let active = true;
+    const finish = (): boolean => {
+      if (!active) return false;
+      active = false;
+      if (this.activeTransaction !== state) {
+        throw new Error("Remote event buffer transaction state changed");
+      }
+      this.activeTransaction = null;
+      return true;
+    };
+    return {
+      get touchedEntryCount(): number {
+        return state.pendingBefore.size + state.bufferedBefore.size;
+      },
+      commit: (): void => {
+        finish();
+      },
+      rollback: (): void => {
+        if (!finish()) return;
+        restorePendingQueues(this.pendingByMissingParent, state.pendingBefore);
+        restoreMapEntries(this.bufferedEventsById, state.bufferedBefore);
+      },
+    };
   }
 
   tryAccept(event: GraphEvent): ApplyRemoteEventResult {
@@ -150,6 +174,7 @@ export class RemoteEventBuffer {
 
     while (stack.length > 0) {
       const waiter = stack.pop()!;
+      this.recordBufferedBefore(waiter.id);
       this.bufferedEventsById.delete(waiter.id);
 
       if (this.deps.graph.hasEvent(waiter.id)) {
@@ -173,21 +198,69 @@ export class RemoteEventBuffer {
   }
 
   private bufferAgainst(event: GraphEvent, missingParent: EventId): void {
-    const queue = this.pendingByMissingParent.get(missingParent) ?? [];
-    queue.push(event);
-    this.pendingByMissingParent.set(missingParent, queue);
+    const queue = this.pendingByMissingParent.get(missingParent);
+    this.recordPendingBefore(missingParent);
+    if (queue === undefined) {
+      this.pendingByMissingParent.set(missingParent, [event]);
+    } else {
+      queue.push(event);
+    }
+    this.recordBufferedBefore(event.id);
     this.bufferedEventsById.set(event.id, event);
   }
 
   private takePendingChildrenOf(parentId: EventId): GraphEvent[] {
     const waiters = this.pendingByMissingParent.get(parentId) ?? [];
+    this.recordPendingBefore(parentId);
     this.pendingByMissingParent.delete(parentId);
     return waiters;
+  }
+
+  private recordPendingBefore(parentId: EventId): void {
+    const journal = this.activeTransaction?.pendingBefore;
+    if (journal !== undefined && !journal.has(parentId)) {
+      const queue = this.pendingByMissingParent.get(parentId);
+      journal.set(parentId, { queue, length: queue?.length ?? 0 });
+    }
+  }
+
+  private recordBufferedBefore(eventId: EventId): void {
+    const journal = this.activeTransaction?.bufferedBefore;
+    if (journal !== undefined && !journal.has(eventId)) {
+      journal.set(eventId, this.bufferedEventsById.get(eventId));
+    }
   }
 }
 
 const pushReversed = <T>(target: T[], values: ReadonlyArray<T>): void => {
   for (let index = values.length - 1; index >= 0; index--) {
     target.push(values[index]!);
+  }
+};
+
+const restoreMapEntries = <K, V>(
+  target: Map<K, V>,
+  entries: ReadonlyMap<K, V | undefined>,
+): void => {
+  for (const [key, value] of entries) {
+    if (value === undefined) {
+      target.delete(key);
+    } else {
+      target.set(key, value);
+    }
+  }
+};
+
+const restorePendingQueues = (
+  target: Map<EventId, GraphEvent[]>,
+  entries: ReadonlyMap<EventId, PendingQueueBefore>,
+): void => {
+  for (const [key, before] of entries) {
+    if (before.queue === undefined) {
+      target.delete(key);
+    } else {
+      before.queue.length = before.length;
+      target.set(key, before.queue);
+    }
   }
 };

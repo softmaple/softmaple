@@ -57,7 +57,6 @@ import {
 } from "./internals/persistence-metadata";
 import {
   RemoteEventBuffer,
-  type RemoteEventBufferSnapshot,
   type RemoteIntegrationEffect,
 } from "./internals/remote-event-buffer";
 import { assertPendingCandidatesAcyclic } from "./internals/pending-causality";
@@ -113,7 +112,6 @@ interface RemoteBatchSnapshot {
   readonly currentVersion: Version;
   readonly engineStats: EngineStats | null;
   readonly engineStatsOverride: EngineStats | null;
-  readonly remoteBuffer: RemoteEventBufferSnapshot;
   readonly checkpoints: CriticalCheckpointStoreSnapshot;
   readonly fullReplayCount: number;
   readonly partialReplayCount: number;
@@ -584,7 +582,8 @@ export class EgWalkerReplica {
       return { results: prepared.results, operations: [] };
     }
 
-    const snapshot = this.captureRemoteBatchSnapshot(remoteEvents);
+    const snapshot = this.captureRemoteBatchSnapshot();
+    const remoteTransaction = remoteEvents.beginTransaction();
     const transaction = graph.beginAppendTransaction();
     const operations: PositionOperation[] = [];
     let operationsAreExact = true;
@@ -613,13 +612,15 @@ export class EgWalkerReplica {
       }
 
       transaction.commit();
+      remoteTransaction.commit();
       return {
         results: prepared.results,
         operations: operationsAreExact ? operations : null,
       };
     } catch (error) {
       transaction.rollback();
-      this.restoreRemoteBatchSnapshot(snapshot, graph, remoteEvents);
+      remoteTransaction.rollback();
+      this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
     }
   }
@@ -730,16 +731,13 @@ export class EgWalkerReplica {
     });
   }
 
-  private captureRemoteBatchSnapshot(
-    remoteEvents: RemoteEventBuffer,
-  ): RemoteBatchSnapshot {
+  private captureRemoteBatchSnapshot(): RemoteBatchSnapshot {
     return {
       documentBuffer: this.documentBuffer,
       documentCache: this.documentCache,
       currentVersion: new Set(this.currentVersion),
       engineStats: this.engine?.getStats() ?? null,
       engineStatsOverride: this.engineStatsOverride,
-      remoteBuffer: remoteEvents.snapshot(),
       checkpoints: this.criticalCheckpoints.snapshotForTransaction(),
       fullReplayCount: this.fullReplayCount,
       partialReplayCount: this.partialReplayCount,
@@ -760,9 +758,7 @@ export class EgWalkerReplica {
   private restoreRemoteBatchSnapshot(
     snapshot: RemoteBatchSnapshot,
     graph: EventGraph,
-    remoteEvents: RemoteEventBuffer,
   ): void {
-    remoteEvents.restore(snapshot.remoteBuffer);
     this.criticalCheckpoints.restoreTransaction(snapshot.checkpoints);
     this.fullReplayCount = snapshot.fullReplayCount;
     this.partialReplayCount = snapshot.partialReplayCount;

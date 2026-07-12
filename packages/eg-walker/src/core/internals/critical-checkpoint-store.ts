@@ -6,7 +6,7 @@ import { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 
 const MAX_RETAINED_CHECKPOINTS = 32;
 
-export interface CriticalCheckpoint extends ReplayCheckpoint {
+export type CriticalCheckpoint = ReplayCheckpoint & {
   readonly textBuffer: PersistentUtf16Rope;
   /**
    * Number of events present when this checkpoint was captured.
@@ -17,7 +17,7 @@ export interface CriticalCheckpoint extends ReplayCheckpoint {
    * cut point instead of expanding the checkpoint's full ancestor closure.
    */
   readonly eventCount: number;
-}
+};
 
 export interface CriticalCheckpointSnapshot {
   readonly version: ReadonlyArray<EventId>;

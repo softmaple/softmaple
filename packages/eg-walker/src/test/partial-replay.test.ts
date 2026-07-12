@@ -2,12 +2,36 @@ import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
-import { PartialReplayManager } from "../engine/partial-replay";
+import {
+  PartialReplayManager,
+  type ReplayCheckpoint,
+} from "../engine/partial-replay";
 import { EventGraph } from "../graph/event-graph";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { GraphEvent } from "../types";
 
 describe("PartialReplayManager", () => {
+  it("should reject checkpoints without document content", () => {
+    // Arrange
+    const manager = new PartialReplayManager();
+    const graph = new EventGraph();
+    const missingContent = {
+      version: new Set(),
+    } as unknown as ReplayCheckpoint;
+
+    // Act
+    const replay = () => manager.replayFromCheckpoint(graph, missingContent);
+
+    // Assert
+    expect(replay).toThrow(/requires text or textBuffer content/);
+    expect(
+      manager.replayFromCheckpoint(graph, {
+        version: new Set(),
+        text: "",
+      }).text,
+    ).toBe("");
+  });
+
   it("partially replays from a critical checkpoint using the full graph", () => {
     const graph = new EventGraph();
     const events: GraphEvent[] = [

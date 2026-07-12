@@ -4,11 +4,21 @@ import { compareEventIds } from "../graph/event-id";
 import type { EventId, Version } from "../types";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 
-export interface ReplayCheckpoint {
+interface ReplayCheckpointBase {
   readonly version: Version;
-  readonly text?: string;
-  readonly textBuffer?: PersistentUtf16Rope;
 }
+
+export type ReplayCheckpoint = ReplayCheckpointBase &
+  (
+    | {
+        readonly text: string;
+        readonly textBuffer?: PersistentUtf16Rope;
+      }
+    | {
+        readonly text?: string;
+        readonly textBuffer: PersistentUtf16Rope;
+      }
+  );
 
 export interface PartialReplayResult extends GeneratedDocument {
   readonly replayedEventIds: ReadonlyArray<EventId>;
@@ -49,8 +59,7 @@ export class PartialReplayManager {
         (event): event is NonNullable<typeof event> => event !== undefined,
       );
     const engine = new EgWalkerEngine();
-    const initialTextBuffer =
-      checkpoint.textBuffer ?? PersistentUtf16Rope.from(checkpoint.text ?? "");
+    const initialTextBuffer = checkpointBuffer(checkpoint);
     const generated = engine.generate(events, "", {
       initialVersion: checkpoint.version,
       initialTextBuffer,
@@ -86,6 +95,18 @@ export class PartialReplayManager {
     return getBranchPreservingReplayOrder(graph, onlyInRight);
   }
 }
+
+const checkpointBuffer = (
+  checkpoint: ReplayCheckpoint,
+): PersistentUtf16Rope => {
+  if (checkpoint.textBuffer !== undefined) {
+    return checkpoint.textBuffer;
+  }
+  if (checkpoint.text !== undefined) {
+    return PersistentUtf16Rope.from(checkpoint.text);
+  }
+  throw new Error("Replay checkpoint requires text or textBuffer content");
+};
 
 const getBranchPreservingReplayOrder = (
   graph: EventGraph,

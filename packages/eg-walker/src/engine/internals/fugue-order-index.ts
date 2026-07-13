@@ -365,9 +365,7 @@ export class FugueOrderIndex {
     if (rank < 0 || rank > this.markerSequence.length) {
       throw new Error(`Fugue marker rank ${rank} is out of bounds`);
     }
-    for (let index = 0; index < markers.length; index++) {
-      this.markerSequence.insert(rank + index, markers[index]!);
-    }
+    this.markerSequence.insertMany(rank, markers);
     this.markerOperations += markers.length;
   }
 

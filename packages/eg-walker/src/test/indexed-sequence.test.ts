@@ -218,6 +218,46 @@ describe("IndexedSequence", () => {
     );
   });
 
+  it("inserts a contiguous run with one ranked-tree lookup", () => {
+    const initial = Array.from({ length: 63 }, (_, index) => ({
+      id: `initial-${index}`,
+      prepare: index % 3 === 0 ? 0 : 1,
+      effect: index % 5 === 0 ? 0 : 1,
+    }));
+    const inserted = Array.from({ length: 3 }, (_, index) => ({
+      id: `inserted-${index}`,
+      prepare: 1,
+      effect: index % 2,
+    }));
+    const bulk = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      initial,
+    );
+    const scalar = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      initial,
+    );
+
+    bulk.insertMany(31, inserted);
+    for (const [offset, item] of inserted.entries()) {
+      scalar.insert(31 + offset, item);
+    }
+
+    expect(bulk.toArray()).toEqual(scalar.toArray());
+    for (const item of inserted) {
+      expect(bulk.positionOf(item)).toBe(scalar.positionOf(item));
+    }
+    expect(bulk.prepareLength).toBe(scalar.prepareLength);
+    expect(bulk.effectIndexBeforePosition(50)).toBe(
+      scalar.effectIndexBeforePosition(50),
+    );
+    expect(bulk.getStructuralOperationCount()).toBeLessThan(
+      scalar.getStructuralOperationCount(),
+    );
+  });
+
   it("matches an array model across deterministic B-tree inserts and updates", () => {
     const random = createPrng(13_337);
     const model: SequenceModelItem[] = [];

@@ -116,6 +116,15 @@ export interface GenerateOptions {
   readonly initialTextBuffer?: PersistentUtf16Rope;
   readonly eventGraph?: EventGraph;
   /**
+   * Whether batch replay should retain every transformed operation.
+   *
+   * Defaults to `true` for compatibility. Full-replay callers that only need
+   * the resulting document can disable collection to avoid retaining an
+   * operation array proportional to the number of replayed events. The
+   * generated result returns an empty array when collection is disabled.
+   */
+  readonly collectTransformedOperations?: boolean;
+  /**
    * Topological rank source for prepare/effect retreat/advance ordering.
    *
    * When omitted, the engine uses `eventGraph.getTopologicalOrder()` if a

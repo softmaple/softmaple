@@ -152,6 +152,38 @@ describe("EventGraph", () => {
   });
 
   describe("getTopologicalOrder", () => {
+    it("returns a detached replay order only for exact causal chains", () => {
+      const { graph } = buildLinearHistory(3);
+      const linear = graph.getLinearReplayOrder();
+
+      expect(linear?.map(({ id }) => id)).toEqual(["n-0", "n-1", "n-2"]);
+      (linear?.[1]?.parentVersion as Set<EventId> | undefined)?.clear();
+      expect(graph.getEvent("n-1")?.parentVersion).toEqual(new Set(["n-0"]));
+
+      graph.addEvent({
+        id: "concurrent",
+        timestamp: 4,
+        parentVersion: new Set(["n-1"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 2,
+          text: "c",
+        },
+      });
+      expect(graph.getLinearReplayOrder()).toBeNull();
+    });
+
+    it("can release and lazily rebuild traversal caches", () => {
+      const { graph } = buildLinearHistory(3);
+      const first = graph.getBranchPreservingTopologicalOrder();
+
+      graph.releaseTraversalCaches();
+      const rebuilt = graph.getBranchPreservingTopologicalOrder();
+
+      expect(rebuilt).not.toBe(first);
+      expect(rebuilt).toEqual(first);
+    });
+
     it("should return events in topological order", () => {
       const graph = new EventGraph();
 

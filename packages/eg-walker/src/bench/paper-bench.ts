@@ -70,11 +70,39 @@ interface CliOptions {
   readonly memory: boolean;
   readonly memoryWorker: boolean;
   readonly memoryRun?: number;
+  readonly applyOnly: boolean;
   readonly nativeOnly: boolean;
   readonly nativeOnlyWorker: boolean;
   readonly planPhase0: boolean;
   readonly phase6Gates: boolean;
   readonly help: boolean;
+}
+
+interface ApplyBenchResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyCalls: number;
+  readonly txns: number;
+  readonly patches: number;
+  readonly events: number;
+  readonly finalTextLength: number;
+  readonly finalTextValidated: boolean;
+  readonly loadConvertMs: number;
+  readonly applyMs: number;
+  readonly totalMs: number;
+  readonly fullReplays: number;
+  readonly partialReplays: number;
+  readonly incrementalApplies: number;
+  readonly retreats: number;
+  readonly advances: number;
+  readonly sequenceRecords: number;
+  readonly peakSequenceRecords: number;
+  readonly sequenceTreeOperations: number;
 }
 
 interface NativeBenchResult {
@@ -236,6 +264,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   let memory = false;
   let memoryWorker = false;
   let memoryRun: number | undefined;
+  let applyOnly = false;
   let nativeOnly = false;
   let nativeOnlyWorker = false;
   let planPhase0 = false;
@@ -322,6 +351,10 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
       memory = true;
       continue;
     }
+    if (arg === "--apply-only") {
+      applyOnly = true;
+      continue;
+    }
     if (arg === "--native-only") {
       nativeOnly = true;
       continue;
@@ -393,6 +426,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
     memory,
     memoryWorker,
     memoryRun,
+    applyOnly,
     nativeOnly,
     nativeOnlyWorker,
     planPhase0,
@@ -416,6 +450,7 @@ Options:
                      Remote receive batch size. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS}
   --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
                      in a separate --expose-gc process
+  --apply-only       Measure conversion and public batch receive only; skip all persistence work
   --native-only      Build an EGW3 payload outside the timed lane, then measure
                      decode, replica load/replay, and final text materialization
   --plan-phase0      Run the persistence guardrail suite:
@@ -496,6 +531,38 @@ const printResult = (result: BenchResult): void => {
       `checkpointMisses=${result.checkpointMisses}`,
       `sequenceRecords=${result.sequenceRecords}`,
       `peakSequenceRecords=${result.peakSequenceRecords}`,
+    ].join(" "),
+  );
+};
+
+const printApplyResult = (result: ApplyBenchResult): void => {
+  console.log(
+    [
+      "paper-bench-apply",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `maxTxns=${result.maxTxns ?? "none"}`,
+      `maxEvents=${result.maxEvents ?? "none"}`,
+      `granularity=${result.granularity}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyCalls=${result.applyCalls}`,
+      `txns=${result.txns}`,
+      `patches=${result.patches}`,
+      `events=${result.events}`,
+      `text=${result.finalTextLength}`,
+      `finalTextValidated=${result.finalTextValidated}`,
+      `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
+      `applyMs=${formatNumber(result.applyMs)}`,
+      `totalMs=${formatNumber(result.totalMs)}`,
+      `fullReplays=${result.fullReplays}`,
+      `partialReplays=${result.partialReplays}`,
+      `incrementalApplies=${result.incrementalApplies}`,
+      `retreats=${result.retreats}`,
+      `advances=${result.advances}`,
+      `sequenceRecords=${result.sequenceRecords}`,
+      `peakSequenceRecords=${result.peakSequenceRecords}`,
+      `sequenceTreeOperations=${result.sequenceTreeOperations}`,
     ].join(" "),
   );
 };
@@ -859,6 +926,68 @@ const runDatasetOnce = (
   };
 };
 
+const runApplyDatasetOnce = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+): ApplyBenchResult => {
+  const startedAt = performance.now();
+  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  const convertedAt = performance.now();
+  printProgress(
+    "converted",
+    benchCase,
+    run,
+    startedAt,
+    loaded.events.length,
+    0,
+  );
+  const applyStartedAt = performance.now();
+  const { replica, text, applyCalls } = applyLoadedPaperTrace(
+    benchCase.dataset,
+    run,
+    loaded,
+    benchCase.applyBatchEvents,
+  );
+  const appliedAt = performance.now();
+  printProgress(
+    "applied",
+    benchCase,
+    run,
+    startedAt,
+    loaded.events.length,
+    applyCalls,
+  );
+  const stats = replica.getReplayStats();
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    maxTxns: benchCase.maxTxns,
+    maxEvents: benchCase.maxEvents,
+    granularity: benchCase.granularity,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyCalls,
+    txns: loaded.txnCount,
+    patches: loaded.patchCount,
+    events: loaded.events.length,
+    finalTextLength: text.length,
+    finalTextValidated: !loaded.limited,
+    loadConvertMs: convertedAt - startedAt,
+    applyMs: appliedAt - applyStartedAt,
+    totalMs: appliedAt - startedAt,
+    fullReplays: stats.fullReplays,
+    partialReplays: stats.partialReplays,
+    incrementalApplies: stats.incrementalApplies,
+    retreats: stats.engineRetreats,
+    advances: stats.engineAdvances,
+    sequenceRecords: stats.sequenceRecordCount,
+    peakSequenceRecords: stats.peakSequenceRecordCount,
+    sequenceTreeOperations: stats.sequenceTreeOperations,
+  };
+};
+
 const buildPersistencePayload = (
   paperRoot: string,
   dataset: PaperDataset,
@@ -1215,6 +1344,45 @@ const printNativeSummaries = (
   }
 };
 
+const printApplySummaries = (
+  results: ReadonlyArray<ApplyBenchResult>,
+): void => {
+  for (const label of new Set(results.map((result) => result.label))) {
+    const datasetResults = results.filter((result) => result.label === label);
+    const first = datasetResults[0];
+    if (!first) {
+      continue;
+    }
+    const convertTimes = datasetResults.map((result) => result.loadConvertMs);
+    const applyTimes = datasetResults.map((result) => result.applyMs);
+    console.log(
+      [
+        "paper-bench-apply-summary",
+        `dataset=${first.dataset}`,
+        `label=${label}`,
+        `runs=${datasetResults.length}`,
+        `maxTxns=${first.maxTxns ?? "none"}`,
+        `maxEvents=${first.maxEvents ?? "none"}`,
+        `granularity=${first.granularity}`,
+        `applyBatchEvents=${first.applyBatchEvents}`,
+        `applyCalls=${first.applyCalls}`,
+        `events=${first.events}`,
+        `finalTextValidated=${datasetResults.every((result) => result.finalTextValidated)}`,
+        `meanLoadConvertMs=${formatNumber(mean(convertTimes))}`,
+        `meanApplyMs=${formatNumber(mean(applyTimes))}`,
+        `minApplyMs=${formatNumber(Math.min(...applyTimes))}`,
+        `maxApplyMs=${formatNumber(Math.max(...applyTimes))}`,
+        `meanTotalMs=${formatNumber(
+          mean(datasetResults.map((result) => result.totalMs)),
+        )}`,
+        `meanEventsPerSecond=${formatNumber(
+          (first.events * 1_000) / mean(applyTimes),
+        )}`,
+      ].join(" "),
+    );
+  }
+};
+
 const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
   for (const label of new Set(results.map((result) => result.label))) {
     const datasetResults = results.filter((result) => result.label === label);
@@ -1512,6 +1680,18 @@ const main = (): void => {
       "--native-only cannot be combined with --memory, --plan-phase0, or --phase6-gates",
     );
   }
+  if (
+    options.applyOnly &&
+    (options.nativeOnly ||
+      options.memory ||
+      options.memoryWorker ||
+      options.planPhase0 ||
+      options.phase6Gates)
+  ) {
+    throw new Error(
+      "--apply-only cannot be combined with --native-only, --memory, --plan-phase0, or --phase6-gates",
+    );
+  }
   const benchCases = buildBenchCases(options);
   if (options.nativeOnlyWorker) {
     const benchCase = benchCases[0];
@@ -1554,12 +1734,26 @@ const main = (): void => {
       `maxEvents=${options.maxEvents ?? "none"}`,
       `granularity=${options.granularity}`,
       `applyBatchEvents=${options.applyBatchEvents}`,
+      `applyOnly=${options.applyOnly}`,
       `nativeOnly=${options.nativeOnly}`,
       `memory=${options.memory}`,
       `planPhase0=${options.planPhase0}`,
       `phase6Gates=${options.phase6Gates}`,
     ].join(" "),
   );
+
+  if (options.applyOnly) {
+    const applyResults: ApplyBenchResult[] = [];
+    for (const benchCase of benchCases) {
+      for (let run = 1; run <= options.runs; run++) {
+        const result = runApplyDatasetOnce(options.paperRoot, run, benchCase);
+        applyResults.push(result);
+        printApplyResult(result);
+      }
+    }
+    printApplySummaries(applyResults);
+    return;
+  }
 
   if (options.nativeOnly) {
     const nativeResults: NativeBenchResult[] = [];

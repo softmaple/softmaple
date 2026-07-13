@@ -12,6 +12,9 @@ type DeleteOperation = Extract<
   { type: typeof OPERATION_TYPE.DELETE }
 >;
 
+const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
+  Object.freeze([]);
+
 export interface DeleteHandlerDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
   readonly deleteTargets: DeleteTargetIndex;
@@ -26,7 +29,8 @@ export const applyDelete = (
   event: GraphEvent,
   operation: DeleteOperation,
   deps: DeleteHandlerDeps,
-): ExternalOperation[] => {
+  collectTransformedOperations: boolean,
+): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
     deleteTargets,
@@ -48,7 +52,9 @@ export const applyDelete = (
     flushPendingInsert();
   }
   const deletedItemIds: EventId[] = [];
-  const outputDeleteIndexes: number[] = [];
+  const outputDeleteIndexes: number[] | null = collectTransformedOperations
+    ? []
+    : null;
   let remaining = operation.length;
 
   while (remaining > 0) {
@@ -94,7 +100,7 @@ export const applyDelete = (
       if (!middle.everDeleted) {
         const effectIndex = itemToEffectIndex(middle);
         for (let k = 0; k < toDelete; k++) {
-          outputDeleteIndexes.push(effectIndex);
+          outputDeleteIndexes?.push(effectIndex);
         }
         deleteText(effectIndex, toDelete);
       }
@@ -109,7 +115,7 @@ export const applyDelete = (
     deletedItemIds.push(candidate.id);
     if (!candidate.everDeleted) {
       const effectIndex = itemToEffectIndex(candidate);
-      outputDeleteIndexes.push(effectIndex);
+      outputDeleteIndexes?.push(effectIndex);
       deleteText(effectIndex, 1);
     }
     candidate.everDeleted = true;
@@ -120,5 +126,7 @@ export const applyDelete = (
 
   deleteTargets.record(event.id, deletedItemIds);
 
-  return coalesceDeleteRuns(outputDeleteIndexes);
+  return outputDeleteIndexes === null
+    ? NO_TRANSFORMED_OPERATIONS
+    : coalesceDeleteRuns(outputDeleteIndexes);
 };

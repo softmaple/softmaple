@@ -14,7 +14,7 @@ const DIFF_COLOR = {
 } as const;
 
 interface DiffVersionsView {
-  readonly getParents: (id: EventId) => ReadonlySet<EventId>;
+  readonly getParents: (id: EventId) => Iterable<EventId>;
   readonly hasEvent: (id: EventId) => boolean;
   readonly insertionRankOf: (id: EventId) => number | undefined;
 }

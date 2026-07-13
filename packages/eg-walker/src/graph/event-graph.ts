@@ -27,6 +27,8 @@ export {
   MissingParentError,
 } from "./event-graph-errors";
 
+const EMPTY_EVENT_IDS: ReadonlySet<EventId> = new Set();
+
 export interface EventGraphAppendTransaction {
   commit(): void;
   rollback(): void;
@@ -39,7 +41,6 @@ export interface EventGraphAppendTransaction {
 export class EventGraph {
   private readonly events: Map<EventId, GraphEvent> = new Map();
   private readonly childrenMap: Map<EventId, Set<EventId>> = new Map();
-  private readonly parentsMap: Map<EventId, Set<EventId>> = new Map();
   private readonly frontier: Set<EventId> = new Set();
   /**
    * Monotonically increasing rank assigned to each event in the order it was
@@ -76,12 +77,23 @@ export class EventGraph {
   }
 
   /**
+   * Release materialized traversal orders without changing graph contents.
+   *
+   * A full replay consumes a branch-preserving order once and can then drop
+   * it; retaining cloned event/parent objects for a large persisted history
+   * would otherwise nearly duplicate the graph's resident memory. Future
+   * callers rebuild and cache the order lazily.
+   */
+  releaseTraversalCaches(): void {
+    this.invalidateDerivedCaches();
+  }
+
+  /**
    * Remove all events and metadata from the graph.
    */
   clear(): void {
     this.events.clear();
     this.childrenMap.clear();
-    this.parentsMap.clear();
     this.insertionRank.clear();
     this.frontier.clear();
     this.metadata = {};
@@ -133,10 +145,6 @@ export class EventGraph {
       children.add(stored.id);
       this.childrenMap.set(parentId, children);
       this.frontier.delete(parentId);
-
-      const parents = this.parentsMap.get(stored.id) ?? new Set();
-      parents.add(parentId);
-      this.parentsMap.set(stored.id, parents);
     }
 
     this.invalidateDerivedCaches();
@@ -146,11 +154,11 @@ export class EventGraph {
     const appended = Array.from(this.events.keys()).slice(startingEventCount);
     for (let index = appended.length - 1; index >= 0; index--) {
       const eventId = appended[index]!;
-      const parents = this.parentsMap.get(eventId) ?? new Set<EventId>();
+      const parents =
+        this.events.get(eventId)?.parentVersion ?? EMPTY_EVENT_IDS;
 
       this.frontier.delete(eventId);
       this.childrenMap.delete(eventId);
-      this.parentsMap.delete(eventId);
       this.insertionRank.delete(eventId);
       this.events.delete(eventId);
 
@@ -198,6 +206,37 @@ export class EventGraph {
    */
   getEventCount(): number {
     return this.events.size;
+  }
+
+  /**
+   * Return insertion order when the complete graph is one exact causal chain.
+   *
+   * `addEvent` guarantees insertion order is topological. Detecting the
+   * single-parent chain directly avoids building Kahn/DFS traversal state for
+   * the common persisted single-author case. Returned events are detached
+   * copies, preserving the graph's external immutability contract.
+   */
+  getLinearReplayOrder(): ReadonlyArray<GraphEvent> | null {
+    let previousId: EventId | null = null;
+    for (const event of this.events.values()) {
+      if (previousId === null) {
+        if (event.parentVersion.size !== 0) {
+          return null;
+        }
+      } else if (
+        event.parentVersion.size !== 1 ||
+        !event.parentVersion.has(previousId)
+      ) {
+        return null;
+      }
+      previousId = event.id;
+    }
+
+    // Do not clone while probing. A nonlinear history can have a very long
+    // linear prefix; eagerly cloning that prefix would discard all of those
+    // objects before the normal branch-preserving traversal clones the graph
+    // again. Only detach events after the complete chain has been proven.
+    return Object.freeze(Array.from(this.events.values(), cloneGraphEvent));
   }
 
   /**
@@ -274,7 +313,7 @@ export class EventGraph {
     right: ReadonlySet<EventId>,
   ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
     return diffVersionSets(left, right, {
-      getParents: (id) => this.getParents(id),
+      getParents: (id) => this.iterateParents(id),
       hasEvent: (id) => this.hasEvent(id),
       insertionRankOf: (id) => this.insertionRank.get(id),
     });
@@ -364,11 +403,21 @@ export class EventGraph {
     return new Set(this.childrenMap.get(id) ?? []);
   }
 
+  /** Allocation-free child traversal that does not expose the backing set. */
+  iterateChildren(id: EventId): IterableIterator<EventId> {
+    return (this.childrenMap.get(id) ?? EMPTY_EVENT_IDS).values();
+  }
+
   /**
    * Get parents of an event
    */
   getParents(id: EventId): ReadonlySet<EventId> {
-    return new Set(this.parentsMap.get(id) ?? []);
+    return new Set(this.events.get(id)?.parentVersion ?? EMPTY_EVENT_IDS);
+  }
+
+  /** Allocation-free parent traversal that does not expose the backing set. */
+  iterateParents(id: EventId): IterableIterator<EventId> {
+    return (this.events.get(id)?.parentVersion ?? EMPTY_EVENT_IDS).values();
   }
 
   /**
@@ -385,7 +434,7 @@ export class EventGraph {
       if (visited.has(current)) continue;
       visited.add(current);
 
-      const parents = this.getParents(current);
+      const parents = this.iterateParents(current);
       for (const parent of parents) {
         if (parent === ancestor) return true;
         stack.push(parent);

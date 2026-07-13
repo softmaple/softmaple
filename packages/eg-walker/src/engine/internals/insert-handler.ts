@@ -16,6 +16,9 @@ type InsertOperation = Extract<
   { type: typeof OPERATION_TYPE.INSERT }
 >;
 
+const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
+  Object.freeze([]);
+
 export interface InsertHandlerDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
   readonly itemsById: Map<EventId, AugmentedCRDTItem>;
@@ -37,7 +40,8 @@ export const applyInsert = (
   event: GraphEvent,
   operation: InsertOperation,
   deps: InsertHandlerDeps,
-): ExternalOperation[] => {
+  collectTransformedOperations: boolean,
+): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
     itemsById,
@@ -57,7 +61,7 @@ export const applyInsert = (
 
   if (operation.text.length === 0) {
     eventItems.set(event.id, []);
-    return [];
+    return NO_TRANSFORMED_OPERATIONS;
   }
 
   const landing = sequence.prepareIndexToPositionAndOffset(
@@ -165,13 +169,15 @@ export const applyInsert = (
       // non-coalesced read or write of the document text.
       pendingInsert.append(effectIndex, operation.text, applyPendingSplice);
 
-      return [
-        {
-          type: OPERATION_TYPE.INSERT,
-          index: effectIndex,
-          text: operation.text,
-        },
-      ];
+      return collectTransformedOperations
+        ? [
+            {
+              type: OPERATION_TYPE.INSERT,
+              index: effectIndex,
+              text: operation.text,
+            },
+          ]
+        : NO_TRANSFORMED_OPERATIONS;
     }
   }
 
@@ -283,11 +289,13 @@ export const applyInsert = (
   }
   insertText(effectIndex, operation.text);
 
-  return [
-    {
-      type: OPERATION_TYPE.INSERT,
-      index: effectIndex,
-      text: operation.text,
-    },
-  ];
+  return collectTransformedOperations
+    ? [
+        {
+          type: OPERATION_TYPE.INSERT,
+          index: effectIndex,
+          text: operation.text,
+        },
+      ]
+    : NO_TRANSFORMED_OPERATIONS;
 };

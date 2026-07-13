@@ -1,10 +1,10 @@
 import type { CriticalVersionAnalyzer } from "../../engine/critical-version";
 import type { ReplayCheckpoint } from "../../engine/partial-replay";
 import type { EventGraph } from "../../graph/event-graph";
-import type { EventId } from "../../types";
+import type { EventId, Version } from "../../types";
 import { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 
-const MAX_RETAINED_CHECKPOINTS = 32;
+export const MAX_RETAINED_CHECKPOINTS = 32;
 
 export type CriticalCheckpoint = ReplayCheckpoint & {
   readonly textBuffer: PersistentUtf16Rope;
@@ -122,18 +122,36 @@ export class CriticalCheckpointStore {
     // that frontier. The singleton frontier is therefore critical by
     // definition, so avoid the analyzer's full ancestor expansion on the
     // sequential hot path.
+    this.record(frontier, document, graph.getEventCount());
+  }
+
+  /**
+   * Record a frontier already proven critical by the replay planner.
+   *
+   * Unlike {@link maybeAdvance}, this accepts multi-tip frontiers. During a
+   * full replay the planner can prove that every remaining event descends
+   * from the complete frontier, so retaining its shared rope root is a safe
+   * Section 3.5 checkpoint without re-running graph-wide critical analysis.
+   */
+  record(
+    version: Version,
+    document: string | PersistentUtf16Rope,
+    eventCount: number,
+  ): CriticalCheckpoint {
     const last = this.checkpoints[this.checkpoints.length - 1];
-    if (last && versionsEqual(last.version, frontier)) {
-      return;
+    if (last && versionsEqual(last.version, version)) {
+      return last;
     }
-    this.append({
-      version: new Set(frontier),
+    const checkpoint: CriticalCheckpoint = {
+      version: new Set(version),
       textBuffer:
         typeof document === "string"
           ? PersistentUtf16Rope.from(document)
           : document,
-      eventCount: graph.getEventCount(),
-    });
+      eventCount,
+    };
+    this.append(checkpoint);
+    return checkpoint;
   }
 
   pickFor(graph: EventGraph): CriticalCheckpoint | null {
@@ -170,7 +188,7 @@ export class CriticalCheckpointStore {
     // The checkpoint frontier was singleton and childless when captured.
     // Therefore every reachable descendant must have been inserted after
     // `candidate.eventCount`; count unique descendants without checking ranks.
-    const stack = Array.from(graph.getChildren(frontierId!));
+    const stack = Array.from(graph.iterateChildren(frontierId!));
     const visited = new Set<EventId>(stack);
 
     while (stack.length > 0) {
@@ -180,7 +198,7 @@ export class CriticalCheckpointStore {
         return true;
       }
 
-      for (const child of graph.getChildren(current)) {
+      for (const child of graph.iterateChildren(current)) {
         if (!visited.has(child)) {
           visited.add(child);
           stack.push(child);

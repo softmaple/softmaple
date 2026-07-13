@@ -231,6 +231,23 @@ pnpm --filter @softmaple/eg-walker paper-bench -- --datasets S1 --runs 1
 pnpm --filter @softmaple/eg-walker paper-bench -- --datasets S1,S2,S3 --runs 1
 ```
 
+Use the isolated apply lane when measuring public remote-receive throughput:
+
+```bash
+pnpm --filter @softmaple/eg-walker paper-bench -- \
+  --datasets S1,C1 \
+  --runs 3 \
+  --apply-batch-events all \
+  --apply-only
+```
+
+`--apply-only` validates the final document and reports conversion, apply,
+replay, and structural-operation metrics, but deliberately skips JSON, EGW3,
+portable-snapshot, and native-snapshot construction. Keeping those phases out
+of the process prevents persistence object graphs from contaminating raw apply
+time and peak memory. Use the normal or `--native-only` lanes for persistence
+and cold-load measurements.
+
 Phase 0 guardrail suite:
 
 ```bash
@@ -715,7 +732,8 @@ Done:
 
 1. `paper-traces.ts` implements patch-level and operation-level conversion.
 2. `paper-bench.ts` supports `--datasets`, `--runs`, `--paper-root`,
-   `--max-txns`, `--max-events`, and operation-only `--granularity`.
+   `--max-txns`, `--max-events`, `--apply-only`, and operation-only
+   `--granularity`.
 3. `S1,S2,S3 --runs 1` has separate patch import-stress baselines.
 4. `A1 --runs 1` has a separate patch import-stress baseline.
 5. `C1` and `C2` pass bounded `--max-txns 3000` and `--max-txns 10000`

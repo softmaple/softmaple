@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
+import { EventGraph } from "../graph/event-graph";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { GraphEvent } from "../types";
 
@@ -149,6 +150,35 @@ describe("paper-style replay lifecycle", () => {
     expect(replica.getText()).toHaveLength(100_000);
     expect(PersistentUtf16Rope.getInstrumentation().flattenCount).toBe(1);
   }, 30_000);
+
+  it("loads a persisted linear history without retaining replay records", () => {
+    const events: GraphEvent[] = [];
+    let parent: ReadonlySet<string> = new Set();
+    for (let index = 0; index < 10_000; index++) {
+      const event: GraphEvent = {
+        id: `persisted:${index}`,
+        parentVersion: parent,
+        operation: { type: OPERATION_TYPE.INSERT, index, text: "x" },
+        timestamp: index,
+      };
+      events.push(event);
+      parent = new Set([event.id]);
+    }
+
+    const replica = new EgWalkerReplica(
+      "persisted",
+      "",
+      EventGraph.fromEvents(events),
+    );
+
+    expect(replica.getText()).toBe("x".repeat(events.length));
+    expect(replica.getReplayStats()).toMatchObject({
+      fullReplays: 1,
+      sequenceRecordCount: 0,
+      replayCacheEvents: 0,
+      checkpointCount: 32,
+    });
+  });
 
   it("shares checkpoint leaves instead of retaining full string copies", () => {
     const replica = new EgWalkerReplica("sharing", "x".repeat(8_192));

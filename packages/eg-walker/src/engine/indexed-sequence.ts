@@ -186,6 +186,39 @@ export class IndexedSequence<T extends object> {
     this.insertIntoLeaf(leaf, offset, item);
   }
 
+  /** Insert a small contiguous run with one tree lookup and aggregate walk. */
+  insertMany(index: number, items: ReadonlyArray<T>): void {
+    if (index < 0 || index > this.length) {
+      throw new Error(`Insert index ${index} out of bounds`);
+    }
+    if (items.length === 0) {
+      return;
+    }
+    // The optimized path is intentionally leaf-sized. Larger caller batches
+    // retain the exact single-insert semantics while Fugue's hot marker runs
+    // (two or three items) use one splice and one ancestor propagation.
+    if (items.length > LEAF_CAPACITY) {
+      for (let offset = 0; offset < items.length; offset++) {
+        this.insert(index + offset, items[offset]!);
+      }
+      return;
+    }
+
+    this.structuralOperationCount++;
+    if (!this.root) {
+      const leaf = createLeaf<T>();
+      this.root = leaf;
+      this.insertManyIntoLeaf(leaf, 0, items);
+      return;
+    }
+
+    const landing =
+      index === this.length
+        ? this.findRightmostLeaf()
+        : this.findLeafByRecordIndex(index);
+    this.insertManyIntoLeaf(landing.leaf, landing.offset, items);
+  }
+
   push(item: T): void {
     this.insert(this.length, item);
   }
@@ -411,6 +444,36 @@ export class IndexedSequence<T extends object> {
     }
 
     this.propagateDelta(leaf, 1, prepare, effect, anchor);
+
+    if (leaf.items.length > LEAF_CAPACITY) {
+      this.splitLeaf(leaf);
+    }
+  }
+
+  private insertManyIntoLeaf(
+    leaf: LeafNode<T>,
+    offset: number,
+    items: ReadonlyArray<T>,
+  ): void {
+    const prepareWeights = items.map(this.prepareWeight);
+    const effectWeights = items.map(this.effectWeight);
+    const anchorWeights = items.map(this.anchorWeight);
+    const prepareSum = sumWeights(prepareWeights);
+    const effectSum = sumWeights(effectWeights);
+    const anchorSum = sumWeights(anchorWeights);
+
+    leaf.items.splice(offset, 0, ...items);
+    leaf.prepareWeights.splice(offset, 0, ...prepareWeights);
+    leaf.effectWeights.splice(offset, 0, ...effectWeights);
+    leaf.anchorWeights.splice(offset, 0, ...anchorWeights);
+
+    for (let index = offset; index < leaf.items.length; index++) {
+      const item = leaf.items[index];
+      if (item !== undefined) {
+        this.locationsByItem.set(item, { leaf, offsetInLeaf: index });
+      }
+    }
+    this.propagateDelta(leaf, items.length, prepareSum, effectSum, anchorSum);
 
     if (leaf.items.length > LEAF_CAPACITY) {
       this.splitLeaf(leaf);
@@ -805,3 +868,6 @@ export class IndexedSequence<T extends object> {
     }
   }
 }
+
+const sumWeights = (weights: ReadonlyArray<number>): number =>
+  weights.reduce((sum, weight) => sum + weight, 0);

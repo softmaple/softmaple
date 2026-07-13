@@ -135,11 +135,17 @@ export class EgWalkerEngine {
   ): GeneratedDocument {
     this.reset(events, initialText, options);
 
-    const transformedOperations: ExternalOperation[] = [];
+    const collectTransformedOperations =
+      options.collectTransformedOperations !== false;
+    const transformedOperations: ExternalOperation[] | undefined =
+      collectTransformedOperations ? [] : undefined;
 
     for (const event of events) {
-      const transformed = this.processEvent(event);
-      transformedOperations.push(...transformed);
+      const transformed = this.processEvent(
+        event,
+        collectTransformedOperations,
+      );
+      transformedOperations?.push(...transformed);
     }
 
     // The typed-run coalescing path may have left an open buffer of
@@ -156,7 +162,7 @@ export class EgWalkerEngine {
         return textBuffer.toString();
       },
       textBuffer,
-      transformedOperations,
+      transformedOperations: transformedOperations ?? [],
       stats: {
         retreatCount: this.retreatCount,
         advanceCount: this.advanceCount,
@@ -221,7 +227,7 @@ export class EgWalkerEngine {
     }
     this.graph = graph;
 
-    const transformed = this.processEvent(event);
+    const transformed = this.processEvent(event, true);
     // {@link EgWalkerReplica.applyRemoteEvent} reads the returned `text`
     // (and then `getText()`) immediately after this call, so the
     // incremental return value must reflect the post-event document. This
@@ -444,7 +450,10 @@ export class EgWalkerEngine {
     }
   }
 
-  private processEvent(event: GraphEvent): ExternalOperation[] {
+  private processEvent(
+    event: GraphEvent,
+    collectTransformedOperations: boolean,
+  ): ReadonlyArray<ExternalOperation> {
     // Section 3.4 "internal-document" fast path.
     //
     // When the event's parent version already equals the engine's current
@@ -459,7 +468,7 @@ export class EgWalkerEngine {
     // below, which retreats overlapping inserts/deletes back to the
     // event's prepare-view and re-advances after applying.
     if (this.isNonConflictingRun(event)) {
-      const transformed = this.apply(event);
+      const transformed = this.apply(event, collectTransformedOperations);
       this.currentVersion = new Set([event.id]);
       this.nonConflictingRunCount++;
       this.samplePeakSequenceRecordCount();
@@ -478,7 +487,7 @@ export class EgWalkerEngine {
       this.advance(eventId);
     }
 
-    const transformed = this.apply(event);
+    const transformed = this.apply(event, collectTransformedOperations);
     this.currentVersion = new Set([event.id]);
     this.fullReplayCount++;
     this.samplePeakSequenceRecordCount();
@@ -616,15 +625,28 @@ export class EgWalkerEngine {
     }
   }
 
-  private apply(event: GraphEvent): ExternalOperation[] {
+  private apply(
+    event: GraphEvent,
+    collectTransformedOperations: boolean,
+  ): ReadonlyArray<ExternalOperation> {
     const operation = event.operation;
     this.assertOperationInPrepareView(event);
 
     if (operation.type === OPERATION_TYPE.INSERT) {
-      return applyInsert(event, operation, this.insertDeps);
+      return applyInsert(
+        event,
+        operation,
+        this.insertDeps,
+        collectTransformedOperations,
+      );
     }
 
-    return applyDelete(event, operation, this.deleteDeps);
+    return applyDelete(
+      event,
+      operation,
+      this.deleteDeps,
+      collectTransformedOperations,
+    );
   }
 
   /**

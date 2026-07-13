@@ -187,6 +187,39 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
       expect(checkpoints.misses).toBe(1);
       expect(checkpoints.hits).toBe(0);
     });
+
+    it("reports the fresh engine counters after a closed-batch partial replay", () => {
+      const api = new EgWalkerReplica("r1");
+      const root: GraphEvent = {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "r" },
+        timestamp: 0,
+      };
+      const sibling = (id: string, text: string): GraphEvent => ({
+        id,
+        parentVersion: new Set([root.id]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text },
+        timestamp: 1,
+      });
+
+      api.applyRemoteEvents([
+        root,
+        sibling("alice:0", "a"),
+        sibling("bob:0", "b"),
+      ]);
+      const before = api.getReplayStats();
+
+      api.applyRemoteEvents([sibling("carol:0", "c"), sibling("dave:0", "d")]);
+      const after = api.getReplayStats();
+
+      expect(after.partialReplays).toBe(before.partialReplays + 1);
+      expect(after.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
+      expect(after.engineRetreats).toBeGreaterThan(before.engineRetreats);
+      expect(after.sequenceTreeOperations).toBeGreaterThan(
+        before.sequenceTreeOperations,
+      );
+    });
   });
 
   describe("lastReplaySource", () => {

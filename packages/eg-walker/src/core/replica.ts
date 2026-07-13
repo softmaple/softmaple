@@ -27,6 +27,7 @@ import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import {
   CriticalCheckpointStore,
+  MAX_RETAINED_CHECKPOINTS,
   type CriticalCheckpoint,
   type CriticalCheckpointSnapshot,
   type CriticalCheckpointStoreSnapshot,
@@ -50,6 +51,7 @@ import type {
   EngineSequenceRecord,
 } from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
+import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
 import { PartialReplayManager } from "../engine/partial-replay";
 import {
   readReplicaMetadata,
@@ -59,6 +61,12 @@ import {
   RemoteEventBuffer,
   type RemoteIntegrationEffect,
 } from "./internals/remote-event-buffer";
+import {
+  isClosedReadyBatch,
+  isLinearBatchFromVersion,
+  isOrderedLinearBatchFromVersion,
+  isTopologicallyReadyBatch,
+} from "./internals/batch-replay-shape";
 import { assertPendingCandidatesAcyclic } from "./internals/pending-causality";
 import {
   consumeDecodedNativeSnapshotGraphSource,
@@ -205,7 +213,6 @@ export class EgWalkerReplica {
     private readonly replicaId: string,
     initialText: string = "",
     eventGraph?: EventGraph,
-    replayOrder?: ReadonlyArray<GraphEvent>,
     options: ReplicaConstructorOptions = {},
   ) {
     assertWellFormedUtf16(initialText, "initial document text");
@@ -242,7 +249,7 @@ export class EgWalkerReplica {
     }
     this.nextSequenceNumber =
       options.nextSequenceNumber ?? this.inferNextSequenceNumber();
-    if (this.eventGraph && this.eventGraph.getAllEvents().length > 0) {
+    if (this.eventGraph && this.eventGraph.getEventCount() > 0) {
       // A prebuilt graph bypasses {@link applyRemoteEvent}, so its event
       // payloads have never been screened by
       // {@link assertRemoteEventWellFormed}. Validate them here before
@@ -253,7 +260,7 @@ export class EgWalkerReplica {
         assertRemoteEventWellFormed(event);
       }
       if (!options.skipReplay) {
-        this.fullReplay(replayOrder);
+        this.fullReplay();
       }
     }
     if (options.restoredCheckpoints) {
@@ -387,12 +394,7 @@ export class EgWalkerReplica {
     const initialText =
       metadata.initialText ??
       (topologicalOrder.length === 0 ? serialized.text : "");
-    let replica = new EgWalkerReplica(
-      replicaId,
-      initialText,
-      graph,
-      topologicalOrder,
-    );
+    let replica = new EgWalkerReplica(replicaId, initialText, graph);
     // Most restores can rebuild from the persisted graph with one replay.
     // Older/order-sensitive payloads may still need the live remote-apply
     // compatibility path to reproduce their persisted text exactly.
@@ -493,7 +495,7 @@ export class EgWalkerReplica {
       deleteTargets = snapshot.deleteTargets;
     }
 
-    return new EgWalkerReplica(replicaId, validated.initialText, graph, [], {
+    return new EgWalkerReplica(replicaId, validated.initialText, graph, {
       skipReplay: true,
       restoredText: validated.text,
       currentVersion: snapshotFrontier,
@@ -519,20 +521,14 @@ export class EgWalkerReplica {
     const validated = validatePortableSnapshotHeaderOnly(snapshot);
     const lazyEventGraph = createPortableSnapshotGraphSource(validated);
 
-    return new EgWalkerReplica(
-      replicaId,
-      validated.initialText,
-      undefined,
-      [],
-      {
-        skipReplay: true,
-        restoredText: validated.text,
-        currentVersion: new Set(validated.currentVersion),
-        nextSequenceNumber: validated.nextSequenceNumber,
-        lazyEventGraph,
-        deferLocalReplay: true,
-      },
-    );
+    return new EgWalkerReplica(replicaId, validated.initialText, undefined, {
+      skipReplay: true,
+      restoredText: validated.text,
+      currentVersion: new Set(validated.currentVersion),
+      nextSequenceNumber: validated.nextSequenceNumber,
+      lazyEventGraph,
+      deferLocalReplay: true,
+    });
   }
 
   /**
@@ -605,9 +601,35 @@ export class EgWalkerReplica {
     const clonedEvents = events.map(cloneRemoteEvent);
     const graph = this.ensureEventGraph();
     const remoteEvents = this.ensureRemoteEvents();
-    const prepared = prepareRemoteBatch(clonedEvents, graph, remoteEvents);
+    const isTopologicallyReady =
+      clonedEvents.length > 1 &&
+      isTopologicallyReadyBatch(clonedEvents, graph, remoteEvents.pendingCount);
+    const prepared = isTopologicallyReady
+      ? prepareKnownNewBatch(clonedEvents)
+      : prepareRemoteBatch(clonedEvents, graph, remoteEvents);
     if (prepared.candidates.length === 0) {
       return { results: prepared.results, operations: [] };
+    }
+
+    const candidateEvents = isTopologicallyReady
+      ? clonedEvents
+      : prepared.candidates.map(({ event }) => event);
+    if (
+      prepared.candidates.length > 1 &&
+      (isTopologicallyReady ||
+        isClosedReadyBatch(candidateEvents, graph, remoteEvents.pendingCount))
+    ) {
+      return this.applyClosedRemoteBatch(
+        prepared,
+        graph,
+        candidateEvents,
+        isTopologicallyReady
+          ? isOrderedLinearBatchFromVersion(
+              candidateEvents,
+              this.currentVersion,
+            )
+          : undefined,
+      );
     }
 
     const snapshot = this.captureRemoteBatchSnapshot();
@@ -659,6 +681,108 @@ export class EgWalkerReplica {
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
     }
+  }
+
+  /**
+   * Integrate a causally-closed batch without invoking the single-event
+   * pending/drain path. Linear batches edit the persistent rope directly;
+   * divergent batches append once and replay once, so a batch of N events
+   * cannot accidentally trigger N successively larger replays.
+   */
+  private applyClosedRemoteBatch(
+    prepared: PreparedRemoteBatch,
+    graph: EventGraph,
+    events: ReadonlyArray<GraphEvent>,
+    orderedLinear?: boolean,
+  ): ApplyRemoteEventsResult {
+    const snapshot = this.captureRemoteBatchSnapshot();
+    const transaction = graph.beginAppendTransaction();
+
+    try {
+      if (
+        orderedLinear ??
+        isLinearBatchFromVersion(events, this.currentVersion)
+      ) {
+        const operations = this.applyClosedLinearBatch(prepared, graph);
+        transaction.commit();
+        return { results: prepared.results, operations };
+      }
+
+      for (const candidate of prepared.candidates) {
+        graph.addEvent(candidate.event);
+        prepared.results[candidate.inputIndex] = {
+          status: APPLY_REMOTE_EVENT_STATUS.Integrated,
+          operation: null,
+        };
+      }
+
+      this.engineStatsOverride = null;
+      const checkpoint = this.criticalCheckpoints.pickFor(graph);
+      if (checkpoint === null) {
+        this.fullReplay();
+      } else {
+        this.partialReplayFromCheckpoint(checkpoint);
+        this.maybeAdvanceCheckpoint();
+      }
+
+      transaction.commit();
+      return { results: prepared.results, operations: null };
+    } catch (error) {
+      transaction.rollback();
+      this.restoreRemoteBatchSnapshot(snapshot, graph);
+      throw error;
+    }
+  }
+
+  private applyClosedLinearBatch(
+    prepared: PreparedRemoteBatch,
+    graph: EventGraph,
+  ): ReadonlyArray<PositionOperation> {
+    const previousStats = this.engineStatsOverride ?? this.engine?.getStats();
+    this.captureEnginePeakBeforeSwap();
+    this.engine = null;
+    this.engineStatsOverride =
+      previousStats === undefined
+        ? null
+        : withLiveSequenceRecordCount(previousStats, 0);
+    this.engineRecoveryAnchor = null;
+    this.setReplayCacheBase(null);
+    this.replayCacheEvents = 0;
+    this.replayCacheBytes = 0;
+
+    const operations: PositionOperation[] = [];
+    const checkpointStart = Math.max(
+      0,
+      prepared.candidates.length - MAX_RETAINED_CHECKPOINTS,
+    );
+    for (const [index, candidate] of prepared.candidates.entries()) {
+      const { event } = candidate;
+      graph.addEvent(event);
+      const operation = this.validateLocalOperation(event.operation);
+      if (operation !== null) {
+        this.applyPlainDocumentOperation(operation);
+      }
+      const transformedOperation = toPositionOperation(operation);
+      prepared.results[candidate.inputIndex] = {
+        status: APPLY_REMOTE_EVENT_STATUS.Integrated,
+        operation: transformedOperation,
+      };
+      if (transformedOperation !== null) {
+        operations.push(transformedOperation);
+      }
+      if (index >= checkpointStart) {
+        this.currentVersion = new Set([event.id]);
+        this.maybeAdvanceCheckpoint();
+      }
+    }
+    const last = prepared.candidates[prepared.candidates.length - 1];
+    if (last !== undefined) {
+      this.currentVersion = new Set([last.event.id]);
+    }
+    this.restoredSequenceRecords = null;
+    this.incrementalApplyCount += prepared.candidates.length;
+    this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
+    return operations;
   }
 
   /**
@@ -838,6 +962,7 @@ export class EgWalkerReplica {
         graph,
         anchor.checkpoint,
         snapshot.currentVersion,
+        { collectTransformedOperations: false },
       ).engine;
     } else {
       restoredEngine = EgWalkerEngine.fromRecoveryState(anchor.state, graph);
@@ -997,39 +1122,131 @@ export class EgWalkerReplica {
     return replica;
   }
 
-  private fullReplay(
-    replayOrder?: ReadonlyArray<GraphEvent>,
-  ): ReadonlyArray<ExternalOperation> {
+  private fullReplay(): void {
     const graph = this.ensureEventGraph();
-    // Section 3.4 of the paper: walk the event graph in branch-preserving
-    // order so each parent transition matches the engine's current version
-    // and triggers the non-conflicting-run fast path instead of forcing a
-    // retreat/advance round-trip across an interleaved Kahn order. The
-    // columnar codec keeps using {@link EventGraph.getTopologicalOrder}
-    // (Kahn) so persisted on-disk bytes stay stable.
     this.captureEnginePeakBeforeSwap();
-    const sortedEvents =
-      replayOrder ?? graph.getBranchPreservingTopologicalOrder();
-    const engine = new EgWalkerEngine();
-    const generated = engine.generate(sortedEvents, this.initialText, {
-      eventGraph: graph,
-    });
-    this.documentBuffer = generated.textBuffer;
+    const sections = planCriticalReplaySections(graph);
+    let replayedEventCount = 0;
+    let aggregateStats: EngineStats | null = null;
+    let retainedEngine: EgWalkerEngine | null = null;
+    let retainedBaseCheckpoint: CriticalCheckpoint | null = null;
+    let retainedEventIds: ReadonlyArray<EventId> = [];
+
+    this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
     this.documentCache = null;
+    this.currentVersion = new Set();
+
+    for (const [sectionIndex, section] of sections.entries()) {
+      const baseCheckpoint: CriticalCheckpoint = {
+        version: new Set(section.baseFrontier),
+        textBuffer: this.documentBuffer,
+        eventCount: replayedEventCount,
+      };
+
+      if (isLinearReplaySection(section.events, section.baseFrontier)) {
+        this.replayLinearSection(
+          section.events,
+          section.baseFrontier,
+          replayedEventCount,
+          sections.length === 1,
+        );
+      } else {
+        const engine = new EgWalkerEngine();
+        const generated = engine.generate(section.events, "", {
+          initialVersion: section.baseFrontier,
+          initialTextBuffer: this.documentBuffer,
+          eventGraph: graph,
+          eventOrder: section.events,
+          collectTransformedOperations: false,
+        });
+        this.documentBuffer = generated.textBuffer;
+        this.documentCache = null;
+        this.currentVersion = new Set(section.endFrontier);
+        aggregateStats = mergeEngineStats(aggregateStats, generated.stats);
+
+        const isLastSection = sectionIndex === sections.length - 1;
+        if (
+          isLastSection &&
+          section.endFrontier.size > 1 &&
+          canRetainReplayEngine(
+            section.events.length,
+            this.documentBuffer,
+            generated.stats,
+          )
+        ) {
+          retainedEngine = engine;
+          retainedBaseCheckpoint = baseCheckpoint;
+          retainedEventIds = section.events.map(({ id }) => id);
+        }
+      }
+
+      replayedEventCount += section.events.length;
+      this.criticalCheckpoints.record(
+        section.endFrontier,
+        this.documentBuffer,
+        replayedEventCount,
+      );
+    }
+
     this.currentVersion = graph.getFrontier();
-    this.engine = engine;
-    this.captureEngineRecoveryAnchor(engine, graph);
-    this.setReplayCacheBase(new Set());
-    this.replayCacheEvents = graph.getEventCount();
+    this.engine = retainedEngine;
+    this.engineStatsOverride =
+      aggregateStats === null
+        ? null
+        : withLiveSequenceRecordCount(
+            aggregateStats,
+            retainedEngine?.getStats().sequenceRecordCount ?? 0,
+          );
+    this.replicaPeakSequenceRecordCount = Math.max(
+      this.replicaPeakSequenceRecordCount,
+      aggregateStats?.peakSequenceRecordCount ?? 0,
+    );
+    if (retainedEngine !== null && retainedBaseCheckpoint !== null) {
+      this.engineRecoveryAnchor = {
+        kind: "checkpoint",
+        checkpoint: retainedBaseCheckpoint,
+        estimatedBytes: 0,
+      };
+      this.setReplayCacheBase(retainedBaseCheckpoint.version, retainedEventIds);
+      this.replayCacheEvents = retainedEventIds.length;
+    } else {
+      this.engineRecoveryAnchor = null;
+      this.setReplayCacheBase(null);
+      this.replayCacheEvents = 0;
+    }
     this.restoredSequenceRecords = null;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     this.refreshReplayCacheMetrics();
-    this.evictReplayCacheIfNeeded();
-    // Returned for the cold-start single-event path in {@link advanceWithEvent};
-    // other callers (constructor seed, retreat-needed full replay) ignore
-    // this because the array spans the whole graph, not a single event.
-    return generated.transformedOperations;
+    graph.releaseTraversalCaches();
+  }
+
+  /** Apply a causally-linear replay section directly to the persistent rope. */
+  private replayLinearSection(
+    events: ReadonlyArray<GraphEvent>,
+    baseVersion: Version,
+    eventCountBeforeSection: number,
+    retainTrailingCheckpoints: boolean,
+  ): void {
+    const checkpointStart = retainTrailingCheckpoints
+      ? Math.max(0, events.length - MAX_RETAINED_CHECKPOINTS)
+      : events.length;
+    for (const [index, event] of events.entries()) {
+      const operation = this.validateLocalOperation(event.operation);
+      if (operation !== null) {
+        this.applyPlainDocumentOperation(operation);
+      }
+      if (index >= checkpointStart) {
+        this.criticalCheckpoints.record(
+          new Set([event.id]),
+          this.documentBuffer,
+          eventCountBeforeSection + index + 1,
+        );
+      }
+    }
+    const last = events[events.length - 1];
+    this.currentVersion =
+      last === undefined ? new Set(baseVersion) : new Set([last.id]);
   }
 
   private engineStateForSnapshot(graph: EventGraph): {
@@ -1297,6 +1514,7 @@ export class EgWalkerReplica {
       graph,
       checkpoint,
       frontier,
+      { collectTransformedOperations: false },
     );
     this.engine = result.engine;
     this.engineRecoveryAnchor = {
@@ -1366,31 +1584,34 @@ function toRemoteIntegrationEffect(
   if (!op) {
     return { operation: null, exact: true };
   }
-  if (op.type === OPERATION_TYPE.INSERT) {
-    if (op.text.length === 0) {
-      return { operation: null, exact: true };
+  return { operation: toPositionOperation(op), exact: true };
+}
+
+const toPositionOperation = (
+  operation: ExternalOperation | null,
+): PositionOperation | null => {
+  if (operation === null) {
+    return null;
+  }
+  if (operation.type === OPERATION_TYPE.INSERT) {
+    if (operation.text.length === 0) {
+      return null;
     }
     return {
-      operation: {
-        type: OPERATION_TYPE.INSERT,
-        index: op.index,
-        length: op.text.length,
-      },
-      exact: true,
+      type: OPERATION_TYPE.INSERT,
+      index: operation.index,
+      length: operation.text.length,
     };
   }
-  if (op.length === 0) {
-    return { operation: null, exact: true };
+  if (operation.length === 0) {
+    return null;
   }
   return {
-    operation: {
-      type: OPERATION_TYPE.DELETE,
-      index: op.index,
-      length: op.length,
-    },
-    exact: true,
+    type: OPERATION_TYPE.DELETE,
+    index: operation.index,
+    length: operation.length,
   };
-}
+};
 
 const prepareRemoteBatch = (
   events: ReadonlyArray<GraphEvent>,
@@ -1438,6 +1659,23 @@ const prepareRemoteBatch = (
     ),
   };
 };
+
+/**
+ * Prepare a batch already proven new, causally closed, and topological.
+ *
+ * The closed-batch executor never consults `firstInputIndexById`, so avoid
+ * materialising another event-ID map proportional to a large persistence
+ * import. Results still stay aligned with the public input contract.
+ */
+const prepareKnownNewBatch = (
+  events: ReadonlyArray<GraphEvent>,
+): PreparedRemoteBatch => ({
+  candidates: events.map((event, inputIndex) => ({ event, inputIndex })),
+  results: events.map(() => ({
+    status: APPLY_REMOTE_EVENT_STATUS.Duplicate,
+  })),
+  firstInputIndexById: new Map(),
+});
 
 const topologicallyOrderRemoteCandidates = (
   candidates: ReadonlyArray<RemoteBatchCandidate>,
@@ -1532,6 +1770,78 @@ const versionsEqual = (
   }
   return true;
 };
+
+const isLinearReplaySection = (
+  events: ReadonlyArray<GraphEvent>,
+  baseVersion: Version,
+): boolean => {
+  const first = events[0];
+  if (first === undefined) {
+    return true;
+  }
+  if (!versionsEqual(first.parentVersion, baseVersion)) {
+    return false;
+  }
+  let previousId = first.id;
+  for (let index = 1; index < events.length; index++) {
+    const event = events[index]!;
+    if (
+      event.parentVersion.size !== 1 ||
+      !event.parentVersion.has(previousId)
+    ) {
+      return false;
+    }
+    previousId = event.id;
+  }
+  return true;
+};
+
+const canRetainReplayEngine = (
+  eventCount: number,
+  document: PersistentUtf16Rope,
+  stats: EngineStats,
+): boolean =>
+  eventCount <= MAX_REPLAY_CACHE_EVENTS &&
+  document.length * 2 +
+    stats.sequenceRecordCount * ESTIMATED_REPLAY_RECORD_BYTES +
+    eventCount * ESTIMATED_DELETE_TARGET_BYTES <=
+    MAX_REPLAY_CACHE_BYTES;
+
+const mergeEngineStats = (
+  aggregate: EngineStats | null,
+  next: EngineStats,
+): EngineStats => {
+  if (aggregate === null) {
+    return next;
+  }
+  return {
+    retreatCount: aggregate.retreatCount + next.retreatCount,
+    advanceCount: aggregate.advanceCount + next.advanceCount,
+    eventsProcessed: aggregate.eventsProcessed + next.eventsProcessed,
+    nonConflictingRunCount:
+      aggregate.nonConflictingRunCount + next.nonConflictingRunCount,
+    fullReplayCount: aggregate.fullReplayCount + next.fullReplayCount,
+    sequenceRecordCount: next.sequenceRecordCount,
+    peakSequenceRecordCount: Math.max(
+      aggregate.peakSequenceRecordCount,
+      next.peakSequenceRecordCount,
+    ),
+    integrationProbeCount:
+      aggregate.integrationProbeCount + next.integrationProbeCount,
+    fugueComparisons: aggregate.fugueComparisons + next.fugueComparisons,
+    fugueMarkerOperations:
+      aggregate.fugueMarkerOperations + next.fugueMarkerOperations,
+    fugueRotations: aggregate.fugueRotations + next.fugueRotations,
+    fugueRebuilds: aggregate.fugueRebuilds + next.fugueRebuilds,
+    sequenceTreeOperations:
+      aggregate.sequenceTreeOperations + next.sequenceTreeOperations,
+  };
+};
+
+const withLiveSequenceRecordCount = (
+  stats: EngineStats,
+  sequenceRecordCount: number,
+): EngineStats => ({ ...stats, sequenceRecordCount });
 
 const recordsUsePlainIndexes = (
   records: ReadonlyArray<EngineSequenceRecord>,

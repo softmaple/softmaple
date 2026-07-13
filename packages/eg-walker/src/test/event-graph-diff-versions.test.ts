@@ -155,12 +155,12 @@ describe("diffVersions topological diff", () => {
     const left = branch("L");
     const right = branch("R");
 
-    // Spy on getParents so we can observe how many distinct events the
+    // Spy on the allocation-free parent iterator so we can observe how many distinct events the
     // diff walks. Only the 10 branch events plus the shared tip need to
     // be visited; the 499 pre-tip events MUST remain untouched.
-    const getParents = graph.getParents.bind(graph);
-    const spy = vi.spyOn(graph, "getParents").mockImplementation((id) => {
-      return getParents(id);
+    const iterateParents = graph.iterateParents.bind(graph);
+    const spy = vi.spyOn(graph, "iterateParents").mockImplementation((id) => {
+      return iterateParents(id);
     });
 
     const diff = graph.diffVersions(
@@ -207,9 +207,9 @@ describe("diffVersions topological diff", () => {
       operation: { type: OPERATION_TYPE.INSERT, index: 50, text: "R" },
     });
 
-    const getParents = graph.getParents.bind(graph);
-    const spy = vi.spyOn(graph, "getParents").mockImplementation((id) => {
-      return getParents(id);
+    const iterateParents = graph.iterateParents.bind(graph);
+    const spy = vi.spyOn(graph, "iterateParents").mockImplementation((id) => {
+      return iterateParents(id);
     });
 
     const diff = graph.diffVersions(new Set(["L-tip"]), new Set(["R-tip"]));

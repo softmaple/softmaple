@@ -31,6 +31,10 @@ export interface PartialReplayResult extends GeneratedDocument {
   readonly engine: EgWalkerEngine;
 }
 
+export interface PartialReplayOptions {
+  readonly collectTransformedOperations?: boolean;
+}
+
 /**
  * Section 3.6 partial replay.
  *
@@ -47,6 +51,7 @@ export class PartialReplayManager {
     graph: EventGraph,
     checkpoint: ReplayCheckpoint,
     targetVersion: Version = graph.getFrontier(),
+    options: PartialReplayOptions = {},
   ): PartialReplayResult {
     const replayedEventIds = this.getReplayEventIds(
       graph,
@@ -65,6 +70,8 @@ export class PartialReplayManager {
       initialTextBuffer,
       eventGraph: graph,
       eventOrder: events,
+      collectTransformedOperations:
+        options.collectTransformedOperations ?? true,
     });
     const textBuffer = generated.textBuffer;
 

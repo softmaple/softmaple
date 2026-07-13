@@ -33,6 +33,31 @@ describe("EgWalkerEngine", () => {
     expect(generated.stats.advanceCount).toBe(0);
   });
 
+  it("can replay without retaining transformed operations", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      },
+    ];
+
+    const generated = new EgWalkerEngine().generate(events, "", {
+      collectTransformedOperations: false,
+    });
+
+    expect(generated.text).toBe("AB");
+    expect(generated.transformedOperations).toEqual([]);
+    expect(generated.stats.eventsProcessed).toBe(events.length);
+  });
+
   it("treats overlapping concurrent deletes as idempotent effect deletes", () => {
     const events: GraphEvent[] = [
       {

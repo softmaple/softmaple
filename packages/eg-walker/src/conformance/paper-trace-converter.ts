@@ -33,6 +33,8 @@ interface UnicodeOffsetState {
   readonly nonBmpCodePointPositions: ReadonlyArray<number>;
 }
 
+const EMPTY_NON_BMP_POSITIONS: ReadonlyArray<number> = [];
+
 export const convertPaperTraceToAtomicEvents = (
   dataset: string,
   trace: AtomicPaperTrace,
@@ -53,7 +55,10 @@ export const convertPaperTraceToAtomicEvents = (
   const transactionUnicodeStates: Array<UnicodeOffsetState | undefined> =
     new Array(trace.txns.length);
   const nextSequenceByAgent = new Map<string, number>();
-  const referenceSession = new ScalarReferenceSession();
+  const validateFinalText = options.validateFinalText ?? true;
+  const referenceSession = needsScalarReferenceSession(trace, validateFinalText)
+    ? new ScalarReferenceSession()
+    : undefined;
 
   for (
     let transactionIndex = 0;
@@ -118,7 +123,7 @@ export const convertPaperTraceToAtomicEvents = (
           timestamp: transactionIndex + operationOffset,
         };
         events.push(event);
-        referenceSession.applyEvent(event);
+        referenceSession?.applyEvent(event);
         if (events.length === options.maxEvents) {
           return events;
         }
@@ -143,7 +148,7 @@ export const convertPaperTraceToAtomicEvents = (
           timestamp: transactionIndex + operationOffset,
         };
         events.push(event);
-        referenceSession.applyEvent(event);
+        referenceSession?.applyEvent(event);
         if (events.length === options.maxEvents) {
           return events;
         }
@@ -166,7 +171,10 @@ export const convertPaperTraceToAtomicEvents = (
     transactionUnicodeStates[transactionIndex] = unicodeState;
   }
 
-  if (options.validateFinalText ?? true) {
+  if (validateFinalText) {
+    if (referenceSession === undefined) {
+      throw new Error(`${dataset}: missing scalar reference session`);
+    }
     const actual = referenceSession.materializeVersion(
       scalarReferenceFrontier(events),
     );
@@ -205,8 +213,8 @@ const unicodeStateForParentVersion = (
   version: Version,
   transaction: AtomicPaperTransaction,
   transactionUnicodeStates: ReadonlyArray<UnicodeOffsetState | undefined>,
-  referenceSession: ScalarReferenceSession,
-): UnicodeOffsetState => {
+  referenceSession: ScalarReferenceSession | undefined,
+): UnicodeOffsetState | undefined => {
   if (transaction.parents.length === 0) {
     return { scalarLength: 0, nonBmpCodePointPositions: [] };
   }
@@ -219,7 +227,42 @@ const unicodeStateForParentVersion = (
       };
     }
   }
-  return unicodeStateFromText(referenceSession.materializeVersion(version));
+  return referenceSession === undefined
+    ? undefined
+    : unicodeStateFromText(referenceSession.materializeVersion(version));
+};
+
+/**
+ * Validation always uses the independent scalar oracle. Benchmark conversion
+ * can omit it when UTF-16 offsets are derivable without materializing merged
+ * parent documents: BMP-only traces have identical scalar/UTF-16 indexes, and
+ * non-BMP linear histories inherit their sparse offset state from one parent.
+ */
+const needsScalarReferenceSession = (
+  trace: AtomicPaperTrace,
+  validateFinalText: boolean,
+): boolean => {
+  if (validateFinalText) {
+    return true;
+  }
+
+  const hasMerge = trace.txns.some(({ parents }) => parents.length > 1);
+  if (!hasMerge) {
+    return false;
+  }
+
+  return trace.txns.some(({ patches }) =>
+    patches.some(([, , insertedText]) => containsNonBmpScalar(insertedText)),
+  );
+};
+
+const containsNonBmpScalar = (text: string): boolean => {
+  for (const character of text) {
+    if (character.length === 2) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const unicodeStateFromText = (text: string): UnicodeOffsetState => ({
@@ -230,33 +273,43 @@ const unicodeStateFromText = (text: string): UnicodeOffsetState => ({
 });
 
 const utf16IndexForScalarIndex = (
-  state: UnicodeOffsetState,
+  state: UnicodeOffsetState | undefined,
   scalarIndex: number,
 ): number =>
-  scalarIndex + lowerBound(state.nonBmpCodePointPositions, scalarIndex);
+  scalarIndex +
+  lowerBound(
+    state?.nonBmpCodePointPositions ?? EMPTY_NON_BMP_POSITIONS,
+    scalarIndex,
+  );
 
 const insertScalar = (
-  state: UnicodeOffsetState,
+  state: UnicodeOffsetState | undefined,
   index: number,
   character: string,
-): UnicodeOffsetState => ({
-  scalarLength: state.scalarLength + 1,
-  nonBmpCodePointPositions: [
-    ...state.nonBmpCodePointPositions
-      .filter((position) => position < index)
-      .map((position) => position),
-    ...(character.length === 2 ? [index] : []),
-    ...state.nonBmpCodePointPositions
-      .filter((position) => position >= index)
-      .map((position) => position + 1),
-  ],
-});
+): UnicodeOffsetState | undefined =>
+  state === undefined
+    ? undefined
+    : {
+        scalarLength: state.scalarLength + 1,
+        nonBmpCodePointPositions: [
+          ...state.nonBmpCodePointPositions
+            .filter((position) => position < index)
+            .map((position) => position),
+          ...(character.length === 2 ? [index] : []),
+          ...state.nonBmpCodePointPositions
+            .filter((position) => position >= index)
+            .map((position) => position + 1),
+        ],
+      };
 
 const deleteScalarRange = (
-  state: UnicodeOffsetState,
+  state: UnicodeOffsetState | undefined,
   index: number,
   length: number,
-): UnicodeOffsetState => {
+): UnicodeOffsetState | undefined => {
+  if (state === undefined) {
+    return undefined;
+  }
   const end = index + length;
   return {
     scalarLength: state.scalarLength - length,
@@ -267,7 +320,7 @@ const deleteScalarRange = (
 };
 
 const assertScalarRange = (
-  state: UnicodeOffsetState,
+  state: UnicodeOffsetState | undefined,
   index: number,
   length: number,
   dataset: string,
@@ -283,7 +336,10 @@ const assertScalarRange = (
       `${dataset}: transaction ${transactionIndex} has invalid scalar length ${length}`,
     );
   }
-  if (index > state.scalarLength || length > state.scalarLength - index) {
+  if (
+    state !== undefined &&
+    (index > state.scalarLength || length > state.scalarLength - index)
+  ) {
     throw new Error(
       `${dataset}: transaction ${transactionIndex} scalar range ${index}..${index + length} exceeds document length ${state.scalarLength}`,
     );

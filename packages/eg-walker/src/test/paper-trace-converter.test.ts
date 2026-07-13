@@ -5,6 +5,7 @@ import {
   convertPaperTraceToAtomicEvents,
   type AtomicPaperTrace,
 } from "../conformance/paper-trace-converter";
+import { ScalarReferenceSession } from "../conformance/scalar-reference-replay";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 describe("convertPaperTraceToAtomicEvents", () => {
@@ -181,6 +182,99 @@ describe("convertPaperTraceToAtomicEvents", () => {
       { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
       { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
     ]);
+  });
+
+  it("skips scalar replay for benchmark conversion of a linear Unicode trace", () => {
+    const trace: AtomicPaperTrace = {
+      endContent: "A😀",
+      txns: [
+        {
+          parents: [],
+          agent: 0,
+          patches: [[0, 0, "😀b"]],
+        },
+        {
+          parents: [0],
+          agent: 1,
+          patches: [
+            [0, 0, "A"],
+            [2, 1, ""],
+          ],
+        },
+      ],
+    };
+    const applyEvent = vi.spyOn(ScalarReferenceSession.prototype, "applyEvent");
+
+    try {
+      const events = convertPaperTraceToAtomicEvents("fast-unicode", trace, {
+        validateFinalText: false,
+      });
+
+      expect(events.map(({ operation }) => operation)).toEqual([
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "😀" },
+        { type: OPERATION_TYPE.INSERT, index: 2, text: "b" },
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        { type: OPERATION_TYPE.DELETE, index: 3, length: 1 },
+      ]);
+      expect(applyEvent).not.toHaveBeenCalled();
+    } finally {
+      applyEvent.mockRestore();
+    }
+  });
+
+  it("skips scalar replay for benchmark conversion of a merged BMP trace", () => {
+    const trace: AtomicPaperTrace = {
+      endContent: "AB",
+      txns: [
+        { parents: [], agent: 0, patches: [[0, 0, "A"]] },
+        { parents: [], agent: 1, patches: [[0, 0, "B"]] },
+        { parents: [0, 1], agent: 2, patches: [[2, 0, "!"]] },
+      ],
+    };
+    const applyEvent = vi.spyOn(ScalarReferenceSession.prototype, "applyEvent");
+
+    try {
+      const events = convertPaperTraceToAtomicEvents("fast-bmp-merge", trace, {
+        validateFinalText: false,
+      });
+
+      expect(events.at(-1)?.operation).toEqual({
+        type: OPERATION_TYPE.INSERT,
+        index: 2,
+        text: "!",
+      });
+      expect(applyEvent).not.toHaveBeenCalled();
+    } finally {
+      applyEvent.mockRestore();
+    }
+  });
+
+  it("keeps scalar replay when a benchmark merge needs Unicode state", () => {
+    const trace: AtomicPaperTrace = {
+      endContent: "A😀B!",
+      txns: [
+        { parents: [], agent: 0, patches: [[0, 0, "😀"]] },
+        { parents: [0], agent: 1, patches: [[0, 0, "A"]] },
+        { parents: [0], agent: 2, patches: [[1, 0, "B"]] },
+        { parents: [1, 2], agent: 3, patches: [[3, 0, "!"]] },
+      ],
+    };
+    const applyEvent = vi.spyOn(ScalarReferenceSession.prototype, "applyEvent");
+
+    try {
+      const events = convertPaperTraceToAtomicEvents("unicode-merge", trace, {
+        validateFinalText: false,
+      });
+
+      expect(events.at(-1)?.operation).toEqual({
+        type: OPERATION_TYPE.INSERT,
+        index: 4,
+        text: "!",
+      });
+      expect(applyEvent).toHaveBeenCalledTimes(4);
+    } finally {
+      applyEvent.mockRestore();
+    }
   });
 
   it("validates with an independent scalar oracle, not EgWalkerEngine", () => {

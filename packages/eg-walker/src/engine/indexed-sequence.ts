@@ -137,20 +137,44 @@ export class IndexedSequence<T extends object> {
   }
 
   positionOf(item: T): number {
-    const location = this.locationsByItem.get(item);
+    const location = this.resolveLocation(item);
     if (!location) {
       return -1;
     }
-    if (location.leaf.items[location.offsetInLeaf] !== item) {
-      // Defensive fallback: the cached offset disagrees with the leaf
-      // contents (should not happen, but be resilient to bugs).
-      const offset = location.leaf.items.indexOf(item);
-      if (offset === -1) {
-        return -1;
-      }
-      location.offsetInLeaf = offset;
-    }
     return this.positionOfNode(location.leaf) + location.offsetInLeaf;
+  }
+
+  /**
+   * Effect-visible UTF-16 width before `item`.
+   *
+   * Unlike `positionOf(item)` followed by `effectIndexBeforePosition`, this
+   * starts at the cached leaf location and accumulates effect weights while
+   * walking upward once. Fugue and document-splice lookups use this combined
+   * query heavily during concurrent replay.
+   */
+  effectIndexOf(item: T): number {
+    const location = this.resolveLocation(item);
+    if (!location) {
+      return -1;
+    }
+
+    let effectIndex = 0;
+    for (let offset = 0; offset < location.offsetInLeaf; offset++) {
+      this.structuralOperationCount++;
+      effectIndex += location.leaf.effectWeights[offset] ?? 0;
+    }
+
+    let current: IndexedNode<T> = location.leaf;
+    while (current.parent) {
+      this.structuralOperationCount++;
+      const parent: InternalNode<T> = current.parent;
+      for (let index = 0; index < current.childIndex; index++) {
+        this.structuralOperationCount++;
+        effectIndex += parent.children[index]?.effectSum ?? 0;
+      }
+      current = parent;
+    }
+    return effectIndex;
   }
 
   clear(): void {
@@ -219,27 +243,29 @@ export class IndexedSequence<T extends object> {
     this.insertManyIntoLeaf(landing.leaf, landing.offset, items);
   }
 
+  /** Insert a small run immediately before a known object without rank lookup. */
+  insertManyBefore(anchor: T, items: ReadonlyArray<T>): boolean {
+    return this.insertManyAtAnchor(anchor, items, false);
+  }
+
+  /** Insert a small run immediately after a known object without rank lookup. */
+  insertManyAfter(anchor: T, items: ReadonlyArray<T>): boolean {
+    return this.insertManyAtAnchor(anchor, items, true);
+  }
+
   push(item: T): void {
     this.insert(this.length, item);
   }
 
   updateItem(item: T): void {
     this.structuralOperationCount++;
-    const location = this.locationsByItem.get(item);
+    const location = this.resolveLocation(item);
     if (!location) {
       return;
     }
 
     const leaf = location.leaf;
-    let offset = location.offsetInLeaf;
-    if (leaf.items[offset] !== item) {
-      const recovered = leaf.items.indexOf(item);
-      if (recovered === -1) {
-        return;
-      }
-      offset = recovered;
-      location.offsetInLeaf = recovered;
-    }
+    const offset = location.offsetInLeaf;
 
     const oldPrepare = leaf.prepareWeights[offset] ?? 0;
     const oldEffect = leaf.effectWeights[offset] ?? 0;
@@ -398,6 +424,55 @@ export class IndexedSequence<T extends object> {
     }
 
     this.root = this.buildBalancedTree(leaves);
+  }
+
+  private resolveLocation(item: T): ItemLocation<T> | undefined {
+    const location = this.locationsByItem.get(item);
+    if (!location) {
+      return undefined;
+    }
+    if (location.leaf.items[location.offsetInLeaf] === item) {
+      return location;
+    }
+
+    // Defensive fallback: cached offsets should be exact, but recovering here
+    // keeps every object-anchored operation resilient to a maintenance bug.
+    const offset = location.leaf.items.indexOf(item);
+    if (offset === -1) {
+      return undefined;
+    }
+    location.offsetInLeaf = offset;
+    return location;
+  }
+
+  private insertManyAtAnchor(
+    anchor: T,
+    items: ReadonlyArray<T>,
+    after: boolean,
+  ): boolean {
+    const location = this.resolveLocation(anchor);
+    if (!location) {
+      return false;
+    }
+    if (items.length === 0) {
+      return true;
+    }
+    if (items.length > LEAF_CAPACITY) {
+      const position =
+        this.positionOfNode(location.leaf) +
+        location.offsetInLeaf +
+        (after ? 1 : 0);
+      this.insertMany(position, items);
+      return true;
+    }
+
+    this.structuralOperationCount++;
+    this.insertManyIntoLeaf(
+      location.leaf,
+      location.offsetInLeaf + (after ? 1 : 0),
+      items,
+    );
+    return true;
   }
 
   private buildBalancedTree(

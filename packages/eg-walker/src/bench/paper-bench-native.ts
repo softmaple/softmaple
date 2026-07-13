@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 
 import { EgWalkerReplica } from "../core/replica";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { EventGraph } from "../graph/event-graph";
+import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import type { EventId, GraphEvent } from "../types";
 
 export interface NativePaperPayload {
@@ -22,36 +22,43 @@ export interface NativePaperLoadMetrics {
   readonly nativeLoadMs: number;
   readonly nativeMaterializeMs: number;
   readonly heapBeforeDecodeBytes: number;
+  readonly arrayBuffersBeforeDecodeBytes: number;
   readonly rssBeforeDecodeBytes: number;
   readonly heapAfterDecodeBytes: number;
+  readonly arrayBuffersAfterDecodeBytes: number;
   readonly rssAfterDecodeBytes: number;
   readonly heapAfterLoadBytes: number;
+  readonly arrayBuffersAfterLoadBytes: number;
   readonly rssAfterLoadBytes: number;
   readonly nativeDecodeHeapBytes: number;
   readonly nativeLoadHeapBytes: number;
   readonly nativeTotalHeapBytes: number;
+  readonly nativeDecodeArrayBufferBytes: number;
+  readonly nativeLoadArrayBufferBytes: number;
+  readonly nativeTotalArrayBufferBytes: number;
   readonly replayStats: ReturnType<EgWalkerReplica["getReplayStats"]>;
 }
 
 interface ProcessMemorySample {
   readonly heapUsed: number;
+  readonly arrayBuffers: number;
   readonly rss: number;
 }
 
 /**
  * Build the native EGW3 payload outside the timed load lane. Paper trace
- * conversion already emits events in causal order, while `fromEvents` keeps
- * this helper safe for synthetic and diagnostic callers that do not.
+ * conversion already emits events in causal order, so the direct encoder can
+ * validate and persist that order without constructing a second graph.
  */
 export const buildNativePaperPayload = (
   events: ReadonlyArray<GraphEvent>,
   expectedText?: string,
 ): NativePaperPayload => {
-  const graph = EventGraph.fromEvents(events);
+  const encoded = encodeTopologicallyOrderedEventsBinary(events);
   return {
-    binary: new ColumnarEventGraphCodec().encodeBinary(graph),
-    eventCount: graph.getEventCount(),
-    frontier: Array.from(graph.getFrontier()).sort(),
+    binary: encoded.binary,
+    eventCount: events.length,
+    frontier: [...encoded.frontier].sort(),
     expectedText,
   };
 };
@@ -126,23 +133,36 @@ export const measureNativePaperPayload = (
     nativeLoadMs: loadedAt - loadStartedAt,
     nativeMaterializeMs: materializedAt - loadedAt,
     heapBeforeDecodeBytes: memoryBeforeDecode.heapUsed,
+    arrayBuffersBeforeDecodeBytes: memoryBeforeDecode.arrayBuffers,
     rssBeforeDecodeBytes: memoryBeforeDecode.rss,
     heapAfterDecodeBytes: memoryAfterDecode.heapUsed,
+    arrayBuffersAfterDecodeBytes: memoryAfterDecode.arrayBuffers,
     rssAfterDecodeBytes: memoryAfterDecode.rss,
     heapAfterLoadBytes: memoryAfterLoad.heapUsed,
+    arrayBuffersAfterLoadBytes: memoryAfterLoad.arrayBuffers,
     rssAfterLoadBytes: memoryAfterLoad.rss,
     nativeDecodeHeapBytes:
       memoryAfterDecode.heapUsed - memoryBeforeDecode.heapUsed,
     nativeLoadHeapBytes: memoryAfterLoad.heapUsed - memoryAfterDecode.heapUsed,
     nativeTotalHeapBytes:
       memoryAfterLoad.heapUsed - memoryBeforeDecode.heapUsed,
+    nativeDecodeArrayBufferBytes:
+      memoryAfterDecode.arrayBuffers - memoryBeforeDecode.arrayBuffers,
+    nativeLoadArrayBufferBytes:
+      memoryAfterLoad.arrayBuffers - memoryAfterDecode.arrayBuffers,
+    nativeTotalArrayBufferBytes:
+      memoryAfterLoad.arrayBuffers - memoryBeforeDecode.arrayBuffers,
     replayStats: replica.getReplayStats(),
   };
 };
 
 const sampleProcessMemory = (): ProcessMemorySample => {
   const memory = process.memoryUsage();
-  return { heapUsed: memory.heapUsed, rss: memory.rss };
+  return {
+    heapUsed: memory.heapUsed,
+    arrayBuffers: memory.arrayBuffers,
+    rss: memory.rss,
+  };
 };
 
 const sameIds = (

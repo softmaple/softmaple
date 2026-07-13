@@ -1,9 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import type { EventId, GraphEvent, Version } from "../types";
-import {
-  scalarReferenceFrontier,
-  ScalarReferenceSession,
-} from "./scalar-reference-replay";
+import { ScalarReferenceSession } from "./scalar-reference-replay";
 
 export interface AtomicPaperTrace {
   readonly endContent: string;
@@ -28,6 +25,56 @@ export interface ConvertAtomicPaperTraceOptions {
   readonly maxEvents?: number;
 }
 
+/**
+ * Field-oriented destination for atomic paper events.
+ *
+ * Keeping the destination field-oriented lets benchmark importers transfer
+ * each event directly into owned columnar or batch storage instead of first
+ * allocating a public {@link GraphEvent} wrapper.
+ */
+export interface AtomicPaperEventSink {
+  appendInsert(
+    id: EventId,
+    parentVersion: Iterable<EventId>,
+    index: number,
+    text: string,
+    timestamp: number,
+  ): void;
+
+  appendDelete(
+    id: EventId,
+    parentVersion: Iterable<EventId>,
+    index: number,
+    length: number,
+    timestamp: number,
+  ): void;
+}
+
+export interface AtomicPaperTraceConversionSummary {
+  readonly eventCount: number;
+  readonly frontier: ReadonlySet<EventId>;
+  /** True when `maxEvents` stopped conversion, including at an exact bound. */
+  readonly limited: boolean;
+}
+
+interface AtomicPaperEventEmitter {
+  appendInsert(
+    id: EventId,
+    parentVersion: Iterable<EventId>,
+    index: number,
+    text: string,
+    timestamp: number,
+  ): GraphEvent | undefined;
+
+  appendDelete(
+    id: EventId,
+    parentVersion: Iterable<EventId>,
+    index: number,
+    length: number,
+    timestamp: number,
+  ): GraphEvent | undefined;
+}
+
 interface UnicodeOffsetState {
   readonly scalarLength: number;
   readonly nonBmpCodePointPositions: ReadonlyArray<number>;
@@ -40,15 +87,73 @@ export const convertPaperTraceToAtomicEvents = (
   trace: AtomicPaperTrace,
   options: ConvertAtomicPaperTraceOptions = {},
 ): GraphEvent[] => {
-  if (
-    options.maxEvents !== undefined &&
-    (!Number.isSafeInteger(options.maxEvents) || options.maxEvents <= 0)
-  ) {
-    throw new Error(
-      `maxEvents must be a positive safe integer, got ${options.maxEvents}`,
-    );
-  }
   const events: GraphEvent[] = [];
+  runPaperTraceAtomicConversion(
+    dataset,
+    trace,
+    {
+      appendInsert: (id, parentVersion, index, text, timestamp) => {
+        const event: GraphEvent = {
+          id,
+          parentVersion: new Set(parentVersion),
+          operation: { type: OPERATION_TYPE.INSERT, index, text },
+          timestamp,
+        };
+        events.push(event);
+        return event;
+      },
+      appendDelete: (id, parentVersion, index, length, timestamp) => {
+        const event: GraphEvent = {
+          id,
+          parentVersion: new Set(parentVersion),
+          operation: { type: OPERATION_TYPE.DELETE, index, length },
+          timestamp,
+        };
+        events.push(event);
+        return event;
+      },
+    },
+    options,
+  );
+  return events;
+};
+
+/**
+ * Stream operation-granularity paper events into a field-oriented sink.
+ *
+ * The sink is called synchronously in trace/topological order. Benchmark
+ * callers normally disable final-text validation; in that mode the common
+ * BMP trace path allocates no intermediate `GraphEvent` values.
+ */
+export const convertPaperTraceToAtomicSink = (
+  dataset: string,
+  trace: AtomicPaperTrace,
+  sink: AtomicPaperEventSink,
+  options: ConvertAtomicPaperTraceOptions = {},
+): AtomicPaperTraceConversionSummary =>
+  runPaperTraceAtomicConversion(
+    dataset,
+    trace,
+    {
+      appendInsert: (id, parentVersion, index, text, timestamp) => {
+        sink.appendInsert(id, parentVersion, index, text, timestamp);
+        return undefined;
+      },
+      appendDelete: (id, parentVersion, index, length, timestamp) => {
+        sink.appendDelete(id, parentVersion, index, length, timestamp);
+        return undefined;
+      },
+    },
+    options,
+  );
+
+const runPaperTraceAtomicConversion = (
+  dataset: string,
+  trace: AtomicPaperTrace,
+  sink: AtomicPaperEventEmitter,
+  options: ConvertAtomicPaperTraceOptions,
+): AtomicPaperTraceConversionSummary => {
+  assertValidMaxEvents(options.maxEvents);
   const transactionVersions: Array<Version | undefined> = new Array(
     trace.txns.length,
   );
@@ -59,6 +164,8 @@ export const convertPaperTraceToAtomicEvents = (
   const referenceSession = needsScalarReferenceSession(trace, validateFinalText)
     ? new ScalarReferenceSession()
     : undefined;
+  const frontier = new Set<EventId>();
+  let eventCount = 0;
 
   for (
     let transactionIndex = 0;
@@ -70,7 +177,7 @@ export const convertPaperTraceToAtomicEvents = (
       throw new Error(`${dataset}: missing transaction ${transactionIndex}`);
     }
 
-    let currentVersion = unionParentVersions(
+    const currentVersion = unionParentVersions(
       dataset,
       transactionIndex,
       trace.txns,
@@ -112,23 +219,33 @@ export const convertPaperTraceToAtomicEvents = (
         const utf16Length =
           utf16IndexForScalarIndex(unicodeState, index + 1) - utf16Index;
         const id = paperEventId(dataset, agentKey, agentSequence++);
-        const event: GraphEvent = {
+        const timestamp = transactionIndex + operationOffset;
+        const emittedEvent = sink.appendDelete(
           id,
-          parentVersion: new Set(currentVersion),
-          operation: {
-            type: OPERATION_TYPE.DELETE,
-            index: utf16Index,
-            length: utf16Length,
+          currentVersion,
+          utf16Index,
+          utf16Length,
+          timestamp,
+        );
+        referenceSession?.applyEvent(
+          emittedEvent ?? {
+            id,
+            parentVersion: new Set(currentVersion),
+            operation: {
+              type: OPERATION_TYPE.DELETE,
+              index: utf16Index,
+              length: utf16Length,
+            },
+            timestamp,
           },
-          timestamp: transactionIndex + operationOffset,
-        };
-        events.push(event);
-        referenceSession?.applyEvent(event);
-        if (events.length === options.maxEvents) {
-          return events;
+        );
+        updateFrontier(frontier, id, currentVersion);
+        eventCount++;
+        if (eventCount === options.maxEvents) {
+          return { eventCount, frontier, limited: true };
         }
         unicodeState = deleteScalarRange(unicodeState, index, 1);
-        currentVersion = new Set([id]);
+        replaceVersionWithEvent(currentVersion, id);
         traceVersion++;
         operationOffset++;
       }
@@ -137,23 +254,34 @@ export const convertPaperTraceToAtomicEvents = (
       for (const character of insertedText) {
         const scalarIndex = index + insertOffset;
         const id = paperEventId(dataset, agentKey, agentSequence++);
-        const event: GraphEvent = {
+        const utf16Index = utf16IndexForScalarIndex(unicodeState, scalarIndex);
+        const timestamp = transactionIndex + operationOffset;
+        const emittedEvent = sink.appendInsert(
           id,
-          parentVersion: new Set(currentVersion),
-          operation: {
-            type: OPERATION_TYPE.INSERT,
-            index: utf16IndexForScalarIndex(unicodeState, scalarIndex),
-            text: character,
+          currentVersion,
+          utf16Index,
+          character,
+          timestamp,
+        );
+        referenceSession?.applyEvent(
+          emittedEvent ?? {
+            id,
+            parentVersion: new Set(currentVersion),
+            operation: {
+              type: OPERATION_TYPE.INSERT,
+              index: utf16Index,
+              text: character,
+            },
+            timestamp,
           },
-          timestamp: transactionIndex + operationOffset,
-        };
-        events.push(event);
-        referenceSession?.applyEvent(event);
-        if (events.length === options.maxEvents) {
-          return events;
+        );
+        updateFrontier(frontier, id, currentVersion);
+        eventCount++;
+        if (eventCount === options.maxEvents) {
+          return { eventCount, frontier, limited: true };
         }
         unicodeState = insertScalar(unicodeState, scalarIndex, character);
-        currentVersion = new Set([id]);
+        replaceVersionWithEvent(currentVersion, id);
         traceVersion++;
         operationOffset++;
         insertOffset++;
@@ -175,9 +303,7 @@ export const convertPaperTraceToAtomicEvents = (
     if (referenceSession === undefined) {
       throw new Error(`${dataset}: missing scalar reference session`);
     }
-    const actual = referenceSession.materializeVersion(
-      scalarReferenceFrontier(events),
-    );
+    const actual = referenceSession.materializeVersion(frontier);
     if (actual !== trace.endContent) {
       throw new Error(
         `${dataset}: converted final text mismatch; expected ${JSON.stringify(trace.endContent)}, received ${JSON.stringify(actual)}`,
@@ -185,7 +311,37 @@ export const convertPaperTraceToAtomicEvents = (
     }
   }
 
-  return events;
+  return { eventCount, frontier, limited: false };
+};
+
+const assertValidMaxEvents = (maxEvents: number | undefined): void => {
+  if (
+    maxEvents !== undefined &&
+    (!Number.isSafeInteger(maxEvents) || maxEvents <= 0)
+  ) {
+    throw new Error(
+      `maxEvents must be a positive safe integer, got ${maxEvents}`,
+    );
+  }
+};
+
+const updateFrontier = (
+  frontier: Set<EventId>,
+  eventId: EventId,
+  parentVersion: Version,
+): void => {
+  for (const parentId of parentVersion) {
+    frontier.delete(parentId);
+  }
+  frontier.add(eventId);
+};
+
+const replaceVersionWithEvent = (
+  version: Set<EventId>,
+  eventId: EventId,
+): void => {
+  version.clear();
+  version.add(eventId);
 };
 
 const unionParentVersions = (
@@ -216,15 +372,15 @@ const unicodeStateForParentVersion = (
   referenceSession: ScalarReferenceSession | undefined,
 ): UnicodeOffsetState | undefined => {
   if (transaction.parents.length === 0) {
-    return { scalarLength: 0, nonBmpCodePointPositions: [] };
+    return {
+      scalarLength: 0,
+      nonBmpCodePointPositions: EMPTY_NON_BMP_POSITIONS,
+    };
   }
   if (transaction.parents.length === 1) {
     const inherited = transactionUnicodeStates[transaction.parents[0]!];
     if (inherited !== undefined) {
-      return {
-        scalarLength: inherited.scalarLength,
-        nonBmpCodePointPositions: [...inherited.nonBmpCodePointPositions],
-      };
+      return inherited;
     }
   }
   return referenceSession === undefined
@@ -265,12 +421,23 @@ const containsNonBmpScalar = (text: string): boolean => {
   return false;
 };
 
-const unicodeStateFromText = (text: string): UnicodeOffsetState => ({
-  scalarLength: Array.from(text).length,
-  nonBmpCodePointPositions: Array.from(text).flatMap((character, index) =>
-    character.length === 2 ? [index] : [],
-  ),
-});
+const unicodeStateFromText = (text: string): UnicodeOffsetState => {
+  const nonBmpCodePointPositions: number[] = [];
+  let scalarLength = 0;
+  for (const character of text) {
+    if (character.length === 2) {
+      nonBmpCodePointPositions.push(scalarLength);
+    }
+    scalarLength++;
+  }
+  return {
+    scalarLength,
+    nonBmpCodePointPositions:
+      nonBmpCodePointPositions.length === 0
+        ? EMPTY_NON_BMP_POSITIONS
+        : nonBmpCodePointPositions,
+  };
+};
 
 const utf16IndexForScalarIndex = (
   state: UnicodeOffsetState | undefined,
@@ -286,21 +453,44 @@ const insertScalar = (
   state: UnicodeOffsetState | undefined,
   index: number,
   character: string,
-): UnicodeOffsetState | undefined =>
-  state === undefined
-    ? undefined
-    : {
-        scalarLength: state.scalarLength + 1,
-        nonBmpCodePointPositions: [
-          ...state.nonBmpCodePointPositions
-            .filter((position) => position < index)
-            .map((position) => position),
-          ...(character.length === 2 ? [index] : []),
-          ...state.nonBmpCodePointPositions
-            .filter((position) => position >= index)
-            .map((position) => position + 1),
-        ],
-      };
+): UnicodeOffsetState | undefined => {
+  if (state === undefined) {
+    return undefined;
+  }
+  const positions = state.nonBmpCodePointPositions;
+  const insertsNonBmp = character.length === 2;
+  if (positions.length === 0) {
+    return {
+      scalarLength: state.scalarLength + 1,
+      nonBmpCodePointPositions: insertsNonBmp
+        ? [index]
+        : EMPTY_NON_BMP_POSITIONS,
+    };
+  }
+
+  const insertionPoint = lowerBound(positions, index);
+  const nextPositions = new Array<number>(
+    positions.length + (insertsNonBmp ? 1 : 0),
+  );
+  for (let sourceIndex = 0; sourceIndex < insertionPoint; sourceIndex++) {
+    nextPositions[sourceIndex] = positions[sourceIndex]!;
+  }
+  let targetIndex = insertionPoint;
+  if (insertsNonBmp) {
+    nextPositions[targetIndex++] = index;
+  }
+  for (
+    let sourceIndex = insertionPoint;
+    sourceIndex < positions.length;
+    sourceIndex++
+  ) {
+    nextPositions[targetIndex++] = positions[sourceIndex]! + 1;
+  }
+  return {
+    scalarLength: state.scalarLength + 1,
+    nonBmpCodePointPositions: nextPositions,
+  };
+};
 
 const deleteScalarRange = (
   state: UnicodeOffsetState | undefined,
@@ -311,11 +501,33 @@ const deleteScalarRange = (
     return undefined;
   }
   const end = index + length;
+  const positions = state.nonBmpCodePointPositions;
+  if (positions.length === 0) {
+    return {
+      scalarLength: state.scalarLength - length,
+      nonBmpCodePointPositions: EMPTY_NON_BMP_POSITIONS,
+    };
+  }
+  const firstDeleted = lowerBound(positions, index);
+  const firstAfterDeleted = lowerBound(positions, end);
+  const nextPositions = new Array<number>(
+    positions.length - (firstAfterDeleted - firstDeleted),
+  );
+  for (let sourceIndex = 0; sourceIndex < firstDeleted; sourceIndex++) {
+    nextPositions[sourceIndex] = positions[sourceIndex]!;
+  }
+  let targetIndex = firstDeleted;
+  for (
+    let sourceIndex = firstAfterDeleted;
+    sourceIndex < positions.length;
+    sourceIndex++
+  ) {
+    nextPositions[targetIndex++] = positions[sourceIndex]! - length;
+  }
   return {
     scalarLength: state.scalarLength - length,
-    nonBmpCodePointPositions: state.nonBmpCodePointPositions
-      .filter((position) => position < index || position >= end)
-      .map((position) => (position >= end ? position - length : position)),
+    nonBmpCodePointPositions:
+      nextPositions.length === 0 ? EMPTY_NON_BMP_POSITIONS : nextPositions,
   };
 };
 

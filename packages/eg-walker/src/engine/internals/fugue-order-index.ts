@@ -29,6 +29,7 @@ interface SiblingNode {
 export interface FugueOrderStats {
   readonly comparisons: number;
   readonly markerOperations: number;
+  readonly markerTreeOperations: number;
   readonly rotations: number;
   readonly rebuilds: number;
 }
@@ -51,6 +52,7 @@ export class FugueOrderIndex {
   private rootNode!: FugueNode;
   private comparisons = 0;
   private markerOperations = 0;
+  private markerTreeOperationOffset = 0;
   private rotations = 0;
   private rebuilds = 0;
   private valid = true;
@@ -70,6 +72,9 @@ export class FugueOrderIndex {
     return {
       comparisons: this.comparisons,
       markerOperations: this.markerOperations,
+      markerTreeOperations:
+        this.markerTreeOperationOffset +
+        this.markerSequence.getStructuralOperationCount(),
       rotations: this.rotations,
       rebuilds: this.rebuilds,
     };
@@ -78,6 +83,8 @@ export class FugueOrderIndex {
   restoreStats(stats: FugueOrderStats): void {
     this.comparisons = stats.comparisons;
     this.markerOperations = stats.markerOperations;
+    this.markerTreeOperationOffset = stats.markerTreeOperations;
+    this.markerSequence.restoreStructuralOperationCount(0);
     this.rotations = stats.rotations;
     this.rebuilds = stats.rebuilds;
   }
@@ -229,10 +236,7 @@ export class FugueOrderIndex {
       this.setForcedParent(right.id, left.id);
     }
 
-    this.insertMarkersAt(this.markerRank(leftNode.visit) + 1, [
-      rightNode.start,
-      rightNode.visit,
-    ]);
+    this.insertMarkersAfter(leftNode.visit, [rightNode.start, rightNode.visit]);
     this.insertMarkersBefore(leftNode.end, [rightNode.end]);
     this.nodesById.set(right.id, rightNode);
     if (this.weightBefore(rightNode.visit) !== rightPosition) {
@@ -259,6 +263,12 @@ export class FugueOrderIndex {
   }
 
   private reset(resetStats: boolean = true): void {
+    if (resetStats) {
+      this.markerTreeOperationOffset = 0;
+    } else {
+      this.markerTreeOperationOffset +=
+        this.markerSequence.getStructuralOperationCount();
+    }
     this.nodesById.clear();
     this.siblingRoots.clear();
     const root = createFugueNode(null);
@@ -358,29 +368,28 @@ export class FugueOrderIndex {
     target: Marker,
     markers: ReadonlyArray<Marker>,
   ): void {
-    this.insertMarkersAt(this.markerRank(target), markers);
-  }
-
-  private insertMarkersAt(rank: number, markers: ReadonlyArray<Marker>): void {
-    if (rank < 0 || rank > this.markerSequence.length) {
-      throw new Error(`Fugue marker rank ${rank} is out of bounds`);
+    if (!this.markerSequence.insertManyBefore(target, markers)) {
+      throw new Error(`Fugue marker ${target.key} is unavailable`);
     }
-    this.markerSequence.insertMany(rank, markers);
     this.markerOperations += markers.length;
   }
 
-  private markerRank(marker: Marker): number {
-    const rank = this.markerSequence.positionOf(marker);
-    if (rank < 0) {
-      throw new Error(`Fugue marker ${marker.key} is unavailable`);
+  private insertMarkersAfter(
+    target: Marker,
+    markers: ReadonlyArray<Marker>,
+  ): void {
+    if (!this.markerSequence.insertManyAfter(target, markers)) {
+      throw new Error(`Fugue marker ${target.key} is unavailable`);
     }
-    return rank;
+    this.markerOperations += markers.length;
   }
 
   private weightBefore(marker: Marker): number {
-    return this.markerSequence.effectIndexBeforePosition(
-      this.markerRank(marker),
-    );
+    const weight = this.markerSequence.effectIndexOf(marker);
+    if (weight < 0) {
+      throw new Error(`Fugue marker ${marker.key} is unavailable`);
+    }
+    return weight;
   }
 
   private setForcedParent(childId: EventId, parentId: EventId): void {

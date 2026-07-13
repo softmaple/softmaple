@@ -1,7 +1,10 @@
 export const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x33]); // EGW3
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+// `ignoreBOM: true` means "treat a leading UTF-8 BOM as content" in the
+// Encoding API. Inserted text may legitimately begin with U+FEFF, so the
+// persistence codec must not silently discard it.
+const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
 export const encodeText = (value: string): Uint8Array =>
   textEncoder.encode(value);
@@ -172,6 +175,18 @@ export class BinaryReader {
     return values;
   }
 
+  readVarintFloat64Array(): Float64Array {
+    const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of varint array");
+    }
+    const values = new Float64Array(length);
+    for (let index = 0; index < length; index++) {
+      values[index] = this.readVarint();
+    }
+    return values;
+  }
+
   readZigZagVarint(): number {
     return zigzagDecode(this.readVarint());
   }
@@ -201,6 +216,24 @@ export class BinaryReader {
       previous = value;
     }
     return out;
+  }
+
+  readZigZagDeltaFloat64Array(): Float64Array {
+    const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of zigzag delta array");
+    }
+    const values = new Float64Array(length);
+    let previous = 0;
+    for (let index = 0; index < length; index++) {
+      const value = previous + this.readZigZagVarint();
+      if (!Number.isSafeInteger(value)) {
+        throw new Error(`Invalid safe-integer delta value ${value}`);
+      }
+      values[index] = value;
+      previous = value;
+    }
+    return values;
   }
 
   readString(): string {

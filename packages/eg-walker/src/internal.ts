@@ -41,6 +41,10 @@ export {
   type ParentOverride,
 } from "./graph/columnar-codec";
 export {
+  encodeTopologicallyOrderedEventsBinary,
+  type TopologicalEventGraphEncoding,
+} from "./graph/columnar-codec/topological-binary-encoder";
+export {
   NativeSnapshotCodec,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,

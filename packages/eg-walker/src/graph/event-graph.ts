@@ -11,12 +11,14 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
+import { isOwnedCausalEvent } from "../core/causal-event-batch";
 import {
   EventAlreadyExistsError,
   MissingParentError,
 } from "./event-graph-errors";
 import { diffVersions as diffVersionSets } from "./internals/diff-versions";
 import { deserializeEventGraph } from "./internals/event-graph-serialization";
+import { PackedEventGraphBase } from "./internals/packed-event-graph-base";
 import {
   getBranchPreservingTopologicalOrder as computeBranchPreservingTopologicalOrder,
   getTopologicalOrder as computeTopologicalOrder,
@@ -39,7 +41,10 @@ export interface EventGraphAppendTransaction {
  * This is what gets persisted to disk
  */
 export class EventGraph {
+  private packedBase: PackedEventGraphBase | null = null;
+  /** Events appended after the immutable packed prefix. */
   private readonly events: Map<EventId, GraphEvent> = new Map();
+  /** Mutable-tail children, including tail children of packed parents. */
   private readonly childrenMap: Map<EventId, Set<EventId>> = new Map();
   private readonly frontier: Set<EventId> = new Set();
   /**
@@ -92,6 +97,7 @@ export class EventGraph {
    * Remove all events and metadata from the graph.
    */
   clear(): void {
+    this.packedBase = null;
     this.events.clear();
     this.childrenMap.clear();
     this.insertionRank.clear();
@@ -106,6 +112,7 @@ export class EventGraph {
    */
   beginAppendTransaction(): EventGraphAppendTransaction {
     const startingEventCount = this.events.size;
+    const startingFrontier = Array.from(this.frontier);
     let active = true;
     return {
       commit: (): void => {
@@ -117,6 +124,10 @@ export class EventGraph {
         }
         active = false;
         this.rollbackAppendedEvents(startingEventCount);
+        this.frontier.clear();
+        for (const eventId of startingFrontier) {
+          this.frontier.add(eventId);
+        }
       },
     };
   }
@@ -125,19 +136,25 @@ export class EventGraph {
    * Add an event to the graph
    */
   addEvent(event: GraphEvent): void {
-    if (this.events.has(event.id)) {
+    if (this.hasEvent(event.id)) {
       throw new EventAlreadyExistsError(event.id);
     }
 
     for (const parentId of event.parentVersion) {
-      if (!this.events.has(parentId)) {
+      if (!this.hasEvent(parentId)) {
         throw new MissingParentError(parentId);
       }
     }
 
-    const stored = cloneGraphEvent(event);
+    // Strict causal batches construct final storage objects in an opaque
+    // builder, so no caller can mutate them after transfer. All ordinary
+    // events retain the public defensive-copy boundary.
+    const stored = isOwnedCausalEvent(event) ? event : cloneGraphEvent(event);
     this.events.set(stored.id, stored);
-    this.insertionRank.set(stored.id, this.insertionRank.size);
+    this.insertionRank.set(
+      stored.id,
+      (this.packedBase?.count ?? 0) + this.insertionRank.size,
+    );
     this.frontier.add(stored.id);
 
     for (const parentId of stored.parentVersion) {
@@ -167,7 +184,8 @@ export class EventGraph {
         siblings?.delete(eventId);
         if (siblings !== undefined && siblings.size === 0) {
           this.childrenMap.delete(parentId);
-          if (this.events.has(parentId)) {
+          const baseChildCount = this.packedBaseChildCount(parentId);
+          if (baseChildCount === 0 && this.hasEvent(parentId)) {
             this.frontier.add(parentId);
           }
         }
@@ -181,21 +199,25 @@ export class EventGraph {
    */
   getEvent(id: EventId): GraphEvent | undefined {
     const event = this.events.get(id);
-    return event === undefined ? undefined : cloneGraphEvent(event);
+    if (event !== undefined) {
+      return cloneGraphEvent(event);
+    }
+    const offset = this.packedBase?.offsetOf(id);
+    return offset === undefined ? undefined : this.packedBase?.eventAt(offset);
   }
 
   /**
    * Check if an event exists in the graph
    */
   hasEvent(id: EventId): boolean {
-    return this.events.has(id);
+    return this.events.has(id) || (this.packedBase?.has(id) ?? false);
   }
 
   /**
    * Get all events
    */
   getAllEvents(): ReadonlyArray<GraphEvent> {
-    return Array.from(this.events.values(), cloneGraphEvent);
+    return Array.from(this.iterateEventsInInsertionOrder());
   }
 
   /**
@@ -205,7 +227,7 @@ export class EventGraph {
    * materialising a new array.
    */
   getEventCount(): number {
-    return this.events.size;
+    return (this.packedBase?.count ?? 0) + this.events.size;
   }
 
   /**
@@ -217,26 +239,74 @@ export class EventGraph {
    * copies, preserving the graph's external immutability contract.
    */
   getLinearReplayOrder(): ReadonlyArray<GraphEvent> | null {
+    if (!this.isExactLinearHistory()) {
+      return null;
+    }
+    return Object.freeze(Array.from(this.iterateEventsInInsertionOrder()));
+  }
+
+  /**
+   * Test whether insertion order is the graph's one exact causal chain
+   * without materialising any `GraphEvent` or parent `Set` objects.
+   */
+  isExactLinearHistory(): boolean {
+    if (this.packedBase !== null && !this.packedBase.isExactLinear()) {
+      return false;
+    }
     let previousId: EventId | null = null;
+    if (this.packedBase !== null && this.packedBase.count > 0) {
+      previousId = this.packedBase.idAt(this.packedBase.count - 1) ?? null;
+    }
     for (const event of this.events.values()) {
       if (previousId === null) {
         if (event.parentVersion.size !== 0) {
-          return null;
+          return false;
         }
       } else if (
         event.parentVersion.size !== 1 ||
         !event.parentVersion.has(previousId)
       ) {
-        return null;
+        return false;
       }
       previousId = event.id;
     }
 
-    // Do not clone while probing. A nonlinear history can have a very long
-    // linear prefix; eagerly cloning that prefix would discard all of those
-    // objects before the normal branch-preserving traversal clones the graph
-    // again. Only detach events after the complete chain has been proven.
-    return Object.freeze(Array.from(this.events.values(), cloneGraphEvent));
+    return true;
+  }
+
+  /**
+   * Stream detached events in insertion order. Unlike `getAllEvents`, this
+   * lets exact-linear replay consume a packed graph one event at a time and
+   * avoids retaining an O(N) array of materialised event objects.
+   */
+  *iterateEventsInInsertionOrder(): IterableIterator<GraphEvent> {
+    if (this.packedBase !== null) {
+      yield* this.packedBase.iterateEvents();
+    }
+    for (const event of this.events.values()) {
+      yield cloneGraphEvent(event);
+    }
+  }
+
+  /** Stream event IDs without reconstructing operations or parent sets. */
+  *iterateEventIdsInInsertionOrder(): IterableIterator<EventId> {
+    if (this.packedBase !== null) yield* this.packedBase.iterateIds();
+    yield* this.events.keys();
+  }
+
+  /**
+   * Validate events not already proven well-formed by the strict packed
+   * decoder. The mutable tail is always visited; ordinary object-backed
+   * graphs visit their complete history.
+   */
+  validateStoredEvents(validate: (event: GraphEvent) => void): void {
+    // PackedEventGraphBase construction checks every persisted field,
+    // including numeric bounds, UTF-16 slices, IDs and causal parent edges.
+    // Reconstructing those events here would repeat the same work on every
+    // lazy snapshot access.
+    for (const event of this.events.values()) {
+      validate(cloneGraphEvent(event));
+    }
   }
 
   /**
@@ -273,13 +343,12 @@ export class EventGraph {
         continue;
       }
 
-      const event = this.events.get(eventId);
-      if (!event) {
+      if (!this.hasEvent(eventId)) {
         continue;
       }
 
       expanded.add(eventId);
-      for (const parentId of event.parentVersion) {
+      for (const parentId of this.iterateParents(eventId)) {
         if (!expanded.has(parentId)) {
           stack.push(parentId);
         }
@@ -315,7 +384,7 @@ export class EventGraph {
     return diffVersionSets(left, right, {
       getParents: (id) => this.iterateParents(id),
       hasEvent: (id) => this.hasEvent(id),
-      insertionRankOf: (id) => this.insertionRank.get(id),
+      insertionRankOf: (id) => this.insertionRankOf(id),
     });
   }
 
@@ -341,10 +410,9 @@ export class EventGraph {
     }
 
     this.cachedTopologicalOrder = Object.freeze(
-      computeTopologicalOrder({
-        events: this.events,
-        childrenMap: this.childrenMap,
-      }).map(cloneReadonlyGraphEvent),
+      computeTopologicalOrder(this.topologicalOrderView()).map((id) =>
+        cloneReadonlyGraphEvent(this.requireStoredEvent(id)),
+      ),
     );
     return this.cachedTopologicalOrder;
   }
@@ -387,11 +455,20 @@ export class EventGraph {
       return this.cachedBranchPreservingOrder;
     }
 
+    if (this.packedBase !== null && this.events.size === 0) {
+      const offsets = this.packedBase.getBranchPreservingOrderOffsets();
+      this.cachedBranchPreservingOrder = Object.freeze(
+        Array.from(offsets, (offset) =>
+          readonlyPackedGraphEvent(this.packedBase!, offset),
+        ),
+      );
+      return this.cachedBranchPreservingOrder;
+    }
+
     this.cachedBranchPreservingOrder = Object.freeze(
-      computeBranchPreservingTopologicalOrder({
-        events: this.events,
-        childrenMap: this.childrenMap,
-      }).map(cloneReadonlyGraphEvent),
+      computeBranchPreservingTopologicalOrder(this.topologicalOrderView()).map(
+        (id) => cloneReadonlyGraphEvent(this.requireStoredEvent(id)),
+      ),
     );
     return this.cachedBranchPreservingOrder;
   }
@@ -400,24 +477,31 @@ export class EventGraph {
    * Get children of an event
    */
   getChildren(id: EventId): ReadonlySet<EventId> {
-    return new Set(this.childrenMap.get(id) ?? []);
+    return new Set(this.iterateChildren(id));
   }
 
   /** Allocation-free child traversal that does not expose the backing set. */
-  iterateChildren(id: EventId): IterableIterator<EventId> {
-    return (this.childrenMap.get(id) ?? EMPTY_EVENT_IDS).values();
+  *iterateChildren(id: EventId): IterableIterator<EventId> {
+    if (this.packedBase?.has(id)) {
+      yield* this.packedBase.iterateChildren(id);
+    }
+    yield* this.childrenMap.get(id) ?? EMPTY_EVENT_IDS;
   }
 
   /**
    * Get parents of an event
    */
   getParents(id: EventId): ReadonlySet<EventId> {
-    return new Set(this.events.get(id)?.parentVersion ?? EMPTY_EVENT_IDS);
+    return new Set(this.iterateParents(id));
   }
 
   /** Allocation-free parent traversal that does not expose the backing set. */
   iterateParents(id: EventId): IterableIterator<EventId> {
-    return (this.events.get(id)?.parentVersion ?? EMPTY_EVENT_IDS).values();
+    const event = this.events.get(id);
+    if (event !== undefined) {
+      return event.parentVersion.values();
+    }
+    return this.packedBase?.iterateParents(id) ?? EMPTY_EVENT_IDS.values();
   }
 
   /**
@@ -488,6 +572,64 @@ export class EventGraph {
   static deserialize(data: SerializedGraphInput): EventGraph {
     return deserializeEventGraph(data, () => new EventGraph());
   }
+
+  /** @internal Build a graph around an immutable, already validated prefix. */
+  static fromPackedBase(
+    base: PackedEventGraphBase,
+    frontier: ReadonlySet<EventId>,
+    metadata: Record<string, unknown> = {},
+  ): EventGraph {
+    const graph = new EventGraph();
+    for (const id of frontier) {
+      if (!base.has(id)) {
+        throw new Error(`Packed graph frontier contains unknown event ${id}`);
+      }
+      graph.frontier.add(id);
+    }
+    graph.packedBase = base;
+    graph.metadata = { ...metadata };
+    return graph;
+  }
+
+  private requireStoredEvent(id: EventId): GraphEvent {
+    const tail = this.events.get(id);
+    if (tail !== undefined) return tail;
+    const offset = this.packedBase?.offsetOf(id);
+    const event =
+      offset === undefined ? undefined : this.packedBase?.eventAt(offset);
+    if (event === undefined) {
+      throw new Error(`Event graph is missing event ${id}`);
+    }
+    return event;
+  }
+
+  private parentCountOf(id: EventId): number {
+    const tail = this.events.get(id);
+    if (tail !== undefined) return tail.parentVersion.size;
+    const offset = this.packedBase?.offsetOf(id);
+    return offset === undefined ? 0 : this.packedBase!.parentCountAt(offset);
+  }
+
+  private insertionRankOf(id: EventId): number | undefined {
+    const baseRank = this.packedBase?.offsetOf(id);
+    return baseRank ?? this.insertionRank.get(id);
+  }
+
+  private packedBaseChildCount(id: EventId): number {
+    const offset = this.packedBase?.offsetOf(id);
+    return offset === undefined ? 0 : this.packedBase!.childCountAt(offset);
+  }
+
+  private topologicalOrderView(): Parameters<
+    typeof computeTopologicalOrder
+  >[0] {
+    return {
+      eventCount: this.getEventCount(),
+      eventIds: this.iterateEventIdsInInsertionOrder(),
+      parentCountOf: (id) => this.parentCountOf(id),
+      childrenOf: (id) => this.iterateChildren(id),
+    };
+  }
 }
 
 const cloneGraphEvent = (event: GraphEvent): GraphEvent => ({
@@ -505,15 +647,52 @@ const cloneReadonlyGraphEvent = (event: GraphEvent): GraphEvent =>
     timestamp: event.timestamp,
   });
 
-const runtimeReadonlySet = <T>(values: Iterable<T>): ReadonlySet<T> => {
-  const result = new Set(values);
-  Object.defineProperties(result, {
-    add: { value: rejectReadonlySetMutation },
-    delete: { value: rejectReadonlySetMutation },
-    clear: { value: rejectReadonlySetMutation },
+const readonlyPackedGraphEvent = (
+  base: PackedEventGraphBase,
+  offset: number,
+): GraphEvent => {
+  const id = base.idAt(offset);
+  const timestamp = base.timestampAt(offset);
+  if (id === undefined || timestamp === undefined) {
+    throw new Error(`Packed event graph is missing event at offset ${offset}`);
+  }
+  return Object.freeze({
+    id,
+    operation: Object.freeze(base.operationAt(offset)),
+    parentVersion: runtimeReadonlySet(base.iterateParentsAt(offset)),
+    timestamp,
   });
-  return Object.freeze(result);
 };
+
+/**
+ * A Set-compatible immutable view whose rejecting mutators live once on the
+ * prototype. Defining three own properties on every materialised traversal
+ * event was a measurable part of cold replay for large packed histories.
+ */
+class RuntimeReadonlySet<T> extends Set<T> {
+  constructor(values: Iterable<T>) {
+    super();
+    for (const value of values) {
+      Set.prototype.add.call(this, value);
+    }
+    Object.freeze(this);
+  }
+
+  override add(): this {
+    return rejectReadonlySetMutation();
+  }
+
+  override delete(): boolean {
+    return rejectReadonlySetMutation();
+  }
+
+  override clear(): void {
+    rejectReadonlySetMutation();
+  }
+}
+
+const runtimeReadonlySet = <T>(values: Iterable<T>): ReadonlySet<T> =>
+  new RuntimeReadonlySet(values);
 
 const rejectReadonlySetMutation = (): never => {
   throw new TypeError("Cannot mutate a read-only event graph view");

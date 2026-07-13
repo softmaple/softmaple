@@ -83,6 +83,11 @@ import {
   validatePortableSnapshotHeaderOnly,
   type PortableSnapshot,
 } from "./portable-snapshot";
+import {
+  consumeCausalEventBatch,
+  inspectCausalEventBatch,
+  type CausalEventBatch,
+} from "./causal-event-batch";
 
 type LazyEventGraphSource = () => EventGraph;
 
@@ -256,9 +261,7 @@ export class EgWalkerReplica {
       // {@link fullReplay} so a tampered persisted payload (lone
       // surrogate, negative delete length) cannot produce malformed
       // {@link getText} output.
-      for (const event of this.eventGraph.getAllEvents()) {
-        assertRemoteEventWellFormed(event);
-      }
+      this.eventGraph.validateStoredEvents(assertRemoteEventWellFormed);
       if (!options.skipReplay) {
         this.fullReplay();
       }
@@ -589,6 +592,80 @@ export class EgWalkerReplica {
   }
 
   /**
+   * Apply an owned batch that is already in strict causal order.
+   *
+   * This ingestion boundary is intended for persistence decoders and causal
+   * diff transports. Unlike {@link applyRemoteEvents}, it does not buffer,
+   * deduplicate, clone caller events, or allocate per-event result objects.
+   * Every event ID must be new and every parent must already exist in the
+   * graph or occur earlier in this batch. The batch is consumed only after
+   * graph and document state commit successfully, so a failed attempt can be
+   * retried after its missing prerequisite is installed.
+   */
+  applyCausalBatch(batch: CausalEventBatch): void {
+    const events = inspectCausalEventBatch(batch);
+    const graph = this.ensureEventGraph();
+    if (this.ensureRemoteEvents().pendingCount !== 0) {
+      throw new Error(
+        "Cannot apply a causal batch while remote events are pending",
+      );
+    }
+    if (events.length === 0) {
+      consumeCausalEventBatch(batch);
+      return;
+    }
+
+    const snapshot = this.captureRemoteBatchSnapshot();
+    const transaction = graph.beginAppendTransaction();
+    const eventCountBeforeBatch = graph.getEventCount();
+    let orderedLinear = true;
+    let previousId: EventId | null = null;
+
+    try {
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index]!;
+        if (index === 0) {
+          orderedLinear = versionsEqual(
+            event.parentVersion,
+            this.currentVersion,
+          );
+        } else if (
+          event.parentVersion.size !== 1 ||
+          previousId === null ||
+          !event.parentVersion.has(previousId)
+        ) {
+          orderedLinear = false;
+        }
+        graph.addEvent(event);
+        previousId = event.id;
+      }
+
+      if (orderedLinear) {
+        this.applyCausalLinearBatch(events, eventCountBeforeBatch);
+      } else {
+        this.engineStatsOverride = null;
+        const checkpoint = this.criticalCheckpoints.pickFor(graph);
+        if (checkpoint === null) {
+          this.fullReplay();
+        } else {
+          this.partialReplayFromCheckpoint(checkpoint);
+          this.maybeAdvanceCheckpoint();
+        }
+      }
+
+      // Consuming cannot fail after a successful inspection in this
+      // synchronous call. Do it before closing the graph transaction so any
+      // unexpected lifecycle error can still roll back replica state.
+      consumeCausalEventBatch(batch);
+      transaction.commit();
+    } catch (error) {
+      transaction.rollback();
+      this.restoreRemoteBatchSnapshot(snapshot, graph);
+      throw error;
+    }
+  }
+
+  /**
    * Atomically validate and accept a remote event batch.
    *
    * Events are detached from caller-owned objects, causally ordered, and then
@@ -785,6 +862,49 @@ export class EgWalkerReplica {
     return operations;
   }
 
+  /** Apply an already-appended exact chain without result allocations. */
+  private applyCausalLinearBatch(
+    events: ReadonlyArray<GraphEvent>,
+    eventCountBeforeBatch: number,
+  ): void {
+    const previousStats = this.engineStatsOverride ?? this.engine?.getStats();
+    this.captureEnginePeakBeforeSwap();
+    this.engine = null;
+    this.engineStatsOverride =
+      previousStats === undefined
+        ? null
+        : withLiveSequenceRecordCount(previousStats, 0);
+    this.engineRecoveryAnchor = null;
+    this.setReplayCacheBase(null);
+    this.replayCacheEvents = 0;
+    this.replayCacheBytes = 0;
+
+    const checkpointStart = Math.max(
+      0,
+      events.length - MAX_RETAINED_CHECKPOINTS,
+    );
+    for (let index = 0; index < events.length; index++) {
+      const event = events[index]!;
+      const operation = this.validateCausalLinearOperation(event.operation);
+      if (operation !== null) {
+        this.applyPlainDocumentOperation(operation);
+      }
+      if (index >= checkpointStart) {
+        this.criticalCheckpoints.record(
+          new Set([event.id]),
+          this.documentBuffer,
+          eventCountBeforeBatch + index + 1,
+        );
+      }
+    }
+
+    const last = events[events.length - 1]!;
+    this.currentVersion = new Set([last.id]);
+    this.restoredSequenceRecords = null;
+    this.incrementalApplyCount += events.length;
+    this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
+  }
+
   /**
    * Number of remote events currently buffered awaiting causal parents.
    * Exposed primarily for tests and diagnostics.
@@ -869,9 +989,7 @@ export class EgWalkerReplica {
         throw new Error("Replica event graph is unavailable");
       }
       const graph = source();
-      for (const event of graph.getAllEvents()) {
-        assertRemoteEventWellFormed(event);
-      }
+      graph.validateStoredEvents(assertRemoteEventWellFormed);
       this.eventGraph = graph;
       this.lazyEventGraph = null;
       this.remoteEvents = this.createRemoteEventBuffer(graph);
@@ -966,7 +1084,9 @@ export class EgWalkerReplica {
       ).engine;
     } else {
       restoredEngine = EgWalkerEngine.fromRecoveryState(anchor.state, graph);
-      for (const event of graph.getAllEvents().slice(anchor.graphEventCount)) {
+      let eventOffset = 0;
+      for (const event of graph.iterateEventsInInsertionOrder()) {
+        if (eventOffset++ < anchor.graphEventCount) continue;
         restoredEngine.applyEvent(event, graph);
       }
     }
@@ -1098,6 +1218,37 @@ export class EgWalkerReplica {
   }
 
   /**
+   * Validate document-relative bounds for an opaque builder-owned event.
+   * Scalar fields and UTF-16 payloads were validated exactly once while the
+   * batch was built and cannot be mutated through its public surface.
+   */
+  private validateCausalLinearOperation(
+    operation: ExternalOperation,
+  ): ExternalOperation | null {
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      if (operation.text.length === 0) {
+        return null;
+      }
+      this.validateIndex(operation.index, true);
+      this.assertNotMidSurrogate(operation.index);
+      return operation;
+    }
+
+    if (operation.length === 0) {
+      return null;
+    }
+    this.validateIndex(operation.index, false);
+    this.assertNotMidSurrogate(operation.index);
+    if (operation.index + operation.length > this.documentBuffer.length) {
+      throw new Error(
+        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.documentBuffer.length}`,
+      );
+    }
+    this.assertNotMidSurrogate(operation.index + operation.length);
+    return operation;
+  }
+
+  /**
    * Export event graph for persistence
    * This is what gets saved to disk - no CRDT metadata
    */
@@ -1125,6 +1276,10 @@ export class EgWalkerReplica {
   private fullReplay(): void {
     const graph = this.ensureEventGraph();
     this.captureEnginePeakBeforeSwap();
+    if (graph.isExactLinearHistory()) {
+      this.fullReplayLinearGraph(graph);
+      return;
+    }
     const sections = planCriticalReplaySections(graph);
     let replayedEventCount = 0;
     let aggregateStats: EngineStats | null = null;
@@ -1218,6 +1373,55 @@ export class EgWalkerReplica {
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     this.refreshReplayCacheMetrics();
+    graph.releaseTraversalCaches();
+  }
+
+  /**
+   * Replay an exact causal chain directly from packed graph storage.
+   *
+   * The general critical-section planner exposes arrays because nonlinear
+   * sections need random access. A persisted single-author trace does not:
+   * streaming it prevents cold load from retaining one GraphEvent, operation,
+   * and parent Set per historical event merely to apply each value once.
+   */
+  private fullReplayLinearGraph(graph: EventGraph): void {
+    const eventCount = graph.getEventCount();
+    const checkpointStart = Math.max(0, eventCount - MAX_RETAINED_CHECKPOINTS);
+    let replayedEventCount = 0;
+
+    this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
+    this.documentCache = null;
+    this.currentVersion = new Set();
+
+    for (const event of graph.iterateEventsInInsertionOrder()) {
+      const operation = this.validateLocalOperation(event.operation);
+      if (operation !== null) {
+        this.applyPlainDocumentOperation(operation);
+      }
+      replayedEventCount++;
+      if (replayedEventCount > checkpointStart) {
+        this.criticalCheckpoints.record(
+          new Set([event.id]),
+          this.documentBuffer,
+          replayedEventCount,
+        );
+      }
+    }
+
+    if (replayedEventCount !== eventCount) {
+      throw new Error("Event graph changed during linear replay");
+    }
+    this.currentVersion = graph.getFrontier();
+    this.engine = null;
+    this.engineStatsOverride = null;
+    this.engineRecoveryAnchor = null;
+    this.setReplayCacheBase(null);
+    this.replayCacheEvents = 0;
+    this.restoredSequenceRecords = null;
+    this.fullReplayCount++;
+    this.lastReplaySource = REPLAY_SOURCE.FULL;
+    this.refreshReplayCacheMetrics();
+
     graph.releaseTraversalCaches();
   }
 
@@ -1535,8 +1739,8 @@ export class EgWalkerReplica {
 
   private inferNextSequenceNumber(): number {
     let maxSequenceNumber = -1;
-    for (const event of this.ensureEventGraph().getAllEvents()) {
-      const parsed = parseEventId(event.id);
+    for (const eventId of this.ensureEventGraph().iterateEventIdsInInsertionOrder()) {
+      const parsed = parseEventId(eventId);
       if (parsed?.replicaId === this.replicaId) {
         maxSequenceNumber = Math.max(maxSequenceNumber, parsed.sequence);
       }

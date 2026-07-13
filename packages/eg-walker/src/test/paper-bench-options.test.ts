@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_PAPER_BENCHMARK_APPLY_API,
   DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS,
   PAPER_BENCHMARK_GRANULARITY,
+  parsePaperBenchmarkApplyApi,
   parsePaperBenchmarkApplyBatchEvents,
   parsePaperBenchmarkGranularity,
 } from "../bench/paper-bench-options";
+
+describe("parsePaperBenchmarkApplyApi", () => {
+  it("defaults to and accepts the strict causal lane", () => {
+    expect(DEFAULT_PAPER_BENCHMARK_APPLY_API).toBe("causal");
+    expect(parsePaperBenchmarkApplyApi("causal")).toBe("causal");
+    expect(parsePaperBenchmarkApplyApi("detailed")).toBe("detailed");
+  });
+
+  it.each(["", "remote", "CAUSAL"])("rejects invalid API %j", (value) => {
+    expect(() => parsePaperBenchmarkApplyApi(value)).toThrow(/apply-api/);
+  });
+});
 
 describe("parsePaperBenchmarkGranularity", () => {
   it("should use operation granularity for paper benchmarks", () => {

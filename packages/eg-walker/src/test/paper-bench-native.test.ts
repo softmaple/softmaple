@@ -57,10 +57,13 @@ describe("native-only paper benchmark", () => {
     expect(result.nativeLoadMs).toBeGreaterThanOrEqual(0);
     expect(result.nativeMaterializeMs).toBeGreaterThanOrEqual(0);
     expect(result.heapBeforeDecodeBytes).toBeGreaterThan(0);
+    expect(result.arrayBuffersBeforeDecodeBytes).toBeGreaterThanOrEqual(0);
     expect(result.rssBeforeDecodeBytes).toBeGreaterThan(0);
     expect(result.heapAfterDecodeBytes).toBeGreaterThan(0);
+    expect(result.arrayBuffersAfterDecodeBytes).toBeGreaterThanOrEqual(0);
     expect(result.rssAfterDecodeBytes).toBeGreaterThan(0);
     expect(result.heapAfterLoadBytes).toBeGreaterThan(0);
+    expect(result.arrayBuffersAfterLoadBytes).toBeGreaterThanOrEqual(0);
     expect(result.rssAfterLoadBytes).toBeGreaterThan(0);
     expect(result.nativeDecodeHeapBytes).toBe(
       result.heapAfterDecodeBytes - result.heapBeforeDecodeBytes,
@@ -70,6 +73,16 @@ describe("native-only paper benchmark", () => {
     );
     expect(result.nativeTotalHeapBytes).toBe(
       result.heapAfterLoadBytes - result.heapBeforeDecodeBytes,
+    );
+    expect(result.nativeDecodeArrayBufferBytes).toBe(
+      result.arrayBuffersAfterDecodeBytes -
+        result.arrayBuffersBeforeDecodeBytes,
+    );
+    expect(result.nativeLoadArrayBufferBytes).toBe(
+      result.arrayBuffersAfterLoadBytes - result.arrayBuffersAfterDecodeBytes,
+    );
+    expect(result.nativeTotalArrayBufferBytes).toBe(
+      result.arrayBuffersAfterLoadBytes - result.arrayBuffersBeforeDecodeBytes,
     );
     expect(result.replayStats.fullReplays).toBe(1);
   });
@@ -97,6 +110,9 @@ describe("native-only paper benchmark", () => {
     expect(result.stdout).toMatch(/nativeDecodeHeapBytes=-?\d+/);
     expect(result.stdout).toMatch(/nativeLoadHeapBytes=-?\d+/);
     expect(result.stdout).toMatch(/nativeTotalHeapBytes=-?\d+/);
+    expect(result.stdout).toMatch(/nativeDecodeArrayBufferBytes=-?\d+/);
+    expect(result.stdout).toMatch(/nativeLoadArrayBufferBytes=-?\d+/);
+    expect(result.stdout).toMatch(/nativeTotalArrayBufferBytes=-?\d+/);
     expect(result.stdout).toMatch(/rssAfterLoadBytes=\d+/);
     expect(result.stdout).toContain("paper-bench-native-summary dataset=S1");
   });

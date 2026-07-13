@@ -9,6 +9,11 @@
 
 export { EgWalkerReplica, createEgWalkerReplica } from "./core/replica";
 export {
+  createCausalEventBatchBuilder,
+  type CausalEventBatch,
+  type CausalEventBatchBuilder,
+} from "./core/causal-event-batch";
+export {
   NativeSnapshotCodec,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,

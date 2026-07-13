@@ -31,10 +31,8 @@ import {
 } from "../internals/binary-io";
 import type { GraphEvent, SerializedGraphOutput } from "../../types";
 import {
-  finalizeOperationRuns,
   operationLength,
   operationTextLength,
-  reconstructTextLengths,
   type ColumnarEventGraph,
   type IdRun,
   type OperationRun,
@@ -53,6 +51,7 @@ import {
   writeParentOverrides,
 } from "./parents";
 import { decodeIds, encodeIdRuns, readIdRuns, writeIdRuns } from "./ids";
+import { buildPackedEventGraphBase } from "./packed-decode";
 
 export type { ColumnarEventGraph, IdRun, OperationRun, ParentOverride };
 
@@ -156,15 +155,23 @@ export class ColumnarEventGraphCodec {
 
     const version = reader.readStringArray();
     const partialOperationRuns = readOperationRuns(reader);
-    const operationIndexes = reader.readZigZagDeltaArray();
-    const operationLengths = reader.readVarintArray();
+    const operationIndexes = reader.readZigZagDeltaFloat64Array();
+    const operationLengths = reader.readVarintFloat64Array();
 
     // Validate before consuming these arrays so finalizeOperationRuns and
     // reconstructTextLengths never see undefined values from a short column.
-    const operationRunsTotal = partialOperationRuns.reduce(
-      (sum, run) => sum + run.length,
-      0,
-    );
+    let operationRunsTotal = 0;
+    for (const [runIndex, run] of partialOperationRuns.entries()) {
+      if (!Number.isSafeInteger(run.length) || run.length <= 0) {
+        throw new Error(
+          `Operation run ${runIndex} must have positive safe length`,
+        );
+      }
+      operationRunsTotal += run.length;
+      if (!Number.isSafeInteger(operationRunsTotal)) {
+        throw new Error("Operation runs exceed safe event count");
+      }
+    }
     if (operationIndexes.length !== operationRunsTotal) {
       throw new Error(
         `Column length mismatch: operationIndexes has ${operationIndexes.length} entries but operationRuns implies ${operationRunsTotal} events`,
@@ -176,16 +183,26 @@ export class ColumnarEventGraphCodec {
       );
     }
 
-    const operationRuns = finalizeOperationRuns(
-      partialOperationRuns,
-      operationIndexes,
-      operationLengths,
-    );
-    const textLengths = reconstructTextLengths(operationRuns, operationLengths);
-    const expectedInsertedSize = textLengths.reduce(
-      (total, length) => total + length,
-      0,
-    );
+    let expectedInsertedSize = 0;
+    for (const run of partialOperationRuns) {
+      if (run.type !== OPERATION_TYPE.INSERT) continue;
+      const end = run.startEventOffset + run.length;
+      for (let offset = run.startEventOffset; offset < end; offset++) {
+        const length = operationLengths[offset]!;
+        if (!Number.isSafeInteger(length) || length < 0) {
+          throw new Error(`Invalid operation length at event offset ${offset}`);
+        }
+        expectedInsertedSize += length;
+        if (
+          !Number.isSafeInteger(expectedInsertedSize) ||
+          expectedInsertedSize > 0xffffffff
+        ) {
+          throw new Error(
+            "Inserted content exceeds packed UTF-16 offset range",
+          );
+        }
+      }
+    }
     // Memory cap: LZ4 frames declare a per-block ceiling that's typically
     // 4-8 MB regardless of actual payload, so the frame's decompressBound is
     // not a useful bomb signal. Instead, bound the destination allocation
@@ -206,7 +223,7 @@ export class ColumnarEventGraphCodec {
     }
     const parentOverrides = readParentOverrides(reader);
     const idRuns = readIdRuns(reader);
-    const timestamps = reader.readZigZagDeltaArray();
+    const timestamps = reader.readZigZagDeltaFloat64Array();
     const metadata = JSON.parse(reader.readString()) as unknown;
     if (reader.remainingByteLength !== 0) {
       throw new Error("Invalid eg-walker columnar graph: trailing bytes");
@@ -225,18 +242,28 @@ export class ColumnarEventGraphCodec {
       );
     }
 
-    return this.decode({
+    const ids = decodeIds(idRuns);
+    const expectedFrontier = strictEventIdSet(
       version,
-      operationRuns,
+      "columnar graph version",
+    );
+    const packed = buildPackedEventGraphBase({
+      ids,
+      operationRuns: partialOperationRuns,
       operationIndexes,
       operationLengths,
-      textLengths,
       insertedContent,
       parentOverrides,
-      idRuns,
       timestamps,
-      metadata: strictMetadata(metadata),
     });
+    if (!sameEventIds(packed.frontier, expectedFrontier)) {
+      throw new Error("Columnar graph version does not match its frontier");
+    }
+    return EventGraph.fromPackedBase(
+      packed.base,
+      packed.frontier,
+      strictMetadata(metadata),
+    );
   }
 }
 

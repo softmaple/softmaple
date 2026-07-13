@@ -9,6 +9,10 @@ interface LeafNode {
   readonly length: number;
   readonly nodeCount: 1;
   readonly height: 0;
+  readonly firstCodeUnit: number | undefined;
+  readonly lastCodeUnit: number | undefined;
+  readonly hasSurrogateCodeUnits: boolean;
+  readonly hasSurrogatePairs: boolean;
 }
 
 interface BranchNode {
@@ -18,6 +22,10 @@ interface BranchNode {
   readonly length: number;
   readonly nodeCount: number;
   readonly height: number;
+  readonly firstCodeUnit: number | undefined;
+  readonly lastCodeUnit: number | undefined;
+  readonly hasSurrogateCodeUnits: boolean;
+  readonly hasSurrogatePairs: boolean;
 }
 
 type RopeNode = LeafNode | BranchNode;
@@ -25,6 +33,13 @@ type RopeNode = LeafNode | BranchNode;
 interface DeleteResult {
   readonly node: RopeNode | null;
   readonly hasUnderfilledLeaf: boolean;
+}
+
+interface Utf16NodeMetadata {
+  readonly firstCodeUnit: number | undefined;
+  readonly lastCodeUnit: number | undefined;
+  readonly hasSurrogateCodeUnits: boolean;
+  readonly hasSurrogatePairs: boolean;
 }
 
 export interface Utf16RopeInstrumentation {
@@ -45,7 +60,55 @@ const counters = {
   flattenedCodeUnits: 0,
 };
 
-const leaf = (text: string): LeafNode => {
+const isHighSurrogate = (codeUnit: number): boolean =>
+  codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+
+const isLowSurrogate = (codeUnit: number): boolean =>
+  codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
+
+const analyzeUtf16 = (text: string): Utf16NodeMetadata => {
+  let hasSurrogateCodeUnits = false;
+  let hasSurrogatePairs = false;
+  let previous = -1;
+  for (let index = 0; index < text.length; index++) {
+    const current = text.charCodeAt(index);
+    hasSurrogateCodeUnits ||=
+      isHighSurrogate(current) || isLowSurrogate(current);
+    hasSurrogatePairs ||= isHighSurrogate(previous) && isLowSurrogate(current);
+    previous = current;
+  }
+  return {
+    firstCodeUnit: text.length === 0 ? undefined : text.charCodeAt(0),
+    lastCodeUnit:
+      text.length === 0 ? undefined : text.charCodeAt(text.length - 1),
+    hasSurrogateCodeUnits,
+    hasSurrogatePairs,
+  };
+};
+
+const bmpUtf16Metadata = (text: string): Utf16NodeMetadata => ({
+  firstCodeUnit: text.length === 0 ? undefined : text.charCodeAt(0),
+  lastCodeUnit:
+    text.length === 0 ? undefined : text.charCodeAt(text.length - 1),
+  hasSurrogateCodeUnits: false,
+  hasSurrogatePairs: false,
+});
+
+/** Cheap conservative signal used by replay to skip scalar-boundary lookups. */
+export const containsUtf16SurrogateCodeUnit = (text: string): boolean => {
+  for (let index = 0; index < text.length; index++) {
+    const codeUnit = text.charCodeAt(index);
+    if (isHighSurrogate(codeUnit) || isLowSurrogate(codeUnit)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const leaf = (
+  text: string,
+  utf16: Utf16NodeMetadata = analyzeUtf16(text),
+): LeafNode => {
   counters.nodeAllocations++;
   return Object.freeze({
     kind: "leaf" as const,
@@ -53,10 +116,11 @@ const leaf = (text: string): LeafNode => {
     length: text.length,
     nodeCount: 1 as const,
     height: 0 as const,
+    ...utf16,
   });
 };
 
-const EMPTY_LEAF = leaf("");
+const EMPTY_LEAF = leaf("", bmpUtf16Metadata(""));
 
 const branch = (
   children: ReadonlyArray<RopeNode>,
@@ -71,9 +135,26 @@ const branch = (
   counters.nodeAllocations++;
   let length = 0;
   let nodeCount = 1;
+  let hasSurrogateCodeUnits = false;
+  let hasSurrogatePairs = false;
+  let firstCodeUnit: number | undefined;
+  let previousLastCodeUnit: number | undefined;
   const cumulativeEnds = children.map((child) => {
     length += child.length;
     nodeCount += child.nodeCount;
+    hasSurrogateCodeUnits ||= child.hasSurrogateCodeUnits;
+    hasSurrogatePairs ||=
+      child.hasSurrogatePairs ||
+      (previousLastCodeUnit !== undefined &&
+        child.firstCodeUnit !== undefined &&
+        isHighSurrogate(previousLastCodeUnit) &&
+        isLowSurrogate(child.firstCodeUnit));
+    if (firstCodeUnit === undefined && child.firstCodeUnit !== undefined) {
+      firstCodeUnit = child.firstCodeUnit;
+    }
+    if (child.lastCodeUnit !== undefined) {
+      previousLastCodeUnit = child.lastCodeUnit;
+    }
     return length;
   });
   return Object.freeze({
@@ -83,6 +164,10 @@ const branch = (
     length,
     nodeCount,
     height: children[0]!.height + 1,
+    firstCodeUnit,
+    lastCodeUnit: previousLastCodeUnit,
+    hasSurrogateCodeUnits,
+    hasSurrogatePairs,
   });
 };
 
@@ -123,6 +208,16 @@ export class PersistentUtf16Rope {
 
   get height(): number {
     return this.root.height;
+  }
+
+  /** Whether any UTF-16 surrogate code unit exists in this rope. */
+  get hasSurrogateCodeUnits(): boolean {
+    return this.root.hasSurrogateCodeUnits;
+  }
+
+  /** Whether this rope contains an adjacent high/low surrogate pair. */
+  get hasSurrogatePairs(): boolean {
+    return this.root.hasSurrogatePairs;
   }
 
   insert(index: number, text: string): PersistentUtf16Rope {
@@ -247,7 +342,7 @@ export class PersistentUtf16Rope {
   }
 }
 
-const chunkText = (text: string): LeafNode[] => {
+const chunkText = (text: string, knownBmp: boolean = false): LeafNode[] => {
   if (text.length === 0) {
     return [];
   }
@@ -258,7 +353,8 @@ const chunkText = (text: string): LeafNode[] => {
   let offset = 0;
   for (let index = 0; index < count; index++) {
     const size = base + (index < extra ? 1 : 0);
-    result.push(leaf(text.slice(offset, offset + size)));
+    const chunk = text.slice(offset, offset + size);
+    result.push(leaf(chunk, knownBmp ? bmpUtf16Metadata(chunk) : undefined));
     offset += size;
   }
   return result;
@@ -271,8 +367,11 @@ const insertIntoNode = (
 ): RopeNode[] => {
   counters.nodeVisits++;
   if (node.kind === "leaf") {
+    const knownBmp =
+      !node.hasSurrogateCodeUnits && !containsUtf16SurrogateCodeUnit(text);
     return chunkText(
       `${node.text.slice(0, index)}${text}${node.text.slice(index)}`,
+      knownBmp,
     );
   }
 
@@ -307,7 +406,15 @@ const deleteFromNode = (
   if (node.kind === "leaf") {
     const remaining = `${node.text.slice(0, Math.max(0, start))}${node.text.slice(Math.min(node.length, end))}`;
     return {
-      node: remaining.length === 0 ? null : leaf(remaining),
+      node:
+        remaining.length === 0
+          ? null
+          : leaf(
+              remaining,
+              node.hasSurrogateCodeUnits
+                ? undefined
+                : bmpUtf16Metadata(remaining),
+            ),
       hasUnderfilledLeaf:
         remaining.length > 0 && remaining.length < UTF16_ROPE_MIN_LEAF,
     };

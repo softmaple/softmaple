@@ -2,7 +2,10 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
-import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
+import {
+  containsUtf16SurrogateCodeUnit,
+  PersistentUtf16Rope,
+} from "../text/persistent-utf16-rope";
 import { IndexedSequence } from "./indexed-sequence";
 import {
   DeleteTargetIndex,
@@ -33,6 +36,7 @@ import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
 import {
   materializeRecordContent,
+  recordContentHasSurrogateCodeUnits,
   RopeRecordContent,
 } from "./internals/record-content";
 import { RecordSplitter } from "./internals/record-splitter";
@@ -127,6 +131,7 @@ export class EgWalkerEngine {
   private placeholderCounter = 0;
   private integrationProbeCount = 0;
   private useLinearIntegrationOracle = false;
+  private prepareViewMayContainSurrogatePairs = false;
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -176,7 +181,9 @@ export class EgWalkerEngine {
         fugueMarkerOperations: fugueStats.markerOperations,
         fugueRotations: fugueStats.rotations,
         fugueRebuilds: fugueStats.rebuilds,
-        sequenceTreeOperations: this.sequence.getStructuralOperationCount(),
+        sequenceTreeOperations:
+          this.sequence.getStructuralOperationCount() +
+          fugueStats.markerTreeOperations,
       },
     };
   }
@@ -358,7 +365,9 @@ export class EgWalkerEngine {
       fugueMarkerOperations: fugueStats.markerOperations,
       fugueRotations: fugueStats.rotations,
       fugueRebuilds: fugueStats.rebuilds,
-      sequenceTreeOperations: this.sequence.getStructuralOperationCount(),
+      sequenceTreeOperations:
+        this.sequence.getStructuralOperationCount() +
+        fugueStats.markerTreeOperations,
     };
   }
 
@@ -373,6 +382,11 @@ export class EgWalkerEngine {
     this.fugueOrder.restoreStats({
       comparisons: stats.fugueComparisons,
       markerOperations: stats.fugueMarkerOperations,
+      // EngineStats historically stores a single ranked-tree aggregate. Put
+      // the restored aggregate on the document tree below and restart this
+      // internal breakdown at zero so the externally visible total remains
+      // monotonic without changing the snapshot/API shape.
+      markerTreeOperations: 0,
       rotations: stats.fugueRotations,
       rebuilds: stats.fugueRebuilds,
     });
@@ -425,6 +439,9 @@ export class EgWalkerEngine {
     this.currentVersion = new Set(state.currentVersion);
     this.resultingText =
       state.textBuffer ?? PersistentUtf16Rope.from(state.text);
+    this.prepareViewMayContainSurrogatePairs =
+      this.resultingText.hasSurrogateCodeUnits ||
+      items.some((item) => recordContentHasSurrogateCodeUnits(item.content));
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -550,6 +567,8 @@ export class EgWalkerEngine {
     this.currentVersion = new Set(options.initialVersion ?? []);
     this.resultingText =
       options.initialTextBuffer ?? PersistentUtf16Rope.from(initialText);
+    this.prepareViewMayContainSurrogatePairs =
+      this.resultingText.hasSurrogateCodeUnits;
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -633,12 +652,18 @@ export class EgWalkerEngine {
     this.assertOperationInPrepareView(event);
 
     if (operation.type === OPERATION_TYPE.INSERT) {
-      return applyInsert(
+      const transformed = applyInsert(
         event,
         operation,
         this.insertDeps,
         collectTransformedOperations,
       );
+      // Monotonic for the lifetime of this replay engine: deleted/retreated
+      // records can become prepare-visible again, so seeing one surrogate code
+      // unit once means future parent views may contain a scalar pair.
+      this.prepareViewMayContainSurrogatePairs ||=
+        containsUtf16SurrogateCodeUnit(operation.text);
+      return transformed;
     }
 
     return applyDelete(
@@ -677,6 +702,9 @@ export class EgWalkerEngine {
   }
 
   private assertPrepareScalarBoundary(index: number, eventId: EventId): void {
+    if (!this.prepareViewMayContainSurrogatePairs) {
+      return;
+    }
     if (index <= 0 || index >= this.sequence.prepareLength) {
       return;
     }
@@ -757,11 +785,11 @@ export class EgWalkerEngine {
   }
 
   private itemToEffectIndex(target: AugmentedCRDTItem): number {
-    const position = this.sequence.positionOf(target);
-    if (position === -1) {
+    const effectIndex = this.sequence.effectIndexOf(target);
+    if (effectIndex === -1) {
       throw new Error(`Item ${target.id} not found`);
     }
-    return this.sequence.effectIndexBeforePosition(position);
+    return effectIndex;
   }
 
   /**

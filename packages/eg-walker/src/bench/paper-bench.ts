@@ -17,13 +17,17 @@ import {
   type PaperTraceGranularity,
 } from "./paper-traces";
 import {
+  DEFAULT_PAPER_BENCHMARK_APPLY_API,
   DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS,
   PAPER_BENCHMARK_GRANULARITY,
+  parsePaperBenchmarkApplyApi,
   parsePaperBenchmarkApplyBatchEvents,
   parsePaperBenchmarkGranularity,
+  type PaperBenchmarkApplyApi,
   type PaperBenchmarkApplyBatchEvents,
 } from "./paper-bench-options";
 import { applyRemoteEventsInBatches } from "./paper-bench-apply";
+import { loadPaperTraceCausalBatches } from "./paper-trace-causal-batches";
 import {
   buildNativePaperPayload,
   measureNativePaperPayload,
@@ -67,6 +71,7 @@ interface CliOptions {
   readonly maxEvents?: number;
   readonly granularity: PaperTraceGranularity;
   readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyApi: PaperBenchmarkApplyApi;
   readonly memory: boolean;
   readonly memoryWorker: boolean;
   readonly memoryRun?: number;
@@ -86,6 +91,7 @@ interface ApplyBenchResult {
   readonly maxEvents?: number;
   readonly granularity: PaperTraceGranularity;
   readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyApi: PaperBenchmarkApplyApi;
   readonly applyCalls: number;
   readonly txns: number;
   readonly patches: number;
@@ -125,14 +131,20 @@ interface NativeBenchResult {
   readonly nativeLoadMs: number;
   readonly nativeMaterializeMs: number;
   readonly heapBeforeDecodeBytes: number;
+  readonly arrayBuffersBeforeDecodeBytes: number;
   readonly rssBeforeDecodeBytes: number;
   readonly heapAfterDecodeBytes: number;
+  readonly arrayBuffersAfterDecodeBytes: number;
   readonly rssAfterDecodeBytes: number;
   readonly heapAfterLoadBytes: number;
+  readonly arrayBuffersAfterLoadBytes: number;
   readonly rssAfterLoadBytes: number;
   readonly nativeDecodeHeapBytes: number;
   readonly nativeLoadHeapBytes: number;
   readonly nativeTotalHeapBytes: number;
+  readonly nativeDecodeArrayBufferBytes: number;
+  readonly nativeLoadArrayBufferBytes: number;
+  readonly nativeTotalArrayBufferBytes: number;
   readonly fullReplays: number;
   readonly partialReplays: number;
   readonly incrementalApplies: number;
@@ -160,6 +172,15 @@ interface PreparedNativeBench {
   readonly patches: number;
   readonly loadConvertMs: number;
   readonly graphEncodeMs: number;
+}
+
+interface PreparedApplyBench {
+  readonly txnCount: number;
+  readonly patchCount: number;
+  readonly eventCount: number;
+  readonly limited: boolean;
+  readonly expectedText: string;
+  apply(replica: EgWalkerReplica): number;
 }
 
 interface BenchResult {
@@ -261,6 +282,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   let granularity: PaperTraceGranularity = PAPER_BENCHMARK_GRANULARITY;
   let applyBatchEvents: PaperBenchmarkApplyBatchEvents =
     DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS;
+  let applyApi: PaperBenchmarkApplyApi = DEFAULT_PAPER_BENCHMARK_APPLY_API;
   let memory = false;
   let memoryWorker = false;
   let memoryRun: number | undefined;
@@ -347,6 +369,15 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
       );
       continue;
     }
+    if (arg === "--apply-api") {
+      applyApi = parsePaperBenchmarkApplyApi(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--apply-api=")) {
+      applyApi = parsePaperBenchmarkApplyApi(arg.slice("--apply-api=".length));
+      continue;
+    }
     if (arg === "--memory") {
       memory = true;
       continue;
@@ -423,6 +454,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
     maxEvents,
     granularity,
     applyBatchEvents,
+    applyApi,
     memory,
     memoryWorker,
     memoryRun,
@@ -448,6 +480,7 @@ Options:
   --granularity MODE Paper benchmarks require operation. Default: operation
   --apply-batch-events N|all
                      Remote receive batch size. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS}
+  --apply-api MODE   Apply-only ingestion API: causal or detailed. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_API}
   --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
                      in a separate --expose-gc process
   --apply-only       Measure conversion and public batch receive only; skip all persistence work
@@ -546,6 +579,7 @@ const printApplyResult = (result: ApplyBenchResult): void => {
       `maxEvents=${result.maxEvents ?? "none"}`,
       `granularity=${result.granularity}`,
       `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyApi=${result.applyApi}`,
       `applyCalls=${result.applyCalls}`,
       `txns=${result.txns}`,
       `patches=${result.patches}`,
@@ -590,14 +624,20 @@ const printNativeResult = (result: NativeBenchResult): void => {
       `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
       `nativeMaterializeMs=${formatNumber(result.nativeMaterializeMs)}`,
       `heapBeforeDecodeBytes=${result.heapBeforeDecodeBytes}`,
+      `arrayBuffersBeforeDecodeBytes=${result.arrayBuffersBeforeDecodeBytes}`,
       `rssBeforeDecodeBytes=${result.rssBeforeDecodeBytes}`,
       `heapAfterDecodeBytes=${result.heapAfterDecodeBytes}`,
+      `arrayBuffersAfterDecodeBytes=${result.arrayBuffersAfterDecodeBytes}`,
       `rssAfterDecodeBytes=${result.rssAfterDecodeBytes}`,
       `heapAfterLoadBytes=${result.heapAfterLoadBytes}`,
+      `arrayBuffersAfterLoadBytes=${result.arrayBuffersAfterLoadBytes}`,
       `rssAfterLoadBytes=${result.rssAfterLoadBytes}`,
       `nativeDecodeHeapBytes=${result.nativeDecodeHeapBytes}`,
       `nativeLoadHeapBytes=${result.nativeLoadHeapBytes}`,
       `nativeTotalHeapBytes=${result.nativeTotalHeapBytes}`,
+      `nativeDecodeArrayBufferBytes=${result.nativeDecodeArrayBufferBytes}`,
+      `nativeLoadArrayBufferBytes=${result.nativeLoadArrayBufferBytes}`,
+      `nativeTotalArrayBufferBytes=${result.nativeTotalArrayBufferBytes}`,
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
       `incrementalApplies=${result.incrementalApplies}`,
@@ -802,14 +842,20 @@ const runNativeDatasetOnce = (
     nativeLoadMs: measured.nativeLoadMs,
     nativeMaterializeMs: measured.nativeMaterializeMs,
     heapBeforeDecodeBytes: measured.heapBeforeDecodeBytes,
+    arrayBuffersBeforeDecodeBytes: measured.arrayBuffersBeforeDecodeBytes,
     rssBeforeDecodeBytes: measured.rssBeforeDecodeBytes,
     heapAfterDecodeBytes: measured.heapAfterDecodeBytes,
+    arrayBuffersAfterDecodeBytes: measured.arrayBuffersAfterDecodeBytes,
     rssAfterDecodeBytes: measured.rssAfterDecodeBytes,
     heapAfterLoadBytes: measured.heapAfterLoadBytes,
+    arrayBuffersAfterLoadBytes: measured.arrayBuffersAfterLoadBytes,
     rssAfterLoadBytes: measured.rssAfterLoadBytes,
     nativeDecodeHeapBytes: measured.nativeDecodeHeapBytes,
     nativeLoadHeapBytes: measured.nativeLoadHeapBytes,
     nativeTotalHeapBytes: measured.nativeTotalHeapBytes,
+    nativeDecodeArrayBufferBytes: measured.nativeDecodeArrayBufferBytes,
+    nativeLoadArrayBufferBytes: measured.nativeLoadArrayBufferBytes,
+    nativeTotalArrayBufferBytes: measured.nativeTotalArrayBufferBytes,
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
     incrementalApplies: stats.incrementalApplies,
@@ -930,32 +976,43 @@ const runApplyDatasetOnce = (
   paperRoot: string,
   run: number,
   benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
 ): ApplyBenchResult => {
   const startedAt = performance.now();
-  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  const prepared = prepareApplyBench(paperRoot, benchCase, applyApi);
   const convertedAt = performance.now();
-  printProgress(
-    "converted",
-    benchCase,
-    run,
-    startedAt,
-    loaded.events.length,
-    0,
-  );
+  printProgress("converted", benchCase, run, startedAt, prepared.eventCount, 0);
   const applyStartedAt = performance.now();
-  const { replica, text, applyCalls } = applyLoadedPaperTrace(
-    benchCase.dataset,
-    run,
-    loaded,
-    benchCase.applyBatchEvents,
+  const replica = new EgWalkerReplica(
+    `paper-bench:${benchCase.dataset}:${run}:${applyApi}`,
   );
+  let applyCalls: number;
+  try {
+    applyCalls = prepared.apply(replica);
+  } catch (error) {
+    throw new Error(
+      `${benchCase.dataset}: ${applyApi} apply failed with batch size ${benchCase.applyBatchEvents}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const pending = replica.getPendingRemoteCount();
+  if (pending !== 0) {
+    throw new Error(
+      `${benchCase.dataset}: ${pending} remote events remain buffered`,
+    );
+  }
+  const text = replica.getText();
+  if (!prepared.limited && text !== prepared.expectedText) {
+    throw new Error(
+      `${benchCase.dataset}: final text mismatch, got ${text.length} UTF-16 code units, expected ${prepared.expectedText.length}`,
+    );
+  }
   const appliedAt = performance.now();
   printProgress(
     "applied",
     benchCase,
     run,
     startedAt,
-    loaded.events.length,
+    prepared.eventCount,
     applyCalls,
   );
   const stats = replica.getReplayStats();
@@ -968,12 +1025,13 @@ const runApplyDatasetOnce = (
     maxEvents: benchCase.maxEvents,
     granularity: benchCase.granularity,
     applyBatchEvents: benchCase.applyBatchEvents,
+    applyApi,
     applyCalls,
-    txns: loaded.txnCount,
-    patches: loaded.patchCount,
-    events: loaded.events.length,
+    txns: prepared.txnCount,
+    patches: prepared.patchCount,
+    events: prepared.eventCount,
     finalTextLength: text.length,
-    finalTextValidated: !loaded.limited,
+    finalTextValidated: !prepared.limited,
     loadConvertMs: convertedAt - startedAt,
     applyMs: appliedAt - applyStartedAt,
     totalMs: appliedAt - startedAt,
@@ -985,6 +1043,48 @@ const runApplyDatasetOnce = (
     sequenceRecords: stats.sequenceRecordCount,
     peakSequenceRecords: stats.peakSequenceRecordCount,
     sequenceTreeOperations: stats.sequenceTreeOperations,
+  };
+};
+
+const prepareApplyBench = (
+  paperRoot: string,
+  benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
+): PreparedApplyBench => {
+  if (applyApi === "causal") {
+    const loaded = loadPaperTraceCausalBatches(paperRoot, benchCase.dataset, {
+      batchEvents: benchCase.applyBatchEvents,
+      maxTxns: benchCase.maxTxns,
+      maxEvents: benchCase.maxEvents,
+    });
+    return {
+      txnCount: loaded.txnCount,
+      patchCount: loaded.patchCount,
+      eventCount: loaded.eventCount,
+      limited: loaded.limited,
+      expectedText: loaded.trace.endContent,
+      apply: (replica): number => {
+        for (const batch of loaded.batches) {
+          replica.applyCausalBatch(batch);
+        }
+        return loaded.batchCount;
+      },
+    };
+  }
+
+  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  return {
+    txnCount: loaded.txnCount,
+    patchCount: loaded.patchCount,
+    eventCount: loaded.events.length,
+    limited: loaded.limited,
+    expectedText: loaded.trace.endContent,
+    apply: (replica): number =>
+      applyRemoteEventsInBatches(
+        replica,
+        loaded.events,
+        benchCase.applyBatchEvents,
+      ),
   };
 };
 
@@ -1336,6 +1436,21 @@ const printNativeSummaries = (
         `meanNativeTotalHeapBytes=${formatNumber(
           mean(datasetResults.map((result) => result.nativeTotalHeapBytes)),
         )}`,
+        `meanNativeDecodeArrayBufferBytes=${formatNumber(
+          mean(
+            datasetResults.map((result) => result.nativeDecodeArrayBufferBytes),
+          ),
+        )}`,
+        `meanNativeLoadArrayBufferBytes=${formatNumber(
+          mean(
+            datasetResults.map((result) => result.nativeLoadArrayBufferBytes),
+          ),
+        )}`,
+        `meanNativeTotalArrayBufferBytes=${formatNumber(
+          mean(
+            datasetResults.map((result) => result.nativeTotalArrayBufferBytes),
+          ),
+        )}`,
         `meanRssAfterLoadBytes=${formatNumber(
           mean(datasetResults.map((result) => result.rssAfterLoadBytes)),
         )}`,
@@ -1365,6 +1480,7 @@ const printApplySummaries = (
         `maxEvents=${first.maxEvents ?? "none"}`,
         `granularity=${first.granularity}`,
         `applyBatchEvents=${first.applyBatchEvents}`,
+        `applyApi=${first.applyApi}`,
         `applyCalls=${first.applyCalls}`,
         `events=${first.events}`,
         `finalTextValidated=${datasetResults.every((result) => result.finalTextValidated)}`,
@@ -1734,6 +1850,7 @@ const main = (): void => {
       `maxEvents=${options.maxEvents ?? "none"}`,
       `granularity=${options.granularity}`,
       `applyBatchEvents=${options.applyBatchEvents}`,
+      `applyApi=${options.applyApi}`,
       `applyOnly=${options.applyOnly}`,
       `nativeOnly=${options.nativeOnly}`,
       `memory=${options.memory}`,
@@ -1746,7 +1863,12 @@ const main = (): void => {
     const applyResults: ApplyBenchResult[] = [];
     for (const benchCase of benchCases) {
       for (let run = 1; run <= options.runs; run++) {
-        const result = runApplyDatasetOnce(options.paperRoot, run, benchCase);
+        const result = runApplyDatasetOnce(
+          options.paperRoot,
+          run,
+          benchCase,
+          options.applyApi,
+        );
         applyResults.push(result);
         printApplyResult(result);
       }

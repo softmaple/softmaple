@@ -48,6 +48,29 @@ describe("ColumnarEventGraphCodec", () => {
     ).toBe("x".repeat(20));
   });
 
+  it("preserves a leading U+FEFF in the inserted-content column", () => {
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "bom:0",
+      parentVersion: new Set(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: "\uFEFFcontent",
+      },
+      timestamp: 0,
+    });
+
+    const codec = new ColumnarEventGraphCodec();
+    const decoded = codec.decodeBinary(codec.encodeBinary(graph));
+
+    expect(decoded.getEvent("bom:0")?.operation).toEqual({
+      type: OPERATION_TYPE.INSERT,
+      index: 0,
+      text: "\uFEFFcontent",
+    });
+  });
+
   it("preserves a single sequence-zero generated ID through columnar codecs", () => {
     const graph = new EventGraph();
     graph.addEvent({

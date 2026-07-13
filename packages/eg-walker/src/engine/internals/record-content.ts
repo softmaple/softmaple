@@ -1,4 +1,7 @@
-import { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
+import {
+  containsUtf16SurrogateCodeUnit,
+  PersistentUtf16Rope,
+} from "../../text/persistent-utf16-rope";
 
 export type RecordContent = string | RopeRecordContent;
 
@@ -16,6 +19,14 @@ export class RopeRecordContent {
 
   get length(): number {
     return this.end - this.start;
+  }
+
+  /**
+   * Conservative for sliced views: inspecting the shared rope root avoids
+   * materialising the slice and can only keep the replay boundary guard on.
+   */
+  get hasSurrogateCodeUnits(): boolean {
+    return this.rope.hasSurrogateCodeUnits;
   }
 
   charCodeAt(index: number): number {
@@ -61,3 +72,10 @@ export const materializeRecordContent = (
   typeof content === "string"
     ? content.slice(start, end)
     : content.materialize(start, end);
+
+export const recordContentHasSurrogateCodeUnits = (
+  content: RecordContent,
+): boolean =>
+  typeof content === "string"
+    ? containsUtf16SurrogateCodeUnit(content)
+    : content.hasSurrogateCodeUnits;

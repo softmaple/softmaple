@@ -1,10 +1,12 @@
-import type { EventId, GraphEvent } from "../../types";
+import type { EventId } from "../../types";
 import { compareEventIds } from "../event-id";
 import { MaxHeap } from "./max-heap";
 
 interface TopologicalOrderView {
-  readonly events: ReadonlyMap<EventId, GraphEvent>;
-  readonly childrenMap: ReadonlyMap<EventId, ReadonlySet<EventId>>;
+  readonly eventCount: number;
+  readonly eventIds: Iterable<EventId>;
+  readonly parentCountOf: (id: EventId) => number;
+  readonly childrenOf: (id: EventId) => Iterable<EventId>;
 }
 
 /**
@@ -15,31 +17,26 @@ interface TopologicalOrderView {
  * byte-for-byte — important because the columnar codec's on-disk bytes are
  * keyed off this ordering.
  */
-export const getTopologicalOrder = (
-  view: TopologicalOrderView,
-): GraphEvent[] => {
+export const getTopologicalOrder = (view: TopologicalOrderView): EventId[] => {
   const remainingParents = new Map<EventId, number>();
   const ready = new MaxHeap<EventId>((left, right) =>
     compareEventIds(right, left),
   );
 
-  for (const [id, event] of view.events) {
-    remainingParents.set(id, event.parentVersion.size);
-    if (event.parentVersion.size === 0) {
+  for (const id of view.eventIds) {
+    const parentCount = view.parentCountOf(id);
+    remainingParents.set(id, parentCount);
+    if (parentCount === 0) {
       ready.push(id);
     }
   }
 
-  const result: GraphEvent[] = [];
+  const result: EventId[] = [];
   while (ready.size > 0) {
     const id = ready.pop()!;
-    const event = view.events.get(id);
-    if (!event) {
-      continue;
-    }
-    result.push(event);
+    result.push(id);
 
-    for (const childId of view.childrenMap.get(id) ?? []) {
+    for (const childId of view.childrenOf(id)) {
       const remaining = (remainingParents.get(childId) ?? 0) - 1;
       remainingParents.set(childId, remaining);
       if (remaining === 0) {
@@ -48,7 +45,7 @@ export const getTopologicalOrder = (
     }
   }
 
-  if (result.length !== view.events.size) {
+  if (result.length !== view.eventCount) {
     throw new Error("Cycle detected in event graph");
   }
 
@@ -72,13 +69,14 @@ export const getTopologicalOrder = (
  */
 export const getBranchPreservingTopologicalOrder = (
   view: TopologicalOrderView,
-): GraphEvent[] => {
+): EventId[] => {
   const remainingParents = new Map<EventId, number>();
   const roots: EventId[] = [];
 
-  for (const [id, event] of view.events) {
-    remainingParents.set(id, event.parentVersion.size);
-    if (event.parentVersion.size === 0) {
+  for (const id of view.eventIds) {
+    const parentCount = view.parentCountOf(id);
+    remainingParents.set(id, parentCount);
+    if (parentCount === 0) {
       roots.push(id);
     }
   }
@@ -94,7 +92,7 @@ export const getBranchPreservingTopologicalOrder = (
     stack.push(roots[i]!);
   }
 
-  const result: GraphEvent[] = [];
+  const result: EventId[] = [];
   const visited = new Set<EventId>();
 
   while (stack.length > 0) {
@@ -102,20 +100,11 @@ export const getBranchPreservingTopologicalOrder = (
     if (visited.has(id)) {
       continue;
     }
-    const event = view.events.get(id);
-    if (!event) {
-      continue;
-    }
     visited.add(id);
-    result.push(event);
-
-    const children = view.childrenMap.get(id);
-    if (!children || children.size === 0) {
-      continue;
-    }
+    result.push(id);
 
     const newlyReady: EventId[] = [];
-    for (const childId of children) {
+    for (const childId of view.childrenOf(id)) {
       const remaining = (remainingParents.get(childId) ?? 0) - 1;
       remainingParents.set(childId, remaining);
       if (remaining === 0) {
@@ -131,7 +120,7 @@ export const getBranchPreservingTopologicalOrder = (
     }
   }
 
-  if (result.length !== view.events.size) {
+  if (result.length !== view.eventCount) {
     throw new Error("Cycle detected in event graph");
   }
 

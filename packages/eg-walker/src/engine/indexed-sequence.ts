@@ -8,6 +8,7 @@ import {
   type ItemLocation,
   type LeafNode,
 } from "./internals/indexed-sequence-node";
+import { OrderMaintenanceList } from "./internals/order-maintenance-list";
 
 /**
  * Sentinel thrown by the ranked B-tree's prepare/effect index lookups when
@@ -47,6 +48,7 @@ export class IndexOutOfRangeError extends Error {
 export class IndexedSequence<T extends object> {
   private root: IndexedNode<T> | null = null;
   private locationsByItem = new WeakMap<T, ItemLocation<T>>();
+  private readonly leafOrder = new OrderMaintenanceList<LeafNode<T>>();
   private structuralOperationCount = 0;
 
   /**
@@ -61,12 +63,14 @@ export class IndexedSequence<T extends object> {
     prepareWeight: (item: T) => number,
     effectWeight: (item: T) => number,
     anchorWeight?: (item: T) => number,
+    maintainOrder: boolean = false,
   ): IndexedSequence<T> {
     return new IndexedSequence(
       prepareWeight,
       effectWeight,
       records,
       anchorWeight,
+      maintainOrder,
     );
   }
 
@@ -76,6 +80,7 @@ export class IndexedSequence<T extends object> {
     items: ReadonlyArray<T> = [],
     private readonly anchorWeight: (item: T) => number = (item) =>
       prepareWeight(item) > 0 ? 1 : 0,
+    private readonly maintainOrder: boolean = false,
   ) {
     if (items.length > 0) {
       this.bulkLoad(items);
@@ -92,11 +97,17 @@ export class IndexedSequence<T extends object> {
   }
 
   getStructuralOperationCount(): number {
-    return this.structuralOperationCount;
+    return (
+      this.structuralOperationCount +
+      (this.maintainOrder ? this.leafOrder.getStructuralOperationCount() : 0)
+    );
   }
 
   restoreStructuralOperationCount(count: number): void {
     this.structuralOperationCount = count;
+    if (this.maintainOrder) {
+      this.leafOrder.restoreStructuralOperationCount(0);
+    }
   }
 
   toArray(): T[] {
@@ -144,6 +155,25 @@ export class IndexedSequence<T extends object> {
     return this.positionOfNode(location.leaf) + location.offsetInLeaf;
   }
 
+  /** Compare two resident items by sequence order without a rank walk. */
+  compareOrder(left: T, right: T): number {
+    if (!this.maintainOrder) {
+      throw new Error("Indexed sequence order tracking is disabled");
+    }
+    if (left === right) {
+      return 0;
+    }
+    const leftLocation = this.resolveLocation(left);
+    const rightLocation = this.resolveLocation(right);
+    if (leftLocation === undefined || rightLocation === undefined) {
+      throw new Error("Indexed sequence item is unavailable");
+    }
+    if (leftLocation.leaf === rightLocation.leaf) {
+      return leftLocation.offsetInLeaf < rightLocation.offsetInLeaf ? -1 : 1;
+    }
+    return this.leafOrder.compare(leftLocation.leaf, rightLocation.leaf);
+  }
+
   /**
    * Effect-visible UTF-16 width before `item`.
    *
@@ -180,6 +210,9 @@ export class IndexedSequence<T extends object> {
   clear(): void {
     this.root = null;
     this.locationsByItem = new WeakMap<T, ItemLocation<T>>();
+    if (this.maintainOrder) {
+      this.leafOrder.resetFromItems([]);
+    }
     this.structuralOperationCount = 0;
   }
 
@@ -198,6 +231,9 @@ export class IndexedSequence<T extends object> {
 
     if (!this.root) {
       const leaf = createLeaf<T>();
+      if (this.maintainOrder) {
+        this.leafOrder.resetFromItems([leaf]);
+      }
       this.root = leaf;
       this.insertIntoLeaf(leaf, 0, item);
       return;
@@ -231,6 +267,9 @@ export class IndexedSequence<T extends object> {
     this.structuralOperationCount++;
     if (!this.root) {
       const leaf = createLeaf<T>();
+      if (this.maintainOrder) {
+        this.leafOrder.resetFromItems([leaf]);
+      }
       this.root = leaf;
       this.insertManyIntoLeaf(leaf, 0, items);
       return;
@@ -587,6 +626,9 @@ export class IndexedSequence<T extends object> {
       leaves.push(leaf);
     }
 
+    if (this.maintainOrder) {
+      this.leafOrder.resetFromItems(leaves);
+    }
     this.root = this.buildBalancedTree(leaves);
   }
 
@@ -775,6 +817,9 @@ export class IndexedSequence<T extends object> {
     sibling.effectSum = movedEffectSum;
     sibling.anchorSum = movedAnchorSum;
 
+    if (this.maintainOrder && !this.leafOrder.insertAfter(leaf, sibling)) {
+      throw new Error("Indexed sequence leaf order is unavailable");
+    }
     this.insertSiblingAfter(leaf, sibling);
   }
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { compareEventIds } from "../graph/event-id";
+import {
+  compareEventIds,
+  compareEventIdSortKeys,
+  createEventIdSortKey,
+} from "../graph/event-id";
 import type { EventId, GraphEvent } from "../types";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
@@ -120,6 +124,30 @@ describe("compareEventIds (numeric suffix tie-break)", () => {
     expect(compareEventIds("a:2", "a:10")).toBeLessThan(0);
     expect(compareEventIds("a:10", "a:1x")).toBeLessThan(0);
     expect(compareEventIds("a:2", "a:1x")).toBeLessThan(0);
+  });
+
+  it("keeps cached sort keys identical to direct comparison", () => {
+    const ids: EventId[] = [
+      "alice:0",
+      "alice:2",
+      "alice:10",
+      "bob:1",
+      "custom",
+      "alice:01",
+      "alice:unsafe9007199254740992",
+    ];
+    for (const left of ids) {
+      for (const right of ids) {
+        expect(
+          Math.sign(
+            compareEventIdSortKeys(
+              createEventIdSortKey(left),
+              createEventIdSortKey(right),
+            ),
+          ),
+        ).toBe(Math.sign(compareEventIds(left, right)));
+      }
+    }
   });
 
   it("keeps mixed-ID concurrent inserts convergent across delivery orders", () => {

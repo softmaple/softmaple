@@ -108,6 +108,7 @@ export class EgWalkerEngine {
     (item) => (item.everDeleted ? 0 : item.content.length),
     [],
     (item) => (item.prepareState === 0 ? 0 : 1),
+    true,
   );
   private readonly fugueOrder = new FugueOrderIndex(
     this.sequence,

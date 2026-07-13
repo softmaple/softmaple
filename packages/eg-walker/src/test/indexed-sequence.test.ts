@@ -163,6 +163,58 @@ describe("IndexedSequence", () => {
     expect(sequence.positionOf(items[2_000]!)).toBe(2_000);
   });
 
+  it("compares resident item order in constant time across leaf splits", () => {
+    const sequence = new IndexedSequence<SequenceModelItem>(
+      (item) => item.prepare,
+      (item) => item.effect,
+      [],
+      undefined,
+      true,
+    );
+    const oracle: SequenceModelItem[] = [];
+
+    for (let index = 0; index < 2_000; index++) {
+      const value = {
+        id: `ordered-${index}`,
+        prepare: 1,
+        effect: 1,
+      };
+      const position = (index * 17) % (oracle.length + 1);
+      sequence.insert(position, value);
+      oracle.splice(position, 0, value);
+    }
+
+    const operationsBefore = sequence.getStructuralOperationCount();
+    for (let index = 1; index < oracle.length; index++) {
+      expect(sequence.compareOrder(oracle[index - 1]!, oracle[index]!)).toBe(
+        -1,
+      );
+      expect(sequence.compareOrder(oracle[index]!, oracle[index - 1]!)).toBe(1);
+    }
+    expect(sequence.compareOrder(oracle[500]!, oracle[500]!)).toBe(0);
+    expect(sequence.getStructuralOperationCount()).toBe(operationsBefore);
+
+    const restored = [...oracle].reverse();
+    sequence.resetFromRecords(restored);
+    expect(sequence.compareOrder(restored[0]!, restored.at(-1)!)).toBe(-1);
+    expect(() =>
+      sequence.compareOrder(restored[0]!, {
+        id: "missing",
+        prepare: 1,
+        effect: 1,
+      }),
+    ).toThrow(/unavailable/);
+
+    const untracked = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      restored,
+    );
+    expect(() => untracked.compareOrder(restored[0]!, restored[1]!)).toThrow(
+      /tracking is disabled/,
+    );
+  });
+
   it("bulk-builds the same ranked indexes as incremental insertion", () => {
     const items = Array.from({ length: 5_000 }, (_, index) => ({
       id: `bulk-built-${index}`,

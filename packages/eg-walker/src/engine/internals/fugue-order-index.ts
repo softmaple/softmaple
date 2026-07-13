@@ -1,4 +1,8 @@
-import { compareEventIds } from "../../graph/event-id";
+import {
+  compareEventIdSortKeys,
+  createEventIdSortKey,
+  type EventIdSortKey,
+} from "../../graph/event-id";
 import type { EventId } from "../../types";
 import { IndexedSequence } from "../indexed-sequence";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
@@ -11,6 +15,7 @@ interface Marker {
 
 interface FugueNode {
   readonly item: AugmentedCRDTItem | null;
+  sortKey: EventIdSortKey | null;
   readonly start: Marker;
   readonly visit: Marker;
   readonly end: Marker;
@@ -137,8 +142,9 @@ export class FugueOrderIndex {
       insertion.successor?.start ??
       (side === "left" ? parent.visit : parent.end);
     this.insertMarkersBefore(target, [node.start, node.visit, node.end]);
+    const position = this.weightBefore(node.visit);
     this.nodesById.set(item.id, node);
-    return this.weightBefore(node.visit);
+    return position;
   }
 
   /** Rebuild restored records or repair an explicitly invalidated index. */
@@ -158,7 +164,6 @@ export class FugueOrderIndex {
     }
     this.reset(false);
     this.valid = true;
-
     const recordIds = new Set(records.map(({ id }) => id));
     const childrenByParent = new Map<EventId | null, AugmentedCRDTItem[]>();
     for (const item of records) {
@@ -341,23 +346,43 @@ export class FugueOrderIndex {
         // that suffix, so the continuation sorts last in the right region.
         return leftPlaceholder ? 1 : -1;
       }
-      const leftRank = this.rightAnchorRank(left.item!.originRight);
-      const rightRank = this.rightAnchorRank(right.item!.originRight);
-      if (leftRank !== rightRank) {
-        return rightRank - leftRank;
+      const anchorComparison = this.compareRightAnchors(
+        left.item!.originRight,
+        right.item!.originRight,
+      );
+      if (anchorComparison !== 0) {
+        return anchorComparison;
       }
     }
-    return compareEventIds(left.item!.eventId, right.item!.eventId);
+    return compareEventIdSortKeys(
+      this.getSortKey(left),
+      this.getSortKey(right),
+    );
   }
 
-  private rightAnchorRank(eventId: EventId | null): number {
-    if (eventId === null) {
-      return Number.MAX_SAFE_INTEGER;
+  private compareRightAnchors(
+    leftId: EventId | null,
+    rightId: EventId | null,
+  ): number {
+    if (leftId === rightId) {
+      return 0;
     }
-    const node = this.nodesById.get(eventId);
-    return node === undefined
-      ? Number.MAX_SAFE_INTEGER - 1
-      : this.weightBefore(node.visit);
+    if (leftId === null) {
+      return -1;
+    }
+    if (rightId === null) {
+      return 1;
+    }
+    const left = this.nodesById.get(leftId);
+    const right = this.nodesById.get(rightId);
+    if (left === undefined) {
+      return right === undefined ? 0 : -1;
+    }
+    if (right === undefined) {
+      return 1;
+    }
+    // Right anchors sort from the end of the record order toward the start.
+    return -this.sequence.compareOrder(left.item!, right.item!);
   }
 
   private insertMarkersBefore(
@@ -378,6 +403,13 @@ export class FugueOrderIndex {
       throw new Error("Fugue marker is unavailable");
     }
     this.markerOperations += markers.length;
+  }
+
+  private getSortKey(node: FugueNode): EventIdSortKey {
+    if (node.sortKey === null) {
+      node.sortKey = createEventIdSortKey(node.item!.eventId);
+    }
+    return node.sortKey;
   }
 
   private weightBefore(marker: Marker): number {
@@ -408,6 +440,7 @@ const createSiblingNode = (value: FugueNode): SiblingNode => ({
 const createFugueNode = (item: AugmentedCRDTItem | null): FugueNode => {
   return {
     item,
+    sortKey: null,
     start: createMarker(0),
     visit: createMarker(item === null ? 0 : 1),
     end: createMarker(0),

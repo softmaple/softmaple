@@ -54,6 +54,48 @@ export const compareEventIds = (left: EventId, right: EventId): number => {
   return left < right ? -1 : 1;
 };
 
+/** Parsed once for hot balanced-tree comparators. */
+export interface EventIdSortKey {
+  readonly id: EventId;
+  readonly prefix: string | null;
+  readonly sequence: number;
+}
+
+export const createEventIdSortKey = (id: EventId): EventIdSortKey => {
+  const parsed = splitTrailingSequence(id);
+  return {
+    id,
+    prefix: parsed?.prefix ?? null,
+    sequence: parsed?.sequence ?? 0,
+  };
+};
+
+/** Compare pre-parsed keys with exactly the same ordering as compareEventIds. */
+export const compareEventIdSortKeys = (
+  left: EventIdSortKey,
+  right: EventIdSortKey,
+): number => {
+  if (left.id === right.id) {
+    return 0;
+  }
+  if (left.prefix !== null && right.prefix !== null) {
+    if (left.prefix !== right.prefix) {
+      return left.prefix < right.prefix ? -1 : 1;
+    }
+    if (left.sequence !== right.sequence) {
+      return left.sequence < right.sequence ? -1 : 1;
+    }
+    return 0;
+  }
+  if (left.prefix !== null) {
+    return -1;
+  }
+  if (right.prefix !== null) {
+    return 1;
+  }
+  return left.id < right.id ? -1 : 1;
+};
+
 interface ParsedEventId {
   readonly prefix: string;
   readonly sequence: number;

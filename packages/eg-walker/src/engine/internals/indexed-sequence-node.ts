@@ -1,3 +1,5 @@
+import type { OrderMaintenanceItem } from "./order-maintenance-list";
+
 export const LEAF_CAPACITY = 32;
 export const BRANCH_FACTOR = 32;
 
@@ -16,7 +18,8 @@ interface NodeBase<T extends object> {
   anchorSum: number;
 }
 
-export interface LeafNode<T extends object> extends NodeBase<T> {
+export interface LeafNode<T extends object>
+  extends NodeBase<T>, OrderMaintenanceItem {
   readonly kind: "leaf";
   readonly items: T[];
   readonly prepareWeights: number[];
@@ -46,6 +49,10 @@ export const createLeaf = <T extends object>(): LeafNode<T> => ({
   prepareWeights: [],
   effectWeights: [],
   anchorWeights: [],
+  orderLabel: 0,
+  orderPrevious: null,
+  orderNext: null,
+  orderGeneration: 0,
   size: 0,
   prepareSum: 0,
   effectSum: 0,

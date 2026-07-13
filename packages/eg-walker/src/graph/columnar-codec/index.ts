@@ -250,10 +250,11 @@ export class ColumnarEventGraphCodec {
       version,
       "columnar graph version",
     );
+    const idIndex = new LazyIdRunIndex(idRuns, expectedEventCount);
     const packed =
       parentOverrides.length === 0
         ? buildPackedLinearEventGraphBaseFromIdIndex({
-            idIndex: new LazyIdRunIndex(idRuns, expectedEventCount),
+            idIndex,
             operationRuns: partialOperationRuns,
             operationIndexes,
             operationLengths,
@@ -262,6 +263,7 @@ export class ColumnarEventGraphCodec {
           })
         : buildPackedEventGraphBase({
             ids: decodeIds(idRuns),
+            idIndex,
             operationRuns: partialOperationRuns,
             operationIndexes,
             operationLengths,

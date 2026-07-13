@@ -41,14 +41,24 @@ interface MaterializedPackedEventIds {
   readonly idIndex?: never;
 }
 
-interface IndexedPackedEventIds {
+interface RunIndexedMaterializedPackedEventIds {
+  readonly ids: ReadonlyArray<EventId>;
+  readonly offsetById?: never;
+  readonly idIndex: PackedEventIdIndex;
+}
+
+interface LazyIndexedPackedEventIds {
   readonly ids?: never;
   readonly offsetById?: never;
   readonly idIndex: PackedEventIdIndex;
 }
 
 export type PackedEventGraphColumns = PackedEventGraphCommonColumns &
-  (MaterializedPackedEventIds | IndexedPackedEventIds);
+  (
+    | MaterializedPackedEventIds
+    | RunIndexedMaterializedPackedEventIds
+    | LazyIndexedPackedEventIds
+  );
 
 export interface PackedLinearEventGraphBuild {
   readonly base: PackedEventGraphBase;
@@ -95,11 +105,6 @@ export class PackedEventGraphBase {
       throw new Error("Invalid packed event graph: column length mismatch");
     }
     this.implicitLinearEdges = columns.implicitLinearEdges ?? false;
-    if (idIndex !== undefined && !this.implicitLinearEdges) {
-      throw new Error(
-        "Invalid packed event graph: lazy IDs require implicit linear edges",
-      );
-    }
     if (!this.implicitLinearEdges) {
       if (
         columns.parentStarts.length !== count + 1 ||
@@ -115,33 +120,42 @@ export class PackedEventGraphBase {
       }
     }
 
-    if (idIndex === undefined) {
+    if (columns.ids !== undefined) {
       // The packed decoder transfers ownership of this array. Keeping it
       // avoids a second O(N) pointer array at peak decode memory.
       const ids = Object.freeze(columns.ids);
+      if (ids.length !== count) {
+        throw new Error(
+          "Invalid packed event graph: ID column length mismatch",
+        );
+      }
       for (let offset = 0; offset < ids.length; offset++) {
         const id = ids[offset]!;
+        const indexedOffset =
+          idIndex === undefined
+            ? columns.offsetById.get(id)
+            : idIndex.offsetOf(id);
         if (
           typeof id !== "string" ||
           id.length === 0 ||
-          columns.offsetById.get(id) !== offset
+          indexedOffset !== offset
         ) {
           throw new Error(
             `Invalid packed event graph event ID at offset ${offset}`,
           );
         }
       }
-      if (columns.offsetById.size !== count) {
+      if (idIndex === undefined && columns.offsetById.size !== count) {
         throw new Error("Invalid packed event graph: ID index size mismatch");
       }
 
       this.ids = ids;
-      this.offsetById = columns.offsetById;
-      this.idIndex = null;
+      this.offsetById = idIndex === undefined ? columns.offsetById : null;
+      this.idIndex = idIndex ?? null;
     } else {
       this.ids = null;
       this.offsetById = null;
-      this.idIndex = idIndex;
+      this.idIndex = idIndex!;
     }
     this.eventCount = count;
     this.operationTypes = columns.operationTypes;
@@ -190,16 +204,14 @@ export class PackedEventGraphBase {
   }
 
   idAt(offset: number): EventId | undefined {
-    return this.idIndex !== null
-      ? this.idIndex.idAt(offset)
-      : this.ids![offset];
+    return this.ids !== null ? this.ids[offset] : this.idIndex!.idAt(offset);
   }
 
   *iterateIds(): IterableIterator<EventId> {
-    if (this.idIndex !== null) {
-      yield* this.idIndex.iterateIds();
-    } else {
+    if (this.ids !== null) {
       yield* this.ids!;
+    } else {
+      yield* this.idIndex!.iterateIds();
     }
   }
 

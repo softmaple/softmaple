@@ -23,6 +23,7 @@ interface PackedOperationColumns {
 
 interface PackedDecodeColumns extends PackedOperationColumns {
   readonly ids: ReadonlyArray<EventId>;
+  readonly idIndex?: PackedEventIdIndex;
   readonly parentOverrides: ReadonlyArray<ParentOverride>;
 }
 
@@ -47,7 +48,11 @@ export const buildPackedEventGraphBase = (
     throw new Error("Invalid packed event graph: column length mismatch");
   }
 
-  const offsetById = indexIds(columns.ids);
+  const offsetById =
+    columns.idIndex === undefined ? indexIds(columns.ids) : undefined;
+  const idLookup: PackedEventOffsetLookup = columns.idIndex ?? {
+    offsetOf: (id) => offsetById!.get(id),
+  };
   const operationColumns = buildOperationColumns(columns, count);
   const {
     parentStarts,
@@ -56,12 +61,14 @@ export const buildPackedEventGraphBase = (
     childOffsets,
     frontier,
     implicitLinearEdges,
-  } = buildEdges(columns.ids, offsetById, columns.parentOverrides);
+  } = buildEdges(columns.ids, idLookup, columns.parentOverrides);
 
   return {
     base: new PackedEventGraphBase({
       ids: columns.ids,
-      offsetById,
+      ...(columns.idIndex === undefined
+        ? { offsetById: offsetById! }
+        : { idIndex: columns.idIndex }),
       operationTypes: operationColumns.operationTypes,
       operationIndexes: operationColumns.operationIndexes,
       operationLengths: operationColumns.operationLengths,
@@ -76,6 +83,25 @@ export const buildPackedEventGraphBase = (
     }),
     frontier,
   };
+};
+
+interface PackedEventOffsetLookup {
+  offsetOf(id: EventId): number | undefined;
+}
+
+const indexIds = (ids: ReadonlyArray<EventId>): Map<EventId, number> => {
+  const result = new Map<EventId, number>();
+  for (let offset = 0; offset < ids.length; offset++) {
+    const id = ids[offset];
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error(`Invalid event ID at offset ${offset}`);
+    }
+    if (result.has(id)) {
+      throw new Error(`Duplicate event ID in columnar graph: ${id}`);
+    }
+    result.set(id, offset);
+  }
+  return result;
 };
 
 /** Build an exact-linear packed base without materializing its ID runs. */
@@ -117,21 +143,6 @@ export const buildPackedLinearEventGraphBaseFromIdIndex = (
     }),
     frontier,
   };
-};
-
-const indexIds = (ids: ReadonlyArray<EventId>): Map<EventId, number> => {
-  const result = new Map<EventId, number>();
-  for (let offset = 0; offset < ids.length; offset++) {
-    const id = ids[offset];
-    if (typeof id !== "string" || id.length === 0) {
-      throw new Error(`Invalid event ID at offset ${offset}`);
-    }
-    if (result.has(id)) {
-      throw new Error(`Duplicate event ID in columnar graph: ${id}`);
-    }
-    result.set(id, offset);
-  }
-  return result;
 };
 
 const buildOperationColumns = (
@@ -228,7 +239,7 @@ const buildOperationColumns = (
 
 const buildEdges = (
   ids: ReadonlyArray<EventId>,
-  offsetById: ReadonlyMap<EventId, number>,
+  idIndex: PackedEventOffsetLookup,
   overrides: ReadonlyArray<ParentOverride>,
 ): {
   readonly parentStarts: Uint32Array;
@@ -258,10 +269,10 @@ const buildEdges = (
   for (let eventOffset = 0; eventOffset < count; eventOffset++) {
     const override = overrides[overrideCursor];
     if (override?.eventOffset === eventOffset) {
-      validateParents(override.parents, eventOffset, offsetById);
+      validateParents(override.parents, eventOffset, idIndex);
       edgeCount += override.parents.length;
       for (const parent of override.parents) {
-        const parentOffset = offsetById.get(parent)!;
+        const parentOffset = idIndex.offsetOf(parent)!;
         childCounts[parentOffset] = childCounts[parentOffset]! + 1;
       }
       overrideCursor++;
@@ -282,7 +293,7 @@ const buildEdges = (
     const override = overrides[overrideCursor];
     if (override?.eventOffset === eventOffset) {
       for (const parent of override.parents) {
-        parentOffsets[parentCursor++] = offsetById.get(parent)!;
+        parentOffsets[parentCursor++] = idIndex.offsetOf(parent)!;
       }
       overrideCursor++;
     } else if (eventOffset > 0) {
@@ -342,7 +353,7 @@ const validateOverrideOffsets = (
 const validateParents = (
   parents: ReadonlyArray<EventId>,
   childOffset: number,
-  offsetById: ReadonlyMap<EventId, number>,
+  idIndex: PackedEventOffsetLookup,
 ): void => {
   const seen = parents.length > 1 ? new Set<EventId>() : null;
   for (const parent of parents as ReadonlyArray<unknown>) {
@@ -357,7 +368,7 @@ const validateParents = (
       );
     }
     seen?.add(parent);
-    const parentOffset = offsetById.get(parent);
+    const parentOffset = idIndex.offsetOf(parent);
     if (parentOffset === undefined) {
       throw new Error(`Missing parent event: ${parent}`);
     }

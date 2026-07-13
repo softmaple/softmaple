@@ -2,8 +2,14 @@ import type { EventId } from "../../types";
 import { compareEventIds } from "../event-id";
 import { MaxHeap } from "./max-heap";
 
+const MAX_EXCLUSIVE_BRANCH_SPAN = 1_024;
+
 interface TopologicalOrderView {
   readonly eventCount: number;
+  /**
+   * Events in a valid parent-before-child order. EventGraph insertion ranks
+   * provide this invariant without an extra topological sort.
+   */
   readonly eventIds: Iterable<EventId>;
   readonly parentCountOf: (id: EventId) => number;
   readonly childrenOf: (id: EventId) => Iterable<EventId>;
@@ -63,30 +69,74 @@ export const getTopologicalOrder = (view: TopologicalOrderView): EventId[] => {
  * relationship and the engine's diff against the previous version collapses
  * to an empty retreat/advance pair.
  *
- * Roots and sibling branches are ordered by numeric-aware event id via
- * {@link compareEventIds} so the output is a deterministic function of the
- * graph.
+ * Short exclusive branches are visited before long ones. Leaving the longest
+ * branch until last avoids retreating and re-advancing it at the merge point,
+ * matching the paper's branch-size heuristic. A child's exclusive span
+ * contributes to its parent only when it has exactly one parent, so shared
+ * merge suffixes are not charged to every incoming branch. Very long branch
+ * groups use longest causal path instead: exclusive spans become too
+ * conservative around asynchronous multi-parent histories. Equal scores use
+ * numeric-aware event IDs via {@link compareEventIds}, so the output remains
+ * deterministic.
  */
 export const getBranchPreservingTopologicalOrder = (
   view: TopologicalOrderView,
 ): EventId[] => {
   const remainingParents = new Map<EventId, number>();
+  const ids = Array.from(view.eventIds);
   const roots: EventId[] = [];
 
-  for (const id of view.eventIds) {
+  for (const id of ids) {
     const parentCount = view.parentCountOf(id);
     remainingParents.set(id, parentCount);
     if (parentCount === 0) {
       roots.push(id);
     }
   }
-  roots.sort(compareEventIds);
+
+  // EventGraph insertion order is already topological. Walking it backwards
+  // lets each parent accumulate its single-parent descendants in O(V + E).
+  // Redundant ancestor parents can make this estimate conservative, but they
+  // cannot affect the validity of the eventual topological traversal.
+  const exclusiveSpan = new Map<EventId, number>();
+  const longestPath = new Map<EventId, number>();
+  for (let index = ids.length - 1; index >= 0; index--) {
+    const id = ids[index]!;
+    let span = 1;
+    let path = 1;
+    for (const childId of view.childrenOf(id)) {
+      if (remainingParents.get(childId) === 1) {
+        span += exclusiveSpan.get(childId) ?? 0;
+      }
+      path = Math.max(path, 1 + (longestPath.get(childId) ?? 0));
+    }
+    exclusiveSpan.set(id, span);
+    longestPath.set(id, path);
+  }
+
+  const compareExclusive = (left: EventId, right: EventId): number => {
+    const difference =
+      (exclusiveSpan.get(left) ?? 1) - (exclusiveSpan.get(right) ?? 1);
+    return difference === 0 ? compareEventIds(left, right) : difference;
+  };
+  const compareLongest = (left: EventId, right: EventId): number => {
+    const difference =
+      (longestPath.get(left) ?? 1) - (longestPath.get(right) ?? 1);
+    return difference === 0 ? compareEventIds(left, right) : difference;
+  };
+  const sortBranchGroup = (group: EventId[]): void => {
+    const hasLongExclusiveBranch = group.some(
+      (id) => (exclusiveSpan.get(id) ?? 1) > MAX_EXCLUSIVE_BRANCH_SPAN,
+    );
+    group.sort(hasLongExclusiveBranch ? compareLongest : compareExclusive);
+  };
+  sortBranchGroup(roots);
 
   // The stack is the deferred set: events that became ready but are not the
   // natural continuation of the branch we're currently walking. We push
-  // children in descending order so the smallest (by `compareEventIds`) is
-  // on top and is popped next, which keeps the traversal deterministic
-  // across input shapes.
+  // children in descending priority so the shortest branch is on top and is
+  // popped next. The Event ID tie-break keeps traversal deterministic across
+  // input shapes.
   const stack: EventId[] = [];
   for (let i = roots.length - 1; i >= 0; i--) {
     stack.push(roots[i]!);
@@ -114,7 +164,7 @@ export const getBranchPreservingTopologicalOrder = (
     if (newlyReady.length === 0) {
       continue;
     }
-    newlyReady.sort(compareEventIds);
+    sortBranchGroup(newlyReady);
     for (let i = newlyReady.length - 1; i >= 0; i--) {
       stack.push(newlyReady[i]!);
     }

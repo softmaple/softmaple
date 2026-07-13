@@ -503,9 +503,10 @@ export class EventGraph {
    * `diffVersions(currentVersion, next.parentVersion)` collapses to
    * an empty retreat/advance pair.
    *
-   * The output is still a fully deterministic function of the graph:
-   * roots and sibling branches are ordered by numeric-aware event id
-   * via {@link compareEventIds}.
+   * The output is still a fully deterministic function of the graph. Short
+   * concurrent branches use exclusive span while long asynchronous branches
+   * use longest causal path, so the most expensive branch remains applied at
+   * a merge point; numeric-aware event IDs break equal-score ties.
    *
    * `EgWalkerEngine.generate` is traversal-order independent for
    * concurrent inserts (YATA-style integration scan anchored against
@@ -518,9 +519,6 @@ export class EventGraph {
    * the columnar codec keeps using {@link getTopologicalOrder} (Kahn)
    * so on-disk bytes stay stable across runs.
    *
-   * TODO: consider weighting sibling branches by estimated subtree
-   * size (the paper's optional heuristic) instead of pure lex
-   * tie-break to reduce churn further on skewed graphs.
    */
   getBranchPreservingTopologicalOrder(): ReadonlyArray<GraphEvent> {
     if (this.cachedBranchPreservingOrder !== null) {

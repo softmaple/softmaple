@@ -679,12 +679,12 @@ describe("branch-preserving topological traversal", () => {
     // Kahn-lex visits a, b, c (lexicographic tie-break on ready set).
     const kahnOrderIds = graph.getTopologicalOrder().map((event) => event.id);
     expect(kahnOrderIds).toEqual(["a:0", "b:0", "c:0"]);
-    // The branch-preserving DFS visits a, c, b (continues down a's
-    // branch before popping b from the roots).
+    // The branch-preserving DFS visits the one-event b branch first, then
+    // leaves the longer a/c branch applied as the final root traversal.
     const branchOrderIds = graph
       .getBranchPreservingTopologicalOrder()
       .map((event) => event.id);
-    expect(branchOrderIds).toEqual(["a:0", "c:0", "b:0"]);
+    expect(branchOrderIds).toEqual(["b:0", "a:0", "c:0"]);
 
     const kahnText = new EgWalkerEngine().generate(
       graph.getTopologicalOrder(),

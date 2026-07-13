@@ -9,6 +9,7 @@ import { PackedDiffVersionsWorkspace } from "./packed-diff-versions";
 
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
+const MAX_EXCLUSIVE_BRANCH_SPAN = 1_024;
 
 interface PackedEventGraphCommonColumns {
   readonly operationTypes: Uint8Array;
@@ -351,6 +352,8 @@ export class PackedEventGraphBase {
       return result;
     }
     const remainingParents = new Uint32Array(this.count);
+    const exclusiveSpan = new Uint32Array(this.count);
+    const longestPath = new Uint32Array(this.count);
     const roots: number[] = [];
 
     for (let offset = 0; offset < this.count; offset++) {
@@ -358,9 +361,45 @@ export class PackedEventGraphBase {
       remainingParents[offset] = parentCount;
       if (parentCount === 0) roots.push(offset);
     }
-    roots.sort((left, right) =>
-      compareEventIds(this.ids![left]!, this.ids![right]!),
-    );
+
+    // Packed insertion offsets are topological ranks. Accumulate the size of
+    // each exclusive single-parent branch in reverse order; multi-parent
+    // merge suffixes are shared and therefore do not belong to either branch.
+    for (let offset = this.count - 1; offset >= 0; offset--) {
+      let span = 1;
+      let path = 1;
+      const start = this.childStarts![offset]!;
+      const end = this.childStarts![offset + 1]!;
+      for (let cursor = start; cursor < end; cursor++) {
+        const childOffset = this.childOffsets![cursor]!;
+        if (remainingParents[childOffset] === 1) {
+          span += exclusiveSpan[childOffset]!;
+        }
+        path = Math.max(path, 1 + longestPath[childOffset]!);
+      }
+      exclusiveSpan[offset] = span;
+      longestPath[offset] = path;
+    }
+
+    const compareExclusive = (left: number, right: number): number => {
+      const difference = exclusiveSpan[left]! - exclusiveSpan[right]!;
+      return difference === 0
+        ? compareEventIds(this.ids![left]!, this.ids![right]!)
+        : difference;
+    };
+    const compareLongest = (left: number, right: number): number => {
+      const difference = longestPath[left]! - longestPath[right]!;
+      return difference === 0
+        ? compareEventIds(this.ids![left]!, this.ids![right]!)
+        : difference;
+    };
+    const sortBranchGroup = (group: number[]): void => {
+      const hasLongExclusiveBranch = group.some(
+        (offset) => exclusiveSpan[offset]! > MAX_EXCLUSIVE_BRANCH_SPAN,
+      );
+      group.sort(hasLongExclusiveBranch ? compareLongest : compareExclusive);
+    };
+    sortBranchGroup(roots);
 
     const stack: number[] = [];
     for (let index = roots.length - 1; index >= 0; index--) {
@@ -382,9 +421,7 @@ export class PackedEventGraphBase {
         remainingParents[childOffset] = remaining;
         if (remaining === 0) newlyReady.push(childOffset);
       }
-      newlyReady.sort((left, right) =>
-        compareEventIds(this.ids![left]!, this.ids![right]!),
-      );
+      sortBranchGroup(newlyReady);
       for (let index = newlyReady.length - 1; index >= 0; index--) {
         stack.push(newlyReady[index]!);
       }

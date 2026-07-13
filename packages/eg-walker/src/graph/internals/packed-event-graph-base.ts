@@ -5,7 +5,10 @@ import {
   type PackedIntegerColumn,
   type PackedUnsignedIntegerColumn,
 } from "./packed-numeric-columns";
-import { PackedDiffVersionsWorkspace } from "./packed-diff-versions";
+import {
+  type PackedOffsetTransition,
+  PackedDiffVersionsWorkspace,
+} from "./packed-diff-versions";
 
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
@@ -196,6 +199,44 @@ export class PackedEventGraphBase {
   ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diff(left, right, this);
+  }
+
+  /**
+   * Compute a numeric transition from an ID frontier to one event's parents.
+   *
+   * The returned view is workspace-owned and is overwritten by the next diff.
+   */
+  diffVersionToParents(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedOffsetTransition {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diffVersionToParents(
+      currentVersion,
+      targetEventOffset,
+      this,
+      rankByOffset,
+    );
+  }
+
+  /**
+   * Compute a numeric transition from one event to another event's parents.
+   *
+   * The returned view is workspace-owned and is overwritten by the next diff.
+   */
+  diffOffsetToParents(
+    currentOffset: number,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedOffsetTransition {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diffOffsetToParents(
+      currentOffset,
+      targetEventOffset,
+      this,
+      rankByOffset,
+    );
   }
 
   /** Release scratch storage once a packed replay has finished. */

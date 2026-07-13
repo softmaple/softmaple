@@ -4,6 +4,7 @@ import type {
 } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
 import type { ExternalOperation } from "../types";
+import type { PackedOffsetTransition } from "../graph/internals/packed-diff-versions";
 
 /**
  * Critical-section cuts over a packed graph without per-section objects.
@@ -19,6 +20,7 @@ export class PackedCriticalReplayPlan {
   constructor(
     private readonly graph: PackedReplayPlanningView,
     private readonly eventOrder: Uint32Array,
+    private readonly rankByOffset: Uint32Array,
     private readonly sectionEnds: Uint32Array,
     private readonly linearSections: Uint8Array,
     readonly sectionCount: number,
@@ -58,6 +60,17 @@ export class PackedCriticalReplayPlan {
     return id;
   }
 
+  eventIdAtOffset(offset: number): EventId {
+    this.assertEventOffset(offset);
+    const id = this.graph.idAt(offset);
+    if (id === undefined) {
+      throw new Error(
+        `Packed replay plan is missing event at offset ${offset}`,
+      );
+    }
+    return id;
+  }
+
   eventAt(orderIndex: number): GraphEvent {
     const offset = this.eventOffsetAt(orderIndex);
     const event = this.graph.eventAt(offset);
@@ -74,13 +87,130 @@ export class PackedCriticalReplayPlan {
   }
 
   materializeSection(sectionIndex: number): ReadonlyArray<GraphEvent> {
-    const start = this.sectionStartAt(sectionIndex);
-    const end = this.sectionEndAt(sectionIndex);
+    return this.materializeSectionRange(sectionIndex, sectionIndex + 1);
+  }
+
+  /** Materialise one contiguous range without intermediate section arrays. */
+  materializeSectionRange(
+    startSectionIndex: number,
+    endSectionIndex: number,
+  ): ReadonlyArray<GraphEvent> {
+    const { start, end } = this.sectionRangeBounds(
+      startSectionIndex,
+      endSectionIndex,
+    );
     const events = new Array<GraphEvent>(end - start);
     for (let orderIndex = start; orderIndex < end; orderIndex++) {
       events[orderIndex - start] = this.eventAt(orderIndex);
     }
     return Object.freeze(events);
+  }
+
+  advanceFrontierRange(
+    base: ReadonlySet<EventId>,
+    startSectionIndex: number,
+    endSectionIndex: number,
+  ): Set<EventId> {
+    const { start, end } = this.sectionRangeBounds(
+      startSectionIndex,
+      endSectionIndex,
+    );
+    const frontier = new Set(base);
+    for (let orderIndex = start; orderIndex < end; orderIndex++) {
+      const eventOffset = this.eventOffsetAt(orderIndex);
+      const parentCount = this.graph.parentCountAt(eventOffset);
+      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+        const parentOffset = this.graph.parentOffsetAt(
+          eventOffset,
+          parentIndex,
+        );
+        if (parentOffset === undefined) {
+          throw new Error(
+            `Packed replay event ${eventOffset} is missing parent ${parentIndex}`,
+          );
+        }
+        frontier.delete(this.eventIdAtOffset(parentOffset));
+      }
+      frontier.add(this.eventIdAtOffset(eventOffset));
+    }
+    return frontier;
+  }
+
+  eventIdsInSectionRange(
+    startSectionIndex: number,
+    endSectionIndex: number,
+  ): ReadonlyArray<EventId> {
+    const { start, end } = this.sectionRangeBounds(
+      startSectionIndex,
+      endSectionIndex,
+    );
+    const ids = new Array<EventId>(end - start);
+    for (let orderIndex = start; orderIndex < end; orderIndex++) {
+      ids[orderIndex - start] = this.eventIdAt(orderIndex);
+    }
+    return Object.freeze(ids);
+  }
+
+  parentsEqualVersionAt(
+    orderIndex: number,
+    version: ReadonlySet<EventId>,
+  ): boolean {
+    const eventOffset = this.eventOffsetAt(orderIndex);
+    const parentCount = this.graph.parentCountAt(eventOffset);
+    if (parentCount !== version.size) {
+      return false;
+    }
+    for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+      const parentOffset = this.graph.parentOffsetAt(eventOffset, parentIndex);
+      if (
+        parentOffset === undefined ||
+        !version.has(this.eventIdAtOffset(parentOffset))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  hasSingleParentOffsetAt(orderIndex: number, parentOffset: number): boolean {
+    const eventOffset = this.eventOffsetAt(orderIndex);
+    return (
+      this.graph.parentCountAt(eventOffset) === 1 &&
+      this.graph.parentOffsetAt(eventOffset, 0) === parentOffset
+    );
+  }
+
+  orderIndexOfOffset(offset: number): number {
+    this.assertEventOffset(offset);
+    return this.rankByOffset[offset]!;
+  }
+
+  isInsertAtOffset(offset: number): boolean {
+    this.assertEventOffset(offset);
+    return this.graph.isInsertAt(offset);
+  }
+
+  transitionFromVersion(
+    currentVersion: ReadonlySet<EventId>,
+    targetOrderIndex: number,
+  ): PackedOffsetTransition {
+    return this.graph.diffVersionToParents(
+      currentVersion,
+      this.eventOffsetAt(targetOrderIndex),
+      this.rankByOffset,
+    );
+  }
+
+  transitionFromOffset(
+    currentOffset: number,
+    targetOrderIndex: number,
+  ): PackedOffsetTransition {
+    this.assertEventOffset(currentOffset);
+    return this.graph.diffOffsetToParents(
+      currentOffset,
+      this.eventOffsetAt(targetOrderIndex),
+      this.rankByOffset,
+    );
   }
 
   isInsertAt(orderIndex: number): boolean {
@@ -103,7 +233,7 @@ export class PackedCriticalReplayPlan {
     return this.graph.sliceInsertedContent(start, end);
   }
 
-  private eventOffsetAt(orderIndex: number): number {
+  eventOffsetAt(orderIndex: number): number {
     if (
       !Number.isInteger(orderIndex) ||
       orderIndex < 0 ||
@@ -112,6 +242,32 @@ export class PackedCriticalReplayPlan {
       throw new RangeError(`Invalid packed replay order index ${orderIndex}`);
     }
     return this.eventOrder[orderIndex]!;
+  }
+
+  private sectionRangeBounds(
+    startSectionIndex: number,
+    endSectionIndex: number,
+  ): { readonly start: number; readonly end: number } {
+    this.assertSectionIndex(startSectionIndex);
+    if (
+      !Number.isInteger(endSectionIndex) ||
+      endSectionIndex <= startSectionIndex ||
+      endSectionIndex > this.sectionCount
+    ) {
+      throw new RangeError(
+        `Invalid packed replay section range ${startSectionIndex}..${endSectionIndex}`,
+      );
+    }
+    return {
+      start: this.sectionStartAt(startSectionIndex),
+      end: this.sectionEndAt(endSectionIndex - 1),
+    };
+  }
+
+  private assertEventOffset(offset: number): void {
+    if (!Number.isInteger(offset) || offset < 0 || offset >= this.eventCount) {
+      throw new RangeError(`Invalid packed replay event offset ${offset}`);
+    }
   }
 
   private assertSectionIndex(sectionIndex: number): void {
@@ -147,6 +303,7 @@ export const planPackedCriticalReplaySections = (
     return new PackedCriticalReplayPlan(
       graph,
       eventOrder,
+      eventOrder,
       new Uint32Array(),
       new Uint8Array(),
       0,
@@ -159,6 +316,7 @@ export const planPackedCriticalReplaySections = (
   if (source.isExactLinearHistory()) {
     return new PackedCriticalReplayPlan(
       graph,
+      eventOrder,
       eventOrder,
       new Uint32Array([eventCount]),
       new Uint8Array([1]),
@@ -264,9 +422,14 @@ export const planPackedCriticalReplaySections = (
     throw new Error("Packed critical replay plan did not cover every event");
   }
 
+  for (let orderIndex = 0; orderIndex < eventCount; orderIndex++) {
+    remainingParents[eventOrder[orderIndex]!] = orderIndex;
+  }
+
   return new PackedCriticalReplayPlan(
     graph,
     eventOrder,
+    remainingParents,
     sectionEnds.slice(0, sectionCount),
     linearSections.slice(0, sectionCount),
     sectionCount,

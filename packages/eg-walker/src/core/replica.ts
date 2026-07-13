@@ -120,6 +120,12 @@ const MAX_REPLAY_CACHE_EVENTS = 4_096;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
 const ESTIMATED_REPLAY_RECORD_BYTES = 256;
 const ESTIMATED_DELETE_TARGET_BYTES = 32;
+// Old critical cuts are not observable after cold replay. Replaying adjacent
+// nonlinear cuts in one bounded engine lifetime avoids repeatedly rebuilding
+// the ranked sequence and Fugue index while keeping temporary CRDT state
+// independent of total history size. The trailing checkpoint window remains
+// one section per engine so retained recovery semantics do not change.
+const MAX_NONLINEAR_SUPERSECTION_EVENTS = 32_768;
 
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;
@@ -1630,7 +1636,27 @@ export class EgWalkerReplica {
         continue;
       }
 
-      const sectionEventCount = plan.sectionEventCountAt(sectionIndex);
+      let sectionEnd = sectionIndex + 1;
+      let sectionEventCount = plan.sectionEventCountAt(sectionIndex);
+      if (
+        sectionIndex < retainedCheckpointSectionStart &&
+        !plan.isLinearSection(sectionIndex)
+      ) {
+        while (
+          sectionEnd < retainedCheckpointSectionStart &&
+          !plan.isLinearSection(sectionEnd)
+        ) {
+          const candidateCount = plan.sectionEventCountAt(sectionEnd);
+          if (
+            sectionEventCount + candidateCount >
+            MAX_NONLINEAR_SUPERSECTION_EVENTS
+          ) {
+            break;
+          }
+          sectionEventCount += candidateCount;
+          sectionEnd++;
+        }
+      }
       const baseVersion = new Set(this.currentVersion);
       const baseCheckpoint: CriticalCheckpoint = {
         version: baseVersion,
@@ -1646,22 +1672,26 @@ export class EgWalkerReplica {
           plan.sectionCount === 1,
         );
       } else {
-        const events = plan.materializeSection(sectionIndex);
-        const endVersion = advanceReplayFrontier(baseVersion, events);
+        const endVersion = plan.advanceFrontierRange(
+          baseVersion,
+          sectionIndex,
+          sectionEnd,
+        );
         const engine = new EgWalkerEngine();
-        const generated = engine.generate(events, "", {
-          initialVersion: baseVersion,
-          initialTextBuffer: this.documentBuffer,
-          eventGraph: graph,
-          eventOrder: events,
-          collectTransformedOperations: false,
-        });
+        const generated = engine.generatePackedSectionRange(
+          plan,
+          sectionIndex,
+          sectionEnd,
+          graph,
+          baseVersion,
+          this.documentBuffer,
+        );
         this.documentBuffer = generated.textBuffer;
         this.documentCache = null;
         this.currentVersion = endVersion;
         aggregateStats = mergeEngineStats(aggregateStats, generated.stats);
 
-        const isLastSection = sectionIndex === plan.sectionCount - 1;
+        const isLastSection = sectionEnd === plan.sectionCount;
         if (
           isLastSection &&
           endVersion.size > 1 &&
@@ -1671,9 +1701,13 @@ export class EgWalkerReplica {
             generated.stats,
           )
         ) {
+          engine.preparePackedRetention(plan, sectionIndex, sectionEnd);
           retainedEngine = engine;
           retainedBaseCheckpoint = baseCheckpoint;
-          retainedEventIds = events.map(({ id }) => id);
+          retainedEventIds = plan.eventIdsInSectionRange(
+            sectionIndex,
+            sectionEnd,
+          );
         }
       }
 
@@ -1685,7 +1719,7 @@ export class EgWalkerReplica {
           replayedEventCount,
         );
       }
-      sectionIndex++;
+      sectionIndex = sectionEnd;
     }
 
     if (replayedEventCount !== plan.eventCount) {
@@ -2693,21 +2727,6 @@ const versionsEqual = (
     }
   }
   return true;
-};
-
-/** Advance a prefix frontier through one topologically ordered section. */
-const advanceReplayFrontier = (
-  base: ReadonlySet<EventId>,
-  events: ReadonlyArray<GraphEvent>,
-): Set<EventId> => {
-  const frontier = new Set(base);
-  for (const event of events) {
-    for (const parentId of event.parentVersion) {
-      frontier.delete(parentId);
-    }
-    frontier.add(event.id);
-  }
-  return frontier;
 };
 
 const isLinearReplaySection = (

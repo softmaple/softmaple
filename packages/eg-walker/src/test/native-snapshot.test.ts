@@ -830,6 +830,7 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(5, "f");
     const snapshot = replica.createNativeSnapshot({ resumeCache: "rebuild" });
     const graph = EventGraph.deserialize(snapshot.eventGraph);
+    const snapshotEventCount = graph.getEventCount();
     const remote = {
       id: "bob:0",
       parentVersion: new Set(["alice:2"]),
@@ -844,6 +845,7 @@ describe("EgWalkerReplica native snapshots", () => {
       sequenceRecords: snapshot.sequenceRecords,
       deleteTargets: snapshot.deleteTargets,
     });
+    expect(engine.getStats().eventsProcessed).toBe(snapshotEventCount);
 
     // Act
     const result = engine.applyEvent(remote, graph);
@@ -854,6 +856,7 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(engine.getStats().sequenceRecordCount).toBeGreaterThan(
       snapshot.sequenceRecords.length,
     );
+    expect(engine.getStats().eventsProcessed).toBe(snapshotEventCount + 1);
   });
 
   it("should reject snapshots whose frontier does not match the event graph", () => {

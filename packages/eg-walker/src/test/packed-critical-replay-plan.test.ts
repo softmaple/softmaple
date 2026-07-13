@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
-import { planPackedCriticalReplaySections } from "../engine/packed-critical-replay-plan";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import {
+  PackedCriticalReplayPlan,
+  planPackedCriticalReplaySections,
+} from "../engine/packed-critical-replay-plan";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
@@ -97,6 +101,168 @@ describe("packed critical-section replay planning", () => {
         ),
       );
     }
+    expect(
+      compact!
+        .materializeSectionRange(0, compact!.sectionCount)
+        .map(({ id }) => id),
+    ).toEqual(expected.flatMap(({ events }) => events.map(({ id }) => id)));
+  });
+
+  it("replays obsolete nonlinear cuts in bounded engine lifetimes", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 100; layer++) {
+      const left = `left:${layer}`;
+      const right = `right:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+          layer * 2,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          layer * 2 + 1,
+        ),
+      );
+      parents = [left, right];
+    }
+
+    const source = EventGraph.fromEvents(events);
+    const order = source.getBranchPreservingTopologicalOrder();
+    const expected = new EgWalkerEngine().generate(order, "", {
+      eventGraph: source,
+      eventOrder: order,
+    }).text;
+    const packedGraph = pack(events);
+    const compact = planPackedCriticalReplaySections(packedGraph);
+    expect(compact?.sectionCount).toBe(100);
+    expect(
+      Array.from({ length: compact!.sectionCount }, (_, sectionIndex) =>
+        compact!.isLinearSection(sectionIndex),
+      ),
+    ).not.toContain(true);
+
+    const generate = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+    const materialize = vi.spyOn(
+      PackedCriticalReplayPlan.prototype,
+      "materializeSectionRange",
+    );
+    const stringDiff = vi.spyOn(EventGraph.prototype, "diffVersions");
+    const replica = new EgWalkerReplica("packed-layers", "", packedGraph);
+
+    expect(replica.getText()).toBe(expected);
+    // One bounded engine covers the 68 obsolete cuts; the trailing 32 cuts
+    // remain independent so each can still seed a retained checkpoint.
+    expect(generate).toHaveBeenCalledTimes(33);
+    expect(materialize).not.toHaveBeenCalled();
+    expect(stringDiff).not.toHaveBeenCalled();
+  });
+
+  it("continues from a retained numeric replay engine", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 40; layer++) {
+      const left = `left:${layer}`;
+      const right = `right:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+          layer * 2,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          layer * 2 + 1,
+        ),
+      );
+      parents = [left, right];
+    }
+
+    const replica = new EgWalkerReplica("packed-retained", "", pack(events));
+    const replayCount = replica.getReplayStats().fullReplays;
+    const merge = editingEvent(
+      "merge:40",
+      parents,
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+      80,
+    );
+    const divergent = editingEvent(
+      "divergent:40",
+      [parents[0]!],
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "D" },
+      81,
+    );
+
+    expect(replica.applyRemoteEvent(merge).status).toBe("integrated");
+    expect(replica.applyRemoteEvent(divergent).status).toBe("integrated");
+
+    const reference = new EgWalkerReplica(
+      "object-retained",
+      "",
+      EventGraph.fromEvents([...events, merge, divergent]),
+    );
+    expect(replica.getText()).toBe(reference.getText());
+    expect(replica.getReplayStats().fullReplays).toBe(replayCount);
+    expect(replica.getReplayStats().incrementalApplies).toBe(2);
+  });
+
+  it("retains numeric replay across a rope seed and overlapping deletes", () => {
+    const initialText = "x".repeat(100);
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 40; layer++) {
+      const left = `delete-left:${layer}`;
+      const right = `delete-right:${layer}`;
+      const operation: ExternalOperation = {
+        type: OPERATION_TYPE.DELETE,
+        index: 0,
+        length: 1,
+      };
+      events.push(
+        editingEvent(left, parents, operation, layer * 2),
+        editingEvent(right, parents, operation, layer * 2 + 1),
+      );
+      parents = [left, right];
+    }
+
+    const replica = new EgWalkerReplica(
+      "packed-delete-retained",
+      initialText,
+      pack(events),
+    );
+    const merge = editingEvent(
+      "delete-merge:40",
+      parents,
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+      80,
+    );
+    const divergent = editingEvent(
+      "delete-divergent:40",
+      [parents[0]!],
+      { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+      81,
+    );
+
+    replica.applyRemoteEvent(merge);
+    replica.applyRemoteEvent(divergent);
+    const reference = new EgWalkerReplica(
+      "object-delete-retained",
+      initialText,
+      EventGraph.fromEvents([...events, merge, divergent]),
+    );
+
+    expect(replica.getText()).toBe(reference.getText());
+    expect(replica.getReplayStats().incrementalApplies).toBe(2);
   });
 
   it("stores a long post-merge tail as numeric singleton cuts", () => {

@@ -47,6 +47,7 @@ import {
   type CompactEngineSequenceRecords,
   type EngineSequenceRecord,
 } from "./internals/sequence-records";
+import type { PackedCriticalReplayPlan } from "./packed-critical-replay-plan";
 
 export type {
   EngineStats,
@@ -87,6 +88,21 @@ export interface EngineRecoveryState {
 // rank lookup and rope edit dominates the shallow final rope rebuild.
 const DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS = 64;
 
+const versionsEqual = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const id of left) {
+    if (!right.has(id)) {
+      return false;
+    }
+  }
+  return true;
+};
+
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
  *
@@ -95,9 +111,9 @@ const DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS = 64;
  * and effect-state, walks causal history, and then can be discarded.
  */
 export class EgWalkerEngine {
-  private readonly eventsById = new Map<EventId, GraphEvent>();
   private readonly eventOrder = new Map<EventId, number>();
   private eventIndexesComplete = false;
+  private processedEventCount = 0;
   private graph = new EventGraph();
   private readonly eventItems = new EventItemIndex();
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
@@ -169,6 +185,70 @@ export class EgWalkerEngine {
       transformedOperations?.push(...transformed);
     }
 
+    return this.finishGeneration(transformedOperations);
+  }
+
+  /** Replay one packed nonlinear range without materialising GraphEvents. */
+  generatePackedSectionRange(
+    plan: PackedCriticalReplayPlan,
+    startSectionIndex: number,
+    endSectionIndex: number,
+    graph: EventGraph,
+    initialVersion: ReadonlySet<EventId>,
+    initialTextBuffer: PersistentUtf16Rope,
+  ): GeneratedDocument {
+    const startOrderIndex = plan.sectionStartAt(startSectionIndex);
+    const endOrderIndex = plan.sectionEndAt(endSectionIndex - 1);
+    const eventCount = endOrderIndex - startOrderIndex;
+    this.resetState("", {
+      initialVersion,
+      initialTextBuffer,
+      eventGraph: graph,
+      collectTransformedOperations: false,
+    });
+    this.deferTextMaterialization =
+      this.resultingText.length === 0 ||
+      eventCount >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS;
+
+    let currentOffset: number | null = null;
+    for (
+      let orderIndex = startOrderIndex;
+      orderIndex < endOrderIndex;
+      orderIndex++
+    ) {
+      currentOffset = this.processPackedEvent(
+        plan,
+        orderIndex,
+        startOrderIndex,
+        endOrderIndex,
+        currentOffset,
+      );
+    }
+
+    if (currentOffset !== null) {
+      this.currentVersion = new Set([plan.eventIdAtOffset(currentOffset)]);
+    }
+    return this.finishGeneration(undefined);
+  }
+
+  /** Build only the bounded ID rank needed if this packed engine is retained. */
+  preparePackedRetention(
+    plan: PackedCriticalReplayPlan,
+    startSectionIndex: number,
+    endSectionIndex: number,
+  ): void {
+    const start = plan.sectionStartAt(startSectionIndex);
+    const end = plan.sectionEndAt(endSectionIndex - 1);
+    this.eventOrder.clear();
+    for (let orderIndex = start; orderIndex < end; orderIndex++) {
+      this.eventOrder.set(plan.eventIdAt(orderIndex), orderIndex - start);
+    }
+    this.eventIndexesComplete = true;
+  }
+
+  private finishGeneration(
+    transformedOperations: ExternalOperation[] | undefined,
+  ): GeneratedDocument {
     if (!this.deferTextMaterialization) {
       // The typed-run coalescing path may have left an open buffer of
       // appended text. The returned document is observable, so materialise
@@ -196,7 +276,7 @@ export class EgWalkerEngine {
       stats: {
         retreatCount: this.retreatCount,
         advanceCount: this.advanceCount,
-        eventsProcessed: events.length,
+        eventsProcessed: this.processedEventCount,
         nonConflictingRunCount: this.nonConflictingRunCount,
         fullReplayCount: this.fullReplayCount,
         sequenceRecordCount: this.itemsById.size,
@@ -232,14 +312,11 @@ export class EgWalkerEngine {
       sequenceRecords: state.sequenceRecords,
       deleteTargets: state.deleteTargets,
     });
-    engine.eventsById.clear();
     engine.eventOrder.clear();
     state.eventOrder.forEach((eventId, index) => {
-      const event = graph.getEvent(eventId);
-      if (event === undefined) {
+      if (!graph.hasEvent(eventId)) {
         throw new Error(`Recovery state references missing event ${eventId}`);
       }
-      engine.eventsById.set(eventId, event);
       engine.eventOrder.set(eventId, index);
     });
     engine.eventIndexesComplete = state.eventIndexesComplete;
@@ -253,8 +330,7 @@ export class EgWalkerEngine {
    * graph that already contains {@link event}.
    */
   applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
-    if (this.eventIndexesComplete && !this.eventsById.has(event.id)) {
-      this.eventsById.set(event.id, event);
+    if (this.eventIndexesComplete && !this.eventOrder.has(event.id)) {
       this.eventOrder.set(event.id, this.eventOrder.size);
     }
     this.graph = graph;
@@ -378,9 +454,7 @@ export class EgWalkerEngine {
     return {
       retreatCount: this.retreatCount,
       advanceCount: this.advanceCount,
-      eventsProcessed: this.eventIndexesComplete
-        ? this.eventsById.size
-        : this.graph.getEventCount(),
+      eventsProcessed: this.processedEventCount,
       nonConflictingRunCount: this.nonConflictingRunCount,
       fullReplayCount: this.fullReplayCount,
       sequenceRecordCount: this.itemsById.size,
@@ -400,6 +474,7 @@ export class EgWalkerEngine {
   restoreStats(stats: EngineStats): void {
     this.retreatCount = stats.retreatCount;
     this.advanceCount = stats.advanceCount;
+    this.processedEventCount = stats.eventsProcessed;
     this.nonConflictingRunCount = stats.nonConflictingRunCount;
     this.fullReplayCount = stats.fullReplayCount;
     this.peakSequenceRecordCount = stats.peakSequenceRecordCount;
@@ -451,7 +526,6 @@ export class EgWalkerEngine {
       ? itemsFromCompactRecords(state.compactSequenceRecords)
       : itemsFromRecords(state.sequenceRecords ?? []);
 
-    this.eventsById.clear();
     this.eventOrder.clear();
     this.eventIndexesComplete = false;
     this.graph = state.graph;
@@ -472,6 +546,10 @@ export class EgWalkerEngine {
     this.advanceCount = 0;
     this.nonConflictingRunCount = 0;
     this.fullReplayCount = 0;
+    const graphFrontier = state.graph.getFrontier();
+    this.processedEventCount = versionsEqual(this.currentVersion, graphFrontier)
+      ? state.graph.getEventCount()
+      : state.graph.expandVersion(this.currentVersion).size;
     this.peakSequenceRecordCount = items.length;
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle = false;
@@ -513,6 +591,7 @@ export class EgWalkerEngine {
       const transformed = this.apply(event, collectTransformedOperations);
       this.currentVersion = new Set([event.id]);
       this.nonConflictingRunCount++;
+      this.processedEventCount++;
       this.samplePeakSequenceRecordCount();
       return transformed;
     }
@@ -532,8 +611,111 @@ export class EgWalkerEngine {
     const transformed = this.apply(event, collectTransformedOperations);
     this.currentVersion = new Set([event.id]);
     this.fullReplayCount++;
+    this.processedEventCount++;
     this.samplePeakSequenceRecordCount();
     return transformed;
+  }
+
+  private processPackedEvent(
+    plan: PackedCriticalReplayPlan,
+    orderIndex: number,
+    rangeStart: number,
+    rangeEnd: number,
+    currentOffset: number | null,
+  ): number {
+    const nonConflicting =
+      currentOffset === null
+        ? plan.parentsEqualVersionAt(orderIndex, this.currentVersion)
+        : plan.hasSingleParentOffsetAt(orderIndex, currentOffset);
+
+    if (!nonConflicting) {
+      const transition =
+        currentOffset === null
+          ? plan.transitionFromVersion(this.currentVersion, orderIndex)
+          : plan.transitionFromOffset(currentOffset, orderIndex);
+      for (let index = 0; index < transition.retreatCount; index++) {
+        const offset = transition.retreatOffsets[index]!;
+        const rank = plan.orderIndexOfOffset(offset);
+        if (rank < rangeStart || rank >= rangeEnd) {
+          continue;
+        }
+        this.adjustPrepareState(
+          plan.eventIdAtOffset(offset),
+          plan.isInsertAtOffset(offset),
+          -1,
+        );
+        this.retreatCount++;
+      }
+      for (let index = 0; index < transition.advanceCount; index++) {
+        const offset = transition.advanceOffsets[index]!;
+        const rank = plan.orderIndexOfOffset(offset);
+        if (rank < rangeStart || rank >= rangeEnd) {
+          continue;
+        }
+        this.adjustPrepareState(
+          plan.eventIdAtOffset(offset),
+          plan.isInsertAtOffset(offset),
+          1,
+        );
+        this.advanceCount++;
+      }
+      this.fullReplayCount++;
+    } else {
+      this.nonConflictingRunCount++;
+    }
+
+    this.applyPackedOperation(plan, orderIndex);
+    this.processedEventCount++;
+    this.samplePeakSequenceRecordCount();
+    return plan.eventOffsetAt(orderIndex);
+  }
+
+  private applyPackedOperation(
+    plan: PackedCriticalReplayPlan,
+    orderIndex: number,
+  ): void {
+    const eventId = plan.eventIdAt(orderIndex);
+    const operationIndex = plan.operationIndexAt(orderIndex);
+    const operationLength = plan.operationLengthAt(orderIndex);
+    if (plan.isInsertAt(orderIndex)) {
+      const start = plan.insertStartAt(orderIndex);
+      const insertedText = plan.sliceInsertedContent(
+        start,
+        start + operationLength,
+      );
+      this.assertOperationInPrepareView(
+        eventId,
+        operationIndex,
+        operationLength,
+        false,
+      );
+      applyInsert(
+        eventId,
+        operationIndex,
+        insertedText,
+        this.insertDeps,
+        false,
+        this.deferTextMaterialization,
+      );
+      this.prepareViewMayContainSurrogatePairs ||=
+        containsUtf16SurrogateCodeUnit(insertedText);
+      return;
+    }
+
+    this.assertOperationInPrepareView(
+      eventId,
+      operationIndex,
+      operationLength,
+      true,
+    );
+    applyDelete(
+      eventId,
+      operationIndex,
+      operationLength,
+      this.deleteDeps,
+      false,
+      this.deferTextMaterialization,
+    );
   }
 
   /**
@@ -562,16 +744,7 @@ export class EgWalkerEngine {
    * the caller can skip them outright.
    */
   private isNonConflictingRun(event: GraphEvent): boolean {
-    const parent = event.parentVersion;
-    if (parent.size !== this.currentVersion.size) {
-      return false;
-    }
-    for (const id of parent) {
-      if (!this.currentVersion.has(id)) {
-        return false;
-      }
-    }
-    return true;
+    return versionsEqual(event.parentVersion, this.currentVersion);
   }
 
   private reset(
@@ -579,7 +752,19 @@ export class EgWalkerEngine {
     initialText: string,
     options: GenerateOptions,
   ): void {
-    this.eventsById.clear();
+    this.resetState(initialText, options);
+    const graphEvents =
+      options.eventOrder ?? options.eventGraph?.getTopologicalOrder() ?? events;
+    graphEvents.forEach((event, index) => {
+      this.eventOrder.set(event.id, index);
+      if (!options.eventGraph) {
+        this.graph.addEvent(event);
+      }
+    });
+    this.eventIndexesComplete = true;
+  }
+
+  private resetState(initialText: string, options: GenerateOptions): void {
     this.eventOrder.clear();
     this.eventIndexesComplete = false;
     this.graph = options.eventGraph ?? new EventGraph();
@@ -599,22 +784,12 @@ export class EgWalkerEngine {
     this.advanceCount = 0;
     this.nonConflictingRunCount = 0;
     this.fullReplayCount = 0;
+    this.processedEventCount = 0;
     this.peakSequenceRecordCount = 0;
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle =
       options.integrationMode === "linear-oracle";
     this.placeholderCounter = 0;
-
-    const graphEvents =
-      options.eventOrder ?? options.eventGraph?.getTopologicalOrder() ?? events;
-    graphEvents.forEach((event, index) => {
-      this.eventsById.set(event.id, event);
-      this.eventOrder.set(event.id, index);
-      if (!options.eventGraph) {
-        this.graph.addEvent(event);
-      }
-    });
-    this.eventIndexesComplete = true;
 
     if (this.resultingText.length === 0) {
       return;
@@ -674,12 +849,18 @@ export class EgWalkerEngine {
     collectTransformedOperations: boolean,
   ): ReadonlyArray<ExternalOperation> {
     const operation = event.operation;
-    this.assertOperationInPrepareView(event);
 
     if (operation.type === OPERATION_TYPE.INSERT) {
+      this.assertOperationInPrepareView(
+        event.id,
+        operation.index,
+        operation.text.length,
+        false,
+      );
       const transformed = applyInsert(
-        event,
-        operation,
+        event.id,
+        operation.index,
+        operation.text,
         this.insertDeps,
         collectTransformedOperations,
         this.deferTextMaterialization,
@@ -692,9 +873,16 @@ export class EgWalkerEngine {
       return transformed;
     }
 
+    this.assertOperationInPrepareView(
+      event.id,
+      operation.index,
+      operation.length,
+      true,
+    );
     return applyDelete(
-      event,
-      operation,
+      event.id,
+      operation.index,
+      operation.length,
       this.deleteDeps,
       collectTransformedOperations,
       this.deferTextMaterialization,
@@ -705,26 +893,27 @@ export class EgWalkerEngine {
    * Validate ranges against the document at the event's parent version after
    * retreat/advance, before any sequence, text, or delete-target mutation.
    */
-  private assertOperationInPrepareView(event: GraphEvent): void {
-    const { operation } = event;
+  private assertOperationInPrepareView(
+    eventId: EventId,
+    operationIndex: number,
+    operationLength: number,
+    isDelete: boolean,
+  ): void {
     const prepareLength = this.sequence.prepareLength;
-    const end =
-      operation.type === OPERATION_TYPE.INSERT
-        ? operation.index
-        : operation.index + operation.length;
+    const end = isDelete ? operationIndex + operationLength : operationIndex;
     if (
-      operation.index > prepareLength ||
+      operationIndex > prepareLength ||
       end > prepareLength ||
       !Number.isSafeInteger(end)
     ) {
       throw new Error(
-        `Event ${event.id} operation range ${operation.index}..${end} exceeds parent document length ${prepareLength}`,
+        `Event ${eventId} operation range ${operationIndex}..${end} exceeds parent document length ${prepareLength}`,
       );
     }
 
-    this.assertPrepareScalarBoundary(operation.index, event.id);
-    if (operation.type === OPERATION_TYPE.DELETE) {
-      this.assertPrepareScalarBoundary(end, event.id);
+    this.assertPrepareScalarBoundary(operationIndex, eventId);
+    if (isDelete) {
+      this.assertPrepareScalarBoundary(end, eventId);
     }
   }
 
@@ -764,51 +953,49 @@ export class EgWalkerEngine {
   }
 
   private retreat(eventId: EventId): void {
-    const event = this.eventsById.get(eventId);
-    if (!event) {
+    if (!this.eventOrder.has(eventId)) {
       return;
     }
-
-    if (event.operation.type === OPERATION_TYPE.INSERT) {
-      this.recordSplitter.isolateRunSliceForEvent(eventId);
-      for (const itemId of this.eventItems.get(eventId) ?? []) {
-        const item = this.requireItem(itemId);
-        item.prepareState -= 1;
-        this.sequence.updateItem(item);
-      }
-    } else {
-      for (const itemId of this.deleteTargets.targetsOf(eventId) ?? []) {
-        const item = this.requireItem(itemId);
-        item.prepareState -= 1;
-        this.sequence.updateItem(item);
-      }
+    const isInsert = this.graph.isInsertEvent(eventId);
+    if (isInsert === undefined) {
+      return;
     }
-
+    this.adjustPrepareState(eventId, isInsert, -1);
     this.retreatCount++;
   }
 
   private advance(eventId: EventId): void {
-    const event = this.eventsById.get(eventId);
-    if (!event) {
+    if (!this.eventOrder.has(eventId)) {
+      return;
+    }
+    const isInsert = this.graph.isInsertEvent(eventId);
+    if (isInsert === undefined) {
       return;
     }
 
-    if (event.operation.type === OPERATION_TYPE.INSERT) {
+    this.adjustPrepareState(eventId, isInsert, 1);
+    this.advanceCount++;
+  }
+
+  private adjustPrepareState(
+    eventId: EventId,
+    isInsert: boolean,
+    delta: 1 | -1,
+  ): void {
+    if (isInsert) {
       this.recordSplitter.isolateRunSliceForEvent(eventId);
       for (const itemId of this.eventItems.get(eventId) ?? []) {
         const item = this.requireItem(itemId);
-        item.prepareState += 1;
+        item.prepareState += delta;
         this.sequence.updateItem(item);
       }
     } else {
       for (const itemId of this.deleteTargets.targetsOf(eventId) ?? []) {
         const item = this.requireItem(itemId);
-        item.prepareState += 1;
+        item.prepareState += delta;
         this.sequence.updateItem(item);
       }
     }
-
-    this.advanceCount++;
   }
 
   private itemToEffectIndex(target: AugmentedCRDTItem): number {
@@ -935,10 +1122,8 @@ export class EgWalkerEngine {
     if (this.eventIndexesComplete) {
       return;
     }
-    this.eventsById.clear();
     this.eventOrder.clear();
     this.graph.getTopologicalOrder().forEach((event, index) => {
-      this.eventsById.set(event.id, event);
       this.eventOrder.set(event.id, index);
     });
     this.eventIndexesComplete = true;

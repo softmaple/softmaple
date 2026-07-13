@@ -1,16 +1,10 @@
-import { OPERATION_TYPE } from "../../constants/operation-types";
-import type { EventId, ExternalOperation, GraphEvent } from "../../types";
+import type { EventId, ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
 import { coalesceDeleteRuns } from "./text-utils";
-
-type DeleteOperation = Extract<
-  ExternalOperation,
-  { type: typeof OPERATION_TYPE.DELETE }
->;
 
 const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
   Object.freeze([]);
@@ -26,8 +20,9 @@ export interface DeleteHandlerDeps {
 }
 
 export const applyDelete = (
-  event: GraphEvent,
-  operation: DeleteOperation,
+  eventId: EventId,
+  operationIndex: number,
+  operationLength: number,
   deps: DeleteHandlerDeps,
   collectTransformedOperations: boolean,
   deferTextMaterialization: boolean,
@@ -56,11 +51,11 @@ export const applyDelete = (
   const outputDeleteIndexes: number[] | null = collectTransformedOperations
     ? []
     : null;
-  let remaining = operation.length;
+  let remaining = operationLength;
 
   while (remaining > 0) {
     const landing = sequence.prepareIndexToPositionAndOffset(
-      operation.index,
+      operationIndex,
       false,
     );
     const candidate = sequence.at(landing.position);
@@ -70,7 +65,7 @@ export const applyDelete = (
       // aggregates disagree with its children — a structural bug we want to
       // surface, not silently truncate the delete around.
       throw new Error(
-        `Engine bug: prepare-index ${operation.index} landed at sequence position ` +
+        `Engine bug: prepare-index ${operationIndex} landed at sequence position ` +
           `${landing.position} but no record exists there (remaining=${remaining}).`,
       );
     }
@@ -133,7 +128,7 @@ export const applyDelete = (
     remaining -= 1;
   }
 
-  deleteTargets.record(event.id, deletedItemIds);
+  deleteTargets.record(eventId, deletedItemIds);
 
   return outputDeleteIndexes === null
     ? NO_TRANSFORMED_OPERATIONS

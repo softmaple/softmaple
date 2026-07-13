@@ -5,14 +5,15 @@
  * No CRDT metadata is stored here.
  */
 
+import { OPERATION_TYPE } from "../constants/operation-types";
+import { isOwnedCausalEvent } from "../core/causal-event-batch";
 import type {
-  GraphEvent,
   EventId,
   ExternalOperation,
+  GraphEvent,
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
-import { isOwnedCausalEvent } from "../core/causal-event-batch";
 import {
   EventAlreadyExistsError,
   MissingParentError,
@@ -20,6 +21,7 @@ import {
 import { parseEventId } from "./event-id";
 import { diffVersions as diffVersionSets } from "./internals/diff-versions";
 import { deserializeEventGraph } from "./internals/event-graph-serialization";
+import type { PackedOffsetTransition } from "./internals/packed-diff-versions";
 import {
   buildPackedLinearEventGraphBase,
   PackedEventGraphBase,
@@ -61,12 +63,23 @@ export interface PackedLinearReplayView {
  * parent Set, and GraphEvent wrapper per persisted event.
  */
 export interface PackedReplayPlanningView extends PackedLinearReplayView {
+  offsetOf(id: EventId): number | undefined;
   getBranchPreservingOrderOffsets(): Uint32Array;
   eventAt(offset: number): GraphEvent | undefined;
   parentCountAt(offset: number): number;
   parentOffsetAt(offset: number, parentIndex: number): number | undefined;
   childCountAt(offset: number): number;
   childOffsetAt(offset: number, childIndex: number): number | undefined;
+  diffVersionToParents(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedOffsetTransition;
+  diffOffsetToParents(
+    currentOffset: number,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedOffsetTransition;
 }
 
 /**
@@ -238,6 +251,22 @@ export class EventGraph {
     }
     const offset = this.packedBase?.offsetOf(id);
     return offset === undefined ? undefined : this.packedBase?.eventAt(offset);
+  }
+
+  /**
+   * Return an event's operation kind without cloning its operation or parents.
+   *
+   * `undefined` distinguishes a missing event from a stored DELETE event.
+   */
+  isInsertEvent(id: EventId): boolean | undefined {
+    const event = this.events.get(id);
+    if (event !== undefined) {
+      return event.operation.type === OPERATION_TYPE.INSERT;
+    }
+    const offset = this.packedBase?.offsetOf(id);
+    return offset === undefined
+      ? undefined
+      : this.packedBase!.isInsertAt(offset);
   }
 
   /**

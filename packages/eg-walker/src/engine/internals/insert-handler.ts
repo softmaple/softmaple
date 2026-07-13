@@ -1,6 +1,6 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import { parseEventId } from "../../graph/event-id";
-import type { EventId, ExternalOperation, GraphEvent } from "../../types";
+import type { EventId, ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import type { AugmentedCRDTItem, TypedRun } from "./engine-types";
 import { EventItemIndex } from "./event-item-index";
@@ -10,11 +10,6 @@ import { RecordSplitter } from "./record-splitter";
 import { stringCodeUnits } from "./text-utils";
 import { FugueOrderIndex } from "./fugue-order-index";
 import { findIntegrationPosition } from "./yata-integration";
-
-type InsertOperation = Extract<
-  ExternalOperation,
-  { type: typeof OPERATION_TYPE.INSERT }
->;
 
 const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
   Object.freeze([]);
@@ -37,8 +32,9 @@ export interface InsertHandlerDeps {
 }
 
 export const applyInsert = (
-  event: GraphEvent,
-  operation: InsertOperation,
+  eventId: EventId,
+  operationIndex: number,
+  insertedText: string,
   deps: InsertHandlerDeps,
   collectTransformedOperations: boolean,
   deferTextMaterialization: boolean,
@@ -60,13 +56,13 @@ export const applyInsert = (
     useLinearIntegrationOracle,
   } = deps;
 
-  if (operation.text.length === 0) {
-    eventItems.set(event.id, []);
+  if (insertedText.length === 0) {
+    eventItems.set(eventId, []);
     return NO_TRANSFORMED_OPERATIONS;
   }
 
   const landing = sequence.prepareIndexToPositionAndOffset(
-    operation.index,
+    operationIndex,
     true,
   );
   const firstInsertPosition =
@@ -132,10 +128,10 @@ export const applyInsert = (
   // per code unit) while leaving multi-author / multi-event ordering
   // unchanged — split-on-demand carves the run when a concurrent insert
   // or delete anchors inside it.
-  const parsed = parseEventId(event.id);
+  const parsed = parseEventId(eventId);
   if (
     conflictRegionEmpty &&
-    operation.text.length === 1 &&
+    insertedText.length === 1 &&
     parsed !== null &&
     originLeftPosition !== null &&
     originLeftPosition === firstInsertPosition - 1
@@ -159,9 +155,9 @@ export const applyInsert = (
         throw new Error("Typed-run content must be materialized text");
       }
       const previousLength = leftRecord.content.length;
-      leftRecord.content += operation.text;
+      leftRecord.content += insertedText;
       sequence.updateItem(leftRecord);
-      eventItems.set(event.id, [leftRecord.id]);
+      eventItems.set(eventId, [leftRecord.id]);
       if (deferTextMaterialization) {
         return NO_TRANSFORMED_OPERATIONS;
       }
@@ -171,21 +167,21 @@ export const applyInsert = (
       // pay an O(document length) string realloc per keystroke.
       // {@link flushPendingInsert} materialises the buffer before any
       // non-coalesced read or write of the document text.
-      pendingInsert.append(effectIndex, operation.text, applyPendingSplice);
+      pendingInsert.append(effectIndex, insertedText, applyPendingSplice);
 
       return collectTransformedOperations
         ? [
             {
               type: OPERATION_TYPE.INSERT,
               index: effectIndex,
-              text: operation.text,
+              text: insertedText,
             },
           ]
         : NO_TRANSFORMED_OPERATIONS;
     }
   }
 
-  const codeUnits = stringCodeUnits(operation.text);
+  const codeUnits = stringCodeUnits(insertedText);
   const insertedIds: EventId[] = [];
   let left = originLeft;
 
@@ -196,12 +192,12 @@ export const applyInsert = (
   // coalescing branch above). Multi-character INSERTs and IDs that don't
   // parse keep `run = null` and behave like the pre-coalescing engine.
   const firstRun: TypedRun | null =
-    parsed !== null && operation.text.length === 1
+    parsed !== null && insertedText.length === 1
       ? { replicaId: parsed.replicaId, startSequence: parsed.sequence }
       : null;
   const firstItem: AugmentedCRDTItem = {
-    id: `${event.id}:0`,
-    eventId: event.id,
+    id: `${eventId}:0`,
+    eventId,
     content: codeUnits[0] ?? "",
     originLeft: left,
     originRight,
@@ -223,7 +219,7 @@ export const applyInsert = (
         )
       : null;
   if (!useOracle && indexedFirstPosition === null) {
-    throw new Error(`Fugue order index unavailable for event ${event.id}`);
+    throw new Error(`Fugue order index unavailable for event ${eventId}`);
   }
   const actualFirstPosition = conflictRegionEmpty
     ? firstInsertPosition
@@ -254,8 +250,8 @@ export const applyInsert = (
   // one multi-character INSERT.
   for (let offset = 1; offset < codeUnits.length; offset++) {
     const item: AugmentedCRDTItem = {
-      id: `${event.id}:${offset}`,
-      eventId: event.id,
+      id: `${eventId}:${offset}`,
+      eventId,
       content: codeUnits[offset] ?? "",
       originLeft: left,
       originRight,
@@ -266,7 +262,7 @@ export const applyInsert = (
     const expectedPosition = actualFirstPosition + offset;
     const indexedPosition = useOracle ? null : fugueOrder.integrate(item);
     if (!useOracle && indexedPosition === null) {
-      throw new Error(`Fugue order index unavailable for event ${event.id}`);
+      throw new Error(`Fugue order index unavailable for event ${eventId}`);
     }
     if (indexedPosition !== null && indexedPosition !== expectedPosition) {
       fugueOrder.invalidate();
@@ -278,7 +274,7 @@ export const applyInsert = (
     left = item.id;
   }
 
-  eventItems.set(event.id, insertedIds);
+  eventItems.set(eventId, insertedIds);
 
   // Cold replay callers only need the final document. The sequence already
   // carries the authoritative effect-visible state, so avoid an effect-rank
@@ -288,7 +284,7 @@ export const applyInsert = (
     return NO_TRANSFORMED_OPERATIONS;
   }
 
-  const firstInserted = requireItem(insertedIds[0] ?? event.id);
+  const firstInserted = requireItem(insertedIds[0] ?? eventId);
   const effectIndex = itemToEffectIndex(firstInserted);
   // A non-coalesced insert (multi-character event, new typed-run seed,
   // or non-empty conflict region) must observe the current document so
@@ -299,14 +295,14 @@ export const applyInsert = (
   if (!pendingInsert.isEmpty()) {
     flushPendingInsert();
   }
-  insertText(effectIndex, operation.text);
+  insertText(effectIndex, insertedText);
 
   return collectTransformedOperations
     ? [
         {
           type: OPERATION_TYPE.INSERT,
           index: effectIndex,
-          text: operation.text,
+          text: insertedText,
         },
       ]
     : NO_TRANSFORMED_OPERATIONS;

@@ -60,10 +60,13 @@ Replay working state:
 
 `EgWalkerReplica` currently retains this working state between edits to make
 the linear/incremental path cheap. It is excluded from portable `serialize()`,
-but the optional native-snapshot format stores sequence records, delete-target
-records, and retained checkpoint texts as an implementation-specific fast-load
-cache. This is an intentional engineering extension; it is not the paper's
-strict "discard CRDT state at a critical version" storage architecture.
+but the optional native-snapshot format can store sequence records,
+delete-target records, and retained checkpoint texts as an
+implementation-specific fast-load cache. `createNativeSnapshot()` reuses only
+an already-available cache by default; `resumeCache: "none"` excludes it and
+`resumeCache: "rebuild"` explicitly pays for a missing full-history cache.
+This is an intentional engineering extension; it is not the paper's strict
+"discard CRDT state at a critical version" storage architecture.
 
 The implementation also uses UTF-16 code-unit indexes and allows one graph
 event to carry a multi-code-unit insert or range delete. The paper's semantic

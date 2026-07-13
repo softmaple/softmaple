@@ -248,11 +248,51 @@ export class PackedEventGraphBase {
     return this.parentStarts![offset + 1]! - this.parentStarts![offset]!;
   }
 
+  /** Return a parent as a packed insertion offset without materialising IDs. */
+  parentOffsetAt(offset: number, parentIndex: number): number | undefined {
+    if (!Number.isInteger(parentIndex) || parentIndex < 0) {
+      return undefined;
+    }
+    if (this.implicitLinearEdges) {
+      return parentIndex === 0 && offset > 0 && offset < this.count
+        ? offset - 1
+        : undefined;
+    }
+    const start = this.parentStarts![offset];
+    const end = this.parentStarts![offset + 1];
+    if (
+      start === undefined ||
+      end === undefined ||
+      start + parentIndex >= end
+    ) {
+      return undefined;
+    }
+    return this.parentOffsets![start + parentIndex];
+  }
+
   childCountAt(offset: number): number {
     if (this.implicitLinearEdges) {
       return offset >= 0 && offset + 1 < this.count ? 1 : 0;
     }
     return this.childStarts![offset + 1]! - this.childStarts![offset]!;
+  }
+
+  /** Return a child as a packed insertion offset without materialising IDs. */
+  childOffsetAt(offset: number, childIndex: number): number | undefined {
+    if (!Number.isInteger(childIndex) || childIndex < 0) {
+      return undefined;
+    }
+    if (this.implicitLinearEdges) {
+      return childIndex === 0 && offset >= 0 && offset + 1 < this.count
+        ? offset + 1
+        : undefined;
+    }
+    const start = this.childStarts![offset];
+    const end = this.childStarts![offset + 1];
+    if (start === undefined || end === undefined || start + childIndex >= end) {
+      return undefined;
+    }
+    return this.childOffsets![start + childIndex];
   }
 
   *iterateParents(id: EventId): IterableIterator<EventId> {

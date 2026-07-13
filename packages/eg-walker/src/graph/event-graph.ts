@@ -54,6 +54,22 @@ export interface PackedLinearReplayView {
 }
 
 /**
+ * Numeric access to an immutable packed DAG used by cold replay planning.
+ *
+ * Offsets are insertion/topological ranks. Keeping edges numeric lets the
+ * planner use typed arrays instead of rebuilding one string-keyed Map, Set,
+ * parent Set, and GraphEvent wrapper per persisted event.
+ */
+export interface PackedReplayPlanningView extends PackedLinearReplayView {
+  getBranchPreservingOrderOffsets(): Uint32Array;
+  eventAt(offset: number): GraphEvent | undefined;
+  parentCountAt(offset: number): number;
+  parentOffsetAt(offset: number, parentIndex: number): number | undefined;
+  childCountAt(offset: number): number;
+  childOffsetAt(offset: number, childIndex: number): number | undefined;
+}
+
+/**
  * Event graph for storing operation history
  * This is what gets persisted to disk
  */
@@ -269,6 +285,14 @@ export class EventGraph {
       this.events.size !== 0 ||
       !this.packedBase.isExactLinear()
     ) {
+      return null;
+    }
+    return this.packedBase;
+  }
+
+  /** @internal Return numeric packed-DAG columns for allocation-light replay. */
+  getPackedReplayPlanningView(): PackedReplayPlanningView | null {
+    if (this.packedBase === null || this.events.size !== 0) {
       return null;
     }
     return this.packedBase;

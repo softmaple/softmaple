@@ -16,7 +16,11 @@ The portable `serialize()` format contains plain text plus the event graph and
 does not persist CRDT replay records. `EgWalkerReplica` does cache an engine
 between edits, and the optional native-snapshot API can persist that cache for
 faster restore; those are implementation extensions rather than the paper's
-minimal persistent-state model.
+minimal persistent-state model. `createNativeSnapshot()` defaults to reusing
+only resume state that is already available, so taking a snapshot never causes
+an implicit full-history replay. Pass `{ resumeCache: "none" }` to exclude the
+complete extension (including checkpoints), or `{ resumeCache: "rebuild" }`
+to explicitly rebuild missing sequence/delete state.
 
 ### Paper compatibility boundary
 

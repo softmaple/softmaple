@@ -349,29 +349,13 @@ export class IndexedSequence<T extends object> {
   }
 
   nextPrepareVisiblePosition(start: number): number | null {
-    if (start < 0 || start > this.length || !this.root) {
-      return null;
-    }
-
-    const before = this.prefixSum(start, "prepare");
-    if (before >= this.root.prepareSum) {
-      return null;
-    }
-
-    return this.weightIndexToPosition(before, false, "prepare");
+    return this.nextWeightedPosition(start, "prepare");
   }
 
   /** Next record that exists in the current prepare version, including a
    * delete-hidden ordering anchor whose visible width is zero. */
   nextPrepareAnchorPosition(start: number): number | null {
-    if (start < 0 || start > this.length || !this.root) {
-      return null;
-    }
-    const before = this.prefixSum(start, "anchor");
-    if (before >= this.root.anchorSum) {
-      return null;
-    }
-    return this.weightIndexToPosition(before, false, "anchor");
+    return this.nextWeightedPosition(start, "anchor");
   }
 
   /**
@@ -388,12 +372,192 @@ export class IndexedSequence<T extends object> {
       return null;
     }
 
-    const clampedEnd = Math.min(end, this.root.size);
-    const before = this.prefixSum(clampedEnd, "prepare");
-    if (before === 0) {
+    return this.findPreviousWeightedPosition(
+      this.root,
+      Math.min(end, this.root.size),
+      "prepare",
+      0,
+    );
+  }
+
+  /**
+   * Find the first record at or after `start` with a positive weight.
+   *
+   * Descend by record count once, then use subtree weight aggregates to skip
+   * hidden siblings. The previous implementation first computed a weighted
+   * prefix and then descended from the root a second time to resolve that
+   * weight; this combined traversal visits each tree level only once.
+   */
+  private nextWeightedPosition(
+    start: number,
+    kind: "prepare" | "anchor",
+  ): number | null {
+    if (start < 0 || start >= this.length || !this.root) {
       return null;
     }
-    return this.weightIndexToPosition(before - 1, false, "prepare");
+    return this.findNextWeightedPosition(this.root, start, kind, 0);
+  }
+
+  private findNextWeightedPosition(
+    node: IndexedNode<T>,
+    start: number,
+    kind: "prepare" | "anchor",
+    nodePosition: number,
+  ): number | null {
+    if (node.kind === "leaf") {
+      for (let offset = start; offset < node.items.length; offset++) {
+        this.structuralOperationCount++;
+        if (this.leafWeight(node, offset, kind) > 0) {
+          return nodePosition + offset;
+        }
+      }
+      return null;
+    }
+
+    let remaining = start;
+    let childPosition = nodePosition;
+    for (let childIndex = 0; childIndex < node.children.length; childIndex++) {
+      this.structuralOperationCount++;
+      const child = node.children[childIndex]!;
+      if (remaining < child.size) {
+        const local = this.findNextWeightedPosition(
+          child,
+          remaining,
+          kind,
+          childPosition,
+        );
+        if (local !== null) {
+          return local;
+        }
+
+        childPosition += child.size;
+        for (
+          let siblingIndex = childIndex + 1;
+          siblingIndex < node.children.length;
+          siblingIndex++
+        ) {
+          this.structuralOperationCount++;
+          const sibling = node.children[siblingIndex]!;
+          if (this.weightSum(sibling, kind) > 0) {
+            return this.findFirstWeightedPosition(sibling, kind, childPosition);
+          }
+          childPosition += sibling.size;
+        }
+        return null;
+      }
+      remaining -= child.size;
+      childPosition += child.size;
+    }
+    return null;
+  }
+
+  private findPreviousWeightedPosition(
+    node: IndexedNode<T>,
+    end: number,
+    kind: "prepare",
+    nodePosition: number,
+  ): number | null {
+    if (node.kind === "leaf") {
+      for (
+        let offset = Math.min(end, node.items.length) - 1;
+        offset >= 0;
+        offset--
+      ) {
+        this.structuralOperationCount++;
+        if (this.leafWeight(node, offset, kind) > 0) {
+          return nodePosition + offset;
+        }
+      }
+      return null;
+    }
+
+    let remaining = Math.min(end, node.size);
+    let childPosition = nodePosition;
+    for (let childIndex = 0; childIndex < node.children.length; childIndex++) {
+      this.structuralOperationCount++;
+      const child = node.children[childIndex]!;
+      if (remaining <= child.size) {
+        const local = this.findPreviousWeightedPosition(
+          child,
+          remaining,
+          kind,
+          childPosition,
+        );
+        if (local !== null) {
+          return local;
+        }
+
+        for (
+          let siblingIndex = childIndex - 1;
+          siblingIndex >= 0;
+          siblingIndex--
+        ) {
+          this.structuralOperationCount++;
+          const sibling = node.children[siblingIndex]!;
+          childPosition -= sibling.size;
+          if (this.weightSum(sibling, kind) > 0) {
+            return this.findLastWeightedPosition(sibling, kind, childPosition);
+          }
+        }
+        return null;
+      }
+      remaining -= child.size;
+      childPosition += child.size;
+    }
+    return null;
+  }
+
+  private findFirstWeightedPosition(
+    node: IndexedNode<T>,
+    kind: "prepare" | "anchor",
+    nodePosition: number,
+  ): number | null {
+    if (node.kind === "leaf") {
+      for (let offset = 0; offset < node.items.length; offset++) {
+        this.structuralOperationCount++;
+        if (this.leafWeight(node, offset, kind) > 0) {
+          return nodePosition + offset;
+        }
+      }
+      return null;
+    }
+
+    let childPosition = nodePosition;
+    for (const child of node.children) {
+      this.structuralOperationCount++;
+      if (this.weightSum(child, kind) > 0) {
+        return this.findFirstWeightedPosition(child, kind, childPosition);
+      }
+      childPosition += child.size;
+    }
+    return null;
+  }
+
+  private findLastWeightedPosition(
+    node: IndexedNode<T>,
+    kind: "prepare",
+    nodePosition: number,
+  ): number | null {
+    if (node.kind === "leaf") {
+      for (let offset = node.items.length - 1; offset >= 0; offset--) {
+        this.structuralOperationCount++;
+        if (this.leafWeight(node, offset, kind) > 0) {
+          return nodePosition + offset;
+        }
+      }
+      return null;
+    }
+
+    let childPosition = nodePosition + node.size;
+    for (let index = node.children.length - 1; index >= 0; index--) {
+      this.structuralOperationCount++;
+      const child = node.children[index]!;
+      childPosition -= child.size;
+      if (this.weightSum(child, kind) > 0) {
+        return this.findLastWeightedPosition(child, kind, childPosition);
+      }
+    }
+    return null;
   }
 
   private bulkLoad(items: ReadonlyArray<T>): void {
@@ -545,7 +709,13 @@ export class IndexedSequence<T extends object> {
     for (let index = offset; index < leaf.items.length; index++) {
       const item = leaf.items[index];
       if (item !== undefined) {
-        this.locationsByItem.set(item, { leaf, offsetInLeaf: index });
+        const location = this.locationsByItem.get(item);
+        if (location === undefined) {
+          this.locationsByItem.set(item, { leaf, offsetInLeaf: index });
+        } else {
+          location.leaf = leaf;
+          location.offsetInLeaf = index;
+        }
       }
     }
     this.propagateDelta(leaf, items.length, prepareSum, effectSum, anchorSum);
@@ -582,7 +752,16 @@ export class IndexedSequence<T extends object> {
       movedEffectSum += effect;
       movedAnchorSum += anchor;
       if (item) {
-        this.locationsByItem.set(item, { leaf: sibling, offsetInLeaf: index });
+        const location = this.locationsByItem.get(item);
+        if (location === undefined) {
+          this.locationsByItem.set(item, {
+            leaf: sibling,
+            offsetInLeaf: index,
+          });
+        } else {
+          location.leaf = sibling;
+          location.offsetInLeaf = index;
+        }
       }
     }
 

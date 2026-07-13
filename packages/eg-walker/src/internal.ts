@@ -49,6 +49,10 @@ export {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
 } from "./core/native-snapshot";
+export type {
+  CreateNativeSnapshotOptions,
+  NativeSnapshotResumeCacheMode,
+} from "./core/replica";
 export {
   PortableSnapshotCodec,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,

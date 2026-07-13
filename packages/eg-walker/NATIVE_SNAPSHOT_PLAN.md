@@ -165,8 +165,12 @@ future replay and cap total checkpoint bytes.
 Add explicit snapshot APIs rather than overloading existing graph serialization.
 
 ```ts
+type NativeSnapshotResumeCacheMode = "none" | "available" | "rebuild";
+
 class EgWalkerReplica {
-  createNativeSnapshot(): NativeSnapshot;
+  createNativeSnapshot(options?: {
+    resumeCache?: NativeSnapshotResumeCacheMode;
+  }): NativeSnapshot;
   static fromNativeSnapshot(
     snapshot: NativeSnapshot,
     replicaId?: string,

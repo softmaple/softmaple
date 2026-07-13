@@ -1,4 +1,4 @@
-export const LEAF_CAPACITY = 64;
+export const LEAF_CAPACITY = 32;
 export const BRANCH_FACTOR = 32;
 
 export type IndexedNode<T extends object> = LeafNode<T> | InternalNode<T>;

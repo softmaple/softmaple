@@ -7,7 +7,12 @@
  * semver guarantees.
  */
 
-export { EgWalkerReplica, createEgWalkerReplica } from "./core/replica";
+export {
+  EgWalkerReplica,
+  createEgWalkerReplica,
+  type CreateNativeSnapshotOptions,
+  type NativeSnapshotResumeCacheMode,
+} from "./core/replica";
 export {
   createCausalEventBatchBuilder,
   type CausalEventBatch,

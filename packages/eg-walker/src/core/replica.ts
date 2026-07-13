@@ -59,6 +59,10 @@ import {
   planCriticalReplaySections,
   type CriticalReplaySection,
 } from "../engine/critical-section-replay-plan";
+import {
+  planPackedCriticalReplaySections,
+  type PackedCriticalReplayPlan,
+} from "../engine/packed-critical-replay-plan";
 import { PartialReplayManager } from "../engine/partial-replay";
 import {
   readReplicaMetadata,
@@ -99,6 +103,19 @@ import {
 
 type LazyEventGraphSource = () => EventGraph;
 
+export type NativeSnapshotResumeCacheMode = "none" | "available" | "rebuild";
+
+/** Options controlling the optional EGWS1 fast-resume cache. */
+export interface CreateNativeSnapshotOptions {
+  /**
+   * - `"none"`: exclude sequence records, delete targets, and checkpoints.
+   * - `"available"` (default): include already-live/restored state without
+   *   replaying history.
+   * - `"rebuild"`: replay the graph when sequence/delete state is missing.
+   */
+  readonly resumeCache?: NativeSnapshotResumeCacheMode;
+}
+
 const MAX_REPLAY_CACHE_EVENTS = 4_096;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
 const ESTIMATED_REPLAY_RECORD_BYTES = 256;
@@ -112,6 +129,7 @@ interface ReplicaConstructorOptions {
   readonly lazyEventGraph?: LazyEventGraphSource;
   readonly deferLocalReplay?: boolean;
   readonly restoredSequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
+  readonly restoredDeleteTargets?: ReadonlyArray<DeleteTargetRecord>;
   readonly restoredEngine?: EgWalkerEngine;
   readonly restoredCheckpoints?: ReadonlyArray<CriticalCheckpointSnapshot>;
 }
@@ -140,6 +158,7 @@ interface RemoteBatchSnapshot {
   readonly lastReplaySource: ReplaySource | null;
   readonly replicaPeakSequenceRecordCount: number;
   readonly restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null;
+  readonly restoredDeleteTargets: ReadonlyArray<DeleteTargetRecord> | null;
   readonly replayCacheBaseVersion: Version | null;
   readonly replayCacheCoveredEventIds: Set<EventId> | null;
   readonly replayCacheCoverageChecks: number;
@@ -206,6 +225,8 @@ export class EgWalkerReplica {
   private readonly deferLocalReplay: boolean;
   private restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null =
     null;
+  private restoredDeleteTargets: ReadonlyArray<DeleteTargetRecord> | null =
+    null;
   private lastReplaySource: ReplaySource | null = null;
   /**
    * Replica-lifetime high-water mark for the engine's
@@ -238,6 +259,7 @@ export class EgWalkerReplica {
     this.initialText = initialText;
     this.deferLocalReplay = options.deferLocalReplay ?? false;
     this.restoredSequenceRecords = options.restoredSequenceRecords ?? null;
+    this.restoredDeleteTargets = options.restoredDeleteTargets ?? null;
     this.engine = options.restoredEngine ?? null;
     this.eventGraph =
       eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
@@ -339,18 +361,26 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Create a versioned native snapshot. Phase 1 stores the materialized text
-   * and persistent event graph so snapshot load can answer reads immediately;
-   * the engine is restored lazily before the first post-load edit.
+   * Create a versioned native snapshot containing the materialized text and
+   * persistent event graph. Existing live/restored resume state is included,
+   * but missing transient CRDT state is not rebuilt unless explicitly
+   * requested through {@link CreateNativeSnapshotOptions.resumeCache}.
    */
-  createNativeSnapshot(): NativeSnapshot {
+  createNativeSnapshot(
+    options: CreateNativeSnapshotOptions = {},
+  ): NativeSnapshot {
     const graph = this.ensureEventGraph();
     writeReplicaMetadata(graph, {
       initialText: this.initialText,
       nextSequenceNumber: this.nextSequenceNumber,
     });
 
-    const engineState = this.engineStateForSnapshot(graph);
+    const resumeCache = options.resumeCache ?? "available";
+    assertNativeSnapshotResumeCacheMode(resumeCache);
+    const engineState =
+      resumeCache === "none"
+        ? { sequenceRecords: [], deleteTargets: [] }
+        : this.engineStateForSnapshot(graph, resumeCache === "rebuild");
 
     return {
       formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
@@ -362,7 +392,8 @@ export class EgWalkerReplica {
       metadata: graph.getMetadata(),
       sequenceRecords: engineState.sequenceRecords,
       deleteTargets: engineState.deleteTargets,
-      checkpoints: this.criticalCheckpoints.toSnapshot(),
+      checkpoints:
+        resumeCache === "none" ? [] : this.criticalCheckpoints.toSnapshot(),
       eventGraph: graph.serialize(),
     };
   }
@@ -518,7 +549,14 @@ export class EgWalkerReplica {
       nextSequenceNumber: validated.nextSequenceNumber,
       lazyEventGraph,
       deferLocalReplay: restoredEngine === undefined,
-      restoredSequenceRecords: sequenceRecords,
+      restoredSequenceRecords:
+        sequenceRecords.length === 0 && deleteTargets.length === 0
+          ? undefined
+          : sequenceRecords,
+      restoredDeleteTargets:
+        sequenceRecords.length === 0 && deleteTargets.length === 0
+          ? undefined
+          : deleteTargets,
       restoredEngine,
       restoredCheckpoints: validated.checkpoints,
     });
@@ -579,6 +617,7 @@ export class EgWalkerReplica {
       this.applyPlainDocumentOperation(validatedOperation);
       this.currentVersion = new Set([event.id]);
       this.restoredSequenceRecords = null;
+      this.restoredDeleteTargets = null;
       this.maybeAdvanceCheckpoint();
       return;
     }
@@ -901,6 +940,7 @@ export class EgWalkerReplica {
       this.currentVersion = new Set([last.event.id]);
     }
     this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
     this.incrementalApplyCount += prepared.candidates.length;
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
     return operations;
@@ -944,6 +984,7 @@ export class EgWalkerReplica {
     const last = events[events.length - 1]!;
     this.currentVersion = new Set([last.id]);
     this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
     this.incrementalApplyCount += events.length;
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
   }
@@ -1151,6 +1192,7 @@ export class EgWalkerReplica {
       lastReplaySource: this.lastReplaySource,
       replicaPeakSequenceRecordCount: this.replicaPeakSequenceRecordCount,
       restoredSequenceRecords: this.restoredSequenceRecords,
+      restoredDeleteTargets: this.restoredDeleteTargets,
       replayCacheBaseVersion:
         this.replayCacheBaseVersion === null
           ? null
@@ -1178,6 +1220,7 @@ export class EgWalkerReplica {
     this.replicaPeakSequenceRecordCount =
       snapshot.replicaPeakSequenceRecordCount;
     this.restoredSequenceRecords = snapshot.restoredSequenceRecords;
+    this.restoredDeleteTargets = snapshot.restoredDeleteTargets;
     this.currentVersion = new Set(snapshot.currentVersion);
     this.documentBuffer = snapshot.documentBuffer;
     this.documentCache = snapshot.documentCache;
@@ -1406,6 +1449,11 @@ export class EgWalkerReplica {
       this.fullReplayLinearGraph(graph);
       return;
     }
+    const packedPlan = planPackedCriticalReplaySections(graph);
+    if (packedPlan !== null) {
+      this.fullReplayPackedGraph(graph, packedPlan);
+      return;
+    }
     const sections = planCriticalReplaySections(graph);
     let replayedEventCount = 0;
     let aggregateStats: EngineStats | null = null;
@@ -1526,6 +1574,151 @@ export class EgWalkerReplica {
       this.replayCacheEvents = 0;
     }
     this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
+    this.fullReplayCount++;
+    this.lastReplaySource = REPLAY_SOURCE.FULL;
+    this.refreshReplayCacheMetrics();
+    graph.releaseTraversalCaches();
+  }
+
+  /**
+   * Cold replay for an immutable packed DAG.
+   *
+   * The compact planner stores only numeric event order, section ends, and a
+   * linear bit per cut. Nonlinear events are materialised one section at a
+   * time for the CRDT engine; obsolete linear sections stream directly from
+   * packed operation columns. This avoids retaining the full GraphEvent
+   * order plus hundreds of thousands of section slices and frontier Sets.
+   */
+  private fullReplayPackedGraph(
+    graph: EventGraph,
+    plan: PackedCriticalReplayPlan,
+  ): void {
+    let replayedEventCount = 0;
+    let aggregateStats: EngineStats | null = null;
+    let retainedEngine: EgWalkerEngine | null = null;
+    let retainedBaseCheckpoint: CriticalCheckpoint | null = null;
+    let retainedEventIds: ReadonlyArray<EventId> = [];
+
+    this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
+    this.documentCache = null;
+    this.currentVersion = new Set();
+
+    const retainedCheckpointSectionStart = Math.max(
+      0,
+      plan.sectionCount - MAX_RETAINED_CHECKPOINTS,
+    );
+    for (let sectionIndex = 0; sectionIndex < plan.sectionCount; ) {
+      if (
+        sectionIndex < retainedCheckpointSectionStart &&
+        plan.isLinearSection(sectionIndex)
+      ) {
+        let sectionEnd = sectionIndex + 1;
+        while (
+          sectionEnd < retainedCheckpointSectionStart &&
+          plan.isLinearSection(sectionEnd)
+        ) {
+          sectionEnd++;
+        }
+        this.replayCoalescedPackedLinearSections(
+          plan,
+          sectionIndex,
+          sectionEnd,
+        );
+        replayedEventCount = plan.sectionEndAt(sectionEnd - 1);
+        sectionIndex = sectionEnd;
+        continue;
+      }
+
+      const sectionEventCount = plan.sectionEventCountAt(sectionIndex);
+      const baseVersion = new Set(this.currentVersion);
+      const baseCheckpoint: CriticalCheckpoint = {
+        version: baseVersion,
+        textBuffer: this.documentBuffer,
+        eventCount: replayedEventCount,
+      };
+
+      if (plan.isLinearSection(sectionIndex)) {
+        this.replayPackedPlanLinearSection(
+          plan,
+          sectionIndex,
+          replayedEventCount,
+          plan.sectionCount === 1,
+        );
+      } else {
+        const events = plan.materializeSection(sectionIndex);
+        const endVersion = advanceReplayFrontier(baseVersion, events);
+        const engine = new EgWalkerEngine();
+        const generated = engine.generate(events, "", {
+          initialVersion: baseVersion,
+          initialTextBuffer: this.documentBuffer,
+          eventGraph: graph,
+          eventOrder: events,
+          collectTransformedOperations: false,
+        });
+        this.documentBuffer = generated.textBuffer;
+        this.documentCache = null;
+        this.currentVersion = endVersion;
+        aggregateStats = mergeEngineStats(aggregateStats, generated.stats);
+
+        const isLastSection = sectionIndex === plan.sectionCount - 1;
+        if (
+          isLastSection &&
+          endVersion.size > 1 &&
+          canRetainReplayEngine(
+            sectionEventCount,
+            this.documentBuffer,
+            generated.stats,
+          )
+        ) {
+          retainedEngine = engine;
+          retainedBaseCheckpoint = baseCheckpoint;
+          retainedEventIds = events.map(({ id }) => id);
+        }
+      }
+
+      replayedEventCount += sectionEventCount;
+      if (sectionIndex >= retainedCheckpointSectionStart) {
+        this.criticalCheckpoints.record(
+          this.currentVersion,
+          this.documentBuffer,
+          replayedEventCount,
+        );
+      }
+      sectionIndex++;
+    }
+
+    if (replayedEventCount !== plan.eventCount) {
+      throw new Error("Packed replay plan did not apply every graph event");
+    }
+    this.currentVersion = graph.getFrontier();
+    this.engine = retainedEngine;
+    this.engineStatsOverride =
+      aggregateStats === null
+        ? null
+        : withLiveSequenceRecordCount(
+            aggregateStats,
+            retainedEngine?.getStats().sequenceRecordCount ?? 0,
+          );
+    this.replicaPeakSequenceRecordCount = Math.max(
+      this.replicaPeakSequenceRecordCount,
+      aggregateStats?.peakSequenceRecordCount ?? 0,
+    );
+    if (retainedEngine !== null && retainedBaseCheckpoint !== null) {
+      this.engineRecoveryAnchor = {
+        kind: "checkpoint",
+        checkpoint: retainedBaseCheckpoint,
+        estimatedBytes: 0,
+      };
+      this.setReplayCacheBase(retainedBaseCheckpoint.version, retainedEventIds);
+      this.replayCacheEvents = retainedEventIds.length;
+    } else {
+      this.engineRecoveryAnchor = null;
+      this.setReplayCacheBase(null);
+      this.replayCacheEvents = 0;
+    }
+    this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     this.refreshReplayCacheMetrics();
@@ -1598,6 +1791,7 @@ export class EgWalkerReplica {
     this.setReplayCacheBase(null);
     this.replayCacheEvents = 0;
     this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     this.refreshReplayCacheMetrics();
@@ -1698,6 +1892,147 @@ export class EgWalkerReplica {
     }
 
     flush();
+  }
+
+  /** Apply one compact-plan linear section without reconstructing parents. */
+  private replayPackedPlanLinearSection(
+    plan: PackedCriticalReplayPlan,
+    sectionIndex: number,
+    eventCountBeforeSection: number,
+    retainTrailingCheckpoints: boolean,
+  ): void {
+    const start = plan.sectionStartAt(sectionIndex);
+    const end = plan.sectionEndAt(sectionIndex);
+    const checkpointStart = retainTrailingCheckpoints
+      ? Math.max(start, end - MAX_RETAINED_CHECKPOINTS)
+      : end;
+
+    for (let orderIndex = start; orderIndex < end; orderIndex++) {
+      const operation = this.validateLocalOperation(
+        plan.operationAt(orderIndex),
+      );
+      if (operation !== null) {
+        this.applyPlainDocumentOperation(operation);
+      }
+      if (orderIndex >= checkpointStart) {
+        this.criticalCheckpoints.record(
+          new Set([plan.eventIdAt(orderIndex)]),
+          this.documentBuffer,
+          eventCountBeforeSection + orderIndex - start + 1,
+        );
+      }
+    }
+
+    if (end > start) {
+      this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
+    }
+  }
+
+  /**
+   * Coalesce old linear packed sections while streaming raw operation
+   * columns. No GraphEvent, parent Set, or per-section array is created.
+   */
+  private replayCoalescedPackedLinearSections(
+    plan: PackedCriticalReplayPlan,
+    startSection: number,
+    endSection: number,
+  ): void {
+    let pendingKind: "insert" | "delete" | null = null;
+    let pendingIndex = 0;
+    let pendingLength = 0;
+    let pendingInsertParts: string[] = [];
+
+    const flush = (): void => {
+      if (pendingKind === "insert") {
+        this.applyPlainDocumentOperation({
+          type: OPERATION_TYPE.INSERT,
+          index: pendingIndex,
+          text:
+            pendingInsertParts.length === 1
+              ? pendingInsertParts[0]!
+              : pendingInsertParts.join(""),
+        });
+      } else if (pendingKind === "delete") {
+        this.applyPlainDocumentOperation({
+          type: OPERATION_TYPE.DELETE,
+          index: pendingIndex,
+          length: pendingLength,
+        });
+      }
+      pendingKind = null;
+      pendingLength = 0;
+      pendingInsertParts = [];
+    };
+
+    const start = plan.sectionStartAt(startSection);
+    const end = plan.sectionEndAt(endSection - 1);
+    for (let orderIndex = start; orderIndex < end; orderIndex++) {
+      const operationIndex = plan.operationIndexAt(orderIndex);
+      const operationLength = plan.operationLengthAt(orderIndex);
+
+      if (plan.isInsertAt(orderIndex)) {
+        if (operationLength === 0) {
+          continue;
+        }
+        const contentStart = plan.insertStartAt(orderIndex);
+        const content = plan.sliceInsertedContent(
+          contentStart,
+          contentStart + operationLength,
+        );
+        if (
+          pendingKind === "insert" &&
+          operationIndex === pendingIndex + pendingLength
+        ) {
+          pendingInsertParts.push(content);
+          pendingLength += operationLength;
+          continue;
+        }
+
+        flush();
+        this.validateLocalOperation({
+          type: OPERATION_TYPE.INSERT,
+          index: operationIndex,
+          text: content,
+        });
+        pendingKind = "insert";
+        pendingIndex = operationIndex;
+        pendingLength = operationLength;
+        pendingInsertParts = [content];
+        continue;
+      }
+
+      if (operationLength === 0) {
+        continue;
+      }
+      if (pendingKind === "delete" && operationIndex === pendingIndex) {
+        const virtualDocumentLength =
+          this.documentBuffer.length - pendingLength;
+        if (operationIndex + operationLength > virtualDocumentLength) {
+          throw new Error(
+            `Delete range [${operationIndex}, ${operationIndex + operationLength}) exceeds document length ${virtualDocumentLength}`,
+          );
+        }
+        const combinedLength = pendingLength + operationLength;
+        this.assertNotMidSurrogate(operationIndex + combinedLength);
+        pendingLength = combinedLength;
+        continue;
+      }
+
+      flush();
+      this.validateLocalOperation({
+        type: OPERATION_TYPE.DELETE,
+        index: operationIndex,
+        length: operationLength,
+      });
+      pendingKind = "delete";
+      pendingIndex = operationIndex;
+      pendingLength = operationLength;
+    }
+
+    flush();
+    if (end > start) {
+      this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
+    }
   }
 
   /** Apply a causally-linear replay section directly to the persistent rope. */
@@ -1827,7 +2162,10 @@ export class EgWalkerReplica {
     this.currentVersion = new Set(lastSection?.endFrontier ?? []);
   }
 
-  private engineStateForSnapshot(graph: EventGraph): {
+  private engineStateForSnapshot(
+    graph: EventGraph,
+    rebuildResumeCache: boolean,
+  ): {
     readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
     readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
   } {
@@ -1840,13 +2178,13 @@ export class EgWalkerReplica {
         deleteTargets: this.engine.getDeleteTargetRecords(),
       };
     }
-    if (this.restoredSequenceRecords) {
+    if (this.restoredSequenceRecords !== null) {
       return {
         sequenceRecords: this.restoredSequenceRecords,
-        deleteTargets: [],
+        deleteTargets: this.restoredDeleteTargets ?? [],
       };
     }
-    if (graph.getEventCount() === 0) {
+    if (graph.getEventCount() === 0 || !rebuildResumeCache) {
       return { sequenceRecords: [], deleteTargets: [] };
     }
 
@@ -1919,6 +2257,12 @@ export class EgWalkerReplica {
   private advanceWithEvent(event: GraphEvent): RemoteIntegrationEffect {
     this.engineStatsOverride = null;
     const graph = this.ensureEventGraph();
+    // Restored runtime records describe exactly the frontier captured by their
+    // native snapshot. The caller has already appended `event` to `graph`, so
+    // they must not survive this graph advance and later be mistaken for a
+    // current cache after the live replay engine is evicted.
+    this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
 
     // Paper fast path: a causal extension is already expressed in indexes of
     // the current plain document, so no CRDT replay state is needed at all.
@@ -2109,6 +2453,8 @@ export class EgWalkerReplica {
     this.documentBuffer = result.textBuffer;
     this.documentCache = null;
     this.currentVersion = frontier;
+    this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
     this.partialReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
     this.refreshReplayCacheMetrics();
@@ -2349,6 +2695,21 @@ const versionsEqual = (
   return true;
 };
 
+/** Advance a prefix frontier through one topologically ordered section. */
+const advanceReplayFrontier = (
+  base: ReadonlySet<EventId>,
+  events: ReadonlyArray<GraphEvent>,
+): Set<EventId> => {
+  const frontier = new Set(base);
+  for (const event of events) {
+    for (const parentId of event.parentVersion) {
+      frontier.delete(parentId);
+    }
+    frontier.add(event.id);
+  }
+  return frontier;
+};
+
 const isLinearReplaySection = (
   events: ReadonlyArray<GraphEvent>,
   baseVersion: Version,
@@ -2439,3 +2800,13 @@ const compactRecordsUsePlainIndexes = (
   }
   return true;
 };
+
+function assertNativeSnapshotResumeCacheMode(
+  mode: unknown,
+): asserts mode is NativeSnapshotResumeCacheMode {
+  if (mode !== "none" && mode !== "available" && mode !== "rebuild") {
+    throw new Error(
+      `Invalid native snapshot resume-cache mode: ${String(mode)}`,
+    );
+  }
+}

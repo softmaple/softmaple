@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
@@ -65,7 +65,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
 
     // Act
@@ -85,7 +87,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
     restored.insert(2, "L");
 
@@ -124,7 +128,7 @@ describe("EgWalkerReplica native snapshots", () => {
       },
     ]);
     const restored = EgWalkerReplica.fromNativeSnapshot(
-      replica.createNativeSnapshot(),
+      replica.createNativeSnapshot({ resumeCache: "rebuild" }),
       "alice",
     );
 
@@ -150,7 +154,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
     restored.insert(2, "L");
 
@@ -181,7 +187,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(1, "B");
     replica.insert(2, "C");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
     restored.insert(3, "L");
 
@@ -306,7 +314,9 @@ describe("EgWalkerReplica native snapshots", () => {
     const codec = new NativeSnapshotCodec();
 
     // Act
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const sequence = sequenceFromRecords(decoded.sequenceRecords);
 
     // Assert
@@ -326,6 +336,121 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(2);
   });
 
+  it("should not rebuild a missing resume cache by default", () => {
+    // Arrange
+    const source = new EgWalkerReplica("alice", "");
+    source.insert(0, "A");
+    source.insert(1, "B");
+    const cold = EgWalkerReplica.fromNativeSnapshot(
+      source.createNativeSnapshot({ resumeCache: "none" }),
+      "alice",
+    );
+    const generate = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const snapshot = cold.createNativeSnapshot();
+
+      // Assert
+      expect(snapshot.sequenceRecords).toEqual([]);
+      expect(snapshot.deleteTargets).toEqual([]);
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("should rebuild a missing resume cache only when explicitly requested", () => {
+    // Arrange
+    const source = new EgWalkerReplica("alice", "");
+    source.insert(0, "A");
+    source.insert(1, "B");
+    const cold = EgWalkerReplica.fromNativeSnapshot(
+      source.createNativeSnapshot({ resumeCache: "none" }),
+      "alice",
+    );
+    const generate = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const snapshot = cold.createNativeSnapshot({ resumeCache: "rebuild" });
+
+      // Assert
+      expect(snapshot.sequenceRecords).toHaveLength(1);
+      expect(snapshot.sequenceRecords[0]?.content).toBe("AB");
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("should rebuild restored runtime records after replay-cache eviction", () => {
+    // Arrange
+    const source = new EgWalkerReplica("alice", "");
+    source.insert(0, "A");
+    const sourceSnapshot = source.createNativeSnapshot({
+      resumeCache: "rebuild",
+    });
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      sourceSnapshot,
+      "local",
+    );
+    let parent = sourceSnapshot.currentVersion[0]!;
+    for (let index = 0; index < 4_097; index++) {
+      const id = `remote:${index}`;
+      restored.applyRemoteEvent({
+        id,
+        parentVersion: new Set([parent]),
+        operation: { type: "insert", index: index + 1, text: "x" },
+        timestamp: index,
+      });
+      parent = id;
+    }
+    expect(restored.getReplayStats().replayCacheEvents).toBe(0);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const rebuilt = restored.createNativeSnapshot({ resumeCache: "rebuild" });
+    const resumed = EgWalkerReplica.fromNativeSnapshot(
+      codec.decode(codec.encode(rebuilt)),
+      "resumed",
+    );
+    resumed.insert(resumed.getText().length, "Z");
+
+    // Assert
+    expect(
+      rebuilt.sequenceRecords.reduce(
+        (length, record) => length + record.content.length,
+        0,
+      ),
+    ).toBe(rebuilt.text.length);
+    expect(resumed.getText()).toBe(`${rebuilt.text}Z`);
+  });
+
+  it("should omit the complete resume extension when requested", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    replica.delete(0, 1);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const snapshot = replica.createNativeSnapshot({ resumeCache: "none" });
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      codec.decode(codec.encode(snapshot)),
+      "alice",
+    );
+    restored.insert(1, "C");
+
+    // Assert
+    expect(snapshot.sequenceRecords).toEqual([]);
+    expect(snapshot.deleteTargets).toEqual([]);
+    expect(snapshot.checkpoints).toEqual([]);
+    expect(restored.getText()).toBe("BC");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+  });
+
   it("should store runtime records outside the JSON header", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
@@ -335,7 +460,9 @@ describe("EgWalkerReplica native snapshots", () => {
     const codec = new NativeSnapshotCodec();
 
     // Act
-    const bytes = codec.encode(replica.createNativeSnapshot());
+    const bytes = codec.encode(
+      replica.createNativeSnapshot({ resumeCache: "rebuild" }),
+    );
     const body = bytes.subarray(NATIVE_SNAPSHOT_FORMAT_VERSION.length);
     const reader = new BinaryReader(body);
     const header = JSON.parse(
@@ -549,15 +676,21 @@ describe("EgWalkerReplica native snapshots", () => {
     const codec = new NativeSnapshotCodec();
 
     // Act
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    const readOnlySnapshot = restored.createNativeSnapshot();
     restored.insert(1, "C");
-    const editedSnapshot = restored.createNativeSnapshot();
+    const editedSnapshot = restored.createNativeSnapshot({
+      resumeCache: "rebuild",
+    });
 
     // Assert
     expect(decoded.deleteTargets).toEqual([
       { deleteEventId: "alice:2", targetIds: ["alice:0:0"] },
     ]);
+    expect(readOnlySnapshot.deleteTargets).toEqual(decoded.deleteTargets);
     expect(restored.getText()).toBe("BC");
     expect(restored.getReplayStats().fullReplays).toBe(0);
     expect(editedSnapshot.deleteTargets).toEqual(decoded.deleteTargets);
@@ -569,7 +702,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
 
     // Act
@@ -661,7 +796,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const originalGetTopologicalOrder =
       EventGraph.prototype.getTopologicalOrder;
     EventGraph.prototype.getTopologicalOrder = () => {
@@ -691,7 +828,7 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(3, "d");
     replica.insert(4, "e");
     replica.insert(5, "f");
-    const snapshot = replica.createNativeSnapshot();
+    const snapshot = replica.createNativeSnapshot({ resumeCache: "rebuild" });
     const graph = EventGraph.deserialize(snapshot.eventGraph);
     const remote = {
       id: "bob:0",

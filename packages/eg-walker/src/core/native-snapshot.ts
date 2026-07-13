@@ -30,8 +30,9 @@ export const NATIVE_SNAPSHOT_FORMAT_VERSION = "EGWS1" as const;
 
 /**
  * Optional fast-resume extension. Unlike PortableSnapshot/EGWP1 this format
- * intentionally persists transient sequence records, delete targets, and
- * checkpoints, so it is not the paper-aligned portable persistence boundary.
+ * can persist transient sequence records, delete targets, and checkpoints, so
+ * it is not the paper-aligned portable persistence boundary. Runtime-record
+ * arrays are empty when no resume cache was available or requested.
  */
 export interface NativeSnapshot {
   readonly formatVersion: typeof NATIVE_SNAPSHOT_FORMAT_VERSION;

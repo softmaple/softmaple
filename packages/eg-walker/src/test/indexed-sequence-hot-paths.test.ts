@@ -25,6 +25,34 @@ const createSequence = (
   );
 
 describe("IndexedSequence object-anchored hot paths", () => {
+  it("finds weighted neighbours in one aggregate-guided traversal", () => {
+    const items = Array.from({ length: 2_200 }, (_, index) => ({
+      id: `sparse-${index}`,
+      prepare: index === 7 || index === 1_101 || index === 2_199 ? 1 : 0,
+      effect: 1,
+      anchor: index === 23 || index === 1_337 ? 1 : 0,
+    }));
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => item.prepare,
+      (item) => item.effect,
+      items,
+      (item) => item.anchor,
+    );
+
+    sequence.restoreStructuralOperationCount(0);
+    expect(sequence.nextPrepareVisiblePosition(8)).toBe(1_101);
+    expect(sequence.nextPrepareVisiblePosition(1_102)).toBe(2_199);
+    expect(sequence.nextPrepareAnchorPosition(24)).toBe(1_337);
+    expect(sequence.previousPrepareVisiblePosition(2_199)).toBe(1_101);
+    expect(sequence.previousPrepareVisiblePosition(1_101)).toBe(7);
+    expect(sequence.nextPrepareVisiblePosition(items.length)).toBeNull();
+    expect(sequence.nextPrepareAnchorPosition(-1)).toBeNull();
+
+    // Sparse spans are skipped by subtree aggregates rather than by walking
+    // every hidden record between the probes.
+    expect(sequence.getStructuralOperationCount()).toBeLessThan(700);
+  });
+
   it("fuses object location and effect-prefix lookup across tree levels", () => {
     const items = createItems(3_000);
     const sequence = createSequence(items);

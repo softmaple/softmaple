@@ -130,8 +130,9 @@ The current persistence benchmark records this mode in three forms:
   conflated.
 - `nativeSnapshotEncodeMs` / `nativeSnapshotDecodeMs` /
   `nativeSnapshotRestoreMs`: the optional `EGWS1` resume-state extension. It
-  includes runtime CRDT state and is reported separately from paper-style
-  portable persistence.
+  includes already-available runtime CRDT state and retained checkpoints, but
+  does not rebuild missing state during the timed encode. It is reported
+  separately from paper-style portable persistence.
 
 ## Paper JSON Shape
 

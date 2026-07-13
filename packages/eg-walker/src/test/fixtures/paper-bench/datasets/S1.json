@@ -1,0 +1,25 @@
+{
+  "kind": "concurrent",
+  "endContent": "🙂",
+  "numAgents": 1,
+  "txns": [
+    {
+      "parents": [],
+      "numChildren": 1,
+      "agent": 0,
+      "patches": [[0, 0, "A"]]
+    },
+    {
+      "parents": [0],
+      "numChildren": 1,
+      "agent": 0,
+      "patches": [[1, 0, "🙂"]]
+    },
+    {
+      "parents": [1],
+      "numChildren": 0,
+      "agent": 0,
+      "patches": [[0, 1, ""]]
+    }
+  ]
+}

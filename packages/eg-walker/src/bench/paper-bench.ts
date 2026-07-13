@@ -17,9 +17,18 @@ import {
   type PaperTraceGranularity,
 } from "./paper-traces";
 import {
+  DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS,
   PAPER_BENCHMARK_GRANULARITY,
+  parsePaperBenchmarkApplyBatchEvents,
   parsePaperBenchmarkGranularity,
+  type PaperBenchmarkApplyBatchEvents,
 } from "./paper-bench-options";
+import { applyRemoteEventsInBatches } from "./paper-bench-apply";
+import {
+  buildNativePaperPayload,
+  measureNativePaperPayload,
+  type NativePaperPayload,
+} from "./paper-bench-native";
 import { paperRootFromPackageRoot } from "./paper-bench-paths";
 import { measurePersistenceMetrics } from "./persistence-metrics";
 
@@ -29,7 +38,10 @@ const sourcePackageRoot = resolve(
 );
 const DEFAULT_PAPER_ROOT = paperRootFromPackageRoot(sourcePackageRoot);
 
-type BenchCase = Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity"> & {
+type BenchCase = Pick<
+  CliOptions,
+  "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+> & {
   readonly dataset: PaperDataset;
   readonly label: string;
   readonly gateBudget?: Phase6GateBudget;
@@ -54,12 +66,72 @@ interface CliOptions {
   readonly maxTxns?: number;
   readonly maxEvents?: number;
   readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
   readonly memory: boolean;
   readonly memoryWorker: boolean;
   readonly memoryRun?: number;
+  readonly nativeOnly: boolean;
+  readonly nativeOnlyWorker: boolean;
   readonly planPhase0: boolean;
   readonly phase6Gates: boolean;
   readonly help: boolean;
+}
+
+interface NativeBenchResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly txns: number;
+  readonly patches: number;
+  readonly events: number;
+  readonly frontierSize: number;
+  readonly finalTextLength: number;
+  readonly finalTextValidated: boolean;
+  readonly loadConvertMs: number;
+  readonly graphEncodeMs: number;
+  readonly binaryBytes: number;
+  readonly nativeDecodeMs: number;
+  readonly nativeLoadMs: number;
+  readonly nativeMaterializeMs: number;
+  readonly heapBeforeDecodeBytes: number;
+  readonly rssBeforeDecodeBytes: number;
+  readonly heapAfterDecodeBytes: number;
+  readonly rssAfterDecodeBytes: number;
+  readonly heapAfterLoadBytes: number;
+  readonly rssAfterLoadBytes: number;
+  readonly nativeDecodeHeapBytes: number;
+  readonly nativeLoadHeapBytes: number;
+  readonly nativeTotalHeapBytes: number;
+  readonly fullReplays: number;
+  readonly partialReplays: number;
+  readonly incrementalApplies: number;
+  readonly retreats: number;
+  readonly advances: number;
+  readonly checkpointCount: number;
+  readonly checkpointHits: number;
+  readonly checkpointMisses: number;
+  readonly sequenceRecords: number;
+  readonly peakSequenceRecords: number;
+  readonly replayCacheEvents: number;
+  readonly replayCacheBytes: number;
+  readonly textBufferNodes: number;
+  readonly integrationProbes: number;
+  readonly fugueComparisons: number;
+  readonly fugueMarkerOperations: number;
+  readonly fugueRotations: number;
+  readonly fugueRebuilds: number;
+  readonly sequenceTreeOperations: number;
+}
+
+interface PreparedNativeBench {
+  readonly payload: NativePaperPayload;
+  readonly txns: number;
+  readonly patches: number;
+  readonly loadConvertMs: number;
+  readonly graphEncodeMs: number;
 }
 
 interface BenchResult {
@@ -69,6 +141,8 @@ interface BenchResult {
   readonly maxTxns?: number;
   readonly maxEvents?: number;
   readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyCalls: number;
   readonly txns: number;
   readonly patches: number;
   readonly events: number;
@@ -110,6 +184,8 @@ interface MemoryResult {
   readonly maxTxns?: number;
   readonly maxEvents?: number;
   readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyCalls: number;
   readonly heapBeforeBytes: number;
   readonly heapAfterDecodeBytes: number;
   readonly heapAfterLoadBytes: number;
@@ -155,9 +231,13 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   let maxTxns: number | undefined;
   let maxEvents: number | undefined;
   let granularity: PaperTraceGranularity = PAPER_BENCHMARK_GRANULARITY;
+  let applyBatchEvents: PaperBenchmarkApplyBatchEvents =
+    DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS;
   let memory = false;
   let memoryWorker = false;
   let memoryRun: number | undefined;
+  let nativeOnly = false;
+  let nativeOnlyWorker = false;
   let planPhase0 = false;
   let phase6Gates = false;
   let help = false;
@@ -225,8 +305,30 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
       );
       continue;
     }
+    if (arg === "--apply-batch-events") {
+      applyBatchEvents = parsePaperBenchmarkApplyBatchEvents(
+        readOptionValue(args, index, arg),
+      );
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--apply-batch-events=")) {
+      applyBatchEvents = parsePaperBenchmarkApplyBatchEvents(
+        arg.slice("--apply-batch-events=".length),
+      );
+      continue;
+    }
     if (arg === "--memory") {
       memory = true;
+      continue;
+    }
+    if (arg === "--native-only") {
+      nativeOnly = true;
+      continue;
+    }
+    if (arg === "--native-only-worker") {
+      nativeOnly = true;
+      nativeOnlyWorker = true;
       continue;
     }
     if (arg === "--plan-phase0") {
@@ -287,9 +389,12 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
     maxTxns,
     maxEvents,
     granularity,
+    applyBatchEvents,
     memory,
     memoryWorker,
     memoryRun,
+    nativeOnly,
+    nativeOnlyWorker,
     planPhase0,
     phase6Gates,
     help,
@@ -307,8 +412,12 @@ Options:
   --max-txns 100     Limit each dataset to the first N txns; skips final text check
   --max-events 1000  Limit each dataset to the first N converted events; skips final text check
   --granularity MODE Paper benchmarks require operation. Default: operation
+  --apply-batch-events N|all
+                     Remote receive batch size. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS}
   --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
                      in a separate --expose-gc process
+  --native-only      Build an EGW3 payload outside the timed lane, then measure
+                     decode, replica load/replay, and final text materialization
   --plan-phase0      Run the persistence guardrail suite:
                      S1/S2/S3/A1 full, plus C1/C2 bounded 3k and 10k
   --phase6-gates     Run calibrated Phase 6 portable-persistence gates:
@@ -353,6 +462,8 @@ const printResult = (result: BenchResult): void => {
       `maxTxns=${result.maxTxns ?? "none"}`,
       `maxEvents=${result.maxEvents ?? "none"}`,
       `granularity=${result.granularity}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyCalls=${result.applyCalls}`,
       `txns=${result.txns}`,
       `patches=${result.patches}`,
       `events=${result.events}`,
@@ -389,6 +500,60 @@ const printResult = (result: BenchResult): void => {
   );
 };
 
+const printNativeResult = (result: NativeBenchResult): void => {
+  console.log(
+    [
+      "paper-bench-native",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `maxTxns=${result.maxTxns ?? "none"}`,
+      `maxEvents=${result.maxEvents ?? "none"}`,
+      `granularity=${result.granularity}`,
+      `txns=${result.txns}`,
+      `patches=${result.patches}`,
+      `events=${result.events}`,
+      `frontier=${result.frontierSize}`,
+      `text=${result.finalTextLength}`,
+      `finalTextValidated=${result.finalTextValidated}`,
+      `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
+      `graphEncodeMs=${formatNumber(result.graphEncodeMs)}`,
+      `binaryBytes=${result.binaryBytes}`,
+      `nativeDecodeMs=${formatNumber(result.nativeDecodeMs)}`,
+      `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
+      `nativeMaterializeMs=${formatNumber(result.nativeMaterializeMs)}`,
+      `heapBeforeDecodeBytes=${result.heapBeforeDecodeBytes}`,
+      `rssBeforeDecodeBytes=${result.rssBeforeDecodeBytes}`,
+      `heapAfterDecodeBytes=${result.heapAfterDecodeBytes}`,
+      `rssAfterDecodeBytes=${result.rssAfterDecodeBytes}`,
+      `heapAfterLoadBytes=${result.heapAfterLoadBytes}`,
+      `rssAfterLoadBytes=${result.rssAfterLoadBytes}`,
+      `nativeDecodeHeapBytes=${result.nativeDecodeHeapBytes}`,
+      `nativeLoadHeapBytes=${result.nativeLoadHeapBytes}`,
+      `nativeTotalHeapBytes=${result.nativeTotalHeapBytes}`,
+      `fullReplays=${result.fullReplays}`,
+      `partialReplays=${result.partialReplays}`,
+      `incrementalApplies=${result.incrementalApplies}`,
+      `retreats=${result.retreats}`,
+      `advances=${result.advances}`,
+      `checkpointCount=${result.checkpointCount}`,
+      `checkpointHits=${result.checkpointHits}`,
+      `checkpointMisses=${result.checkpointMisses}`,
+      `sequenceRecords=${result.sequenceRecords}`,
+      `peakSequenceRecords=${result.peakSequenceRecords}`,
+      `replayCacheEvents=${result.replayCacheEvents}`,
+      `replayCacheBytes=${result.replayCacheBytes}`,
+      `textBufferNodes=${result.textBufferNodes}`,
+      `integrationProbes=${result.integrationProbes}`,
+      `fugueComparisons=${result.fugueComparisons}`,
+      `fugueMarkerOperations=${result.fugueMarkerOperations}`,
+      `fugueRotations=${result.fugueRotations}`,
+      `fugueRebuilds=${result.fugueRebuilds}`,
+      `sequenceTreeOperations=${result.sequenceTreeOperations}`,
+    ].join(" "),
+  );
+};
+
 const printMemoryResult = (result: MemoryResult): void => {
   console.log(
     [
@@ -399,6 +564,8 @@ const printMemoryResult = (result: MemoryResult): void => {
       `maxTxns=${result.maxTxns ?? "none"}`,
       `maxEvents=${result.maxEvents ?? "none"}`,
       `granularity=${result.granularity}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyCalls=${result.applyCalls}`,
       `heapBeforeBytes=${result.heapBeforeBytes}`,
       `heapAfterDecodeBytes=${result.heapAfterDecodeBytes}`,
       `heapAfterLoadBytes=${result.heapAfterLoadBytes}`,
@@ -431,24 +598,24 @@ const applyLoadedPaperTrace = (
   dataset: PaperDataset,
   run: number,
   loaded: ReturnType<typeof loadPaperTrace>,
+  applyBatchEvents: PaperBenchmarkApplyBatchEvents,
 ): {
   readonly replica: EgWalkerReplica;
   readonly text: string;
+  readonly applyCalls: number;
 } => {
   const replica = new EgWalkerReplica(`paper-bench:${dataset}:${run}`);
-  for (const event of loaded.events) {
-    try {
-      replica.applyRemoteEvent(event);
-    } catch (error) {
-      const detail = JSON.stringify({
-        id: event.id,
-        parents: Array.from(event.parentVersion),
-        operation: event.operation,
-      });
-      throw new Error(
-        `${dataset}: failed applying ${detail}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+  let applyCalls: number;
+  try {
+    applyCalls = applyRemoteEventsInBatches(
+      replica,
+      loaded.events,
+      applyBatchEvents,
+    );
+  } catch (error) {
+    throw new Error(
+      `${dataset}: failed applying remote event batches of ${applyBatchEvents}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   const pending = replica.getPendingRemoteCount();
@@ -463,23 +630,138 @@ const applyLoadedPaperTrace = (
     );
   }
 
-  return { replica, text };
+  return { replica, text, applyCalls };
 };
 
 const applyPaperTrace = (
   paperRoot: string,
   dataset: PaperDataset,
   run: number,
-  options: Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity">,
+  options: Pick<
+    CliOptions,
+    "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+  >,
 ): {
   readonly loaded: ReturnType<typeof loadPaperTrace>;
   readonly replica: EgWalkerReplica;
   readonly text: string;
+  readonly applyCalls: number;
 } => {
   const loaded = loadPaperTrace(paperRoot, dataset, options);
   return {
     loaded,
-    ...applyLoadedPaperTrace(dataset, run, loaded),
+    ...applyLoadedPaperTrace(dataset, run, loaded, options.applyBatchEvents),
+  };
+};
+
+const printProgress = (
+  phase: "converted" | "applied",
+  benchCase: BenchCase,
+  run: number,
+  startedAt: number,
+  events: number,
+  applyCalls: number,
+): void => {
+  console.log(
+    [
+      "paper-bench-progress",
+      `phase=${phase}`,
+      `dataset=${benchCase.dataset}`,
+      `label=${benchCase.label}`,
+      `run=${run}`,
+      `elapsedMs=${formatNumber(performance.now() - startedAt)}`,
+      `events=${events}`,
+      `applyBatchEvents=${benchCase.applyBatchEvents}`,
+      `applyCalls=${applyCalls}`,
+    ].join(" "),
+  );
+};
+
+const prepareNativeBench = (
+  paperRoot: string,
+  benchCase: BenchCase,
+): PreparedNativeBench => {
+  const startedAt = performance.now();
+  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  const convertedAt = performance.now();
+  const payload = buildNativePaperPayload(
+    loaded.events,
+    loaded.limited ? undefined : loaded.trace.endContent,
+  );
+  const encodedAt = performance.now();
+  return {
+    payload,
+    txns: loaded.txnCount,
+    patches: loaded.patchCount,
+    loadConvertMs: convertedAt - startedAt,
+    graphEncodeMs: encodedAt - convertedAt,
+  };
+};
+
+const runNativeDatasetOnce = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+): NativeBenchResult => {
+  const prepared = prepareNativeBench(paperRoot, benchCase);
+
+  // Native-only runs execute in an --expose-gc worker. The measurement helper
+  // collects only between timed phases, after this conversion frame has been
+  // dropped, so source events and encoder state are not part of the baseline.
+  const measured = measureNativePaperPayload(
+    prepared.payload,
+    `paper-native-only:${benchCase.dataset}:${benchCase.label}:${run}`,
+    runGc,
+  );
+  const stats = measured.replayStats;
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    maxTxns: benchCase.maxTxns,
+    maxEvents: benchCase.maxEvents,
+    granularity: benchCase.granularity,
+    txns: prepared.txns,
+    patches: prepared.patches,
+    events: measured.eventCount,
+    frontierSize: measured.frontierSize,
+    finalTextLength: measured.finalTextLength,
+    finalTextValidated: measured.finalTextValidated,
+    loadConvertMs: prepared.loadConvertMs,
+    graphEncodeMs: prepared.graphEncodeMs,
+    binaryBytes: measured.binaryBytes,
+    nativeDecodeMs: measured.nativeDecodeMs,
+    nativeLoadMs: measured.nativeLoadMs,
+    nativeMaterializeMs: measured.nativeMaterializeMs,
+    heapBeforeDecodeBytes: measured.heapBeforeDecodeBytes,
+    rssBeforeDecodeBytes: measured.rssBeforeDecodeBytes,
+    heapAfterDecodeBytes: measured.heapAfterDecodeBytes,
+    rssAfterDecodeBytes: measured.rssAfterDecodeBytes,
+    heapAfterLoadBytes: measured.heapAfterLoadBytes,
+    rssAfterLoadBytes: measured.rssAfterLoadBytes,
+    nativeDecodeHeapBytes: measured.nativeDecodeHeapBytes,
+    nativeLoadHeapBytes: measured.nativeLoadHeapBytes,
+    nativeTotalHeapBytes: measured.nativeTotalHeapBytes,
+    fullReplays: stats.fullReplays,
+    partialReplays: stats.partialReplays,
+    incrementalApplies: stats.incrementalApplies,
+    retreats: stats.engineRetreats,
+    advances: stats.engineAdvances,
+    checkpointCount: stats.checkpointCount,
+    checkpointHits: stats.criticalCheckpointHits,
+    checkpointMisses: stats.criticalCheckpointMisses,
+    sequenceRecords: stats.sequenceRecordCount,
+    peakSequenceRecords: stats.peakSequenceRecordCount,
+    replayCacheEvents: stats.replayCacheEvents,
+    replayCacheBytes: stats.replayCacheBytes,
+    textBufferNodes: stats.textBufferNodeCount,
+    integrationProbes: stats.integrationProbeCount,
+    fugueComparisons: stats.fugueComparisons,
+    fugueMarkerOperations: stats.fugueMarkerOperations,
+    fugueRotations: stats.fugueRotations,
+    fugueRebuilds: stats.fugueRebuilds,
+    sequenceTreeOperations: stats.sequenceTreeOperations,
   };
 };
 
@@ -491,12 +773,30 @@ const runDatasetOnce = (
   const startedAt = performance.now();
   const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
   const convertedAt = performance.now();
-  const { replica, text } = applyLoadedPaperTrace(
+  printProgress(
+    "converted",
+    benchCase,
+    run,
+    startedAt,
+    loaded.events.length,
+    0,
+  );
+  const applyStartedAt = performance.now();
+  const { replica, text, applyCalls } = applyLoadedPaperTrace(
     benchCase.dataset,
     run,
     loaded,
+    benchCase.applyBatchEvents,
   );
   const appliedAt = performance.now();
+  printProgress(
+    "applied",
+    benchCase,
+    run,
+    startedAt,
+    loaded.events.length,
+    applyCalls,
+  );
 
   const serialized = replica.serialize();
   const jsonBytes = utf8Bytes(JSON.stringify(serialized));
@@ -533,13 +833,15 @@ const runDatasetOnce = (
     maxTxns: benchCase.maxTxns,
     maxEvents: benchCase.maxEvents,
     granularity: benchCase.granularity,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyCalls,
     txns: loaded.txnCount,
     patches: loaded.patchCount,
     events: loaded.events.length,
     finalTextLength: text.length,
     loadConvertMs: convertedAt - startedAt,
-    applyMs: appliedAt - convertedAt,
-    totalMs: appliedAt - startedAt,
+    applyMs: appliedAt - applyStartedAt,
+    totalMs: convertedAt - startedAt + appliedAt - applyStartedAt,
     jsonBytes,
     binaryBytes: binary.byteLength,
     nativeDecodeMs: loadedAt - decodedAt,
@@ -561,14 +863,23 @@ const buildPersistencePayload = (
   paperRoot: string,
   dataset: PaperDataset,
   run: number,
-  options: Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity">,
+  options: Pick<
+    CliOptions,
+    "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+  >,
 ): {
   readonly binary: Uint8Array;
   readonly portableSnapshotBinary: Uint8Array;
   readonly nativeSnapshotBinary: Uint8Array;
   readonly text: string;
+  readonly applyCalls: number;
 } => {
-  const { replica, text } = applyPaperTrace(paperRoot, dataset, run, options);
+  const { replica, text, applyCalls } = applyPaperTrace(
+    paperRoot,
+    dataset,
+    run,
+    options,
+  );
   const graph = EventGraph.fromEvents(
     replica.exportEventGraph().map((event) => cloneEvent(event)),
   );
@@ -579,7 +890,13 @@ const buildPersistencePayload = (
   const nativeSnapshotBinary = new NativeSnapshotCodec().encode(
     replica.createNativeSnapshot(),
   );
-  return { binary, portableSnapshotBinary, nativeSnapshotBinary, text };
+  return {
+    binary,
+    portableSnapshotBinary,
+    nativeSnapshotBinary,
+    text,
+    applyCalls,
+  };
 };
 
 const measurePersistenceMemory = (
@@ -587,8 +904,13 @@ const measurePersistenceMemory = (
   run: number,
   benchCase: BenchCase,
 ): MemoryResult => {
-  const { binary, portableSnapshotBinary, nativeSnapshotBinary, text } =
-    buildPersistencePayload(paperRoot, benchCase.dataset, run, benchCase);
+  const {
+    binary,
+    portableSnapshotBinary,
+    nativeSnapshotBinary,
+    text,
+    applyCalls,
+  } = buildPersistencePayload(paperRoot, benchCase.dataset, run, benchCase);
   const codec = new ColumnarEventGraphCodec();
   const portableSnapshotCodec = new PortableSnapshotCodec();
   const nativeSnapshotCodec = new NativeSnapshotCodec();
@@ -676,6 +998,8 @@ const measurePersistenceMemory = (
     maxTxns: benchCase.maxTxns,
     maxEvents: benchCase.maxEvents,
     granularity: benchCase.granularity,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyCalls,
     heapBeforeBytes,
     heapAfterDecodeBytes,
     heapAfterLoadBytes,
@@ -742,6 +1066,8 @@ const runMemoryWorkerProcess = (
     options.paperRoot,
     "--granularity",
     benchCase.granularity,
+    "--apply-batch-events",
+    String(benchCase.applyBatchEvents),
   ];
   if (benchCase.maxTxns !== undefined) {
     args.push("--max-txns", String(benchCase.maxTxns));
@@ -770,8 +1096,124 @@ const runMemoryWorkerProcess = (
   }
 };
 
+const runNativeOnlyWorkerProcess = (
+  options: CliOptions,
+  benchCase: BenchCase,
+  run: number,
+): NativeBenchResult => {
+  const script = process.argv[1];
+  if (!script) {
+    throw new Error("Cannot locate paper-bench script for native-only worker");
+  }
+
+  const args = [
+    "--expose-gc",
+    ...process.execArgv,
+    script,
+    "--native-only-worker",
+    "--datasets",
+    benchCase.dataset,
+    "--runs",
+    "1",
+    "--memory-run",
+    String(run),
+    "--paper-root",
+    options.paperRoot,
+    "--granularity",
+    benchCase.granularity,
+  ];
+  if (benchCase.maxTxns !== undefined) {
+    args.push("--max-txns", String(benchCase.maxTxns));
+  }
+  if (benchCase.maxEvents !== undefined) {
+    args.push("--max-events", String(benchCase.maxEvents));
+  }
+
+  const worker = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (worker.error) {
+    throw worker.error;
+  }
+  if (worker.status !== 0) {
+    const detail = worker.stderr.trim() || worker.stdout.trim();
+    throw new Error(
+      `Native-only worker failed${worker.signal ? ` with signal ${worker.signal}` : ` with status ${worker.status}`}: ${detail}`,
+    );
+  }
+
+  try {
+    return JSON.parse(worker.stdout) as NativeBenchResult;
+  } catch (error) {
+    throw new Error(
+      `Native-only worker returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
 const mean = (values: ReadonlyArray<number>): number =>
   values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const printNativeSummaries = (
+  results: ReadonlyArray<NativeBenchResult>,
+): void => {
+  for (const label of new Set(results.map((result) => result.label))) {
+    const datasetResults = results.filter((result) => result.label === label);
+    const first = datasetResults[0];
+    if (!first) {
+      continue;
+    }
+    const decodeTimes = datasetResults.map((result) => result.nativeDecodeMs);
+    const loadTimes = datasetResults.map((result) => result.nativeLoadMs);
+    const materializeTimes = datasetResults.map(
+      (result) => result.nativeMaterializeMs,
+    );
+    console.log(
+      [
+        "paper-bench-native-summary",
+        `dataset=${first.dataset}`,
+        `label=${label}`,
+        `runs=${datasetResults.length}`,
+        `maxTxns=${first.maxTxns ?? "none"}`,
+        `maxEvents=${first.maxEvents ?? "none"}`,
+        `granularity=${first.granularity}`,
+        `events=${first.events}`,
+        `binaryBytes=${first.binaryBytes}`,
+        `finalTextValidated=${datasetResults.every((result) => result.finalTextValidated)}`,
+        `meanNativeDecodeMs=${formatNumber(mean(decodeTimes))}`,
+        `minNativeDecodeMs=${formatNumber(Math.min(...decodeTimes))}`,
+        `maxNativeDecodeMs=${formatNumber(Math.max(...decodeTimes))}`,
+        `meanNativeLoadMs=${formatNumber(mean(loadTimes))}`,
+        `minNativeLoadMs=${formatNumber(Math.min(...loadTimes))}`,
+        `maxNativeLoadMs=${formatNumber(Math.max(...loadTimes))}`,
+        `meanNativeMaterializeMs=${formatNumber(mean(materializeTimes))}`,
+        `meanNativeTotalMs=${formatNumber(
+          mean(
+            datasetResults.map(
+              (result) =>
+                result.nativeDecodeMs +
+                result.nativeLoadMs +
+                result.nativeMaterializeMs,
+            ),
+          ),
+        )}`,
+        `meanNativeDecodeHeapBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.nativeDecodeHeapBytes)),
+        )}`,
+        `meanNativeLoadHeapBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.nativeLoadHeapBytes)),
+        )}`,
+        `meanNativeTotalHeapBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.nativeTotalHeapBytes)),
+        )}`,
+        `meanRssAfterLoadBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.rssAfterLoadBytes)),
+        )}`,
+      ].join(" "),
+    );
+  }
+};
 
 const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
   for (const label of new Set(results.map((result) => result.label))) {
@@ -807,6 +1249,8 @@ const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
         `maxTxns=${first.maxTxns ?? "none"}`,
         `maxEvents=${first.maxEvents ?? "none"}`,
         `granularity=${first.granularity}`,
+        `applyBatchEvents=${first.applyBatchEvents}`,
+        `applyCalls=${first.applyCalls}`,
         `meanApplyMs=${formatNumber(mean(applyTimes))}`,
         `minApplyMs=${formatNumber(Math.min(...applyTimes))}`,
         `maxApplyMs=${formatNumber(Math.max(...applyTimes))}`,
@@ -874,7 +1318,10 @@ const phase6GateBudgetFor = (label: string): Phase6GateBudget => {
 
 const phase6GateCase = (
   dataset: PaperDataset,
-  options: Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity">,
+  options: Pick<
+    CliOptions,
+    "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+  >,
 ): BenchCase => {
   const label = labelForCase(dataset, options);
   return {
@@ -883,6 +1330,7 @@ const phase6GateCase = (
     maxTxns: options.maxTxns,
     maxEvents: options.maxEvents,
     granularity: options.granularity,
+    applyBatchEvents: options.applyBatchEvents,
     gateBudget: phase6GateBudgetFor(label),
   };
 };
@@ -980,6 +1428,7 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
         maxTxns: options.maxTxns,
         maxEvents: options.maxEvents,
         granularity: options.granularity,
+        applyBatchEvents: options.applyBatchEvents,
       }),
     );
   }
@@ -990,6 +1439,7 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
         maxTxns: undefined,
         maxEvents,
         granularity: PAPER_BENCHMARK_GRANULARITY,
+        applyBatchEvents: options.applyBatchEvents,
       }),
     );
   }
@@ -1001,6 +1451,7 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
       maxTxns: options.maxTxns,
       maxEvents: options.maxEvents,
       granularity: options.granularity,
+      applyBatchEvents: options.applyBatchEvents,
     }));
   }
 
@@ -1013,6 +1464,7 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
         granularity: options.granularity,
       }),
       granularity: options.granularity,
+      applyBatchEvents: options.applyBatchEvents,
     })),
     ...(["C1", "C2"] as const).flatMap((dataset) =>
       [3_000, 10_000].map((maxEvents) => ({
@@ -1024,6 +1476,7 @@ const buildBenchCases = (options: CliOptions): BenchCase[] => {
         }),
         maxEvents,
         granularity: options.granularity,
+        applyBatchEvents: options.applyBatchEvents,
       })),
     ),
   ];
@@ -1048,7 +1501,31 @@ const main = (): void => {
     printUsage(options.paperRoot);
     return;
   }
+  if (
+    options.nativeOnly &&
+    (options.memory ||
+      options.memoryWorker ||
+      options.planPhase0 ||
+      options.phase6Gates)
+  ) {
+    throw new Error(
+      "--native-only cannot be combined with --memory, --plan-phase0, or --phase6-gates",
+    );
+  }
   const benchCases = buildBenchCases(options);
+  if (options.nativeOnlyWorker) {
+    const benchCase = benchCases[0];
+    if (!benchCase || benchCases.length !== 1) {
+      throw new Error("Native-only worker requires one benchmark case");
+    }
+    const result = runNativeDatasetOnce(
+      options.paperRoot,
+      options.memoryRun ?? 1,
+      benchCase,
+    );
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
   if (options.memoryWorker) {
     const benchCase = benchCases[0];
     if (!benchCase) {
@@ -1076,11 +1553,26 @@ const main = (): void => {
       `maxTxns=${options.maxTxns ?? "none"}`,
       `maxEvents=${options.maxEvents ?? "none"}`,
       `granularity=${options.granularity}`,
+      `applyBatchEvents=${options.applyBatchEvents}`,
+      `nativeOnly=${options.nativeOnly}`,
       `memory=${options.memory}`,
       `planPhase0=${options.planPhase0}`,
       `phase6Gates=${options.phase6Gates}`,
     ].join(" "),
   );
+
+  if (options.nativeOnly) {
+    const nativeResults: NativeBenchResult[] = [];
+    for (const benchCase of benchCases) {
+      for (let run = 1; run <= options.runs; run++) {
+        const result = runNativeOnlyWorkerProcess(options, benchCase, run);
+        nativeResults.push(result);
+        printNativeResult(result);
+      }
+    }
+    printNativeSummaries(nativeResults);
+    return;
+  }
 
   for (const benchCase of benchCases) {
     for (let run = 1; run <= options.runs; run++) {

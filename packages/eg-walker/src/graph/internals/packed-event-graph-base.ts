@@ -1,17 +1,19 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
-import { compareEventIds } from "../event-id";
+import { compareEventIds, parseEventId } from "../event-id";
+import {
+  type PackedIntegerColumn,
+  type PackedUnsignedIntegerColumn,
+} from "./packed-numeric-columns";
 
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
 
-export interface PackedEventGraphColumns {
-  readonly ids: ReadonlyArray<EventId>;
-  readonly offsetById: ReadonlyMap<EventId, number>;
+interface PackedEventGraphCommonColumns {
   readonly operationTypes: Uint8Array;
-  readonly operationIndexes: Float64Array;
-  readonly operationLengths: Float64Array;
-  readonly timestamps: Float64Array;
+  readonly operationIndexes: PackedUnsignedIntegerColumn;
+  readonly operationLengths: PackedUnsignedIntegerColumn;
+  readonly timestamps: PackedIntegerColumn;
   /** UTF-16 offset of each INSERT event in `insertedContent`; 0 for DELETE. */
   readonly insertStarts: Uint32Array;
   readonly insertedContent: string;
@@ -19,6 +21,36 @@ export interface PackedEventGraphColumns {
   readonly parentOffsets: Uint32Array;
   readonly childStarts: Uint32Array;
   readonly childOffsets: Uint32Array;
+  readonly implicitLinearEdges?: boolean;
+}
+
+export interface PackedEventIdIndex {
+  readonly count: number;
+  has(id: EventId): boolean;
+  offsetOf(id: EventId): number | undefined;
+  idAt(offset: number): EventId | undefined;
+  iterateIds(): IterableIterator<EventId>;
+  maximumSequenceForReplica(replicaId: string): number | undefined;
+}
+
+interface MaterializedPackedEventIds {
+  readonly ids: ReadonlyArray<EventId>;
+  readonly offsetById: ReadonlyMap<EventId, number>;
+  readonly idIndex?: never;
+}
+
+interface IndexedPackedEventIds {
+  readonly ids?: never;
+  readonly offsetById?: never;
+  readonly idIndex: PackedEventIdIndex;
+}
+
+export type PackedEventGraphColumns = PackedEventGraphCommonColumns &
+  (MaterializedPackedEventIds | IndexedPackedEventIds);
+
+export interface PackedLinearEventGraphBuild {
+  readonly base: PackedEventGraphBase;
+  readonly frontier: ReadonlySet<EventId>;
 }
 
 /**
@@ -30,96 +62,132 @@ export interface PackedEventGraphColumns {
  * operation and two sets for every event.
  */
 export class PackedEventGraphBase {
-  private readonly ids: ReadonlyArray<EventId>;
-  private readonly offsetById: ReadonlyMap<EventId, number>;
+  private readonly ids: ReadonlyArray<EventId> | null;
+  private readonly offsetById: ReadonlyMap<EventId, number> | null;
+  private readonly idIndex: PackedEventIdIndex | null;
+  private readonly eventCount: number;
   private readonly operationTypes: Uint8Array;
-  private readonly operationIndexes: Float64Array;
-  private readonly operationLengths: Float64Array;
-  private readonly timestamps: Float64Array;
+  private readonly operationIndexes: PackedUnsignedIntegerColumn;
+  private readonly operationLengths: PackedUnsignedIntegerColumn;
+  private readonly timestamps: PackedIntegerColumn;
   private readonly insertStarts: Uint32Array;
   private readonly insertedContent: string;
-  private readonly parentStarts: Uint32Array;
-  private readonly parentOffsets: Uint32Array;
-  private readonly childStarts: Uint32Array;
-  private readonly childOffsets: Uint32Array;
+  private readonly parentStarts: Uint32Array | null;
+  private readonly parentOffsets: Uint32Array | null;
+  private readonly childStarts: Uint32Array | null;
+  private readonly childOffsets: Uint32Array | null;
+  private readonly implicitLinearEdges: boolean;
   private readonly exactLinear: boolean;
 
   constructor(columns: PackedEventGraphColumns) {
-    const count = columns.ids.length;
+    const idIndex = columns.idIndex;
+    const count = idIndex?.count ?? columns.ids!.length;
     if (
       columns.operationTypes.length !== count ||
       columns.operationIndexes.length !== count ||
       columns.operationLengths.length !== count ||
       columns.timestamps.length !== count ||
-      columns.insertStarts.length !== count ||
-      columns.parentStarts.length !== count + 1 ||
-      columns.childStarts.length !== count + 1
+      columns.insertStarts.length !== count
     ) {
       throw new Error("Invalid packed event graph: column length mismatch");
     }
-    if (
-      columns.parentStarts[count] !== columns.parentOffsets.length ||
-      columns.childStarts[count] !== columns.childOffsets.length
-    ) {
-      throw new Error("Invalid packed event graph: CSR length mismatch");
+    this.implicitLinearEdges = columns.implicitLinearEdges ?? false;
+    if (idIndex !== undefined && !this.implicitLinearEdges) {
+      throw new Error(
+        "Invalid packed event graph: lazy IDs require implicit linear edges",
+      );
     }
-
-    // The packed decoder transfers ownership of this array. Keeping it avoids
-    // a second O(N) pointer array at peak decode memory.
-    const ids = Object.freeze(columns.ids);
-    for (let offset = 0; offset < ids.length; offset++) {
-      const id = ids[offset]!;
+    if (!this.implicitLinearEdges) {
       if (
-        typeof id !== "string" ||
-        id.length === 0 ||
-        columns.offsetById.get(id) !== offset
+        columns.parentStarts.length !== count + 1 ||
+        columns.childStarts.length !== count + 1
       ) {
-        throw new Error(
-          `Invalid packed event graph event ID at offset ${offset}`,
-        );
+        throw new Error("Invalid packed event graph: column length mismatch");
+      }
+      if (
+        columns.parentStarts[count] !== columns.parentOffsets.length ||
+        columns.childStarts[count] !== columns.childOffsets.length
+      ) {
+        throw new Error("Invalid packed event graph: CSR length mismatch");
       }
     }
-    if (columns.offsetById.size !== count) {
-      throw new Error("Invalid packed event graph: ID index size mismatch");
-    }
 
-    this.ids = ids;
-    this.offsetById = columns.offsetById;
+    if (idIndex === undefined) {
+      // The packed decoder transfers ownership of this array. Keeping it
+      // avoids a second O(N) pointer array at peak decode memory.
+      const ids = Object.freeze(columns.ids);
+      for (let offset = 0; offset < ids.length; offset++) {
+        const id = ids[offset]!;
+        if (
+          typeof id !== "string" ||
+          id.length === 0 ||
+          columns.offsetById.get(id) !== offset
+        ) {
+          throw new Error(
+            `Invalid packed event graph event ID at offset ${offset}`,
+          );
+        }
+      }
+      if (columns.offsetById.size !== count) {
+        throw new Error("Invalid packed event graph: ID index size mismatch");
+      }
+
+      this.ids = ids;
+      this.offsetById = columns.offsetById;
+      this.idIndex = null;
+    } else {
+      this.ids = null;
+      this.offsetById = null;
+      this.idIndex = idIndex;
+    }
+    this.eventCount = count;
     this.operationTypes = columns.operationTypes;
     this.operationIndexes = columns.operationIndexes;
     this.operationLengths = columns.operationLengths;
     this.timestamps = columns.timestamps;
     this.insertStarts = columns.insertStarts;
     this.insertedContent = columns.insertedContent;
-    this.parentStarts = columns.parentStarts;
-    this.parentOffsets = columns.parentOffsets;
-    this.childStarts = columns.childStarts;
-    this.childOffsets = columns.childOffsets;
-    this.exactLinear = this.computeExactLinear();
+    this.parentStarts = this.implicitLinearEdges ? null : columns.parentStarts;
+    this.parentOffsets = this.implicitLinearEdges
+      ? null
+      : columns.parentOffsets;
+    this.childStarts = this.implicitLinearEdges ? null : columns.childStarts;
+    this.childOffsets = this.implicitLinearEdges ? null : columns.childOffsets;
+    this.exactLinear = this.implicitLinearEdges || this.computeExactLinear();
   }
 
   get count(): number {
-    return this.ids.length;
+    return this.eventCount;
   }
 
   has(id: EventId): boolean {
-    return this.offsetById.has(id);
+    return this.idIndex !== null
+      ? this.idIndex.has(id)
+      : this.offsetById!.has(id);
   }
 
   offsetOf(id: EventId): number | undefined {
-    return this.offsetById.get(id);
+    return this.idIndex !== null
+      ? this.idIndex.offsetOf(id)
+      : this.offsetById!.get(id);
   }
 
   idAt(offset: number): EventId | undefined {
-    return this.ids[offset];
+    return this.idIndex !== null
+      ? this.idIndex.idAt(offset)
+      : this.ids![offset];
   }
 
   *iterateIds(): IterableIterator<EventId> {
-    yield* this.ids;
+    if (this.idIndex !== null) {
+      yield* this.idIndex.iterateIds();
+    } else {
+      yield* this.ids!;
+    }
   }
 
   eventAt(offset: number): GraphEvent | undefined {
-    const id = this.ids[offset];
+    const id = this.idAt(offset);
     if (id === undefined) {
       return undefined;
     }
@@ -149,32 +217,63 @@ export class PackedEventGraphBase {
     throw new Error(`Invalid packed operation type ${String(type)}`);
   }
 
+  isInsertAt(offset: number): boolean {
+    return this.operationTypes[offset] === INSERT_OPERATION;
+  }
+
+  operationIndexAt(offset: number): number {
+    return this.operationIndexes[offset]!;
+  }
+
+  operationLengthAt(offset: number): number {
+    return this.operationLengths[offset]!;
+  }
+
+  insertStartAt(offset: number): number {
+    return this.insertStarts[offset]!;
+  }
+
+  sliceInsertedContent(start: number, end: number): string {
+    return this.insertedContent.slice(start, end);
+  }
+
   timestampAt(offset: number): number | undefined {
     return this.timestamps[offset];
   }
 
   parentCountAt(offset: number): number {
-    return this.parentStarts[offset + 1]! - this.parentStarts[offset]!;
+    if (this.implicitLinearEdges) {
+      return offset > 0 && offset < this.count ? 1 : 0;
+    }
+    return this.parentStarts![offset + 1]! - this.parentStarts![offset]!;
   }
 
   childCountAt(offset: number): number {
-    return this.childStarts[offset + 1]! - this.childStarts[offset]!;
+    if (this.implicitLinearEdges) {
+      return offset >= 0 && offset + 1 < this.count ? 1 : 0;
+    }
+    return this.childStarts![offset + 1]! - this.childStarts![offset]!;
   }
 
   *iterateParents(id: EventId): IterableIterator<EventId> {
-    const offset = this.offsetById.get(id);
+    const offset = this.offsetOf(id);
     if (offset !== undefined) {
       yield* this.iterateParentsAt(offset);
     }
   }
 
   *iterateChildren(id: EventId): IterableIterator<EventId> {
-    const offset = this.offsetById.get(id);
+    const offset = this.offsetOf(id);
     if (offset !== undefined) {
-      const start = this.childStarts[offset]!;
-      const end = this.childStarts[offset + 1]!;
+      if (this.implicitLinearEdges) {
+        const child = this.idAt(offset + 1);
+        if (child !== undefined) yield child;
+        return;
+      }
+      const start = this.childStarts![offset]!;
+      const end = this.childStarts![offset + 1]!;
       for (let cursor = start; cursor < end; cursor++) {
-        yield this.ids[this.childOffsets[cursor]!]!;
+        yield this.ids![this.childOffsets![cursor]!]!;
       }
     }
   }
@@ -188,6 +287,13 @@ export class PackedEventGraphBase {
    * generator allocation for every visited child edge during cold replay.
    */
   getBranchPreservingOrderOffsets(): Uint32Array {
+    if (this.implicitLinearEdges) {
+      const result = new Uint32Array(this.count);
+      for (let offset = 0; offset < this.count; offset++) {
+        result[offset] = offset;
+      }
+      return result;
+    }
     const remainingParents = new Uint32Array(this.count);
     const roots: number[] = [];
 
@@ -197,7 +303,7 @@ export class PackedEventGraphBase {
       if (parentCount === 0) roots.push(offset);
     }
     roots.sort((left, right) =>
-      compareEventIds(this.ids[left]!, this.ids[right]!),
+      compareEventIds(this.ids![left]!, this.ids![right]!),
     );
 
     const stack: number[] = [];
@@ -212,16 +318,16 @@ export class PackedEventGraphBase {
       result[resultLength++] = offset;
 
       const newlyReady: number[] = [];
-      const start = this.childStarts[offset]!;
-      const end = this.childStarts[offset + 1]!;
+      const start = this.childStarts![offset]!;
+      const end = this.childStarts![offset + 1]!;
       for (let cursor = start; cursor < end; cursor++) {
-        const childOffset = this.childOffsets[cursor]!;
+        const childOffset = this.childOffsets![cursor]!;
         const remaining = remainingParents[childOffset]! - 1;
         remainingParents[childOffset] = remaining;
         if (remaining === 0) newlyReady.push(childOffset);
       }
       newlyReady.sort((left, right) =>
-        compareEventIds(this.ids[left]!, this.ids[right]!),
+        compareEventIds(this.ids![left]!, this.ids![right]!),
       );
       for (let index = newlyReady.length - 1; index >= 0; index--) {
         stack.push(newlyReady[index]!);
@@ -245,22 +351,44 @@ export class PackedEventGraphBase {
   }
 
   *iterateParentsAt(offset: number): IterableIterator<EventId> {
-    const start = this.parentStarts[offset]!;
-    const end = this.parentStarts[offset + 1]!;
-    for (let cursor = start; cursor < end; cursor++) {
-      yield this.ids[this.parentOffsets[cursor]!]!;
+    if (this.implicitLinearEdges) {
+      const parent = this.idAt(offset - 1);
+      if (parent !== undefined) yield parent;
+      return;
     }
+    const start = this.parentStarts![offset]!;
+    const end = this.parentStarts![offset + 1]!;
+    for (let cursor = start; cursor < end; cursor++) {
+      yield this.ids![this.parentOffsets![cursor]!]!;
+    }
+  }
+
+  maximumSequenceForReplica(replicaId: string): number | undefined {
+    if (this.idIndex !== null) {
+      return this.idIndex.maximumSequenceForReplica(replicaId);
+    }
+    let maximum: number | undefined;
+    for (const id of this.ids!) {
+      const parsed = parseEventId(id);
+      if (
+        parsed?.replicaId === replicaId &&
+        (maximum === undefined || parsed.sequence > maximum)
+      ) {
+        maximum = parsed.sequence;
+      }
+    }
+    return maximum;
   }
 
   private computeExactLinear(): boolean {
     for (let offset = 0; offset < this.count; offset++) {
-      const start = this.parentStarts[offset]!;
-      const end = this.parentStarts[offset + 1]!;
+      const start = this.parentStarts![offset]!;
+      const end = this.parentStarts![offset + 1]!;
       if (offset === 0) {
         if (start !== end) return false;
       } else if (
         end - start !== 1 ||
-        this.parentOffsets[start] !== offset - 1
+        this.parentOffsets![start] !== offset - 1
       ) {
         return false;
       }
@@ -268,6 +396,129 @@ export class PackedEventGraphBase {
     return true;
   }
 }
+
+/** Build packed columns directly from a validated exact causal chain. */
+export const buildPackedLinearEventGraphBase = (
+  events: ReadonlyArray<GraphEvent>,
+): PackedLinearEventGraphBuild => {
+  const count = events.length;
+  const ids = new Array<EventId>(count);
+  const offsetById = new Map<EventId, number>();
+  const operationTypes = new Uint8Array(count);
+  let operationIndexes: PackedUnsignedIntegerColumn = new Uint32Array(count);
+  let operationLengths: PackedUnsignedIntegerColumn = new Uint32Array(count);
+  let timestamps: PackedIntegerColumn = new Int32Array(count);
+  const insertStarts = new Uint32Array(count);
+  const insertedParts: string[] = [];
+  let insertedLength = 0;
+  let previousId: EventId | null = null;
+  let hasNegativeTimestamp = false;
+
+  for (let offset = 0; offset < count; offset++) {
+    const event = events[offset]!;
+    if (
+      typeof event.id !== "string" ||
+      event.id.length === 0 ||
+      offsetById.has(event.id)
+    ) {
+      throw new Error(`Invalid or duplicate linear event ID ${event.id}`);
+    }
+    if (
+      previousId === null
+        ? event.parentVersion.size !== 0
+        : event.parentVersion.size !== 1 || !event.parentVersion.has(previousId)
+    ) {
+      throw new Error(`Event ${event.id} does not extend the linear history`);
+    }
+
+    ids[offset] = event.id;
+    offsetById.set(event.id, offset);
+    const operationIndex = event.operation.index;
+    if (!Number.isSafeInteger(operationIndex) || operationIndex < 0) {
+      throw new Error(`Invalid operation index for event ${event.id}`);
+    }
+    if (!Number.isSafeInteger(event.timestamp)) {
+      throw new Error(`Invalid timestamp for event ${event.id}`);
+    }
+    if (
+      operationIndex > 0xffff_ffff &&
+      operationIndexes instanceof Uint32Array
+    ) {
+      const wideIndexes = new Float64Array(count);
+      wideIndexes.set(operationIndexes.subarray(0, offset));
+      operationIndexes = wideIndexes;
+    }
+    operationIndexes[offset] = operationIndex;
+    if (timestamps instanceof Int32Array) {
+      if (event.timestamp < -0x8000_0000 || event.timestamp > 0x7fff_ffff) {
+        const widerTimestamps: Uint32Array | Float64Array =
+          !hasNegativeTimestamp &&
+          event.timestamp >= 0 &&
+          event.timestamp <= 0xffff_ffff
+            ? new Uint32Array(count)
+            : new Float64Array(count);
+        widerTimestamps.set(timestamps.subarray(0, offset));
+        timestamps = widerTimestamps;
+      }
+    } else if (
+      timestamps instanceof Uint32Array &&
+      (event.timestamp < 0 || event.timestamp > 0xffff_ffff)
+    ) {
+      const wideTimestamps = new Float64Array(count);
+      wideTimestamps.set(timestamps.subarray(0, offset));
+      timestamps = wideTimestamps;
+    }
+    timestamps[offset] = event.timestamp;
+    hasNegativeTimestamp ||= event.timestamp < 0;
+    if (event.operation.type === OPERATION_TYPE.INSERT) {
+      if (insertedLength > 0xffff_ffff) {
+        throw new Error("Inserted content exceeds packed UTF-16 offset range");
+      }
+      operationTypes[offset] = INSERT_OPERATION;
+      operationLengths[offset] = event.operation.text.length;
+      insertStarts[offset] = insertedLength;
+      insertedParts.push(event.operation.text);
+      insertedLength += event.operation.text.length;
+    } else {
+      if (
+        !Number.isSafeInteger(event.operation.length) ||
+        event.operation.length < 0
+      ) {
+        throw new Error(`Invalid operation length for event ${event.id}`);
+      }
+      if (
+        event.operation.length > 0xffff_ffff &&
+        operationLengths instanceof Uint32Array
+      ) {
+        const wideLengths = new Float64Array(count);
+        wideLengths.set(operationLengths.subarray(0, offset));
+        operationLengths = wideLengths;
+      }
+      operationTypes[offset] = DELETE_OPERATION;
+      operationLengths[offset] = event.operation.length;
+    }
+    previousId = event.id;
+  }
+
+  return {
+    base: new PackedEventGraphBase({
+      ids,
+      offsetById,
+      operationTypes,
+      operationIndexes,
+      operationLengths,
+      timestamps,
+      insertStarts,
+      insertedContent: insertedParts.join(""),
+      parentStarts: new Uint32Array(),
+      parentOffsets: new Uint32Array(),
+      childStarts: new Uint32Array(),
+      childOffsets: new Uint32Array(),
+      implicitLinearEdges: true,
+    }),
+    frontier: previousId === null ? new Set() : new Set<EventId>([previousId]),
+  };
+};
 
 export const PACKED_OPERATION_TYPE = {
   INSERT: INSERT_OPERATION,

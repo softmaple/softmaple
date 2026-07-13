@@ -22,7 +22,7 @@ import type {
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
-import { compareEventIds, parseEventId } from "../graph/event-id";
+import { compareEventIds } from "../graph/event-id";
 import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import {
@@ -38,8 +38,12 @@ import {
   cloneRemoteEvent,
   createDocumentState,
 } from "./invariants";
-import { EventGraph, EventAlreadyExistsError } from "../graph/event-graph";
-import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import {
+  EventGraph,
+  EventAlreadyExistsError,
+  type PackedLinearReplayView,
+} from "../graph/event-graph";
+import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import {
   EgWalkerEngine,
   type DeleteTargetRecord,
@@ -51,7 +55,10 @@ import type {
   EngineSequenceRecord,
 } from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
-import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
+import {
+  planCriticalReplaySections,
+  type CriticalReplaySection,
+} from "../engine/critical-section-replay-plan";
 import { PartialReplayManager } from "../engine/partial-replay";
 import {
   readReplicaMetadata,
@@ -80,6 +87,7 @@ import {
 import {
   createPortableSnapshotGraphSource,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
+  registerTrustedPortableSnapshot,
   validatePortableSnapshotHeaderOnly,
   type PortableSnapshot,
 } from "./portable-snapshot";
@@ -366,18 +374,23 @@ export class EgWalkerReplica {
    * are deliberately excluded.
    */
   createPortableSnapshot(): PortableSnapshot {
-    const graph = EventGraph.fromEvents(this.ensureEventGraph().getAllEvents());
-    graph.setMetadata({});
-
-    return {
-      formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
-      text: this.getText(),
-      initialText: this.initialText,
-      currentVersion: Array.from(graph.getFrontier()),
-      eventCount: graph.getEventCount(),
-      nextSequenceNumber: this.nextSequenceNumber,
-      eventGraph: new ColumnarEventGraphCodec().encodeBinary(graph),
-    };
+    const graph = this.ensureEventGraph();
+    try {
+      const events =
+        graph.getLinearReplayOrder() ?? graph.getTopologicalOrder();
+      const encoded = encodeTopologicallyOrderedEventsBinary(events);
+      return registerTrustedPortableSnapshot({
+        formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
+        text: this.getText(),
+        initialText: this.initialText,
+        currentVersion: encoded.frontier,
+        eventCount: graph.getEventCount(),
+        nextSequenceNumber: this.nextSequenceNumber,
+        eventGraph: encoded.binary,
+      });
+    } finally {
+      graph.releaseTraversalCaches();
+    }
   }
 
   static deserialize(
@@ -614,6 +627,13 @@ export class EgWalkerReplica {
       consumeCausalEventBatch(batch);
       return;
     }
+    if (
+      graph.getEventCount() === 0 &&
+      isOrderedLinearBatchFromVersion(events, this.currentVersion)
+    ) {
+      this.applyInitialPackedCausalBatch(batch, events, graph);
+      return;
+    }
 
     const snapshot = this.captureRemoteBatchSnapshot();
     const transaction = graph.beginAppendTransaction();
@@ -663,6 +683,30 @@ export class EgWalkerReplica {
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
     }
+  }
+
+  /** Install an initial exact chain without retaining an object graph tail. */
+  private applyInitialPackedCausalBatch(
+    batch: CausalEventBatch,
+    events: ReadonlyArray<GraphEvent>,
+    emptyGraph: EventGraph,
+  ): void {
+    const packedGraph = EventGraph.fromOwnedLinearEvents(
+      events,
+      emptyGraph.getMetadata(),
+    );
+    const snapshot = this.captureRemoteBatchSnapshot();
+    try {
+      this.applyCausalLinearBatch(events, 0);
+      consumeCausalEventBatch(batch);
+    } catch (error) {
+      this.restoreRemoteBatchSnapshot(snapshot, emptyGraph);
+      throw error;
+    }
+
+    this.eventGraph = packedGraph;
+    this.lazyEventGraph = null;
+    this.remoteEvents = this.createRemoteEventBuffer(packedGraph);
   }
 
   /**
@@ -883,19 +927,18 @@ export class EgWalkerReplica {
       0,
       events.length - MAX_RETAINED_CHECKPOINTS,
     );
-    for (let index = 0; index < events.length; index++) {
+    this.replayCausalLinearPrefix(events, checkpointStart);
+    for (let index = checkpointStart; index < events.length; index++) {
       const event = events[index]!;
       const operation = this.validateCausalLinearOperation(event.operation);
       if (operation !== null) {
         this.applyPlainDocumentOperation(operation);
       }
-      if (index >= checkpointStart) {
-        this.criticalCheckpoints.record(
-          new Set([event.id]),
-          this.documentBuffer,
-          eventCountBeforeBatch + index + 1,
-        );
-      }
+      this.criticalCheckpoints.record(
+        new Set([event.id]),
+        this.documentBuffer,
+        eventCountBeforeBatch + index + 1,
+      );
     }
 
     const last = events[events.length - 1]!;
@@ -903,6 +946,89 @@ export class EgWalkerReplica {
     this.restoredSequenceRecords = null;
     this.incrementalApplyCount += events.length;
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
+  }
+
+  /** Fold a trusted linear batch prefix without losing per-event validation. */
+  private replayCausalLinearPrefix(
+    events: ReadonlyArray<GraphEvent>,
+    endOffset: number,
+  ): void {
+    let pendingKind: "insert" | "delete" | null = null;
+    let pendingIndex = 0;
+    let pendingLength = 0;
+    let pendingInsertParts: string[] = [];
+
+    const flush = (): void => {
+      if (pendingKind === "insert") {
+        this.applyPlainDocumentOperation({
+          type: OPERATION_TYPE.INSERT,
+          index: pendingIndex,
+          text:
+            pendingInsertParts.length === 1
+              ? pendingInsertParts[0]!
+              : pendingInsertParts.join(""),
+        });
+      } else if (pendingKind === "delete") {
+        this.applyPlainDocumentOperation({
+          type: OPERATION_TYPE.DELETE,
+          index: pendingIndex,
+          length: pendingLength,
+        });
+      }
+      pendingKind = null;
+      pendingLength = 0;
+      pendingInsertParts = [];
+    };
+
+    for (let offset = 0; offset < endOffset; offset++) {
+      const operation = events[offset]!.operation;
+      if (operation.type === OPERATION_TYPE.INSERT) {
+        if (operation.text.length === 0) {
+          continue;
+        }
+        if (
+          pendingKind === "insert" &&
+          operation.index === pendingIndex + pendingLength
+        ) {
+          pendingInsertParts.push(operation.text);
+          pendingLength += operation.text.length;
+          continue;
+        }
+
+        flush();
+        this.validateCausalLinearOperation(operation);
+        pendingKind = "insert";
+        pendingIndex = operation.index;
+        pendingLength = operation.text.length;
+        pendingInsertParts = [operation.text];
+        continue;
+      }
+
+      if (operation.length === 0) {
+        continue;
+      }
+      if (pendingKind === "delete" && operation.index === pendingIndex) {
+        const virtualDocumentLength =
+          this.documentBuffer.length - pendingLength;
+        if (operation.index + operation.length > virtualDocumentLength) {
+          throw new Error(
+            `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${virtualDocumentLength}`,
+          );
+        }
+        const combinedLength = pendingLength + operation.length;
+        this.assertNotMidSurrogate(operation.index + combinedLength);
+        pendingLength = combinedLength;
+        continue;
+      }
+
+      flush();
+      this.validateCausalLinearOperation(operation);
+      pendingKind = "delete";
+      pendingIndex = operation.index;
+      pendingLength = operation.length;
+    }
+
+    flush();
   }
 
   /**
@@ -1291,7 +1417,34 @@ export class EgWalkerReplica {
     this.documentCache = null;
     this.currentVersion = new Set();
 
-    for (const [sectionIndex, section] of sections.entries()) {
+    const retainedCheckpointSectionStart = Math.max(
+      0,
+      sections.length - MAX_RETAINED_CHECKPOINTS,
+    );
+    for (let sectionIndex = 0; sectionIndex < sections.length; ) {
+      const section = sections[sectionIndex]!;
+      if (
+        sectionIndex < retainedCheckpointSectionStart &&
+        isLinearReplaySection(section.events, section.baseFrontier)
+      ) {
+        let sectionEnd = sectionIndex + 1;
+        let groupedEventCount = section.events.length;
+        while (sectionEnd < retainedCheckpointSectionStart) {
+          const candidate = sections[sectionEnd]!;
+          if (
+            !isLinearReplaySection(candidate.events, candidate.baseFrontier)
+          ) {
+            break;
+          }
+          groupedEventCount += candidate.events.length;
+          sectionEnd++;
+        }
+        this.replayCoalescedLinearSections(sections, sectionIndex, sectionEnd);
+        replayedEventCount += groupedEventCount;
+        sectionIndex = sectionEnd;
+        continue;
+      }
+
       const baseCheckpoint: CriticalCheckpoint = {
         version: new Set(section.baseFrontier),
         textBuffer: this.documentBuffer,
@@ -1336,11 +1489,14 @@ export class EgWalkerReplica {
       }
 
       replayedEventCount += section.events.length;
-      this.criticalCheckpoints.record(
-        section.endFrontier,
-        this.documentBuffer,
-        replayedEventCount,
-      );
+      if (sectionIndex >= retainedCheckpointSectionStart) {
+        this.criticalCheckpoints.record(
+          section.endFrontier,
+          this.documentBuffer,
+          replayedEventCount,
+        );
+      }
+      sectionIndex++;
     }
 
     this.currentVersion = graph.getFrontier();
@@ -1393,15 +1549,39 @@ export class EgWalkerReplica {
     this.documentCache = null;
     this.currentVersion = new Set();
 
-    for (const event of graph.iterateEventsInInsertionOrder()) {
-      const operation = this.validateLocalOperation(event.operation);
-      if (operation !== null) {
-        this.applyPlainDocumentOperation(operation);
+    const packed = graph.getPackedLinearReplayView();
+    if (packed === null) {
+      for (const event of graph.iterateEventsInInsertionOrder()) {
+        const operation = this.validateLocalOperation(event.operation);
+        if (operation !== null) {
+          this.applyPlainDocumentOperation(operation);
+        }
+        replayedEventCount++;
+        if (replayedEventCount > checkpointStart) {
+          this.criticalCheckpoints.record(
+            new Set([event.id]),
+            this.documentBuffer,
+            replayedEventCount,
+          );
+        }
       }
-      replayedEventCount++;
-      if (replayedEventCount > checkpointStart) {
+    } else {
+      this.replayPackedLinearPrefix(packed, checkpointStart);
+      replayedEventCount = checkpointStart;
+      for (let offset = checkpointStart; offset < packed.count; offset++) {
+        const operation = this.validateLocalOperation(
+          packed.operationAt(offset),
+        );
+        if (operation !== null) {
+          this.applyPlainDocumentOperation(operation);
+        }
+        replayedEventCount++;
+        const eventId = packed.idAt(offset);
+        if (eventId === undefined) {
+          throw new Error(`Packed graph is missing event at offset ${offset}`);
+        }
         this.criticalCheckpoints.record(
-          new Set([event.id]),
+          new Set([eventId]),
           this.documentBuffer,
           replayedEventCount,
         );
@@ -1423,6 +1603,101 @@ export class EgWalkerReplica {
     this.refreshReplayCacheMetrics();
 
     graph.releaseTraversalCaches();
+  }
+
+  /**
+   * Fold the checkpoint-free prefix of a packed causal chain into larger rope
+   * edits. The decoder has already validated scalar fields and every insert
+   * slice; this method validates document-relative indexes while delaying the
+   * physical edit until an adjacent run ends.
+   */
+  private replayPackedLinearPrefix(
+    packed: PackedLinearReplayView,
+    endOffset: number,
+  ): void {
+    let pendingKind: "insert" | "delete" | null = null;
+    let pendingIndex = 0;
+    let pendingLength = 0;
+    let pendingContentStart = 0;
+    let pendingContentEnd = 0;
+
+    const flush = (): void => {
+      if (pendingKind === "insert") {
+        this.documentBuffer = this.documentBuffer.insert(
+          pendingIndex,
+          packed.sliceInsertedContent(pendingContentStart, pendingContentEnd),
+        );
+        this.documentCache = null;
+      } else if (pendingKind === "delete") {
+        this.documentBuffer = this.documentBuffer.delete(
+          pendingIndex,
+          pendingLength,
+        );
+        this.documentCache = null;
+      }
+      pendingKind = null;
+      pendingLength = 0;
+    };
+
+    for (let offset = 0; offset < endOffset; offset++) {
+      const length = packed.operationLengthAt(offset);
+      if (length === 0) {
+        continue;
+      }
+      const index = packed.operationIndexAt(offset);
+
+      if (packed.isInsertAt(offset)) {
+        const contentStart = packed.insertStartAt(offset);
+        if (
+          pendingKind === "insert" &&
+          index === pendingIndex + pendingLength &&
+          contentStart === pendingContentEnd
+        ) {
+          pendingLength += length;
+          pendingContentEnd += length;
+          continue;
+        }
+
+        flush();
+        this.validateIndex(index, true);
+        this.assertNotMidSurrogate(index);
+        pendingKind = "insert";
+        pendingIndex = index;
+        pendingLength = length;
+        pendingContentStart = contentStart;
+        pendingContentEnd = contentStart + length;
+        continue;
+      }
+
+      if (pendingKind === "delete" && index === pendingIndex) {
+        const virtualDocumentLength =
+          this.documentBuffer.length - pendingLength;
+        if (index + length > virtualDocumentLength) {
+          throw new Error(
+            `Delete range [${index}, ${index + length}) exceeds document length ${virtualDocumentLength}`,
+          );
+        }
+        const combinedLength = pendingLength + length;
+        this.assertNotMidSurrogate(index + combinedLength);
+        pendingLength = combinedLength;
+        continue;
+      }
+
+      flush();
+      this.validateIndex(index, false);
+      this.assertNotMidSurrogate(index);
+      if (index + length > this.documentBuffer.length) {
+        throw new Error(
+          `Delete range [${index}, ${index + length}) exceeds document length ${this.documentBuffer.length}`,
+        );
+      }
+      this.assertNotMidSurrogate(index + length);
+      pendingKind = "delete";
+      pendingIndex = index;
+      pendingLength = length;
+    }
+
+    flush();
   }
 
   /** Apply a causally-linear replay section directly to the persistent rope. */
@@ -1451,6 +1726,105 @@ export class EgWalkerReplica {
     const last = events[events.length - 1];
     this.currentVersion =
       last === undefined ? new Set(baseVersion) : new Set([last.id]);
+  }
+
+  /**
+   * Replay old critical sections as one physical rope batch.
+   *
+   * Only the trailing checkpoint window is observable after a cold replay.
+   * Earlier one-event critical sections can therefore share the same pending
+   * insert/delete accumulator instead of forcing one persistent-rope edit at
+   * every section boundary. Event-relative validation still happens in order.
+   */
+  private replayCoalescedLinearSections(
+    sections: ReadonlyArray<CriticalReplaySection>,
+    startSection: number,
+    endSection: number,
+  ): void {
+    let pendingKind: "insert" | "delete" | null = null;
+    let pendingIndex = 0;
+    let pendingLength = 0;
+    let pendingInsertParts: string[] = [];
+
+    const flush = (): void => {
+      if (pendingKind === "insert") {
+        this.applyPlainDocumentOperation({
+          type: OPERATION_TYPE.INSERT,
+          index: pendingIndex,
+          text:
+            pendingInsertParts.length === 1
+              ? pendingInsertParts[0]!
+              : pendingInsertParts.join(""),
+        });
+      } else if (pendingKind === "delete") {
+        this.applyPlainDocumentOperation({
+          type: OPERATION_TYPE.DELETE,
+          index: pendingIndex,
+          length: pendingLength,
+        });
+      }
+      pendingKind = null;
+      pendingLength = 0;
+      pendingInsertParts = [];
+    };
+
+    for (
+      let sectionIndex = startSection;
+      sectionIndex < endSection;
+      sectionIndex++
+    ) {
+      for (const event of sections[sectionIndex]!.events) {
+        const operation = event.operation;
+        if (operation.type === OPERATION_TYPE.INSERT) {
+          if (operation.text.length === 0) {
+            continue;
+          }
+          if (
+            pendingKind === "insert" &&
+            operation.index === pendingIndex + pendingLength
+          ) {
+            pendingInsertParts.push(operation.text);
+            pendingLength += operation.text.length;
+            continue;
+          }
+
+          flush();
+          this.validateLocalOperation(operation);
+          pendingKind = "insert";
+          pendingIndex = operation.index;
+          pendingLength = operation.text.length;
+          pendingInsertParts = [operation.text];
+          continue;
+        }
+
+        if (operation.length === 0) {
+          continue;
+        }
+        if (pendingKind === "delete" && operation.index === pendingIndex) {
+          const virtualDocumentLength =
+            this.documentBuffer.length - pendingLength;
+          if (operation.index + operation.length > virtualDocumentLength) {
+            throw new Error(
+              `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${virtualDocumentLength}`,
+            );
+          }
+          const combinedLength = pendingLength + operation.length;
+          this.assertNotMidSurrogate(operation.index + combinedLength);
+          pendingLength = combinedLength;
+          continue;
+        }
+
+        flush();
+        this.validateLocalOperation(operation);
+        pendingKind = "delete";
+        pendingIndex = operation.index;
+        pendingLength = operation.length;
+      }
+    }
+
+    flush();
+    const lastSection = sections[endSection - 1];
+    this.currentVersion = new Set(lastSection?.endFrontier ?? []);
   }
 
   private engineStateForSnapshot(graph: EventGraph): {
@@ -1483,18 +1857,22 @@ export class EgWalkerReplica {
     readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
     readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
   } {
-    const engine = new EgWalkerEngine();
-    const generated = engine.generate(
-      graph.getBranchPreservingTopologicalOrder(),
-      this.initialText,
-      { eventGraph: graph },
-    );
-    return generated.text === this.getText()
-      ? {
-          sequenceRecords: engine.getSequenceRecords(),
-          deleteTargets: engine.getDeleteTargetRecords(),
-        }
-      : { sequenceRecords: [], deleteTargets: [] };
+    try {
+      const engine = new EgWalkerEngine();
+      const eventOrder = graph.getBranchPreservingTopologicalOrder();
+      const generated = engine.generate(eventOrder, this.initialText, {
+        eventGraph: graph,
+        eventOrder,
+      });
+      return generated.text === this.getText()
+        ? {
+            sequenceRecords: engine.getSequenceRecords(),
+            deleteTargets: engine.getDeleteTargetRecords(),
+          }
+        : { sequenceRecords: [], deleteTargets: [] };
+    } finally {
+      graph.releaseTraversalCaches();
+    }
   }
 
   /**
@@ -1738,13 +2116,9 @@ export class EgWalkerReplica {
   }
 
   private inferNextSequenceNumber(): number {
-    let maxSequenceNumber = -1;
-    for (const eventId of this.ensureEventGraph().iterateEventIdsInInsertionOrder()) {
-      const parsed = parseEventId(eventId);
-      if (parsed?.replicaId === this.replicaId) {
-        maxSequenceNumber = Math.max(maxSequenceNumber, parsed.sequence);
-      }
-    }
+    const maxSequenceNumber =
+      this.ensureEventGraph().getMaximumSequenceForReplica(this.replicaId) ??
+      -1;
 
     return maxSequenceNumber === Number.MAX_SAFE_INTEGER
       ? Number.MAX_SAFE_INTEGER

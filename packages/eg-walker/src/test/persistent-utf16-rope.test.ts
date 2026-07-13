@@ -75,6 +75,27 @@ describe("PersistentUtf16Rope", () => {
     expect(edited.toString()).toBe(`x!${text.slice(1)}`);
   });
 
+  it("assembles structural slices without flattening shared leaves", () => {
+    const text = "x".repeat(UTF16_ROPE_TARGET_LEAF * 8);
+    const original = PersistentUtf16Rope.from(text);
+    const originalLeaves = new Set(original.getLeafIdentities());
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const middle = original.sliceRope(100, original.length - 100);
+    const assembled = PersistentUtf16Rope.fromSegments(["<", middle, ">"]);
+    const stats = PersistentUtf16Rope.getInstrumentation();
+    const sharedLeaves = assembled
+      .getLeafIdentities()
+      .filter((candidate) => originalLeaves.has(candidate));
+
+    expect(assembled.toString()).toBe(`<${text.slice(100, -100)}>`);
+    expect(sharedLeaves.length).toBeGreaterThanOrEqual(
+      original.getLeafIdentities().length - 2,
+    );
+    expect(stats.flattenCount).toBe(0);
+    expect(stats.flattenedCodeUnits).toBe(0);
+  });
+
   it("touches only a root-to-leaf path for a point edit", () => {
     const rope = PersistentUtf16Rope.from("x".repeat(2_048 * 2_000));
     PersistentUtf16Rope.resetInstrumentation();

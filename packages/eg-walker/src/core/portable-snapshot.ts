@@ -33,6 +33,18 @@ interface PortableSnapshotHeader {
 
 const MAGIC = encodeText(PORTABLE_SNAPSHOT_FORMAT_VERSION);
 const codec = new ColumnarEventGraphCodec();
+interface PortableSnapshotProof {
+  readonly formatVersion: typeof PORTABLE_SNAPSHOT_FORMAT_VERSION;
+  readonly text: string;
+  readonly initialText: string;
+  readonly currentVersion: ReadonlyArray<EventId>;
+  readonly eventCount: number;
+  readonly nextSequenceNumber: number;
+  readonly eventGraph: Uint8Array;
+}
+
+const trustedSnapshots = new WeakMap<PortableSnapshot, PortableSnapshotProof>();
+const trustedEncodedBytes = new WeakMap<Uint8Array, PortableSnapshotProof>();
 const FORBIDDEN_RUNTIME_METADATA = new Set([
   "sequenceRecords",
   "deleteTargets",
@@ -44,7 +56,11 @@ const FORBIDDEN_RUNTIME_METADATA = new Set([
 
 export class PortableSnapshotCodec {
   encode(snapshot: PortableSnapshot): Uint8Array {
-    const validated = validatePortableSnapshot(snapshot);
+    const existingProof = matchingProof(snapshot);
+    const validated =
+      existingProof === null ? validatePortableSnapshot(snapshot) : snapshot;
+    const proof = existingProof ?? captureProof(validated);
+    trustedSnapshots.set(snapshot, proof);
     const writer = new BinaryWriter();
     writer.writeString(
       JSON.stringify({
@@ -61,6 +77,7 @@ export class PortableSnapshotCodec {
     const encoded = new Uint8Array(MAGIC.length + body.length);
     encoded.set(MAGIC, 0);
     encoded.set(body, MAGIC.length);
+    trustedEncodedBytes.set(encoded, proof);
     return encoded;
   }
 
@@ -83,16 +100,31 @@ export class PortableSnapshotCodec {
       ...header,
       eventGraph,
     });
+    const proof = trustedEncodedBytes.get(bytes);
+    if (proof !== undefined && snapshotMatchesProof(snapshot, proof)) {
+      trustedSnapshots.set(snapshot, proof);
+    }
     return snapshot;
   }
 }
 
+/** @internal Mark a snapshot produced from live replica state as validated. */
+export const registerTrustedPortableSnapshot = (
+  snapshot: PortableSnapshot,
+): PortableSnapshot => {
+  trustedSnapshots.set(snapshot, captureProof(snapshot));
+  return snapshot;
+};
+
 export const validatePortableSnapshot = (
   snapshot: PortableSnapshot,
 ): PortableSnapshot => {
+  if (matchingProof(snapshot) !== null) {
+    return validatePortableSnapshotHeaderOnly(snapshot);
+  }
   const validated = validatePortableSnapshotHeaderOnly(snapshot);
   const graph = codec.decodeBinary(validated.eventGraph);
-  validatePortableSnapshotGraph(graph, validated);
+  validatePortableSnapshotGraph(graph, validated, true);
   return validated;
 };
 
@@ -139,7 +171,7 @@ export const validatePortableSnapshotHeaderOnly = (
     throw new Error("Invalid portable snapshot: eventGraph must be EGW3 bytes");
   }
 
-  return {
+  const validated: PortableSnapshot = {
     formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
     text: value.text,
     initialText: value.initialText,
@@ -148,6 +180,11 @@ export const validatePortableSnapshotHeaderOnly = (
     nextSequenceNumber: value.nextSequenceNumber as number,
     eventGraph: value.eventGraph.slice(),
   };
+  const proof = matchingProof(snapshot);
+  if (proof !== null) {
+    trustedSnapshots.set(validated, proof);
+  }
+  return validated;
 };
 
 export const createPortableSnapshotGraphSource = (
@@ -157,7 +194,11 @@ export const createPortableSnapshotGraphSource = (
   return () => {
     if (graph === null) {
       const decoded = codec.decodeBinary(snapshot.eventGraph);
-      validatePortableSnapshotGraph(decoded, snapshot);
+      validatePortableSnapshotGraph(
+        decoded,
+        snapshot,
+        matchingProof(snapshot) === null,
+      );
       graph = decoded;
     }
     return graph;
@@ -167,28 +208,96 @@ export const createPortableSnapshotGraphSource = (
 const validatePortableSnapshotGraph = (
   graph: EventGraph,
   snapshot: PortableSnapshot,
+  validateMaterializedText: boolean,
 ): void => {
-  if (graph.getEventCount() !== snapshot.eventCount) {
-    throw new Error("Invalid portable snapshot: event count mismatch");
-  }
-  if (!sameIds(graph.getFrontier(), new Set(snapshot.currentVersion))) {
-    throw new Error("Invalid portable snapshot: frontier mismatch");
-  }
-  for (const key of Object.keys(graph.getMetadata())) {
-    if (FORBIDDEN_RUNTIME_METADATA.has(key)) {
-      throw new Error(
-        `Invalid portable snapshot: runtime metadata ${key} is forbidden`,
+  try {
+    if (graph.getEventCount() !== snapshot.eventCount) {
+      throw new Error("Invalid portable snapshot: event count mismatch");
+    }
+    if (!sameIds(graph.getFrontier(), new Set(snapshot.currentVersion))) {
+      throw new Error("Invalid portable snapshot: frontier mismatch");
+    }
+    for (const key of Object.keys(graph.getMetadata())) {
+      if (FORBIDDEN_RUNTIME_METADATA.has(key)) {
+        throw new Error(
+          `Invalid portable snapshot: runtime metadata ${key} is forbidden`,
+        );
+      }
+    }
+    if (validateMaterializedText) {
+      const eventOrder = graph.getBranchPreservingTopologicalOrder();
+      const generated = new EgWalkerEngine().generate(
+        eventOrder,
+        snapshot.initialText,
+        { eventGraph: graph, eventOrder },
       );
+      if (generated.text !== snapshot.text) {
+        throw new Error(
+          "Invalid portable snapshot: materialized text mismatch",
+        );
+      }
+    }
+  } finally {
+    graph.releaseTraversalCaches();
+  }
+};
+
+const captureProof = (snapshot: PortableSnapshot): PortableSnapshotProof => ({
+  formatVersion: snapshot.formatVersion,
+  text: snapshot.text,
+  initialText: snapshot.initialText,
+  currentVersion: [...snapshot.currentVersion],
+  eventCount: snapshot.eventCount,
+  nextSequenceNumber: snapshot.nextSequenceNumber,
+  eventGraph: snapshot.eventGraph.slice(),
+});
+
+const matchingProof = (
+  snapshot: PortableSnapshot,
+): PortableSnapshotProof | null => {
+  if (
+    snapshot === null ||
+    (typeof snapshot !== "object" && typeof snapshot !== "function")
+  ) {
+    return null;
+  }
+  const proof = trustedSnapshots.get(snapshot);
+  return proof !== undefined && snapshotMatchesProof(snapshot, proof)
+    ? proof
+    : null;
+};
+
+const snapshotMatchesProof = (
+  snapshot: PortableSnapshot,
+  proof: PortableSnapshotProof,
+): boolean =>
+  Array.isArray(snapshot.currentVersion) &&
+  snapshot.eventGraph instanceof Uint8Array &&
+  snapshot.formatVersion === proof.formatVersion &&
+  snapshot.text === proof.text &&
+  snapshot.initialText === proof.initialText &&
+  snapshot.eventCount === proof.eventCount &&
+  snapshot.nextSequenceNumber === proof.nextSequenceNumber &&
+  equalArrays(snapshot.currentVersion, proof.currentVersion) &&
+  equalBytes(snapshot.eventGraph, proof.eventGraph);
+
+const equalArrays = <T>(
+  left: ReadonlyArray<T>,
+  right: ReadonlyArray<T>,
+): boolean =>
+  left.length === right.length &&
+  left.every((value, index) => value === right[index]);
+
+const equalBytes = (left: Uint8Array, right: Uint8Array): boolean => {
+  if (left.byteLength !== right.byteLength) {
+    return false;
+  }
+  for (let index = 0; index < left.byteLength; index++) {
+    if (left[index] !== right[index]) {
+      return false;
     }
   }
-  const generated = new EgWalkerEngine().generate(
-    graph.getBranchPreservingTopologicalOrder(),
-    snapshot.initialText,
-    { eventGraph: graph },
-  );
-  if (generated.text !== snapshot.text) {
-    throw new Error("Invalid portable snapshot: materialized text mismatch");
-  }
+  return true;
 };
 
 const parseHeader = (json: string): PortableSnapshotHeader => {

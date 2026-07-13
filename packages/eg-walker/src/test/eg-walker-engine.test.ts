@@ -3,6 +3,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { EventGraph } from "../graph/event-graph";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { EventId, GraphEvent } from "../types";
 
 describe("EgWalkerEngine", () => {
@@ -56,6 +57,197 @@ describe("EgWalkerEngine", () => {
     expect(generated.text).toBe("AB");
     expect(generated.transformedOperations).toEqual([]);
     expect(generated.stats.eventsProcessed).toBe(events.length);
+  });
+
+  it("materializes cold-replay text once and remains incrementally usable", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "ab" },
+        timestamp: 1,
+      },
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "X" },
+        timestamp: 2,
+      },
+      {
+        id: "bob:0",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        timestamp: 3,
+      },
+    ];
+    const graph = EventGraph.fromEvents(events);
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+
+    PersistentUtf16Rope.resetInstrumentation();
+    const coldEngine = new EgWalkerEngine();
+    const cold = coldEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+    const ropeStats = PersistentUtf16Rope.getInstrumentation();
+
+    expect(cold.text).toBe(eager.text);
+    expect(coldEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(coldEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+    expect(cold.stats.sequenceTreeOperations).toBeLessThan(
+      eager.stats.sequenceTreeOperations,
+    );
+    expect(ropeStats.joins).toBe(0);
+    expect(ropeStats.splits).toBe(0);
+
+    const next: GraphEvent = {
+      id: "merge:0",
+      parentVersion: graph.getFrontier(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: cold.text.length,
+        text: "!",
+      },
+      timestamp: 4,
+    };
+    graph.addEvent(next);
+
+    const eagerApplied = eagerEngine.applyEvent(next, graph);
+    const coldApplied = coldEngine.applyEvent(next, graph);
+    expect(coldApplied.text).toBe(eagerApplied.text);
+    expect(coldApplied.transformedOperations).toEqual(
+      eagerApplied.transformedOperations,
+    );
+  });
+
+  it("defers a large checkpoint suffix while retaining checkpoint leaves", () => {
+    const checkpointText = "x".repeat(2_048 * 64);
+    const checkpointBuffer = PersistentUtf16Rope.from(checkpointText);
+    const checkpointLeaves = new Set(checkpointBuffer.getLeafIdentities());
+    const root: GraphEvent = {
+      id: "root:0",
+      parentVersion: new Set(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: checkpointText,
+      },
+      timestamp: 0,
+    };
+    const events = Array.from(
+      { length: 96 },
+      (_, index): GraphEvent => ({
+        id: `suffix:${index}`,
+        parentVersion: new Set([index === 0 ? root.id : `suffix:${index - 1}`]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: checkpointText.length + index,
+          text: "!",
+        },
+        timestamp: index + 1,
+      }),
+    );
+    const graph = EventGraph.fromEvents([root, ...events]);
+
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(events, "", {
+      initialVersion: new Set([root.id]),
+      initialTextBuffer: checkpointBuffer,
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    PersistentUtf16Rope.resetInstrumentation();
+    const deferredEngine = new EgWalkerEngine();
+    const deferred = deferredEngine.generate(events, "", {
+      initialVersion: new Set([root.id]),
+      initialTextBuffer: checkpointBuffer,
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+    const ropeStats = PersistentUtf16Rope.getInstrumentation();
+    const sharedLeaves = deferred.textBuffer
+      .getLeafIdentities()
+      .filter((candidate) => checkpointLeaves.has(candidate));
+
+    expect(deferred.text).toBe(eager.text);
+    expect(deferred.stats.sequenceTreeOperations).toBeLessThan(
+      eager.stats.sequenceTreeOperations,
+    );
+    expect(sharedLeaves).toHaveLength(checkpointLeaves.size);
+    expect(ropeStats).toMatchObject({
+      joins: 0,
+      splits: 0,
+      flattenCount: 0,
+      flattenedCodeUnits: 0,
+    });
+
+    const next: GraphEvent = {
+      id: "suffix:96",
+      parentVersion: new Set(["suffix:95"]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: deferred.textBuffer.length,
+        text: "?",
+      },
+      timestamp: 97,
+    };
+    graph.addEvent(next);
+    const applied = deferredEngine.applyEvent(next, graph);
+    expect(applied.text).toBe(`${deferred.text}?`);
+    expect(applied.transformedOperations).toEqual([
+      {
+        type: OPERATION_TYPE.INSERT,
+        index: deferred.textBuffer.length,
+        text: "?",
+      },
+    ]);
+  });
+
+  it("keeps a tiny checkpoint suffix on the eager splice path", () => {
+    const checkpointBuffer = PersistentUtf16Rope.from("x".repeat(8_192));
+    const root: GraphEvent = {
+      id: "root:0",
+      parentVersion: new Set(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: "x".repeat(8_192),
+      },
+      timestamp: 0,
+    };
+    const event: GraphEvent = {
+      id: "suffix:0",
+      parentVersion: new Set([root.id]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: checkpointBuffer.length,
+        text: "!",
+      },
+      timestamp: 1,
+    };
+    const graph = EventGraph.fromEvents([root, event]);
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const generated = new EgWalkerEngine().generate([event], "", {
+      initialVersion: new Set([root.id]),
+      initialTextBuffer: checkpointBuffer,
+      eventGraph: graph,
+      eventOrder: [event],
+      collectTransformedOperations: false,
+    });
+
+    expect(generated.text).toBe(`${"x".repeat(8_192)}!`);
+    expect(PersistentUtf16Rope.getInstrumentation().joins).toBe(1);
   });
 
   it("treats overlapping concurrent deletes as idempotent effect deletes", () => {

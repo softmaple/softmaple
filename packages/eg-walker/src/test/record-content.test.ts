@@ -17,4 +17,23 @@ describe("RopeRecordContent", () => {
     expect(() => content.slice(3, 2)).toThrow(/Invalid rope record slice/);
     expect(materializeRecordContent("abcd", 1, 3)).toBe("bc");
   });
+
+  it("should expose structural slices that retain full rope leaves", () => {
+    const rope = PersistentUtf16Rope.from("x".repeat(2_048 * 4));
+    const originalLeaves = new Set(rope.getLeafIdentities());
+    const content = RopeRecordContent.from(rope).slice(100, rope.length - 100);
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const sliced = content.toRope();
+    const sharedLeaves = sliced
+      .getLeafIdentities()
+      .filter((candidate) => originalLeaves.has(candidate));
+    const constructionStats = PersistentUtf16Rope.getInstrumentation();
+
+    expect(sliced.toString()).toBe("x".repeat(rope.length - 200));
+    expect(sharedLeaves.length).toBeGreaterThanOrEqual(
+      rope.getLeafIdentities().length - 2,
+    );
+    expect(constructionStats.flattenCount).toBe(0);
+  });
 });

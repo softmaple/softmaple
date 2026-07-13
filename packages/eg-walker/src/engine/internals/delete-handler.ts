@@ -30,6 +30,7 @@ export const applyDelete = (
   operation: DeleteOperation,
   deps: DeleteHandlerDeps,
   collectTransformedOperations: boolean,
+  deferTextMaterialization: boolean,
 ): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
@@ -98,11 +99,15 @@ export const applyDelete = (
       // deletes of the same region replay to a shorter string than full
       // replay produces.
       if (!middle.everDeleted) {
-        const effectIndex = itemToEffectIndex(middle);
-        for (let k = 0; k < toDelete; k++) {
-          outputDeleteIndexes?.push(effectIndex);
+        if (!deferTextMaterialization) {
+          const effectIndex = itemToEffectIndex(middle);
+          if (collectTransformedOperations) {
+            for (let k = 0; k < toDelete; k++) {
+              outputDeleteIndexes?.push(effectIndex);
+            }
+          }
+          deleteText(effectIndex, toDelete);
         }
-        deleteText(effectIndex, toDelete);
       }
 
       middle.everDeleted = true;
@@ -114,9 +119,13 @@ export const applyDelete = (
 
     deletedItemIds.push(candidate.id);
     if (!candidate.everDeleted) {
-      const effectIndex = itemToEffectIndex(candidate);
-      outputDeleteIndexes?.push(effectIndex);
-      deleteText(effectIndex, 1);
+      if (!deferTextMaterialization) {
+        const effectIndex = itemToEffectIndex(candidate);
+        if (collectTransformedOperations) {
+          outputDeleteIndexes?.push(effectIndex);
+        }
+        deleteText(effectIndex, 1);
+      }
     }
     candidate.everDeleted = true;
     candidate.prepareState += 1;

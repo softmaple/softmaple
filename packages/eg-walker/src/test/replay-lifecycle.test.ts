@@ -180,6 +180,57 @@ describe("paper-style replay lifecycle", () => {
     });
   });
 
+  it("coalesces obsolete one-event critical sections across boundaries", () => {
+    // Arrange: one concurrent prefix makes the graph nonlinear, followed by
+    // a long chain whose every singleton frontier is a critical cut.
+    const graph = new EventGraph();
+    graph.addEvent({
+      id: "alice:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+      timestamp: 0,
+    });
+    graph.addEvent({
+      id: "bob:0",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      timestamp: 1,
+    });
+    graph.addEvent({
+      id: "merge:0",
+      parentVersion: new Set(["alice:0", "bob:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "" },
+      timestamp: 2,
+    });
+    let parent = "merge:0";
+    for (let offset = 0; offset < 200; offset++) {
+      const id = `tail:${offset}`;
+      graph.addEvent({
+        id,
+        parentVersion: new Set([parent]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 2 + offset,
+          text: "x",
+        },
+        timestamp: offset + 3,
+      });
+      parent = id;
+    }
+    PersistentUtf16Rope.resetInstrumentation();
+
+    // Act
+    const restored = new EgWalkerReplica("restored", "", graph);
+    const ropeStats = PersistentUtf16Rope.getInstrumentation();
+
+    // Assert: one prefix splice plus the 32 retained checkpoint edits, rather
+    // than one persistent edit for every old critical section.
+    expect(restored.getText()).toHaveLength(202);
+    expect(restored.getText().endsWith("x".repeat(200))).toBe(true);
+    expect(restored.getReplayStats().checkpointCount).toBe(32);
+    expect(ropeStats.joins).toBeLessThanOrEqual(40);
+  });
+
   it("shares checkpoint leaves instead of retaining full string copies", () => {
     const replica = new EgWalkerReplica("sharing", "x".repeat(8_192));
     for (let index = 0; index < 40; index++) {

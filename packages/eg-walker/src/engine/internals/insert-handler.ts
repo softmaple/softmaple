@@ -41,6 +41,7 @@ export const applyInsert = (
   operation: InsertOperation,
   deps: InsertHandlerDeps,
   collectTransformedOperations: boolean,
+  deferTextMaterialization: boolean,
 ): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
@@ -157,11 +158,14 @@ export const applyInsert = (
       if (typeof leftRecord.content !== "string") {
         throw new Error("Typed-run content must be materialized text");
       }
-      const effectIndex =
-        itemToEffectIndex(leftRecord) + leftRecord.content.length;
+      const previousLength = leftRecord.content.length;
       leftRecord.content += operation.text;
       sequence.updateItem(leftRecord);
       eventItems.set(event.id, [leftRecord.id]);
+      if (deferTextMaterialization) {
+        return NO_TRANSFORMED_OPERATIONS;
+      }
+      const effectIndex = itemToEffectIndex(leftRecord) + previousLength;
       // Defer the splice on the engine's resulting text into the
       // pending-insert buffer so a long single-author typed run doesn't
       // pay an O(document length) string realloc per keystroke.
@@ -275,6 +279,14 @@ export const applyInsert = (
   }
 
   eventItems.set(event.id, insertedIds);
+
+  // Cold replay callers only need the final document. The sequence already
+  // carries the authoritative effect-visible state, so avoid an effect-rank
+  // lookup and persistent-rope splice for every historical insert. The
+  // engine materializes the final rope once after replay completes.
+  if (deferTextMaterialization) {
+    return NO_TRANSFORMED_OPERATIONS;
+  }
 
   const firstInserted = requireItem(insertedIds[0] ?? event.id);
   const effectIndex = itemToEffectIndex(firstInserted);

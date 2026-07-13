@@ -3,17 +3,31 @@ import type { EventId } from "../../types";
 import {
   PACKED_OPERATION_TYPE,
   PackedEventGraphBase,
+  type PackedEventIdIndex,
 } from "../internals/packed-event-graph-base";
+import {
+  compactIntegerColumn,
+  compactUnsignedIntegerColumn,
+  type PackedIntegerColumn,
+  type PackedUnsignedIntegerColumn,
+} from "../internals/packed-numeric-columns";
 import type { ParentOverride, PartialOperationRun } from "./types";
 
-interface PackedDecodeColumns {
-  readonly ids: ReadonlyArray<EventId>;
+interface PackedOperationColumns {
   readonly operationRuns: ReadonlyArray<PartialOperationRun>;
-  readonly operationIndexes: Float64Array;
-  readonly operationLengths: Float64Array;
+  readonly operationIndexes: PackedUnsignedIntegerColumn;
+  readonly operationLengths: PackedUnsignedIntegerColumn;
   readonly insertedContent: string;
+  readonly timestamps: PackedIntegerColumn;
+}
+
+interface PackedDecodeColumns extends PackedOperationColumns {
+  readonly ids: ReadonlyArray<EventId>;
   readonly parentOverrides: ReadonlyArray<ParentOverride>;
-  readonly timestamps: Float64Array;
+}
+
+interface PackedLinearDecodeColumns extends PackedOperationColumns {
+  readonly idIndex: PackedEventIdIndex;
 }
 
 export interface PackedDecodeResult {
@@ -34,24 +48,72 @@ export const buildPackedEventGraphBase = (
   }
 
   const offsetById = indexIds(columns.ids);
-  const { operationTypes, insertStarts } = buildOperationColumns(columns);
-  const { parentStarts, parentOffsets, childStarts, childOffsets, frontier } =
-    buildEdges(columns.ids, offsetById, columns.parentOverrides);
+  const operationColumns = buildOperationColumns(columns, count);
+  const {
+    parentStarts,
+    parentOffsets,
+    childStarts,
+    childOffsets,
+    frontier,
+    implicitLinearEdges,
+  } = buildEdges(columns.ids, offsetById, columns.parentOverrides);
 
   return {
     base: new PackedEventGraphBase({
       ids: columns.ids,
       offsetById,
-      operationTypes,
-      operationIndexes: columns.operationIndexes,
-      operationLengths: columns.operationLengths,
-      timestamps: columns.timestamps,
-      insertStarts,
+      operationTypes: operationColumns.operationTypes,
+      operationIndexes: operationColumns.operationIndexes,
+      operationLengths: operationColumns.operationLengths,
+      timestamps: operationColumns.timestamps,
+      insertStarts: operationColumns.insertStarts,
       insertedContent: columns.insertedContent,
       parentStarts,
       parentOffsets,
       childStarts,
       childOffsets,
+      implicitLinearEdges,
+    }),
+    frontier,
+  };
+};
+
+/** Build an exact-linear packed base without materializing its ID runs. */
+export const buildPackedLinearEventGraphBaseFromIdIndex = (
+  columns: PackedLinearDecodeColumns,
+): PackedDecodeResult => {
+  const count = columns.idIndex.count;
+  if (
+    columns.operationIndexes.length !== count ||
+    columns.operationLengths.length !== count ||
+    columns.timestamps.length !== count
+  ) {
+    throw new Error("Invalid packed event graph: column length mismatch");
+  }
+  const operationColumns = buildOperationColumns(columns, count);
+  const frontier = new Set<EventId>();
+  if (count > 0) {
+    const lastId = columns.idIndex.idAt(count - 1);
+    if (lastId === undefined) {
+      throw new Error("Invalid packed event graph: missing final event ID");
+    }
+    frontier.add(lastId);
+  }
+
+  return {
+    base: new PackedEventGraphBase({
+      idIndex: columns.idIndex,
+      operationTypes: operationColumns.operationTypes,
+      operationIndexes: operationColumns.operationIndexes,
+      operationLengths: operationColumns.operationLengths,
+      timestamps: operationColumns.timestamps,
+      insertStarts: operationColumns.insertStarts,
+      insertedContent: columns.insertedContent,
+      parentStarts: new Uint32Array(),
+      parentOffsets: new Uint32Array(),
+      childStarts: new Uint32Array(),
+      childOffsets: new Uint32Array(),
+      implicitLinearEdges: true,
     }),
     frontier,
   };
@@ -73,12 +135,15 @@ const indexIds = (ids: ReadonlyArray<EventId>): Map<EventId, number> => {
 };
 
 const buildOperationColumns = (
-  columns: PackedDecodeColumns,
+  columns: PackedOperationColumns,
+  count: number,
 ): {
   readonly operationTypes: Uint8Array;
+  readonly operationIndexes: PackedUnsignedIntegerColumn;
+  readonly operationLengths: PackedUnsignedIntegerColumn;
+  readonly timestamps: PackedIntegerColumn;
   readonly insertStarts: Uint32Array;
 } => {
-  const count = columns.ids.length;
   const operationTypes = new Uint8Array(count);
   const insertStarts = new Uint32Array(count);
   let covered = 0;
@@ -152,7 +217,13 @@ const buildOperationColumns = (
       `Inserted-content size mismatch (expected ${contentOffset}, got ${columns.insertedContent.length})`,
     );
   }
-  return { operationTypes, insertStarts };
+  return {
+    operationTypes,
+    operationIndexes: compactUnsignedIntegerColumn(columns.operationIndexes),
+    operationLengths: compactUnsignedIntegerColumn(columns.operationLengths),
+    timestamps: compactIntegerColumn(columns.timestamps),
+    insertStarts,
+  };
 };
 
 const buildEdges = (
@@ -165,8 +236,19 @@ const buildEdges = (
   readonly childStarts: Uint32Array;
   readonly childOffsets: Uint32Array;
   readonly frontier: ReadonlySet<EventId>;
+  readonly implicitLinearEdges: boolean;
 } => {
   const count = ids.length;
+  if (overrides.length === 0) {
+    return {
+      parentStarts: new Uint32Array(),
+      parentOffsets: new Uint32Array(),
+      childStarts: new Uint32Array(),
+      childOffsets: new Uint32Array(),
+      frontier: count === 0 ? new Set() : new Set([ids[count - 1]!]),
+      implicitLinearEdges: true,
+    };
+  }
   validateOverrideOffsets(overrides, count);
   const parentStarts = new Uint32Array(count + 1);
   const childCounts = new Uint32Array(count);
@@ -229,7 +311,14 @@ const buildEdges = (
   for (let offset = 0; offset < count; offset++) {
     if (childCounts[offset] === 0) frontier.add(ids[offset]!);
   }
-  return { parentStarts, parentOffsets, childStarts, childOffsets, frontier };
+  return {
+    parentStarts,
+    parentOffsets,
+    childStarts,
+    childOffsets,
+    frontier,
+    implicitLinearEdges: false,
+  };
 };
 
 const validateOverrideOffsets = (

@@ -51,7 +51,11 @@ import {
   writeParentOverrides,
 } from "./parents";
 import { decodeIds, encodeIdRuns, readIdRuns, writeIdRuns } from "./ids";
-import { buildPackedEventGraphBase } from "./packed-decode";
+import { LazyIdRunIndex } from "./lazy-id-run-index";
+import {
+  buildPackedEventGraphBase,
+  buildPackedLinearEventGraphBaseFromIdIndex,
+} from "./packed-decode";
 
 export type { ColumnarEventGraph, IdRun, OperationRun, ParentOverride };
 
@@ -155,8 +159,8 @@ export class ColumnarEventGraphCodec {
 
     const version = reader.readStringArray();
     const partialOperationRuns = readOperationRuns(reader);
-    const operationIndexes = reader.readZigZagDeltaFloat64Array();
-    const operationLengths = reader.readVarintFloat64Array();
+    const operationIndexes = reader.readZigZagDeltaPackedUnsignedArray();
+    const operationLengths = reader.readVarintPackedUnsignedArray();
 
     // Validate before consuming these arrays so finalizeOperationRuns and
     // reconstructTextLengths never see undefined values from a short column.
@@ -223,7 +227,7 @@ export class ColumnarEventGraphCodec {
     }
     const parentOverrides = readParentOverrides(reader);
     const idRuns = readIdRuns(reader);
-    const timestamps = reader.readZigZagDeltaFloat64Array();
+    const timestamps = reader.readZigZagDeltaPackedIntegerArray();
     const metadata = JSON.parse(reader.readString()) as unknown;
     if (reader.remainingByteLength !== 0) {
       throw new Error("Invalid eg-walker columnar graph: trailing bytes");
@@ -242,20 +246,29 @@ export class ColumnarEventGraphCodec {
       );
     }
 
-    const ids = decodeIds(idRuns);
     const expectedFrontier = strictEventIdSet(
       version,
       "columnar graph version",
     );
-    const packed = buildPackedEventGraphBase({
-      ids,
-      operationRuns: partialOperationRuns,
-      operationIndexes,
-      operationLengths,
-      insertedContent,
-      parentOverrides,
-      timestamps,
-    });
+    const packed =
+      parentOverrides.length === 0
+        ? buildPackedLinearEventGraphBaseFromIdIndex({
+            idIndex: new LazyIdRunIndex(idRuns, expectedEventCount),
+            operationRuns: partialOperationRuns,
+            operationIndexes,
+            operationLengths,
+            insertedContent,
+            timestamps,
+          })
+        : buildPackedEventGraphBase({
+            ids: decodeIds(idRuns),
+            operationRuns: partialOperationRuns,
+            operationIndexes,
+            operationLengths,
+            insertedContent,
+            parentOverrides,
+            timestamps,
+          });
     if (!sameEventIds(packed.frontier, expectedFrontier)) {
       throw new Error("Columnar graph version does not match its frontier");
     }

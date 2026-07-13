@@ -8,6 +8,7 @@
 import type {
   GraphEvent,
   EventId,
+  ExternalOperation,
   SerializedGraphInput,
   SerializedGraphOutput,
 } from "../types";
@@ -16,9 +17,13 @@ import {
   EventAlreadyExistsError,
   MissingParentError,
 } from "./event-graph-errors";
+import { parseEventId } from "./event-id";
 import { diffVersions as diffVersionSets } from "./internals/diff-versions";
 import { deserializeEventGraph } from "./internals/event-graph-serialization";
-import { PackedEventGraphBase } from "./internals/packed-event-graph-base";
+import {
+  buildPackedLinearEventGraphBase,
+  PackedEventGraphBase,
+} from "./internals/packed-event-graph-base";
 import {
   getBranchPreservingTopologicalOrder as computeBranchPreservingTopologicalOrder,
   getTopologicalOrder as computeTopologicalOrder,
@@ -34,6 +39,18 @@ const EMPTY_EVENT_IDS: ReadonlySet<EventId> = new Set();
 export interface EventGraphAppendTransaction {
   commit(): void;
   rollback(): void;
+}
+
+/** Allocation-free column access used only by exact-linear cold replay. */
+export interface PackedLinearReplayView {
+  readonly count: number;
+  idAt(offset: number): EventId | undefined;
+  operationAt(offset: number): ExternalOperation;
+  isInsertAt(offset: number): boolean;
+  operationIndexAt(offset: number): number;
+  operationLengthAt(offset: number): number;
+  insertStartAt(offset: number): number;
+  sliceInsertedContent(start: number, end: number): string;
 }
 
 /**
@@ -228,6 +245,33 @@ export class EventGraph {
    */
   getEventCount(): number {
     return (this.packedBase?.count ?? 0) + this.events.size;
+  }
+
+  /** @internal Return the greatest canonical sequence for one replica. */
+  getMaximumSequenceForReplica(replicaId: string): number | null {
+    let maximum = this.packedBase?.maximumSequenceForReplica(replicaId);
+    for (const id of this.events.keys()) {
+      const parsed = parseEventId(id);
+      if (
+        parsed?.replicaId === replicaId &&
+        (maximum === undefined || parsed.sequence > maximum)
+      ) {
+        maximum = parsed.sequence;
+      }
+    }
+    return maximum ?? null;
+  }
+
+  /** @internal Return raw packed columns when the whole graph is one chain. */
+  getPackedLinearReplayView(): PackedLinearReplayView | null {
+    if (
+      this.packedBase === null ||
+      this.events.size !== 0 ||
+      !this.packedBase.isExactLinear()
+    ) {
+      return null;
+    }
+    return this.packedBase;
   }
 
   /**
@@ -589,6 +633,15 @@ export class EventGraph {
     graph.packedBase = base;
     graph.metadata = { ...metadata };
     return graph;
+  }
+
+  /** @internal Adopt builder-owned events as one immutable packed chain. */
+  static fromOwnedLinearEvents(
+    events: ReadonlyArray<GraphEvent>,
+    metadata: Record<string, unknown> = {},
+  ): EventGraph {
+    const packed = buildPackedLinearEventGraphBase(events);
+    return EventGraph.fromPackedBase(packed.base, packed.frontier, metadata);
   }
 
   private requireStoredEvent(id: EventId): GraphEvent {

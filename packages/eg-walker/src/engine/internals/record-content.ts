@@ -59,6 +59,14 @@ export class RopeRecordContent {
     return this.slice(start, end).toString();
   }
 
+  /**
+   * Expose this view as a persistent rope slice. Fully-covered leaves retain
+   * their identity, allowing a replay result to share checkpoint storage.
+   */
+  toRope(): PersistentUtf16Rope {
+    return this.rope.sliceRope(this.start, this.end);
+  }
+
   toString(): string {
     return this.rope.slice(this.start, this.end);
   }

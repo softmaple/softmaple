@@ -8,6 +8,7 @@ import {
   type PortableSnapshot,
 } from "../core/portable-snapshot";
 import { EgWalkerReplica } from "../core/replica";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { BinaryWriter, encodeText } from "../graph/internals/binary-io";
 import type { GraphEvent } from "../types";
@@ -141,6 +142,59 @@ describe("PortableSnapshot", () => {
     // Assert
     expect(restored.getText()).toBe(source.getText());
     expect(restored.exportEventGraph()).toEqual(source.exportEventGraph());
+  });
+
+  it("reuses validation provenance across a trusted codec round-trip", () => {
+    // Arrange
+    const source = createConcurrentReplica();
+    const codec = new PortableSnapshotCodec();
+    const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const decoded = codec.decode(
+        codec.encode(source.createPortableSnapshot()),
+      );
+      const restored = EgWalkerReplica.fromPortableSnapshot(decoded);
+      restored.exportEventGraph();
+
+      // Assert
+      expect(generated).not.toHaveBeenCalled();
+    } finally {
+      generated.mockRestore();
+    }
+  });
+
+  it("semantically validates bytes whose trusted identity was not preserved", () => {
+    // Arrange
+    const source = createConcurrentReplica();
+    const codec = new PortableSnapshotCodec();
+    const bytes = codec.encode(source.createPortableSnapshot()).slice();
+    const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const restored = EgWalkerReplica.fromPortableSnapshot(
+        codec.decode(bytes),
+      );
+      restored.exportEventGraph();
+
+      // Assert
+      expect(generated).toHaveBeenCalledOnce();
+    } finally {
+      generated.mockRestore();
+    }
+  });
+
+  it("does not trust a snapshot after its graph bytes are mutated", () => {
+    // Arrange
+    const snapshot = createConcurrentReplica().createPortableSnapshot();
+    snapshot.eventGraph.fill(0);
+
+    // Act and assert
+    expect(() => new PortableSnapshotCodec().encode(snapshot)).toThrow(
+      /columnar graph|header/,
+    );
   });
 
   it("keeps rejecting a lazy graph after validation fails", () => {

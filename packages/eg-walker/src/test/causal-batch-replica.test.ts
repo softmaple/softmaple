@@ -6,6 +6,7 @@ import {
   type CausalEventBatch,
 } from "../core/causal-event-batch";
 import { EgWalkerReplica } from "../core/replica";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { GraphEvent } from "../types";
 
 describe("EgWalkerReplica.applyCausalBatch", () => {
@@ -14,7 +15,9 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
     const subject = new EgWalkerReplica("causal-linear");
     const reference = new EgWalkerReplica("detailed-linear");
 
+    PersistentUtf16Rope.resetInstrumentation();
     subject.applyCausalBatch(toCausalBatch(events));
+    const causalRope = PersistentUtf16Rope.getInstrumentation();
     reference.applyRemoteEvents(events);
 
     expect(subject.getText()).toBe(reference.getText());
@@ -25,6 +28,32 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
       incrementalApplies: events.length,
       sequenceRecordCount: 0,
     });
+    expect(causalRope.nodeAllocations).toBeLessThan(events.length / 2);
+  });
+
+  it("rejects a coalesced delete that would split a surrogate pair", () => {
+    const replica = new EgWalkerReplica("causal-delete-boundary", "a🙂");
+    const events: GraphEvent[] = [
+      deleteEvent("delete:0", [], 0, 1, 0),
+      deleteEvent("delete:1", ["delete:0"], 0, 1, 1),
+    ];
+    for (let offset = 2; offset < 42; offset++) {
+      events.push(
+        insertEvent(
+          `delete:${offset}`,
+          [`delete:${offset - 1}`],
+          999,
+          "",
+          offset,
+        ),
+      );
+    }
+    const before = observableState(replica);
+
+    expect(() => replica.applyCausalBatch(toCausalBatch(events))).toThrow(
+      /surrogate halves/,
+    );
+    expect(observableState(replica)).toEqual(before);
   });
 
   it("integrates a branch and merge with at most one replay", () => {
@@ -224,6 +253,19 @@ const insertEvent = (
   id,
   parentVersion: new Set(parents),
   operation: { type: OPERATION_TYPE.INSERT, index, text },
+  timestamp,
+});
+
+const deleteEvent = (
+  id: string,
+  parents: ReadonlyArray<string>,
+  index: number,
+  length: number,
+  timestamp: number,
+): GraphEvent => ({
+  id,
+  parentVersion: new Set(parents),
+  operation: { type: OPERATION_TYPE.DELETE, index, length },
   timestamp,
 });
 

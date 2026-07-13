@@ -185,6 +185,52 @@ export class PersistentUtf16Rope {
       : new PersistentUtf16Rope(buildTree(chunkText(text)));
   }
 
+  /**
+   * Build a rope from already-persistent rope spans and newly-produced text.
+   *
+   * String segments are joined and chunked in batches. Rope segments donate
+   * their immutable leaves by identity, so replay can assemble a checkpoint
+   * document without flattening or copying every untouched leaf payload.
+   * Only the shallow branch hierarchy is rebuilt.
+   */
+  static fromSegments(
+    segments: ReadonlyArray<string | PersistentUtf16Rope>,
+  ): PersistentUtf16Rope {
+    if (segments.length === 1) {
+      const only = segments[0];
+      if (only instanceof PersistentUtf16Rope) {
+        return only;
+      }
+    }
+
+    const leaves: LeafNode[] = [];
+    let textParts: string[] = [];
+    const flushText = (): void => {
+      if (textParts.length === 0) {
+        return;
+      }
+      leaves.push(...chunkText(textParts.join("")));
+      textParts = [];
+    };
+
+    for (const segment of segments) {
+      if (typeof segment === "string") {
+        if (segment.length > 0) {
+          textParts.push(segment);
+        }
+        continue;
+      }
+      if (segment.length === 0) {
+        continue;
+      }
+      flushText();
+      appendLeaves(segment.root, leaves);
+    }
+    flushText();
+
+    return new PersistentUtf16Rope(buildTree(leaves));
+  }
+
   static resetInstrumentation(): void {
     counters.nodeVisits = 0;
     counters.nodeAllocations = 0;
@@ -275,6 +321,24 @@ export class PersistentUtf16Rope {
     const parts: string[] = [];
     collectSlice(this.root, start, end, 0, parts);
     return parts.join("");
+  }
+
+  /**
+   * Return a persistent rope slice while retaining every fully-covered leaf
+   * by identity. At most the two boundary leaves need new string payloads.
+   */
+  sliceRope(start: number, end: number = this.length): PersistentUtf16Rope {
+    assertSlice(start, end, this.length);
+    if (start === 0 && end === this.length) {
+      return this;
+    }
+    if (start === end) {
+      return new PersistentUtf16Rope(EMPTY_LEAF);
+    }
+
+    const leaves: LeafNode[] = [];
+    collectSliceLeaves(this.root, start, end, 0, leaves);
+    return new PersistentUtf16Rope(buildTree(leaves));
   }
 
   codeUnitAt(index: number): number | undefined {
@@ -547,6 +611,11 @@ const buildTree = (leaves: ReadonlyArray<LeafNode>): RopeNode => {
 
 const collectLeaves = (root: RopeNode): LeafNode[] => {
   const leaves: LeafNode[] = [];
+  appendLeaves(root, leaves);
+  return leaves;
+};
+
+const appendLeaves = (root: RopeNode, leaves: LeafNode[]): void => {
   const stack: RopeNode[] = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
@@ -561,7 +630,47 @@ const collectLeaves = (root: RopeNode): LeafNode[] => {
       stack.push(node.children[index]!);
     }
   }
-  return leaves;
+};
+
+const collectSliceLeaves = (
+  node: RopeNode,
+  start: number,
+  end: number,
+  nodeStart: number,
+  output: LeafNode[],
+): void => {
+  counters.nodeVisits++;
+  const nodeEnd = nodeStart + node.length;
+  if (end <= nodeStart || start >= nodeEnd) {
+    return;
+  }
+  if (start <= nodeStart && end >= nodeEnd) {
+    appendLeaves(node, output);
+    return;
+  }
+  if (node.kind === "leaf") {
+    const retained = node.text.slice(
+      Math.max(0, start - nodeStart),
+      Math.min(node.length, end - nodeStart),
+    );
+    if (retained.length > 0) {
+      output.push(
+        leaf(
+          retained,
+          node.hasSurrogateCodeUnits ? undefined : bmpUtf16Metadata(retained),
+        ),
+      );
+    }
+    return;
+  }
+  let childStart = nodeStart;
+  for (const child of node.children) {
+    collectSliceLeaves(child, start, end, childStart, output);
+    childStart += child.length;
+    if (childStart >= end) {
+      break;
+    }
+  }
 };
 
 const collectSlice = (
@@ -630,6 +739,20 @@ const assertRange = (index: number, length: number, total: number): void => {
   ) {
     throw new Error(
       `Invalid rope delete range [${index}, ${index + length}) for length ${total}`,
+    );
+  }
+};
+
+const assertSlice = (start: number, end: number, total: number): void => {
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    end > total
+  ) {
+    throw new Error(
+      `Invalid rope slice [${start}, ${end}) for length ${total}`,
     );
   }
 };

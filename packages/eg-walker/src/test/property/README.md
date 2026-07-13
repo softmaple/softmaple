@@ -45,6 +45,8 @@ up automatically.
 | [`long-offline-branch-merge.property.test.ts`](./long-offline-branch-merge.property.test.ts)         | Two replicas that diverge for many steps without syncing converge after full event exchange.            |
 | [`apply-remote-event-result.property.test.ts`](./apply-remote-event-result.property.test.ts)         | `applyRemoteEvent`'s position operation describes the visible splice from pre-event to post-event text. |
 | [`event-graph-diff.property.test.ts`](./event-graph-diff.property.test.ts)                           | `diffVersions` matches expanded causal-set differences; frontier expansion covers the whole graph.      |
+| [`packed-linear-replay.property.test.ts`](./packed-linear-replay.property.test.ts)                   | Packed exact-linear replay matches ordinary replay for valid shrinkable UTF-16 edit scripts.            |
+| [`deferred-text-materialization.property.test.ts`](./deferred-text-materialization.property.test.ts) | Deferred cold replay produces the same text and transient records as eager replay.                      |
 
 ## Shared helpers
 

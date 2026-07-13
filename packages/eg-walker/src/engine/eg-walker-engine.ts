@@ -81,6 +81,12 @@ export interface EngineRecoveryState {
   readonly stats: EngineStats;
 }
 
+// For a checkpoint-seeded replay, one or two eager persistent-rope splices
+// retain more structure than rebuilding the result from sequence records.
+// Once the divergent suffix is large enough, avoiding its per-event effect
+// rank lookup and rope edit dominates the shallow final rope rebuild.
+const DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS = 64;
+
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
  *
@@ -132,6 +138,7 @@ export class EgWalkerEngine {
   private integrationProbeCount = 0;
   private useLinearIntegrationOracle = false;
   private prepareViewMayContainSurrogatePairs = false;
+  private deferTextMaterialization = false;
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -142,6 +149,14 @@ export class EgWalkerEngine {
 
     const collectTransformedOperations =
       options.collectTransformedOperations !== false;
+    // Empty-seed cold replay always benefits from a single final materialize.
+    // Checkpoint replay uses the same path only for a sufficiently large
+    // divergent suffix; tiny suffixes retain more branch structure through
+    // eager splices than they save in effect-rank lookups.
+    this.deferTextMaterialization =
+      !collectTransformedOperations &&
+      (this.resultingText.length === 0 ||
+        events.length >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS);
     const transformedOperations: ExternalOperation[] | undefined =
       collectTransformedOperations ? [] : undefined;
 
@@ -153,12 +168,21 @@ export class EgWalkerEngine {
       transformedOperations?.push(...transformed);
     }
 
-    // The typed-run coalescing path may have left an open buffer of
-    // appended text. The returned document is observable, so materialise
-    // it before handing back the snapshot. This is the load-bearing flush
-    // for batch (non-incremental) callers of `generate`; the per-event
-    // `applyEvent` return flush below is what `EgWalkerReplica` relies on.
-    this.flushPendingInsert();
+    if (!this.deferTextMaterialization) {
+      // The typed-run coalescing path may have left an open buffer of
+      // appended text. The returned document is observable, so materialise
+      // it before handing back the snapshot. This is the load-bearing flush
+      // for batch (non-incremental) callers of `generate`; the per-event
+      // `applyEvent` return flush below is what `EgWalkerReplica` relies on.
+      this.flushPendingInsert();
+    } else {
+      // Cold replay does not expose intermediate transformed operations.
+      // Insert/delete handlers therefore maintain only the authoritative
+      // effect weights and skip every historical effect-rank lookup and rope
+      // edit. Build the observable document once from the final sequence.
+      this.resultingText = this.materializeEffectVisibleText();
+      this.deferTextMaterialization = false;
+    }
 
     const textBuffer = this.resultingText;
     const fugueStats = this.fugueOrder.getStats();
@@ -657,6 +681,7 @@ export class EgWalkerEngine {
         operation,
         this.insertDeps,
         collectTransformedOperations,
+        this.deferTextMaterialization,
       );
       // Monotonic for the lifetime of this replay engine: deleted/retreated
       // records can become prepare-visible again, so seeing one surrogate code
@@ -671,6 +696,7 @@ export class EgWalkerEngine {
       operation,
       this.deleteDeps,
       collectTransformedOperations,
+      this.deferTextMaterialization,
     );
   }
 
@@ -790,6 +816,20 @@ export class EgWalkerEngine {
       throw new Error(`Item ${target.id} not found`);
     }
     return effectIndex;
+  }
+
+  private materializeEffectVisibleText(): PersistentUtf16Rope {
+    const segments: Array<string | PersistentUtf16Rope> = [];
+    for (const item of this.sequence.toArray()) {
+      if (!item.everDeleted && item.content.length > 0) {
+        segments.push(
+          typeof item.content === "string"
+            ? item.content
+            : item.content.toRope(),
+        );
+      }
+    }
+    return PersistentUtf16Rope.fromSegments(segments);
   }
 
   /**

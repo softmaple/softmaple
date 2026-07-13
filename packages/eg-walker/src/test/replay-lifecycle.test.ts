@@ -12,6 +12,52 @@ const rootInsert = (index: number): GraphEvent => ({
   timestamp: index,
 });
 
+const twoBranchBurst = (eventCount: number): GraphEvent[] => {
+  const root: GraphEvent = {
+    id: "shared:0",
+    parentVersion: new Set(),
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "s" },
+    timestamp: 0,
+  };
+  const events = [root];
+  let leftParent = root.id;
+  let rightParent = root.id;
+  let branchLength = 1;
+
+  while (events.length < eventCount) {
+    const left: GraphEvent = {
+      id: `left:${branchLength}`,
+      parentVersion: new Set([leftParent]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: branchLength,
+        text: "l",
+      },
+      timestamp: events.length,
+    };
+    events.push(left);
+    leftParent = left.id;
+
+    if (events.length < eventCount) {
+      const right: GraphEvent = {
+        id: `right:${branchLength}`,
+        parentVersion: new Set([rightParent]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: branchLength,
+          text: "r",
+        },
+        timestamp: events.length,
+      };
+      events.push(right);
+      rightParent = right.id;
+    }
+    branchLength++;
+  }
+
+  return events;
+};
+
 describe("paper-style replay lifecycle", () => {
   it("absorbs a 1,600-event concurrent batch with one cold replay", () => {
     const replica = new EgWalkerReplica("batch");
@@ -37,6 +83,47 @@ describe("paper-style replay lifecycle", () => {
     expect(stats.fullReplays).toBeLessThanOrEqual(2);
     expect(stats.replayCacheEvents).toBeLessThanOrEqual(4_096);
     expect(stats.replayCacheBytes).toBeLessThanOrEqual(32 * 1024 * 1024);
+  });
+
+  it("checks replay-cache coverage through direct parents in linear work", () => {
+    // Arrange / Act: the second branch seeds a singleton critical checkpoint;
+    // every later event descends from it through one direct parent.
+    const sampleSizes = new Set([200, 400, 800]);
+    const replica = new EgWalkerReplica("coverage");
+    const measurements: Array<{
+      readonly eventCount: number;
+      readonly coverageChecks: number;
+    }> = [];
+    for (const [index, event] of twoBranchBurst(800).entries()) {
+      replica.applyRemoteEvent(event);
+      const eventCount = index + 1;
+      if (sampleSizes.has(eventCount)) {
+        measurements.push({
+          eventCount,
+          coverageChecks: replica.getReplayStats().replayCacheCoverageChecks,
+        });
+      }
+    }
+
+    // Assert: doubling the history doubles Set membership checks rather than
+    // re-expanding every parent's complete ancestor closure.
+    for (const measurement of measurements) {
+      expect(measurement.coverageChecks).toBeLessThanOrEqual(
+        measurement.eventCount,
+      );
+    }
+    for (let index = 1; index < measurements.length; index++) {
+      const previous = measurements[index - 1]!;
+      const current = measurements[index]!;
+      expect(
+        current.coverageChecks / previous.coverageChecks,
+      ).toBeLessThanOrEqual(2.02);
+    }
+    expect(replica.getText()).toHaveLength(800);
+    expect(replica.getReplayStats()).toMatchObject({
+      partialReplays: 1,
+      fullReplays: 0,
+    });
   });
 
   it("keeps 100,000 linear events engine-free and materializes lazily", () => {

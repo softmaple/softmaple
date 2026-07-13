@@ -105,6 +105,45 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().incrementalApplies).toBe(2);
   });
 
+  it("should fall back when one parent does not cover a restored multi-frontier", () => {
+    // Arrange: empty inserts retain the seeded text as a plain-index engine
+    // record while leaving a two-event frontier in the snapshot.
+    const replica = new EgWalkerReplica("alice", "S");
+    replica.applyRemoteEvents([
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: "insert", index: 0, text: "" },
+        timestamp: 0,
+      },
+      {
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: { type: "insert", index: 0, text: "" },
+        timestamp: 1,
+      },
+    ]);
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      replica.createNativeSnapshot(),
+      "alice",
+    );
+
+    // Act: alice:0 alone does not causally cover the restored
+    // {alice:0, bob:0} engine base.
+    restored.applyRemoteEvent({
+      id: "alice:1",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: "insert", index: 1, text: "A" },
+      timestamp: 2,
+    });
+
+    // Assert
+    const stats = restored.getReplayStats();
+    expect(restored.getText()).toBe("SA");
+    expect(stats.replayCacheCoverageChecks).toBe(2);
+    expect(stats.fullReplays + stats.partialReplays).toBe(1);
+  });
+
   it("should partial replay bounded concurrent remote edits after snapshot restore", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");

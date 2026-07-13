@@ -56,54 +56,7 @@ export const materializeScalarReferenceVersion = (
 
   for (const event of events) {
     transitionTo(event.parentVersion);
-    if (event.operation.type === OPERATION_TYPE.INSERT) {
-      const scalars = Array.from(event.operation.text);
-      if (scalars.length !== 1) {
-        throw new Error(
-          `Scalar reference event ${event.id} must insert exactly one Unicode scalar`,
-        );
-      }
-      const cursor = findPrepareCursor(items, event.operation.index);
-      const originLeft = cursor === 0 ? null : items[cursor - 1]!.id;
-      let originRight: EventId | null = null;
-      for (let index = cursor; index < items.length; index++) {
-        const candidate = items[index]!;
-        if (candidate.prepareState !== 0) {
-          originRight =
-            candidate.originLeft === originLeft ? candidate.id : null;
-          break;
-        }
-      }
-      const item: ScalarItem = {
-        id: event.id,
-        eventId: event.id,
-        content: scalars[0]!,
-        originLeft,
-        originRight,
-        prepareState: 1,
-        deleted: false,
-      };
-      const position = referenceIntegrationPosition(item, cursor, items);
-      items.splice(position, 0, item);
-      itemsById.set(item.id, item);
-    } else {
-      let cursor = findPrepareCursor(items, event.operation.index);
-      while (cursor < items.length && items[cursor]!.prepareState !== 1) {
-        cursor++;
-      }
-      const target = items[cursor];
-      if (
-        target === undefined ||
-        target.content.length !== event.operation.length
-      ) {
-        throw new Error(
-          `Scalar reference delete ${event.id} does not target one scalar`,
-        );
-      }
-      target.prepareState++;
-      target.deleted = true;
-      deleteTargets.set(event.id, target.id);
-    }
+    applyScalarReferenceEvent(event, items, itemsById, deleteTargets);
     currentVersion = new Set([event.id]);
   }
 
@@ -111,6 +64,178 @@ export const materializeScalarReferenceVersion = (
     .filter(({ deleted }) => !deleted)
     .map(({ content }) => content)
     .join("");
+};
+
+export interface ScalarReferenceSessionStats {
+  readonly eventsApplied: number;
+  readonly versionTransitions: number;
+  readonly versionDiffVisits: number;
+}
+
+/**
+ * Stateful form of the independent scalar oracle.
+ *
+ * Paper trace conversion asks for many parent-version documents. Rebuilding
+ * the scalar oracle from event zero for every merge is quadratic, so this
+ * session retains scalar items and moves only across each version diff. It
+ * deliberately shares no EventGraph, EgWalkerEngine, Fugue index, or ranked
+ * sequence implementation with the production algorithm.
+ */
+export class ScalarReferenceSession {
+  private readonly events = new Map<EventId, GraphEvent>();
+  private readonly rank = new Map<EventId, number>();
+  private readonly items: ScalarItem[];
+  private readonly itemsById: Map<EventId, ScalarItem>;
+  private readonly deleteTargets = new Map<EventId, EventId>();
+  private currentVersion = new Set<EventId>();
+  private eventsApplied = 0;
+  private versionTransitions = 0;
+  private versionDiffVisits = 0;
+
+  constructor(initialText: string = "") {
+    this.items = seedItems(initialText);
+    this.itemsById = new Map(this.items.map((item) => [item.id, item]));
+  }
+
+  applyEvent(event: GraphEvent): void {
+    if (this.events.has(event.id)) {
+      throw new Error(`Duplicate event ${event.id}`);
+    }
+    for (const parentId of event.parentVersion) {
+      if (!this.events.has(parentId)) {
+        throw new Error(`Unknown scalar reference event ${parentId}`);
+      }
+    }
+
+    this.transitionTo(event.parentVersion);
+    applyScalarReferenceEvent(
+      event,
+      this.items,
+      this.itemsById,
+      this.deleteTargets,
+    );
+    this.events.set(event.id, event);
+    this.rank.set(event.id, this.rank.size);
+    this.currentVersion = new Set([event.id]);
+    this.eventsApplied++;
+  }
+
+  transitionTo(version: Version): void {
+    if (versionsEqual(this.currentVersion, version)) {
+      return;
+    }
+    const diff = referenceVersionDiff(
+      this.currentVersion,
+      version,
+      this.events,
+      this.rank,
+    );
+    const retreat = [...diff.onlyInLeft].sort(
+      (left, right) =>
+        (this.rank.get(right) ?? -1) - (this.rank.get(left) ?? -1),
+    );
+    const advance = [...diff.onlyInRight].sort(
+      (left, right) =>
+        (this.rank.get(left) ?? -1) - (this.rank.get(right) ?? -1),
+    );
+    for (const eventId of retreat) {
+      togglePrepareState(
+        eventId,
+        -1,
+        this.events,
+        this.itemsById,
+        this.deleteTargets,
+      );
+    }
+    for (const eventId of advance) {
+      togglePrepareState(
+        eventId,
+        1,
+        this.events,
+        this.itemsById,
+        this.deleteTargets,
+      );
+    }
+    this.currentVersion = new Set(version);
+    this.versionTransitions++;
+    this.versionDiffVisits += diff.visits;
+  }
+
+  getPrepareText(): string {
+    return this.items
+      .filter(({ prepareState }) => prepareState === 1)
+      .map(({ content }) => content)
+      .join("");
+  }
+
+  materializeVersion(version: Version): string {
+    this.transitionTo(version);
+    return this.getPrepareText();
+  }
+
+  getStats(): ScalarReferenceSessionStats {
+    return {
+      eventsApplied: this.eventsApplied,
+      versionTransitions: this.versionTransitions,
+      versionDiffVisits: this.versionDiffVisits,
+    };
+  }
+}
+
+const applyScalarReferenceEvent = (
+  event: GraphEvent,
+  items: ScalarItem[],
+  itemsById: Map<EventId, ScalarItem>,
+  deleteTargets: Map<EventId, EventId>,
+): void => {
+  if (event.operation.type === OPERATION_TYPE.INSERT) {
+    const scalars = Array.from(event.operation.text);
+    if (scalars.length !== 1) {
+      throw new Error(
+        `Scalar reference event ${event.id} must insert exactly one Unicode scalar`,
+      );
+    }
+    const cursor = findPrepareCursor(items, event.operation.index);
+    const originLeft = cursor === 0 ? null : items[cursor - 1]!.id;
+    let originRight: EventId | null = null;
+    for (let index = cursor; index < items.length; index++) {
+      const candidate = items[index]!;
+      if (candidate.prepareState !== 0) {
+        originRight = candidate.originLeft === originLeft ? candidate.id : null;
+        break;
+      }
+    }
+    const item: ScalarItem = {
+      id: event.id,
+      eventId: event.id,
+      content: scalars[0]!,
+      originLeft,
+      originRight,
+      prepareState: 1,
+      deleted: false,
+    };
+    const position = referenceIntegrationPosition(item, cursor, items);
+    items.splice(position, 0, item);
+    itemsById.set(item.id, item);
+    return;
+  }
+
+  let cursor = findPrepareCursor(items, event.operation.index);
+  while (cursor < items.length && items[cursor]!.prepareState !== 1) {
+    cursor++;
+  }
+  const target = items[cursor];
+  if (
+    target === undefined ||
+    target.content.length !== event.operation.length
+  ) {
+    throw new Error(
+      `Scalar reference delete ${event.id} does not target one scalar`,
+    );
+  }
+  target.prepareState++;
+  target.deleted = true;
+  deleteTargets.set(event.id, target.id);
 };
 
 interface ScalarTextNode {
@@ -326,11 +451,20 @@ const referenceIntegrationPosition = (
   cursor: number,
   items: ReadonlyArray<ScalarItem>,
 ): number => {
+  let itemIndexes: ReadonlyMap<EventId, number> | null = null;
+  const indexFor = (id: EventId): number => {
+    itemIndexes ??= new Map(
+      items.map((candidate, index) => [candidate.id, index]),
+    );
+    const index = itemIndexes.get(id);
+    if (index === undefined) {
+      throw new Error(`Scalar reference missing item ${id}`);
+    }
+    return index;
+  };
   const leftIndex = cursor - 1;
   const rightIndex =
-    item.originRight === null
-      ? items.length
-      : requireItemIndex(items, item.originRight);
+    item.originRight === null ? items.length : indexFor(item.originRight);
   let insertion = cursor;
   let scan = cursor;
   let candidate = cursor;
@@ -343,15 +477,11 @@ const referenceIntegrationPosition = (
       throw new Error("Scalar reference encountered its right anchor early");
     }
     const otherLeft =
-      other.originLeft === null
-        ? -1
-        : requireItemIndex(items, other.originLeft);
+      other.originLeft === null ? -1 : indexFor(other.originLeft);
     if (otherLeft < leftIndex) break;
     if (otherLeft === leftIndex) {
       const otherRight =
-        other.originRight === null
-          ? items.length
-          : requireItemIndex(items, other.originRight);
+        other.originRight === null ? items.length : indexFor(other.originRight);
       if (
         otherRight === rightIndex &&
         compareReferenceEventIds(item.eventId, other.eventId) < 0
@@ -369,15 +499,6 @@ const referenceIntegrationPosition = (
     if (!scanning) insertion = scan;
   }
   return scanning ? candidate : insertion;
-};
-
-const requireItemIndex = (
-  items: ReadonlyArray<ScalarItem>,
-  id: EventId,
-): number => {
-  const index = items.findIndex((item) => item.id === id);
-  if (index === -1) throw new Error(`Scalar reference missing item ${id}`);
-  return index;
 };
 
 const togglePrepareState = (
@@ -417,6 +538,160 @@ const causalClosure = (
     stack.push(...event.parentVersion);
   }
   return result;
+};
+
+interface ReferenceVersionDiff {
+  readonly onlyInLeft: Set<EventId>;
+  readonly onlyInRight: Set<EventId>;
+  readonly visits: number;
+}
+
+const REFERENCE_DIFF_COLOR = {
+  LEFT: 1,
+  RIGHT: 2,
+  COMMON: 3,
+} as const;
+
+/** Independent merge-base walk, differential-tested against causalClosure. */
+const referenceVersionDiff = (
+  left: Version,
+  right: Version,
+  events: ReadonlyMap<EventId, GraphEvent>,
+  rank: ReadonlyMap<EventId, number>,
+): ReferenceVersionDiff => {
+  const onlyInLeft = new Set<EventId>();
+  const onlyInRight = new Set<EventId>();
+  const colors = new Map<EventId, number>();
+  const heap = new ReferenceEventHeap(rank);
+  let pendingDivergent = 0;
+  let visits = 0;
+
+  const paint = (eventId: EventId, addedColor: number): void => {
+    if (!events.has(eventId)) {
+      throw new Error(`Unknown scalar reference event ${eventId}`);
+    }
+    const existing = colors.get(eventId) ?? 0;
+    const merged = existing | addedColor;
+    if (merged === existing) {
+      return;
+    }
+    colors.set(eventId, merged);
+    if (existing === 0) {
+      heap.push(eventId);
+      if (merged !== REFERENCE_DIFF_COLOR.COMMON) {
+        pendingDivergent++;
+      }
+    } else if (
+      existing !== REFERENCE_DIFF_COLOR.COMMON &&
+      merged === REFERENCE_DIFF_COLOR.COMMON
+    ) {
+      pendingDivergent--;
+    }
+  };
+
+  for (const eventId of left) {
+    paint(eventId, REFERENCE_DIFF_COLOR.LEFT);
+  }
+  for (const eventId of right) {
+    paint(eventId, REFERENCE_DIFF_COLOR.RIGHT);
+  }
+
+  while (heap.size > 0 && pendingDivergent > 0) {
+    const eventId = heap.pop()!;
+    const color = colors.get(eventId) ?? 0;
+    visits++;
+    if (color === REFERENCE_DIFF_COLOR.LEFT) {
+      onlyInLeft.add(eventId);
+      pendingDivergent--;
+    } else if (color === REFERENCE_DIFF_COLOR.RIGHT) {
+      onlyInRight.add(eventId);
+      pendingDivergent--;
+    }
+    for (const parentId of events.get(eventId)!.parentVersion) {
+      paint(parentId, color);
+    }
+  }
+
+  return { onlyInLeft, onlyInRight, visits };
+};
+
+class ReferenceEventHeap {
+  private readonly values: EventId[] = [];
+
+  constructor(private readonly rank: ReadonlyMap<EventId, number>) {}
+
+  get size(): number {
+    return this.values.length;
+  }
+
+  push(eventId: EventId): void {
+    this.values.push(eventId);
+    let index = this.values.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (!this.isHigher(index, parent)) {
+        break;
+      }
+      this.swap(index, parent);
+      index = parent;
+    }
+  }
+
+  pop(): EventId | undefined {
+    const top = this.values[0];
+    const last = this.values.pop();
+    if (top === undefined || last === undefined || this.values.length === 0) {
+      return top;
+    }
+    this.values[0] = last;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let highest = index;
+      if (left < this.values.length && this.isHigher(left, highest)) {
+        highest = left;
+      }
+      if (right < this.values.length && this.isHigher(right, highest)) {
+        highest = right;
+      }
+      if (highest === index) {
+        break;
+      }
+      this.swap(index, highest);
+      index = highest;
+    }
+    return top;
+  }
+
+  private isHigher(leftIndex: number, rightIndex: number): boolean {
+    const left = this.values[leftIndex]!;
+    const right = this.values[rightIndex]!;
+    const rankDelta =
+      (this.rank.get(left) ?? -1) - (this.rank.get(right) ?? -1);
+    return rankDelta === 0
+      ? compareReferenceEventIds(left, right) > 0
+      : rankDelta > 0;
+  }
+
+  private swap(left: number, right: number): void {
+    [this.values[left], this.values[right]] = [
+      this.values[right]!,
+      this.values[left]!,
+    ];
+  }
+}
+
+const versionsEqual = (left: Version, right: Version): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const eventId of left) {
+    if (!right.has(eventId)) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const strictEventMap = (

@@ -1,8 +1,8 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import type { EventId, GraphEvent, Version } from "../types";
 import {
-  materializeScalarReferenceVersion,
   scalarReferenceFrontier,
+  ScalarReferenceSession,
 } from "./scalar-reference-replay";
 
 export interface AtomicPaperTrace {
@@ -53,6 +53,7 @@ export const convertPaperTraceToAtomicEvents = (
   const transactionUnicodeStates: Array<UnicodeOffsetState | undefined> =
     new Array(trace.txns.length);
   const nextSequenceByAgent = new Map<string, number>();
+  const referenceSession = new ScalarReferenceSession();
 
   for (
     let transactionIndex = 0;
@@ -74,7 +75,7 @@ export const convertPaperTraceToAtomicEvents = (
       currentVersion,
       transaction,
       transactionUnicodeStates,
-      events,
+      referenceSession,
     );
     const agentKey = paperAgentKey(transaction.agent);
     let agentSequence = nextSequenceByAgent.get(agentKey) ?? 0;
@@ -106,7 +107,7 @@ export const convertPaperTraceToAtomicEvents = (
         const utf16Length =
           utf16IndexForScalarIndex(unicodeState, index + 1) - utf16Index;
         const id = paperEventId(dataset, agentKey, agentSequence++);
-        events.push({
+        const event: GraphEvent = {
           id,
           parentVersion: new Set(currentVersion),
           operation: {
@@ -115,7 +116,9 @@ export const convertPaperTraceToAtomicEvents = (
             length: utf16Length,
           },
           timestamp: transactionIndex + operationOffset,
-        });
+        };
+        events.push(event);
+        referenceSession.applyEvent(event);
         if (events.length === options.maxEvents) {
           return events;
         }
@@ -129,7 +132,7 @@ export const convertPaperTraceToAtomicEvents = (
       for (const character of insertedText) {
         const scalarIndex = index + insertOffset;
         const id = paperEventId(dataset, agentKey, agentSequence++);
-        events.push({
+        const event: GraphEvent = {
           id,
           parentVersion: new Set(currentVersion),
           operation: {
@@ -138,7 +141,9 @@ export const convertPaperTraceToAtomicEvents = (
             text: character,
           },
           timestamp: transactionIndex + operationOffset,
-        });
+        };
+        events.push(event);
+        referenceSession.applyEvent(event);
         if (events.length === options.maxEvents) {
           return events;
         }
@@ -162,8 +167,7 @@ export const convertPaperTraceToAtomicEvents = (
   }
 
   if (options.validateFinalText ?? true) {
-    const actual = materializeScalarReferenceVersion(
-      events,
+    const actual = referenceSession.materializeVersion(
       scalarReferenceFrontier(events),
     );
     if (actual !== trace.endContent) {
@@ -201,7 +205,7 @@ const unicodeStateForParentVersion = (
   version: Version,
   transaction: AtomicPaperTransaction,
   transactionUnicodeStates: ReadonlyArray<UnicodeOffsetState | undefined>,
-  events: ReadonlyArray<GraphEvent>,
+  referenceSession: ScalarReferenceSession,
 ): UnicodeOffsetState => {
   if (transaction.parents.length === 0) {
     return { scalarLength: 0, nonBmpCodePointPositions: [] };
@@ -215,9 +219,7 @@ const unicodeStateForParentVersion = (
       };
     }
   }
-  return unicodeStateFromText(
-    materializeScalarReferenceVersion(events, version),
-  );
+  return unicodeStateFromText(referenceSession.materializeVersion(version));
 };
 
 const unicodeStateFromText = (text: string): UnicodeOffsetState => ({

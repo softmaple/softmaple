@@ -4,8 +4,9 @@ The paper-conformance suite intentionally keeps the author's 3.6 MB corpus
 outside this repository. Prepare a pinned checkout once:
 
 ```bash
-git clone https://github.com/josephg/egwalker-reference.git ~/.cache/eg-walker-reference
-git -C ~/.cache/eg-walker-reference checkout 7287f4bc2c054984838b3582a27b4fea8f6d8161
+git clone https://github.com/josephg/egwalker-paper.git ~/.cache/egwalker-paper
+git -C ~/.cache/egwalker-paper checkout 4d9bef55e4f2e3b3b8b0efe8f91cd35d34ed35a8
+ln -s ~/.cache/egwalker-paper/eg-walker-reference ~/.cache/eg-walker-reference
 ```
 
 Then run:

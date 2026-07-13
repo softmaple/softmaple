@@ -5,6 +5,7 @@ import {
   type PackedIntegerColumn,
   type PackedUnsignedIntegerColumn,
 } from "./packed-numeric-columns";
+import { PackedDiffVersionsWorkspace } from "./packed-diff-versions";
 
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
@@ -78,6 +79,7 @@ export class PackedEventGraphBase {
   private readonly childOffsets: Uint32Array | null;
   private readonly implicitLinearEdges: boolean;
   private readonly exactLinear: boolean;
+  private diffWorkspace: PackedDiffVersionsWorkspace | null = null;
 
   constructor(columns: PackedEventGraphColumns) {
     const idIndex = columns.idIndex;
@@ -170,6 +172,20 @@ export class PackedEventGraphBase {
     return this.idIndex !== null
       ? this.idIndex.offsetOf(id)
       : this.offsetById!.get(id);
+  }
+
+  /** Compute a version diff directly over immutable packed offsets. */
+  diffVersions(
+    left: ReadonlySet<EventId>,
+    right: ReadonlySet<EventId>,
+  ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diff(left, right, this);
+  }
+
+  /** Release scratch storage once a packed replay has finished. */
+  releaseDiffWorkspace(): void {
+    this.diffWorkspace = null;
   }
 
   idAt(offset: number): EventId | undefined {

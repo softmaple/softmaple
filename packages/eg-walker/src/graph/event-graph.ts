@@ -112,6 +112,7 @@ export class EventGraph {
   private invalidateDerivedCaches(): void {
     this.cachedTopologicalOrder = null;
     this.cachedBranchPreservingOrder = null;
+    this.packedBase?.releaseDiffWorkspace();
   }
 
   /**
@@ -449,6 +450,9 @@ export class EventGraph {
     left: ReadonlySet<EventId>,
     right: ReadonlySet<EventId>,
   ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
+    if (this.packedBase !== null && this.events.size === 0) {
+      return this.packedBase.diffVersions(left, right);
+    }
     return diffVersionSets(left, right, {
       getParents: (id) => this.iterateParents(id),
       hasEvent: (id) => this.hasEvent(id),

@@ -4,11 +4,8 @@ import { IndexedSequence } from "../indexed-sequence";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 
 type Side = "left" | "right";
-type MarkerKind = "start" | "visit" | "end";
 
 interface Marker {
-  readonly key: string;
-  readonly kind: MarkerKind;
   readonly weight: number;
 }
 
@@ -17,6 +14,8 @@ interface FugueNode {
   readonly start: Marker;
   readonly visit: Marker;
   readonly end: Marker;
+  leftSiblings: SiblingNode | null;
+  rightSiblings: SiblingNode | null;
 }
 
 interface SiblingNode {
@@ -46,7 +45,6 @@ export class FugueOrderIndex {
     (marker) => marker.weight,
   );
   private readonly nodesById = new Map<EventId, FugueNode>();
-  private readonly siblingRoots = new Map<string, SiblingNode | null>();
   private readonly forcedParentById = new Map<EventId, EventId>();
   private readonly forcedChildByParentId = new Map<EventId, EventId>();
   private rootNode!: FugueNode;
@@ -124,13 +122,16 @@ export class FugueOrderIndex {
     }
     const side: Side = isLeftChild ? "left" : "right";
     const node = createFugueNode(item);
-    const siblingKey = keyForSiblings(parent, side);
     const insertion = this.insertSibling(
-      this.siblingRoots.get(siblingKey) ?? null,
+      side === "left" ? parent.leftSiblings : parent.rightSiblings,
       node,
       side,
     );
-    this.siblingRoots.set(siblingKey, insertion.root);
+    if (side === "left") {
+      parent.leftSiblings = insertion.root;
+    } else {
+      parent.rightSiblings = insertion.root;
+    }
 
     const target =
       insertion.successor?.start ??
@@ -219,12 +220,8 @@ export class FugueOrderIndex {
     }
 
     const rightNode = createFugueNode(right);
-    const leftChildrenKey = keyForSiblings(leftNode, "right");
-    const rightChildrenKey = keyForSiblings(rightNode, "right");
-    const previousRightChildren =
-      this.siblingRoots.get(leftChildrenKey) ?? null;
-    this.siblingRoots.set(rightChildrenKey, previousRightChildren);
-    this.siblingRoots.set(leftChildrenKey, createSiblingNode(rightNode));
+    rightNode.rightSiblings = leftNode.rightSiblings;
+    leftNode.rightSiblings = createSiblingNode(rightNode);
 
     const previousForcedChild = this.forcedChildByParentId.get(left.id);
     if (previousForcedChild !== undefined) {
@@ -270,7 +267,6 @@ export class FugueOrderIndex {
         this.markerSequence.getStructuralOperationCount();
     }
     this.nodesById.clear();
-    this.siblingRoots.clear();
     const root = createFugueNode(null);
     this.rootNode = root;
     this.markerSequence.resetFromRecords([root.start, root.visit, root.end]);
@@ -369,7 +365,7 @@ export class FugueOrderIndex {
     markers: ReadonlyArray<Marker>,
   ): void {
     if (!this.markerSequence.insertManyBefore(target, markers)) {
-      throw new Error(`Fugue marker ${target.key} is unavailable`);
+      throw new Error("Fugue marker is unavailable");
     }
     this.markerOperations += markers.length;
   }
@@ -379,7 +375,7 @@ export class FugueOrderIndex {
     markers: ReadonlyArray<Marker>,
   ): void {
     if (!this.markerSequence.insertManyAfter(target, markers)) {
-      throw new Error(`Fugue marker ${target.key} is unavailable`);
+      throw new Error("Fugue marker is unavailable");
     }
     this.markerOperations += markers.length;
   }
@@ -387,7 +383,7 @@ export class FugueOrderIndex {
   private weightBefore(marker: Marker): number {
     const weight = this.markerSequence.effectIndexOf(marker);
     if (weight < 0) {
-      throw new Error(`Fugue marker ${marker.key} is unavailable`);
+      throw new Error("Fugue marker is unavailable");
     }
     return weight;
   }
@@ -402,9 +398,6 @@ export class FugueOrderIndex {
   }
 }
 
-const keyForSiblings = (parent: FugueNode, side: Side): string =>
-  `${parent.item?.id ?? "ROOT"}:${side}`;
-
 const createSiblingNode = (value: FugueNode): SiblingNode => ({
   value,
   left: null,
@@ -413,17 +406,17 @@ const createSiblingNode = (value: FugueNode): SiblingNode => ({
 });
 
 const createFugueNode = (item: AugmentedCRDTItem | null): FugueNode => {
-  const id = item?.id ?? "ROOT";
   return {
     item,
-    start: createMarker(`${id}:start`, "start", 0),
-    visit: createMarker(`${id}:visit`, "visit", item === null ? 0 : 1),
-    end: createMarker(`${id}:end`, "end", 0),
+    start: createMarker(0),
+    visit: createMarker(item === null ? 0 : 1),
+    end: createMarker(0),
+    leftSiblings: null,
+    rightSiblings: null,
   };
 };
 
-const createMarker = (key: string, kind: MarkerKind, weight: number): Marker =>
-  Object.freeze({ key, kind, weight });
+const createMarker = (weight: number): Marker => ({ weight });
 
 const rotateSiblingRight = (root: SiblingNode): SiblingNode => {
   const pivot = root.left!;

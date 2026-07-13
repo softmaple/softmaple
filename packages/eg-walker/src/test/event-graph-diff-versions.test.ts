@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import type { EventId } from "../types";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
+import { PackedEventGraphBase } from "../graph/internals/packed-event-graph-base";
 import { buildLinearHistory } from "./test-helpers";
 
 /**
@@ -17,6 +19,11 @@ const mulberry32 = (seed: number): (() => number) => {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) % 0x7fffffff;
   };
+};
+
+const packGraph = (graph: EventGraph): EventGraph => {
+  const codec = new ColumnarEventGraphCodec();
+  return codec.decodeBinary(codec.encodeBinary(graph));
 };
 
 describe("diffVersions topological diff", () => {
@@ -300,6 +307,223 @@ describe("diffVersions topological diff", () => {
       const actual = graph.diffVersions(left, right);
       expect(actual.onlyInLeft).toEqual(expected.onlyInLeft);
       expect(actual.onlyInRight).toEqual(expected.onlyInRight);
+    }
+  });
+
+  it("matches the object oracle for immutable packed DAG frontiers", () => {
+    const rng = mulberry32(0x51a7e);
+    const graph = new EventGraph();
+    const ids: EventId[] = [];
+
+    for (let index = 0; index < 180; index++) {
+      const id = index % 3 === 0 ? `replica:${index}` : `custom#${index}`;
+      const parents = new Set<EventId>();
+      if (index > 0) {
+        const parentCount = (rng() % 3) + 1;
+        for (let parent = 0; parent < parentCount; parent++) {
+          parents.add(ids[rng() % ids.length]!);
+        }
+      }
+      graph.addEvent({
+        id,
+        timestamp: index,
+        parentVersion: parents,
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: "x",
+        },
+      });
+      ids.push(id);
+    }
+
+    const packed = packGraph(graph);
+    const packedParentIterator = vi.spyOn(packed, "iterateParents");
+    for (let trial = 0; trial < 80; trial++) {
+      const version = (side: string): Set<EventId> => {
+        const result = new Set<EventId>();
+        const width = rng() % 4;
+        for (let index = 0; index < width; index++) {
+          result.add(ids[rng() % ids.length]!);
+        }
+        if (trial % 5 === 0) result.add(`unknown-${side}-${trial}`);
+        return result;
+      };
+      const left = version("left");
+      const right = version("right");
+
+      expect(packed.diffVersions(left, right)).toEqual(
+        graph.diffVersions(left, right),
+      );
+    }
+
+    // The immutable packed path must not fall through to string-ID parent
+    // iterators; mixed/object graphs continue to exercise that oracle.
+    expect(packedParentIterator).not.toHaveBeenCalled();
+  });
+
+  it("uses packed linear offsets until a mutable tail requires the object path", () => {
+    const source = buildLinearHistory(4, "mixed").graph;
+    const packed = packGraph(source);
+    const packedParentIterator = vi.spyOn(packed, "iterateParents");
+
+    expect(
+      packed.diffVersions(new Set(["mixed-3"]), new Set(["mixed-1"])),
+    ).toEqual(source.diffVersions(new Set(["mixed-3"]), new Set(["mixed-1"])));
+    expect(packedParentIterator).not.toHaveBeenCalled();
+
+    const tail = {
+      id: "tail",
+      timestamp: 4,
+      parentVersion: new Set<EventId>(["mixed-3"]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 4,
+        text: "t",
+      } as const,
+    };
+    source.addEvent(tail);
+    packed.addEvent(tail);
+    packedParentIterator.mockClear();
+
+    expect(
+      packed.diffVersions(new Set(["tail"]), new Set(["mixed-1"])),
+    ).toEqual(source.diffVersions(new Set(["tail"]), new Set(["mixed-1"])));
+    expect(packedParentIterator).toHaveBeenCalled();
+  });
+
+  it("isolates re-entrant packed queries and resets scratch state after errors", () => {
+    const { graph } = buildLinearHistory(1, "shared");
+    graph.addEvent({
+      id: "left",
+      timestamp: 1,
+      parentVersion: new Set(["shared-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "L" },
+    });
+    graph.addEvent({
+      id: "right",
+      timestamp: 2,
+      parentVersion: new Set(["shared-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "R" },
+    });
+    const packed = packGraph(graph);
+
+    let nestedDiff: ReturnType<EventGraph["diffVersions"]> | undefined;
+    class ReentrantVersion extends Set<EventId> {
+      private entered = false;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        if (!this.entered) {
+          this.entered = true;
+          nestedDiff = packed.diffVersions(
+            new Set(["right"]),
+            new Set(["left"]),
+          );
+        }
+        yield* super[Symbol.iterator]();
+      }
+    }
+
+    expect(
+      packed.diffVersions(new ReentrantVersion(["left"]), new Set(["right"])),
+    ).toEqual({
+      onlyInLeft: new Set(["left"]),
+      onlyInRight: new Set(["right"]),
+    });
+    expect(nestedDiff).toEqual({
+      onlyInLeft: new Set(["right"]),
+      onlyInRight: new Set(["left"]),
+    });
+
+    class ThrowOnceVersion extends Set<EventId> {
+      private failed = false;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        for (const id of super[Symbol.iterator]()) {
+          yield id;
+          if (!this.failed) {
+            this.failed = true;
+            throw new Error("iterator failed");
+          }
+        }
+      }
+    }
+
+    expect(() =>
+      packed.diffVersions(new ThrowOnceVersion(["left"]), new Set(["right"])),
+    ).toThrow("iterator failed");
+    expect(packed.diffVersions(new Set(["left"]), new Set(["right"]))).toEqual({
+      onlyInLeft: new Set(["left"]),
+      onlyInRight: new Set(["right"]),
+    });
+  });
+
+  it("stops packed CSR traversal at a deep shared-history boundary", () => {
+    const { graph, ids } = buildLinearHistory(20_000, "deep");
+    const sharedTip = ids[ids.length - 1]!;
+    graph.addEvent({
+      id: "deep-left",
+      timestamp: 20_000,
+      parentVersion: new Set([sharedTip]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 20_000, text: "L" },
+    });
+    graph.addEvent({
+      id: "deep-right",
+      timestamp: 20_001,
+      parentVersion: new Set([sharedTip]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 20_000, text: "R" },
+    });
+    const packed = packGraph(graph);
+    const parentOffsetAt = vi.spyOn(
+      PackedEventGraphBase.prototype,
+      "parentOffsetAt",
+    );
+
+    try {
+      expect(
+        packed.diffVersions(
+          new Set(["deep-left", "unknown-left"]),
+          new Set(["deep-right", "unknown-right"]),
+        ),
+      ).toEqual({
+        onlyInLeft: new Set(["deep-left"]),
+        onlyInRight: new Set(["deep-right"]),
+      });
+
+      // Each branch tip contributes one parent edge. The common offset is
+      // painted from both sides but never popped, so none of the 20k shared
+      // ancestors are traversed.
+      expect(parentOffsetAt).toHaveBeenCalledTimes(2);
+
+      parentOffsetAt.mockClear();
+      expect(
+        packed.diffVersions(new Set(["deep-left"]), new Set(["deep-left"])),
+      ).toEqual({ onlyInLeft: new Set(), onlyInRight: new Set() });
+      expect(parentOffsetAt).not.toHaveBeenCalled();
+
+      // A second divergent query proves the reused colour workspace was
+      // cleared rather than leaking COMMON markings from the first call.
+      expect(
+        packed.diffVersions(new Set(["deep-right"]), new Set(["deep-left"])),
+      ).toEqual({
+        onlyInLeft: new Set(["deep-right"]),
+        onlyInRight: new Set(["deep-left"]),
+      });
+      expect(parentOffsetAt).toHaveBeenCalledTimes(2);
+
+      // Cold replay drops scratch memory together with its traversal caches;
+      // the next packed query lazily creates a clean workspace again.
+      packed.releaseTraversalCaches();
+      parentOffsetAt.mockClear();
+      expect(
+        packed.diffVersions(new Set(["deep-left"]), new Set(["deep-right"])),
+      ).toEqual({
+        onlyInLeft: new Set(["deep-left"]),
+        onlyInRight: new Set(["deep-right"]),
+      });
+      expect(parentOffsetAt).toHaveBeenCalledTimes(2);
+    } finally {
+      parentOffsetAt.mockRestore();
     }
   });
 });

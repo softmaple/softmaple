@@ -42,8 +42,9 @@ Paper alignment means:
 Add an external conformance command that consumes the author's pinned
 TypeScript reference checkout without committing its 3.6 MB fixture.
 
-- Pin repository commit
-  `7287f4bc2c054984838b3582a27b4fea8f6d8161`.
+- Pin the `eg-walker-reference` directory from the author's
+  `josephg/egwalker-paper` repository at commit
+  `4d9bef55e4f2e3b3b8b0efe8f91cd35d34ed35a8`.
 - Require `testdata/conformance.json` SHA-256
   `95bdb544deca513441a50ea26a1c3ecbad116061c1d0fd6dde3175ea1e0bffd7`.
 - Resolve the checkout from `EG_WALKER_REFERENCE_ROOT`, falling back to a

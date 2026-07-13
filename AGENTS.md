@@ -82,6 +82,10 @@ const withLogging =
 
 - **Unit tests:** Vitest in `packages/md2latex/tests/` (\*.test.ts)
 - **E2E tests:** Playwright in `apps/web/e2e/` (\*.spec.ts)
+- **Property tests:** Use the `javascript-testing-expert` skill when writing,
+  reviewing, or debugging `fast-check` / `@fast-check/vitest` tests. This skill
+  is scoped to property-based testing and is not required for ordinary Vitest
+  example tests.
 - Run tests before merging
 - Regenerate Prisma after schema changes
 

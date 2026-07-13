@@ -5,6 +5,11 @@ in this directory pins one invariant of the engine and exercises it
 against shrunk inputs, so a failing case reduces to a minimal
 script + delivery permutation instead of an opaque seed.
 
+When an agent writes, reviews, or debugs tests in this directory, it should use
+the repository's `javascript-testing-expert` skill. That skill is specifically
+for `fast-check` / `@fast-check/vitest` property-based testing; ordinary Vitest
+example tests elsewhere do not require it.
+
 ## Run count
 
 Every property uses a shared run-count knob defined in

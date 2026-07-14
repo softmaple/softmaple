@@ -137,9 +137,9 @@ export class EgWalkerEngine {
     originLeftIndex: this.originLeftIndex,
     deleteTargets: this.deleteTargets,
     nextPlaceholderId: () => this.nextPlaceholderId(),
-    onRecordSplit: (left, right, rightPosition) => {
+    onRecordSplit: (left, right) => {
       if (!this.useLinearIntegrationOracle) {
-        this.fugueOrder.handleRecordSplit(left, right, rightPosition);
+        this.fugueOrder.handleRecordSplit(left, right);
       }
     },
   });
@@ -823,8 +823,10 @@ export class EgWalkerEngine {
       prepareState: 1,
       run: null,
     };
-    const placeholderPosition = this.fugueOrder.integrate(placeholder) ?? 0;
-    this.sequence.insert(placeholderPosition, placeholder);
+    if (!this.fugueOrder.integrateAtKnownPosition(placeholder)) {
+      throw new Error("Fugue order index unavailable for initial text");
+    }
+    this.sequence.insert(0, placeholder);
     this.itemsById.set(placeholder.id, placeholder);
     this.samplePeakSequenceRecordCount();
   }
@@ -983,8 +985,7 @@ export class EgWalkerEngine {
     delta: 1 | -1,
   ): void {
     if (isInsert) {
-      this.recordSplitter.isolateRunSliceForEvent(eventId);
-      const eventItems = this.eventItems.get(eventId);
+      const eventItems = this.recordSplitter.isolateRunSliceForEvent(eventId);
       if (typeof eventItems === "string") {
         const item = this.requireItem(eventItems);
         item.prepareState += delta;
@@ -997,7 +998,14 @@ export class EgWalkerEngine {
         this.sequence.updateItem(item);
       }
     } else {
-      for (const itemId of this.deleteTargets.targetsOf(eventId) ?? []) {
+      const targetRefs = this.deleteTargets.targetRefsOf(eventId);
+      if (typeof targetRefs === "string") {
+        const item = this.requireItem(targetRefs);
+        item.prepareState += delta;
+        this.sequence.updateItem(item);
+        return;
+      }
+      for (const itemId of targetRefs ?? []) {
         const item = this.requireItem(itemId);
         item.prepareState += delta;
         this.sequence.updateItem(item);

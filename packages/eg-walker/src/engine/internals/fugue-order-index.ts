@@ -91,6 +91,18 @@ export class FugueOrderIndex {
 
   /** Insert and return the record position of the new item's VISIT marker. */
   integrate(item: AugmentedCRDTItem): number | null {
+    return this.integrateInternal(item, true);
+  }
+
+  /** Insert when the caller has already proved the document position. */
+  integrateAtKnownPosition(item: AugmentedCRDTItem): boolean {
+    return this.integrateInternal(item, false) !== null;
+  }
+
+  private integrateInternal(
+    item: AugmentedCRDTItem,
+    collectPosition: boolean,
+  ): number | null {
     // Record splitting rewrites logical boundaries; until those boundary
     // objects are represented directly, let the scalar oracle handle the
     // post-split transition without risking ordering drift. Ordinary anchored
@@ -142,11 +154,20 @@ export class FugueOrderIndex {
         : side === "left"
           ? PACKED_EULER_BOUNDARY.Visit
           : PACKED_EULER_BOUNDARY.End;
-    const position = this.markerSequence.insertNodeBefore(
-      target.markerHandle,
-      targetBoundary,
-      node.markerHandle,
-    );
+    let position = 0;
+    if (collectPosition) {
+      position = this.markerSequence.insertNodeBefore(
+        target.markerHandle,
+        targetBoundary,
+        node.markerHandle,
+      );
+    } else {
+      this.markerSequence.insertNodeBeforeUnranked(
+        target.markerHandle,
+        targetBoundary,
+        node.markerHandle,
+      );
+    }
     this.markerOperations += 3;
     this.nodesById.set(item.id, node);
     return position;
@@ -210,11 +231,7 @@ export class FugueOrderIndex {
     }
   }
 
-  handleRecordSplit(
-    left: AugmentedCRDTItem,
-    right: AugmentedCRDTItem,
-    rightPosition: number,
-  ): void {
+  handleRecordSplit(left: AugmentedCRDTItem, right: AugmentedCRDTItem): void {
     if (!this.valid) {
       throw new Error("Cannot update an invalid Fugue order index");
     }
@@ -225,11 +242,7 @@ export class FugueOrderIndex {
     if (this.nodesById.has(right.id)) {
       throw new Error(`Fugue index already contains split record ${right.id}`);
     }
-    if (
-      this.markerSequence.rankOfVisit(leftNode.markerHandle) + 1 !==
-        rightPosition ||
-      this.sequence.positionOf(right) !== rightPosition
-    ) {
+    if (!this.sequence.areAdjacent(left, right)) {
       throw new Error(`Fugue split position mismatch for ${right.id}`);
     }
 
@@ -250,15 +263,12 @@ export class FugueOrderIndex {
       this.setForcedParent(right.id, left.id);
     }
 
-    const splitRank = this.markerSequence.insertSplitContinuation(
+    this.markerSequence.insertSplitContinuation(
       leftNode.markerHandle,
       rightNode.markerHandle,
     );
     this.markerOperations += 3;
     this.nodesById.set(right.id, rightNode);
-    if (splitRank !== rightPosition) {
-      throw new Error(`Fugue split rank mismatch for ${right.id}`);
-    }
   }
 
   invalidate(): void {

@@ -202,9 +202,12 @@ export const applyInsert = (
     run: firstRun,
   };
   const useOracle = useLinearIntegrationOracle();
-  const indexedFirstPosition = useOracle
-    ? null
-    : fugueOrder.integrate(firstItem);
+  const indexedFirstPosition =
+    useOracle || conflictRegionEmpty ? null : fugueOrder.integrate(firstItem);
+  const indexedKnownPositionIntegrated =
+    useOracle || !conflictRegionEmpty
+      ? true
+      : fugueOrder.integrateAtKnownPosition(firstItem);
   const oracleFirstPosition =
     useOracle && !conflictRegionEmpty
       ? findIntegrationPosition(
@@ -214,7 +217,11 @@ export const applyInsert = (
           recordIntegrationProbe,
         )
       : null;
-  if (!useOracle && indexedFirstPosition === null) {
+  if (
+    !useOracle &&
+    (indexedKnownPositionIntegrated === false ||
+      (!conflictRegionEmpty && indexedFirstPosition === null))
+  ) {
     throw new Error(`Fugue order index unavailable for event ${eventId}`);
   }
   const actualFirstPosition = conflictRegionEmpty
@@ -256,12 +263,10 @@ export const applyInsert = (
       run: null,
     };
     const expectedPosition = actualFirstPosition + offset;
-    const indexedPosition = useOracle ? null : fugueOrder.integrate(item);
-    if (!useOracle && indexedPosition === null) {
+    const indexedIntegrated =
+      useOracle || fugueOrder.integrateAtKnownPosition(item);
+    if (!indexedIntegrated) {
       throw new Error(`Fugue order index unavailable for event ${eventId}`);
-    }
-    if (indexedPosition !== null && indexedPosition !== expectedPosition) {
-      fugueOrder.invalidate();
     }
     sequence.insert(expectedPosition, item);
     itemsById.set(item.id, item);

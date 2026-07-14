@@ -82,7 +82,7 @@ export const applyDelete = (
         candidate.content.length - landing.offsetInRecord;
       const toDelete = Math.min(remaining, availableInRecord);
       const middle = recordSplitter.splitRecordForDelete(
-        landing.position,
+        candidate,
         landing.offsetInRecord,
         toDelete,
       );

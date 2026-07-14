@@ -3,7 +3,7 @@ import type { EventId } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
-import { EventItemIndex } from "./event-item-index";
+import { EventItemIndex, type EventItems } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import type { RecordContent } from "./record-content";
 
@@ -17,7 +17,6 @@ interface RecordSplitterDeps {
   readonly onRecordSplit?: (
     left: AugmentedCRDTItem,
     right: AugmentedCRDTItem,
-    rightPosition: number,
   ) => void;
 }
 
@@ -52,19 +51,40 @@ export class RecordSplitter {
    *   land on the right slice.
    */
   splitRecordAt(position: number, offsetInRecord: number): number {
-    const { sequence, itemsById, originLeftIndex, deleteTargets } = this.deps;
+    const { sequence } = this.deps;
     const left = sequence.at(position);
     if (!left || offsetInRecord <= 0 || offsetInRecord >= left.content.length) {
       return position + (offsetInRecord > 0 ? 1 : 0);
     }
 
+    this.splitRecord(left, offsetInRecord);
+    return position + 1;
+  }
+
+  private splitRecord(
+    left: AugmentedCRDTItem,
+    offsetInRecord: number,
+  ): AugmentedCRDTItem {
+    const { sequence, itemsById, originLeftIndex, deleteTargets } = this.deps;
+    if (offsetInRecord <= 0 || offsetInRecord >= left.content.length) {
+      throw new Error(
+        `Record split offset ${offsetInRecord} is invalid for ${left.id}`,
+      );
+    }
+
+    const leftOriginalContent = left.content;
     const leftOriginalLength = left.content.length;
     const rightContent = left.content.slice(offsetInRecord);
     left.content = left.content.slice(0, offsetInRecord);
-    sequence.updateItem(left);
 
     const right = this.buildSplitRightHalf(left, offsetInRecord, rightContent);
-    sequence.insert(position + 1, right);
+    if (!sequence.updateAndInsertAfter(left, right)) {
+      // The sequence still carries the old cached weights because the fused
+      // mutation did not run. Restore the object too before surfacing the
+      // violated internal invariant.
+      left.content = leftOriginalContent;
+      throw new Error(`Record ${left.id} missing from sequence index`);
+    }
     itemsById.set(right.id, right);
 
     // Existing items with `originLeft = left.id` were anchored to the
@@ -89,8 +109,8 @@ export class RecordSplitter {
       offsetInRecord,
       leftOriginalLength,
     );
-    this.deps.onRecordSplit?.(left, right, position + 1);
-    return position + 1;
+    this.deps.onRecordSplit?.(left, right);
+    return right;
   }
 
   /**
@@ -103,20 +123,16 @@ export class RecordSplitter {
    * shape for each side.
    */
   splitRecordForDelete(
-    position: number,
+    candidate: AugmentedCRDTItem,
     offsetInRecord: number,
     length: number,
   ): AugmentedCRDTItem {
+    let middle = candidate;
     if (offsetInRecord > 0) {
-      const afterPrefix = this.splitRecordAt(position, offsetInRecord);
-      position = afterPrefix;
-    }
-    const middle = this.deps.sequence.at(position);
-    if (!middle) {
-      throw new Error(`Record split missing record at position ${position}`);
+      middle = this.splitRecord(candidate, offsetInRecord);
     }
     if (length < middle.content.length) {
-      this.splitRecordAt(position, length);
+      this.splitRecord(middle, length);
     }
     return middle;
   }
@@ -127,11 +143,11 @@ export class RecordSplitter {
    * still holds more than this one event's code unit is carved into prefix /
    * slice / suffix records via {@link splitRecordAt}, which also remaps the
    * other events' `eventItems` entries to point at the new neighbours.
-   * After the call, `eventItems.get(eventId)` references exactly the slice
-   * to toggle.
+   * Returns the exact scalar/array references that the caller should toggle;
+   * this avoids a second event-index lookup after split bookkeeping.
    */
-  isolateRunSliceForEvent(eventId: EventId): void {
-    const { sequence, itemsById, eventItems } = this.deps;
+  isolateRunSliceForEvent(eventId: EventId): EventItems | undefined {
+    const { itemsById, eventItems } = this.deps;
     const items = eventItems.get(eventId);
     if (
       items === undefined ||
@@ -139,17 +155,17 @@ export class RecordSplitter {
     ) {
       // Event hasn't been integrated yet (e.g. a delete-only or pre-effect
       // retreat). Nothing to toggle.
-      return;
+      return items;
     }
     if (typeof items !== "string" && items.length > 1) {
       // Multi-character INSERT events stay one record per code unit, each with
       // its own id and `run === null`. The retreat / advance loop already
       // toggles every slice in order; no isolation is needed.
-      return;
+      return items;
     }
     const itemId = typeof items === "string" ? items : items[0];
     if (itemId === undefined) {
-      return;
+      return items;
     }
     const record = itemsById.get(itemId);
     if (!record) {
@@ -160,7 +176,13 @@ export class RecordSplitter {
     if (record.run === null) {
       // Placeholder or per-code-unit paste record — nothing to coalesce, so
       // the slice is already this event's whole contribution.
-      return;
+      return items;
+    }
+    if (record.content.length === 1) {
+      // Direct event mappings are rewritten with every typed-run split, so a
+      // one-code-unit record is already the exact slice. Avoid reparsing the
+      // canonical id on repeat retreat/advance transitions.
+      return items;
     }
     const parsed = parseEventId(eventId);
     if (parsed === null || parsed.replicaId !== record.run.replicaId) {
@@ -168,30 +190,27 @@ export class RecordSplitter {
       // The run-extension guard in `applyInsert` only seeds runs from
       // canonical `replicaId:sequence` ids, so this should be unreachable;
       // bail out conservatively rather than splitting at a wrong offset.
-      return;
+      return items;
     }
     const offsetInRecord = parsed.sequence - record.run.startSequence;
     if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
       // Same defensive bail-out: the eventItems entry should never point at
       // a record whose run no longer covers this event's sequence.
-      return;
+      return items;
     }
     if (offsetInRecord === 0 && record.content.length === 1) {
       // Slice is already its own record.
-      return;
+      return items;
     }
 
-    let position = sequence.positionOf(record);
-    if (position === -1) {
-      throw new Error(`Record ${record.id} missing from sequence index`);
-    }
+    let middle = record;
     if (offsetInRecord > 0) {
-      position = this.splitRecordAt(position, offsetInRecord);
+      middle = this.splitRecord(record, offsetInRecord);
     }
-    const middle = sequence.at(position);
-    if (middle && middle.content.length > 1) {
-      this.splitRecordAt(position, 1);
+    if (middle.content.length > 1) {
+      this.splitRecord(middle, 1);
     }
+    return middle.id;
   }
 
   private buildSplitRightHalf(

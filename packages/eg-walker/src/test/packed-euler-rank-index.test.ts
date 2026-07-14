@@ -118,9 +118,8 @@ describe("PackedEulerRankIndex", () => {
           leftNode,
           node,
         );
-        expect(index.insertSplitContinuation(leftNode, node)).toBe(
-          expectedRank,
-        );
+        index.insertSplitContinuation(leftNode, node);
+        expect(index.rankOfVisit(node)).toBe(expectedRank);
       } else {
         const targetNode =
           insertedNodes[Math.floor(random() * insertedNodes.length)]!;
@@ -168,13 +167,31 @@ describe("PackedEulerRankIndex", () => {
         leftNode,
         rightNode,
       );
-      expect(index.insertSplitContinuation(leftNode, rightNode)).toBe(
-        expectedRank,
-      );
+      index.insertSplitContinuation(leftNode, rightNode);
       expect(index.rankOfVisit(rightNode)).toBe(expectedRank);
     }
 
     expect(index.getMarkerOrder()).toEqual(model);
+  });
+
+  it("skips the rank walk when the caller already knows the position", () => {
+    const ranked = new PackedEulerRankIndex();
+    const unranked = new PackedEulerRankIndex();
+    for (let step = 0; step < 256; step++) {
+      const rankedNode = ranked.allocateNode();
+      const unrankedNode = unranked.allocateNode();
+      ranked.insertNodeBefore(0, PACKED_EULER_BOUNDARY.End, rankedNode);
+      unranked.insertNodeBeforeUnranked(
+        0,
+        PACKED_EULER_BOUNDARY.End,
+        unrankedNode,
+      );
+    }
+
+    expect(unranked.getMarkerOrder()).toEqual(ranked.getMarkerOrder());
+    expect(unranked.getStructuralOperationCount()).toBeLessThan(
+      ranked.getStructuralOperationCount(),
+    );
   });
 
   it("resets marker locations, handles, and structural counters", () => {

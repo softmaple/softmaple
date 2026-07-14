@@ -15,6 +15,15 @@ describe("DeleteTargetIndex", () => {
         "item-a",
         "item-b",
       ]);
+      expect(index.targetRefsOf("delete-1")).toEqual(["item-a", "item-b"]);
+    });
+
+    it("exposes a scalar hot-path ref while preserving targetsOf array semantics", () => {
+      const index = new DeleteTargetIndex();
+      index.record("delete-1", ["item-a"]);
+
+      expect(index.targetRefsOf("delete-1")).toBe("item-a");
+      expect(index.targetsOf("delete-1")).toEqual(["item-a"]);
     });
 
     it("defensively copies the caller's array so later mutations don't leak in", () => {
@@ -32,6 +41,27 @@ describe("DeleteTargetIndex", () => {
       const index = new DeleteTargetIndex();
       index.record("delete-empty", []);
       expect(Array.from(index.targetsOf("delete-empty") ?? [])).toEqual([]);
+    });
+  });
+
+  describe("entries", () => {
+    it("returns defensive target arrays for scalar and multi-target records", () => {
+      const index = new DeleteTargetIndex();
+      index.record("delete-scalar", ["item-a"]);
+      index.record("delete-many", ["item-b", "item-c"]);
+
+      const entries = index.entries();
+      expect(entries).toEqual([
+        { deleteEventId: "delete-scalar", targetIds: ["item-a"] },
+        {
+          deleteEventId: "delete-many",
+          targetIds: ["item-b", "item-c"],
+        },
+      ]);
+
+      const manyTargets = entries[1]?.targetIds as string[] | undefined;
+      manyTargets?.push("item-mutated");
+      expect(index.targetsOf("delete-many")).toEqual(["item-b", "item-c"]);
     });
   });
 
@@ -63,6 +93,14 @@ describe("DeleteTargetIndex", () => {
         "item-left",
         "item-right",
       ]);
+      expect(index.targetRefsOf("delete-1")).toEqual([
+        "item-left",
+        "item-right",
+      ]);
+      expect(index.targetRefsOf("delete-2")).toEqual([
+        "item-left",
+        "item-right",
+      ]);
     });
 
     it("does not extend deletes that never targeted the source item", () => {
@@ -89,6 +127,10 @@ describe("DeleteTargetIndex", () => {
       index.extendMembership("item-left", "item-right");
 
       expect(Array.from(index.targetsOf("delete-1") ?? [])).toEqual([
+        "item-left",
+        "item-right",
+      ]);
+      expect(index.targetRefsOf("delete-1")).toEqual([
         "item-left",
         "item-right",
       ]);

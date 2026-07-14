@@ -180,6 +180,37 @@ export class IndexedSequence<T extends object> {
   }
 
   /**
+   * Return whether `right` immediately follows `left` in sequence order.
+   *
+   * Leaf-order tracking makes the cross-leaf case a constant-time neighbour
+   * check. Within one leaf, the cached item offsets are sufficient. As with
+   * {@link compareOrder}, callers must opt into order tracking when creating
+   * the sequence.
+   */
+  areAdjacent(left: T, right: T): boolean {
+    if (!this.maintainOrder) {
+      throw new Error("Indexed sequence order tracking is disabled");
+    }
+    if (left === right) {
+      return false;
+    }
+
+    const leftLocation = this.resolveLocation(left);
+    const rightLocation = this.resolveLocation(right);
+    if (leftLocation === undefined || rightLocation === undefined) {
+      return false;
+    }
+    if (leftLocation.leaf === rightLocation.leaf) {
+      return rightLocation.offsetInLeaf === leftLocation.offsetInLeaf + 1;
+    }
+    return (
+      leftLocation.offsetInLeaf === leftLocation.leaf.items.length - 1 &&
+      rightLocation.offsetInLeaf === 0 &&
+      leftLocation.leaf.orderNext === rightLocation.leaf
+    );
+  }
+
+  /**
    * Effect-visible UTF-16 width before `item`.
    *
    * Unlike `positionOf(item)` followed by `effectIndexBeforePosition`, this
@@ -328,6 +359,72 @@ export class IndexedSequence<T extends object> {
     leaf.effectWeights[offset] = newEffect;
     leaf.anchorWeights[offset] = newAnchor;
     this.propagateDelta(leaf, 0, prepareDelta, effectDelta, anchorDelta);
+  }
+
+  /**
+   * Refresh a mutated anchor and insert its split continuation in one leaf
+   * operation. Returns `false` without changing the sequence when the anchor
+   * is unavailable or the inserted object is already resident.
+   *
+   * The cached anchor weights are read before the new weights are evaluated,
+   * then each resident array is spliced once and one combined delta is walked
+   * through the ancestors. This is the record-split counterpart to calling
+   * {@link updateItem} followed by {@link insertManyAfter}, without paying for
+   * two location lookups and two aggregate walks.
+   */
+  updateAndInsertAfter(anchor: T, inserted: T): boolean {
+    const location = this.resolveLocation(anchor);
+    if (
+      location === undefined ||
+      this.resolveLocation(inserted) !== undefined
+    ) {
+      return false;
+    }
+
+    this.structuralOperationCount++;
+    const leaf = location.leaf;
+    const offset = location.offsetInLeaf;
+    const insertOffset = offset + 1;
+    const oldPrepare = leaf.prepareWeights[offset] ?? 0;
+    const oldEffect = leaf.effectWeights[offset] ?? 0;
+    const oldAnchor = leaf.anchorWeights[offset] ?? 0;
+    const anchorPrepare = this.prepareWeight(anchor);
+    const anchorEffect = this.effectWeight(anchor);
+    const anchorAnchor = this.anchorWeight(anchor);
+    const insertedPrepare = this.prepareWeight(inserted);
+    const insertedEffect = this.effectWeight(inserted);
+    const insertedAnchor = this.anchorWeight(inserted);
+
+    leaf.items.splice(insertOffset, 0, inserted);
+    leaf.prepareWeights.splice(offset, 1, anchorPrepare, insertedPrepare);
+    leaf.effectWeights.splice(offset, 1, anchorEffect, insertedEffect);
+    leaf.anchorWeights.splice(offset, 1, anchorAnchor, insertedAnchor);
+
+    for (let index = insertOffset; index < leaf.items.length; index++) {
+      const item = leaf.items[index];
+      if (item === undefined) {
+        continue;
+      }
+      const itemLocation = this.locationsByItem.get(item);
+      if (itemLocation === undefined) {
+        this.locationsByItem.set(item, { leaf, offsetInLeaf: index });
+      } else {
+        itemLocation.leaf = leaf;
+        itemLocation.offsetInLeaf = index;
+      }
+    }
+
+    this.propagateDelta(
+      leaf,
+      1,
+      anchorPrepare - oldPrepare + insertedPrepare,
+      anchorEffect - oldEffect + insertedEffect,
+      anchorAnchor - oldAnchor + insertedAnchor,
+    );
+    if (leaf.items.length > LEAF_CAPACITY) {
+      this.splitLeaf(leaf);
+    }
+    return true;
   }
 
   updateWeights(): void {

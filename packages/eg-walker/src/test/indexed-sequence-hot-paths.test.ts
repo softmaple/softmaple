@@ -110,4 +110,108 @@ describe("IndexedSequence object-anchored hot paths", () => {
       ),
     ).toBe(false);
   });
+
+  it("updates a split anchor and inserts its continuation with one aggregate walk", () => {
+    const items = [
+      { id: "left", prepare: 1, effect: 2, anchor: 1 },
+      { id: "split", prepare: 3, effect: 4, anchor: 1 },
+      { id: "right", prepare: 2, effect: 1, anchor: 1 },
+    ];
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => item.prepare,
+      (item) => item.effect,
+      items,
+      (item) => item.anchor,
+      true,
+    );
+    const continuation = {
+      id: "continuation",
+      prepare: 4,
+      effect: 5,
+      anchor: 2,
+    };
+
+    // The old values remain in the leaf caches until the fused operation, so
+    // the aggregate delta must account for both the mutation and insertion.
+    items[1]!.prepare = 0;
+    items[1]!.effect = 2;
+    items[1]!.anchor = 0;
+
+    sequence.restoreStructuralOperationCount(0);
+    expect(sequence.updateAndInsertAfter(items[1]!, continuation)).toBe(true);
+    expect(sequence.getStructuralOperationCount()).toBe(2);
+    expect(sequence.toArray()).toEqual([
+      items[0],
+      items[1],
+      continuation,
+      items[2],
+    ]);
+    expect(sequence.prepareLength).toBe(7);
+    expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(10);
+    expect(sequence.nextPrepareAnchorPosition(1)).toBe(2);
+    expect(sequence.positionOf(continuation)).toBe(2);
+    expect(sequence.areAdjacent(items[1]!, continuation)).toBe(true);
+
+    const beforeRejectedInsert = sequence.toArray();
+    expect(sequence.updateAndInsertAfter(items[0]!, continuation)).toBe(false);
+    expect(
+      sequence.updateAndInsertAfter(
+        { id: "missing", prepare: 1, effect: 1, anchor: 1 },
+        { id: "unused", prepare: 1, effect: 1, anchor: 1 },
+      ),
+    ).toBe(false);
+    expect(sequence.toArray()).toEqual(beforeRejectedInsert);
+  });
+
+  it("keeps adjacency and ranks correct when a 32-item leaf splits", () => {
+    const items = createItems(64);
+    const sequence = new IndexedSequence<WeightedItem>(
+      (item) => item.prepare,
+      (item) => item.effect,
+      items,
+      undefined,
+      true,
+    );
+    const continuation: WeightedItem = {
+      id: "boundary-continuation",
+      prepare: 2,
+      effect: 3,
+    };
+    const oldPrepareLength = sequence.prepareLength;
+    const oldEffectLength = sequence.effectIndexBeforePosition(sequence.length);
+
+    // Item 31 is the final record in the first full leaf. Inserting after it
+    // grows that leaf from 32 to 33 records and creates a leaf boundary between
+    // the continuation and the old item 32.
+    expect(sequence.updateAndInsertAfter(items[31]!, continuation)).toBe(true);
+    expect(sequence.length).toBe(65);
+    expect(sequence.prepareLength).toBe(
+      oldPrepareLength + continuation.prepare,
+    );
+    expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(
+      oldEffectLength + continuation.effect,
+    );
+    expect(sequence.positionOf(items[31]!)).toBe(31);
+    expect(sequence.positionOf(continuation)).toBe(32);
+    expect(sequence.positionOf(items[32]!)).toBe(33);
+
+    const operationsBeforeAdjacencyChecks =
+      sequence.getStructuralOperationCount();
+    expect(sequence.areAdjacent(items[30]!, items[31]!)).toBe(true);
+    expect(sequence.areAdjacent(items[31]!, continuation)).toBe(true);
+    expect(sequence.areAdjacent(continuation, items[32]!)).toBe(true);
+    expect(sequence.areAdjacent(items[32]!, continuation)).toBe(false);
+    expect(sequence.areAdjacent(items[30]!, items[32]!)).toBe(false);
+    expect(sequence.areAdjacent(items[31]!, items[31]!)).toBe(false);
+    expect(
+      sequence.areAdjacent(items[31]!, {
+        id: "missing",
+        prepare: 1,
+        effect: 1,
+      }),
+    ).toBe(false);
+    expect(sequence.getStructuralOperationCount()).toBe(
+      operationsBeforeAdjacencyChecks,
+    );
+  });
 });

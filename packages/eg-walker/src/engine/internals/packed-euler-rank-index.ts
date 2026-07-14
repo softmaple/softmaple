@@ -110,13 +110,36 @@ export class PackedEulerRankIndex {
     targetBoundary: PackedEulerBoundary,
     node: PackedEulerNodeHandle,
   ): number {
+    return this.insertNodeBeforeInternal(
+      targetNode,
+      targetBoundary,
+      node,
+      true,
+    )!;
+  }
+
+  /** Insert a node when the caller already knows its document position. */
+  insertNodeBeforeUnranked(
+    targetNode: PackedEulerNodeHandle,
+    targetBoundary: PackedEulerBoundary,
+    node: PackedEulerNodeHandle,
+  ): void {
+    this.insertNodeBeforeInternal(targetNode, targetBoundary, node, false);
+  }
+
+  private insertNodeBeforeInternal(
+    targetNode: PackedEulerNodeHandle,
+    targetBoundary: PackedEulerBoundary,
+    node: PackedEulerNodeHandle,
+    collectRank: boolean,
+  ): number | undefined {
     this.assertAllocatedNode(targetNode);
     this.assertAllocatedNode(node);
     const firstMarker = markerId(node, PACKED_EULER_BOUNDARY.Start);
     this.assertMarkerRunAvailable(firstMarker, MARKERS_PER_NODE);
 
     const target = this.requireLocation(markerId(targetNode, targetBoundary));
-    const rank = this.visitRankBefore(target);
+    const rank = collectRank ? this.visitRankBefore(target) : undefined;
     this.insertRun(
       this.leafForLocation(target),
       slotForLocation(target),
@@ -136,7 +159,7 @@ export class PackedEulerRankIndex {
   insertSplitContinuation(
     leftNode: PackedEulerNodeHandle,
     rightNode: PackedEulerNodeHandle,
-  ): number {
+  ): void {
     this.assertAllocatedNode(leftNode);
     this.assertAllocatedNode(rightNode);
     if (leftNode === 0) {
@@ -149,7 +172,6 @@ export class PackedEulerRankIndex {
     const leftVisit = this.requireLocation(
       markerId(leftNode, PACKED_EULER_BOUNDARY.Visit),
     );
-    const rank = this.visitRankBefore(leftVisit) + 1;
     this.insertRun(
       this.leafForLocation(leftVisit),
       slotForLocation(leftVisit) + 1,
@@ -168,7 +190,6 @@ export class PackedEulerRankIndex {
       markerId(rightNode, PACKED_EULER_BOUNDARY.End),
       1,
     );
-    return rank;
   }
 
   rankOfVisit(node: PackedEulerNodeHandle): number {

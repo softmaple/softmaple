@@ -3,6 +3,7 @@ import {
   compareEventIds,
   compareEventIdSortKeys,
   createEventIdSortKey,
+  parseEventId,
 } from "../graph/event-id";
 import type { EventId, GraphEvent } from "../types";
 import { OPERATION_TYPE } from "../constants/operation-types";
@@ -89,6 +90,45 @@ const buildCanonical = (
 };
 
 describe("compareEventIds (numeric suffix tie-break)", () => {
+  it("parses the canonical sequence boundaries", () => {
+    expect(parseEventId("replica:0")).toEqual({
+      replicaId: "replica",
+      sequence: 0,
+    });
+    expect(parseEventId("team:replica:42")).toEqual({
+      replicaId: "team:replica",
+      sequence: 42,
+    });
+    expect(parseEventId("replica:9007199254740991")).toEqual({
+      replicaId: "replica",
+      sequence: Number.MAX_SAFE_INTEGER,
+    });
+  });
+
+  it("rejects non-canonical and unsafe sequence suffixes", () => {
+    const invalidIds: EventId[] = [
+      "replica",
+      ":0",
+      "replica:",
+      "replica:00",
+      "replica:01",
+      "replica:+1",
+      "replica:-1",
+      "replica:1.0",
+      "replica:1e2",
+      "replica: 1",
+      "replica:1 ",
+      "replica:\u0661",
+      "replica:\uff11",
+      "replica:9007199254740992",
+      "replica:99999999999999999999999999999999999999999999999999",
+    ];
+
+    for (const id of invalidIds) {
+      expect(parseEventId(id), id).toBeNull();
+    }
+  });
+
   it("orders r1:10 after r1:2 numerically", () => {
     expect(compareEventIds("r1:2", "r1:10")).toBeLessThan(0);
     expect(compareEventIds("r1:10", "r1:2")).toBeGreaterThan(0);

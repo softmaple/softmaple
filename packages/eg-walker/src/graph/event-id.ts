@@ -19,7 +19,7 @@
 
 import type { EventId } from "../types";
 
-const NUMERIC_SUFFIX = /^(0|[1-9]\d*)$/;
+const MAX_SAFE_SEQUENCE_DIGITS = 16;
 
 /**
  * Compare two event IDs with numeric-aware semantics on the
@@ -103,17 +103,37 @@ interface ParsedEventId {
 
 const splitTrailingSequence = (id: EventId): ParsedEventId | null => {
   const colonIndex = id.lastIndexOf(":");
-  if (colonIndex <= 0 || colonIndex === id.length - 1) {
+  const suffixStart = colonIndex + 1;
+  const suffixLength = id.length - suffixStart;
+  if (
+    colonIndex <= 0 ||
+    suffixLength === 0 ||
+    suffixLength > MAX_SAFE_SEQUENCE_DIGITS
+  ) {
     return null;
   }
-  const suffix = id.slice(colonIndex + 1);
-  if (!NUMERIC_SUFFIX.test(suffix)) {
+
+  let codeUnit = id.charCodeAt(suffixStart);
+  if (
+    codeUnit < 48 ||
+    codeUnit > 57 ||
+    (codeUnit === 48 && suffixLength !== 1)
+  ) {
     return null;
   }
-  const sequence = Number(suffix);
-  if (!Number.isSafeInteger(sequence)) {
+
+  let sequence = codeUnit - 48;
+  for (let index = suffixStart + 1; index < id.length; index++) {
+    codeUnit = id.charCodeAt(index);
+    if (codeUnit < 48 || codeUnit > 57) {
+      return null;
+    }
+    sequence = sequence * 10 + (codeUnit - 48);
+  }
+  if (sequence > Number.MAX_SAFE_INTEGER) {
     return null;
   }
+
   return { prefix: id.slice(0, colonIndex), sequence };
 };
 

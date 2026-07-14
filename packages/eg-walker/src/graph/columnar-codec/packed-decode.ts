@@ -261,52 +261,52 @@ const buildEdges = (
     };
   }
   validateOverrideOffsets(overrides, count);
+  const edgeCount = countPackedEdges(count, overrides);
   const parentStarts = new Uint32Array(count + 1);
+  const parentOffsets = new Uint32Array(edgeCount);
   const childCounts = new Uint32Array(count);
-  let edgeCount = 0;
   let overrideCursor = 0;
+  let parentCursor = 0;
 
   for (let eventOffset = 0; eventOffset < count; eventOffset++) {
     const override = overrides[overrideCursor];
     if (override?.eventOffset === eventOffset) {
-      validateParents(override.parents, eventOffset, idIndex);
-      edgeCount += override.parents.length;
-      for (const parent of override.parents) {
-        const parentOffset = idIndex.offsetOf(parent)!;
+      const seen = override.parents.length > 1 ? new Set<EventId>() : undefined;
+      for (const parent of override.parents as ReadonlyArray<unknown>) {
+        const parentOffset = resolveParentOffset(
+          parent,
+          eventOffset,
+          idIndex,
+          seen,
+        );
+        parentOffsets[parentCursor++] = parentOffset;
         childCounts[parentOffset] = childCounts[parentOffset]! + 1;
       }
       overrideCursor++;
     } else if (eventOffset > 0) {
-      edgeCount++;
-      childCounts[eventOffset - 1] = childCounts[eventOffset - 1]! + 1;
+      const parentOffset = eventOffset - 1;
+      parentOffsets[parentCursor++] = parentOffset;
+      childCounts[parentOffset] = childCounts[parentOffset]! + 1;
     }
-    if (edgeCount > 0xffffffff) {
-      throw new Error("Packed event graph contains too many edges");
-    }
-    parentStarts[eventOffset + 1] = edgeCount;
+    parentStarts[eventOffset + 1] = parentCursor;
   }
 
-  const parentOffsets = new Uint32Array(edgeCount);
-  overrideCursor = 0;
-  let parentCursor = 0;
-  for (let eventOffset = 0; eventOffset < count; eventOffset++) {
-    const override = overrides[overrideCursor];
-    if (override?.eventOffset === eventOffset) {
-      for (const parent of override.parents) {
-        parentOffsets[parentCursor++] = idIndex.offsetOf(parent)!;
-      }
-      overrideCursor++;
-    } else if (eventOffset > 0) {
-      parentOffsets[parentCursor++] = eventOffset - 1;
-    }
+  if (parentCursor !== edgeCount) {
+    throw new Error("Packed event graph edge count changed during decode");
   }
 
   const childStarts = new Uint32Array(count + 1);
+  const frontier = new Set<EventId>();
   for (let offset = 0; offset < count; offset++) {
     childStarts[offset + 1] = childStarts[offset]! + childCounts[offset]!;
+    if (childCounts[offset] === 0) frontier.add(ids[offset]!);
   }
   const childOffsets = new Uint32Array(edgeCount);
-  const childCursors = childStarts.slice(0, count);
+  // Child counts are dead after the frontier and prefix sums are known. Reuse
+  // the same O(N) typed array as the mutable CSR cursors instead of allocating
+  // a second copy of `childStarts` at peak decode memory.
+  const childCursors = childCounts;
+  childCursors.set(childStarts.subarray(0, count));
   for (let childOffset = 0; childOffset < count; childOffset++) {
     const start = parentStarts[childOffset]!;
     const end = parentStarts[childOffset + 1]!;
@@ -318,10 +318,6 @@ const buildEdges = (
     }
   }
 
-  const frontier = new Set<EventId>();
-  for (let offset = 0; offset < count; offset++) {
-    if (childCounts[offset] === 0) frontier.add(ids[offset]!);
-  }
   return {
     parentStarts,
     parentOffsets,
@@ -330,6 +326,22 @@ const buildEdges = (
     frontier,
     implicitLinearEdges: false,
   };
+};
+
+const countPackedEdges = (
+  eventCount: number,
+  overrides: ReadonlyArray<ParentOverride>,
+): number => {
+  let edgeCount = Math.max(0, eventCount - 1);
+  for (const override of overrides) {
+    // An override replaces the implicit edge from the immediately preceding
+    // event (except at offset zero, where there is no implicit edge).
+    edgeCount += override.parents.length - (override.eventOffset > 0 ? 1 : 0);
+    if (!Number.isSafeInteger(edgeCount) || edgeCount > 0xffffffff) {
+      throw new Error("Packed event graph contains too many edges");
+    }
+  }
+  return edgeCount;
 };
 
 const validateOverrideOffsets = (
@@ -350,34 +362,33 @@ const validateOverrideOffsets = (
   }
 };
 
-const validateParents = (
-  parents: ReadonlyArray<EventId>,
+const resolveParentOffset = (
+  parent: unknown,
   childOffset: number,
   idIndex: PackedEventOffsetLookup,
-): void => {
-  const seen = parents.length > 1 ? new Set<EventId>() : null;
-  for (const parent of parents as ReadonlyArray<unknown>) {
-    if (typeof parent !== "string" || parent.length === 0) {
-      throw new Error(
-        `Event at offset ${childOffset} contains a non-string parent`,
-      );
-    }
-    if (seen?.has(parent)) {
-      throw new Error(
-        `Event at offset ${childOffset} contains duplicate parent ${parent}`,
-      );
-    }
-    seen?.add(parent);
-    const parentOffset = idIndex.offsetOf(parent);
-    if (parentOffset === undefined) {
-      throw new Error(`Missing parent event: ${parent}`);
-    }
-    if (parentOffset >= childOffset) {
-      throw new Error(
-        `Parent ${parent} is not before child ${idsForError(childOffset)}`,
-      );
-    }
+  seen: Set<EventId> | undefined,
+): number => {
+  if (typeof parent !== "string" || parent.length === 0) {
+    throw new Error(
+      `Event at offset ${childOffset} contains a non-string parent`,
+    );
   }
+  if (seen?.has(parent)) {
+    throw new Error(
+      `Event at offset ${childOffset} contains duplicate parent ${parent}`,
+    );
+  }
+  seen?.add(parent);
+  const parentOffset = idIndex.offsetOf(parent);
+  if (parentOffset === undefined) {
+    throw new Error(`Missing parent event: ${parent}`);
+  }
+  if (parentOffset >= childOffset) {
+    throw new Error(
+      `Parent ${parent} is not before child ${idsForError(childOffset)}`,
+    );
+  }
+  return parentOffset;
 };
 
 const idsForError = (offset: number): string => `at offset ${offset}`;

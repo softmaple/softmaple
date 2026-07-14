@@ -1,6 +1,7 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
+import type { PackedOffsetTransition } from "../graph/internals/packed-diff-versions";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
   containsUtf16SurrogateCodeUnit,
@@ -31,6 +32,7 @@ import { FugueOrderIndex } from "./internals/fugue-order-index";
 import {
   applyInsert,
   type InsertHandlerDeps,
+  type InsertTailResult,
 } from "./internals/insert-handler";
 import { OriginLeftIndex } from "./internals/origin-left-index";
 import { PendingInsertBuffer } from "./internals/pending-insert-buffer";
@@ -156,6 +158,10 @@ export class EgWalkerEngine {
   private useLinearIntegrationOracle = false;
   private prepareViewMayContainSurrogatePairs = false;
   private deferTextMaterialization = false;
+  private packedInsertTail: AugmentedCRDTItem | null = null;
+  private packedInsertNextPrepareIndex = -1;
+  private readonly packedInsertTailResult: InsertTailResult = { item: null };
+  private readonly packedPrepareDeltas = new Map<AugmentedCRDTItem, number>();
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -216,9 +222,10 @@ export class EgWalkerEngine {
       orderIndex < endOrderIndex;
       orderIndex++
     ) {
+      const eventOffset = plan.eventOffsetAt(orderIndex);
       currentOffset = this.processPackedEvent(
         plan,
-        orderIndex,
+        eventOffset,
         startOrderIndex,
         endOrderIndex,
         currentOffset,
@@ -618,67 +625,131 @@ export class EgWalkerEngine {
 
   private processPackedEvent(
     plan: PackedCriticalReplayPlan,
-    orderIndex: number,
+    eventOffset: number,
     rangeStart: number,
     rangeEnd: number,
     currentOffset: number | null,
   ): number {
     const nonConflicting =
       currentOffset === null
-        ? plan.parentsEqualVersionAt(orderIndex, this.currentVersion)
-        : plan.hasSingleParentOffsetAt(orderIndex, currentOffset);
+        ? plan.parentsEqualVersionAtKnownOffset(
+            eventOffset,
+            this.currentVersion,
+          )
+        : plan.hasSingleParentAtKnownOffset(eventOffset, currentOffset);
 
     if (!nonConflicting) {
       const transition =
         currentOffset === null
-          ? plan.transitionFromVersion(this.currentVersion, orderIndex)
-          : plan.transitionFromOffset(currentOffset, orderIndex);
-      for (let index = 0; index < transition.retreatCount; index++) {
-        const offset = transition.retreatOffsets[index]!;
-        const rank = plan.orderIndexOfOffset(offset);
-        if (rank < rangeStart || rank >= rangeEnd) {
-          continue;
-        }
-        this.adjustPrepareState(
-          plan.eventIdAtOffset(offset),
-          plan.isInsertAtOffset(offset),
-          -1,
-        );
-        this.retreatCount++;
-      }
-      for (let index = 0; index < transition.advanceCount; index++) {
-        const offset = transition.advanceOffsets[index]!;
-        const rank = plan.orderIndexOfOffset(offset);
-        if (rank < rangeStart || rank >= rangeEnd) {
-          continue;
-        }
-        this.adjustPrepareState(
-          plan.eventIdAtOffset(offset),
-          plan.isInsertAtOffset(offset),
-          1,
-        );
-        this.advanceCount++;
-      }
+          ? plan.transitionFromVersionToKnownOffset(
+              this.currentVersion,
+              eventOffset,
+            )
+          : plan.transitionBetweenKnownOffsets(currentOffset, eventOffset);
+      this.applyPackedPrepareTransition(plan, transition, rangeStart, rangeEnd);
       this.fullReplayCount++;
     } else {
       this.nonConflictingRunCount++;
     }
 
-    this.applyPackedOperation(plan, orderIndex);
+    this.applyPackedOperation(plan, eventOffset, nonConflicting);
     this.processedEventCount++;
     this.samplePeakSequenceRecordCount();
-    return plan.eventOffsetAt(orderIndex);
+    return eventOffset;
+  }
+
+  private applyPackedPrepareTransition(
+    plan: PackedCriticalReplayPlan,
+    transition: PackedOffsetTransition,
+    rangeStart: number,
+    rangeEnd: number,
+  ): void {
+    const deltas = this.packedPrepareDeltas;
+    deltas.clear();
+
+    // Split every affected insert slice before resolving delete targets. A
+    // split extends existing delete membership to both halves; resolving
+    // deletes afterwards therefore observes the final record boundaries and
+    // lets all prepare-state changes commute inside this transition.
+    for (let index = 0; index < transition.retreatCount; index++) {
+      const offset = transition.retreatOffsets[index]!;
+      const rank = plan.orderIndexOfKnownOffset(offset);
+      if (rank < rangeStart || rank >= rangeEnd) {
+        continue;
+      }
+      if (plan.isInsertAtKnownOffset(offset)) {
+        this.collectInsertPrepareDelta(
+          plan.eventIdAtKnownOffset(offset),
+          -1,
+          deltas,
+        );
+      }
+      this.retreatCount++;
+    }
+    for (let index = 0; index < transition.advanceCount; index++) {
+      const offset = transition.advanceOffsets[index]!;
+      const rank = plan.orderIndexOfKnownOffset(offset);
+      if (rank < rangeStart || rank >= rangeEnd) {
+        continue;
+      }
+      if (plan.isInsertAtKnownOffset(offset)) {
+        this.collectInsertPrepareDelta(
+          plan.eventIdAtKnownOffset(offset),
+          1,
+          deltas,
+        );
+      }
+      this.advanceCount++;
+    }
+
+    for (let index = 0; index < transition.retreatCount; index++) {
+      const offset = transition.retreatOffsets[index]!;
+      const rank = plan.orderIndexOfKnownOffset(offset);
+      if (
+        rank >= rangeStart &&
+        rank < rangeEnd &&
+        !plan.isInsertAtKnownOffset(offset)
+      ) {
+        this.collectDeletePrepareDelta(
+          plan.eventIdAtKnownOffset(offset),
+          -1,
+          deltas,
+        );
+      }
+    }
+    for (let index = 0; index < transition.advanceCount; index++) {
+      const offset = transition.advanceOffsets[index]!;
+      const rank = plan.orderIndexOfKnownOffset(offset);
+      if (
+        rank >= rangeStart &&
+        rank < rangeEnd &&
+        !plan.isInsertAtKnownOffset(offset)
+      ) {
+        this.collectDeletePrepareDelta(
+          plan.eventIdAtKnownOffset(offset),
+          1,
+          deltas,
+        );
+      }
+    }
+
+    for (const [item, delta] of deltas) {
+      item.prepareState += delta;
+    }
+    this.sequence.updateItems(deltas.keys());
+    deltas.clear();
   }
 
   private applyPackedOperation(
     plan: PackedCriticalReplayPlan,
-    orderIndex: number,
+    eventOffset: number,
+    mayContinuePreviousInsert: boolean,
   ): void {
-    const eventId = plan.eventIdAt(orderIndex);
-    const operationIndex = plan.operationIndexAt(orderIndex);
-    const operationLength = plan.operationLengthAt(orderIndex);
-    if (plan.isInsertAt(orderIndex)) {
-      const start = plan.insertStartAt(orderIndex);
+    const eventId = plan.eventIdAtKnownOffset(eventOffset);
+    const operationIndex = plan.operationIndexAtKnownOffset(eventOffset);
+    const operationLength = plan.operationLengthAtKnownOffset(eventOffset);
+    if (plan.isInsertAtKnownOffset(eventOffset)) {
+      const start = plan.insertStartAtKnownOffset(eventOffset);
       const insertedText = plan.sliceInsertedContent(
         start,
         start + operationLength,
@@ -689,6 +760,12 @@ export class EgWalkerEngine {
         operationLength,
         false,
       );
+      const knownTail =
+        mayContinuePreviousInsert &&
+        this.packedInsertTail !== null &&
+        operationIndex === this.packedInsertNextPrepareIndex
+          ? this.packedInsertTail
+          : null;
       applyInsert(
         eventId,
         operationIndex,
@@ -696,12 +773,18 @@ export class EgWalkerEngine {
         this.insertDeps,
         false,
         this.deferTextMaterialization,
+        knownTail,
+        this.packedInsertTailResult,
       );
+      this.packedInsertTail = this.packedInsertTailResult.item;
+      this.packedInsertNextPrepareIndex = operationIndex + operationLength;
       this.prepareViewMayContainSurrogatePairs ||=
         containsUtf16SurrogateCodeUnit(insertedText);
       return;
     }
 
+    this.packedInsertTail = null;
+    this.packedInsertNextPrepareIndex = -1;
     this.assertOperationInPrepareView(
       eventId,
       operationIndex,
@@ -789,6 +872,10 @@ export class EgWalkerEngine {
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle =
       options.integrationMode === "linear-oracle";
+    this.packedInsertTail = null;
+    this.packedInsertNextPrepareIndex = -1;
+    this.packedInsertTailResult.item = null;
+    this.packedPrepareDeltas.clear();
     this.placeholderCounter = 0;
 
     if (this.resultingText.length === 0) {
@@ -1010,6 +1097,50 @@ export class EgWalkerEngine {
         item.prepareState += delta;
         this.sequence.updateItem(item);
       }
+    }
+  }
+
+  private collectInsertPrepareDelta(
+    eventId: EventId,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    const eventItems = this.recordSplitter.isolateRunSliceForEvent(eventId);
+    if (typeof eventItems === "string") {
+      this.collectItemPrepareDelta(eventItems, delta, deltas);
+      return;
+    }
+    for (const itemId of eventItems ?? []) {
+      this.collectItemPrepareDelta(itemId, delta, deltas);
+    }
+  }
+
+  private collectDeletePrepareDelta(
+    eventId: EventId,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    const targetRefs = this.deleteTargets.targetRefsOf(eventId);
+    if (typeof targetRefs === "string") {
+      this.collectItemPrepareDelta(targetRefs, delta, deltas);
+      return;
+    }
+    for (const itemId of targetRefs ?? []) {
+      this.collectItemPrepareDelta(itemId, delta, deltas);
+    }
+  }
+
+  private collectItemPrepareDelta(
+    itemId: EventId,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    const item = this.requireItem(itemId);
+    const next = (deltas.get(item) ?? 0) + delta;
+    if (next === 0) {
+      deltas.delete(item);
+    } else {
+      deltas.set(item, next);
     }
   }
 

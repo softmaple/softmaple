@@ -163,6 +163,93 @@ describe("IndexedSequence object-anchored hot paths", () => {
     expect(sequence.toArray()).toEqual(beforeRejectedInsert);
   });
 
+  it("inserts one item after an object anchor without a rank walk", () => {
+    const items = createItems(64);
+    const sequence = new IndexedSequence<WeightedItem>(
+      (item) => item.prepare,
+      (item) => item.effect,
+      items,
+      undefined,
+      true,
+    );
+    const inserted: WeightedItem = {
+      id: "object-anchored",
+      prepare: 2,
+      effect: 3,
+    };
+
+    sequence.restoreStructuralOperationCount(0);
+    expect(sequence.insertAfter(items[31]!, inserted)).toBe(true);
+    expect(sequence.positionOf(inserted)).toBe(32);
+    expect(sequence.areAdjacent(items[31]!, inserted)).toBe(true);
+    expect(sequence.areAdjacent(inserted, items[32]!)).toBe(true);
+    expect(sequence.isLast(inserted)).toBe(false);
+    expect(sequence.isLast(items[63]!)).toBe(true);
+    expect(sequence.insertAfter(items[31]!, inserted)).toBe(false);
+    expect(
+      sequence.insertAfter(
+        { id: "missing", prepare: 1, effect: 1 },
+        { id: "unused", prepare: 1, effect: 1 },
+      ),
+    ).toBe(false);
+  });
+
+  it("finds the final item across leaves without order tracking", () => {
+    const items = createItems(64);
+    const sequence = new IndexedSequence<WeightedItem>(
+      (item) => item.prepare,
+      (item) => item.effect,
+      items,
+    );
+
+    expect(sequence.isLast(items[31]!)).toBe(false);
+    expect(sequence.isLast(items[63]!)).toBe(true);
+  });
+
+  it("aggregates multi-item weight updates by touched tree nodes", () => {
+    const batchedItems = createItems(96);
+    const scalarItems = createItems(96);
+    const createSequence = (items: WeightedItem[]) =>
+      new IndexedSequence<WeightedItem>(
+        (item) => item.prepare,
+        (item) => item.effect,
+        items,
+        undefined,
+        true,
+      );
+    const batched = createSequence(batchedItems);
+    const scalar = createSequence(scalarItems);
+    const indexes = [1, 2, 3, 31, 32, 33, 70, 71, 72];
+    for (const index of indexes) {
+      Object.assign(batchedItems[index]!, {
+        prepare: index % 2,
+        effect: (index + 1) % 2,
+      });
+      Object.assign(scalarItems[index]!, {
+        prepare: index % 2,
+        effect: (index + 1) % 2,
+      });
+    }
+
+    batched.restoreStructuralOperationCount(0);
+    scalar.restoreStructuralOperationCount(0);
+    batched.updateItems(indexes.map((index) => batchedItems[index]!));
+    for (const index of indexes) {
+      scalar.updateItem(scalarItems[index]!);
+    }
+
+    expect(batched.prepareLength).toBe(scalar.prepareLength);
+    expect(batched.effectIndexBeforePosition(batched.length)).toBe(
+      scalar.effectIndexBeforePosition(scalar.length),
+    );
+    expect(batched.prepareIndexToPosition(20, false)).toBe(
+      scalar.prepareIndexToPosition(20, false),
+    );
+    expect(batched.getStructuralOperationCount()).toBeLessThan(
+      scalar.getStructuralOperationCount(),
+    );
+  });
+
   it("keeps adjacency and ranks correct when a 32-item leaf splits", () => {
     const items = createItems(64);
     const sequence = new IndexedSequence<WeightedItem>(

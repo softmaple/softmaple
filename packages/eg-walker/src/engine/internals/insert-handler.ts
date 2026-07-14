@@ -29,6 +29,10 @@ export interface InsertHandlerDeps {
   readonly useLinearIntegrationOracle: () => boolean;
 }
 
+export interface InsertTailResult {
+  item: AugmentedCRDTItem | null;
+}
+
 export const applyInsert = (
   eventId: EventId,
   operationIndex: number,
@@ -36,6 +40,8 @@ export const applyInsert = (
   deps: InsertHandlerDeps,
   collectTransformedOperations: boolean,
   deferTextMaterialization: boolean,
+  knownTail: AugmentedCRDTItem | null = null,
+  tailResult?: InsertTailResult,
 ): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
@@ -53,65 +59,71 @@ export const applyInsert = (
     useLinearIntegrationOracle,
   } = deps;
 
+  if (tailResult !== undefined) {
+    tailResult.item = null;
+  }
+
   if (insertedText.length === 0) {
     eventItems.set(eventId, []);
     return NO_TRANSFORMED_OPERATIONS;
   }
 
-  const landing = sequence.prepareIndexToPositionAndOffset(
-    operationIndex,
-    true,
-  );
-  const firstInsertPosition =
-    landing.offsetInRecord > 0
-      ? recordSplitter.splitRecordAt(landing.position, landing.offsetInRecord)
-      : landing.position;
-  // YATA-style origins are derived from the event's parent (prepare) version,
-  // NOT from whichever concurrent records happen to be sitting in the
-  // sequence right now. Without this filter the engine would assign different
-  // origins to the same event depending on which concurrent siblings were
-  // integrated first, breaking traversal-order independence.
-  const originLeftPosition =
-    sequence.previousPrepareVisiblePosition(firstInsertPosition);
-  const originLeft =
-    originLeftPosition === null
-      ? null
-      : (sequence.at(originLeftPosition)?.id ?? null);
-  // The paper artifact's YjsMod/Fugue right-origin search starts at the first
-  // record that exists in the prepare version, including a record deleted in
-  // that version. A deleted record has zero prepare *width* but is still an
-  // ordering anchor. Using the next prepare-visible record here skips such
-  // anchors and makes the origin tuple depend on which valid topological order
-  // happened to build the sequence.
-  const anchorSearchStart = (originLeftPosition ?? -1) + 1;
+  const useOracle = useLinearIntegrationOracle();
+  const knownBoundary =
+    !useOracle &&
+    knownTail !== null &&
+    knownTail.prepareState === 1 &&
+    !knownTail.everDeleted &&
+    !originLeftIndex.has(knownTail.id);
+  let firstInsertPosition = -1;
+  let originLeftPosition: number | null = null;
+  let originLeftRecord: AugmentedCRDTItem | undefined = knownBoundary
+    ? (knownTail ?? undefined)
+    : undefined;
+  let originLeft = originLeftRecord?.id ?? null;
   let originRightPosition: number | null = null;
-  const candidatePosition =
-    sequence.nextPrepareAnchorPosition(anchorSearchStart);
-  const candidate =
-    candidatePosition === null ? undefined : sequence.at(candidatePosition);
-  originRightPosition =
-    candidate !== undefined && candidate.originLeft === originLeft
-      ? candidatePosition
-      : null;
-  const originRight =
-    originRightPosition === null
-      ? null
-      : (sequence.at(originRightPosition)?.id ?? null);
+  let originRight: EventId | null = null;
+  let conflictRegionEmpty = knownBoundary;
 
-  // Section 3.4 internal-document fast path for the first item.
-  //
-  // The YATA integration scan walks the sequence positions strictly between
-  // `originLeft` and `originRight`. When that range is empty (no retreated,
-  // deleted, or otherwise non-prepare-visible records sit in it) the scan
-  // is provably a no-op, so we can place the first item at
-  // `firstInsertPosition` without invoking it. The dominant case for this
-  // is a non-conflicting run: no concurrent siblings have been integrated
-  // near the insertion point, so the previous-prepare-visible record is
-  // the literal neighbour of `firstInsertPosition`.
-  const leftBound = originLeftPosition ?? -1;
-  const rightBound = originRightPosition ?? sequence.length;
-  const conflictRegionEmpty =
-    leftBound + 1 === firstInsertPosition && firstInsertPosition === rightBound;
+  if (!knownBoundary) {
+    const landing = sequence.prepareIndexToPositionAndOffset(
+      operationIndex,
+      true,
+    );
+    firstInsertPosition =
+      landing.offsetInRecord > 0
+        ? recordSplitter.splitRecordAt(landing.position, landing.offsetInRecord)
+        : landing.position;
+    // YATA-style origins are derived from the event's parent (prepare)
+    // version, not from whichever concurrent records happen to be sitting in
+    // the sequence right now.
+    originLeftPosition =
+      sequence.previousPrepareVisiblePosition(firstInsertPosition);
+    originLeftRecord =
+      originLeftPosition === null ? undefined : sequence.at(originLeftPosition);
+    originLeft = originLeftRecord?.id ?? null;
+
+    // A prepare-deleted record still remains an ordering anchor. Start at the
+    // first anchor after origin-left instead of skipping zero-width records.
+    const anchorSearchStart = (originLeftPosition ?? -1) + 1;
+    const candidatePosition =
+      sequence.nextPrepareAnchorPosition(anchorSearchStart);
+    const candidate =
+      candidatePosition === null ? undefined : sequence.at(candidatePosition);
+    originRightPosition =
+      candidate !== undefined && candidate.originLeft === originLeft
+        ? candidatePosition
+        : null;
+    originRight = originRightPosition === null ? null : (candidate?.id ?? null);
+
+    // The YATA integration scan walks strictly between the two origins. When
+    // that interval is empty, the prepare landing is already final.
+    const leftBound = originLeftPosition ?? -1;
+    const rightBound = originRightPosition ?? sequence.length;
+    conflictRegionEmpty =
+      leftBound + 1 === firstInsertPosition &&
+      firstInsertPosition === rightBound;
+  }
 
   // Section 3.4 "smaller" lever: typed-run coalescing.
   //
@@ -126,14 +138,17 @@ export const applyInsert = (
   // unchanged — split-on-demand carves the run when a concurrent insert
   // or delete anchors inside it.
   const parsed = parseEventId(eventId);
+  const coalescingBoundary = knownBoundary
+    ? originLeftRecord !== undefined && sequence.isLast(originLeftRecord)
+    : originLeftPosition !== null &&
+      originLeftPosition === firstInsertPosition - 1;
   if (
     conflictRegionEmpty &&
     insertedText.length === 1 &&
     parsed !== null &&
-    originLeftPosition !== null &&
-    originLeftPosition === firstInsertPosition - 1
+    coalescingBoundary
   ) {
-    const leftRecord = sequence.at(originLeftPosition);
+    const leftRecord = originLeftRecord;
     if (
       leftRecord !== undefined &&
       leftRecord.run !== null &&
@@ -155,6 +170,9 @@ export const applyInsert = (
       leftRecord.content += insertedText;
       sequence.updateItem(leftRecord);
       eventItems.setOne(eventId, leftRecord.id);
+      if (tailResult !== undefined) {
+        tailResult.item = leftRecord;
+      }
       if (deferTextMaterialization) {
         return NO_TRANSFORMED_OPERATIONS;
       }
@@ -201,7 +219,6 @@ export const applyInsert = (
     prepareState: 1,
     run: firstRun,
   };
-  const useOracle = useLinearIntegrationOracle();
   const indexedFirstPosition =
     useOracle || conflictRegionEmpty ? null : fugueOrder.integrate(firstItem);
   const indexedKnownPositionIntegrated =
@@ -224,30 +241,43 @@ export const applyInsert = (
   ) {
     throw new Error(`Fugue order index unavailable for event ${eventId}`);
   }
-  const actualFirstPosition = conflictRegionEmpty
-    ? firstInsertPosition
-    : useOracle
-      ? oracleFirstPosition!
-      : indexedFirstPosition!;
+  const actualFirstPosition = knownBoundary
+    ? -1
+    : conflictRegionEmpty
+      ? firstInsertPosition
+      : useOracle
+        ? oracleFirstPosition!
+        : indexedFirstPosition!;
   if (
     indexedFirstPosition !== null &&
     indexedFirstPosition !== actualFirstPosition
   ) {
     fugueOrder.invalidate();
   }
-  sequence.insert(actualFirstPosition, firstItem);
+  if (knownBoundary) {
+    if (
+      originLeftRecord === undefined ||
+      !sequence.insertAfter(originLeftRecord, firstItem)
+    ) {
+      throw new Error(`Known insert boundary unavailable for event ${eventId}`);
+    }
+  } else {
+    sequence.insert(actualFirstPosition, firstItem);
+  }
   itemsById.set(firstItem.id, firstItem);
   originLeftIndex.track(firstItem.id, firstItem.originLeft);
   insertedIds?.push(firstItem.id);
   left = firstItem.id;
+  let tailItem = firstItem;
 
   // Multi-character inserts: every subsequent item is chained off the
   // previous item via `originLeft`. No record that existed before this
   // event can reference that brand-new id, so the YATA scan for chars
   // 1..N terminates on its first iteration and the integration position
   // is unconditionally `previous + 1`. We bypass the scan and place them
-  // at sequential positions instead of paying `findIntegrationPosition`'s
-  // setup cost per character. The items stay `run = null` because
+  // immediately after the previous object instead of paying numeric rank
+  // lookups or `findIntegrationPosition` setup per character. The items stay
+  // `run = null` because
   // typed-run coalescing operates on single-character events from
   // contiguous sequence numbers, not on the per-code-unit fragments of
   // one multi-character INSERT.
@@ -262,17 +292,23 @@ export const applyInsert = (
       prepareState: 1,
       run: null,
     };
-    const expectedPosition = actualFirstPosition + offset;
     const indexedIntegrated =
       useOracle || fugueOrder.integrateAtKnownPosition(item);
     if (!indexedIntegrated) {
       throw new Error(`Fugue order index unavailable for event ${eventId}`);
     }
-    sequence.insert(expectedPosition, item);
+    if (!sequence.insertAfter(tailItem, item)) {
+      throw new Error(`Insert tail unavailable for event ${eventId}`);
+    }
     itemsById.set(item.id, item);
     originLeftIndex.track(item.id, item.originLeft);
     insertedIds?.push(item.id);
     left = item.id;
+    tailItem = item;
+  }
+
+  if (tailResult !== undefined) {
+    tailResult.item = tailItem;
   }
 
   if (insertedIds === null) {

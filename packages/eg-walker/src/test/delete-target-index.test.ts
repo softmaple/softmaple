@@ -20,10 +20,19 @@ describe("DeleteTargetIndex", () => {
 
     it("exposes a scalar hot-path ref while preserving targetsOf array semantics", () => {
       const index = new DeleteTargetIndex();
-      index.record("delete-1", ["item-a"]);
+      index.recordOne("delete-1", "item-a");
 
       expect(index.targetRefsOf("delete-1")).toBe("item-a");
       expect(index.targetsOf("delete-1")).toEqual(["item-a"]);
+    });
+
+    it("tracks reverse membership for scalar records", () => {
+      const index = new DeleteTargetIndex();
+      index.recordOne("delete-1", "item-left");
+
+      index.extendMembership("item-left", "item-right");
+
+      expect(index.targetsOf("delete-1")).toEqual(["item-left", "item-right"]);
     });
 
     it("defensively copies the caller's array so later mutations don't leak in", () => {

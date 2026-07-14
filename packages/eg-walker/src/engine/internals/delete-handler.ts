@@ -47,7 +47,8 @@ export const applyDelete = (
   if (!pendingInsert.isEmpty()) {
     flushPendingInsert();
   }
-  const deletedItemIds: EventId[] = [];
+  let firstDeletedItemId: EventId | undefined;
+  let additionalDeletedItemIds: EventId[] | null = null;
   const outputDeleteIndexes: number[] | null = collectTransformedOperations
     ? []
     : null;
@@ -87,7 +88,12 @@ export const applyDelete = (
         toDelete,
       );
 
-      deletedItemIds.push(middle.id);
+      if (firstDeletedItemId === undefined) {
+        firstDeletedItemId = middle.id;
+      } else {
+        additionalDeletedItemIds ??= [firstDeletedItemId];
+        additionalDeletedItemIds.push(middle.id);
+      }
       // A concurrent delete that lands on an already-effect-deleted slice
       // (e.g. after retreating an overlapping sibling) must NOT remove
       // characters from the text again. Without this, two concurrent
@@ -112,7 +118,12 @@ export const applyDelete = (
       continue;
     }
 
-    deletedItemIds.push(candidate.id);
+    if (firstDeletedItemId === undefined) {
+      firstDeletedItemId = candidate.id;
+    } else {
+      additionalDeletedItemIds ??= [firstDeletedItemId];
+      additionalDeletedItemIds.push(candidate.id);
+    }
     if (!candidate.everDeleted) {
       if (!deferTextMaterialization) {
         const effectIndex = itemToEffectIndex(candidate);
@@ -128,7 +139,13 @@ export const applyDelete = (
     remaining -= 1;
   }
 
-  deleteTargets.record(eventId, deletedItemIds);
+  if (additionalDeletedItemIds !== null) {
+    deleteTargets.record(eventId, additionalDeletedItemIds);
+  } else if (firstDeletedItemId !== undefined) {
+    deleteTargets.recordOne(eventId, firstDeletedItemId);
+  } else {
+    deleteTargets.record(eventId, []);
+  }
 
   return outputDeleteIndexes === null
     ? NO_TRANSFORMED_OPERATIONS

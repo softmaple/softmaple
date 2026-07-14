@@ -50,18 +50,16 @@ export class PackedCriticalReplayPlan {
   }
 
   eventIdAt(orderIndex: number): EventId {
-    const offset = this.eventOffsetAt(orderIndex);
-    const id = this.graph.idAt(offset);
-    if (id === undefined) {
-      throw new Error(
-        `Packed replay plan is missing event at offset ${offset}`,
-      );
-    }
-    return id;
+    return this.eventIdAtKnownOffset(this.eventOffsetAt(orderIndex));
   }
 
   eventIdAtOffset(offset: number): EventId {
     this.assertEventOffset(offset);
+    return this.eventIdAtKnownOffset(offset);
+  }
+
+  /** @internal `offset` must originate from this plan or one of its diffs. */
+  eventIdAtKnownOffset(offset: number): EventId {
     const id = this.graph.idAt(offset);
     if (id === undefined) {
       throw new Error(
@@ -155,7 +153,17 @@ export class PackedCriticalReplayPlan {
     orderIndex: number,
     version: ReadonlySet<EventId>,
   ): boolean {
-    const eventOffset = this.eventOffsetAt(orderIndex);
+    return this.parentsEqualVersionAtKnownOffset(
+      this.eventOffsetAt(orderIndex),
+      version,
+    );
+  }
+
+  /** @internal `eventOffset` must originate from this plan. */
+  parentsEqualVersionAtKnownOffset(
+    eventOffset: number,
+    version: ReadonlySet<EventId>,
+  ): boolean {
     const parentCount = this.graph.parentCountAt(eventOffset);
     if (parentCount !== version.size) {
       return false;
@@ -173,7 +181,17 @@ export class PackedCriticalReplayPlan {
   }
 
   hasSingleParentOffsetAt(orderIndex: number, parentOffset: number): boolean {
-    const eventOffset = this.eventOffsetAt(orderIndex);
+    return this.hasSingleParentAtKnownOffset(
+      this.eventOffsetAt(orderIndex),
+      parentOffset,
+    );
+  }
+
+  /** @internal Both offsets must originate from this plan. */
+  hasSingleParentAtKnownOffset(
+    eventOffset: number,
+    parentOffset: number,
+  ): boolean {
     return (
       this.graph.parentCountAt(eventOffset) === 1 &&
       this.graph.parentOffsetAt(eventOffset, 0) === parentOffset
@@ -182,11 +200,21 @@ export class PackedCriticalReplayPlan {
 
   orderIndexOfOffset(offset: number): number {
     this.assertEventOffset(offset);
+    return this.orderIndexOfKnownOffset(offset);
+  }
+
+  /** @internal `offset` must originate from this plan or one of its diffs. */
+  orderIndexOfKnownOffset(offset: number): number {
     return this.rankByOffset[offset]!;
   }
 
   isInsertAtOffset(offset: number): boolean {
     this.assertEventOffset(offset);
+    return this.isInsertAtKnownOffset(offset);
+  }
+
+  /** @internal `offset` must originate from this plan or one of its diffs. */
+  isInsertAtKnownOffset(offset: number): boolean {
     return this.graph.isInsertAt(offset);
   }
 
@@ -194,9 +222,20 @@ export class PackedCriticalReplayPlan {
     currentVersion: ReadonlySet<EventId>,
     targetOrderIndex: number,
   ): PackedOffsetTransition {
-    return this.graph.diffVersionToParents(
+    return this.transitionFromVersionToKnownOffset(
       currentVersion,
       this.eventOffsetAt(targetOrderIndex),
+    );
+  }
+
+  /** @internal `targetEventOffset` must originate from this plan. */
+  transitionFromVersionToKnownOffset(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+  ): PackedOffsetTransition {
+    return this.graph.diffVersionToParents(
+      currentVersion,
+      targetEventOffset,
       this.rankByOffset,
     );
   }
@@ -206,27 +245,53 @@ export class PackedCriticalReplayPlan {
     targetOrderIndex: number,
   ): PackedOffsetTransition {
     this.assertEventOffset(currentOffset);
-    return this.graph.diffOffsetToParents(
+    return this.transitionBetweenKnownOffsets(
       currentOffset,
       this.eventOffsetAt(targetOrderIndex),
+    );
+  }
+
+  /** @internal Both offsets must originate from this plan. */
+  transitionBetweenKnownOffsets(
+    currentOffset: number,
+    targetEventOffset: number,
+  ): PackedOffsetTransition {
+    return this.graph.diffOffsetToParents(
+      currentOffset,
+      targetEventOffset,
       this.rankByOffset,
     );
   }
 
   isInsertAt(orderIndex: number): boolean {
-    return this.graph.isInsertAt(this.eventOffsetAt(orderIndex));
+    return this.isInsertAtKnownOffset(this.eventOffsetAt(orderIndex));
   }
 
   operationIndexAt(orderIndex: number): number {
-    return this.graph.operationIndexAt(this.eventOffsetAt(orderIndex));
+    return this.operationIndexAtKnownOffset(this.eventOffsetAt(orderIndex));
   }
 
   operationLengthAt(orderIndex: number): number {
-    return this.graph.operationLengthAt(this.eventOffsetAt(orderIndex));
+    return this.operationLengthAtKnownOffset(this.eventOffsetAt(orderIndex));
   }
 
   insertStartAt(orderIndex: number): number {
-    return this.graph.insertStartAt(this.eventOffsetAt(orderIndex));
+    return this.insertStartAtKnownOffset(this.eventOffsetAt(orderIndex));
+  }
+
+  /** @internal `offset` must originate from this plan. */
+  operationIndexAtKnownOffset(offset: number): number {
+    return this.graph.operationIndexAt(offset);
+  }
+
+  /** @internal `offset` must originate from this plan. */
+  operationLengthAtKnownOffset(offset: number): number {
+    return this.graph.operationLengthAt(offset);
+  }
+
+  /** @internal `offset` must originate from this plan. */
+  insertStartAtKnownOffset(offset: number): number {
+    return this.graph.insertStartAt(offset);
   }
 
   sliceInsertedContent(start: number, end: number): string {

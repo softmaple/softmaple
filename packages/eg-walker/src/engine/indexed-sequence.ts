@@ -25,6 +25,12 @@ export class IndexOutOfRangeError extends Error {
   }
 }
 
+interface WeightDelta {
+  prepare: number;
+  effect: number;
+  anchor: number;
+}
+
 /**
  * Ranked B-tree for Eg-walker's mutable CRDT sequence.
  *
@@ -210,6 +216,21 @@ export class IndexedSequence<T extends object> {
     );
   }
 
+  /** Return whether `item` is the final record without computing its rank. */
+  isLast(item: T): boolean {
+    const location = this.resolveLocation(item);
+    if (
+      location === undefined ||
+      location.offsetInLeaf !== location.leaf.items.length - 1
+    ) {
+      return false;
+    }
+    if (this.maintainOrder) {
+      return this.leafOrder.isLast(location.leaf);
+    }
+    return this.findRightmostLeaf().leaf === location.leaf;
+  }
+
   /**
    * Effect-visible UTF-16 width before `item`.
    *
@@ -318,6 +339,18 @@ export class IndexedSequence<T extends object> {
     this.insertManyIntoLeaf(landing.leaf, landing.offset, items);
   }
 
+  /** Insert one item immediately after a known object without a rank lookup. */
+  insertAfter(anchor: T, item: T): boolean {
+    const location = this.resolveLocation(anchor);
+    if (location === undefined || this.resolveLocation(item) !== undefined) {
+      return false;
+    }
+
+    this.structuralOperationCount++;
+    this.insertIntoLeaf(location.leaf, location.offsetInLeaf + 1, item);
+    return true;
+  }
+
   /** Insert a small run immediately before a known object without rank lookup. */
   insertManyBefore(anchor: T, items: ReadonlyArray<T>): boolean {
     return this.insertManyAtAnchor(anchor, items, false);
@@ -359,6 +392,82 @@ export class IndexedSequence<T extends object> {
     leaf.effectWeights[offset] = newEffect;
     leaf.anchorWeights[offset] = newAnchor;
     this.propagateDelta(leaf, 0, prepareDelta, effectDelta, anchorDelta);
+  }
+
+  /**
+   * Refresh several mutated items while aggregating shared ancestor work.
+   *
+   * Callers may yield the same item more than once; after the first refresh
+   * its cached weights already match, so later visits contribute zero. Leaf
+   * deltas are combined first, then propagated bottom-up once per touched
+   * internal node instead of once per event.
+   */
+  updateItems(items: Iterable<T>): void {
+    const leafDeltas = new Map<LeafNode<T>, WeightDelta>();
+    for (const item of items) {
+      this.structuralOperationCount++;
+      const location = this.resolveLocation(item);
+      if (location === undefined) {
+        continue;
+      }
+
+      const leaf = location.leaf;
+      const offset = location.offsetInLeaf;
+      const oldPrepare = leaf.prepareWeights[offset] ?? 0;
+      const oldEffect = leaf.effectWeights[offset] ?? 0;
+      const oldAnchor = leaf.anchorWeights[offset] ?? 0;
+      const newPrepare = this.prepareWeight(item);
+      const newEffect = this.effectWeight(item);
+      const newAnchor = this.anchorWeight(item);
+      const prepareDelta = newPrepare - oldPrepare;
+      const effectDelta = newEffect - oldEffect;
+      const anchorDelta = newAnchor - oldAnchor;
+      if (prepareDelta === 0 && effectDelta === 0 && anchorDelta === 0) {
+        continue;
+      }
+
+      leaf.prepareWeights[offset] = newPrepare;
+      leaf.effectWeights[offset] = newEffect;
+      leaf.anchorWeights[offset] = newAnchor;
+      addWeightDelta(leafDeltas, leaf, prepareDelta, effectDelta, anchorDelta);
+    }
+
+    let pending = new Map<IndexedNode<T>, WeightDelta>();
+    for (const [leaf, delta] of leafDeltas) {
+      this.structuralOperationCount++;
+      leaf.prepareSum += delta.prepare;
+      leaf.effectSum += delta.effect;
+      leaf.anchorSum += delta.anchor;
+      if (leaf.parent !== null) {
+        addWeightDelta(
+          pending,
+          leaf.parent,
+          delta.prepare,
+          delta.effect,
+          delta.anchor,
+        );
+      }
+    }
+
+    while (pending.size > 0) {
+      const next = new Map<IndexedNode<T>, WeightDelta>();
+      for (const [node, delta] of pending) {
+        this.structuralOperationCount++;
+        node.prepareSum += delta.prepare;
+        node.effectSum += delta.effect;
+        node.anchorSum += delta.anchor;
+        if (node.parent !== null) {
+          addWeightDelta(
+            next,
+            node.parent,
+            delta.prepare,
+            delta.effect,
+            delta.anchor,
+          );
+        }
+      }
+      pending = next;
+    }
   }
 
   /**
@@ -1269,6 +1378,23 @@ export class IndexedSequence<T extends object> {
     }
   }
 }
+
+const addWeightDelta = <K>(
+  deltas: Map<K, WeightDelta>,
+  key: K,
+  prepare: number,
+  effect: number,
+  anchor: number,
+): void => {
+  const existing = deltas.get(key);
+  if (existing === undefined) {
+    deltas.set(key, { prepare, effect, anchor });
+    return;
+  }
+  existing.prepare += prepare;
+  existing.effect += effect;
+  existing.anchor += anchor;
+};
 
 const sumWeights = (weights: ReadonlyArray<number>): number =>
   weights.reduce((sum, weight) => sum + weight, 0);

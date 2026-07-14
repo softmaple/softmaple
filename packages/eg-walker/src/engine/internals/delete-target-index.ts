@@ -110,6 +110,12 @@ export class DeleteTargetIndex {
     return this.targets.get(deleteEventId);
   }
 
+  /** Store the dominant one-delete/one-record case without an array. */
+  recordOne(deleteEventId: EventId, itemId: EventId): void {
+    this.targets.set(deleteEventId, itemId);
+    this.addOwner(itemId, deleteEventId);
+  }
+
   record(deleteEventId: EventId, itemIds: ReadonlyArray<EventId>): void {
     const first = itemIds[0];
     this.targets.set(
@@ -117,16 +123,20 @@ export class DeleteTargetIndex {
       itemIds.length === 1 && first !== undefined ? first : [...itemIds],
     );
     for (const itemId of itemIds) {
-      const owners = this.byItem.get(itemId);
-      if (owners === undefined) {
-        this.byItem.set(itemId, deleteEventId);
-      } else if (typeof owners === "string") {
-        if (owners !== deleteEventId) {
-          this.byItem.set(itemId, new Set([owners, deleteEventId]));
-        }
-      } else {
-        owners.add(deleteEventId);
+      this.addOwner(itemId, deleteEventId);
+    }
+  }
+
+  private addOwner(itemId: EventId, deleteEventId: EventId): void {
+    const owners = this.byItem.get(itemId);
+    if (owners === undefined) {
+      this.byItem.set(itemId, deleteEventId);
+    } else if (typeof owners === "string") {
+      if (owners !== deleteEventId) {
+        this.byItem.set(itemId, new Set([owners, deleteEventId]));
       }
+    } else {
+      owners.add(deleteEventId);
     }
   }
 

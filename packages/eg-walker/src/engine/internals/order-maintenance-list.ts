@@ -142,6 +142,10 @@ export class OrderMaintenanceList<T extends OrderMaintenanceItem> {
     return leftLabel < rightLabel ? -1 : 1;
   }
 
+  isLast(item: T): boolean {
+    return this.contains(item) && item.orderNext === this.sentinel;
+  }
+
   toArray(): T[] {
     const result: T[] = [];
     for (

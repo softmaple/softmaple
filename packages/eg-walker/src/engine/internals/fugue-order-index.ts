@@ -4,21 +4,21 @@ import {
   type EventIdSortKey,
 } from "../../graph/event-id";
 import type { EventId } from "../../types";
-import { IndexedSequence } from "../indexed-sequence";
+import type { IndexedSequence } from "../indexed-sequence";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
+import {
+  PACKED_EULER_BOUNDARY,
+  PackedEulerRankIndex,
+  type PackedEulerBoundary,
+  type PackedEulerNodeHandle,
+} from "./packed-euler-rank-index";
 
 type Side = "left" | "right";
-
-interface Marker {
-  readonly weight: number;
-}
 
 interface FugueNode {
   readonly item: AugmentedCRDTItem | null;
   sortKey: EventIdSortKey | null;
-  readonly start: Marker;
-  readonly visit: Marker;
-  readonly end: Marker;
+  readonly markerHandle: PackedEulerNodeHandle;
   leftSiblings: SiblingNode | null;
   rightSiblings: SiblingNode | null;
 }
@@ -45,10 +45,7 @@ export interface FugueOrderStats {
  * worst-case logarithmic time, independent of caller-controlled event IDs.
  */
 export class FugueOrderIndex {
-  private readonly markerSequence = new IndexedSequence<Marker>(
-    () => 0,
-    (marker) => marker.weight,
-  );
+  private readonly markerSequence = new PackedEulerRankIndex();
   private readonly nodesById = new Map<EventId, FugueNode>();
   private readonly forcedParentById = new Map<EventId, EventId>();
   private readonly forcedChildByParentId = new Map<EventId, EventId>();
@@ -126,7 +123,7 @@ export class FugueOrderIndex {
       );
     }
     const side: Side = isLeftChild ? "left" : "right";
-    const node = createFugueNode(item);
+    const node = createFugueNode(item, this.markerSequence.allocateNode());
     const insertion = this.insertSibling(
       side === "left" ? parent.leftSiblings : parent.rightSiblings,
       node,
@@ -138,11 +135,19 @@ export class FugueOrderIndex {
       parent.rightSiblings = insertion.root;
     }
 
-    const target =
-      insertion.successor?.start ??
-      (side === "left" ? parent.visit : parent.end);
-    this.insertMarkersBefore(target, [node.start, node.visit, node.end]);
-    const position = this.weightBefore(node.visit);
+    const target = insertion.successor ?? parent;
+    const targetBoundary: PackedEulerBoundary =
+      insertion.successor !== null
+        ? PACKED_EULER_BOUNDARY.Start
+        : side === "left"
+          ? PACKED_EULER_BOUNDARY.Visit
+          : PACKED_EULER_BOUNDARY.End;
+    const position = this.markerSequence.insertNodeBefore(
+      target.markerHandle,
+      targetBoundary,
+      node.markerHandle,
+    );
+    this.markerOperations += 3;
     this.nodesById.set(item.id, node);
     return position;
   }
@@ -195,7 +200,10 @@ export class FugueOrderIndex {
 
     for (let index = 0; index < records.length; index++) {
       const node = this.nodesById.get(records[index]!.id);
-      if (node === undefined || this.weightBefore(node.visit) !== index) {
+      if (
+        node === undefined ||
+        this.markerSequence.rankOfVisit(node.markerHandle) !== index
+      ) {
         this.valid = false;
         return;
       }
@@ -218,13 +226,17 @@ export class FugueOrderIndex {
       throw new Error(`Fugue index already contains split record ${right.id}`);
     }
     if (
-      this.weightBefore(leftNode.visit) + 1 !== rightPosition ||
+      this.markerSequence.rankOfVisit(leftNode.markerHandle) + 1 !==
+        rightPosition ||
       this.sequence.positionOf(right) !== rightPosition
     ) {
       throw new Error(`Fugue split position mismatch for ${right.id}`);
     }
 
-    const rightNode = createFugueNode(right);
+    const rightNode = createFugueNode(
+      right,
+      this.markerSequence.allocateNode(),
+    );
     rightNode.rightSiblings = leftNode.rightSiblings;
     leftNode.rightSiblings = createSiblingNode(rightNode);
 
@@ -238,10 +250,13 @@ export class FugueOrderIndex {
       this.setForcedParent(right.id, left.id);
     }
 
-    this.insertMarkersAfter(leftNode.visit, [rightNode.start, rightNode.visit]);
-    this.insertMarkersBefore(leftNode.end, [rightNode.end]);
+    const splitRank = this.markerSequence.insertSplitContinuation(
+      leftNode.markerHandle,
+      rightNode.markerHandle,
+    );
+    this.markerOperations += 3;
     this.nodesById.set(right.id, rightNode);
-    if (this.weightBefore(rightNode.visit) !== rightPosition) {
+    if (splitRank !== rightPosition) {
       throw new Error(`Fugue split rank mismatch for ${right.id}`);
     }
   }
@@ -272,9 +287,8 @@ export class FugueOrderIndex {
         this.markerSequence.getStructuralOperationCount();
     }
     this.nodesById.clear();
-    const root = createFugueNode(null);
+    const root = createFugueNode(null, this.markerSequence.reset());
     this.rootNode = root;
-    this.markerSequence.resetFromRecords([root.start, root.visit, root.end]);
     if (resetStats) {
       this.forcedParentById.clear();
       this.forcedChildByParentId.clear();
@@ -385,39 +399,11 @@ export class FugueOrderIndex {
     return -this.sequence.compareOrder(left.item!, right.item!);
   }
 
-  private insertMarkersBefore(
-    target: Marker,
-    markers: ReadonlyArray<Marker>,
-  ): void {
-    if (!this.markerSequence.insertManyBefore(target, markers)) {
-      throw new Error("Fugue marker is unavailable");
-    }
-    this.markerOperations += markers.length;
-  }
-
-  private insertMarkersAfter(
-    target: Marker,
-    markers: ReadonlyArray<Marker>,
-  ): void {
-    if (!this.markerSequence.insertManyAfter(target, markers)) {
-      throw new Error("Fugue marker is unavailable");
-    }
-    this.markerOperations += markers.length;
-  }
-
   private getSortKey(node: FugueNode): EventIdSortKey {
     if (node.sortKey === null) {
       node.sortKey = createEventIdSortKey(node.item!.eventId);
     }
     return node.sortKey;
-  }
-
-  private weightBefore(marker: Marker): number {
-    const weight = this.markerSequence.effectIndexOf(marker);
-    if (weight < 0) {
-      throw new Error("Fugue marker is unavailable");
-    }
-    return weight;
   }
 
   private setForcedParent(childId: EventId, parentId: EventId): void {
@@ -437,19 +423,18 @@ const createSiblingNode = (value: FugueNode): SiblingNode => ({
   height: 1,
 });
 
-const createFugueNode = (item: AugmentedCRDTItem | null): FugueNode => {
+const createFugueNode = (
+  item: AugmentedCRDTItem | null,
+  markerHandle: PackedEulerNodeHandle,
+): FugueNode => {
   return {
     item,
     sortKey: null,
-    start: createMarker(0),
-    visit: createMarker(item === null ? 0 : 1),
-    end: createMarker(0),
+    markerHandle,
     leftSiblings: null,
     rightSiblings: null,
   };
 };
-
-const createMarker = (weight: number): Marker => ({ weight });
 
 const rotateSiblingRight = (root: SiblingNode): SiblingNode => {
   const pivot = root.left!;

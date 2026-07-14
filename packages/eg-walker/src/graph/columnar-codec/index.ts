@@ -53,7 +53,7 @@ import {
 import { decodeIds, encodeIdRuns, readIdRuns, writeIdRuns } from "./ids";
 import { LazyIdRunIndex } from "./lazy-id-run-index";
 import {
-  buildPackedEventGraphBase,
+  buildPackedEventGraphBaseFromValidatedIdRuns,
   buildPackedLinearEventGraphBaseFromIdIndex,
 } from "./packed-decode";
 
@@ -261,7 +261,7 @@ export class ColumnarEventGraphCodec {
             insertedContent,
             timestamps,
           })
-        : buildPackedEventGraphBase({
+        : buildPackedEventGraphBaseFromValidatedIdRuns({
             ids: decodeIds(idRuns),
             idIndex,
             operationRuns: partialOperationRuns,

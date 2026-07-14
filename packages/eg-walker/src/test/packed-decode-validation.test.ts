@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
-import { buildPackedEventGraphBase } from "../graph/columnar-codec/packed-decode";
+import {
+  buildPackedEventGraphBase,
+  buildPackedEventGraphBaseFromValidatedIdRuns,
+} from "../graph/columnar-codec/packed-decode";
 import type { PackedEventIdIndex } from "../graph/internals/packed-event-graph-base";
 
 type PackedColumns = Parameters<typeof buildPackedEventGraphBase>[0];
@@ -98,6 +101,52 @@ describe("packed EGW3 validation", () => {
       base.childOffsetAt(2, 0),
       base.childOffsetAt(3, 0),
     ]).toEqual([1, 2, 2, undefined, undefined]);
+  });
+
+  it("skips redundant ID-index lookups only for validated ID runs", () => {
+    const ids = ["a:0", "a:1"];
+    const offsetById = new Map(ids.map((id, offset) => [id, offset]));
+    const offsetOf = vi.fn((id: string) => offsetById.get(id));
+    const idIndex: PackedEventIdIndex = {
+      count: ids.length,
+      has: (id) => offsetById.has(id),
+      offsetOf,
+      idAt: (offset) => ids[offset],
+      *iterateIds() {
+        yield* ids;
+      },
+      maximumSequenceForReplica: () => 1,
+    };
+
+    buildPackedEventGraphBaseFromValidatedIdRuns({
+      ...twoInsertColumns(),
+      idIndex,
+      parentOverrides: [{ eventOffset: 1, parents: ["a:0"] }],
+    });
+
+    expect(offsetOf).toHaveBeenCalledTimes(1);
+    expect(offsetOf).toHaveBeenCalledWith("a:0");
+  });
+
+  it("keeps mismatched caller-provided ID indexes strict by default", () => {
+    const ids = ["a:0", "a:1"];
+    const idIndex: PackedEventIdIndex = {
+      count: ids.length,
+      has: () => true,
+      offsetOf: (id) => (id === "a:0" ? 1 : 0),
+      idAt: (offset) => ids[offset],
+      *iterateIds() {
+        yield* ids;
+      },
+      maximumSequenceForReplica: () => 1,
+    };
+
+    expect(() =>
+      buildPackedEventGraphBase({
+        ...twoInsertColumns(),
+        idIndex,
+      }),
+    ).toThrow(/Invalid packed event graph event ID at offset 0/);
   });
 
   it.each([

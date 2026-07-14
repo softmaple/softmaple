@@ -95,7 +95,31 @@ export class PackedEventGraphBase {
   private readonly exactLinear: boolean;
   private diffWorkspace: PackedDiffVersionsWorkspace | null = null;
 
-  constructor(columns: PackedEventGraphColumns) {
+  /** Build from arbitrary packed columns, validating materialized IDs. */
+  static create(columns: PackedEventGraphColumns): PackedEventGraphBase {
+    return new PackedEventGraphBase(columns, false);
+  }
+
+  /**
+   * Build from materialized IDs and an index derived from the same validated
+   * source. This is intentionally separate from {@link create}: callers must
+   * establish that both views came from one validated ID-run column.
+   */
+  static createWithTrustedMaterializedIds(
+    columns: PackedEventGraphColumns,
+  ): PackedEventGraphBase {
+    if (columns.ids === undefined || columns.idIndex === undefined) {
+      throw new Error(
+        "Trusted materialized IDs require both an ID column and an ID index",
+      );
+    }
+    return new PackedEventGraphBase(columns, true);
+  }
+
+  private constructor(
+    columns: PackedEventGraphColumns,
+    trustMaterializedIds: boolean,
+  ) {
     const idIndex = columns.idIndex;
     const count = idIndex?.count ?? columns.ids!.length;
     if (
@@ -132,20 +156,22 @@ export class PackedEventGraphBase {
           "Invalid packed event graph: ID column length mismatch",
         );
       }
-      for (let offset = 0; offset < ids.length; offset++) {
-        const id = ids[offset]!;
-        const indexedOffset =
-          idIndex === undefined
-            ? columns.offsetById.get(id)
-            : idIndex.offsetOf(id);
-        if (
-          typeof id !== "string" ||
-          id.length === 0 ||
-          indexedOffset !== offset
-        ) {
-          throw new Error(
-            `Invalid packed event graph event ID at offset ${offset}`,
-          );
+      if (!trustMaterializedIds) {
+        for (let offset = 0; offset < ids.length; offset++) {
+          const id = ids[offset]!;
+          const indexedOffset =
+            idIndex === undefined
+              ? columns.offsetById.get(id)
+              : idIndex.offsetOf(id);
+          if (
+            typeof id !== "string" ||
+            id.length === 0 ||
+            indexedOffset !== offset
+          ) {
+            throw new Error(
+              `Invalid packed event graph event ID at offset ${offset}`,
+            );
+          }
         }
       }
       if (idIndex === undefined && columns.offsetById.size !== count) {
@@ -647,7 +673,7 @@ export const buildPackedLinearEventGraphBase = (
   }
 
   return {
-    base: new PackedEventGraphBase({
+    base: PackedEventGraphBase.create({
       ids,
       offsetById,
       operationTypes,

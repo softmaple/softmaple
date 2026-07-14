@@ -38,6 +38,20 @@ export interface PackedDecodeResult {
 
 export const buildPackedEventGraphBase = (
   columns: PackedDecodeColumns,
+): PackedDecodeResult => buildPackedEventGraphBaseInternal(columns, false);
+
+/**
+ * Decode materialized IDs whose ID index was derived from the same validated
+ * ID-run column. Parent lookups remain strict; only the redundant per-ID
+ * index cross-check is skipped.
+ */
+export const buildPackedEventGraphBaseFromValidatedIdRuns = (
+  columns: PackedDecodeColumns & { readonly idIndex: PackedEventIdIndex },
+): PackedDecodeResult => buildPackedEventGraphBaseInternal(columns, true);
+
+const buildPackedEventGraphBaseInternal = (
+  columns: PackedDecodeColumns,
+  trustMaterializedIds: boolean,
 ): PackedDecodeResult => {
   const count = columns.ids.length;
   if (
@@ -63,24 +77,40 @@ export const buildPackedEventGraphBase = (
     implicitLinearEdges,
   } = buildEdges(columns.ids, idLookup, columns.parentOverrides);
 
+  const commonColumns = {
+    operationTypes: operationColumns.operationTypes,
+    operationIndexes: operationColumns.operationIndexes,
+    operationLengths: operationColumns.operationLengths,
+    timestamps: operationColumns.timestamps,
+    insertStarts: operationColumns.insertStarts,
+    insertedContent: columns.insertedContent,
+    parentStarts,
+    parentOffsets,
+    childStarts,
+    childOffsets,
+    implicitLinearEdges,
+  };
+  const base =
+    columns.idIndex === undefined
+      ? PackedEventGraphBase.create({
+          ids: columns.ids,
+          offsetById: offsetById!,
+          ...commonColumns,
+        })
+      : trustMaterializedIds
+        ? PackedEventGraphBase.createWithTrustedMaterializedIds({
+            ids: columns.ids,
+            idIndex: columns.idIndex,
+            ...commonColumns,
+          })
+        : PackedEventGraphBase.create({
+            ids: columns.ids,
+            idIndex: columns.idIndex,
+            ...commonColumns,
+          });
+
   return {
-    base: new PackedEventGraphBase({
-      ids: columns.ids,
-      ...(columns.idIndex === undefined
-        ? { offsetById: offsetById! }
-        : { idIndex: columns.idIndex }),
-      operationTypes: operationColumns.operationTypes,
-      operationIndexes: operationColumns.operationIndexes,
-      operationLengths: operationColumns.operationLengths,
-      timestamps: operationColumns.timestamps,
-      insertStarts: operationColumns.insertStarts,
-      insertedContent: columns.insertedContent,
-      parentStarts,
-      parentOffsets,
-      childStarts,
-      childOffsets,
-      implicitLinearEdges,
-    }),
+    base,
     frontier,
   };
 };
@@ -127,7 +157,7 @@ export const buildPackedLinearEventGraphBaseFromIdIndex = (
   }
 
   return {
-    base: new PackedEventGraphBase({
+    base: PackedEventGraphBase.create({
       idIndex: columns.idIndex,
       operationTypes: operationColumns.operationTypes,
       operationIndexes: operationColumns.operationIndexes,

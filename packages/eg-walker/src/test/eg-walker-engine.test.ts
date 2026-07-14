@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { RopeRecordContent } from "../engine/internals/record-content";
 import { EventGraph } from "../graph/event-graph";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { EventId, GraphEvent } from "../types";
@@ -167,13 +168,22 @@ describe("EgWalkerEngine", () => {
     });
     PersistentUtf16Rope.resetInstrumentation();
     const deferredEngine = new EgWalkerEngine();
-    const deferred = deferredEngine.generate(events, "", {
-      initialVersion: new Set([root.id]),
-      initialTextBuffer: checkpointBuffer,
-      eventGraph: graph,
-      eventOrder: events,
-      collectTransformedOperations: false,
-    });
+    const toRope = vi.spyOn(RopeRecordContent.prototype, "toRope");
+    const deferred = (() => {
+      try {
+        const generated = deferredEngine.generate(events, "", {
+          initialVersion: new Set([root.id]),
+          initialTextBuffer: checkpointBuffer,
+          eventGraph: graph,
+          eventOrder: events,
+          collectTransformedOperations: false,
+        });
+        expect(toRope).not.toHaveBeenCalled();
+        return generated;
+      } finally {
+        toRope.mockRestore();
+      }
+    })();
     const ropeStats = PersistentUtf16Rope.getInstrumentation();
     const sharedLeaves = deferred.textBuffer
       .getLeafIdentities()

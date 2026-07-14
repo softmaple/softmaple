@@ -1,6 +1,7 @@
 import {
   containsUtf16SurrogateCodeUnit,
   PersistentUtf16Rope,
+  type Utf16RopeAssembler,
 } from "../../text/persistent-utf16-rope";
 
 export type RecordContent = string | RopeRecordContent;
@@ -65,6 +66,11 @@ export class RopeRecordContent {
    */
   toRope(): PersistentUtf16Rope {
     return this.rope.sliceRope(this.start, this.end);
+  }
+
+  /** Append this shared view without first constructing a temporary rope. */
+  appendTo(assembler: Utf16RopeAssembler): void {
+    assembler.appendSlice(this.rope, this.start, this.end);
   }
 
   toString(): string {

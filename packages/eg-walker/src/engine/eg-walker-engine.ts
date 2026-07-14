@@ -1007,17 +1007,18 @@ export class EgWalkerEngine {
   }
 
   private materializeEffectVisibleText(): PersistentUtf16Rope {
-    const segments: Array<string | PersistentUtf16Rope> = [];
-    for (const item of this.sequence.toArray()) {
-      if (!item.everDeleted && item.content.length > 0) {
-        segments.push(
-          typeof item.content === "string"
-            ? item.content
-            : item.content.toRope(),
-        );
-      }
-    }
-    return PersistentUtf16Rope.fromSegments(segments);
+    return PersistentUtf16Rope.assemble((assembler) => {
+      this.sequence.forEach((item) => {
+        if (item.everDeleted || item.content.length === 0) {
+          return;
+        }
+        if (typeof item.content === "string") {
+          assembler.appendText(item.content);
+        } else {
+          item.content.appendTo(assembler);
+        }
+      });
+    });
   }
 
   /**

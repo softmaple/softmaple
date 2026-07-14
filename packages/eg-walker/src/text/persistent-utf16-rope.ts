@@ -51,6 +51,17 @@ export interface Utf16RopeInstrumentation {
   readonly flattenedCodeUnits: number;
 }
 
+/**
+ * Ephemeral sink for assembling one persistent rope from text and shared rope
+ * ranges. A range is copied structurally: fully covered leaves retain their
+ * identity and only its boundary leaves may allocate new string payloads.
+ */
+export interface Utf16RopeAssembler {
+  appendText(text: string): void;
+  appendRope(rope: PersistentUtf16Rope): void;
+  appendSlice(rope: PersistentUtf16Rope, start: number, end?: number): void;
+}
+
 const counters = {
   nodeVisits: 0,
   nodeAllocations: 0,
@@ -203,6 +214,25 @@ export class PersistentUtf16Rope {
       }
     }
 
+    return PersistentUtf16Rope.assemble((assembler) => {
+      for (const segment of segments) {
+        if (typeof segment === "string") {
+          assembler.appendText(segment);
+        } else {
+          assembler.appendRope(segment);
+        }
+      }
+    });
+  }
+
+  /**
+   * Assemble a rope in one pass without constructing temporary rope roots for
+   * shared slices. Appending to a retained sink after {@link write} returns
+   * cannot mutate the immutable result.
+   */
+  static assemble(
+    write: (assembler: Utf16RopeAssembler) => void,
+  ): PersistentUtf16Rope {
     const leaves: LeafNode[] = [];
     let textParts: string[] = [];
     const flushText = (): void => {
@@ -213,19 +243,34 @@ export class PersistentUtf16Rope {
       textParts = [];
     };
 
-    for (const segment of segments) {
-      if (typeof segment === "string") {
-        if (segment.length > 0) {
-          textParts.push(segment);
+    const assembler: Utf16RopeAssembler = {
+      appendText: (text) => {
+        if (text.length > 0) {
+          textParts.push(text);
         }
-        continue;
-      }
-      if (segment.length === 0) {
-        continue;
-      }
-      flushText();
-      appendLeaves(segment.root, leaves);
-    }
+      },
+      appendRope: (rope) => {
+        if (rope.length === 0) {
+          return;
+        }
+        flushText();
+        appendLeaves(rope.root, leaves);
+      },
+      appendSlice: (rope, start, end = rope.length) => {
+        assertSlice(start, end, rope.length);
+        if (start === end) {
+          return;
+        }
+        flushText();
+        if (start === 0 && end === rope.length) {
+          appendLeaves(rope.root, leaves);
+          return;
+        }
+        collectSliceLeaves(rope.root, start, end, 0, leaves);
+      },
+    };
+
+    write(assembler);
     flushText();
 
     return new PersistentUtf16Rope(buildTree(leaves));

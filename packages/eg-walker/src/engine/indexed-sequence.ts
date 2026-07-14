@@ -112,10 +112,15 @@ export class IndexedSequence<T extends object> {
 
   toArray(): T[] {
     const items: T[] = [];
-    if (this.root) {
-      this.visit(this.root, (item) => items.push(item));
-    }
+    this.forEach((item) => items.push(item));
     return items;
+  }
+
+  /** Visit resident records in sequence order without allocating an array. */
+  forEach(visitor: (item: T) => void): void {
+    if (this.root) {
+      this.visit(this.root, visitor);
+    }
   }
 
   at(index: number): T | undefined {

@@ -96,6 +96,41 @@ describe("PersistentUtf16Rope", () => {
     expect(stats.flattenedCodeUnits).toBe(0);
   });
 
+  it("assembles shared ranges without allocating discarded slice roots", () => {
+    const text = "x".repeat(UTF16_ROPE_TARGET_LEAF * 8);
+    const original = PersistentUtf16Rope.from(text);
+    const originalLeaves = new Set(original.getLeafIdentities());
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const assembled = PersistentUtf16Rope.assemble((assembler) => {
+      assembler.appendText("<");
+      assembler.appendSlice(original, 100, original.length - 100);
+      assembler.appendText(">🙂");
+    });
+    const sharedLeaves = assembled
+      .getLeafIdentities()
+      .filter((candidate) => originalLeaves.has(candidate));
+    const stats = PersistentUtf16Rope.getInstrumentation();
+
+    expect(assembled.toString()).toBe(`<${text.slice(100, -100)}>🙂`);
+    expect(sharedLeaves.length).toBeGreaterThanOrEqual(
+      original.getLeafIdentities().length - 2,
+    );
+    // Every post-reset allocation belongs to the final rope. A temporary
+    // sliceRope() hierarchy would increase this count without appearing in
+    // assembled.nodeCount.
+    expect(stats.nodeAllocations).toBe(
+      assembled.nodeCount - sharedLeaves.length,
+    );
+    expect(stats.flattenCount).toBe(0);
+    expect(stats.flattenedCodeUnits).toBe(0);
+    expect(() =>
+      PersistentUtf16Rope.assemble((assembler) => {
+        assembler.appendSlice(original, 2, 1);
+      }),
+    ).toThrow(/Invalid rope slice/);
+  });
+
   it("touches only a root-to-leaf path for a point edit", () => {
     const rope = PersistentUtf16Rope.from("x".repeat(2_048 * 2_000));
     PersistentUtf16Rope.resetInstrumentation();

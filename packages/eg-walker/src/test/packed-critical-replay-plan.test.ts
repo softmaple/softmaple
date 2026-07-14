@@ -165,6 +165,68 @@ describe("packed critical-section replay planning", () => {
     expect(stringDiff).not.toHaveBeenCalled();
   });
 
+  it("bridges short linear gaps between obsolete nonlinear cuts", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 100; layer++) {
+      const left = `left:${layer}`;
+      const right = `right:${layer}`;
+      const merge = `merge:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: layer * 2, text: "L" },
+          layer * 3,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: layer * 2, text: "R" },
+          layer * 3 + 1,
+        ),
+        editingEvent(
+          merge,
+          [left, right],
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: (layer + 1) * 2,
+            text: "",
+          },
+          layer * 3 + 2,
+        ),
+      );
+      parents = [merge];
+    }
+
+    const source = EventGraph.fromEvents(events);
+    const order = source.getBranchPreservingTopologicalOrder();
+    const expected = new EgWalkerEngine().generate(order, "", {
+      eventGraph: source,
+      eventOrder: order,
+    }).text;
+    const packedGraph = pack(events);
+    const compact = planPackedCriticalReplaySections(packedGraph);
+    expect(compact?.sectionCount).toBe(200);
+
+    const generate = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+    generate.mockClear();
+    const replica = new EgWalkerReplica(
+      "packed-linear-bridges",
+      "",
+      packedGraph,
+    );
+
+    expect(replica.getText()).toBe(expected);
+    // The 168 obsolete cuts become one N-(short L)-N range plus one direct
+    // trailing L cut. Only the 16 nonlinear cuts in the retained 32-section
+    // checkpoint window still need independent engines.
+    expect(generate).toHaveBeenCalledTimes(17);
+  });
+
   it("continues from a retained numeric replay engine", () => {
     const events: GraphEvent[] = [];
     let parents: EventId[] = [];

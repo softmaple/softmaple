@@ -120,6 +120,12 @@ const MAX_REPLAY_CACHE_EVENTS = 4_096;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
 const ESTIMATED_REPLAY_RECORD_BYTES = 256;
 const ESTIMATED_DELETE_TARGET_BYTES = 32;
+// Keep a short causally-linear gap inside one obsolete nonlinear replay
+// lifetime. Paper critical versions permit discarding temporary CRDT state;
+// they do not require it. Bridging a handful of events avoids rebuilding the
+// engine and eagerly splicing the persistent rope on both sides of the gap,
+// while long linear tails still take the cheaper direct replay path.
+const MAX_LINEAR_BRIDGE_EVENTS = 8;
 // Old critical cuts are not observable after cold replay. Replaying adjacent
 // nonlinear cuts in one bounded engine lifetime avoids repeatedly rebuilding
 // the ranked sequence and Fugue index while keeping temporary CRDT state
@@ -1642,20 +1648,13 @@ export class EgWalkerReplica {
         sectionIndex < retainedCheckpointSectionStart &&
         !plan.isLinearSection(sectionIndex)
       ) {
-        while (
-          sectionEnd < retainedCheckpointSectionStart &&
-          !plan.isLinearSection(sectionEnd)
-        ) {
-          const candidateCount = plan.sectionEventCountAt(sectionEnd);
-          if (
-            sectionEventCount + candidateCount >
-            MAX_NONLINEAR_SUPERSECTION_EVENTS
-          ) {
-            break;
-          }
-          sectionEventCount += candidateCount;
-          sectionEnd++;
-        }
+        const grouped = extendPackedNonlinearReplayRange(
+          plan,
+          sectionIndex,
+          retainedCheckpointSectionStart,
+        );
+        sectionEnd = grouped.endSection;
+        sectionEventCount = grouped.eventCount;
       }
       const baseVersion = new Set(this.currentVersion);
       const baseCheckpoint: CriticalCheckpoint = {
@@ -2752,6 +2751,58 @@ const isLinearReplaySection = (
     previousId = event.id;
   }
   return true;
+};
+
+interface PackedNonlinearReplayRange {
+  readonly endSection: number;
+  readonly eventCount: number;
+}
+
+/**
+ * Extend one obsolete nonlinear packed range across only short linear gaps.
+ *
+ * The returned range always starts and ends with a nonlinear section. A
+ * trailing linear run is deliberately left to the direct rope path, and the
+ * caller-provided limit keeps the retained checkpoint window independent.
+ */
+const extendPackedNonlinearReplayRange = (
+  plan: PackedCriticalReplayPlan,
+  startSection: number,
+  endSectionLimit: number,
+): PackedNonlinearReplayRange => {
+  let endSection = startSection + 1;
+  let eventCount = plan.sectionEventCountAt(startSection);
+
+  while (endSection < endSectionLimit) {
+    let candidateSection = endSection;
+    let bridgeEventCount = 0;
+    while (
+      candidateSection < endSectionLimit &&
+      plan.isLinearSection(candidateSection)
+    ) {
+      bridgeEventCount += plan.sectionEventCountAt(candidateSection);
+      if (bridgeEventCount > MAX_LINEAR_BRIDGE_EVENTS) {
+        return { endSection, eventCount };
+      }
+      candidateSection++;
+    }
+
+    // Do not absorb a trailing linear tail: without another nonlinear cut,
+    // the direct packed replay path is strictly less stateful.
+    if (candidateSection >= endSectionLimit) {
+      break;
+    }
+
+    const candidateEventCount =
+      bridgeEventCount + plan.sectionEventCountAt(candidateSection);
+    if (eventCount + candidateEventCount > MAX_NONLINEAR_SUPERSECTION_EVENTS) {
+      break;
+    }
+    eventCount += candidateEventCount;
+    endSection = candidateSection + 1;
+  }
+
+  return { endSection, eventCount };
 };
 
 const canRetainReplayEngine = (

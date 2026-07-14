@@ -133,18 +133,21 @@ export class RecordSplitter {
   isolateRunSliceForEvent(eventId: EventId): void {
     const { sequence, itemsById, eventItems } = this.deps;
     const items = eventItems.get(eventId);
-    if (!items || items.length === 0) {
+    if (
+      items === undefined ||
+      (typeof items !== "string" && items.length === 0)
+    ) {
       // Event hasn't been integrated yet (e.g. a delete-only or pre-effect
       // retreat). Nothing to toggle.
       return;
     }
-    if (items.length > 1) {
+    if (typeof items !== "string" && items.length > 1) {
       // Multi-character INSERT events stay one record per code unit, each with
       // its own id and `run === null`. The retreat / advance loop already
       // toggles every slice in order; no isolation is needed.
       return;
     }
-    const itemId = items[0];
+    const itemId = typeof items === "string" ? items : items[0];
     if (itemId === undefined) {
       return;
     }

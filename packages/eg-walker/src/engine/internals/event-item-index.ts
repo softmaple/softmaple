@@ -2,7 +2,8 @@ import { parseEventId } from "../../graph/event-id";
 import type { EventId } from "../../types";
 import type { AugmentedCRDTItem } from "./engine-types";
 
-type DirectEventItems = EventId | EventId[];
+type StoredEventItems = EventId | EventId[];
+export type EventItems = EventId | ReadonlyArray<EventId>;
 
 /**
  * Event-id -> CRDT item lookup used by retreat / advance.
@@ -14,7 +15,7 @@ type DirectEventItems = EventId | EventId[];
  * and one string per character event.
  */
 export class EventItemIndex {
-  private readonly direct = new Map<EventId, DirectEventItems>();
+  private readonly direct = new Map<EventId, StoredEventItems>();
   private readonly runItemsByReplica = new Map<string, AugmentedCRDTItem[]>();
   private sortedRunReplicas = new Set<string>();
 
@@ -28,23 +29,33 @@ export class EventItemIndex {
     this.direct.set(eventId, itemIds.length === 1 ? itemIds[0]! : itemIds);
   }
 
+  /** Store the dominant one-event/one-record case without a wrapper array. */
+  setOne(eventId: EventId, itemId: EventId): void {
+    this.direct.set(eventId, itemId);
+  }
+
   add(eventId: EventId, itemId: EventId): void {
     const items = this.direct.get(eventId);
     if (items === undefined) {
       this.direct.set(eventId, itemId);
       return;
     }
-    if (Array.isArray(items)) {
-      this.direct.set(eventId, [...items, itemId]);
+    if (typeof items !== "string") {
+      items.push(itemId);
       return;
     }
     this.direct.set(eventId, [items, itemId]);
   }
 
-  get(eventId: EventId): EventId[] | undefined {
+  /**
+   * Resolve to a scalar for one-record events and an array only when the
+   * event genuinely owns multiple records. Callers must treat returned arrays
+   * as read-only; avoiding a scalar wrapper is load-bearing on replay diffs.
+   */
+  get(eventId: EventId): EventItems | undefined {
     const direct = this.direct.get(eventId);
     if (direct !== undefined) {
-      return Array.isArray(direct) ? direct : [direct];
+      return direct;
     }
 
     const parsed = parseEventId(eventId);
@@ -53,7 +64,7 @@ export class EventItemIndex {
     }
 
     const item = this.findRunItem(parsed.replicaId, parsed.sequence);
-    return item ? [item.id] : undefined;
+    return item?.id;
   }
 
   registerRunItem(item: AugmentedCRDTItem): void {
@@ -62,7 +73,7 @@ export class EventItemIndex {
     }
     const items = this.runItemsByReplica.get(item.run.replicaId);
     if (items) {
-      this.runItemsByReplica.set(item.run.replicaId, [...items, item]);
+      items.push(item);
       this.sortedRunReplicas.delete(item.run.replicaId);
       return;
     }

@@ -7,7 +7,6 @@ import { EventItemIndex } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
-import { stringCodeUnits } from "./text-utils";
 import { FugueOrderIndex } from "./fugue-order-index";
 import { findIntegrationPosition } from "./yata-integration";
 
@@ -25,7 +24,6 @@ export interface InsertHandlerDeps {
   readonly applyPendingSplice: (effectIndex: number, text: string) => void;
   readonly flushPendingInsert: () => void;
   readonly itemToEffectIndex: (target: AugmentedCRDTItem) => number;
-  readonly requireItem: (itemId: EventId) => AugmentedCRDTItem;
   readonly insertText: (index: number, text: string) => void;
   readonly recordIntegrationProbe: () => void;
   readonly useLinearIntegrationOracle: () => boolean;
@@ -50,7 +48,6 @@ export const applyInsert = (
     applyPendingSplice,
     flushPendingInsert,
     itemToEffectIndex,
-    requireItem,
     insertText,
     recordIntegrationProbe,
     useLinearIntegrationOracle,
@@ -157,7 +154,7 @@ export const applyInsert = (
       const previousLength = leftRecord.content.length;
       leftRecord.content += insertedText;
       sequence.updateItem(leftRecord);
-      eventItems.set(eventId, [leftRecord.id]);
+      eventItems.setOne(eventId, leftRecord.id);
       if (deferTextMaterialization) {
         return NO_TRANSFORMED_OPERATIONS;
       }
@@ -181,8 +178,7 @@ export const applyInsert = (
     }
   }
 
-  const codeUnits = stringCodeUnits(insertedText);
-  const insertedIds: EventId[] = [];
+  const insertedIds: EventId[] | null = insertedText.length === 1 ? null : [];
   let left = originLeft;
 
   // First code unit: pay the full integration scan if the conflict region
@@ -198,7 +194,7 @@ export const applyInsert = (
   const firstItem: AugmentedCRDTItem = {
     id: `${eventId}:0`,
     eventId,
-    content: codeUnits[0] ?? "",
+    content: insertedText[0] ?? "",
     originLeft: left,
     originRight,
     everDeleted: false,
@@ -235,7 +231,7 @@ export const applyInsert = (
   sequence.insert(actualFirstPosition, firstItem);
   itemsById.set(firstItem.id, firstItem);
   originLeftIndex.track(firstItem.id, firstItem.originLeft);
-  insertedIds.push(firstItem.id);
+  insertedIds?.push(firstItem.id);
   left = firstItem.id;
 
   // Multi-character inserts: every subsequent item is chained off the
@@ -248,11 +244,11 @@ export const applyInsert = (
   // typed-run coalescing operates on single-character events from
   // contiguous sequence numbers, not on the per-code-unit fragments of
   // one multi-character INSERT.
-  for (let offset = 1; offset < codeUnits.length; offset++) {
+  for (let offset = 1; offset < insertedText.length; offset++) {
     const item: AugmentedCRDTItem = {
       id: `${eventId}:${offset}`,
       eventId,
-      content: codeUnits[offset] ?? "",
+      content: insertedText[offset] ?? "",
       originLeft: left,
       originRight,
       everDeleted: false,
@@ -270,11 +266,15 @@ export const applyInsert = (
     sequence.insert(expectedPosition, item);
     itemsById.set(item.id, item);
     originLeftIndex.track(item.id, item.originLeft);
-    insertedIds.push(item.id);
+    insertedIds?.push(item.id);
     left = item.id;
   }
 
-  eventItems.set(eventId, insertedIds);
+  if (insertedIds === null) {
+    eventItems.setOne(eventId, firstItem.id);
+  } else {
+    eventItems.set(eventId, insertedIds);
+  }
 
   // Cold replay callers only need the final document. The sequence already
   // carries the authoritative effect-visible state, so avoid an effect-rank
@@ -284,8 +284,7 @@ export const applyInsert = (
     return NO_TRANSFORMED_OPERATIONS;
   }
 
-  const firstInserted = requireItem(insertedIds[0] ?? eventId);
-  const effectIndex = itemToEffectIndex(firstInserted);
+  const effectIndex = itemToEffectIndex(firstItem);
   // A non-coalesced insert (multi-character event, new typed-run seed,
   // or non-empty conflict region) must observe the current document so
   // {@link effectIndex} aligns with the engine's resulting text. Drain

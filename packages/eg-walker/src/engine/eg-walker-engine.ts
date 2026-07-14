@@ -984,7 +984,14 @@ export class EgWalkerEngine {
   ): void {
     if (isInsert) {
       this.recordSplitter.isolateRunSliceForEvent(eventId);
-      for (const itemId of this.eventItems.get(eventId) ?? []) {
+      const eventItems = this.eventItems.get(eventId);
+      if (typeof eventItems === "string") {
+        const item = this.requireItem(eventItems);
+        item.prepareState += delta;
+        this.sequence.updateItem(item);
+        return;
+      }
+      for (const itemId of eventItems ?? []) {
         const item = this.requireItem(itemId);
         item.prepareState += delta;
         this.sequence.updateItem(item);
@@ -1054,7 +1061,6 @@ export class EgWalkerEngine {
     applyPendingSplice: this.applyPendingSplice,
     flushPendingInsert: () => this.flushPendingInsert(),
     itemToEffectIndex: (target) => this.itemToEffectIndex(target),
-    requireItem: (itemId) => this.requireItem(itemId),
     insertText: (index, text) => {
       this.resultingText = this.resultingText.insert(index, text);
     },

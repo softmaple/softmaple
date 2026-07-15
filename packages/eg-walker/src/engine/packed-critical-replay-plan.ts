@@ -20,6 +20,9 @@ import type {
  * object, an event slice, and two Sets.
  */
 export class PackedCriticalReplayPlan {
+  private readonly numericFrontier: Uint8Array;
+  private readonly numericBaseOffsets: number[] = [];
+
   constructor(
     private readonly graph: PackedReplayPlanningView,
     private readonly eventOrder: Uint32Array,
@@ -27,7 +30,9 @@ export class PackedCriticalReplayPlan {
     private readonly sectionEnds: Uint32Array,
     private readonly linearSections: Uint8Array,
     readonly sectionCount: number,
-  ) {}
+  ) {
+    this.numericFrontier = new Uint8Array(eventOrder.length);
+  }
 
   get eventCount(): number {
     return this.eventOrder.length;
@@ -116,25 +121,68 @@ export class PackedCriticalReplayPlan {
       startSectionIndex,
       endSectionIndex,
     );
-    const frontier = new Set(base);
-    for (let orderIndex = start; orderIndex < end; orderIndex++) {
-      const eventOffset = this.eventOffsetAt(orderIndex);
-      const parentCount = this.graph.parentCountAt(eventOffset);
-      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-        const parentOffset = this.graph.parentOffsetAt(
-          eventOffset,
-          parentIndex,
-        );
-        if (parentOffset === undefined) {
-          throw new Error(
-            `Packed replay event ${eventOffset} is missing parent ${parentIndex}`,
-          );
-        }
-        frontier.delete(this.eventIdAtOffset(parentOffset));
+    const marks = this.numericFrontier;
+    const baseOffsets = this.numericBaseOffsets;
+    const frontier = new Set<EventId>();
+    baseOffsets.length = 0;
+
+    for (const eventId of base) {
+      const offset = this.graph.offsetOf(eventId);
+      if (offset === undefined) {
+        // Preserve the historical Set implementation's behavior for an
+        // out-of-graph base ID. Valid replay frontiers never take this path,
+        // but retaining it keeps the internal helper total for callers.
+        frontier.add(eventId);
+        continue;
       }
-      frontier.add(this.eventIdAtOffset(eventOffset));
+      marks[offset] = 1;
+      baseOffsets.push(offset);
     }
-    return frontier;
+
+    try {
+      for (let orderIndex = start; orderIndex < end; orderIndex++) {
+        const eventOffset = this.eventOffsetAt(orderIndex);
+        const parentCount = this.graph.parentCountAt(eventOffset);
+        for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+          const parentOffset = this.graph.parentOffsetAt(
+            eventOffset,
+            parentIndex,
+          );
+          if (parentOffset === undefined) {
+            throw new Error(
+              `Packed replay event ${eventOffset} is missing parent ${parentIndex}`,
+            );
+          }
+          marks[parentOffset] = 0;
+        }
+        marks[eventOffset] = 1;
+      }
+
+      // Only the base frontier and events in this range can be live. Walk
+      // those compact numeric sources and materialize string IDs once for the
+      // usually tiny end frontier, instead of hashing strings for every event.
+      for (let index = 0; index < baseOffsets.length; index++) {
+        const offset = baseOffsets[index]!;
+        if (marks[offset] === 1) {
+          frontier.add(this.eventIdAtKnownOffset(offset));
+        }
+      }
+      for (let orderIndex = start; orderIndex < end; orderIndex++) {
+        const eventOffset = this.eventOffsetAt(orderIndex);
+        if (marks[eventOffset] === 1) {
+          frontier.add(this.eventIdAtKnownOffset(eventOffset));
+        }
+      }
+      return frontier;
+    } finally {
+      for (let index = 0; index < baseOffsets.length; index++) {
+        marks[baseOffsets[index]!] = 0;
+      }
+      for (let orderIndex = start; orderIndex < end; orderIndex++) {
+        marks[this.eventOffsetAt(orderIndex)] = 0;
+      }
+      baseOffsets.length = 0;
+    }
   }
 
   eventIdsInSectionRange(
@@ -472,11 +520,36 @@ export const planPackedCriticalReplaySections = (
     readyCount--;
 
     const parentCount = graph.parentCountAt(eventOffset);
+    const prefixFrontierSizeBefore = prefixFrontierSize;
+    let parentsInPrefixFrontier = 0;
+
+    // Removing the popped ready event from parent coverage and replacing its
+    // parent frontier with the event used to require three complete parent
+    // scans (plus a fourth at section starts). Fuse those updates while every
+    // parent offset is hot: the arithmetic is identical because each term is
+    // additive and uses readyCount after the pop plus coverage after removal.
+    for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+      const parentOffset = requireParentOffset(graph, eventOffset, parentIndex);
+      const previousCoverage = readyParentCoverage[parentOffset]!;
+      if (previousCoverage === 0) {
+        throw new Error("Invalid packed replay ready-parent coverage");
+      }
+      const nextCoverage = previousCoverage - 1;
+      readyParentCoverage[parentOffset] = nextCoverage;
+
+      if (prefixFrontier[parentOffset] !== 1) {
+        continue;
+      }
+      parentsInPrefixFrontier++;
+      missingReadyParentPairs -= readyCount - nextCoverage;
+      prefixFrontier[parentOffset] = 0;
+      prefixFrontierSize--;
+    }
+
     if (orderIndex === sectionStart) {
       sectionIsLinear =
-        parentCount === prefixFrontierSize &&
-        countParentsInNumericFrontier(graph, eventOffset, prefixFrontier) ===
-          prefixFrontierSize;
+        parentCount === prefixFrontierSizeBefore &&
+        parentsInPrefixFrontier === prefixFrontierSizeBefore;
     } else if (
       parentCount !== 1 ||
       graph.parentOffsetAt(eventOffset, 0) !== eventOrder[orderIndex - 1]
@@ -485,20 +558,7 @@ export const planPackedCriticalReplaySections = (
     }
 
     missingReadyParentPairs -=
-      prefixFrontierSize -
-      countParentsInNumericFrontier(graph, eventOffset, prefixFrontier);
-    adjustParentCoverage(graph, eventOffset, readyParentCoverage, -1);
-
-    for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-      const parentOffset = requireParentOffset(graph, eventOffset, parentIndex);
-      if (prefixFrontier[parentOffset] !== 1) {
-        continue;
-      }
-      missingReadyParentPairs -=
-        readyCount - readyParentCoverage[parentOffset]!;
-      prefixFrontier[parentOffset] = 0;
-      prefixFrontierSize--;
-    }
+      prefixFrontierSizeBefore - parentsInPrefixFrontier;
     prefixFrontier[eventOffset] = 1;
     prefixFrontierSize++;
     missingReadyParentPairs += readyCount - readyParentCoverage[eventOffset]!;
@@ -512,10 +572,22 @@ export const planPackedCriticalReplaySections = (
         continue;
       }
 
+      const childParentCount = graph.parentCountAt(childOffset);
+      let childParentsInPrefixFrontier = 0;
+      for (let parentIndex = 0; parentIndex < childParentCount; parentIndex++) {
+        const parentOffset = requireParentOffset(
+          graph,
+          childOffset,
+          parentIndex,
+        );
+        if (prefixFrontier[parentOffset] === 1) {
+          childParentsInPrefixFrontier++;
+        }
+        readyParentCoverage[parentOffset] =
+          readyParentCoverage[parentOffset]! + 1;
+      }
       missingReadyParentPairs +=
-        prefixFrontierSize -
-        countParentsInNumericFrontier(graph, childOffset, prefixFrontier);
-      adjustParentCoverage(graph, childOffset, readyParentCoverage, 1);
+        prefixFrontierSize - childParentsInPrefixFrontier;
       ready[childOffset] = 1;
       readyCount++;
     }
@@ -547,38 +619,6 @@ export const planPackedCriticalReplaySections = (
     linearSections.slice(0, sectionCount),
     sectionCount,
   );
-};
-
-const countParentsInNumericFrontier = (
-  graph: PackedReplayPlanningView,
-  eventOffset: number,
-  frontier: Uint8Array,
-): number => {
-  const parentCount = graph.parentCountAt(eventOffset);
-  let count = 0;
-  for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-    if (frontier[requireParentOffset(graph, eventOffset, parentIndex)] === 1) {
-      count++;
-    }
-  }
-  return count;
-};
-
-const adjustParentCoverage = (
-  graph: PackedReplayPlanningView,
-  eventOffset: number,
-  coverage: Uint32Array,
-  delta: 1 | -1,
-): void => {
-  const parentCount = graph.parentCountAt(eventOffset);
-  for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-    const parentOffset = requireParentOffset(graph, eventOffset, parentIndex);
-    const previous = coverage[parentOffset]!;
-    if (delta === -1 && previous === 0) {
-      throw new Error("Invalid packed replay ready-parent coverage");
-    }
-    coverage[parentOffset] = previous + delta;
-  }
 };
 
 const requireParentOffset = (

@@ -517,10 +517,9 @@ export class PackedEventGraphBase {
     };
     sortBranchGroup(roots);
 
-    const stack = new Uint32Array(this.count);
-    let stackLength = 0;
+    const stack: number[] = [];
     for (let index = roots.length - 1; index >= 0; index--) {
-      stack[stackLength++] = roots[index]!;
+      stack.push(roots[index]!);
     }
 
     const result = new Uint32Array(this.count);
@@ -530,8 +529,8 @@ export class PackedEventGraphBase {
     // event in large operation-granularity traces while preserving the same
     // branch-group ordering whenever several children become ready together.
     const newlyReady: number[] = [];
-    while (stackLength > 0) {
-      const offset = stack[--stackLength]!;
+    while (stack.length > 0) {
+      const offset = stack.pop()!;
       result[resultLength++] = offset;
 
       newlyReady.length = 0;
@@ -545,7 +544,7 @@ export class PackedEventGraphBase {
       }
       sortBranchGroup(newlyReady);
       for (let index = newlyReady.length - 1; index >= 0; index--) {
-        stack[stackLength++] = newlyReady[index]!;
+        stack.push(newlyReady[index]!);
       }
     }
 

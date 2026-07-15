@@ -517,18 +517,24 @@ export class PackedEventGraphBase {
     };
     sortBranchGroup(roots);
 
-    const stack: number[] = [];
+    const stack = new Uint32Array(this.count);
+    let stackLength = 0;
     for (let index = roots.length - 1; index >= 0; index--) {
-      stack.push(roots[index]!);
+      stack[stackLength++] = roots[index]!;
     }
 
     const result = new Uint32Array(this.count);
     let resultLength = 0;
-    while (stack.length > 0) {
-      const offset = stack.pop()!;
+    // Most events release no child (and a linear edge releases exactly one).
+    // Reusing one scratch group avoids allocating an empty array for every
+    // event in large operation-granularity traces while preserving the same
+    // branch-group ordering whenever several children become ready together.
+    const newlyReady: number[] = [];
+    while (stackLength > 0) {
+      const offset = stack[--stackLength]!;
       result[resultLength++] = offset;
 
-      const newlyReady: number[] = [];
+      newlyReady.length = 0;
       const start = this.childStarts![offset]!;
       const end = this.childStarts![offset + 1]!;
       for (let cursor = start; cursor < end; cursor++) {
@@ -539,7 +545,7 @@ export class PackedEventGraphBase {
       }
       sortBranchGroup(newlyReady);
       for (let index = newlyReady.length - 1; index >= 0; index--) {
-        stack.push(newlyReady[index]!);
+        stack[stackLength++] = newlyReady[index]!;
       }
     }
 

@@ -176,6 +176,46 @@ describe("EgWalkerEngine", () => {
     expect(deferredApplied.transformedOperations).toEqual(
       eagerApplied.transformedOperations,
     );
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+
+    const restoredEngine = EgWalkerEngine.fromSnapshotState({
+      graph,
+      currentVersion: deferredEngine.getCurrentVersion(),
+      text: deferredEngine.getText(),
+      sequenceRecords: deferredEngine.getSequenceRecords(),
+      deleteTargets: deferredEngine.getDeleteTargetRecords(),
+    });
+    const divergent: GraphEvent = {
+      id: "divergent-insert",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "Y" },
+      timestamp: events.length + 1,
+    };
+    graph.addEvent(divergent);
+
+    const eagerDivergent = eagerEngine.applyEvent(divergent, graph);
+    const deferredDivergent = deferredEngine.applyEvent(divergent, graph);
+    const restoredDivergent = restoredEngine.applyEvent(divergent, graph);
+
+    expect(deferredDivergent.text).toBe(eagerDivergent.text);
+    expect(restoredDivergent.text).toBe(eagerDivergent.text);
+    expect(deferredDivergent.transformedOperations).toEqual(
+      eagerDivergent.transformedOperations,
+    );
+    expect(restoredDivergent.transformedOperations).toEqual(
+      eagerDivergent.transformedOperations,
+    );
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      restoredEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      restoredEngine.getDeleteTargetRecords(),
+    );
   });
 
   it("deletes segmented effect ranges without shifting later spans", () => {

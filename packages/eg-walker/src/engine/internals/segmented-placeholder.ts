@@ -17,10 +17,8 @@ export interface PlaceholderDeleteResult<Owner extends object> {
   readonly affectedSlices: ReadonlyArray<PlaceholderPhysicalSlice<Owner>>;
 }
 
-interface RangeMutationSummary {
-  readonly prepareLengthBefore: number;
-  readonly effectLengthBefore: number;
-}
+const PREPARE_VISIBLE_UNIT = 1;
+const EFFECT_VISIBLE_UNIT = 2;
 
 interface SegmentNode {
   readonly id: EventId;
@@ -28,6 +26,7 @@ interface SegmentNode {
   spanLength: number;
   cover: number;
   effectVisible: boolean;
+  parent: SegmentNode | null;
   left: SegmentNode | null;
   right: SegmentNode | null;
   subtreeLength: number;
@@ -146,6 +145,10 @@ export class SegmentedPlaceholderState<Owner extends object> {
   private root: SegmentNode;
   private sliceRoot: SliceNode<Owner> | null = null;
   private readonly allocatedSegmentIds = new Set<EventId>();
+  private readonly boundaryNodes = new Map<number, SegmentNode>();
+  private readonly directPathNodes: SegmentNode[] = [];
+  private mutationPrepareLengthBefore = 0;
+  private mutationEffectLengthBefore = 0;
   private structuralOperationCount = 0;
 
   constructor(
@@ -156,6 +159,7 @@ export class SegmentedPlaceholderState<Owner extends object> {
     assertPositiveSafeInteger(length, "placeholder length");
     this.assertFreshSegmentId(initialSegmentId);
     this.root = createSegmentNode(initialSegmentId, length, 0, true);
+    this.boundaryNodes.set(0, this.root);
   }
 
   get prepareLength(): number {
@@ -167,11 +171,7 @@ export class SegmentedPlaceholderState<Owner extends object> {
   }
 
   get logicalSegmentCount(): number {
-    let count = 0;
-    this.forEachLogicalSegment(() => {
-      count++;
-    });
-    return count;
+    return this.boundaryNodes.size;
   }
 
   get physicalSliceCount(): number {
@@ -255,11 +255,11 @@ export class SegmentedPlaceholderState<Owner extends object> {
       throw new Error(`Invalid logical placeholder boundary ${offset}`);
     }
     this.ensureLogicalBoundary(offset);
-    const node = this.findSegmentAtContentOffset(offset);
-    if (node === null || node.start !== offset) {
+    const node = this.boundaryNodes.get(offset);
+    if (node === undefined) {
       throw new Error(`Missing logical placeholder boundary ${offset}`);
     }
-    return node.node.id;
+    return node.id;
   }
 
   prepareLengthInRange(start: number, end: number): number {
@@ -378,6 +378,66 @@ export class SegmentedPlaceholderState<Owner extends object> {
   }
 
   /**
+   * Delete exactly one prepare-visible UTF-16 code unit in a physical slice.
+   *
+   * This scalar replay path performs no per-call range/result allocation. It
+   * validates visibility before creating logical boundaries, mutates the
+   * aligned segment through the reusable parent path, and applies the known
+   * one-unit cache deltas directly to the owning physical slice.
+   *
+   * @returns `1` when the unit was effect-visible before deletion, otherwise
+   * `0` when a previous delete had already hidden it from the effect view.
+   */
+  deletePrepareVisibleUnitInSlice(
+    slice: PlaceholderPhysicalSlice<Owner>,
+    localOffset: number,
+  ): number {
+    const operationCountBeforeValidation = this.structuralOperationCount;
+    let visibility = 0;
+    try {
+      this.assertOwnedSlice(slice);
+      if (
+        !Number.isSafeInteger(localOffset) ||
+        localOffset < 0 ||
+        localOffset >= slice.length
+      ) {
+        throw new Error(
+          `Invalid placeholder delete offset ${localOffset} for slice length ${slice.length}`,
+        );
+      }
+      visibility = this.unitVisibilityAtContentOffset(
+        slice.start + localOffset,
+      );
+      if ((visibility & PREPARE_VISIBLE_UNIT) === 0) {
+        throw new Error(
+          `Placeholder unit ${slice.start + localOffset} is not prepare-visible`,
+        );
+      }
+      const effectDelta = (visibility & EFFECT_VISIBLE_UNIT) === 0 ? 0 : 1;
+      if (slice.prepareLength < 1 || slice.effectLength < effectDelta) {
+        throw new Error("Placeholder slice cache disagrees with logical state");
+      }
+    } catch (error) {
+      this.structuralOperationCount = operationCountBeforeValidation;
+      throw error;
+    }
+
+    const absoluteOffset = slice.start + localOffset;
+    this.ensureLogicalBoundary(absoluteOffset);
+    this.ensureLogicalBoundary(absoluteOffset + 1);
+    const node = this.boundaryNodes.get(absoluteOffset);
+    if (node === undefined || node.spanLength !== 1) {
+      throw new Error(`Missing scalar placeholder segment ${absoluteOffset}`);
+    }
+    this.deleteVisibleUnitNode(node);
+
+    const deletedEffectLength =
+      (visibility & EFFECT_VISIBLE_UNIT) === 0 ? 0 : 1;
+    slice.adjustCachedLengths(-1, -deletedEffectLength);
+    return deletedEffectLength;
+  }
+
+  /**
    * Hot replay variant for a delete already landed inside one physical slice.
    * The selected ranges all have zero cover, and the split middle exposes its
    * old effect width before hiding, so cached weights can be adjusted without
@@ -406,9 +466,9 @@ export class SegmentedPlaceholderState<Owner extends object> {
     let deletedPrepareLength = 0;
     let deletedEffectLength = 0;
     for (const range of ranges) {
-      const summary = this.mutateRange(range.start, range.end, 1, true);
-      deletedPrepareLength += summary.prepareLengthBefore;
-      deletedEffectLength += summary.effectLengthBefore;
+      this.mutateRange(range.start, range.end, 1, true);
+      deletedPrepareLength += this.mutationPrepareLengthBefore;
+      deletedEffectLength += this.mutationEffectLengthBefore;
     }
     if (deletedPrepareLength > 0 || deletedEffectLength > 0) {
       slice.adjustCachedLengths(-deletedPrepareLength, -deletedEffectLength);
@@ -436,13 +496,8 @@ export class SegmentedPlaceholderState<Owner extends object> {
     delta: 1 | -1,
   ): ReadonlyArray<PlaceholderPhysicalSlice<Owner>> {
     this.assertRange(start, end);
-    if (delta < 0 && this.minCoverInRange(start, end) === 0) {
-      throw new Error(
-        `Placeholder prepare coverage would become negative in [${start}, ${end})`,
-      );
-    }
-    const affectedSlices = this.slicesOverlapping(start, end);
     this.mutateRange(start, end, delta, false);
+    const affectedSlices = this.slicesOverlapping(start, end);
     for (const slice of affectedSlices) {
       slice.setCachedLengths(
         this.prepareLengthInRange(slice.start, slice.end),
@@ -566,42 +621,34 @@ export class SegmentedPlaceholderState<Owner extends object> {
     throw new Error(`Placeholder prepare rank ${rank} escaped the treap`);
   }
 
-  private minCoverInRange(start: number, end: number): number {
-    const minimum = this.queryMinCover(this.root, 0, start, end);
-    if (!Number.isFinite(minimum)) {
-      throw new Error(`Missing placeholder coverage in [${start}, ${end})`);
+  private unitVisibilityAtContentOffset(offset: number): number {
+    let node: SegmentNode | null = this.root;
+    let remaining = offset;
+    let inheritedCover = 0;
+    let inheritedEffectHidden = false;
+    while (node !== null) {
+      this.structuralOperationCount++;
+      const leftLength = nodeLength(node.left);
+      if (remaining < leftLength) {
+        inheritedCover += node.lazyCoverDelta;
+        inheritedEffectHidden ||= node.lazyHideEffect;
+        node = node.left;
+        continue;
+      }
+      if (remaining < leftLength + node.spanLength) {
+        return (
+          (node.cover + inheritedCover === 0 ? PREPARE_VISIBLE_UNIT : 0) |
+          (!inheritedEffectHidden && node.effectVisible
+            ? EFFECT_VISIBLE_UNIT
+            : 0)
+        );
+      }
+      remaining -= leftLength + node.spanLength;
+      inheritedCover += node.lazyCoverDelta;
+      inheritedEffectHidden ||= node.lazyHideEffect;
+      node = node.right;
     }
-    return minimum;
-  }
-
-  private queryMinCover(
-    node: SegmentNode | null,
-    subtreeStart: number,
-    start: number,
-    end: number,
-  ): number {
-    if (
-      node === null ||
-      end <= subtreeStart ||
-      start >= subtreeStart + node.subtreeLength
-    ) {
-      return Number.POSITIVE_INFINITY;
-    }
-    this.structuralOperationCount++;
-    if (start <= subtreeStart && subtreeStart + node.subtreeLength <= end) {
-      return node.minCover;
-    }
-
-    this.push(node);
-    const nodeStart = subtreeStart + nodeLength(node.left);
-    let minimum = this.queryMinCover(node.left, subtreeStart, start, end);
-    if (start < nodeStart + node.spanLength && end > nodeStart) {
-      minimum = Math.min(minimum, node.cover);
-    }
-    return Math.min(
-      minimum,
-      this.queryMinCover(node.right, nodeStart + node.spanLength, start, end),
-    );
+    throw new Error(`Placeholder offset ${offset} escaped the segment tree`);
   }
 
   private mutateRange(
@@ -609,169 +656,418 @@ export class SegmentedPlaceholderState<Owner extends object> {
     end: number,
     coverDelta: number,
     hideEffect: boolean,
-  ): RangeMutationSummary {
+  ): void {
     if (start === end) {
-      return { prepareLengthBefore: 0, effectLengthBefore: 0 };
+      this.mutationPrepareLengthBefore = 0;
+      this.mutationEffectLengthBefore = 0;
+      return;
     }
-    const [left, tail] = this.splitNode(this.root, start);
-    if (tail === null) {
-      throw new Error(`Missing placeholder range tail at ${start}`);
+    if (this.tryMutateSingleSegment(start, end, coverDelta, hideEffect)) {
+      return;
     }
-    const [middle, right] = this.splitNode(tail, end - start);
-    if (middle === null) {
-      throw new Error(`Missing placeholder range [${start}, ${end})`);
+
+    const prepareBeforeValidation = this.mutationPrepareLengthBefore;
+    const effectBeforeValidation = this.mutationEffectLengthBefore;
+    let hasPreflight = false;
+    if (coverDelta < 0) {
+      const operationCountBeforeValidation = this.structuralOperationCount;
+      this.measureRange(start, end);
+      hasPreflight = true;
+      if (this.mutationPrepareLengthBefore > 0) {
+        this.structuralOperationCount = operationCountBeforeValidation;
+        this.mutationPrepareLengthBefore = prepareBeforeValidation;
+        this.mutationEffectLengthBefore = effectBeforeValidation;
+        throw new Error(
+          `Placeholder prepare coverage would become negative in [${start}, ${end})`,
+        );
+      }
     }
-    if (coverDelta < 0 && middle.minCover + coverDelta < 0) {
-      this.root = this.mergeNodes(left, this.mergeNodes(middle, right))!;
+
+    this.ensureLogicalBoundary(start);
+    this.ensureLogicalBoundary(end);
+    if (this.tryMutateSingleSegment(start, end, coverDelta, hideEffect)) {
+      return;
+    }
+
+    if (!hasPreflight) {
+      this.measureRange(start, end);
+    }
+    this.applyRange(this.root, 0, start, end, coverDelta, hideEffect);
+  }
+
+  private deleteVisibleUnitNode(node: SegmentNode): void {
+    this.directPathNodes.length = 0;
+    let current: SegmentNode | null = node;
+    while (current !== null) {
+      this.structuralOperationCount++;
+      this.directPathNodes.push(current);
+      current = current.parent;
+    }
+    for (let index = this.directPathNodes.length - 1; index >= 0; index--) {
+      this.push(this.directPathNodes[index]!);
+    }
+    if (node.cover !== 0) {
+      throw new Error("Placeholder scalar target is not prepare-visible");
+    }
+    node.cover = 1;
+    node.effectVisible = false;
+    for (let index = 0; index < this.directPathNodes.length; index++) {
+      this.updateNode(this.directPathNodes[index]!);
+    }
+  }
+
+  private tryMutateSingleSegment(
+    start: number,
+    end: number,
+    coverDelta: number,
+    hideEffect: boolean,
+  ): boolean {
+    const node = this.boundaryNodes.get(start);
+    if (node === undefined || node.spanLength !== end - start) {
+      return false;
+    }
+
+    const operationCountBeforeValidation = this.structuralOperationCount;
+    const prepareBeforeValidation = this.mutationPrepareLengthBefore;
+    const effectBeforeValidation = this.mutationEffectLengthBefore;
+    this.directPathNodes.length = 0;
+    let inheritedCover = 0;
+    let inheritedEffectHidden = false;
+    let current: SegmentNode | null = node;
+    while (current !== null) {
+      this.structuralOperationCount++;
+      this.directPathNodes.push(current);
+      const parent: SegmentNode | null = current.parent;
+      if (parent !== null) {
+        inheritedCover += parent.lazyCoverDelta;
+        inheritedEffectHidden ||= parent.lazyHideEffect;
+      }
+      current = parent;
+    }
+
+    const effectiveCover = node.cover + inheritedCover;
+    this.mutationPrepareLengthBefore =
+      effectiveCover === 0 ? node.spanLength : 0;
+    this.mutationEffectLengthBefore =
+      !inheritedEffectHidden && node.effectVisible ? node.spanLength : 0;
+    if (coverDelta < 0 && effectiveCover + coverDelta < 0) {
+      this.structuralOperationCount = operationCountBeforeValidation;
+      this.mutationPrepareLengthBefore = prepareBeforeValidation;
+      this.mutationEffectLengthBefore = effectBeforeValidation;
       throw new Error(
         `Placeholder prepare coverage would become negative in [${start}, ${end})`,
       );
     }
-    const summary: RangeMutationSummary = {
-      prepareLengthBefore: visiblePrepareLength(middle),
-      effectLengthBefore: middle.effectVisibleLength,
-    };
+
+    for (let index = this.directPathNodes.length - 1; index >= 0; index--) {
+      this.push(this.directPathNodes[index]!);
+    }
     if (coverDelta !== 0) {
-      this.applyCoverDelta(middle, coverDelta);
+      const nextCover = node.cover + coverDelta;
+      if (!Number.isSafeInteger(nextCover)) {
+        throw new Error(
+          "Placeholder prepare coverage exceeded safe integer range",
+        );
+      }
+      node.cover = nextCover;
     }
     if (hideEffect) {
-      this.applyHideEffect(middle);
+      node.effectVisible = false;
     }
-    this.root = this.mergeNodes(left, this.mergeNodes(middle, right))!;
-    return summary;
+    for (let index = 0; index < this.directPathNodes.length; index++) {
+      this.updateNode(this.directPathNodes[index]!);
+    }
+    return true;
+  }
+
+  private measureRange(start: number, end: number): void {
+    this.mutationPrepareLengthBefore = 0;
+    this.mutationEffectLengthBefore = 0;
+    this.measureRangeReadOnly(this.root, 0, start, end, 0, false);
+  }
+
+  private measureRangeReadOnly(
+    node: SegmentNode | null,
+    subtreeStart: number,
+    start: number,
+    end: number,
+    inheritedCover: number,
+    inheritedEffectHidden: boolean,
+  ): void {
+    if (
+      node === null ||
+      end <= subtreeStart ||
+      start >= subtreeStart + node.subtreeLength
+    ) {
+      return;
+    }
+    this.structuralOperationCount++;
+    const subtreeEnd = subtreeStart + node.subtreeLength;
+    if (start <= subtreeStart && subtreeEnd <= end) {
+      if (node.minCover + inheritedCover === 0) {
+        this.mutationPrepareLengthBefore += node.minCoverLength;
+      }
+      if (!inheritedEffectHidden) {
+        this.mutationEffectLengthBefore += node.effectVisibleLength;
+      }
+      return;
+    }
+
+    const nodeStart = subtreeStart + nodeLength(node.left);
+    const childCover = inheritedCover + node.lazyCoverDelta;
+    const childEffectHidden = inheritedEffectHidden || node.lazyHideEffect;
+    this.measureRangeReadOnly(
+      node.left,
+      subtreeStart,
+      start,
+      end,
+      childCover,
+      childEffectHidden,
+    );
+    const ownStart = Math.max(start, nodeStart);
+    const ownEnd = Math.min(end, nodeStart + node.spanLength);
+    if (ownStart < ownEnd) {
+      const ownLength = ownEnd - ownStart;
+      if (node.cover + inheritedCover === 0) {
+        this.mutationPrepareLengthBefore += ownLength;
+      }
+      if (!inheritedEffectHidden && node.effectVisible) {
+        this.mutationEffectLengthBefore += ownLength;
+      }
+    }
+    this.measureRangeReadOnly(
+      node.right,
+      nodeStart + node.spanLength,
+      start,
+      end,
+      childCover,
+      childEffectHidden,
+    );
+  }
+
+  private applyRange(
+    node: SegmentNode | null,
+    subtreeStart: number,
+    start: number,
+    end: number,
+    coverDelta: number,
+    hideEffect: boolean,
+  ): void {
+    if (
+      node === null ||
+      end <= subtreeStart ||
+      start >= subtreeStart + node.subtreeLength
+    ) {
+      return;
+    }
+    this.structuralOperationCount++;
+    const subtreeEnd = subtreeStart + node.subtreeLength;
+    if (start <= subtreeStart && subtreeEnd <= end) {
+      if (coverDelta !== 0) {
+        this.applyCoverDelta(node, coverDelta);
+      }
+      if (hideEffect) {
+        this.applyHideEffect(node);
+      }
+      return;
+    }
+
+    this.push(node);
+    const nodeStart = subtreeStart + nodeLength(node.left);
+    this.applyRange(
+      node.left,
+      subtreeStart,
+      start,
+      end,
+      coverDelta,
+      hideEffect,
+    );
+    if (start < nodeStart + node.spanLength && end > nodeStart) {
+      if (start > nodeStart || end < nodeStart + node.spanLength) {
+        throw new Error(
+          `Unaligned placeholder mutation [${start}, ${end}) crossed segment ` +
+            `[${nodeStart}, ${nodeStart + node.spanLength})`,
+        );
+      }
+      if (coverDelta !== 0) {
+        const nextCover = node.cover + coverDelta;
+        if (!Number.isSafeInteger(nextCover)) {
+          throw new Error(
+            "Placeholder prepare coverage exceeded safe integer range",
+          );
+        }
+        node.cover = nextCover;
+      }
+      if (hideEffect) {
+        node.effectVisible = false;
+      }
+    }
+    this.applyRange(
+      node.right,
+      nodeStart + node.spanLength,
+      start,
+      end,
+      coverDelta,
+      hideEffect,
+    );
+    this.updateNode(node);
   }
 
   private ensureLogicalBoundary(offset: number): void {
     if (offset === 0 || offset === this.length) {
       return;
     }
-    const found = this.findSegmentAtContentOffset(offset);
-    if (found !== null && found.start === offset) {
+    if (this.boundaryNodes.has(offset)) {
       return;
     }
-    const [left, right] = this.splitNode(this.root, offset);
-    this.root = this.mergeNodes(left, right)!;
+    this.insertLogicalBoundary(offset);
   }
 
-  private findSegmentAtContentOffset(
-    offset: number,
-  ): { readonly node: SegmentNode; readonly start: number } | null {
-    let current: SegmentNode | null = this.root;
-    let remaining = offset;
-    let start = 0;
-    while (current !== null) {
+  private insertLogicalBoundary(offset: number): void {
+    this.directPathNodes.length = 0;
+    let node: SegmentNode | null = this.root;
+    let subtreeStart = 0;
+    let nodeStart = 0;
+    while (node !== null) {
       this.structuralOperationCount++;
-      this.push(current);
-      const leftLength = nodeLength(current.left);
-      if (remaining < leftLength) {
-        current = current.left;
-      } else if (remaining < leftLength + current.spanLength) {
-        return { node: current, start: start + leftLength };
+      this.directPathNodes.push(node);
+      const leftLength = nodeLength(node.left);
+      nodeStart = subtreeStart + leftLength;
+      if (offset < nodeStart) {
+        node = node.left;
+      } else if (offset > nodeStart + node.spanLength) {
+        subtreeStart = nodeStart + node.spanLength;
+        node = node.right;
+      } else if (
+        offset === nodeStart ||
+        offset === nodeStart + node.spanLength
+      ) {
+        throw new Error(`Unindexed logical placeholder boundary ${offset}`);
       } else {
-        remaining -= leftLength + current.spanLength;
-        start += leftLength + current.spanLength;
-        current = current.right;
+        break;
       }
     }
-    return null;
-  }
-
-  private splitNode(
-    node: SegmentNode | null,
-    offset: number,
-  ): readonly [SegmentNode | null, SegmentNode | null] {
     if (node === null) {
-      if (offset !== 0) {
-        throw new Error(`Placeholder split ${offset} escaped an empty subtree`);
-      }
-      return [null, null];
-    }
-    this.structuralOperationCount++;
-    if (offset === 0) {
-      return [null, node];
-    }
-    if (offset === node.subtreeLength) {
-      return [node, null];
-    }
-    if (offset < 0 || offset > node.subtreeLength) {
-      throw new Error(
-        `Placeholder split ${offset} exceeds subtree length ${node.subtreeLength}`,
-      );
+      throw new Error(`Missing logical placeholder boundary ${offset}`);
     }
 
-    this.push(node);
-    const leftLength = nodeLength(node.left);
-    if (offset < leftLength) {
-      const [left, remainder] = this.splitNode(node.left, offset);
-      node.left = remainder;
-      this.updateNode(node);
-      return [left, node];
-    }
-    if (offset > leftLength + node.spanLength) {
-      const [remainder, right] = this.splitNode(
-        node.right,
-        offset - leftLength - node.spanLength,
-      );
-      node.right = remainder;
-      this.updateNode(node);
-      return [node, right];
-    }
-    if (offset === leftLength) {
-      const left = node.left;
-      node.left = null;
-      this.updateNode(node);
-      return [left, node];
-    }
-    if (offset === leftLength + node.spanLength) {
-      const right = node.right;
-      node.right = null;
-      this.updateNode(node);
-      return [node, right];
-    }
-
-    const localOffset = offset - leftLength;
-    const leftSubtree = node.left;
-    const rightSubtree = node.right;
-    const leftChunk = createSegmentNode(
-      node.id,
-      localOffset,
-      node.cover,
-      node.effectVisible,
-    );
+    // Allocate and validate the stable ID before changing span lengths or
+    // topology. Lazy propagation below is therefore entered only after the
+    // external allocator has succeeded.
     const rightId = this.allocateFreshSegmentId();
-    const rightChunk = createSegmentNode(
+    for (let index = 0; index < this.directPathNodes.length; index++) {
+      this.push(this.directPathNodes[index]!);
+    }
+
+    const oldRight = node.right;
+    let successorParent: SegmentNode = node;
+    if (oldRight !== null) {
+      let successor = oldRight;
+      while (true) {
+        this.structuralOperationCount++;
+        this.push(successor);
+        if (successor.left === null) {
+          successorParent = successor;
+          break;
+        }
+        successor = successor.left;
+      }
+    }
+
+    const localOffset = offset - nodeStart;
+    const right = createSegmentNode(
       rightId,
       node.spanLength - localOffset,
       node.cover,
       node.effectVisible,
     );
-    return [
-      this.mergeNodes(leftSubtree, leftChunk),
-      this.mergeNodes(rightChunk, rightSubtree),
-    ];
+    node.spanLength = localOffset;
+    if (oldRight === null) {
+      node.right = right;
+    } else {
+      successorParent.left = right;
+    }
+    right.parent = successorParent;
+
+    let current: SegmentNode | null = successorParent;
+    while (current !== null) {
+      this.structuralOperationCount++;
+      this.updateNode(current);
+      current = current.parent;
+    }
+
+    while (right.parent !== null && comparePriority(right, right.parent) < 0) {
+      const parent = right.parent;
+      if (parent.left === right) {
+        this.rotateSegmentRight(parent);
+      } else if (parent.right === right) {
+        this.rotateSegmentLeft(parent);
+      } else {
+        throw new Error("Placeholder segment parent link is inconsistent");
+      }
+    }
+    this.boundaryNodes.set(offset, right);
+    this.root.parent = null;
   }
 
-  private mergeNodes(
-    left: SegmentNode | null,
-    right: SegmentNode | null,
-  ): SegmentNode | null {
-    if (left === null) {
-      return right;
-    }
-    if (right === null) {
-      return left;
+  private rotateSegmentLeft(pivot: SegmentNode): void {
+    const child = pivot.right;
+    if (child === null) {
+      throw new Error("Cannot rotate placeholder segment tree left");
     }
     this.structuralOperationCount++;
-    if (comparePriority(left, right) <= 0) {
-      this.push(left);
-      left.right = this.mergeNodes(left.right, right);
-      this.updateNode(left);
-      return left;
+    this.push(pivot);
+    this.push(child);
+    const grandparent = pivot.parent;
+    const transfer = child.left;
+    pivot.right = transfer;
+    if (transfer !== null) {
+      transfer.parent = pivot;
     }
-    this.push(right);
-    right.left = this.mergeNodes(left, right.left);
-    this.updateNode(right);
-    return right;
+    child.left = pivot;
+    pivot.parent = child;
+    child.parent = grandparent;
+    if (grandparent === null) {
+      this.root = child;
+    } else if (grandparent.left === pivot) {
+      grandparent.left = child;
+    } else if (grandparent.right === pivot) {
+      grandparent.right = child;
+    } else {
+      throw new Error("Placeholder segment grandparent link is inconsistent");
+    }
+    this.updateNode(pivot);
+    this.updateNode(child);
+  }
+
+  private rotateSegmentRight(pivot: SegmentNode): void {
+    const child = pivot.left;
+    if (child === null) {
+      throw new Error("Cannot rotate placeholder segment tree right");
+    }
+    this.structuralOperationCount++;
+    this.push(pivot);
+    this.push(child);
+    const grandparent = pivot.parent;
+    const transfer = child.right;
+    pivot.left = transfer;
+    if (transfer !== null) {
+      transfer.parent = pivot;
+    }
+    child.right = pivot;
+    pivot.parent = child;
+    child.parent = grandparent;
+    if (grandparent === null) {
+      this.root = child;
+    } else if (grandparent.left === pivot) {
+      grandparent.left = child;
+    } else if (grandparent.right === pivot) {
+      grandparent.right = child;
+    } else {
+      throw new Error("Placeholder segment grandparent link is inconsistent");
+    }
+    this.updateNode(pivot);
+    this.updateNode(child);
   }
 
   private applyCoverDelta(node: SegmentNode, delta: number): void {
@@ -1086,6 +1382,7 @@ const createSegmentNode = (
   spanLength,
   cover,
   effectVisible,
+  parent: null,
   left: null,
   right: null,
   subtreeLength: spanLength,

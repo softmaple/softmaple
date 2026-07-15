@@ -1,10 +1,6 @@
 import type { EventId, ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
-import {
-  DeleteTargetIndex,
-  type PlaceholderDeleteTarget,
-  type RuntimeDeleteTarget,
-} from "./delete-target-index";
+import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
@@ -51,52 +47,123 @@ export const applyDelete = (
   if (!pendingInsert.isEmpty()) {
     flushPendingInsert();
   }
-  let firstDeletedTarget: RuntimeDeleteTarget | undefined;
-  let additionalDeletedTargets: RuntimeDeleteTarget[] | null = null;
+  const targetGroup = deleteTargets.beginRecord();
   const outputDeleteIndexes: number[] | null = collectTransformedOperations
     ? []
     : null;
   let remaining = operationLength;
 
-  while (remaining > 0) {
-    const landing = sequence.prepareIndexToPositionAndOffset(
-      operationIndex,
-      false,
-    );
-    const candidate = sequence.at(landing.position);
-    if (!candidate) {
-      // The ranked B-tree just told us the prepare-weight prefix sum lands
-      // on `landing.position`, so a missing record there means the tree's
-      // aggregates disagree with its children — a structural bug we want to
-      // surface, not silently truncate the delete around.
-      throw new Error(
-        `Engine bug: prepare-index ${operationIndex} landed at sequence position ` +
-          `${landing.position} but no record exists there (remaining=${remaining}).`,
+  try {
+    while (remaining > 0) {
+      const landing = sequence.prepareIndexToPositionAndOffset(
+        operationIndex,
+        false,
       );
-    }
+      const candidate = sequence.at(landing.position);
+      if (!candidate) {
+        // The ranked B-tree just told us the prepare-weight prefix sum lands
+        // on `landing.position`, so a missing record there means the tree's
+        // aggregates disagree with its children — a structural bug we want to
+        // surface, not silently truncate the delete around.
+        throw new Error(
+          `Engine bug: prepare-index ${operationIndex} landed at sequence position ` +
+            `${landing.position} but no record exists there (remaining=${remaining}).`,
+        );
+      }
 
-    const placeholder = candidate.placeholder;
-    if (placeholder !== undefined) {
-      const state = placeholder.state;
-      if (deferTextMaterialization) {
-        const result = state.deletePrepareVisibleInSlice(
-          placeholder,
-          landing.offsetInRecord,
+      const placeholder = candidate.placeholder;
+      if (placeholder !== undefined) {
+        const state = placeholder.state;
+        if (deferTextMaterialization) {
+          if (remaining === 1) {
+            const absoluteOffset = placeholder.start + landing.offsetInRecord;
+            state.deletePrepareVisibleUnitInSlice(
+              placeholder,
+              landing.offsetInRecord,
+            );
+            deleteTargets.appendPlaceholderRange(
+              targetGroup,
+              state,
+              absoluteOffset,
+              absoluteOffset + 1,
+            );
+            sequence.updateItem(candidate);
+            remaining = 0;
+            continue;
+          }
+          const result = state.deletePrepareVisibleInSlice(
+            placeholder,
+            landing.offsetInRecord,
+            remaining,
+          );
+          let deletedLength = 0;
+          for (const range of result.ranges) {
+            deleteTargets.appendPlaceholderRange(
+              targetGroup,
+              state,
+              range.start,
+              range.end,
+            );
+            deletedLength += range.end - range.start;
+          }
+          if (deletedLength === 0) {
+            throw new Error(
+              `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
+            );
+          }
+          sequence.updateItem(candidate);
+          remaining -= deletedLength;
+          continue;
+        }
+
+        const absoluteStart = placeholder.start + landing.offsetInRecord;
+        const ranges = state.collectPrepareVisibleRanges(
+          absoluteStart,
+          placeholder.end,
           remaining,
         );
         let deletedLength = 0;
-        for (const range of result.ranges) {
-          const target: PlaceholderDeleteTarget = {
-            kind: "placeholder-range",
+        const affected = new Set<AugmentedCRDTItem>();
+        for (const range of ranges) {
+          deleteTargets.appendPlaceholderRange(
+            targetGroup,
             state,
-            start: range.start,
-            end: range.end,
-          };
-          if (firstDeletedTarget === undefined) {
-            firstDeletedTarget = target;
-          } else {
-            additionalDeletedTargets ??= [firstDeletedTarget];
-            additionalDeletedTargets.push(target);
+            range.start,
+            range.end,
+          );
+
+          if (!deferTextMaterialization) {
+            const effectRanges = state.collectEffectVisibleRanges(
+              range.start,
+              range.end,
+            );
+            // Delete disjoint effect-visible spans from right to left. Removing
+            // an earlier span first would shift the effect indexes of every
+            // later span while the placeholder state still describes the
+            // pre-delete document.
+            for (let index = effectRanges.length - 1; index >= 0; index--) {
+              const effectRange = effectRanges[index];
+              if (effectRange === undefined) {
+                continue;
+              }
+              const effectIndex =
+                itemToEffectIndex(candidate) +
+                state.effectLengthInRange(placeholder.start, effectRange.start);
+              const effectLength = effectRange.end - effectRange.start;
+              if (collectTransformedOperations) {
+                for (let index = 0; index < effectLength; index++) {
+                  outputDeleteIndexes?.push(effectIndex);
+                }
+              }
+              deleteText(effectIndex, effectLength);
+            }
+          }
+
+          for (const slice of state.applyDeleteRange(range.start, range.end)) {
+            const owner = slice.owner;
+            if (owner !== null) {
+              affected.add(owner);
+            }
           }
           deletedLength += range.end - range.start;
         }
@@ -105,153 +172,75 @@ export const applyDelete = (
             `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
           );
         }
-        sequence.updateItem(candidate);
+        sequence.updateItems(affected);
         remaining -= deletedLength;
         continue;
       }
 
-      const absoluteStart = placeholder.start + landing.offsetInRecord;
-      const ranges = state.collectPrepareVisibleRanges(
-        absoluteStart,
-        placeholder.end,
-        remaining,
-      );
-      let deletedLength = 0;
-      const affected = new Set<AugmentedCRDTItem>();
-      for (const range of ranges) {
-        const target: PlaceholderDeleteTarget = {
-          kind: "placeholder-range",
-          state,
-          start: range.start,
-          end: range.end,
-        };
-        if (firstDeletedTarget === undefined) {
-          firstDeletedTarget = target;
-        } else {
-          additionalDeletedTargets ??= [firstDeletedTarget];
-          additionalDeletedTargets.push(target);
-        }
+      // Multi-character records (placeholders and typed-run leaves coalesced
+      // by Section 3.4) are split on demand so the deleted slice is its own
+      // record. Single-character records and per-code-unit paste fragments
+      // skip the split entirely and are marked in place.
+      const isMultiCharRecord =
+        (candidate.eventId === PLACEHOLDER_EVENT_ID ||
+          candidate.run !== null) &&
+        candidate.content.length > 1;
+      if (isMultiCharRecord) {
+        const availableInRecord =
+          candidate.content.length - landing.offsetInRecord;
+        const toDelete = Math.min(remaining, availableInRecord);
+        const middle = recordSplitter.splitRecordForDelete(
+          candidate,
+          landing.offsetInRecord,
+          toDelete,
+        );
 
-        if (!deferTextMaterialization) {
-          const effectRanges = state.collectEffectVisibleRanges(
-            range.start,
-            range.end,
-          );
-          // Delete disjoint effect-visible spans from right to left. Removing
-          // an earlier span first would shift the effect indexes of every
-          // later span while the placeholder state still describes the
-          // pre-delete document.
-          for (let index = effectRanges.length - 1; index >= 0; index--) {
-            const effectRange = effectRanges[index];
-            if (effectRange === undefined) {
-              continue;
-            }
-            const effectIndex =
-              itemToEffectIndex(candidate) +
-              state.effectLengthInRange(placeholder.start, effectRange.start);
-            const effectLength = effectRange.end - effectRange.start;
+        deleteTargets.appendItem(targetGroup, middle.id);
+        // A concurrent delete that lands on an already-effect-deleted slice
+        // (e.g. after retreating an overlapping sibling) must NOT remove
+        // characters from the text again. Without this, two concurrent
+        // deletes of the same region replay to a shorter string than full
+        // replay produces.
+        if (!middle.everDeleted) {
+          if (!deferTextMaterialization) {
+            const effectIndex = itemToEffectIndex(middle);
             if (collectTransformedOperations) {
-              for (let index = 0; index < effectLength; index++) {
+              for (let k = 0; k < toDelete; k++) {
                 outputDeleteIndexes?.push(effectIndex);
               }
             }
-            deleteText(effectIndex, effectLength);
+            deleteText(effectIndex, toDelete);
           }
         }
 
-        for (const slice of state.applyDeleteRange(range.start, range.end)) {
-          const owner = slice.owner;
-          if (owner !== null) {
-            affected.add(owner);
-          }
-        }
-        deletedLength += range.end - range.start;
+        middle.everDeleted = true;
+        middle.prepareState += 1;
+        sequence.updateItem(middle);
+        remaining -= toDelete;
+        continue;
       }
-      if (deletedLength === 0) {
-        throw new Error(
-          `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
-        );
-      }
-      sequence.updateItems(affected);
-      remaining -= deletedLength;
-      continue;
-    }
 
-    // Multi-character records (placeholders and typed-run leaves coalesced
-    // by Section 3.4) are split on demand so the deleted slice is its own
-    // record. Single-character records and per-code-unit paste fragments
-    // skip the split entirely and are marked in place.
-    const isMultiCharRecord =
-      (candidate.eventId === PLACEHOLDER_EVENT_ID || candidate.run !== null) &&
-      candidate.content.length > 1;
-    if (isMultiCharRecord) {
-      const availableInRecord =
-        candidate.content.length - landing.offsetInRecord;
-      const toDelete = Math.min(remaining, availableInRecord);
-      const middle = recordSplitter.splitRecordForDelete(
-        candidate,
-        landing.offsetInRecord,
-        toDelete,
-      );
-
-      if (firstDeletedTarget === undefined) {
-        firstDeletedTarget = middle.id;
-      } else {
-        additionalDeletedTargets ??= [firstDeletedTarget];
-        additionalDeletedTargets.push(middle.id);
-      }
-      // A concurrent delete that lands on an already-effect-deleted slice
-      // (e.g. after retreating an overlapping sibling) must NOT remove
-      // characters from the text again. Without this, two concurrent
-      // deletes of the same region replay to a shorter string than full
-      // replay produces.
-      if (!middle.everDeleted) {
+      deleteTargets.appendItem(targetGroup, candidate.id);
+      if (!candidate.everDeleted) {
         if (!deferTextMaterialization) {
-          const effectIndex = itemToEffectIndex(middle);
+          const effectIndex = itemToEffectIndex(candidate);
           if (collectTransformedOperations) {
-            for (let k = 0; k < toDelete; k++) {
-              outputDeleteIndexes?.push(effectIndex);
-            }
+            outputDeleteIndexes?.push(effectIndex);
           }
-          deleteText(effectIndex, toDelete);
+          deleteText(effectIndex, 1);
         }
       }
-
-      middle.everDeleted = true;
-      middle.prepareState += 1;
-      sequence.updateItem(middle);
-      remaining -= toDelete;
-      continue;
+      candidate.everDeleted = true;
+      candidate.prepareState += 1;
+      sequence.updateItem(candidate);
+      remaining -= 1;
     }
-
-    if (firstDeletedTarget === undefined) {
-      firstDeletedTarget = candidate.id;
-    } else {
-      additionalDeletedTargets ??= [firstDeletedTarget];
-      additionalDeletedTargets.push(candidate.id);
-    }
-    if (!candidate.everDeleted) {
-      if (!deferTextMaterialization) {
-        const effectIndex = itemToEffectIndex(candidate);
-        if (collectTransformedOperations) {
-          outputDeleteIndexes?.push(effectIndex);
-        }
-        deleteText(effectIndex, 1);
-      }
-    }
-    candidate.everDeleted = true;
-    candidate.prepareState += 1;
-    sequence.updateItem(candidate);
-    remaining -= 1;
+  } catch (error) {
+    deleteTargets.abortRecord(targetGroup);
+    throw error;
   }
 
-  if (additionalDeletedTargets !== null) {
-    deleteTargets.recordRuntime(eventId, additionalDeletedTargets);
-  } else if (firstDeletedTarget !== undefined) {
-    deleteTargets.recordRuntimeOne(eventId, firstDeletedTarget);
-  } else {
-    deleteTargets.record(eventId, []);
-  }
+  deleteTargets.commitRecord(eventId, targetGroup);
 
   return outputDeleteIndexes === null
     ? NO_TRANSFORMED_OPERATIONS

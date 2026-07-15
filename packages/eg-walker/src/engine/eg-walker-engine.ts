@@ -9,12 +9,11 @@ import {
 } from "../text/persistent-utf16-rope";
 import { IndexedSequence } from "./indexed-sequence";
 import {
+  DELETE_TARGET_KIND,
   DeleteTargetIndex,
-  isPlaceholderDeleteTarget,
   iterateCompactDeleteTargets,
   type CompactDeleteTargetRecords,
   type DeleteTargetRecord,
-  type PlaceholderDeleteTarget,
 } from "./internals/delete-target-index";
 import {
   applyDelete,
@@ -1258,37 +1257,71 @@ export class EgWalkerEngine {
         item.prepareState += delta;
         this.sequence.updateItem(item);
       }
-    } else {
-      const targetRefs = this.deleteTargets.targetRefsOf(eventId);
-      if (typeof targetRefs === "string") {
-        const item = this.requireItem(targetRefs);
+      return;
+    }
+
+    const firstTarget = this.deleteTargets.firstTargetOf(eventId);
+    if (firstTarget === 0) {
+      return;
+    }
+    const secondTarget = this.deleteTargets.nextTarget(firstTarget);
+    if (secondTarget === 0) {
+      if (this.deleteTargets.kindOf(firstTarget) === DELETE_TARGET_KIND.ITEM) {
+        const item = this.requireItem(this.deleteTargets.itemIdOf(firstTarget));
         item.prepareState += delta;
         this.sequence.updateItem(item);
         return;
       }
-      if (targetRefs !== undefined && isPlaceholderDeleteTarget(targetRefs)) {
-        const affected = this.adjustPlaceholderDeleteTarget(targetRefs, delta);
-        this.sequence.updateItems(affected);
-        return;
-      }
 
-      const dirty = new Set<AugmentedCRDTItem>();
-      for (const target of targetRefs ?? []) {
-        if (typeof target === "string") {
-          const item = this.requireItem(target);
-          item.prepareState += delta;
-          dirty.add(item);
-        } else {
-          for (const item of this.adjustPlaceholderDeleteTarget(
-            target,
+      const affected = this.deleteTargets
+        .placeholderStateOf(firstTarget)
+        .adjustPrepareRange(
+          this.deleteTargets.placeholderStartOf(firstTarget),
+          this.deleteTargets.placeholderEndOf(firstTarget),
+          delta,
+        );
+      if (affected.length === 1) {
+        const owner = affected[0]?.owner;
+        if (owner !== null && owner !== undefined) {
+          this.sequence.updateItem(owner);
+        }
+      } else {
+        const dirty = new Set<AugmentedCRDTItem>();
+        for (const slice of affected) {
+          const owner = slice.owner;
+          if (owner !== null) {
+            dirty.add(owner);
+          }
+        }
+        this.sequence.updateItems(dirty);
+      }
+      return;
+    }
+
+    const dirty = new Set<AugmentedCRDTItem>();
+    let target = firstTarget;
+    while (target !== 0) {
+      if (this.deleteTargets.kindOf(target) === DELETE_TARGET_KIND.ITEM) {
+        const item = this.requireItem(this.deleteTargets.itemIdOf(target));
+        item.prepareState += delta;
+        dirty.add(item);
+      } else {
+        for (const slice of this.deleteTargets
+          .placeholderStateOf(target)
+          .adjustPrepareRange(
+            this.deleteTargets.placeholderStartOf(target),
+            this.deleteTargets.placeholderEndOf(target),
             delta,
           )) {
+          const item = slice.owner;
+          if (item !== null) {
             dirty.add(item);
           }
         }
       }
-      this.sequence.updateItems(dirty);
+      target = this.deleteTargets.nextTarget(target);
     }
+    this.sequence.updateItems(dirty);
   }
 
   private collectInsertPrepareDelta(
@@ -1311,55 +1344,34 @@ export class EgWalkerEngine {
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
-    const targetRefs = this.deleteTargets.targetRefsOf(eventId);
-    if (typeof targetRefs === "string") {
-      this.collectItemPrepareDelta(targetRefs, delta, deltas);
-      return;
-    }
-    if (targetRefs !== undefined && isPlaceholderDeleteTarget(targetRefs)) {
-      this.collectPlaceholderPrepareDelta(targetRefs, delta, deltas);
-      return;
-    }
-    for (const target of targetRefs ?? []) {
-      if (typeof target === "string") {
-        this.collectItemPrepareDelta(target, delta, deltas);
+    let target = this.deleteTargets.firstTargetOf(eventId);
+    while (target !== 0) {
+      if (this.deleteTargets.kindOf(target) === DELETE_TARGET_KIND.ITEM) {
+        this.collectItemPrepareDelta(
+          this.deleteTargets.itemIdOf(target),
+          delta,
+          deltas,
+        );
       } else {
-        this.collectPlaceholderPrepareDelta(target, delta, deltas);
+        for (const slice of this.deleteTargets
+          .placeholderStateOf(target)
+          .adjustPrepareRange(
+            this.deleteTargets.placeholderStartOf(target),
+            this.deleteTargets.placeholderEndOf(target),
+            delta,
+          )) {
+          const item = slice.owner;
+          if (item !== null && !deltas.has(item)) {
+            // The segmented state already absorbed the delta. A zero entry
+            // keeps the physical slice in the one batched ranked-weight
+            // refresh without applying the same prepare delta to its scalar
+            // compatibility fields.
+            deltas.set(item, 0);
+          }
+        }
       }
+      target = this.deleteTargets.nextTarget(target);
     }
-  }
-
-  private collectPlaceholderPrepareDelta(
-    target: PlaceholderDeleteTarget,
-    delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
-  ): void {
-    for (const item of this.adjustPlaceholderDeleteTarget(target, delta)) {
-      if (!deltas.has(item)) {
-        // The segmented state already absorbed the delta. A zero entry keeps
-        // the physical slice in the one batched ranked-weight refresh without
-        // applying the same prepare delta to its scalar compatibility fields.
-        deltas.set(item, 0);
-      }
-    }
-  }
-
-  private adjustPlaceholderDeleteTarget(
-    target: PlaceholderDeleteTarget,
-    delta: 1 | -1,
-  ): ReadonlyArray<AugmentedCRDTItem> {
-    const affected: AugmentedCRDTItem[] = [];
-    for (const slice of target.state.adjustPrepareRange(
-      target.start,
-      target.end,
-      delta,
-    )) {
-      const owner = slice.owner;
-      if (owner !== null) {
-        affected.push(owner);
-      }
-    }
-    return affected;
   }
 
   private collectItemPrepareDelta(

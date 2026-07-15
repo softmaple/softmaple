@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DELETE_TARGET_KIND,
   DeleteTargetIndex,
+  isPlaceholderDeleteTarget,
   iterateCompactDeleteTargets,
+  recordsFromCompactDeleteTargets,
   type PlaceholderDeleteTarget,
 } from "../engine/internals/delete-target-index";
 import type { AugmentedCRDTItem } from "../engine/internals/engine-types";
@@ -56,6 +59,8 @@ describe("DeleteTargetIndex", () => {
       const index = new DeleteTargetIndex();
       index.record("delete-empty", []);
       expect(Array.from(index.targetsOf("delete-empty") ?? [])).toEqual([]);
+      expect(index.targetRefsOf("delete-empty")).toEqual([]);
+      expect(index.targetRefsOf("missing")).toBeUndefined();
     });
   });
 
@@ -106,6 +111,278 @@ describe("DeleteTargetIndex", () => {
     });
   });
 
+  describe("packed target arena", () => {
+    it("walks mixed targets through allocation-free numeric cursors", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        8,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const index = new DeleteTargetIndex();
+      const group = index.beginRecord();
+      index.appendItem(group, "item-left");
+      index.appendPlaceholderRange(group, state, 2, 6);
+      index.appendItem(group, "item-right");
+      index.commitRecord("delete-mixed", group);
+
+      const first = index.firstTargetOf("delete-mixed");
+      expect(index.kindOf(first)).toBe(DELETE_TARGET_KIND.ITEM);
+      expect(index.itemIdOf(first)).toBe("item-left");
+
+      const second = index.nextTarget(first);
+      expect(index.kindOf(second)).toBe(DELETE_TARGET_KIND.PLACEHOLDER);
+      expect(index.placeholderStateOf(second)).toBe(state);
+      expect(index.placeholderStartOf(second)).toBe(2);
+      expect(index.placeholderEndOf(second)).toBe(6);
+
+      const third = index.nextTarget(second);
+      expect(index.kindOf(third)).toBe(DELETE_TARGET_KIND.ITEM);
+      expect(index.itemIdOf(third)).toBe("item-right");
+      expect(index.nextTarget(third)).toBe(0);
+      expect(index.firstTargetOf("missing")).toBe(0);
+
+      expect(index.targetRefsOf("delete-mixed")).toEqual([
+        "item-left",
+        {
+          kind: "placeholder-range",
+          state,
+          start: 2,
+          end: 6,
+        },
+        "item-right",
+      ]);
+    });
+
+    it("grows group and target columns geometrically without changing order", () => {
+      const index = new DeleteTargetIndex();
+      for (let groupIndex = 0; groupIndex < 40; groupIndex++) {
+        const group = index.beginRecord();
+        for (let targetIndex = 0; targetIndex < 40; targetIndex++) {
+          index.appendItem(group, `item:${groupIndex}:${targetIndex}`);
+        }
+        index.commitRecord(`delete:${groupIndex}`, group);
+      }
+
+      let target = index.firstTargetOf("delete:39");
+      for (let targetIndex = 0; targetIndex < 40; targetIndex++) {
+        expect(index.itemIdOf(target)).toBe(`item:39:${targetIndex}`);
+        target = index.nextTarget(target);
+      }
+      expect(target).toBe(0);
+      expect(index.entries()).toHaveLength(40);
+    });
+
+    it("preserves safe-integer placeholder offsets above the uint32 range", () => {
+      const length = 0x1_0000_0040;
+      const start = 0x1_0000_0010;
+      const end = 0x1_0000_0030;
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        length,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const index = new DeleteTargetIndex();
+      const group = index.beginRecord();
+      index.appendPlaceholderRange(group, state, start, end);
+      index.commitRecord("delete-large-offset", group);
+
+      const target = index.firstTargetOf("delete-large-offset");
+      expect(index.placeholderStartOf(target)).toBe(start);
+      expect(index.placeholderEndOf(target)).toBe(end);
+    });
+
+    it("aborts an uncommitted group and reuses its target storage safely", () => {
+      const index = new DeleteTargetIndex();
+      const aborted = index.beginRecord();
+      index.appendItem(aborted, "aborted-left");
+      index.appendItem(aborted, "aborted-right");
+      index.abortRecord(aborted);
+
+      expect(index.firstTargetOf("aborted-delete")).toBe(0);
+      index.extendMembership("aborted-left", "should-not-appear");
+
+      const committed = index.beginRecord();
+      index.appendItem(committed, "live-left");
+      index.commitRecord("live-delete", committed);
+      expect(index.targetsOf("live-delete")).toEqual(["live-left"]);
+      const next = index.beginRecord();
+      index.abortRecord(next);
+    });
+
+    it("materializes placeholder coordinates before rebuilding split membership", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        4,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const runtime = new DeleteTargetIndex();
+      runtime.recordRuntimeOne("delete-placeholder", {
+        kind: "placeholder-range",
+        state,
+        start: 0,
+        end: 4,
+      });
+
+      // Physical placeholder splits do not extend coordinate targets. At the
+      // snapshot boundary the range becomes stable logical item IDs instead.
+      runtime.extendMembership("placeholder:0", "physical-right");
+      expect(runtime.entries(() => ["logical-left"])).toEqual([
+        {
+          deleteEventId: "delete-placeholder",
+          targetIds: ["logical-left"],
+        },
+      ]);
+
+      const restored = new DeleteTargetIndex();
+      restored.record("delete-placeholder", ["logical-left"]);
+      restored.extendMembership("logical-left", "logical-right");
+      expect(restored.targetsOf("delete-placeholder")).toEqual([
+        "logical-left",
+        "logical-right",
+      ]);
+    });
+
+    it("rejects builder misuse and targets accessed through the wrong cursor kind", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        4,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const index = new DeleteTargetIndex();
+      const group = index.beginRecord();
+
+      expect(() => index.beginRecord()).toThrow("already active");
+      expect(() => index.appendItem(group + 1, "wrong-group")).toThrow(
+        "not the active builder",
+      );
+      expect(() => index.commitRecord("wrong-delete", group + 1)).toThrow(
+        "not the active builder",
+      );
+      expect(() => index.abortRecord(group + 1)).toThrow(
+        "not the active builder",
+      );
+
+      index.appendItem(group, "item");
+      index.appendPlaceholderRange(group, state, 1, 3);
+      index.commitRecord("delete", group);
+
+      const item = index.firstTargetOf("delete");
+      const placeholder = index.nextTarget(item);
+      expect(() => index.placeholderStateOf(item)).toThrow(
+        "is not a placeholder target",
+      );
+      expect(() => index.placeholderStartOf(item)).toThrow(
+        "is not a placeholder target",
+      );
+      expect(() => index.placeholderEndOf(item)).toThrow(
+        "is not a placeholder target",
+      );
+      expect(() => index.itemIdOf(placeholder)).toThrow(
+        "is not an item target",
+      );
+      expect(() => index.nextTarget(0)).toThrow("Invalid delete target handle");
+      expect(() => index.kindOf(Number.NaN)).toThrow(
+        "Invalid delete target handle",
+      );
+      expect(() => index.kindOf(3)).toThrow("Invalid delete target handle");
+    });
+
+    it("rolls back every compatibility builder when target creation fails", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        4,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const invalidTarget = (start: number, end: number) => ({
+        kind: "placeholder-range" as const,
+        state,
+        start,
+        end,
+      });
+      const index = new DeleteTargetIndex();
+
+      expect(() =>
+        index.recordRuntimeOne("negative", invalidTarget(-1, 1)),
+      ).toThrow("Invalid placeholder delete target");
+      expect(() =>
+        index.recordRuntime("reversed", [
+          invalidTarget(0, 1),
+          invalidTarget(3, 2),
+        ]),
+      ).toThrow("Invalid placeholder delete target");
+
+      const throwingItems = ["item-before-error"];
+      Object.defineProperty(throwingItems, Symbol.iterator, {
+        value: function* () {
+          yield "item-before-error";
+          throw new Error("iterator failed");
+        },
+      });
+      expect(() => index.record("iterator-error", throwingItems)).toThrow(
+        "iterator failed",
+      );
+
+      const invalidRanges: ReadonlyArray<readonly [number, number]> = [
+        [0.5, 1],
+        [0, 1.5],
+        [0, 0],
+        [0, 5],
+      ];
+      for (const [start, end] of invalidRanges) {
+        expect(() =>
+          index.recordRuntimeOne("invalid-range", invalidTarget(start, end)),
+        ).toThrow("Invalid placeholder delete target");
+      }
+
+      expect(index.entries()).toEqual([]);
+      index.recordOne("reused", "live-item");
+      expect(index.targetsOf("reused")).toEqual(["live-item"]);
+    });
+
+    it("removes stale reverse membership when a delete record is replaced", () => {
+      const index = new DeleteTargetIndex();
+      index.recordOne("delete-a", "shared");
+      index.recordOne("delete-b", "shared");
+
+      index.recordOne("delete-a", "replacement-a");
+      index.extendMembership("shared", "shared-right");
+      expect(index.targetsOf("delete-a")).toEqual(["replacement-a"]);
+      expect(index.targetsOf("delete-b")).toEqual(["shared", "shared-right"]);
+
+      index.recordOne("delete-b", "replacement-b");
+      index.extendMembership("shared", "orphan-right");
+      expect(index.targetsOf("delete-b")).toEqual(["replacement-b"]);
+    });
+
+    it("reuses one placeholder state reference across multiple ranges", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        6,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const index = new DeleteTargetIndex();
+      const firstTarget: PlaceholderDeleteTarget = {
+        kind: "placeholder-range",
+        state,
+        start: 0,
+        end: 2,
+      };
+      const secondTarget: PlaceholderDeleteTarget = {
+        kind: "placeholder-range",
+        state,
+        start: 4,
+        end: 6,
+      };
+      index.recordRuntime("delete", [firstTarget, secondTarget]);
+
+      const refs = index.targetRefsOf("delete");
+      expect(Array.isArray(refs)).toBe(true);
+      expect(refs).toEqual([firstTarget, secondTarget]);
+      expect(isPlaceholderDeleteTarget(refs ?? [])).toBe(false);
+      expect(isPlaceholderDeleteTarget(firstTarget)).toBe(true);
+    });
+  });
+
   describe("compact iteration", () => {
     it("decodes compact refs lazily and rejects invalid IDs", () => {
       const compact = {
@@ -127,6 +404,12 @@ describe("DeleteTargetIndex", () => {
           deleteEventRefs: Uint32Array.of(9),
         }),
       ]).toThrow("Invalid compact delete target id ref");
+      expect(recordsFromCompactDeleteTargets(compact)).toEqual([
+        {
+          deleteEventId: "delete",
+          targetIds: ["item-a", "item-b"],
+        },
+      ]);
     });
   });
 

@@ -6,6 +6,7 @@ import {
   type PackedUnsignedIntegerColumn,
 } from "./packed-numeric-columns";
 import {
+  type PackedLocalVersionTransition,
   type PackedOffsetTransition,
   PackedDiffVersionsWorkspace,
 } from "./packed-diff-versions";
@@ -247,6 +248,24 @@ export class PackedEventGraphBase {
   }
 
   /**
+   * Compute a range-compressed transition from an ID frontier to one event's
+   * parents. The returned buffers are overwritten by the next diff query.
+   */
+  diffVersionToParentRanges(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diffVersionToParentRanges(
+      currentVersion,
+      targetEventOffset,
+      this,
+      rankByOffset,
+    );
+  }
+
+  /**
    * Compute a numeric transition from one event to another event's parents.
    *
    * The returned view is workspace-owned and is overwritten by the next diff.
@@ -258,6 +277,24 @@ export class PackedEventGraphBase {
   ): PackedOffsetTransition {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diffOffsetToParents(
+      currentOffset,
+      targetEventOffset,
+      this,
+      rankByOffset,
+    );
+  }
+
+  /**
+   * Compute a range-compressed transition from one event to another event's
+   * parents. The returned buffers are overwritten by the next diff query.
+   */
+  diffOffsetToParentRanges(
+    currentOffset: number,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diffOffsetToParentRanges(
       currentOffset,
       targetEventOffset,
       this,

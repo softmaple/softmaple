@@ -37,6 +37,26 @@ export interface PackedOffsetTransition {
 }
 
 /**
+ * Ephemeral run-length encoded transition over packed local versions.
+ *
+ * Each range is half-open (`[start, end)`). Retreat ranges expand from
+ * `end - 1` down to `start`; advance ranges expand from `start` up to
+ * `end - 1`. Only prefixes selected by the corresponding range counts are
+ * valid. The buffers and this view are workspace-owned and are overwritten by
+ * the workspace's next query.
+ */
+export interface PackedLocalVersionTransition {
+  readonly retreatStarts: Uint32Array;
+  readonly retreatEnds: Uint32Array;
+  readonly retreatRangeCount: number;
+  readonly retreatEventCount: number;
+  readonly advanceStarts: Uint32Array;
+  readonly advanceEnds: Uint32Array;
+  readonly advanceRangeCount: number;
+  readonly advanceEventCount: number;
+}
+
+/**
  * Reusable numeric workspace for Appendix B's version diff.
  *
  * Packed insertion offsets are already a valid topological rank, so the
@@ -47,7 +67,9 @@ export interface PackedOffsetTransition {
  * transition outputs grow only to the largest divergent region observed by
  * this immutable graph and are reused by subsequent diffs.
  */
-export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
+export class PackedDiffVersionsWorkspace
+  implements PackedOffsetTransition, PackedLocalVersionTransition
+{
   private readonly colors: Uint8Array;
   private heap: Uint32Array;
   private heapLength = 0;
@@ -57,6 +79,14 @@ export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
   private retreatLength = 0;
   private advanceBuffer: Uint32Array;
   private advanceLength = 0;
+  private retreatStartBuffer: Uint32Array;
+  private retreatEndBuffer: Uint32Array;
+  private retreatRangeLength = 0;
+  private retreatRangeEventLength = 0;
+  private advanceStartBuffer: Uint32Array;
+  private advanceEndBuffer: Uint32Array;
+  private advanceRangeLength = 0;
+  private advanceRangeEventLength = 0;
   private activeRankByOffset: Uint32Array | null = null;
   private active = false;
 
@@ -67,6 +97,10 @@ export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
     this.touched = new Uint32Array(initialCapacity);
     this.retreatBuffer = new Uint32Array(initialCapacity);
     this.advanceBuffer = new Uint32Array(initialCapacity);
+    this.retreatStartBuffer = new Uint32Array(initialCapacity);
+    this.retreatEndBuffer = new Uint32Array(initialCapacity);
+    this.advanceStartBuffer = new Uint32Array(initialCapacity);
+    this.advanceEndBuffer = new Uint32Array(initialCapacity);
   }
 
   get retreatOffsets(): Uint32Array {
@@ -83,6 +117,38 @@ export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
 
   get advanceCount(): number {
     return this.advanceLength;
+  }
+
+  get retreatStarts(): Uint32Array {
+    return this.retreatStartBuffer;
+  }
+
+  get retreatEnds(): Uint32Array {
+    return this.retreatEndBuffer;
+  }
+
+  get retreatRangeCount(): number {
+    return this.retreatRangeLength;
+  }
+
+  get retreatEventCount(): number {
+    return this.retreatRangeEventLength;
+  }
+
+  get advanceStarts(): Uint32Array {
+    return this.advanceStartBuffer;
+  }
+
+  get advanceEnds(): Uint32Array {
+    return this.advanceEndBuffer;
+  }
+
+  get advanceRangeCount(): number {
+    return this.advanceRangeLength;
+  }
+
+  get advanceEventCount(): number {
+    return this.advanceRangeEventLength;
   }
 
   diff(
@@ -166,6 +232,36 @@ export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
   }
 
   /**
+   * Diff an ID frontier against one event's parents as local-version ranges.
+   */
+  diffVersionToParentRanges(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+    view: PackedDiffVersionsView,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    if (this.active) {
+      return new PackedDiffVersionsWorkspace(
+        this.eventCount,
+      ).diffVersionToParentRanges(
+        currentVersion,
+        targetEventOffset,
+        view,
+        rankByOffset,
+      );
+    }
+
+    const transition = this.diffVersionToParents(
+      currentVersion,
+      targetEventOffset,
+      view,
+      rankByOffset,
+    );
+    this.collectLocalVersionRanges(transition);
+    return this;
+  }
+
+  /**
    * Diff a singleton packed version against one event's direct parent version.
    */
   diffOffsetToParents(
@@ -202,6 +298,37 @@ export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
     }
   }
 
+  /**
+   * Diff one packed event against another event's parents as local-version
+   * ranges.
+   */
+  diffOffsetToParentRanges(
+    currentOffset: number,
+    targetEventOffset: number,
+    view: PackedDiffVersionsView,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    if (this.active) {
+      return new PackedDiffVersionsWorkspace(
+        this.eventCount,
+      ).diffOffsetToParentRanges(
+        currentOffset,
+        targetEventOffset,
+        view,
+        rankByOffset,
+      );
+    }
+
+    const transition = this.diffOffsetToParents(
+      currentOffset,
+      targetEventOffset,
+      view,
+      rankByOffset,
+    );
+    this.collectLocalVersionRanges(transition);
+    return this;
+  }
+
   private begin(rankByOffset: Uint32Array | null): void {
     if (rankByOffset !== null && rankByOffset.length !== this.eventCount) {
       throw new Error(
@@ -212,6 +339,77 @@ export class PackedDiffVersionsWorkspace implements PackedOffsetTransition {
     this.activeRankByOffset = rankByOffset;
     this.retreatLength = 0;
     this.advanceLength = 0;
+    this.retreatRangeLength = 0;
+    this.retreatRangeEventLength = 0;
+    this.advanceRangeLength = 0;
+    this.advanceRangeEventLength = 0;
+  }
+
+  private collectLocalVersionRanges(transition: PackedOffsetTransition): void {
+    this.retreatRangeEventLength = transition.retreatCount;
+    this.advanceRangeEventLength = transition.advanceCount;
+
+    for (let index = 0; index < transition.retreatCount; index++) {
+      const offset = transition.retreatOffsets[index]!;
+      const previousRange = this.retreatRangeLength - 1;
+      if (
+        previousRange >= 0 &&
+        offset + 1 === this.retreatStartBuffer[previousRange]
+      ) {
+        this.retreatStartBuffer[previousRange] = offset;
+        continue;
+      }
+
+      this.ensureRetreatRangeCapacity(this.retreatRangeLength + 1);
+      this.retreatStartBuffer[this.retreatRangeLength] = offset;
+      this.retreatEndBuffer[this.retreatRangeLength] = offset + 1;
+      this.retreatRangeLength++;
+    }
+
+    for (let index = 0; index < transition.advanceCount; index++) {
+      const offset = transition.advanceOffsets[index]!;
+      const previousRange = this.advanceRangeLength - 1;
+      if (
+        previousRange >= 0 &&
+        this.advanceEndBuffer[previousRange] === offset
+      ) {
+        this.advanceEndBuffer[previousRange] = offset + 1;
+        continue;
+      }
+
+      this.ensureAdvanceRangeCapacity(this.advanceRangeLength + 1);
+      this.advanceStartBuffer[this.advanceRangeLength] = offset;
+      this.advanceEndBuffer[this.advanceRangeLength] = offset + 1;
+      this.advanceRangeLength++;
+    }
+  }
+
+  private ensureRetreatRangeCapacity(required: number): void {
+    if (required <= this.retreatStartBuffer.length) {
+      return;
+    }
+    this.retreatStartBuffer = this.ensureCapacity(
+      this.retreatStartBuffer,
+      required,
+    );
+    this.retreatEndBuffer = this.ensureCapacity(
+      this.retreatEndBuffer,
+      required,
+    );
+  }
+
+  private ensureAdvanceRangeCapacity(required: number): void {
+    if (required <= this.advanceStartBuffer.length) {
+      return;
+    }
+    this.advanceStartBuffer = this.ensureCapacity(
+      this.advanceStartBuffer,
+      required,
+    );
+    this.advanceEndBuffer = this.ensureCapacity(
+      this.advanceEndBuffer,
+      required,
+    );
   }
 
   private paintVersion(

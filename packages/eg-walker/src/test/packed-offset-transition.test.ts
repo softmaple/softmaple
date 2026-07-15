@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
+import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
 import type { EventId, GraphEvent } from "../types";
 
 const insert = (
@@ -35,6 +36,33 @@ const transitionIds = (
     ids[index] = id;
   }
   return ids;
+};
+
+const expandRangeTransition = (
+  transition: PackedLocalVersionTransition,
+): { retreat: number[]; advance: number[] } => {
+  const retreat: number[] = [];
+  for (let range = 0; range < transition.retreatRangeCount; range++) {
+    for (
+      let offset = transition.retreatEnds[range]! - 1;
+      offset >= transition.retreatStarts[range]!;
+      offset--
+    ) {
+      retreat.push(offset);
+    }
+  }
+
+  const advance: number[] = [];
+  for (let range = 0; range < transition.advanceRangeCount; range++) {
+    for (
+      let offset = transition.advanceStarts[range]!;
+      offset < transition.advanceEnds[range]!;
+      offset++
+    ) {
+      advance.push(offset);
+    }
+  }
+  return { retreat, advance };
 };
 
 describe("packed offset transitions", () => {
@@ -116,6 +144,82 @@ describe("packed offset transitions", () => {
         (offset) => view.idAt(offset),
       ),
     ).toEqual(["4-d", "3-c"]);
+  });
+
+  it("compresses contiguous local versions without changing scalar order", () => {
+    const view = pack(events).getPackedReplayPlanningView()!;
+    const targetOffset = view.offsetOf("5-target")!;
+    const expected = view.diffVersionToParents(
+      new Set(["1-a", "2-b"]),
+      targetOffset,
+    );
+    const expectedRetreat = Array.from(
+      expected.retreatOffsets.subarray(0, expected.retreatCount),
+    );
+    const expectedAdvance = Array.from(
+      expected.advanceOffsets.subarray(0, expected.advanceCount),
+    );
+
+    const transition = view.diffVersionToParentRanges(
+      new Set(["1-a", "2-b"]),
+      targetOffset,
+    );
+
+    expect(transition.retreatRangeCount).toBe(1);
+    expect(transition.retreatEventCount).toBe(expectedRetreat.length);
+    expect(transition.advanceRangeCount).toBe(1);
+    expect(transition.advanceEventCount).toBe(expectedAdvance.length);
+    expect(expandRangeTransition(transition)).toEqual({
+      retreat: expectedRetreat,
+      advance: expectedAdvance,
+    });
+
+    const next = view.diffOffsetToParentRanges(
+      view.offsetOf("1-a")!,
+      targetOffset,
+    );
+    expect(next).toBe(transition);
+    expect(expandRangeTransition(next)).toEqual({
+      retreat: [view.offsetOf("1-a")!],
+      advance: [view.offsetOf("3-c")!, view.offsetOf("4-d")!],
+    });
+  });
+
+  it("preserves ranked scalar order when adjacent offsets cannot merge", () => {
+    const view = pack(events).getPackedReplayPlanningView()!;
+    const targetOffset = view.offsetOf("5-target")!;
+    const rankByOffset = new Uint32Array(view.count);
+    for (let offset = 0; offset < view.count; offset++) {
+      rankByOffset[offset] = offset;
+    }
+    rankByOffset[view.offsetOf("2-b")!] = 1;
+    rankByOffset[view.offsetOf("1-a")!] = 2;
+    rankByOffset[view.offsetOf("4-d")!] = 3;
+    rankByOffset[view.offsetOf("3-c")!] = 4;
+
+    const expected = view.diffVersionToParents(
+      new Set(["1-a", "2-b"]),
+      targetOffset,
+      rankByOffset,
+    );
+    const expectedRetreat = Array.from(
+      expected.retreatOffsets.subarray(0, expected.retreatCount),
+    );
+    const expectedAdvance = Array.from(
+      expected.advanceOffsets.subarray(0, expected.advanceCount),
+    );
+    const transition = view.diffVersionToParentRanges(
+      new Set(["1-a", "2-b"]),
+      targetOffset,
+      rankByOffset,
+    );
+
+    expect(transition.retreatRangeCount).toBe(2);
+    expect(transition.advanceRangeCount).toBe(2);
+    expect(expandRangeTransition(transition)).toEqual({
+      retreat: expectedRetreat,
+      advance: expectedAdvance,
+    });
   });
 
   it("resets its reusable workspace after invalid replay ranks", () => {

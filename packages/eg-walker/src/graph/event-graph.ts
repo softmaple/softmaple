@@ -21,7 +21,10 @@ import {
 import { parseEventId } from "./event-id";
 import { diffVersions as diffVersionSets } from "./internals/diff-versions";
 import { deserializeEventGraph } from "./internals/event-graph-serialization";
-import type { PackedOffsetTransition } from "./internals/packed-diff-versions";
+import type {
+  PackedLocalVersionTransition,
+  PackedOffsetTransition,
+} from "./internals/packed-diff-versions";
 import {
   buildPackedLinearEventGraphBase,
   PackedEventGraphBase,
@@ -75,11 +78,21 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
     targetEventOffset: number,
     rankByOffset?: Uint32Array,
   ): PackedOffsetTransition;
+  diffVersionToParentRanges(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition;
   diffOffsetToParents(
     currentOffset: number,
     targetEventOffset: number,
     rankByOffset?: Uint32Array,
   ): PackedOffsetTransition;
+  diffOffsetToParentRanges(
+    currentOffset: number,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition;
 }
 
 /**

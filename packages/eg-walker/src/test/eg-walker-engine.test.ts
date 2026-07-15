@@ -130,6 +130,152 @@ describe("EgWalkerEngine", () => {
     );
   });
 
+  it("keeps checkpoint delete boundaries logical until an insert needs a physical anchor", () => {
+    const events: GraphEvent[] = Array.from({ length: 80 }, (_, index) => ({
+      id: `delete-${index}`,
+      parentVersion: new Set<EventId>(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+      timestamp: index,
+    }));
+    const graph = EventGraph.fromEvents(events);
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    const deferredEngine = new EgWalkerEngine();
+    const deferred = deferredEngine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+
+    expect(deferred.text).toBe(eager.text);
+    expect(deferred.text).toBe("acdef");
+    expect(deferred.stats.sequenceRecordCount).toBe(1);
+    expect(eager.stats.sequenceRecordCount).toBe(3);
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+
+    const insert: GraphEvent = {
+      id: "merge-insert",
+      parentVersion: graph.getFrontier(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "X" },
+      timestamp: events.length,
+    };
+    graph.addEvent(insert);
+    const eagerApplied = eagerEngine.applyEvent(insert, graph);
+    const deferredApplied = deferredEngine.applyEvent(insert, graph);
+
+    expect(deferredApplied.text).toBe("aXcdef");
+    expect(deferredApplied.text).toBe(eagerApplied.text);
+    expect(deferredApplied.transformedOperations).toEqual(
+      eagerApplied.transformedOperations,
+    );
+  });
+
+  it("deletes segmented effect ranges without shifting later spans", () => {
+    const hidden: GraphEvent = {
+      id: "hidden",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+      timestamp: 0,
+    };
+    const visibleBranch = Array.from(
+      { length: 63 },
+      (_, index): GraphEvent => ({
+        id: `visible-branch:${index}`,
+        parentVersion:
+          index === 0
+            ? new Set<EventId>()
+            : new Set([`visible-branch:${index - 1}`]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 6 + index,
+          text: "X",
+        },
+        timestamp: index + 1,
+      }),
+    );
+    const events = [hidden, ...visibleBranch];
+    const graph = EventGraph.fromEvents(events);
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+
+    const suffix = "X".repeat(visibleBranch.length);
+    expect(generated.text).toBe(`abdef${suffix}`);
+
+    const spanningDelete: GraphEvent = {
+      id: "spanning-delete",
+      parentVersion: new Set([visibleBranch.at(-1)!.id]),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 4 },
+      timestamp: 2,
+    };
+    graph.addEvent(spanningDelete);
+
+    expect(engine.applyEvent(spanningDelete, graph).text).toBe(`af${suffix}`);
+  });
+
+  it("records every segmented range for concurrent deletes across a hidden gap", () => {
+    const hidden: GraphEvent = {
+      id: "hidden-gap",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+      timestamp: 0,
+    };
+    const suffixEvents = Array.from(
+      { length: 62 },
+      (_, index): GraphEvent => ({
+        id: `suffix:${index}`,
+        parentVersion: new Set([
+          index === 0 ? hidden.id : `suffix:${index - 1}`,
+        ]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 5 + index,
+          text: "X",
+        },
+        timestamp: index + 1,
+      }),
+    );
+    const branchParent = suffixEvents.at(-1)!.id;
+    const firstDelete: GraphEvent = {
+      id: "delete:first",
+      parentVersion: new Set([branchParent]),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 4 },
+      timestamp: 63,
+    };
+    const events = [hidden, ...suffixEvents, firstDelete];
+    const graph = EventGraph.fromEvents(events);
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+    const expected = `a${"X".repeat(suffixEvents.length)}`;
+
+    expect(generated.text).toBe(expected);
+
+    const concurrentDelete: GraphEvent = {
+      id: "delete:concurrent",
+      parentVersion: new Set([branchParent]),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 4 },
+      timestamp: 64,
+    };
+    graph.addEvent(concurrentDelete);
+
+    expect(engine.applyEvent(concurrentDelete, graph).text).toBe(expected);
+  });
+
   it("defers a large checkpoint suffix while retaining checkpoint leaves", () => {
     const checkpointText = "x".repeat(2_048 * 64);
     const checkpointBuffer = PersistentUtf16Rope.from(checkpointText);

@@ -31,6 +31,14 @@ interface WeightDelta {
   anchor: number;
 }
 
+type WeightKind = "prepare" | "effect" | "anchor";
+
+type WeightOffsetResolver<T> = (
+  item: T,
+  visibleOffset: number,
+  kind: WeightKind,
+) => number;
+
 /**
  * Ranked B-tree for Eg-walker's mutable CRDT sequence.
  *
@@ -70,6 +78,7 @@ export class IndexedSequence<T extends object> {
     effectWeight: (item: T) => number,
     anchorWeight?: (item: T) => number,
     maintainOrder: boolean = false,
+    weightOffsetResolver?: WeightOffsetResolver<T>,
   ): IndexedSequence<T> {
     return new IndexedSequence(
       prepareWeight,
@@ -77,6 +86,7 @@ export class IndexedSequence<T extends object> {
       records,
       anchorWeight,
       maintainOrder,
+      weightOffsetResolver,
     );
   }
 
@@ -87,6 +97,10 @@ export class IndexedSequence<T extends object> {
     private readonly anchorWeight: (item: T) => number = (item) =>
       prepareWeight(item) > 0 ? 1 : 0,
     private readonly maintainOrder: boolean = false,
+    private readonly weightOffsetResolver: WeightOffsetResolver<T> = (
+      _item,
+      visibleOffset,
+    ) => visibleOffset,
   ) {
     if (items.length > 0) {
       this.bulkLoad(items);
@@ -556,6 +570,42 @@ export class IndexedSequence<T extends object> {
     allowEnd: boolean,
   ): { readonly position: number; readonly offsetInRecord: number } {
     return this.weightIndexToPositionAndOffset(index, allowEnd, "prepare");
+  }
+
+  /**
+   * Resolve an insertion boundary in the prepare-visible document.
+   *
+   * A weighted record may contain prepare-hidden gaps. In that case the
+   * boundary before visible character `index` is not necessarily the content
+   * offset of that character: insertion must stay immediately after the
+   * previous visible code unit and before every following hidden anchor. This
+   * differs from delete/read lookup, which needs the actual kth visible code
+   * unit and continues to use {@link prepareIndexToPositionAndOffset}.
+   */
+  prepareBoundaryToPositionAndOffset(index: number): {
+    readonly position: number;
+    readonly offsetInRecord: number;
+  } {
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      index > this.prepareLength
+    ) {
+      throw new IndexOutOfRangeError(`Index ${index} out of bounds`);
+    }
+    if (index === 0) {
+      return { position: 0, offsetInRecord: 0 };
+    }
+
+    const previous = this.weightIndexToPositionAndOffset(
+      index - 1,
+      false,
+      "prepare",
+    );
+    return {
+      position: previous.position,
+      offsetInRecord: previous.offsetInRecord + 1,
+    };
   }
 
   /**
@@ -1200,7 +1250,7 @@ export class IndexedSequence<T extends object> {
   private weightIndexToPosition(
     index: number,
     allowEnd: boolean,
-    kind: "prepare" | "effect" | "anchor",
+    kind: WeightKind,
   ): number {
     return this.weightIndexToPositionAndOffset(index, allowEnd, kind).position;
   }
@@ -1208,7 +1258,7 @@ export class IndexedSequence<T extends object> {
   private weightIndexToPositionAndOffset(
     index: number,
     allowEnd: boolean,
-    kind: "prepare" | "effect" | "anchor",
+    kind: WeightKind,
   ): { readonly position: number; readonly offsetInRecord: number } {
     if (index < 0) {
       throw new IndexOutOfRangeError(`Index ${index} out of bounds`);
@@ -1260,7 +1310,16 @@ export class IndexedSequence<T extends object> {
       this.structuralOperationCount++;
       const weight = this.leafWeight(node, offset, kind);
       if (remaining < weight) {
-        return { position: position + offset, offsetInRecord: remaining };
+        const item = node.items[offset];
+        if (item === undefined) {
+          throw new Error(
+            `IndexedSequence aggregate inconsistency: weight ${kind} index ${index} resolved to a missing leaf item`,
+          );
+        }
+        return {
+          position: position + offset,
+          offsetInRecord: this.weightOffsetResolver(item, remaining, kind),
+        };
       }
       remaining -= weight;
     }
@@ -1271,10 +1330,7 @@ export class IndexedSequence<T extends object> {
     );
   }
 
-  private weightSum(
-    node: IndexedNode<T>,
-    kind: "prepare" | "effect" | "anchor",
-  ): number {
+  private weightSum(node: IndexedNode<T>, kind: WeightKind): number {
     return kind === "prepare"
       ? node.prepareSum
       : kind === "effect"
@@ -1285,7 +1341,7 @@ export class IndexedSequence<T extends object> {
   private leafWeight(
     node: LeafNode<T>,
     offset: number,
-    kind: "prepare" | "effect" | "anchor",
+    kind: WeightKind,
   ): number {
     return kind === "prepare"
       ? (node.prepareWeights[offset] ?? 0)

@@ -1,4 +1,6 @@
 import type { EventId } from "../../types";
+import type { AugmentedCRDTItem } from "./engine-types";
+import type { SegmentedPlaceholderState } from "./segmented-placeholder";
 
 export interface DeleteTargetRecord {
   readonly deleteEventId: EventId;
@@ -12,10 +14,25 @@ export interface CompactDeleteTargetRecords {
   readonly targetRefs: Uint32Array;
 }
 
-export type DeleteTargetRefs = EventId | ReadonlyArray<EventId>;
+export interface PlaceholderDeleteTarget {
+  readonly kind: "placeholder-range";
+  readonly state: SegmentedPlaceholderState<AugmentedCRDTItem>;
+  readonly start: number;
+  readonly end: number;
+}
 
-type StoredDeleteTargets = EventId | EventId[];
+export type RuntimeDeleteTarget = EventId | PlaceholderDeleteTarget;
+export type DeleteTargetRefs =
+  | RuntimeDeleteTarget
+  | ReadonlyArray<RuntimeDeleteTarget>;
+
+type StoredDeleteTargets = RuntimeDeleteTarget | RuntimeDeleteTarget[];
 type DeleteOwners = EventId | Set<EventId>;
+
+export const isPlaceholderDeleteTarget = (
+  target: DeleteTargetRefs,
+): target is PlaceholderDeleteTarget =>
+  typeof target !== "string" && !Array.isArray(target);
 
 export const recordsFromCompactDeleteTargets = (
   records: CompactDeleteTargetRecords,
@@ -86,10 +103,14 @@ export class DeleteTargetIndex {
     this.byItem.clear();
   }
 
-  entries(): DeleteTargetRecord[] {
-    return Array.from(this.targets, ([deleteEventId, targetIds]) => ({
+  entries(
+    materializePlaceholder?: (
+      target: PlaceholderDeleteTarget,
+    ) => ReadonlyArray<EventId>,
+  ): DeleteTargetRecord[] {
+    return Array.from(this.targets, ([deleteEventId, targets]) => ({
       deleteEventId,
-      targetIds: typeof targetIds === "string" ? [targetIds] : [...targetIds],
+      targetIds: this.materializeTargets(targets, materializePlaceholder),
     }));
   }
 
@@ -98,7 +119,7 @@ export class DeleteTargetIndex {
     if (targets === undefined) {
       return undefined;
     }
-    return typeof targets === "string" ? [targets] : targets;
+    return this.materializeTargets(targets);
   }
 
   /**
@@ -112,19 +133,61 @@ export class DeleteTargetIndex {
 
   /** Store the dominant one-delete/one-record case without an array. */
   recordOne(deleteEventId: EventId, itemId: EventId): void {
-    this.targets.set(deleteEventId, itemId);
-    this.addOwner(itemId, deleteEventId);
+    this.recordRuntimeOne(deleteEventId, itemId);
   }
 
   record(deleteEventId: EventId, itemIds: ReadonlyArray<EventId>): void {
-    const first = itemIds[0];
+    this.recordRuntime(deleteEventId, itemIds);
+  }
+
+  recordRuntimeOne(deleteEventId: EventId, target: RuntimeDeleteTarget): void {
+    this.targets.set(deleteEventId, target);
+    if (typeof target === "string") {
+      this.addOwner(target, deleteEventId);
+    }
+  }
+
+  recordRuntime(
+    deleteEventId: EventId,
+    targets: ReadonlyArray<RuntimeDeleteTarget>,
+  ): void {
+    const first = targets[0];
     this.targets.set(
       deleteEventId,
-      itemIds.length === 1 && first !== undefined ? first : [...itemIds],
+      targets.length === 1 && first !== undefined ? first : [...targets],
     );
-    for (const itemId of itemIds) {
-      this.addOwner(itemId, deleteEventId);
+    for (const target of targets) {
+      if (typeof target === "string") {
+        this.addOwner(target, deleteEventId);
+      }
     }
+  }
+
+  private materializeTargets(
+    targets: StoredDeleteTargets,
+    materializePlaceholder?: (
+      target: PlaceholderDeleteTarget,
+    ) => ReadonlyArray<EventId>,
+  ): EventId[] {
+    const materialized: EventId[] = [];
+    const append = (target: RuntimeDeleteTarget): void => {
+      if (typeof target === "string") {
+        materialized.push(target);
+        return;
+      }
+      if (materializePlaceholder === undefined) {
+        throw new Error("Segmented placeholder targets require a materializer");
+      }
+      materialized.push(...materializePlaceholder(target));
+    };
+    if (Array.isArray(targets)) {
+      for (const target of targets) {
+        append(target);
+      }
+    } else {
+      append(targets);
+    }
+    return materialized;
   }
 
   private addOwner(itemId: EventId, deleteEventId: EventId): void {
@@ -173,6 +236,10 @@ export class DeleteTargetIndex {
     }
     if (typeof targets === "string") {
       this.targets.set(deleteEventId, [targets, toItemId]);
+    } else if (!Array.isArray(targets)) {
+      throw new Error(
+        `Delete target ${deleteEventId} has no item membership for ${toItemId}`,
+      );
     } else {
       targets.push(toItemId);
     }

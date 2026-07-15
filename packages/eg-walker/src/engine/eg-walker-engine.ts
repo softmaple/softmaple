@@ -1,7 +1,7 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
-import type { PackedOffsetTransition } from "../graph/internals/packed-diff-versions";
+import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
   containsUtf16SurrogateCodeUnit,
@@ -10,9 +10,11 @@ import {
 import { IndexedSequence } from "./indexed-sequence";
 import {
   DeleteTargetIndex,
+  isPlaceholderDeleteTarget,
   iterateCompactDeleteTargets,
   type CompactDeleteTargetRecords,
   type DeleteTargetRecord,
+  type PlaceholderDeleteTarget,
 } from "./internals/delete-target-index";
 import {
   applyDelete,
@@ -42,10 +44,11 @@ import {
   RopeRecordContent,
 } from "./internals/record-content";
 import { RecordSplitter } from "./internals/record-splitter";
+import { SegmentedPlaceholderState } from "./internals/segmented-placeholder";
 import {
   itemsFromCompactRecords,
   itemsFromRecords,
-  recordsFromItems,
+  recordFromItem,
   type CompactEngineSequenceRecords,
   type EngineSequenceRecord,
 } from "./internals/sequence-records";
@@ -121,12 +124,27 @@ export class EgWalkerEngine {
   private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
   private readonly originLeftIndex = new OriginLeftIndex();
   private readonly deleteTargets = new DeleteTargetIndex();
+  private readonly segmentedPlaceholders = new Set<
+    SegmentedPlaceholderState<AugmentedCRDTItem>
+  >();
   private readonly sequence = new IndexedSequence<AugmentedCRDTItem>(
-    (item) => (item.prepareState === 1 ? item.content.length : 0),
-    (item) => (item.everDeleted ? 0 : item.content.length),
+    (item) =>
+      item.placeholder?.prepareLength ??
+      (item.prepareState === 1 ? item.content.length : 0),
+    (item) =>
+      item.placeholder?.effectLength ??
+      (item.everDeleted ? 0 : item.content.length),
     [],
-    (item) => (item.prepareState === 0 ? 0 : 1),
+    (item) =>
+      item.placeholder === undefined ? (item.prepareState === 0 ? 0 : 1) : 1,
     true,
+    (item, visibleOffset, kind) =>
+      kind === "prepare" && item.placeholder !== undefined
+        ? item.placeholder.state.contentOffsetAtPrepareRank(
+            item.placeholder,
+            visibleOffset,
+          )
+        : visibleOffset,
   );
   private readonly fugueOrder = new FugueOrderIndex(
     this.sequence,
@@ -180,6 +198,9 @@ export class EgWalkerEngine {
       !collectTransformedOperations &&
       (this.resultingText.length === 0 ||
         events.length >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS);
+    if (this.deferTextMaterialization) {
+      this.enableSegmentedPlaceholder();
+    }
     const transformedOperations: ExternalOperation[] | undefined =
       collectTransformedOperations ? [] : undefined;
 
@@ -215,6 +236,9 @@ export class EgWalkerEngine {
     this.deferTextMaterialization =
       this.resultingText.length === 0 ||
       eventCount >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS;
+    if (this.deferTextMaterialization) {
+      this.enableSegmentedPlaceholder();
+    }
 
     let currentOffset: number | null = null;
     for (
@@ -295,7 +319,8 @@ export class EgWalkerEngine {
         fugueRebuilds: fugueStats.rebuilds,
         sequenceTreeOperations:
           this.sequence.getStructuralOperationCount() +
-          fugueStats.markerTreeOperations,
+          fugueStats.markerTreeOperations +
+          this.segmentedPlaceholderStructuralOperationCount(),
       },
     };
   }
@@ -440,6 +465,31 @@ export class EgWalkerEngine {
       if (item === undefined) {
         throw new Error(`Missing prepare record at index ${index}`);
       }
+      const placeholder = item.placeholder;
+      if (placeholder !== undefined) {
+        const ranges = placeholder.state.collectPrepareVisibleRanges(
+          placeholder.start + landing.offsetInRecord,
+          placeholder.end,
+          end - index,
+        );
+        let visibleLength = 0;
+        for (const range of ranges) {
+          const localStart = range.start - placeholder.start;
+          const localEnd = range.end - placeholder.start;
+          parts.push(
+            materializeRecordContent(item.content, localStart, localEnd),
+          );
+          visibleLength += localEnd - localStart;
+        }
+        if (visibleLength === 0) {
+          throw new Error(
+            `Segmented prepare record ${item.id} exposed no text at index ${index}`,
+          );
+        }
+        index += visibleLength;
+        continue;
+      }
+
       const length = Math.min(
         end - index,
         item.content.length - landing.offsetInRecord,
@@ -473,7 +523,8 @@ export class EgWalkerEngine {
       fugueRebuilds: fugueStats.rebuilds,
       sequenceTreeOperations:
         this.sequence.getStructuralOperationCount() +
-        fugueStats.markerTreeOperations,
+        fugueStats.markerTreeOperations +
+        this.segmentedPlaceholderStructuralOperationCount(),
     };
   }
 
@@ -502,11 +553,72 @@ export class EgWalkerEngine {
 
   getSequenceRecords(): EngineSequenceRecord[] {
     this.flushPendingInsert();
-    return recordsFromItems(this.sequence.toArray());
+    const items = this.sequence.toArray();
+    if (this.segmentedPlaceholders.size === 0) {
+      return items.map(recordFromItem);
+    }
+
+    const rightBoundaryAliases = new Map<EventId, EventId>();
+    for (const item of items) {
+      const placeholder = item.placeholder;
+      if (placeholder === undefined) {
+        continue;
+      }
+      const segments = placeholder.state.logicalSegmentsInRange(
+        placeholder.start,
+        placeholder.end,
+      );
+      const rightmost = segments.at(-1);
+      if (rightmost !== undefined) {
+        rightBoundaryAliases.set(item.id, rightmost.id);
+      }
+    }
+
+    const records: EngineSequenceRecord[] = [];
+    for (const item of items) {
+      const placeholder = item.placeholder;
+      if (placeholder === undefined) {
+        const record = recordFromItem(item);
+        const originLeft =
+          record.originLeft === null
+            ? null
+            : (rightBoundaryAliases.get(record.originLeft) ??
+              record.originLeft);
+        records.push(
+          originLeft === record.originLeft ? record : { ...record, originLeft },
+        );
+        continue;
+      }
+
+      for (const segment of placeholder.state.logicalSegmentsInRange(
+        placeholder.start,
+        placeholder.end,
+      )) {
+        records.push({
+          id: segment.id,
+          eventId: PLACEHOLDER_EVENT_ID,
+          content: materializeRecordContent(
+            item.content,
+            segment.start - placeholder.start,
+            segment.end - placeholder.start,
+          ),
+          originLeft: null,
+          originRight: null,
+          everDeleted: segment.everDeleted,
+          prepareState: segment.prepareState,
+          run: null,
+        });
+      }
+    }
+    return records;
   }
 
   getDeleteTargetRecords(): DeleteTargetRecord[] {
-    return this.deleteTargets.entries();
+    return this.deleteTargets.entries((target) =>
+      target.state
+        .logicalSegmentsInRange(target.start, target.end)
+        .map(({ id }) => id),
+    );
   }
 
   captureRecoveryState(): EngineRecoveryState {
@@ -538,6 +650,7 @@ export class EgWalkerEngine {
     this.graph = state.graph;
     this.eventItems.clear();
     this.deleteTargets.clear();
+    this.segmentedPlaceholders.clear();
     this.itemsById.clear();
     this.originLeftIndex.clear();
     this.fugueOrder.clear();
@@ -641,11 +754,14 @@ export class EgWalkerEngine {
     if (!nonConflicting) {
       const transition =
         currentOffset === null
-          ? plan.transitionFromVersionToKnownOffset(
+          ? plan.transitionRangesFromVersionToKnownOffset(
               this.currentVersion,
               eventOffset,
             )
-          : plan.transitionBetweenKnownOffsets(currentOffset, eventOffset);
+          : plan.transitionRangesBetweenKnownOffsets(
+              currentOffset,
+              eventOffset,
+            );
       this.applyPackedPrepareTransition(plan, transition, rangeStart, rangeEnd);
       this.fullReplayCount++;
     } else {
@@ -660,7 +776,7 @@ export class EgWalkerEngine {
 
   private applyPackedPrepareTransition(
     plan: PackedCriticalReplayPlan,
-    transition: PackedOffsetTransition,
+    transition: PackedLocalVersionTransition,
     rangeStart: number,
     rangeEnd: number,
   ): void {
@@ -671,65 +787,89 @@ export class EgWalkerEngine {
     // split extends existing delete membership to both halves; resolving
     // deletes afterwards therefore observes the final record boundaries and
     // lets all prepare-state changes commute inside this transition.
-    for (let index = 0; index < transition.retreatCount; index++) {
-      const offset = transition.retreatOffsets[index]!;
-      const rank = plan.orderIndexOfKnownOffset(offset);
-      if (rank < rangeStart || rank >= rangeEnd) {
-        continue;
+    for (let range = 0; range < transition.retreatRangeCount; range++) {
+      const start = transition.retreatStarts[range]!;
+      for (
+        let offset = transition.retreatEnds[range]! - 1;
+        offset >= start;
+        offset--
+      ) {
+        const rank = plan.orderIndexOfKnownOffset(offset);
+        if (rank < rangeStart || rank >= rangeEnd) {
+          continue;
+        }
+        if (plan.isInsertAtKnownOffset(offset)) {
+          this.collectInsertPrepareDelta(
+            plan.eventIdAtKnownOffset(offset),
+            -1,
+            deltas,
+          );
+        }
+        this.retreatCount++;
       }
-      if (plan.isInsertAtKnownOffset(offset)) {
-        this.collectInsertPrepareDelta(
-          plan.eventIdAtKnownOffset(offset),
-          -1,
-          deltas,
-        );
-      }
-      this.retreatCount++;
     }
-    for (let index = 0; index < transition.advanceCount; index++) {
-      const offset = transition.advanceOffsets[index]!;
-      const rank = plan.orderIndexOfKnownOffset(offset);
-      if (rank < rangeStart || rank >= rangeEnd) {
-        continue;
+    for (let range = 0; range < transition.advanceRangeCount; range++) {
+      const end = transition.advanceEnds[range]!;
+      for (
+        let offset = transition.advanceStarts[range]!;
+        offset < end;
+        offset++
+      ) {
+        const rank = plan.orderIndexOfKnownOffset(offset);
+        if (rank < rangeStart || rank >= rangeEnd) {
+          continue;
+        }
+        if (plan.isInsertAtKnownOffset(offset)) {
+          this.collectInsertPrepareDelta(
+            plan.eventIdAtKnownOffset(offset),
+            1,
+            deltas,
+          );
+        }
+        this.advanceCount++;
       }
-      if (plan.isInsertAtKnownOffset(offset)) {
-        this.collectInsertPrepareDelta(
-          plan.eventIdAtKnownOffset(offset),
-          1,
-          deltas,
-        );
-      }
-      this.advanceCount++;
     }
 
-    for (let index = 0; index < transition.retreatCount; index++) {
-      const offset = transition.retreatOffsets[index]!;
-      const rank = plan.orderIndexOfKnownOffset(offset);
-      if (
-        rank >= rangeStart &&
-        rank < rangeEnd &&
-        !plan.isInsertAtKnownOffset(offset)
+    for (let range = 0; range < transition.retreatRangeCount; range++) {
+      const start = transition.retreatStarts[range]!;
+      for (
+        let offset = transition.retreatEnds[range]! - 1;
+        offset >= start;
+        offset--
       ) {
-        this.collectDeletePrepareDelta(
-          plan.eventIdAtKnownOffset(offset),
-          -1,
-          deltas,
-        );
+        const rank = plan.orderIndexOfKnownOffset(offset);
+        if (
+          rank >= rangeStart &&
+          rank < rangeEnd &&
+          !plan.isInsertAtKnownOffset(offset)
+        ) {
+          this.collectDeletePrepareDelta(
+            plan.eventIdAtKnownOffset(offset),
+            -1,
+            deltas,
+          );
+        }
       }
     }
-    for (let index = 0; index < transition.advanceCount; index++) {
-      const offset = transition.advanceOffsets[index]!;
-      const rank = plan.orderIndexOfKnownOffset(offset);
-      if (
-        rank >= rangeStart &&
-        rank < rangeEnd &&
-        !plan.isInsertAtKnownOffset(offset)
+    for (let range = 0; range < transition.advanceRangeCount; range++) {
+      const end = transition.advanceEnds[range]!;
+      for (
+        let offset = transition.advanceStarts[range]!;
+        offset < end;
+        offset++
       ) {
-        this.collectDeletePrepareDelta(
-          plan.eventIdAtKnownOffset(offset),
-          1,
-          deltas,
-        );
+        const rank = plan.orderIndexOfKnownOffset(offset);
+        if (
+          rank >= rangeStart &&
+          rank < rangeEnd &&
+          !plan.isInsertAtKnownOffset(offset)
+        ) {
+          this.collectDeletePrepareDelta(
+            plan.eventIdAtKnownOffset(offset),
+            1,
+            deltas,
+          );
+        }
       }
     }
 
@@ -813,6 +953,14 @@ export class EgWalkerEngine {
     if (live > this.peakSequenceRecordCount) {
       this.peakSequenceRecordCount = live;
     }
+  }
+
+  private segmentedPlaceholderStructuralOperationCount(): number {
+    let count = 0;
+    for (const state of this.segmentedPlaceholders) {
+      count += state.getStructuralOperationCount();
+    }
+    return count;
   }
 
   /**
@@ -920,6 +1068,32 @@ export class EgWalkerEngine {
 
   private nextPlaceholderId(): EventId {
     return `${PLACEHOLDER_ID_PREFIX}${this.placeholderCounter++}`;
+  }
+
+  private enableSegmentedPlaceholder(): void {
+    if (this.sequence.length !== 1) {
+      return;
+    }
+    const placeholder = this.sequence.at(0);
+    if (
+      placeholder === undefined ||
+      placeholder.eventId !== PLACEHOLDER_EVENT_ID ||
+      placeholder.placeholder !== undefined ||
+      placeholder.content.length === 0
+    ) {
+      return;
+    }
+
+    const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+      placeholder.content.length,
+      placeholder.id,
+      () => this.nextPlaceholderId(),
+    );
+    const slice = state.createInitialPhysicalSlice();
+    slice.attachOwner(placeholder);
+    placeholder.placeholder = slice;
+    this.segmentedPlaceholders.add(state);
+    this.sequence.updateItem(placeholder);
   }
 
   private trackEventItems(item: AugmentedCRDTItem): void {
@@ -1092,11 +1266,28 @@ export class EgWalkerEngine {
         this.sequence.updateItem(item);
         return;
       }
-      for (const itemId of targetRefs ?? []) {
-        const item = this.requireItem(itemId);
-        item.prepareState += delta;
-        this.sequence.updateItem(item);
+      if (targetRefs !== undefined && isPlaceholderDeleteTarget(targetRefs)) {
+        const affected = this.adjustPlaceholderDeleteTarget(targetRefs, delta);
+        this.sequence.updateItems(affected);
+        return;
       }
+
+      const dirty = new Set<AugmentedCRDTItem>();
+      for (const target of targetRefs ?? []) {
+        if (typeof target === "string") {
+          const item = this.requireItem(target);
+          item.prepareState += delta;
+          dirty.add(item);
+        } else {
+          for (const item of this.adjustPlaceholderDeleteTarget(
+            target,
+            delta,
+          )) {
+            dirty.add(item);
+          }
+        }
+      }
+      this.sequence.updateItems(dirty);
     }
   }
 
@@ -1125,9 +1316,50 @@ export class EgWalkerEngine {
       this.collectItemPrepareDelta(targetRefs, delta, deltas);
       return;
     }
-    for (const itemId of targetRefs ?? []) {
-      this.collectItemPrepareDelta(itemId, delta, deltas);
+    if (targetRefs !== undefined && isPlaceholderDeleteTarget(targetRefs)) {
+      this.collectPlaceholderPrepareDelta(targetRefs, delta, deltas);
+      return;
     }
+    for (const target of targetRefs ?? []) {
+      if (typeof target === "string") {
+        this.collectItemPrepareDelta(target, delta, deltas);
+      } else {
+        this.collectPlaceholderPrepareDelta(target, delta, deltas);
+      }
+    }
+  }
+
+  private collectPlaceholderPrepareDelta(
+    target: PlaceholderDeleteTarget,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    for (const item of this.adjustPlaceholderDeleteTarget(target, delta)) {
+      if (!deltas.has(item)) {
+        // The segmented state already absorbed the delta. A zero entry keeps
+        // the physical slice in the one batched ranked-weight refresh without
+        // applying the same prepare delta to its scalar compatibility fields.
+        deltas.set(item, 0);
+      }
+    }
+  }
+
+  private adjustPlaceholderDeleteTarget(
+    target: PlaceholderDeleteTarget,
+    delta: 1 | -1,
+  ): ReadonlyArray<AugmentedCRDTItem> {
+    const affected: AugmentedCRDTItem[] = [];
+    for (const slice of target.state.adjustPrepareRange(
+      target.start,
+      target.end,
+      delta,
+    )) {
+      const owner = slice.owner;
+      if (owner !== null) {
+        affected.push(owner);
+      }
+    }
+    return affected;
   }
 
   private collectItemPrepareDelta(
@@ -1155,6 +1387,22 @@ export class EgWalkerEngine {
   private materializeEffectVisibleText(): PersistentUtf16Rope {
     return PersistentUtf16Rope.assemble((assembler) => {
       this.sequence.forEach((item) => {
+        const placeholder = item.placeholder;
+        if (placeholder !== undefined) {
+          for (const range of placeholder.state.collectEffectVisibleRanges(
+            placeholder.start,
+            placeholder.end,
+          )) {
+            const start = range.start - placeholder.start;
+            const end = range.end - placeholder.start;
+            if (typeof item.content === "string") {
+              assembler.appendText(item.content.slice(start, end));
+            } else {
+              item.content.appendRangeTo(assembler, start, end);
+            }
+          }
+          return;
+        }
         if (item.everDeleted || item.content.length === 0) {
           return;
         }

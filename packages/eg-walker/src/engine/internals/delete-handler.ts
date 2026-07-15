@@ -1,6 +1,10 @@
 import type { EventId, ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
-import { DeleteTargetIndex } from "./delete-target-index";
+import {
+  DeleteTargetIndex,
+  type PlaceholderDeleteTarget,
+  type RuntimeDeleteTarget,
+} from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
@@ -47,8 +51,8 @@ export const applyDelete = (
   if (!pendingInsert.isEmpty()) {
     flushPendingInsert();
   }
-  let firstDeletedItemId: EventId | undefined;
-  let additionalDeletedItemIds: EventId[] | null = null;
+  let firstDeletedTarget: RuntimeDeleteTarget | undefined;
+  let additionalDeletedTargets: RuntimeDeleteTarget[] | null = null;
   const outputDeleteIndexes: number[] | null = collectTransformedOperations
     ? []
     : null;
@@ -71,6 +75,108 @@ export const applyDelete = (
       );
     }
 
+    const placeholder = candidate.placeholder;
+    if (placeholder !== undefined) {
+      const state = placeholder.state;
+      if (deferTextMaterialization) {
+        const result = state.deletePrepareVisibleInSlice(
+          placeholder,
+          landing.offsetInRecord,
+          remaining,
+        );
+        let deletedLength = 0;
+        for (const range of result.ranges) {
+          const target: PlaceholderDeleteTarget = {
+            kind: "placeholder-range",
+            state,
+            start: range.start,
+            end: range.end,
+          };
+          if (firstDeletedTarget === undefined) {
+            firstDeletedTarget = target;
+          } else {
+            additionalDeletedTargets ??= [firstDeletedTarget];
+            additionalDeletedTargets.push(target);
+          }
+          deletedLength += range.end - range.start;
+        }
+        if (deletedLength === 0) {
+          throw new Error(
+            `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
+          );
+        }
+        sequence.updateItem(candidate);
+        remaining -= deletedLength;
+        continue;
+      }
+
+      const absoluteStart = placeholder.start + landing.offsetInRecord;
+      const ranges = state.collectPrepareVisibleRanges(
+        absoluteStart,
+        placeholder.end,
+        remaining,
+      );
+      let deletedLength = 0;
+      const affected = new Set<AugmentedCRDTItem>();
+      for (const range of ranges) {
+        const target: PlaceholderDeleteTarget = {
+          kind: "placeholder-range",
+          state,
+          start: range.start,
+          end: range.end,
+        };
+        if (firstDeletedTarget === undefined) {
+          firstDeletedTarget = target;
+        } else {
+          additionalDeletedTargets ??= [firstDeletedTarget];
+          additionalDeletedTargets.push(target);
+        }
+
+        if (!deferTextMaterialization) {
+          const effectRanges = state.collectEffectVisibleRanges(
+            range.start,
+            range.end,
+          );
+          // Delete disjoint effect-visible spans from right to left. Removing
+          // an earlier span first would shift the effect indexes of every
+          // later span while the placeholder state still describes the
+          // pre-delete document.
+          for (let index = effectRanges.length - 1; index >= 0; index--) {
+            const effectRange = effectRanges[index];
+            if (effectRange === undefined) {
+              continue;
+            }
+            const effectIndex =
+              itemToEffectIndex(candidate) +
+              state.effectLengthInRange(placeholder.start, effectRange.start);
+            const effectLength = effectRange.end - effectRange.start;
+            if (collectTransformedOperations) {
+              for (let index = 0; index < effectLength; index++) {
+                outputDeleteIndexes?.push(effectIndex);
+              }
+            }
+            deleteText(effectIndex, effectLength);
+          }
+        }
+
+        for (const slice of state.applyDeleteRange(range.start, range.end)) {
+          const owner = slice.owner;
+          if (owner !== null) {
+            affected.add(owner);
+          }
+        }
+        deletedLength += range.end - range.start;
+      }
+      if (deletedLength === 0) {
+        throw new Error(
+          `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
+        );
+      }
+      sequence.updateItems(affected);
+      remaining -= deletedLength;
+      continue;
+    }
+
     // Multi-character records (placeholders and typed-run leaves coalesced
     // by Section 3.4) are split on demand so the deleted slice is its own
     // record. Single-character records and per-code-unit paste fragments
@@ -88,11 +194,11 @@ export const applyDelete = (
         toDelete,
       );
 
-      if (firstDeletedItemId === undefined) {
-        firstDeletedItemId = middle.id;
+      if (firstDeletedTarget === undefined) {
+        firstDeletedTarget = middle.id;
       } else {
-        additionalDeletedItemIds ??= [firstDeletedItemId];
-        additionalDeletedItemIds.push(middle.id);
+        additionalDeletedTargets ??= [firstDeletedTarget];
+        additionalDeletedTargets.push(middle.id);
       }
       // A concurrent delete that lands on an already-effect-deleted slice
       // (e.g. after retreating an overlapping sibling) must NOT remove
@@ -118,11 +224,11 @@ export const applyDelete = (
       continue;
     }
 
-    if (firstDeletedItemId === undefined) {
-      firstDeletedItemId = candidate.id;
+    if (firstDeletedTarget === undefined) {
+      firstDeletedTarget = candidate.id;
     } else {
-      additionalDeletedItemIds ??= [firstDeletedItemId];
-      additionalDeletedItemIds.push(candidate.id);
+      additionalDeletedTargets ??= [firstDeletedTarget];
+      additionalDeletedTargets.push(candidate.id);
     }
     if (!candidate.everDeleted) {
       if (!deferTextMaterialization) {
@@ -139,10 +245,10 @@ export const applyDelete = (
     remaining -= 1;
   }
 
-  if (additionalDeletedItemIds !== null) {
-    deleteTargets.record(eventId, additionalDeletedItemIds);
-  } else if (firstDeletedItemId !== undefined) {
-    deleteTargets.recordOne(eventId, firstDeletedItemId);
+  if (additionalDeletedTargets !== null) {
+    deleteTargets.recordRuntime(eventId, additionalDeletedTargets);
+  } else if (firstDeletedTarget !== undefined) {
+    deleteTargets.recordRuntimeOne(eventId, firstDeletedTarget);
   } else {
     deleteTargets.record(eventId, []);
   }

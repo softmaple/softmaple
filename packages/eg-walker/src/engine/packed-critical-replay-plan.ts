@@ -4,7 +4,10 @@ import type {
 } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
 import type { ExternalOperation } from "../types";
-import type { PackedOffsetTransition } from "../graph/internals/packed-diff-versions";
+import type {
+  PackedLocalVersionTransition,
+  PackedOffsetTransition,
+} from "../graph/internals/packed-diff-versions";
 
 /**
  * Critical-section cuts over a packed graph without per-section objects.
@@ -240,6 +243,28 @@ export class PackedCriticalReplayPlan {
     );
   }
 
+  transitionRangesFromVersion(
+    currentVersion: ReadonlySet<EventId>,
+    targetOrderIndex: number,
+  ): PackedLocalVersionTransition {
+    return this.transitionRangesFromVersionToKnownOffset(
+      currentVersion,
+      this.eventOffsetAt(targetOrderIndex),
+    );
+  }
+
+  /** @internal `targetEventOffset` must originate from this plan. */
+  transitionRangesFromVersionToKnownOffset(
+    currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+  ): PackedLocalVersionTransition {
+    return this.graph.diffVersionToParentRanges(
+      currentVersion,
+      targetEventOffset,
+      this.rankByOffset,
+    );
+  }
+
   transitionFromOffset(
     currentOffset: number,
     targetOrderIndex: number,
@@ -257,6 +282,29 @@ export class PackedCriticalReplayPlan {
     targetEventOffset: number,
   ): PackedOffsetTransition {
     return this.graph.diffOffsetToParents(
+      currentOffset,
+      targetEventOffset,
+      this.rankByOffset,
+    );
+  }
+
+  transitionRangesFromOffset(
+    currentOffset: number,
+    targetOrderIndex: number,
+  ): PackedLocalVersionTransition {
+    this.assertEventOffset(currentOffset);
+    return this.transitionRangesBetweenKnownOffsets(
+      currentOffset,
+      this.eventOffsetAt(targetOrderIndex),
+    );
+  }
+
+  /** @internal Both offsets must originate from this plan. */
+  transitionRangesBetweenKnownOffsets(
+    currentOffset: number,
+    targetEventOffset: number,
+  ): PackedLocalVersionTransition {
+    return this.graph.diffOffsetToParentRanges(
       currentOffset,
       targetEventOffset,
       this.rankByOffset,

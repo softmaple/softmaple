@@ -36,4 +36,27 @@ describe("RopeRecordContent", () => {
     );
     expect(constructionStats.flattenCount).toBe(0);
   });
+
+  it("appends complete and partial rope views without materializing them", () => {
+    const content = RopeRecordContent.from(PersistentUtf16Rope.from("A🙂B"));
+
+    const assembled = PersistentUtf16Rope.assemble((assembler) => {
+      content.appendTo(assembler);
+      content.appendRangeTo(assembler, 1, 3);
+    });
+
+    expect(content.hasSurrogateCodeUnits).toBe(true);
+    expect(assembled.toString()).toBe("A🙂B🙂");
+    expect(() =>
+      content.appendRangeTo(
+        {
+          appendText: () => undefined,
+          appendRope: () => undefined,
+          appendSlice: () => undefined,
+        },
+        -1,
+        1,
+      ),
+    ).toThrow("Invalid rope record append range");
+  });
 });

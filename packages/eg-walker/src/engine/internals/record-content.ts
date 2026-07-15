@@ -73,6 +73,26 @@ export class RopeRecordContent {
     assembler.appendSlice(this.rope, this.start, this.end);
   }
 
+  /** Append a subrange of this shared view without materialising it. */
+  appendRangeTo(
+    assembler: Utf16RopeAssembler,
+    start: number,
+    end: number,
+  ): void {
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      end < start ||
+      end > this.length
+    ) {
+      throw new Error(
+        `Invalid rope record append range [${start}, ${end}) for length ${this.length}`,
+      );
+    }
+    assembler.appendSlice(this.rope, this.start + start, this.start + end);
+  }
+
   toString(): string {
     return this.rope.slice(this.start, this.end);
   }

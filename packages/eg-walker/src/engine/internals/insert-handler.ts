@@ -86,10 +86,7 @@ export const applyInsert = (
   let conflictRegionEmpty = knownBoundary;
 
   if (!knownBoundary) {
-    const landing = sequence.prepareIndexToPositionAndOffset(
-      operationIndex,
-      true,
-    );
+    const landing = sequence.prepareBoundaryToPositionAndOffset(operationIndex);
     firstInsertPosition =
       landing.offsetInRecord > 0
         ? recordSplitter.splitRecordAt(landing.position, landing.offsetInRecord)

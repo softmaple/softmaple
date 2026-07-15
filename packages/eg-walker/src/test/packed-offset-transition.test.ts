@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { planPackedCriticalReplaySections } from "../engine/packed-critical-replay-plan";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
-import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
+import {
+  PackedDiffVersionsWorkspace,
+  type PackedLocalVersionTransition,
+} from "../graph/internals/packed-diff-versions";
 import type { EventId, GraphEvent } from "../types";
 
 const insert = (
@@ -185,6 +189,35 @@ describe("packed offset transitions", () => {
     });
   });
 
+  it("collects ranges without writing scalar transition offsets", () => {
+    const view = pack(events).getPackedReplayPlanningView()!;
+    const targetOffset = view.offsetOf("5-target")!;
+    const workspace = new PackedDiffVersionsWorkspace(view.count);
+
+    const transition = workspace.diffVersionToParentRanges(
+      new Set(["1-a", "2-b"]),
+      targetOffset,
+      view,
+    );
+
+    expect(workspace.scalarOffsetWriteCount).toBe(0);
+    expect(workspace.retreatCount).toBe(0);
+    expect(workspace.advanceCount).toBe(0);
+    expect(expandRangeTransition(transition)).toEqual({
+      retreat: [view.offsetOf("2-b")!, view.offsetOf("1-a")!],
+      advance: [view.offsetOf("3-c")!, view.offsetOf("4-d")!],
+    });
+
+    const scalar = workspace.diffVersionToParents(
+      new Set(["1-a", "2-b"]),
+      targetOffset,
+      view,
+    );
+    expect(workspace.scalarOffsetWriteCount).toBe(
+      scalar.retreatCount + scalar.advanceCount,
+    );
+  });
+
   it("preserves ranked scalar order when adjacent offsets cannot merge", () => {
     const view = pack(events).getPackedReplayPlanningView()!;
     const targetOffset = view.offsetOf("5-target")!;
@@ -252,6 +285,53 @@ describe("packed offset transitions", () => {
         (offset) => view.idAt(offset),
       ),
     ).toEqual(["3-c", "4-d"]);
+  });
+
+  it("exposes range transitions through the packed replay plan", () => {
+    const graph = pack(events);
+    const view = graph.getPackedReplayPlanningView()!;
+    const plan = planPackedCriticalReplaySections(graph)!;
+    const targetOffset = view.offsetOf("5-target")!;
+    const currentVersion = new Set<EventId>(["1-a", "2-b"]);
+    const expected = plan.transitionFromVersionToKnownOffset(
+      currentVersion,
+      targetOffset,
+    );
+    const expectedRetreat = Array.from(
+      expected.retreatOffsets.subarray(0, expected.retreatCount),
+    );
+    const expectedAdvance = Array.from(
+      expected.advanceOffsets.subarray(0, expected.advanceCount),
+    );
+
+    const transition = plan.transitionRangesFromVersionToKnownOffset(
+      currentVersion,
+      targetOffset,
+    );
+    expect(expandRangeTransition(transition)).toEqual({
+      retreat: expectedRetreat,
+      advance: expectedAdvance,
+    });
+
+    const currentOffset = view.offsetOf("1-a")!;
+    const expectedNext = plan.transitionBetweenKnownOffsets(
+      currentOffset,
+      targetOffset,
+    );
+    const expectedNextRetreat = Array.from(
+      expectedNext.retreatOffsets.subarray(0, expectedNext.retreatCount),
+    );
+    const expectedNextAdvance = Array.from(
+      expectedNext.advanceOffsets.subarray(0, expectedNext.advanceCount),
+    );
+    const next = plan.transitionRangesBetweenKnownOffsets(
+      currentOffset,
+      targetOffset,
+    );
+    expect(expandRangeTransition(next)).toEqual({
+      retreat: expectedNextRetreat,
+      advance: expectedNextAdvance,
+    });
   });
 });
 

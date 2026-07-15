@@ -45,6 +45,49 @@ describe("IndexedSequence", () => {
     expect(sequence.effectIndexBeforePosition(4)).toBe(4);
   });
 
+  it("distinguishes visible code-unit lookups from insertion boundaries across hidden gaps", () => {
+    const item = {
+      id: "a-hidden-b-visible-c",
+      visibleOffsets: [0, 2],
+      length: 3,
+    };
+    const sequence = new IndexedSequence(
+      (candidate: typeof item) => candidate.visibleOffsets.length,
+      (candidate: typeof item) => candidate.length,
+      [item],
+      undefined,
+      false,
+      (candidate, visibleOffset, kind) =>
+        kind === "prepare"
+          ? candidate.visibleOffsets[visibleOffset]!
+          : visibleOffset,
+    );
+
+    expect(sequence.prepareIndexToPositionAndOffset(0, false)).toEqual({
+      position: 0,
+      offsetInRecord: 0,
+    });
+    expect(sequence.prepareIndexToPositionAndOffset(1, false)).toEqual({
+      position: 0,
+      offsetInRecord: 2,
+    });
+    expect(sequence.prepareBoundaryToPositionAndOffset(0)).toEqual({
+      position: 0,
+      offsetInRecord: 0,
+    });
+    expect(sequence.prepareBoundaryToPositionAndOffset(1)).toEqual({
+      position: 0,
+      offsetInRecord: 1,
+    });
+    expect(sequence.prepareBoundaryToPositionAndOffset(2)).toEqual({
+      position: 0,
+      offsetInRecord: 3,
+    });
+    expect(() => sequence.prepareBoundaryToPositionAndOffset(3)).toThrow(
+      /out of bounds/,
+    );
+  });
+
   it("indexes zero-width delete anchors independently of prepare visibility", () => {
     const items = [
       { id: "retreated", state: 0, effect: 1 },

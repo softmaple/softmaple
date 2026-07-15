@@ -242,6 +242,28 @@ export class RecordSplitter {
         },
       };
     }
+
+    const leftPlaceholder = left.placeholder;
+    if (leftPlaceholder !== undefined) {
+      const rightPlaceholder = leftPlaceholder.state.splitPhysicalSlice(
+        leftPlaceholder,
+        offsetInRecord,
+      );
+      const right: AugmentedCRDTItem = {
+        id: leftPlaceholder.state.segmentIdAtBoundary(rightPlaceholder.start),
+        eventId: PLACEHOLDER_EVENT_ID,
+        content: rightContent,
+        originLeft: null,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: null,
+        placeholder: rightPlaceholder,
+      };
+      rightPlaceholder.attachOwner(right);
+      return right;
+    }
+
     return {
       id: this.deps.nextPlaceholderId(),
       eventId: PLACEHOLDER_EVENT_ID,

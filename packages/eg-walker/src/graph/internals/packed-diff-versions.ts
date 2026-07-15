@@ -87,6 +87,7 @@ export class PackedDiffVersionsWorkspace
   private advanceEndBuffer: Uint32Array;
   private advanceRangeLength = 0;
   private advanceRangeEventLength = 0;
+  private scalarOffsetWrites = 0;
   private activeRankByOffset: Uint32Array | null = null;
   private active = false;
 
@@ -149,6 +150,11 @@ export class PackedDiffVersionsWorkspace
 
   get advanceEventCount(): number {
     return this.advanceRangeEventLength;
+  }
+
+  /** @internal Structural diagnostic for tests and replay benchmarks. */
+  get scalarOffsetWriteCount(): number {
+    return this.scalarOffsetWrites;
   }
 
   diff(
@@ -251,14 +257,24 @@ export class PackedDiffVersionsWorkspace
       );
     }
 
-    const transition = this.diffVersionToParents(
-      currentVersion,
-      targetEventOffset,
-      view,
-      rankByOffset,
-    );
-    this.collectLocalVersionRanges(transition);
-    return this;
+    this.assertEventOffset(targetEventOffset);
+    this.begin(rankByOffset ?? null);
+    try {
+      let pendingDivergent = this.paintVersion(
+        currentVersion,
+        DIFF_COLOR.LEFT,
+        view,
+      );
+      pendingDivergent += this.paintParents(
+        targetEventOffset,
+        DIFF_COLOR.RIGHT,
+        view,
+      );
+      this.collectRangeTransition(pendingDivergent, view);
+      return this;
+    } finally {
+      this.finish();
+    }
   }
 
   /**
@@ -319,14 +335,21 @@ export class PackedDiffVersionsWorkspace
       );
     }
 
-    const transition = this.diffOffsetToParents(
-      currentOffset,
-      targetEventOffset,
-      view,
-      rankByOffset,
-    );
-    this.collectLocalVersionRanges(transition);
-    return this;
+    this.assertEventOffset(currentOffset);
+    this.assertEventOffset(targetEventOffset);
+    this.begin(rankByOffset ?? null);
+    try {
+      let pendingDivergent = this.paint(currentOffset, DIFF_COLOR.LEFT);
+      pendingDivergent += this.paintParents(
+        targetEventOffset,
+        DIFF_COLOR.RIGHT,
+        view,
+      );
+      this.collectRangeTransition(pendingDivergent, view);
+      return this;
+    } finally {
+      this.finish();
+    }
   }
 
   private begin(rankByOffset: Uint32Array | null): void {
@@ -343,45 +366,7 @@ export class PackedDiffVersionsWorkspace
     this.retreatRangeEventLength = 0;
     this.advanceRangeLength = 0;
     this.advanceRangeEventLength = 0;
-  }
-
-  private collectLocalVersionRanges(transition: PackedOffsetTransition): void {
-    this.retreatRangeEventLength = transition.retreatCount;
-    this.advanceRangeEventLength = transition.advanceCount;
-
-    for (let index = 0; index < transition.retreatCount; index++) {
-      const offset = transition.retreatOffsets[index]!;
-      const previousRange = this.retreatRangeLength - 1;
-      if (
-        previousRange >= 0 &&
-        offset + 1 === this.retreatStartBuffer[previousRange]
-      ) {
-        this.retreatStartBuffer[previousRange] = offset;
-        continue;
-      }
-
-      this.ensureRetreatRangeCapacity(this.retreatRangeLength + 1);
-      this.retreatStartBuffer[this.retreatRangeLength] = offset;
-      this.retreatEndBuffer[this.retreatRangeLength] = offset + 1;
-      this.retreatRangeLength++;
-    }
-
-    for (let index = 0; index < transition.advanceCount; index++) {
-      const offset = transition.advanceOffsets[index]!;
-      const previousRange = this.advanceRangeLength - 1;
-      if (
-        previousRange >= 0 &&
-        this.advanceEndBuffer[previousRange] === offset
-      ) {
-        this.advanceEndBuffer[previousRange] = offset + 1;
-        continue;
-      }
-
-      this.ensureAdvanceRangeCapacity(this.advanceRangeLength + 1);
-      this.advanceStartBuffer[this.advanceRangeLength] = offset;
-      this.advanceEndBuffer[this.advanceRangeLength] = offset + 1;
-      this.advanceRangeLength++;
-    }
+    this.scalarOffsetWrites = 0;
   }
 
   private ensureRetreatRangeCapacity(required: number): void {
@@ -461,6 +446,7 @@ export class PackedDiffVersionsWorkspace
           this.retreatLength + 1,
         );
         this.retreatBuffer[this.retreatLength++] = offset;
+        this.scalarOffsetWrites++;
         pendingDivergent--;
       } else if (finalColor === DIFF_COLOR.RIGHT) {
         this.advanceBuffer = this.ensureCapacity(
@@ -468,6 +454,7 @@ export class PackedDiffVersionsWorkspace
           this.advanceLength + 1,
         );
         this.advanceBuffer[this.advanceLength++] = offset;
+        this.scalarOffsetWrites++;
         pendingDivergent--;
       }
 
@@ -495,6 +482,91 @@ export class PackedDiffVersionsWorkspace
       this.advanceBuffer[left] = this.advanceBuffer[right]!;
       this.advanceBuffer[right] = value;
     }
+  }
+
+  /**
+   * Collect the transition directly into local-version ranges.
+   *
+   * The max-heap yields both sides in descending replay rank. Retreat ranges
+   * therefore arrive in their final order. Advance ranges are accumulated in
+   * the inverse direction, then their range pairs (not their events) are
+   * reversed so callers can expand them in ascending replay rank.
+   */
+  private collectRangeTransition(
+    initialPendingDivergent: number,
+    view: PackedDiffVersionsView,
+  ): void {
+    let pendingDivergent = initialPendingDivergent;
+    while (this.heapLength > 0 && pendingDivergent > 0) {
+      const offset = this.pop();
+      const finalColor = this.colors[offset]!;
+
+      if (finalColor === DIFF_COLOR.LEFT) {
+        this.appendDescendingRetreatOffset(offset);
+        this.retreatRangeEventLength++;
+        pendingDivergent--;
+      } else if (finalColor === DIFF_COLOR.RIGHT) {
+        this.appendDescendingAdvanceOffset(offset);
+        this.advanceRangeEventLength++;
+        pendingDivergent--;
+      }
+
+      const parentCount = view.parentCountAt(offset);
+      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+        const parentOffset = view.parentOffsetAt(offset, parentIndex);
+        if (parentOffset === undefined) {
+          throw new Error(
+            `Packed event ${offset} is missing parent ${parentIndex}`,
+          );
+        }
+        pendingDivergent += this.paint(parentOffset, finalColor);
+      }
+    }
+
+    for (
+      let left = 0, right = this.advanceRangeLength - 1;
+      left < right;
+      left++, right--
+    ) {
+      const start = this.advanceStartBuffer[left]!;
+      const end = this.advanceEndBuffer[left]!;
+      this.advanceStartBuffer[left] = this.advanceStartBuffer[right]!;
+      this.advanceEndBuffer[left] = this.advanceEndBuffer[right]!;
+      this.advanceStartBuffer[right] = start;
+      this.advanceEndBuffer[right] = end;
+    }
+  }
+
+  private appendDescendingRetreatOffset(offset: number): void {
+    const previousRange = this.retreatRangeLength - 1;
+    if (
+      previousRange >= 0 &&
+      offset + 1 === this.retreatStartBuffer[previousRange]
+    ) {
+      this.retreatStartBuffer[previousRange] = offset;
+      return;
+    }
+
+    this.ensureRetreatRangeCapacity(this.retreatRangeLength + 1);
+    this.retreatStartBuffer[this.retreatRangeLength] = offset;
+    this.retreatEndBuffer[this.retreatRangeLength] = offset + 1;
+    this.retreatRangeLength++;
+  }
+
+  private appendDescendingAdvanceOffset(offset: number): void {
+    const previousRange = this.advanceRangeLength - 1;
+    if (
+      previousRange >= 0 &&
+      offset + 1 === this.advanceStartBuffer[previousRange]
+    ) {
+      this.advanceStartBuffer[previousRange] = offset;
+      return;
+    }
+
+    this.ensureAdvanceRangeCapacity(this.advanceRangeLength + 1);
+    this.advanceStartBuffer[this.advanceRangeLength] = offset;
+    this.advanceEndBuffer[this.advanceRangeLength] = offset + 1;
+    this.advanceRangeLength++;
   }
 
   /**

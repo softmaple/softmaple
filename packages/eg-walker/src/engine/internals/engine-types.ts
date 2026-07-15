@@ -2,6 +2,7 @@ import type { EventGraph } from "../../graph/event-graph";
 import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
 import type { RecordContent } from "./record-content";
+import type { PlaceholderPhysicalSlice } from "./segmented-placeholder";
 
 export const PLACEHOLDER_EVENT_ID = "__placeholder__";
 export const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
@@ -54,6 +55,8 @@ export interface AugmentedCRDTItem {
   everDeleted: boolean;
   prepareState: number;
   run: TypedRun | null;
+  /** Deferred checkpoint state; absent from ordinary and serialized records. */
+  placeholder?: PlaceholderPhysicalSlice<AugmentedCRDTItem>;
 }
 
 export interface EngineStats {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DeleteTargetIndex } from "../engine/internals/delete-target-index";
+import {
+  DeleteTargetIndex,
+  iterateCompactDeleteTargets,
+  type PlaceholderDeleteTarget,
+} from "../engine/internals/delete-target-index";
+import type { AugmentedCRDTItem } from "../engine/internals/engine-types";
+import { SegmentedPlaceholderState } from "../engine/internals/segmented-placeholder";
 
 describe("DeleteTargetIndex", () => {
   describe("record / targetsOf", () => {
@@ -71,6 +77,56 @@ describe("DeleteTargetIndex", () => {
       const manyTargets = entries[1]?.targetIds as string[] | undefined;
       manyTargets?.push("item-mutated");
       expect(index.targetsOf("delete-many")).toEqual(["item-b", "item-c"]);
+    });
+
+    it("materializes runtime placeholder ranges only at the legacy boundary", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        4,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const target: PlaceholderDeleteTarget = {
+        kind: "placeholder-range",
+        state,
+        start: 0,
+        end: 4,
+      };
+      const index = new DeleteTargetIndex();
+      index.recordRuntimeOne("delete-placeholder", target);
+
+      expect(() => index.targetsOf("delete-placeholder")).toThrow(
+        "require a materializer",
+      );
+      expect(index.entries(() => ["placeholder:0"])).toEqual([
+        {
+          deleteEventId: "delete-placeholder",
+          targetIds: ["placeholder:0"],
+        },
+      ]);
+    });
+  });
+
+  describe("compact iteration", () => {
+    it("decodes compact refs lazily and rejects invalid IDs", () => {
+      const compact = {
+        idTable: ["delete", "item-a", "item-b"],
+        deleteEventRefs: Uint32Array.of(0),
+        targetOffsets: Uint32Array.of(0, 2),
+        targetRefs: Uint32Array.of(1, 2),
+      };
+
+      expect([...iterateCompactDeleteTargets(compact)]).toEqual([
+        {
+          deleteEventId: "delete",
+          targetIds: ["item-a", "item-b"],
+        },
+      ]);
+      expect(() => [
+        ...iterateCompactDeleteTargets({
+          ...compact,
+          deleteEventRefs: Uint32Array.of(9),
+        }),
+      ]).toThrow("Invalid compact delete target id ref");
     });
   });
 

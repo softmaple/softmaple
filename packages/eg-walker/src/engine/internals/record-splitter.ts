@@ -45,10 +45,8 @@ export class RecordSplitter {
    * - **Placeholder:** right gets a fresh placeholder id; both halves stay
    *   anonymous, owned by the engine-internal `PLACEHOLDER_EVENT_ID`.
    * - **Typed-run record:** right inherits the run's replicaId with
-   *   `startSequence` advanced by `offsetInRecord`, and the `eventItems`
-   *   entry for every event whose sequence moved to the right half is
-   *   repointed from `left.id` to `right.id` so retreat / advance still
-   *   land on the right slice.
+   *   `startSequence` advanced by `offsetInRecord` and is registered as one
+   *   numeric range, so retreat / advance resolve either half logarithmically.
    */
   splitRecordAt(position: number, offsetInRecord: number): number {
     const { sequence } = this.deps;
@@ -73,7 +71,6 @@ export class RecordSplitter {
     }
 
     const leftOriginalContent = left.content;
-    const leftOriginalLength = left.content.length;
     const rightContent = left.content.slice(offsetInRecord);
     left.content = left.content.slice(0, offsetInRecord);
 
@@ -103,12 +100,9 @@ export class RecordSplitter {
     // `everDeleted` and `prepareState` and must move together under
     // future retreat / advance calls for those events.
     deleteTargets.extendMembership(left.id, right.id);
-    this.rewriteEventItemsForRunSplit(
-      left,
-      right,
-      offsetInRecord,
-      leftOriginalLength,
-    );
+    if (left.run !== null) {
+      this.deps.eventItems.registerRunItem(right);
+    }
     this.deps.onRecordSplit?.(left, right);
     return right;
   }
@@ -274,24 +268,5 @@ export class RecordSplitter {
       prepareState: left.prepareState,
       run: null,
     };
-  }
-
-  private rewriteEventItemsForRunSplit(
-    left: AugmentedCRDTItem,
-    right: AugmentedCRDTItem,
-    offsetInRecord: number,
-    leftOriginalLength: number,
-  ): void {
-    if (left.run === null) {
-      return;
-    }
-    const { eventItems } = this.deps;
-    eventItems.rewriteDirectReferencesForRunSplit(
-      left,
-      right,
-      offsetInRecord,
-      leftOriginalLength,
-    );
-    eventItems.registerRunItem(right);
   }
 }

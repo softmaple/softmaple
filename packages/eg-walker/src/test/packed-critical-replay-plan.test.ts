@@ -278,6 +278,66 @@ describe("packed critical-section replay planning", () => {
     expect(replica.getReplayStats().incrementalApplies).toBe(2);
   });
 
+  it("splits a packed middle-position typed run after a stale-version fork", () => {
+    const events: GraphEvent[] = [
+      editingEvent(
+        "root",
+        [],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        0,
+      ),
+    ];
+    let leftParent = "root";
+    let rightParent = "root";
+    for (let sequence = 0; sequence < 80; sequence++) {
+      const left = `left:${sequence}`;
+      const right = `right:${sequence}`;
+      events.push(
+        editingEvent(
+          left,
+          [leftParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "L" },
+          sequence * 2 + 1,
+        ),
+        editingEvent(
+          right,
+          [rightParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "R" },
+          sequence * 2 + 2,
+        ),
+      );
+      leftParent = left;
+      rightParent = right;
+    }
+
+    const packed = new EgWalkerReplica("packed-runs", "", pack(events));
+    const object = new EgWalkerReplica(
+      "object-runs",
+      "",
+      EventGraph.fromEvents(events),
+    );
+    expect(packed.getText()).toBe(object.getText());
+    expect(packed.getReplayStats().peakSequenceRecordCount).toBeLessThan(100);
+
+    const divergent = editingEvent(
+      "fork",
+      ["left:20"],
+      { type: OPERATION_TYPE.INSERT, index: 21, text: "X" },
+      1_000,
+    );
+    expect(packed.applyRemoteEvent(divergent).status).toBe("integrated");
+
+    const reference = new EgWalkerReplica(
+      "reference-runs",
+      "",
+      EventGraph.fromEvents([...events, divergent]),
+    );
+    expect(packed.getText()).toBe(reference.getText());
+    expect([...packed.serialize().eventGraph.version].sort()).toEqual(
+      [...reference.serialize().eventGraph.version].sort(),
+    );
+  });
+
   it("retains numeric replay across a rope seed and overlapping deletes", () => {
     const initialText = "x".repeat(100);
     const events: GraphEvent[] = [];

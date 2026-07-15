@@ -158,7 +158,8 @@ export const applyInsert = (
       // boundary — those items chose this id as their `originLeft` at a
       // moment when the record ended one code unit earlier, and stretching
       // the content would shift the boundary they were anchored to.
-      !originLeftIndex.has(leftRecord.id)
+      !originLeftIndex.has(leftRecord.id) &&
+      eventItems.canExtendRunItem(leftRecord, insertedText.length)
     ) {
       if (typeof leftRecord.content !== "string") {
         throw new Error("Typed-run content must be materialized text");
@@ -166,7 +167,6 @@ export const applyInsert = (
       const previousLength = leftRecord.content.length;
       leftRecord.content += insertedText;
       sequence.updateItem(leftRecord);
-      eventItems.setOne(eventId, leftRecord.id);
       if (tailResult !== undefined) {
         tailResult.item = leftRecord;
       }
@@ -309,7 +309,11 @@ export const applyInsert = (
   }
 
   if (insertedIds === null) {
-    eventItems.setOne(eventId, firstItem.id);
+    if (firstItem.run === null) {
+      eventItems.setOne(eventId, firstItem.id);
+    } else {
+      eventItems.registerRunItem(firstItem);
+    }
   } else {
     eventItems.set(eventId, insertedIds);
   }

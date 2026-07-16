@@ -122,10 +122,16 @@ const ESTIMATED_REPLAY_RECORD_BYTES = 256;
 const ESTIMATED_DELETE_TARGET_BYTES = 32;
 // Keep a short causally-linear gap inside one obsolete nonlinear replay
 // lifetime. Paper critical versions permit discarding temporary CRDT state;
-// they do not require it. Bridging a handful of events avoids rebuilding the
-// engine and eagerly splicing the persistent rope on both sides of the gap,
-// while long linear tails still take the cheaper direct replay path.
-const MAX_LINEAR_BRIDGE_EVENTS = 8;
+// they do not require it. Start conservatively, then admit a wider bounded
+// bridge only when the previous engine's deterministic record/byte pressure
+// stayed low. Long linear tails still take the cheaper direct replay path.
+const MIN_LINEAR_BRIDGE_EVENTS = 8;
+const MID_LINEAR_BRIDGE_EVENTS = 16;
+const MAX_LINEAR_BRIDGE_EVENTS = 32;
+const LOW_BRIDGE_PRESSURE_RECORDS = 1_024;
+const MID_BRIDGE_PRESSURE_RECORDS = 4_096;
+const LOW_BRIDGE_PRESSURE_BYTES = 4 * 1024 * 1024;
+const MID_BRIDGE_PRESSURE_BYTES = 16 * 1024 * 1024;
 // Old critical cuts are not observable after cold replay. Replaying adjacent
 // nonlinear cuts in one bounded engine lifetime avoids repeatedly rebuilding
 // the ranked sequence and Fugue index while keeping temporary CRDT state
@@ -1620,6 +1626,7 @@ export class EgWalkerReplica {
     let retainedEngine: EgWalkerEngine | null = null;
     let retainedBaseCheckpoint: CriticalCheckpoint | null = null;
     let retainedEventIds: ReadonlyArray<EventId> = [];
+    let maxLinearBridgeEvents = MIN_LINEAR_BRIDGE_EVENTS;
 
     this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
     this.documentCache = null;
@@ -1661,6 +1668,7 @@ export class EgWalkerReplica {
           plan,
           sectionIndex,
           retainedCheckpointSectionStart,
+          maxLinearBridgeEvents,
         );
         sectionEnd = grouped.endSection;
         sectionEventCount = grouped.eventCount;
@@ -1698,6 +1706,9 @@ export class EgWalkerReplica {
         this.documentCache = null;
         this.currentVersion = endVersion;
         aggregateStats = mergeEngineStats(aggregateStats, generated.stats);
+        maxLinearBridgeEvents = selectPackedLinearBridgeEventLimit(
+          generated.stats,
+        );
 
         const isLastSection = sectionEnd === plan.sectionCount;
         if (
@@ -2778,6 +2789,7 @@ const extendPackedNonlinearReplayRange = (
   plan: PackedCriticalReplayPlan,
   startSection: number,
   endSectionLimit: number,
+  maxLinearBridgeEvents: number,
 ): PackedNonlinearReplayRange => {
   let endSection = startSection + 1;
   let eventCount = plan.sectionEventCountAt(startSection);
@@ -2790,7 +2802,7 @@ const extendPackedNonlinearReplayRange = (
       plan.isLinearSection(candidateSection)
     ) {
       bridgeEventCount += plan.sectionEventCountAt(candidateSection);
-      if (bridgeEventCount > MAX_LINEAR_BRIDGE_EVENTS) {
+      if (bridgeEventCount > maxLinearBridgeEvents) {
         return { endSection, eventCount };
       }
       candidateSection++;
@@ -2812,6 +2824,28 @@ const extendPackedNonlinearReplayRange = (
   }
 
   return { endSection, eventCount };
+};
+
+/** @internal Deterministic pressure feedback for obsolete packed replay. */
+export const selectPackedLinearBridgeEventLimit = (
+  stats: EngineStats,
+): number => {
+  const estimatedTransientBytes =
+    stats.peakSequenceRecordCount * ESTIMATED_REPLAY_RECORD_BYTES +
+    stats.eventsProcessed * ESTIMATED_DELETE_TARGET_BYTES;
+  if (
+    stats.peakSequenceRecordCount <= LOW_BRIDGE_PRESSURE_RECORDS &&
+    estimatedTransientBytes <= LOW_BRIDGE_PRESSURE_BYTES
+  ) {
+    return MAX_LINEAR_BRIDGE_EVENTS;
+  }
+  if (
+    stats.peakSequenceRecordCount <= MID_BRIDGE_PRESSURE_RECORDS &&
+    estimatedTransientBytes <= MID_BRIDGE_PRESSURE_BYTES
+  ) {
+    return MID_LINEAR_BRIDGE_EVENTS;
+  }
+  return MIN_LINEAR_BRIDGE_EVENTS;
 };
 
 const canRetainReplayEngine = (

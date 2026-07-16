@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
-import { EgWalkerReplica } from "../core/replica";
+import {
+  EgWalkerReplica,
+  selectPackedLinearBridgeEventLimit,
+} from "../core/replica";
 import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { IndexedSequence } from "../engine/indexed-sequence";
@@ -84,6 +87,32 @@ const isLinear = (
 };
 
 describe("packed critical-section replay planning", () => {
+  it("adapts linear bridge width from deterministic record pressure", () => {
+    const baseline = new EgWalkerEngine().getStats();
+
+    expect(
+      selectPackedLinearBridgeEventLimit({
+        ...baseline,
+        eventsProcessed: 32_768,
+        peakSequenceRecordCount: 1_024,
+      }),
+    ).toBe(32);
+    expect(
+      selectPackedLinearBridgeEventLimit({
+        ...baseline,
+        eventsProcessed: 131_073,
+        peakSequenceRecordCount: 1_024,
+      }),
+    ).toBe(16);
+    expect(
+      selectPackedLinearBridgeEventLimit({
+        ...baseline,
+        eventsProcessed: 32_768,
+        peakSequenceRecordCount: 4_097,
+      }),
+    ).toBe(8);
+  });
+
   it("matches the general planner without materialising a full event order", () => {
     const graph = pack([
       event("root", [], 0),
@@ -242,6 +271,77 @@ describe("packed critical-section replay planning", () => {
     // trailing L cut. Only the 16 nonlinear cuts in the retained 32-section
     // checkpoint window still need independent engines.
     expect(generate).toHaveBeenCalledTimes(17);
+  });
+
+  it("widens obsolete bridges after a low-pressure nonlinear range", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    let timestamp = 0;
+    for (let layer = 0; layer < 50; layer++) {
+      const left = `left-wide:${layer}`;
+      const right = `right-wide:${layer}`;
+      const merge = `merge-wide:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+          timestamp++,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          timestamp++,
+        ),
+        editingEvent(
+          merge,
+          [left, right],
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "m" },
+          timestamp++,
+        ),
+      );
+      let parent = merge;
+      for (let gap = 0; gap < 15; gap++) {
+        const id = `gap-wide:${layer}:${gap}`;
+        events.push(
+          editingEvent(
+            id,
+            [parent],
+            { type: OPERATION_TYPE.INSERT, index: 0, text: "g" },
+            timestamp++,
+          ),
+        );
+        parent = id;
+      }
+      parents = [parent];
+    }
+
+    const source = EventGraph.fromEvents(events);
+    const order = source.getBranchPreservingTopologicalOrder();
+    const expected = new EgWalkerEngine().generate(order, "", {
+      eventGraph: source,
+      eventOrder: order,
+    }).text;
+    const generate = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+    generate.mockClear();
+
+    const replica = new EgWalkerReplica(
+      "packed-adaptive-bridges",
+      "",
+      pack(events),
+    );
+
+    expect(replica.getText()).toBe(expected);
+    // The first 16-event gap is kept direct at the conservative width of 8.
+    // Its low-pressure engine then raises the deterministic hard-bounded
+    // width to 32, so the remaining obsolete ranges share one engine.
+    expect(generate.mock.calls.length).toBeGreaterThan(1);
+    expect(generate.mock.calls.length).toBeLessThan(10);
+    generate.mockRestore();
   });
 
   it("continues from a retained numeric replay engine", () => {

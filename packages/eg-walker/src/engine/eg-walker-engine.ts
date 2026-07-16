@@ -263,6 +263,18 @@ export class EgWalkerEngine {
       if (extendedEnd !== orderIndex) {
         orderIndex = extendedEnd;
         currentOffset = plan.eventOffsetAt(orderIndex - 1);
+        continue;
+      }
+
+      const deletedEnd = this.extendPackedPlaceholderDeleteRun(
+        plan,
+        orderIndex,
+        endOrderIndex,
+        currentOffset,
+      );
+      if (deletedEnd !== orderIndex) {
+        orderIndex = deletedEnd;
+        currentOffset = plan.eventOffsetAt(orderIndex - 1);
       }
     }
 
@@ -798,46 +810,26 @@ export class EgWalkerEngine {
     // deletes afterwards therefore observes the final record boundaries and
     // lets all prepare-state changes commute inside this transition.
     for (let range = 0; range < transition.retreatRangeCount; range++) {
-      const start = transition.retreatStarts[range]!;
-      for (
-        let offset = transition.retreatEnds[range]! - 1;
-        offset >= start;
-        offset--
-      ) {
-        const rank = plan.orderIndexOfKnownOffset(offset);
-        if (rank < rangeStart || rank >= rangeEnd) {
-          continue;
-        }
-        if (plan.isInsertAtKnownOffset(offset)) {
-          this.collectInsertPrepareDelta(
-            plan.eventIdAtKnownOffset(offset),
-            -1,
-            deltas,
-          );
-        }
-        this.retreatCount++;
-      }
+      this.collectPackedInsertPrepareRange(
+        plan,
+        transition.retreatStarts[range]!,
+        transition.retreatEnds[range]!,
+        -1,
+        rangeStart,
+        rangeEnd,
+        deltas,
+      );
     }
     for (let range = 0; range < transition.advanceRangeCount; range++) {
-      const end = transition.advanceEnds[range]!;
-      for (
-        let offset = transition.advanceStarts[range]!;
-        offset < end;
-        offset++
-      ) {
-        const rank = plan.orderIndexOfKnownOffset(offset);
-        if (rank < rangeStart || rank >= rangeEnd) {
-          continue;
-        }
-        if (plan.isInsertAtKnownOffset(offset)) {
-          this.collectInsertPrepareDelta(
-            plan.eventIdAtKnownOffset(offset),
-            1,
-            deltas,
-          );
-        }
-        this.advanceCount++;
-      }
+      this.collectPackedInsertPrepareRange(
+        plan,
+        transition.advanceStarts[range]!,
+        transition.advanceEnds[range]!,
+        1,
+        rangeStart,
+        rangeEnd,
+        deltas,
+      );
     }
 
     for (let range = 0; range < transition.retreatRangeCount; range++) {
@@ -888,6 +880,131 @@ export class EgWalkerEngine {
     }
     this.sequence.updateItems(deltas.keys());
     deltas.clear();
+  }
+
+  /**
+   * Collect one packed transition range while preserving its scalar event
+   * counters. Adjacent canonical scalar inserts are first grouped by author
+   * sequence, then consumed one existing typed-run fragment at a time. This
+   * keeps record splitting proportional to actual run boundaries rather than
+   * the number of events in the version diff.
+   */
+  private collectPackedInsertPrepareRange(
+    plan: PackedCriticalReplayPlan,
+    startOffset: number,
+    endOffset: number,
+    direction: 1 | -1,
+    rangeStart: number,
+    rangeEnd: number,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    let offset = direction === 1 ? startOffset : endOffset - 1;
+    while (direction === 1 ? offset < endOffset : offset >= startOffset) {
+      const rank = plan.orderIndexOfKnownOffset(offset);
+      if (rank < rangeStart || rank >= rangeEnd) {
+        offset += direction;
+        continue;
+      }
+
+      if (!plan.isInsertAtKnownOffset(offset)) {
+        if (direction === 1) {
+          this.advanceCount++;
+        } else {
+          this.retreatCount++;
+        }
+        offset += direction;
+        continue;
+      }
+
+      const eventId = plan.eventIdAtKnownOffset(offset);
+      const parsed =
+        plan.operationLengthAtKnownOffset(offset) === 1
+          ? parseEventId(eventId)
+          : null;
+      let groupLength = 1;
+      let groupTailOffset = offset;
+      let scanOffset = offset + direction;
+      if (parsed !== null) {
+        let expectedSequence = parsed.sequence + direction;
+        while (
+          direction === 1 ? scanOffset < endOffset : scanOffset >= startOffset
+        ) {
+          const scanRank = plan.orderIndexOfKnownOffset(scanOffset);
+          if (
+            scanRank < rangeStart ||
+            scanRank >= rangeEnd ||
+            !plan.isInsertAtKnownOffset(scanOffset) ||
+            plan.operationLengthAtKnownOffset(scanOffset) !== 1
+          ) {
+            break;
+          }
+          const next = parseEventId(plan.eventIdAtKnownOffset(scanOffset));
+          if (
+            next === null ||
+            next.replicaId !== parsed.replicaId ||
+            next.sequence !== expectedSequence
+          ) {
+            break;
+          }
+          groupLength++;
+          groupTailOffset = scanOffset;
+          expectedSequence += direction;
+          scanOffset += direction;
+        }
+      }
+
+      if (groupLength === 1) {
+        this.collectInsertPrepareDelta(eventId, direction, deltas);
+      } else {
+        const firstOffset = direction === 1 ? offset : groupTailOffset;
+        this.collectPackedInsertPrepareSpan(
+          plan,
+          firstOffset,
+          groupLength,
+          direction,
+          deltas,
+        );
+      }
+      if (direction === 1) {
+        this.advanceCount += groupLength;
+      } else {
+        this.retreatCount += groupLength;
+      }
+      offset = scanOffset;
+    }
+  }
+
+  /** Consume one ascending canonical event span by current run fragments. */
+  private collectPackedInsertPrepareSpan(
+    plan: PackedCriticalReplayPlan,
+    firstOffset: number,
+    eventCount: number,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    let consumed = 0;
+    while (consumed < eventCount) {
+      const eventId = plan.eventIdAtKnownOffset(firstOffset + consumed);
+      const item = this.recordSplitter.isolateRunSpanForEvents(
+        eventId,
+        eventCount - consumed,
+      );
+      if (item === null) {
+        this.collectInsertPrepareDelta(eventId, delta, deltas);
+        consumed++;
+        continue;
+      }
+
+      const isolatedEventCount = item.content.length;
+      if (
+        isolatedEventCount <= 0 ||
+        isolatedEventCount > eventCount - consumed
+      ) {
+        throw new Error(`Invalid typed-run transition span at ${eventId}`);
+      }
+      this.collectPrepareDeltaForItem(item, delta, deltas);
+      consumed += isolatedEventCount;
+    }
   }
 
   private applyPackedOperation(
@@ -1048,6 +1165,121 @@ export class EgWalkerEngine {
     this.processedEventCount += appendedEvents;
     this.samplePeakSequenceRecordCount();
     return orderIndex;
+  }
+
+  /**
+   * Absorb a sole-parent chain of scalar deletes at one cursor into a single
+   * segmented-placeholder range mutation. Each event still receives its own
+   * exact logical target, so later retreat/advance transitions remain scalar
+   * while cover/effect and ranked-sequence updates stay range-batched.
+   */
+  private extendPackedPlaceholderDeleteRun(
+    plan: PackedCriticalReplayPlan,
+    startOrderIndex: number,
+    endOrderIndex: number,
+    currentOffset: number,
+  ): number {
+    if (
+      !this.deferTextMaterialization ||
+      this.prepareViewMayContainSurrogatePairs ||
+      plan.isInsertAtKnownOffset(currentOffset) ||
+      plan.operationLengthAtKnownOffset(currentOffset) !== 1
+    ) {
+      return startOrderIndex;
+    }
+
+    const operationIndex = plan.operationIndexAtKnownOffset(currentOffset);
+    if (operationIndex >= this.sequence.prepareLength) {
+      return startOrderIndex;
+    }
+    const landing = this.sequence.prepareIndexToPositionAndOffset(
+      operationIndex,
+      false,
+    );
+    const candidate = this.sequence.at(landing.position);
+    const placeholder = candidate?.placeholder;
+    if (candidate === undefined || placeholder === undefined) {
+      return startOrderIndex;
+    }
+
+    const state = placeholder.state;
+    const absoluteStart = placeholder.start + landing.offsetInRecord;
+    const availableEvents = state.prepareLengthInRange(
+      absoluteStart,
+      placeholder.end,
+    );
+    if (availableEvents < 2) {
+      return startOrderIndex;
+    }
+
+    let previousOffset = currentOffset;
+    let orderIndex = startOrderIndex;
+    const scanEndOrderIndex = Math.min(
+      endOrderIndex,
+      startOrderIndex + availableEvents,
+    );
+    while (orderIndex < scanEndOrderIndex) {
+      const eventOffset = plan.eventOffsetAt(orderIndex);
+      if (
+        !plan.hasSingleParentAtKnownOffset(eventOffset, previousOffset) ||
+        plan.isInsertAtKnownOffset(eventOffset) ||
+        plan.operationLengthAtKnownOffset(eventOffset) !== 1 ||
+        plan.operationIndexAtKnownOffset(eventOffset) !== operationIndex
+      ) {
+        break;
+      }
+      previousOffset = eventOffset;
+      orderIndex++;
+    }
+
+    const appendedEvents = orderIndex - startOrderIndex;
+    if (appendedEvents < 2) {
+      return startOrderIndex;
+    }
+
+    const result = state.deletePrepareVisibleUnitsInSlice(
+      placeholder,
+      landing.offsetInRecord,
+      appendedEvents,
+    );
+    let batchedEvents = 0;
+    for (const range of result.ranges) {
+      batchedEvents += range.end - range.start;
+    }
+    if (batchedEvents <= 0) {
+      throw new Error(
+        `Packed placeholder delete run found no target at ${operationIndex}`,
+      );
+    }
+
+    let consumed = 0;
+    for (const range of result.ranges) {
+      for (
+        let absoluteOffset = range.start;
+        absoluteOffset < range.end && consumed < batchedEvents;
+        absoluteOffset++
+      ) {
+        const eventOffset = plan.eventOffsetAt(startOrderIndex + consumed);
+        this.deleteTargets.recordPlaceholderRange(
+          plan.eventIdAtKnownOffset(eventOffset),
+          state,
+          absoluteOffset,
+          absoluteOffset + 1,
+        );
+        consumed++;
+      }
+    }
+    if (consumed !== batchedEvents) {
+      throw new Error(
+        `Packed placeholder delete run applied ${consumed} of ${batchedEvents} events`,
+      );
+    }
+
+    this.sequence.updateItem(candidate);
+    this.nonConflictingRunCount += batchedEvents;
+    this.processedEventCount += batchedEvents;
+    this.samplePeakSequenceRecordCount();
+    return startOrderIndex + batchedEvents;
   }
 
   /**
@@ -1489,7 +1721,14 @@ export class EgWalkerEngine {
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
-    const item = this.requireItem(itemId);
+    this.collectPrepareDeltaForItem(this.requireItem(itemId), delta, deltas);
+  }
+
+  private collectPrepareDeltaForItem(
+    item: AugmentedCRDTItem,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
     const next = (deltas.get(item) ?? 0) + delta;
     if (next === 0) {
       deltas.delete(item);

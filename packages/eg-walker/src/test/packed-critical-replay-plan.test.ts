@@ -5,12 +5,15 @@ import { EgWalkerReplica } from "../core/replica";
 import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { IndexedSequence } from "../engine/indexed-sequence";
+import { RecordSplitter } from "../engine/internals/record-splitter";
+import { SegmentedPlaceholderState } from "../engine/internals/segmented-placeholder";
 import {
   PackedCriticalReplayPlan,
   planPackedCriticalReplaySections,
 } from "../engine/packed-critical-replay-plan";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 
 const event = (
@@ -342,6 +345,246 @@ describe("packed critical-section replay planning", () => {
     expect(packed.getText()).toBe(reference.getText());
     expect([...packed.serialize().eventGraph.version].sort()).toEqual(
       [...reference.serialize().eventGraph.version].sort(),
+    );
+  });
+
+  it("batches typed-run prepare spans across retreat, advance, and delete membership", () => {
+    const events: GraphEvent[] = [];
+    let timestamp = 0;
+    let aParent: EventId | null = null;
+    for (let sequence = 0; sequence < 3; sequence++) {
+      const id = `a:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          aParent === null ? [] : [aParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "a" },
+          timestamp++,
+        ),
+      );
+      aParent = id;
+    }
+    events.push(
+      editingEvent(
+        "c:0",
+        ["a:2"],
+        { type: OPERATION_TYPE.INSERT, index: 3, text: "" },
+        timestamp++,
+      ),
+    );
+    for (let sequence = 3; sequence < 8; sequence++) {
+      const id = `a:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [aParent!],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "a" },
+          timestamp++,
+        ),
+      );
+      aParent = id;
+    }
+    events.push(
+      editingEvent(
+        "delete:0",
+        ["a:7"],
+        { type: OPERATION_TYPE.DELETE, index: 2, length: 5 },
+        timestamp++,
+      ),
+    );
+
+    let bParent: EventId = "a:2";
+    for (let sequence = 0; sequence < 10; sequence++) {
+      const id = `b:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [bParent],
+          { type: OPERATION_TYPE.INSERT, index: 3 + sequence, text: "b" },
+          timestamp++,
+        ),
+      );
+      bParent = id;
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["delete:0", "b:9"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        timestamp++,
+      ),
+      editingEvent(
+        "final:0",
+        ["c:0", "merge:0"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        timestamp,
+      ),
+    );
+
+    const spanIsolation = vi.spyOn(
+      RecordSplitter.prototype,
+      "isolateRunSpanForEvents",
+    );
+    const scalarIsolation = vi.spyOn(
+      RecordSplitter.prototype,
+      "isolateRunSliceForEvent",
+    );
+    const packed = new EgWalkerReplica("packed-span", "", pack(events));
+    const packedSpanCalls = spanIsolation.mock.calls.filter(
+      ([eventId, eventCount]) => eventId === "a:3" && eventCount === 5,
+    ).length;
+    const packedScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
+      /^a:[3-7]$/.test(eventId),
+    ).length;
+
+    spanIsolation.mockClear();
+    scalarIsolation.mockClear();
+    const object = new EgWalkerReplica(
+      "object-span",
+      "",
+      EventGraph.fromEvents(events),
+    );
+    const objectScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
+      /^a:[3-7]$/.test(eventId),
+    ).length;
+    spanIsolation.mockRestore();
+    scalarIsolation.mockRestore();
+
+    expect(packedSpanCalls).toBe(2);
+    expect(packedScalarCalls).toBe(0);
+    expect(objectScalarCalls).toBe(10);
+    expect(packed.getText()).toBe(`aaa${"b".repeat(10)}`);
+    expect(packed.getText()).toBe(object.getText());
+    expect(packed.getReplayStats().engineRetreats).toBe(7);
+    expect(packed.getReplayStats().engineAdvances).toBe(6);
+    expect(packed.getReplayStats().engineRetreats).toBe(
+      object.getReplayStats().engineRetreats,
+    );
+    expect(packed.getReplayStats().engineAdvances).toBe(
+      object.getReplayStats().engineAdvances,
+    );
+    expect([...packed.serialize().eventGraph.version].sort()).toEqual(
+      [...object.serialize().eventGraph.version].sort(),
+    );
+  });
+
+  it("batches a causal scalar-delete run into one placeholder range mutation", () => {
+    const initialText = "x".repeat(128);
+    const events: GraphEvent[] = [];
+    let parent: EventId | null = null;
+    for (let sequence = 0; sequence < 64; sequence++) {
+      const id = `delete:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          parent === null ? [] : [parent],
+          { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+          sequence,
+        ),
+      );
+      parent = id;
+    }
+    events.push(
+      editingEvent(
+        "other:0",
+        [],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        64,
+      ),
+      editingEvent(
+        "merge:0",
+        ["delete:63", "other:0"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        65,
+      ),
+    );
+
+    const rangeDelete = vi.spyOn(
+      SegmentedPlaceholderState.prototype,
+      "deletePrepareVisibleUnitsInSlice",
+    );
+    const packed = new EgWalkerReplica(
+      "packed-delete-run",
+      initialText,
+      pack(events),
+    );
+    const packedRangeDeletes = rangeDelete.mock.calls.filter(
+      ([, localStart, maxLength]) => localStart === 1 && maxLength === 63,
+    ).length;
+
+    rangeDelete.mockClear();
+    const object = new EgWalkerReplica(
+      "object-delete-run",
+      initialText,
+      EventGraph.fromEvents(events),
+    );
+    const objectRangeDeletes = rangeDelete.mock.calls.length;
+    rangeDelete.mockRestore();
+
+    expect(packedRangeDeletes).toBe(1);
+    expect(objectRangeDeletes).toBe(0);
+    expect(packed.getText()).toBe("x".repeat(64));
+    expect(packed.getText()).toBe(object.getText());
+    expect(packed.getReplayStats().engineRetreats).toBe(
+      object.getReplayStats().engineRetreats,
+    );
+    expect(packed.getReplayStats().engineAdvances).toBe(
+      object.getReplayStats().engineAdvances,
+    );
+    expect(packed.getReplayStats().sequenceTreeOperations).toBeLessThan(
+      object.getReplayStats().sequenceTreeOperations,
+    );
+
+    const packedGraph = pack(events);
+    const packedPlan = planPackedCriticalReplaySections(packedGraph);
+    expect(packedPlan).not.toBeNull();
+    const packedEngine = new EgWalkerEngine();
+    packedEngine.generatePackedSectionRange(
+      packedPlan!,
+      0,
+      packedPlan!.sectionCount,
+      packedGraph,
+      new Set(),
+      PersistentUtf16Rope.from(initialText),
+    );
+    packedEngine.preparePackedRetention(
+      packedPlan!,
+      0,
+      packedPlan!.sectionCount,
+    );
+
+    const objectEngine = new EgWalkerEngine();
+    const objectOrder = packedGraph.getBranchPreservingTopologicalOrder();
+    objectEngine.generate(objectOrder, initialText, {
+      eventGraph: packedGraph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    const packedTargets = packedEngine.getDeleteTargetRecords();
+    expect(packedEngine.getSequenceRecords()).toEqual(
+      objectEngine.getSequenceRecords(),
+    );
+    expect(packedTargets).toEqual(objectEngine.getDeleteTargetRecords());
+    expect(
+      new Set(packedTargets.flatMap(({ targetIds }) => targetIds)).size,
+    ).toBe(64);
+
+    const restoredEngine = EgWalkerEngine.fromRecoveryState(
+      packedEngine.captureRecoveryState(),
+      packedGraph,
+    );
+    const partialDeleteVersion = new Set<EventId>(["delete:62"]);
+    packedEngine.transitionPrepareView(partialDeleteVersion, packedGraph);
+    objectEngine.transitionPrepareView(partialDeleteVersion, packedGraph);
+    restoredEngine.transitionPrepareView(partialDeleteVersion, packedGraph);
+
+    expect(packedEngine.getPrepareLength()).toBe(65);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+    expect(restoredEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
     );
   });
 

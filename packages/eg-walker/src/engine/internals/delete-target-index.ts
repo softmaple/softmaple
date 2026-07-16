@@ -343,6 +343,25 @@ export class DeleteTargetIndex {
     this.recordRuntimeOne(deleteEventId, itemId);
   }
 
+  /** Store one placeholder range without allocating a runtime target object. */
+  recordPlaceholderRange(
+    deleteEventId: EventId,
+    state: SegmentedPlaceholderState<AugmentedCRDTItem>,
+    start: number,
+    end: number,
+  ): void {
+    const group = this.beginRecord();
+    try {
+      this.appendPlaceholderRange(group, state, start, end);
+      this.commitRecord(deleteEventId, group);
+    } catch (error) {
+      if (this.activeGroup === group) {
+        this.abortRecord(group);
+      }
+      throw error;
+    }
+  }
+
   record(deleteEventId: EventId, itemIds: ReadonlyArray<EventId>): void {
     const group = this.beginRecord();
     try {

@@ -207,6 +207,64 @@ export class RecordSplitter {
     return middle.id;
   }
 
+  /**
+   * Isolate as much as possible of a contiguous canonical scalar-event span
+   * inside its current typed-run record. At most the two outer boundaries are
+   * split; callers repeat at the next sequence when an existing record
+   * boundary falls inside the requested interval.
+   *
+   * Resolving through {@link EventItemIndex.get} preserves direct-event map
+   * precedence. `null` therefore means the caller must retain the exact
+   * scalar compatibility path for this event.
+   */
+  isolateRunSpanForEvents(
+    firstEventId: EventId,
+    maximumEventCount: number,
+  ): AugmentedCRDTItem | null {
+    const parsed = parseEventId(firstEventId);
+    if (
+      parsed === null ||
+      !Number.isSafeInteger(maximumEventCount) ||
+      maximumEventCount <= 0
+    ) {
+      return null;
+    }
+
+    const { itemsById, eventItems } = this.deps;
+    const items = eventItems.get(firstEventId);
+    if (typeof items !== "string") {
+      return null;
+    }
+    const record = itemsById.get(items);
+    if (
+      record === undefined ||
+      record.run === null ||
+      typeof record.content !== "string" ||
+      record.run.replicaId !== parsed.replicaId
+    ) {
+      return null;
+    }
+
+    const offsetInRecord = parsed.sequence - record.run.startSequence;
+    if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
+      return null;
+    }
+    const availableEvents = record.content.length - offsetInRecord;
+    const isolatedEventCount = Math.min(maximumEventCount, availableEvents);
+    if (isolatedEventCount <= 0) {
+      return null;
+    }
+
+    let middle = record;
+    if (offsetInRecord > 0) {
+      middle = this.splitRecord(record, offsetInRecord);
+    }
+    if (isolatedEventCount < middle.content.length) {
+      this.splitRecord(middle, isolatedEventCount);
+    }
+    return middle;
+  }
+
   private buildSplitRightHalf(
     left: AugmentedCRDTItem,
     offsetInRecord: number,

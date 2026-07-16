@@ -597,6 +597,39 @@ export class SegmentedPlaceholderState<Owner extends object> {
     localStart: number,
     maxLength: number,
   ): PlaceholderDeleteResult<Owner> {
+    return this.deletePrepareVisibleRangesInSlice(
+      slice,
+      localStart,
+      maxLength,
+      false,
+    );
+  }
+
+  /**
+   * Range-delete hot path that retains a logical boundary for every selected
+   * UTF-16 unit. Packed scalar events use these stable boundaries as their
+   * independent native-recovery targets while sharing the range mutation and
+   * ranked-sequence weight update.
+   */
+  deletePrepareVisibleUnitsInSlice(
+    slice: PlaceholderPhysicalSlice<Owner>,
+    localStart: number,
+    maxLength: number,
+  ): PlaceholderDeleteResult<Owner> {
+    return this.deletePrepareVisibleRangesInSlice(
+      slice,
+      localStart,
+      maxLength,
+      true,
+    );
+  }
+
+  private deletePrepareVisibleRangesInSlice(
+    slice: PlaceholderPhysicalSlice<Owner>,
+    localStart: number,
+    maxLength: number,
+    preserveUnitBoundaries: boolean,
+  ): PlaceholderDeleteResult<Owner> {
     this.assertOwnedSlice(slice);
     if (
       !Number.isSafeInteger(localStart) ||
@@ -612,6 +645,14 @@ export class SegmentedPlaceholderState<Owner extends object> {
       slice.end,
       maxLength,
     );
+    if (preserveUnitBoundaries) {
+      for (const range of ranges) {
+        for (let offset = range.start; offset < range.end; offset++) {
+          this.ensureLogicalBoundary(offset);
+          this.ensureLogicalBoundary(offset + 1);
+        }
+      }
+    }
     let deletedPrepareLength = 0;
     let deletedEffectLength = 0;
     for (const range of ranges) {

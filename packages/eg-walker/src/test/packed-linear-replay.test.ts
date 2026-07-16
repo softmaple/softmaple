@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
@@ -26,6 +26,24 @@ const pack = (graph: EventGraph): EventGraph => {
 };
 
 describe("packed exact-linear replay", () => {
+  it("skips rope boundary descents when metadata proves the text is BMP", () => {
+    const replica = new EgWalkerReplica("local", "a".repeat(4_096));
+    const codeUnitAt = vi.spyOn(PersistentUtf16Rope.prototype, "codeUnitAt");
+
+    replica.insert(2_048, "x");
+    replica.delete(2_048, 1);
+
+    expect(codeUnitAt).not.toHaveBeenCalled();
+    codeUnitAt.mockRestore();
+
+    const emoji = new EgWalkerReplica("emoji", "🙂");
+    emoji.delete(0, 2);
+    const afterDelete = vi.spyOn(PersistentUtf16Rope.prototype, "codeUnitAt");
+    emoji.insert(0, "a");
+    expect(afterDelete).not.toHaveBeenCalled();
+    afterDelete.mockRestore();
+  });
+
   it("coalesces the checkpoint-free prefix into bounded rope edits", () => {
     const graph = new EventGraph();
     const pieces = Array.from({ length: 256 }, (_, index) =>

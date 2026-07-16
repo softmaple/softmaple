@@ -1351,7 +1351,11 @@ export class EgWalkerReplica {
    * the CRDT layer free of mid-surrogate operations.
    */
   private assertNotMidSurrogate(index: number): void {
-    if (index <= 0 || index >= this.documentBuffer.length) {
+    if (
+      index <= 0 ||
+      index >= this.documentBuffer.length ||
+      !this.documentBuffer.hasSurrogateCodeUnits
+    ) {
       return;
     }
     const high = this.documentBuffer.codeUnitAt(index - 1)!;

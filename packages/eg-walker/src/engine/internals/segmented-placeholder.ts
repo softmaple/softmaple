@@ -393,7 +393,6 @@ export class SegmentedPlaceholderState<Owner extends object> {
     localOffset: number,
   ): number {
     const operationCountBeforeValidation = this.structuralOperationCount;
-    let visibility = 0;
     try {
       this.assertOwnedSlice(slice);
       if (
@@ -405,12 +404,28 @@ export class SegmentedPlaceholderState<Owner extends object> {
           `Invalid placeholder delete offset ${localOffset} for slice length ${slice.length}`,
         );
       }
-      visibility = this.unitVisibilityAtContentOffset(
-        slice.start + localOffset,
+    } catch (error) {
+      this.structuralOperationCount = operationCountBeforeValidation;
+      throw error;
+    }
+
+    const absoluteOffset = slice.start + localOffset;
+    const boundaryNode = this.boundaryNodes.get(absoluteOffset);
+    if (boundaryNode !== undefined) {
+      return this.deleteBoundaryPrepareVisibleUnitInSlice(
+        slice,
+        boundaryNode,
+        absoluteOffset,
+        operationCountBeforeValidation,
       );
+    }
+
+    let visibility = 0;
+    try {
+      visibility = this.unitVisibilityAtContentOffset(absoluteOffset);
       if ((visibility & PREPARE_VISIBLE_UNIT) === 0) {
         throw new Error(
-          `Placeholder unit ${slice.start + localOffset} is not prepare-visible`,
+          `Placeholder unit ${absoluteOffset} is not prepare-visible`,
         );
       }
       const effectDelta = (visibility & EFFECT_VISIBLE_UNIT) === 0 ? 0 : 1;
@@ -422,7 +437,6 @@ export class SegmentedPlaceholderState<Owner extends object> {
       throw error;
     }
 
-    const absoluteOffset = slice.start + localOffset;
     this.ensureLogicalBoundary(absoluteOffset);
     this.ensureLogicalBoundary(absoluteOffset + 1);
     const node = this.boundaryNodes.get(absoluteOffset);
@@ -433,6 +447,141 @@ export class SegmentedPlaceholderState<Owner extends object> {
 
     const deletedEffectLength =
       (visibility & EFFECT_VISIBLE_UNIT) === 0 ? 0 : 1;
+    slice.adjustCachedLengths(-1, -deletedEffectLength);
+    return deletedEffectLength;
+  }
+
+  /**
+   * Delete the first unit of a known segment boundary without root searches.
+   *
+   * Operation-granularity range deletes repeatedly select the next visible
+   * unit. The previous split already indexed that boundary, so locate and
+   * validate through the node's parent links, split a long suffix in place,
+   * then hide the left unit before one final ancestor refresh.
+   */
+  private deleteBoundaryPrepareVisibleUnitInSlice(
+    slice: PlaceholderPhysicalSlice<Owner>,
+    node: SegmentNode,
+    absoluteOffset: number,
+    operationCountBeforeValidation: number,
+  ): number {
+    this.directPathNodes.length = 0;
+    let inheritedCover = 0;
+    let inheritedEffectHidden = false;
+    let current: SegmentNode | null = node;
+    while (current !== null) {
+      this.structuralOperationCount++;
+      this.directPathNodes.push(current);
+      const parent: SegmentNode | null = current.parent;
+      if (parent !== null) {
+        inheritedCover += parent.lazyCoverDelta;
+        inheritedEffectHidden ||= parent.lazyHideEffect;
+      }
+      current = parent;
+    }
+
+    const effectiveCover = node.cover + inheritedCover;
+    const deletedEffectLength =
+      inheritedEffectHidden || !node.effectVisible ? 0 : 1;
+    if (effectiveCover !== 0) {
+      this.directPathNodes.length = 0;
+      this.structuralOperationCount = operationCountBeforeValidation;
+      throw new Error(
+        `Placeholder unit ${absoluteOffset} is not prepare-visible`,
+      );
+    }
+    if (slice.prepareLength < 1 || slice.effectLength < deletedEffectLength) {
+      this.directPathNodes.length = 0;
+      this.structuralOperationCount = operationCountBeforeValidation;
+      throw new Error("Placeholder slice cache disagrees with logical state");
+    }
+
+    const requiresSplit = node.spanLength > 1;
+    if (requiresSplit) {
+      let rightId: EventId;
+      try {
+        rightId = this.allocateFreshSegmentId();
+      } catch (error) {
+        this.directPathNodes.length = 0;
+        this.structuralOperationCount = operationCountBeforeValidation;
+        throw error;
+      }
+
+      for (let index = this.directPathNodes.length - 1; index >= 0; index--) {
+        this.push(this.directPathNodes[index]!);
+      }
+
+      const oldRight = node.right;
+      let successorParent: SegmentNode = node;
+      if (oldRight !== null) {
+        let successor = oldRight;
+        while (true) {
+          this.structuralOperationCount++;
+          this.push(successor);
+          if (successor.left === null) {
+            successorParent = successor;
+            break;
+          }
+          successor = successor.left;
+        }
+      }
+
+      const right = createSegmentNode(
+        rightId,
+        node.spanLength - 1,
+        node.cover,
+        node.effectVisible,
+      );
+      node.spanLength = 1;
+      if (oldRight === null) {
+        node.right = right;
+      } else {
+        successorParent.left = right;
+      }
+      right.parent = successorParent;
+
+      let update: SegmentNode | null = successorParent;
+      while (update !== null) {
+        this.structuralOperationCount++;
+        this.updateNode(update);
+        update = update.parent;
+      }
+      while (
+        right.parent !== null &&
+        comparePriority(right, right.parent) < 0
+      ) {
+        const parent = right.parent;
+        if (parent.left === right) {
+          this.rotateSegmentRight(parent);
+        } else if (parent.right === right) {
+          this.rotateSegmentLeft(parent);
+        } else {
+          throw new Error("Placeholder segment parent link is inconsistent");
+        }
+      }
+      this.boundaryNodes.set(absoluteOffset + 1, right);
+    } else {
+      for (let index = this.directPathNodes.length - 1; index >= 0; index--) {
+        this.push(this.directPathNodes[index]!);
+      }
+    }
+
+    node.cover = 1;
+    node.effectVisible = false;
+    if (requiresSplit) {
+      let update: SegmentNode | null = node;
+      while (update !== null) {
+        this.structuralOperationCount++;
+        this.updateNode(update);
+        update = update.parent;
+      }
+    } else {
+      for (let index = 0; index < this.directPathNodes.length; index++) {
+        this.updateNode(this.directPathNodes[index]!);
+      }
+    }
+    this.root.parent = null;
+    this.directPathNodes.length = 0;
     slice.adjustCachedLengths(-1, -deletedEffectLength);
     return deletedEffectLength;
   }

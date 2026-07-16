@@ -240,10 +240,54 @@ describe("SegmentedPlaceholderState", () => {
     state.adjustPrepareRange(2, 3, -1);
     expect(slice.prepareLength).toBe(5);
     expect(slice.effectLength).toBe(4);
+    state.restoreStructuralOperationCount(0);
     expect(state.deletePrepareVisibleUnitInSlice(slice, 2)).toBe(0);
+    expect(state.getStructuralOperationCount()).toBeLessThanOrEqual(
+      state.logicalSegmentCount,
+    );
     expect(slice.prepareLength).toBe(4);
     expect(slice.effectLength).toBe(4);
     expect(allocations()).toBe(3);
+  });
+
+  it("streams contiguous scalar deletes from indexed suffix boundaries", () => {
+    const length = 1_024;
+    const deleted = 512;
+    const { state, allocations } = createState(length);
+    const slice = state.createInitialPhysicalSlice();
+    slice.attachOwner({ id: "root" });
+
+    state.restoreStructuralOperationCount(0);
+    for (let offset = 0; offset < deleted; offset++) {
+      expect(state.deletePrepareVisibleUnitInSlice(slice, offset)).toBe(1);
+    }
+
+    expect(state.prepareLength).toBe(length - deleted);
+    expect(state.effectLength).toBe(length - deleted);
+    expect(slice.prepareLength).toBe(length - deleted);
+    expect(slice.effectLength).toBe(length - deleted);
+    expect(state.logicalSegmentCount).toBe(deleted + 1);
+    expect(allocations()).toBe(deleted + 1);
+    expect(state.getStructuralOperationCount()).toBeLessThan(deleted * 128);
+
+    const segments = state.logicalSegments();
+    expect(
+      segments
+        .slice(0, deleted)
+        .every(
+          (segment) =>
+            segment.end - segment.start === 1 &&
+            segment.prepareState === 2 &&
+            segment.everDeleted,
+        ),
+    ).toBe(true);
+    expect(segments.at(-1)).toMatchObject({
+      start: deleted,
+      end: length,
+      prepareState: 1,
+      everDeleted: false,
+    });
+    expectValidSegmentTreap(state);
   });
 
   it("rejects a hidden interior unit before creating scalar boundaries", () => {

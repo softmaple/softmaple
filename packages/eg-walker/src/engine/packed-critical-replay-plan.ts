@@ -2,6 +2,7 @@ import type {
   EventGraph,
   PackedReplayPlanningView,
 } from "../graph/event-graph";
+import type { PackedCanonicalIdRun } from "../graph/internals/packed-event-graph-base";
 import type { EventId, GraphEvent } from "../types";
 import type { ExternalOperation } from "../types";
 import type {
@@ -64,6 +65,13 @@ export class PackedCriticalReplayPlan {
   eventIdAtOffset(offset: number): EventId {
     this.assertEventOffset(offset);
     return this.eventIdAtKnownOffset(offset);
+  }
+
+  /** @internal Canonical ID interval retained by the packed EGW3 index. */
+  canonicalIdRunAtKnownOffset(
+    offset: number,
+  ): PackedCanonicalIdRun | undefined {
+    return this.graph.canonicalIdRunAt?.(offset);
   }
 
   /** @internal `offset` must originate from this plan or one of its diffs. */

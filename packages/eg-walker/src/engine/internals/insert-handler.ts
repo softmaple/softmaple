@@ -91,6 +91,8 @@ export const applyInsert = (
   deferTextMaterialization: boolean,
   knownTail: AugmentedCRDTItem | null = null,
   tailResult?: InsertTailResult,
+  canonicalReplicaId?: string,
+  canonicalSequence?: number,
 ): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
@@ -182,7 +184,16 @@ export const applyInsert = (
   // per code unit) while leaving multi-author / multi-event ordering
   // unchanged — split-on-demand carves the run when a concurrent insert
   // or delete anchors inside it.
-  const parsed = parseEventId(eventId);
+  if (
+    (canonicalReplicaId === undefined) !==
+    (canonicalSequence === undefined)
+  ) {
+    throw new Error("Canonical insert ID metadata must be complete");
+  }
+  const suppliedCanonicalId = canonicalReplicaId !== undefined;
+  const parsed = suppliedCanonicalId ? null : parseEventId(eventId);
+  const eventReplicaId = canonicalReplicaId ?? parsed?.replicaId ?? null;
+  const eventSequence = canonicalSequence ?? parsed?.sequence ?? -1;
   const coalescingBoundary = knownBoundary
     ? originLeftRecord !== undefined && sequence.isLast(originLeftRecord)
     : originLeftPosition !== null &&
@@ -190,7 +201,7 @@ export const applyInsert = (
   if (
     conflictRegionEmpty &&
     insertedText.length === 1 &&
-    parsed !== null &&
+    eventReplicaId !== null &&
     coalescingBoundary
   ) {
     const leftRecord = originLeftRecord;
@@ -198,8 +209,8 @@ export const applyInsert = (
       leftRecord !== undefined &&
       canExtendTypedRun(
         leftRecord,
-        parsed.replicaId,
-        parsed.sequence,
+        eventReplicaId,
+        eventSequence,
         insertedText.length,
         deps,
       )
@@ -242,8 +253,8 @@ export const applyInsert = (
   // coalescing branch above). Multi-character INSERTs and IDs that don't
   // parse keep `run = null` and behave like the pre-coalescing engine.
   const firstRun: TypedRun | null =
-    parsed !== null && insertedText.length === 1
-      ? { replicaId: parsed.replicaId, startSequence: parsed.sequence }
+    eventReplicaId !== null && insertedText.length === 1
+      ? { replicaId: eventReplicaId, startSequence: eventSequence }
       : null;
   const firstItem: AugmentedCRDTItem = {
     id: `${eventId}:0`,

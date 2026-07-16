@@ -49,6 +49,24 @@ describe("LazyIdRunIndex", () => {
     expect(index.idAt(-1)).toBeUndefined();
     expect(index.idAt(8)).toBeUndefined();
     expect(index.idAt(1.5)).toBeUndefined();
+    expect(index.canonicalRunAt(0)).toMatchObject({
+      replicaId: "alice",
+      startSequence: 40,
+      startEventOffset: 0,
+      length: 3,
+    });
+    expect(index.canonicalRunAt(2)).toBe(index.canonicalRunAt(0));
+    expect(index.canonicalRunAt(3)).toBeUndefined();
+    expect(index.canonicalRunAt(7)).toMatchObject({
+      replicaId: "alice",
+      startSequence: 100,
+      startEventOffset: 6,
+      length: 2,
+    });
+    expect(index.canonicalRunAt(-1)).toBeUndefined();
+    expect(index.canonicalRunAt(8)).toBeUndefined();
+    index.releaseCanonicalRunLookup();
+    expect(index.canonicalRunAt(2)).toBe(index.canonicalRunAt(0));
     expect(index.offsetOf("alice:41")).toBe(1);
     expect(index.offsetOf("legacy-id")).toBe(3);
     expect(index.offsetOf("alice:99")).toBeUndefined();

@@ -28,6 +28,7 @@ import type {
 import {
   buildPackedLinearEventGraphBase,
   PackedEventGraphBase,
+  type PackedCanonicalIdRun,
 } from "./internals/packed-event-graph-base";
 import {
   getBranchPreservingTopologicalOrder as computeBranchPreservingTopologicalOrder,
@@ -50,6 +51,7 @@ export interface EventGraphAppendTransaction {
 export interface PackedLinearReplayView {
   readonly count: number;
   idAt(offset: number): EventId | undefined;
+  canonicalIdRunAt?(offset: number): PackedCanonicalIdRun | undefined;
   operationAt(offset: number): ExternalOperation;
   isInsertAt(offset: number): boolean;
   operationIndexAt(offset: number): number;

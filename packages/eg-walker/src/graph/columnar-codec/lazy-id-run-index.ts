@@ -21,6 +21,7 @@ export class LazyIdRunIndex implements PackedEventIdIndex {
   >;
   private readonly customOffsets: ReadonlyMap<EventId, number>;
   private readonly maximumSequenceByReplica: ReadonlyMap<string, number>;
+  private runIndexesByEventOffset: Uint32Array | null = null;
 
   constructor(runs: ReadonlyArray<IdRun>, expectedCount: number) {
     if (!Number.isSafeInteger(expectedCount) || expectedCount < 0) {
@@ -133,6 +134,30 @@ export class LazyIdRunIndex implements PackedEventIdIndex {
     return run.custom
       ? run.replicaId
       : `${run.replicaId}:${run.startSequence + offset - run.startEventOffset}`;
+  }
+
+  /** Resolve canonical metadata in O(1) after one lazy packed fill. */
+  canonicalRunAt(offset: number): IdRun | undefined {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= this.count) {
+      return undefined;
+    }
+    if (this.runIndexesByEventOffset === null) {
+      const indexes = new Uint32Array(this.count);
+      for (const [runIndex, run] of this.runs.entries()) {
+        indexes.fill(
+          runIndex,
+          run.startEventOffset,
+          run.startEventOffset + run.length,
+        );
+      }
+      this.runIndexesByEventOffset = indexes;
+    }
+    const run = this.runs[this.runIndexesByEventOffset[offset]!]!;
+    return run.custom ? undefined : run;
+  }
+
+  releaseCanonicalRunLookup(): void {
+    this.runIndexesByEventOffset = null;
   }
 
   *iterateIds(): IterableIterator<EventId> {

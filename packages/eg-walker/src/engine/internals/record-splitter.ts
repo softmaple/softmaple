@@ -245,7 +245,52 @@ export class RecordSplitter {
       return null;
     }
 
-    const offsetInRecord = parsed.sequence - record.run.startSequence;
+    return this.isolateCanonicalRunSpan(
+      record,
+      parsed.sequence,
+      maximumEventCount,
+    );
+  }
+
+  /** Packed equivalent that consumes already-decoded canonical ID columns. */
+  isolateRunSpanForCanonicalEvents(
+    replicaId: string,
+    firstSequence: number,
+    maximumEventCount: number,
+  ): AugmentedCRDTItem | null {
+    if (
+      !Number.isSafeInteger(firstSequence) ||
+      firstSequence < 0 ||
+      !Number.isSafeInteger(maximumEventCount) ||
+      maximumEventCount <= 0
+    ) {
+      return null;
+    }
+    const record = this.deps.eventItems.getRunItem(replicaId, firstSequence);
+    if (
+      record === undefined ||
+      record.run === null ||
+      typeof record.content !== "string" ||
+      record.run.replicaId !== replicaId
+    ) {
+      return null;
+    }
+    return this.isolateCanonicalRunSpan(
+      record,
+      firstSequence,
+      maximumEventCount,
+    );
+  }
+
+  private isolateCanonicalRunSpan(
+    record: AugmentedCRDTItem,
+    firstSequence: number,
+    maximumEventCount: number,
+  ): AugmentedCRDTItem | null {
+    if (record.run === null || typeof record.content !== "string") {
+      return null;
+    }
+    const offsetInRecord = firstSequence - record.run.startSequence;
     if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
       return null;
     }

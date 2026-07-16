@@ -930,6 +930,18 @@ export class EgWalkerEngine {
       }
     }
 
+    if (deltas.size === 0) {
+      return;
+    }
+    if (deltas.size === 1) {
+      for (const [item, delta] of deltas) {
+        item.prepareState += delta;
+        this.sequence.updateItem(item);
+      }
+      deltas.clear();
+      return;
+    }
+
     for (const [item, delta] of deltas) {
       item.prepareState += delta;
     }
@@ -1025,16 +1037,28 @@ export class EgWalkerEngine {
         continue;
       }
 
-      const eventId = plan.eventIdAtKnownOffset(offset);
-      const parsed =
+      const canonicalRun =
         plan.operationLengthAtKnownOffset(offset) === 1
+          ? plan.canonicalIdRunAtKnownOffset(offset)
+          : undefined;
+      const eventId =
+        canonicalRun === undefined
+          ? plan.eventIdAtKnownOffset(offset)
+          : undefined;
+      const parsed =
+        canonicalRun === undefined && eventId !== undefined
           ? parseEventId(eventId)
           : null;
+      const replicaId = canonicalRun?.replicaId ?? parsed?.replicaId ?? null;
+      const sequence =
+        canonicalRun === undefined
+          ? (parsed?.sequence ?? -1)
+          : canonicalRun.startSequence + offset - canonicalRun.startEventOffset;
       let groupLength = 1;
       let groupTailOffset = offset;
       let scanOffset = offset + direction;
-      if (parsed !== null) {
-        let expectedSequence = parsed.sequence + direction;
+      if (replicaId !== null) {
+        let expectedSequence = sequence + direction;
         while (
           direction === 1 ? scanOffset < endOffset : scanOffset >= startOffset
         ) {
@@ -1047,11 +1071,19 @@ export class EgWalkerEngine {
           ) {
             break;
           }
-          const next = parseEventId(plan.eventIdAtKnownOffset(scanOffset));
+          const nextRun = plan.canonicalIdRunAtKnownOffset(scanOffset);
+          const next =
+            nextRun === undefined
+              ? parseEventId(plan.eventIdAtKnownOffset(scanOffset))
+              : null;
+          const nextReplicaId = nextRun?.replicaId ?? next?.replicaId ?? null;
+          const nextSequence =
+            nextRun === undefined
+              ? (next?.sequence ?? -1)
+              : nextRun.startSequence + scanOffset - nextRun.startEventOffset;
           if (
-            next === null ||
-            next.replicaId !== parsed.replicaId ||
-            next.sequence !== expectedSequence
+            nextReplicaId !== replicaId ||
+            nextSequence !== expectedSequence
           ) {
             break;
           }
@@ -1062,10 +1094,25 @@ export class EgWalkerEngine {
         }
       }
 
-      if (groupLength === 1) {
-        this.collectInsertPrepareDelta(eventId, direction, deltas);
+      const firstOffset = direction === 1 ? offset : groupTailOffset;
+      const firstRun = plan.canonicalIdRunAtKnownOffset(firstOffset);
+      if (firstRun !== undefined) {
+        this.collectPackedInsertPrepareSpan(
+          plan,
+          firstOffset,
+          groupLength,
+          direction,
+          deltas,
+          firstRun.replicaId,
+          firstRun.startSequence + firstOffset - firstRun.startEventOffset,
+        );
+      } else if (groupLength === 1) {
+        this.collectInsertPrepareDelta(
+          eventId ?? plan.eventIdAtKnownOffset(offset),
+          direction,
+          deltas,
+        );
       } else {
-        const firstOffset = direction === 1 ? offset : groupTailOffset;
         this.collectPackedInsertPrepareSpan(
           plan,
           firstOffset,
@@ -1090,15 +1137,25 @@ export class EgWalkerEngine {
     eventCount: number,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
+    replicaId?: string,
+    firstSequence?: number,
   ): void {
     let consumed = 0;
     while (consumed < eventCount) {
-      const eventId = plan.eventIdAtKnownOffset(firstOffset + consumed);
-      const item = this.recordSplitter.isolateRunSpanForEvents(
-        eventId,
-        eventCount - consumed,
-      );
+      const eventOffset = firstOffset + consumed;
+      const item =
+        replicaId !== undefined && firstSequence !== undefined
+          ? this.recordSplitter.isolateRunSpanForCanonicalEvents(
+              replicaId,
+              firstSequence + consumed,
+              eventCount - consumed,
+            )
+          : this.recordSplitter.isolateRunSpanForEvents(
+              plan.eventIdAtKnownOffset(eventOffset),
+              eventCount - consumed,
+            );
       if (item === null) {
+        const eventId = plan.eventIdAtKnownOffset(eventOffset);
         this.collectInsertPrepareDelta(eventId, delta, deltas);
         consumed++;
         continue;
@@ -1109,6 +1166,7 @@ export class EgWalkerEngine {
         isolatedEventCount <= 0 ||
         isolatedEventCount > eventCount - consumed
       ) {
+        const eventId = plan.eventIdAtKnownOffset(eventOffset);
         throw new Error(`Invalid typed-run transition span at ${eventId}`);
       }
       this.collectPrepareDeltaForItem(item, delta, deltas);
@@ -1125,6 +1183,13 @@ export class EgWalkerEngine {
     const operationIndex = plan.operationIndexAtKnownOffset(eventOffset);
     const operationLength = plan.operationLengthAtKnownOffset(eventOffset);
     if (plan.isInsertAtKnownOffset(eventOffset)) {
+      const canonicalRun = plan.canonicalIdRunAtKnownOffset(eventOffset);
+      const canonicalSequence =
+        canonicalRun === undefined
+          ? undefined
+          : canonicalRun.startSequence +
+            eventOffset -
+            canonicalRun.startEventOffset;
       const start = plan.insertStartAtKnownOffset(eventOffset);
       const insertedText = plan.sliceInsertedContent(
         start,
@@ -1151,6 +1216,8 @@ export class EgWalkerEngine {
         this.deferTextMaterialization,
         knownTail,
         this.packedInsertTailResult,
+        canonicalRun?.replicaId,
+        canonicalSequence,
       );
       this.packedInsertTail = this.packedInsertTailResult.item;
       this.packedInsertNextPrepareIndex = operationIndex + operationLength;
@@ -1220,12 +1287,19 @@ export class EgWalkerEngine {
         break;
       }
 
-      const parsed = parseEventId(plan.eventIdAtKnownOffset(eventOffset));
-      if (
-        parsed === null ||
-        parsed.replicaId !== run.replicaId ||
-        parsed.sequence !== expectedSequence
-      ) {
+      const canonicalRun = plan.canonicalIdRunAtKnownOffset(eventOffset);
+      const parsed =
+        canonicalRun === undefined
+          ? parseEventId(plan.eventIdAtKnownOffset(eventOffset))
+          : null;
+      const replicaId = canonicalRun?.replicaId ?? parsed?.replicaId ?? null;
+      const sequence =
+        canonicalRun === undefined
+          ? (parsed?.sequence ?? -1)
+          : canonicalRun.startSequence +
+            eventOffset -
+            canonicalRun.startEventOffset;
+      if (replicaId !== run.replicaId || sequence !== expectedSequence) {
         break;
       }
 

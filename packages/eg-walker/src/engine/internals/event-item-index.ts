@@ -77,6 +77,14 @@ export class EventItemIndex {
     return item?.id;
   }
 
+  /** Resolve a canonical scalar event without formatting or parsing its ID. */
+  getRunItem(
+    replicaId: string,
+    sequence: number,
+  ): AugmentedCRDTItem | undefined {
+    return this.findRunItem(replicaId, sequence) ?? undefined;
+  }
+
   registerRunItem(item: AugmentedCRDTItem): void {
     const run = item.run;
     if (run === null) {

@@ -35,8 +35,18 @@ export interface PackedEventIdIndex {
   has(id: EventId): boolean;
   offsetOf(id: EventId): number | undefined;
   idAt(offset: number): EventId | undefined;
+  canonicalRunAt?(offset: number): PackedCanonicalIdRun | undefined;
+  releaseCanonicalRunLookup?(): void;
   iterateIds(): IterableIterator<EventId>;
   maximumSequenceForReplica(replicaId: string): number | undefined;
+}
+
+/** Canonical ID interval retained by the EGW3 run index. */
+export interface PackedCanonicalIdRun {
+  readonly replicaId: string;
+  readonly startSequence: number;
+  readonly startEventOffset: number;
+  readonly length: number;
 }
 
 interface MaterializedPackedEventIds {
@@ -305,10 +315,16 @@ export class PackedEventGraphBase {
   /** Release scratch storage once a packed replay has finished. */
   releaseDiffWorkspace(): void {
     this.diffWorkspace = null;
+    this.idIndex?.releaseCanonicalRunLookup?.();
   }
 
   idAt(offset: number): EventId | undefined {
     return this.ids !== null ? this.ids[offset] : this.idIndex!.idAt(offset);
+  }
+
+  /** Return canonical author/sequence metadata without reparsing an ID. */
+  canonicalIdRunAt(offset: number): PackedCanonicalIdRun | undefined {
+    return this.idIndex?.canonicalRunAt?.(offset);
   }
 
   *iterateIds(): IterableIterator<EventId> {

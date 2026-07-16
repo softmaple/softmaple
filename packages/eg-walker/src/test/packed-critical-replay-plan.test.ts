@@ -536,7 +536,7 @@ describe("packed critical-section replay planning", () => {
 
     const spanIsolation = vi.spyOn(
       RecordSplitter.prototype,
-      "isolateRunSpanForEvents",
+      "isolateRunSpanForCanonicalEvents",
     );
     const scalarIsolation = vi.spyOn(
       RecordSplitter.prototype,
@@ -544,7 +544,8 @@ describe("packed critical-section replay planning", () => {
     );
     const packed = new EgWalkerReplica("packed-span", "", pack(events));
     const packedSpanCalls = spanIsolation.mock.calls.filter(
-      ([eventId, eventCount]) => eventId === "a:3" && eventCount === 5,
+      ([replicaId, firstSequence, eventCount]) =>
+        replicaId === "a" && firstSequence === 3 && eventCount === 5,
     ).length;
     const packedScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
       /^a:[3-7]$/.test(eventId),

@@ -177,6 +177,7 @@ export class EgWalkerEngine {
   private useLinearIntegrationOracle = false;
   private prepareViewMayContainSurrogatePairs = false;
   private deferTextMaterialization = false;
+  private canonicalizeDeleteTargetOrder = false;
   private packedInsertTail: AugmentedCRDTItem | null = null;
   private packedInsertNextPrepareIndex = -1;
   private readonly packedInsertTailResult: InsertTailResult = { item: null };
@@ -266,7 +267,7 @@ export class EgWalkerEngine {
         continue;
       }
 
-      const deletedEnd = this.extendPackedPlaceholderDeleteRun(
+      const deletedEnd = this.extendPackedScalarDeleteRun(
         plan,
         orderIndex,
         endOrderIndex,
@@ -575,6 +576,7 @@ export class EgWalkerEngine {
 
   getSequenceRecords(): EngineSequenceRecord[] {
     this.flushPendingInsert();
+    this.materializeRunDeleteTargets();
     const items = this.sequence.toArray();
     if (this.segmentedPlaceholders.size === 0) {
       return items.map(recordFromItem);
@@ -636,11 +638,52 @@ export class EgWalkerEngine {
   }
 
   getDeleteTargetRecords(): DeleteTargetRecord[] {
-    return this.deleteTargets.entries((target) =>
+    this.flushPendingInsert();
+    this.materializeRunDeleteTargets();
+    const records = this.deleteTargets.entries((target) =>
       target.state
         .logicalSegmentsInRange(target.start, target.end)
         .map(({ id }) => id),
     );
+    if (!this.canonicalizeDeleteTargetOrder) {
+      return records;
+    }
+
+    const order = new Map<EventId, number>();
+    let rank = 0;
+    this.sequence.forEach((item) => {
+      const placeholder = item.placeholder;
+      if (placeholder === undefined) {
+        order.set(item.id, rank++);
+        return;
+      }
+      for (const segment of placeholder.state.logicalSegmentsInRange(
+        placeholder.start,
+        placeholder.end,
+      )) {
+        order.set(segment.id, rank++);
+      }
+    });
+    return records.map((record) => ({
+      deleteEventId: record.deleteEventId,
+      targetIds: [...record.targetIds].sort((left, right) => {
+        const leftRank = order.get(left) ?? Number.POSITIVE_INFINITY;
+        const rightRank = order.get(right) ?? Number.POSITIVE_INFINITY;
+        return leftRank === rightRank
+          ? compareEventIds(left, right)
+          : leftRank - rightRank;
+      }),
+    }));
+  }
+
+  private materializeRunDeleteTargets(): void {
+    if (!this.deleteTargets.hasRunEventTargets()) {
+      return;
+    }
+    this.deleteTargets.materializeRunEventTargets(
+      (eventId) => this.resolveRunDeleteTargetItem(eventId).id,
+    );
+    this.samplePeakSequenceRecordCount();
   }
 
   captureRecoveryState(): EngineRecoveryState {
@@ -683,6 +726,7 @@ export class EgWalkerEngine {
     this.prepareViewMayContainSurrogatePairs =
       this.resultingText.hasSurrogateCodeUnits ||
       items.some((item) => recordContentHasSurrogateCodeUnits(item.content));
+    this.canonicalizeDeleteTargetOrder = false;
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -805,6 +849,17 @@ export class EgWalkerEngine {
     const deltas = this.packedPrepareDeltas;
     deltas.clear();
 
+    // Lazy scalar delete targets may still share one typed-run record. Split
+    // targets participating in this transition before insert spans add
+    // pending deltas: splitting afterwards would leave new right halves out
+    // of the delta map and toggle only part of an insert range.
+    this.materializePackedTransitionRunDeleteTargets(
+      plan,
+      transition,
+      rangeStart,
+      rangeEnd,
+    );
+
     // Split every affected insert slice before resolving delete targets. A
     // split extends existing delete membership to both halves; resolving
     // deletes afterwards therefore observes the final record boundaries and
@@ -880,6 +935,60 @@ export class EgWalkerEngine {
     }
     this.sequence.updateItems(deltas.keys());
     deltas.clear();
+  }
+
+  private materializePackedTransitionRunDeleteTargets(
+    plan: PackedCriticalReplayPlan,
+    transition: PackedLocalVersionTransition,
+    rangeStart: number,
+    rangeEnd: number,
+  ): void {
+    if (!this.deleteTargets.hasRunEventTargets()) {
+      return;
+    }
+    const resolveItemId = (eventId: EventId): EventId =>
+      this.resolveRunDeleteTargetItem(eventId).id;
+    for (let range = 0; range < transition.retreatRangeCount; range++) {
+      const start = transition.retreatStarts[range]!;
+      for (
+        let offset = transition.retreatEnds[range]! - 1;
+        offset >= start;
+        offset--
+      ) {
+        const rank = plan.orderIndexOfKnownOffset(offset);
+        if (
+          rank >= rangeStart &&
+          rank < rangeEnd &&
+          !plan.isInsertAtKnownOffset(offset)
+        ) {
+          this.deleteTargets.materializeRunEventTargetsOf(
+            plan.eventIdAtKnownOffset(offset),
+            resolveItemId,
+          );
+        }
+      }
+    }
+    for (let range = 0; range < transition.advanceRangeCount; range++) {
+      const end = transition.advanceEnds[range]!;
+      for (
+        let offset = transition.advanceStarts[range]!;
+        offset < end;
+        offset++
+      ) {
+        const rank = plan.orderIndexOfKnownOffset(offset);
+        if (
+          rank >= rangeStart &&
+          rank < rangeEnd &&
+          !plan.isInsertAtKnownOffset(offset)
+        ) {
+          this.deleteTargets.materializeRunEventTargetsOf(
+            plan.eventIdAtKnownOffset(offset),
+            resolveItemId,
+          );
+        }
+      }
+    }
+    this.samplePeakSequenceRecordCount();
   }
 
   /**
@@ -1173,7 +1282,7 @@ export class EgWalkerEngine {
    * exact logical target, so later retreat/advance transitions remain scalar
    * while cover/effect and ranked-sequence updates stay range-batched.
    */
-  private extendPackedPlaceholderDeleteRun(
+  private extendPackedScalarDeleteRun(
     plan: PackedCriticalReplayPlan,
     startOrderIndex: number,
     endOrderIndex: number,
@@ -1197,17 +1306,22 @@ export class EgWalkerEngine {
       false,
     );
     const candidate = this.sequence.at(landing.position);
-    const placeholder = candidate?.placeholder;
-    if (candidate === undefined || placeholder === undefined) {
+    if (candidate === undefined) {
       return startOrderIndex;
     }
 
-    const state = placeholder.state;
-    const absoluteStart = placeholder.start + landing.offsetInRecord;
-    const availableEvents = state.prepareLengthInRange(
-      absoluteStart,
-      placeholder.end,
-    );
+    const placeholder = candidate.placeholder;
+    const availableEvents =
+      placeholder !== undefined
+        ? placeholder.state.prepareLengthInRange(
+            placeholder.start + landing.offsetInRecord,
+            placeholder.end,
+          )
+        : candidate.run !== null &&
+            typeof candidate.content === "string" &&
+            candidate.prepareState === 1
+          ? candidate.content.length - landing.offsetInRecord
+          : 0;
     if (availableEvents < 2) {
       return startOrderIndex;
     }
@@ -1237,49 +1351,80 @@ export class EgWalkerEngine {
       return startOrderIndex;
     }
 
-    const result = state.deletePrepareVisibleUnitsInSlice(
-      placeholder,
-      landing.offsetInRecord,
-      appendedEvents,
-    );
-    let batchedEvents = 0;
-    for (const range of result.ranges) {
-      batchedEvents += range.end - range.start;
-    }
-    if (batchedEvents <= 0) {
-      throw new Error(
-        `Packed placeholder delete run found no target at ${operationIndex}`,
+    if (placeholder !== undefined) {
+      const state = placeholder.state;
+      const result = state.deletePrepareVisibleUnitsInSlice(
+        placeholder,
+        landing.offsetInRecord,
+        appendedEvents,
       );
-    }
-
-    let consumed = 0;
-    for (const range of result.ranges) {
-      for (
-        let absoluteOffset = range.start;
-        absoluteOffset < range.end && consumed < batchedEvents;
-        absoluteOffset++
-      ) {
-        const eventOffset = plan.eventOffsetAt(startOrderIndex + consumed);
-        this.deleteTargets.recordPlaceholderRange(
-          plan.eventIdAtKnownOffset(eventOffset),
-          state,
-          absoluteOffset,
-          absoluteOffset + 1,
-        );
-        consumed++;
+      let batchedEvents = 0;
+      for (const range of result.ranges) {
+        batchedEvents += range.end - range.start;
       }
-    }
-    if (consumed !== batchedEvents) {
-      throw new Error(
-        `Packed placeholder delete run applied ${consumed} of ${batchedEvents} events`,
+      if (batchedEvents !== appendedEvents) {
+        throw new Error(
+          `Packed placeholder delete run applied ${batchedEvents} of ${appendedEvents} events`,
+        );
+      }
+
+      let consumed = 0;
+      for (const range of result.ranges) {
+        for (
+          let absoluteOffset = range.start;
+          absoluteOffset < range.end;
+          absoluteOffset++
+        ) {
+          const eventOffset = plan.eventOffsetAt(startOrderIndex + consumed);
+          this.deleteTargets.recordPlaceholderRange(
+            plan.eventIdAtKnownOffset(eventOffset),
+            state,
+            absoluteOffset,
+            absoluteOffset + 1,
+          );
+          consumed++;
+        }
+      }
+      if (consumed !== appendedEvents) {
+        throw new Error(
+          `Packed placeholder delete run recorded ${consumed} of ${appendedEvents} events`,
+        );
+      }
+      this.sequence.updateItem(candidate);
+    } else {
+      const middle = this.recordSplitter.splitRecordForDelete(
+        candidate,
+        landing.offsetInRecord,
+        appendedEvents,
       );
+      const run = middle.run;
+      if (
+        run === null ||
+        typeof middle.content !== "string" ||
+        middle.content.length !== appendedEvents ||
+        middle.prepareState !== 1
+      ) {
+        throw new Error(
+          `Packed typed-run delete span is invalid at ${operationIndex}`,
+        );
+      }
+      for (let consumed = 0; consumed < appendedEvents; consumed++) {
+        const eventOffset = plan.eventOffsetAt(startOrderIndex + consumed);
+        this.deleteTargets.recordRunEvent(
+          plan.eventIdAtKnownOffset(eventOffset),
+          `${run.replicaId}:${run.startSequence + consumed}`,
+        );
+      }
+      this.canonicalizeDeleteTargetOrder = true;
+      middle.everDeleted = true;
+      middle.prepareState += 1;
+      this.sequence.updateItem(middle);
     }
 
-    this.sequence.updateItem(candidate);
-    this.nonConflictingRunCount += batchedEvents;
-    this.processedEventCount += batchedEvents;
+    this.nonConflictingRunCount += appendedEvents;
+    this.processedEventCount += appendedEvents;
     this.samplePeakSequenceRecordCount();
-    return startOrderIndex + batchedEvents;
+    return orderIndex;
   }
 
   /**
@@ -1351,6 +1496,7 @@ export class EgWalkerEngine {
       options.initialTextBuffer ?? PersistentUtf16Rope.from(initialText);
     this.prepareViewMayContainSurrogatePairs =
       this.resultingText.hasSurrogateCodeUnits;
+    this.canonicalizeDeleteTargetOrder = false;
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -1608,9 +1754,18 @@ export class EgWalkerEngine {
     }
     const secondTarget = this.deleteTargets.nextTarget(firstTarget);
     if (secondTarget === 0) {
-      if (this.deleteTargets.kindOf(firstTarget) === DELETE_TARGET_KIND.ITEM) {
+      const kind = this.deleteTargets.kindOf(firstTarget);
+      if (kind === DELETE_TARGET_KIND.ITEM) {
         const item = this.requireItem(this.deleteTargets.itemIdOf(firstTarget));
         item.prepareState += delta;
+        this.sequence.updateItem(item);
+        return;
+      }
+      if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
+        const item = this.adjustRunEventPrepareState(
+          this.deleteTargets.runEventIdOf(firstTarget),
+          delta,
+        );
         this.sequence.updateItem(item);
         return;
       }
@@ -1643,10 +1798,18 @@ export class EgWalkerEngine {
     const dirty = new Set<AugmentedCRDTItem>();
     let target = firstTarget;
     while (target !== 0) {
-      if (this.deleteTargets.kindOf(target) === DELETE_TARGET_KIND.ITEM) {
+      const kind = this.deleteTargets.kindOf(target);
+      if (kind === DELETE_TARGET_KIND.ITEM) {
         const item = this.requireItem(this.deleteTargets.itemIdOf(target));
         item.prepareState += delta;
         dirty.add(item);
+      } else if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
+        dirty.add(
+          this.adjustRunEventPrepareState(
+            this.deleteTargets.runEventIdOf(target),
+            delta,
+          ),
+        );
       } else {
         for (const slice of this.deleteTargets
           .placeholderStateOf(target)
@@ -1688,11 +1851,16 @@ export class EgWalkerEngine {
   ): void {
     let target = this.deleteTargets.firstTargetOf(eventId);
     while (target !== 0) {
-      if (this.deleteTargets.kindOf(target) === DELETE_TARGET_KIND.ITEM) {
+      const kind = this.deleteTargets.kindOf(target);
+      if (kind === DELETE_TARGET_KIND.ITEM) {
         this.collectItemPrepareDelta(
           this.deleteTargets.itemIdOf(target),
           delta,
           deltas,
+        );
+      } else if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
+        throw new Error(
+          `Packed transition did not materialize typed-run target ${this.deleteTargets.runEventIdOf(target)}`,
         );
       } else {
         for (const slice of this.deleteTargets
@@ -1714,6 +1882,32 @@ export class EgWalkerEngine {
       }
       target = this.deleteTargets.nextTarget(target);
     }
+  }
+
+  private resolveRunDeleteTargetItem(eventId: EventId): AugmentedCRDTItem {
+    const items = this.recordSplitter.isolateRunSliceForEvent(eventId);
+    if (typeof items !== "string") {
+      throw new Error(`Typed-run delete target ${eventId} is not scalar`);
+    }
+    const item = this.requireItem(items);
+    if (
+      item.run === null ||
+      item.content.length !== 1 ||
+      item.eventId !== eventId
+    ) {
+      throw new Error(`Typed-run delete target ${eventId} is not isolated`);
+    }
+    this.samplePeakSequenceRecordCount();
+    return item;
+  }
+
+  private adjustRunEventPrepareState(
+    eventId: EventId,
+    delta: 1 | -1,
+  ): AugmentedCRDTItem {
+    const item = this.resolveRunDeleteTargetItem(eventId);
+    item.prepareState += delta;
+    return item;
   }
 
   private collectItemPrepareDelta(

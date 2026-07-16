@@ -1131,7 +1131,8 @@ export class EgWalkerReplica {
     readonly fugueRebuilds: number;
     readonly sequenceTreeOperations: number;
   } {
-    const engineStats = this.engineStatsOverride ?? this.engine?.getStats();
+    const liveEngineStats = this.engine?.getStats();
+    const engineStats = this.engineStatsOverride ?? liveEngineStats;
     return {
       fullReplays: this.fullReplayCount,
       partialReplays: this.partialReplayCount,
@@ -1139,10 +1140,14 @@ export class EgWalkerReplica {
       engineRetreats: engineStats?.retreatCount ?? 0,
       engineAdvances: engineStats?.advanceCount ?? 0,
       checkpointCount: this.criticalCheckpoints.count,
-      sequenceRecordCount: engineStats?.sequenceRecordCount ?? 0,
+      sequenceRecordCount:
+        liveEngineStats?.sequenceRecordCount ??
+        engineStats?.sequenceRecordCount ??
+        0,
       peakSequenceRecordCount: Math.max(
         this.replicaPeakSequenceRecordCount,
         engineStats?.peakSequenceRecordCount ?? 0,
+        liveEngineStats?.peakSequenceRecordCount ?? 0,
       ),
       criticalCheckpointHits: this.criticalCheckpoints.hits,
       criticalCheckpointMisses: this.criticalCheckpoints.misses,

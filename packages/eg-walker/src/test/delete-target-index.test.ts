@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DELETE_TARGET_KIND,
   DeleteTargetIndex,
@@ -33,6 +33,92 @@ describe("DeleteTargetIndex", () => {
 
       expect(index.targetRefsOf("delete-1")).toBe("item-a");
       expect(index.targetsOf("delete-1")).toEqual(["item-a"]);
+    });
+
+    it("materializes a lazy typed-run event target to an item target", () => {
+      const index = new DeleteTargetIndex();
+      index.recordRunEvent("delete-1", "author:4");
+      expect(index.hasRunEventTargets()).toBe(true);
+
+      const target = index.firstTargetOf("delete-1");
+      expect(index.kindOf(target)).toBe(DELETE_TARGET_KIND.RUN_EVENT);
+      expect(index.runEventIdOf(target)).toBe("author:4");
+      expect(index.targetRefsOf("delete-1")).toEqual({
+        kind: "typed-run-event",
+        eventId: "author:4",
+      });
+      expect(() => index.targetsOf("delete-1")).toThrow("must be materialized");
+
+      index.materializeRunEventTargetsOf("delete-1", (eventId) =>
+        eventId === "author:4" ? "author:4:0" : "unreachable",
+      );
+
+      expect(index.kindOf(target)).toBe(DELETE_TARGET_KIND.ITEM);
+      expect(index.hasRunEventTargets()).toBe(false);
+      expect(index.targetsOf("delete-1")).toEqual(["author:4:0"]);
+      index.extendMembership("author:4:0", "author:5:0");
+      expect(index.targetsOf("delete-1")).toEqual(["author:4:0", "author:5:0"]);
+    });
+
+    it("keeps lazy target accounting exact across runtime records, replacement, and abort", () => {
+      const index = new DeleteTargetIndex();
+      index.recordRuntime("delete-1", [
+        { kind: "typed-run-event", eventId: "author:4" },
+        "ordinary-item",
+        { kind: "typed-run-event", eventId: "author:5" },
+      ]);
+      expect(index.hasRunEventTargets()).toBe(true);
+
+      index.materializeRunEventTargets((eventId) => `${eventId}:item`);
+      expect(index.targetsOf("delete-1")).toEqual([
+        "author:4:item",
+        "ordinary-item",
+        "author:5:item",
+      ]);
+      expect(index.hasRunEventTargets()).toBe(false);
+
+      index.recordRunEvent("delete-1", "author:6");
+      expect(index.hasRunEventTargets()).toBe(true);
+      index.recordOne("delete-1", "replacement-item");
+      expect(index.hasRunEventTargets()).toBe(false);
+      expect(index.targetsOf("delete-1")).toEqual(["replacement-item"]);
+
+      const aborted = index.beginRecord();
+      index.appendRunEvent(aborted, "author:7");
+      expect(index.hasRunEventTargets()).toBe(true);
+      index.abortRecord(aborted);
+      expect(index.hasRunEventTargets()).toBe(false);
+
+      index.materializeRunEventTargetsOf("missing", () => "unreachable");
+    });
+
+    it("rolls back lazy and placeholder builders after validation or commit errors", () => {
+      const index = new DeleteTargetIndex();
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        4,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      expect(() =>
+        index.recordPlaceholderRange("invalid-placeholder", state, -1, 1),
+      ).toThrow("Invalid placeholder delete target");
+
+      const commit = vi
+        .spyOn(index, "commitRecord")
+        .mockImplementationOnce(() => {
+          throw new Error("simulated commit failure");
+        });
+      expect(() => index.recordRunEvent("failed-delete", "author:4")).toThrow(
+        "simulated commit failure",
+      );
+      commit.mockRestore();
+
+      expect(index.firstTargetOf("failed-delete")).toBe(0);
+      expect(index.hasRunEventTargets()).toBe(false);
+      index.recordOne("live-delete", "item");
+      expect(() =>
+        index.runEventIdOf(index.firstTargetOf("live-delete")),
+      ).toThrow("is not a typed-run event target");
     });
 
     it("tracks reverse membership for scalar records", () => {

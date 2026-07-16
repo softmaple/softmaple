@@ -5,6 +5,7 @@ import { EgWalkerReplica } from "../core/replica";
 import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { IndexedSequence } from "../engine/indexed-sequence";
+import { DeleteTargetIndex } from "../engine/internals/delete-target-index";
 import { RecordSplitter } from "../engine/internals/record-splitter";
 import { SegmentedPlaceholderState } from "../engine/internals/segmented-placeholder";
 import {
@@ -42,6 +43,18 @@ const editingEvent = (
 const pack = (events: ReadonlyArray<GraphEvent>): EventGraph => {
   const codec = new ColumnarEventGraphCodec();
   return codec.decodeBinary(codec.encodeBinary(EventGraph.fromEvents(events)));
+};
+
+const prepareText = (engine: EgWalkerEngine): string => {
+  let text = "";
+  for (let index = 0; index < engine.getPrepareLength(); index++) {
+    const codeUnit = engine.getPrepareCodeUnitAt(index);
+    if (codeUnit === undefined) {
+      throw new Error(`Missing prepare code unit ${index}`);
+    }
+    text += String.fromCharCode(codeUnit);
+  }
+  return text;
 };
 
 const versionsEqual = (
@@ -586,6 +599,309 @@ describe("packed critical-section replay planning", () => {
     expect(restoredEngine.getPrepareLength()).toBe(
       objectEngine.getPrepareLength(),
     );
+  });
+
+  it("keeps batched typed-run delete targets lazy and recovery-safe", () => {
+    const events: GraphEvent[] = [];
+    let insertParent: EventId | null = null;
+    for (let sequence = 0; sequence < 32; sequence++) {
+      const id = `source:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          insertParent === null ? [] : [insertParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "x" },
+          sequence,
+        ),
+      );
+      insertParent = id;
+    }
+    events.push(
+      editingEvent(
+        "other:0",
+        ["source:31"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        32,
+      ),
+    );
+
+    let deleteParent: EventId = "source:31";
+    for (let sequence = 0; sequence < 16; sequence++) {
+      const id = `delete:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [deleteParent],
+          { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+          33 + sequence,
+        ),
+      );
+      deleteParent = id;
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["other:0", "delete:15"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        49,
+      ),
+    );
+
+    const graph = pack(events);
+    const plan = planPackedCriticalReplaySections(graph);
+    expect(plan).not.toBeNull();
+    const objectOrder = graph.getBranchPreservingTopologicalOrder();
+    expect(objectOrder.findIndex(({ id }) => id === "other:0")).toBeLessThan(
+      objectOrder.findIndex(({ id }) => id === "delete:0"),
+    );
+
+    const lazyTarget = vi.spyOn(DeleteTargetIndex.prototype, "recordRunEvent");
+    const packedEngine = new EgWalkerEngine();
+    const packedGenerated = packedEngine.generatePackedSectionRange(
+      plan!,
+      0,
+      plan!.sectionCount,
+      graph,
+      new Set(),
+      PersistentUtf16Rope.from(""),
+    );
+    packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
+    const lazyTargetCount = lazyTarget.mock.calls.length;
+    lazyTarget.mockRestore();
+
+    const objectEngine = new EgWalkerEngine();
+    const objectGenerated = objectEngine.generate(objectOrder, "", {
+      eventGraph: graph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(lazyTargetCount).toBe(15);
+    expect(packedGenerated.text).toBe("x".repeat(16));
+    expect(packedGenerated.text).toBe(objectGenerated.text);
+    expect(packedGenerated.stats.sequenceRecordCount).toBe(3);
+    expect(packedGenerated.stats.sequenceRecordCount).toBeLessThan(
+      objectGenerated.stats.sequenceRecordCount,
+    );
+    expect(packedGenerated.stats.sequenceTreeOperations).toBeLessThan(
+      objectGenerated.stats.sequenceTreeOperations,
+    );
+
+    const partialVersion = new Set<EventId>(["delete:14"]);
+    packedEngine.transitionPrepareView(partialVersion, graph);
+    objectEngine.transitionPrepareView(partialVersion, graph);
+    expect(packedEngine.getPrepareLength()).toBe(17);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+
+    const fullVersion = graph.getFrontier();
+    packedEngine.transitionPrepareView(fullVersion, graph);
+    objectEngine.transitionPrepareView(fullVersion, graph);
+    const packedRecords = packedEngine.getSequenceRecords();
+    const packedTargets = packedEngine.getDeleteTargetRecords();
+    expect(packedRecords).toEqual(objectEngine.getSequenceRecords());
+    expect(packedTargets).toEqual(objectEngine.getDeleteTargetRecords());
+    expect(
+      packedEngine.getStats().peakSequenceRecordCount,
+    ).toBeGreaterThanOrEqual(packedEngine.getStats().sequenceRecordCount);
+
+    const restoredEngine = EgWalkerEngine.fromRecoveryState(
+      packedEngine.captureRecoveryState(),
+      graph,
+    );
+    const middleVersion = new Set<EventId>(["delete:7"]);
+    packedEngine.transitionPrepareView(middleVersion, graph);
+    objectEngine.transitionPrepareView(middleVersion, graph);
+    restoredEngine.transitionPrepareView(middleVersion, graph);
+    expect(packedEngine.getPrepareLength()).toBe(24);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+    expect(restoredEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+  });
+
+  it("materializes lazy delete targets before collecting insert transition deltas", () => {
+    const events: GraphEvent[] = [];
+    let parent: EventId | null = null;
+    for (let sequence = 0; sequence < 8; sequence++) {
+      const id = `a:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          parent === null ? [] : [parent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "a" },
+          sequence,
+        ),
+      );
+      parent = id;
+    }
+    for (let sequence = 0; sequence < 3; sequence++) {
+      events.push(
+        editingEvent(
+          `delete:${sequence}`,
+          [sequence === 0 ? "a:7" : `delete:${sequence - 1}`],
+          { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+          8 + sequence,
+        ),
+      );
+    }
+    let bParent: EventId = "a:1";
+    for (let sequence = 0; sequence < 12; sequence++) {
+      const id = `b:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [bParent],
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: sequence === 0 ? 2 : 3,
+            text: sequence === 0 ? "B" : "",
+          },
+          11 + sequence,
+        ),
+      );
+      bParent = id;
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["delete:2", "b:11"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        23,
+      ),
+    );
+
+    const graph = pack(events);
+    const plan = planPackedCriticalReplaySections(graph);
+    expect(plan).not.toBeNull();
+    const objectOrder = graph.getBranchPreservingTopologicalOrder();
+    expect(objectOrder.findIndex(({ id }) => id === "delete:2")).toBeLessThan(
+      objectOrder.findIndex(({ id }) => id === "b:0"),
+    );
+
+    const packedEngine = new EgWalkerEngine();
+    const packed = packedEngine.generatePackedSectionRange(
+      plan!,
+      0,
+      plan!.sectionCount,
+      graph,
+      new Set(),
+      PersistentUtf16Rope.from(""),
+    );
+    const objectEngine = new EgWalkerEngine();
+    const object = objectEngine.generate(objectOrder, "", {
+      eventGraph: graph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(packed.text).toBe(object.text);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+    expect(packedEngine.getDeleteTargetRecords()).toEqual(
+      objectEngine.getDeleteTargetRecords(),
+    );
+    expect(packed.stats.retreatCount).toBe(object.stats.retreatCount);
+    expect(packed.stats.advanceCount).toBe(object.stats.advanceCount);
+    for (const version of [
+      new Set<EventId>(["b:11"]),
+      new Set<EventId>(["delete:2"]),
+      new Set<EventId>(["a:1"]),
+      graph.getFrontier(),
+    ]) {
+      packedEngine.transitionPrepareView(version, graph);
+      objectEngine.transitionPrepareView(version, graph);
+      expect(prepareText(packedEngine)).toBe(prepareText(objectEngine));
+    }
+  });
+
+  it("canonicalizes older item memberships after lazy target splits", () => {
+    const events: GraphEvent[] = [];
+    let parent: EventId | null = null;
+    for (let sequence = 0; sequence < 10; sequence++) {
+      const id = `source:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          parent === null ? [] : [parent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "x" },
+          sequence,
+        ),
+      );
+      parent = id;
+    }
+    events.push(
+      editingEvent(
+        "old:0",
+        ["source:9"],
+        { type: OPERATION_TYPE.DELETE, index: 2, length: 4 },
+        10,
+      ),
+    );
+    for (let sequence = 0; sequence < 3; sequence++) {
+      events.push(
+        editingEvent(
+          `delete:${sequence}`,
+          [sequence === 0 ? "source:9" : `delete:${sequence - 1}`],
+          { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+          11 + sequence,
+        ),
+      );
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["old:0", "delete:2"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        14,
+      ),
+    );
+
+    const graph = pack(events);
+    const plan = planPackedCriticalReplaySections(graph);
+    expect(plan).not.toBeNull();
+    const objectOrder = graph.getBranchPreservingTopologicalOrder();
+    expect(objectOrder.findIndex(({ id }) => id === "old:0")).toBeLessThan(
+      objectOrder.findIndex(({ id }) => id === "delete:0"),
+    );
+    const packedEngine = new EgWalkerEngine();
+    const packed = packedEngine.generatePackedSectionRange(
+      plan!,
+      0,
+      plan!.sectionCount,
+      graph,
+      new Set(),
+      PersistentUtf16Rope.from(""),
+    );
+    const objectEngine = new EgWalkerEngine();
+    const object = objectEngine.generate(objectOrder, "", {
+      eventGraph: graph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(packed.text).toBe(object.text);
+    expect(packedEngine.getSequenceRecords()).toEqual(
+      objectEngine.getSequenceRecords(),
+    );
+    expect(packedEngine.getDeleteTargetRecords()).toEqual(
+      objectEngine.getDeleteTargetRecords(),
+    );
+
+    const restored = EgWalkerEngine.fromRecoveryState(
+      packedEngine.captureRecoveryState(),
+      graph,
+    );
+    const version = new Set<EventId>(["delete:1"]);
+    packedEngine.transitionPrepareView(version, graph);
+    objectEngine.transitionPrepareView(version, graph);
+    restored.transitionPrepareView(version, graph);
+    expect(prepareText(packedEngine)).toBe(prepareText(objectEngine));
+    expect(prepareText(restored)).toBe(prepareText(objectEngine));
   });
 
   it("retains numeric replay across a rope seed and overlapping deletes", () => {

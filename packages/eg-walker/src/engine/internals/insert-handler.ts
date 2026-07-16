@@ -33,6 +33,55 @@ export interface InsertTailResult {
   item: AugmentedCRDTItem | null;
 }
 
+/**
+ * Shared eligibility gate for scalar and packed typed-run extension.
+ *
+ * The caller proves that the insert lands immediately after `item` in the
+ * prepare view. This helper owns every mutable run invariant, including the
+ * cached successor bound in {@link EventItemIndex}; packed replay must never
+ * append a span by checking only document position.
+ */
+export const canExtendTypedRun = (
+  item: AugmentedCRDTItem,
+  replicaId: string,
+  startSequence: number,
+  additionalLength: number,
+  deps: InsertHandlerDeps,
+): boolean =>
+  typeof item.content === "string" &&
+  item.run !== null &&
+  item.run.replicaId === replicaId &&
+  item.run.startSequence + item.content.length === startSequence &&
+  item.prepareState === 1 &&
+  !item.everDeleted &&
+  !deps.originLeftIndex.has(item.id) &&
+  deps.eventItems.canExtendRunItem(item, additionalLength);
+
+/**
+ * Extend an already-validated typed run with one sequence/tree update.
+ * Returns the effect insertion index when text materialization is eager.
+ */
+export const applyTypedRunExtension = (
+  item: AugmentedCRDTItem,
+  insertedText: string,
+  deps: InsertHandlerDeps,
+  deferTextMaterialization: boolean,
+): number | null => {
+  if (typeof item.content !== "string" || insertedText.length === 0) {
+    throw new Error("Typed-run extension requires materialized text");
+  }
+  const previousLength = item.content.length;
+  item.content += insertedText;
+  deps.sequence.updateItem(item);
+  if (deferTextMaterialization) {
+    return null;
+  }
+
+  const effectIndex = deps.itemToEffectIndex(item) + previousLength;
+  deps.pendingInsert.append(effectIndex, insertedText, deps.applyPendingSplice);
+  return effectIndex;
+};
+
 export const applyInsert = (
   eventId: EventId,
   operationIndex: number,
@@ -51,7 +100,6 @@ export const applyInsert = (
     recordSplitter,
     fugueOrder,
     pendingInsert,
-    applyPendingSplice,
     flushPendingInsert,
     itemToEffectIndex,
     insertText,
@@ -148,38 +196,29 @@ export const applyInsert = (
     const leftRecord = originLeftRecord;
     if (
       leftRecord !== undefined &&
-      leftRecord.run !== null &&
-      leftRecord.run.replicaId === parsed.replicaId &&
-      leftRecord.run.startSequence + leftRecord.content.length ===
-        parsed.sequence &&
-      leftRecord.prepareState === 1 &&
-      !leftRecord.everDeleted &&
-      // Don't extend a run that already has items anchored to its right
-      // boundary — those items chose this id as their `originLeft` at a
-      // moment when the record ended one code unit earlier, and stretching
-      // the content would shift the boundary they were anchored to.
-      !originLeftIndex.has(leftRecord.id) &&
-      eventItems.canExtendRunItem(leftRecord, insertedText.length)
+      canExtendTypedRun(
+        leftRecord,
+        parsed.replicaId,
+        parsed.sequence,
+        insertedText.length,
+        deps,
+      )
     ) {
-      if (typeof leftRecord.content !== "string") {
-        throw new Error("Typed-run content must be materialized text");
-      }
-      const previousLength = leftRecord.content.length;
-      leftRecord.content += insertedText;
-      sequence.updateItem(leftRecord);
+      const effectIndex = applyTypedRunExtension(
+        leftRecord,
+        insertedText,
+        deps,
+        deferTextMaterialization,
+      );
       if (tailResult !== undefined) {
         tailResult.item = leftRecord;
       }
       if (deferTextMaterialization) {
         return NO_TRANSFORMED_OPERATIONS;
       }
-      const effectIndex = itemToEffectIndex(leftRecord) + previousLength;
-      // Defer the splice on the engine's resulting text into the
-      // pending-insert buffer so a long single-author typed run doesn't
-      // pay an O(document length) string realloc per keystroke.
-      // {@link flushPendingInsert} materialises the buffer before any
-      // non-coalesced read or write of the document text.
-      pendingInsert.append(effectIndex, insertedText, applyPendingSplice);
+      if (effectIndex === null) {
+        throw new Error("Typed-run extension did not produce an effect index");
+      }
 
       return collectTransformedOperations
         ? [

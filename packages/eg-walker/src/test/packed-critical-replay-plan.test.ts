@@ -4,6 +4,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { IndexedSequence } from "../engine/indexed-sequence";
 import {
   PackedCriticalReplayPlan,
   planPackedCriticalReplaySections,
@@ -310,13 +311,19 @@ describe("packed critical-section replay planning", () => {
       rightParent = right;
     }
 
+    const updateItem = vi.spyOn(IndexedSequence.prototype, "updateItem");
     const packed = new EgWalkerReplica("packed-runs", "", pack(events));
+    const packedUpdateCount = updateItem.mock.calls.length;
+    updateItem.mockClear();
     const object = new EgWalkerReplica(
       "object-runs",
       "",
       EventGraph.fromEvents(events),
     );
+    const objectUpdateCount = updateItem.mock.calls.length;
+    updateItem.mockRestore();
     expect(packed.getText()).toBe(object.getText());
+    expect(packedUpdateCount).toBeLessThan(objectUpdateCount);
     expect(packed.getReplayStats().peakSequenceRecordCount).toBeLessThan(100);
 
     const divergent = editingEvent(

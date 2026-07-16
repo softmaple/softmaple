@@ -35,6 +35,12 @@ describe("IndexedSequence", () => {
     expect(sequence.prepareIndexToPosition(1, false)).toBe(2);
     expect(sequence.nextPrepareVisiblePosition(1)).toBe(2);
     expect(sequence.effectIndexBeforePosition(3)).toBe(2);
+    expect(sequence.prepareIndexAfter(items[0]!)).toBe(1);
+    expect(sequence.prepareIndexAfter(items[1]!)).toBe(1);
+    expect(sequence.prepareIndexAfter(items[2]!)).toBe(2);
+    expect(
+      sequence.prepareIndexAfter({ id: "missing", prepare: 1, effect: 1 }),
+    ).toBe(-1);
 
     items[1]!.prepare = 1;
     items[2]!.effect = 1;
@@ -43,6 +49,7 @@ describe("IndexedSequence", () => {
 
     expect(sequence.prepareIndexToPosition(1, false)).toBe(1);
     expect(sequence.effectIndexBeforePosition(4)).toBe(4);
+    expect(sequence.prepareIndexAfter(items[1]!)).toBe(2);
   });
 
   it("distinguishes visible code-unit lookups from insertion boundaries across hidden gaps", () => {

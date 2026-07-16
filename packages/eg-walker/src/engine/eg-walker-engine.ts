@@ -1,6 +1,6 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
-import { compareEventIds } from "../graph/event-id";
+import { compareEventIds, parseEventId } from "../graph/event-id";
 import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
@@ -31,7 +31,9 @@ import {
 import { EventItemIndex } from "./internals/event-item-index";
 import { FugueOrderIndex } from "./internals/fugue-order-index";
 import {
+  applyTypedRunExtension,
   applyInsert,
+  canExtendTypedRun,
   type InsertHandlerDeps,
   type InsertTailResult,
 } from "./internals/insert-handler";
@@ -240,11 +242,8 @@ export class EgWalkerEngine {
     }
 
     let currentOffset: number | null = null;
-    for (
-      let orderIndex = startOrderIndex;
-      orderIndex < endOrderIndex;
-      orderIndex++
-    ) {
+    let orderIndex = startOrderIndex;
+    while (orderIndex < endOrderIndex) {
       const eventOffset = plan.eventOffsetAt(orderIndex);
       currentOffset = this.processPackedEvent(
         plan,
@@ -253,6 +252,18 @@ export class EgWalkerEngine {
         endOrderIndex,
         currentOffset,
       );
+      orderIndex++;
+
+      const extendedEnd = this.extendPackedInsertRun(
+        plan,
+        orderIndex,
+        endOrderIndex,
+        currentOffset,
+      );
+      if (extendedEnd !== orderIndex) {
+        orderIndex = extendedEnd;
+        currentOffset = plan.eventOffsetAt(orderIndex - 1);
+      }
     }
 
     if (currentOffset !== null) {
@@ -938,6 +949,105 @@ export class EgWalkerEngine {
       false,
       this.deferTextMaterialization,
     );
+  }
+
+  /**
+   * Absorb a sole-parent chain of scalar typed inserts into the current tail.
+   *
+   * Every causal/index/ID column is checked before mutation, then the shared
+   * scalar run gate validates the whole author interval. The final-span check
+   * is load-bearing: a prepare-position proof alone cannot rule out a
+   * previously registered successor run after nonlinear replay and splits.
+   */
+  private extendPackedInsertRun(
+    plan: PackedCriticalReplayPlan,
+    startOrderIndex: number,
+    endOrderIndex: number,
+    currentOffset: number,
+  ): number {
+    const tail = this.packedInsertTail;
+    if (
+      tail === null ||
+      typeof tail.content !== "string" ||
+      tail.run === null
+    ) {
+      return startOrderIndex;
+    }
+
+    const run = tail.run;
+    const firstSequence = run.startSequence + tail.content.length;
+    let expectedSequence = firstSequence;
+    let expectedPrepareIndex = this.packedInsertNextPrepareIndex;
+    let previousOffset = currentOffset;
+    let orderIndex = startOrderIndex;
+    let contentStart = -1;
+    let contentEnd = -1;
+
+    while (orderIndex < endOrderIndex) {
+      const eventOffset = plan.eventOffsetAt(orderIndex);
+      if (
+        !plan.hasSingleParentAtKnownOffset(eventOffset, previousOffset) ||
+        !plan.isInsertAtKnownOffset(eventOffset) ||
+        plan.operationLengthAtKnownOffset(eventOffset) !== 1 ||
+        plan.operationIndexAtKnownOffset(eventOffset) !== expectedPrepareIndex
+      ) {
+        break;
+      }
+
+      const parsed = parseEventId(plan.eventIdAtKnownOffset(eventOffset));
+      if (
+        parsed === null ||
+        parsed.replicaId !== run.replicaId ||
+        parsed.sequence !== expectedSequence
+      ) {
+        break;
+      }
+
+      const insertStart = plan.insertStartAtKnownOffset(eventOffset);
+      if (contentStart < 0) {
+        contentStart = insertStart;
+      } else if (insertStart !== contentEnd) {
+        break;
+      }
+      contentEnd = insertStart + 1;
+      expectedPrepareIndex++;
+      expectedSequence++;
+      previousOffset = eventOffset;
+      orderIndex++;
+    }
+
+    const appendedEvents = orderIndex - startOrderIndex;
+    if (appendedEvents < 2 || contentStart < 0 || contentEnd <= contentStart) {
+      return startOrderIndex;
+    }
+    const appendedText = plan.sliceInsertedContent(contentStart, contentEnd);
+    if (
+      appendedText.length !== appendedEvents ||
+      containsUtf16SurrogateCodeUnit(appendedText) ||
+      this.sequence.prepareIndexAfter(tail) !==
+        this.packedInsertNextPrepareIndex ||
+      !canExtendTypedRun(
+        tail,
+        run.replicaId,
+        firstSequence,
+        appendedEvents,
+        this.insertDeps,
+      )
+    ) {
+      return startOrderIndex;
+    }
+
+    applyTypedRunExtension(
+      tail,
+      appendedText,
+      this.insertDeps,
+      this.deferTextMaterialization,
+    );
+    this.packedInsertNextPrepareIndex = expectedPrepareIndex;
+    this.nonConflictingRunCount += appendedEvents;
+    this.processedEventCount += appendedEvents;
+    this.samplePeakSequenceRecordCount();
+    return orderIndex;
   }
 
   /**

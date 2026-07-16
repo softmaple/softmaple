@@ -278,6 +278,39 @@ export class IndexedSequence<T extends object> {
     return effectIndex;
   }
 
+  /**
+   * Prepare-view boundary immediately after a known item.
+   *
+   * Packed replay uses this once per candidate span to prove that extending a
+   * middle-position typed run lands at the same boundary as scalar replay.
+   * The query follows the item's cached leaf location and ancestor weights,
+   * so it is O(log n) and does not materialize sequence positions.
+   */
+  prepareIndexAfter(item: T): number {
+    const location = this.resolveLocation(item);
+    if (!location) {
+      return -1;
+    }
+
+    let prepareIndex = 0;
+    for (let offset = 0; offset <= location.offsetInLeaf; offset++) {
+      this.structuralOperationCount++;
+      prepareIndex += location.leaf.prepareWeights[offset] ?? 0;
+    }
+
+    let current: IndexedNode<T> = location.leaf;
+    while (current.parent) {
+      this.structuralOperationCount++;
+      const parent: InternalNode<T> = current.parent;
+      for (let index = 0; index < current.childIndex; index++) {
+        this.structuralOperationCount++;
+        prepareIndex += parent.children[index]?.prepareSum ?? 0;
+      }
+      current = parent;
+    }
+    return prepareIndex;
+  }
+
   clear(): void {
     this.root = null;
     this.locationsByItem = new WeakMap<T, ItemLocation<T>>();

@@ -80,6 +80,28 @@ export interface PackedLinearEventGraphBuild {
 }
 
 /**
+ * Owned numeric layout for one packed critical-section replay.
+ *
+ * `eventOrder` maps replay rank to packed insertion offset and
+ * `rankByOffset` is its inverse. Section bounds index that order. The graph
+ * builds all four columns in one branch-preserving traversal so the critical
+ * planner does not have to walk every event and edge a second time.
+ */
+export interface PackedBranchReplayLayout {
+  readonly eventOrder: Uint32Array;
+  readonly rankByOffset: Uint32Array;
+  readonly sectionEnds: Uint32Array;
+  readonly linearSections: Uint8Array;
+  readonly sectionCount: number;
+}
+
+interface PackedBranchTraversalWorkspace {
+  readonly remainingParents: Uint32Array;
+  readonly roots: number[];
+  sortBranchGroup(group: number[]): void;
+}
+
+/**
  * Immutable, allocation-light storage for an already validated EGW3 prefix.
  *
  * Public `GraphEvent` objects and parent sets are reconstructed only at an API
@@ -483,57 +505,8 @@ export class PackedEventGraphBase {
       }
       return result;
     }
-    const remainingParents = new Uint32Array(this.count);
-    const exclusiveSpan = new Uint32Array(this.count);
-    const longestPath = new Uint32Array(this.count);
-    const roots: number[] = [];
-
-    for (let offset = 0; offset < this.count; offset++) {
-      const parentCount = this.parentCountAt(offset);
-      remainingParents[offset] = parentCount;
-      if (parentCount === 0) roots.push(offset);
-    }
-
-    // Packed insertion offsets are topological ranks. Accumulate the size of
-    // each exclusive single-parent branch in reverse order; multi-parent
-    // merge suffixes are shared and therefore do not belong to either branch.
-    for (let offset = this.count - 1; offset >= 0; offset--) {
-      let span = 1;
-      let path = 1;
-      const start = this.childStarts![offset]!;
-      const end = this.childStarts![offset + 1]!;
-      for (let cursor = start; cursor < end; cursor++) {
-        const childOffset = this.childOffsets![cursor]!;
-        if (remainingParents[childOffset] === 1) {
-          span += exclusiveSpan[childOffset]!;
-        }
-        path = Math.max(path, 1 + longestPath[childOffset]!);
-      }
-      exclusiveSpan[offset] = span;
-      longestPath[offset] = path;
-    }
-
-    const compareExclusive = (left: number, right: number): number => {
-      const difference = exclusiveSpan[left]! - exclusiveSpan[right]!;
-      return difference === 0
-        ? compareEventIds(this.ids![left]!, this.ids![right]!)
-        : difference;
-    };
-    const compareLongest = (left: number, right: number): number => {
-      const difference = longestPath[left]! - longestPath[right]!;
-      return difference === 0
-        ? compareEventIds(this.ids![left]!, this.ids![right]!)
-        : difference;
-    };
-    const sortBranchGroup = (group: number[]): void => {
-      const hasLongExclusiveBranch = group.some(
-        (offset) => exclusiveSpan[offset]! > MAX_EXCLUSIVE_BRANCH_SPAN,
-      );
-      group.sort(hasLongExclusiveBranch ? compareLongest : compareExclusive);
-    };
-    if (roots.length > 1) {
-      sortBranchGroup(roots);
-    }
+    const { remainingParents, roots, sortBranchGroup } =
+      this.createBranchTraversalWorkspace();
 
     const stack: number[] = [];
     for (let index = roots.length - 1; index >= 0; index--) {
@@ -572,6 +545,247 @@ export class PackedEventGraphBase {
       throw new Error("Cycle detected in packed event graph");
     }
     return result;
+  }
+
+  /**
+   * Build replay order, inverse rank, and critical cuts in one numeric DFS.
+   *
+   * The standalone critical planner historically initialized another parent
+   * counter, walked every child edge again, kept a separate ready bitmap, and
+   * inverted the finished order in a final pass. The DFS stack is already the
+   * authoritative ready set, so critical-frontier accounting can advance as
+   * each offset is emitted. Once an offset is popped, its remaining-parent
+   * slot is dead and can hold the inverse replay rank.
+   */
+  buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout {
+    const eventCount = this.count;
+    if (eventCount === 0) {
+      const empty = new Uint32Array();
+      return {
+        eventOrder: empty,
+        rankByOffset: empty,
+        sectionEnds: empty,
+        linearSections: new Uint8Array(),
+        sectionCount: 0,
+      };
+    }
+
+    if (this.exactLinear) {
+      const eventOrder = new Uint32Array(eventCount);
+      for (let offset = 0; offset < eventCount; offset++) {
+        eventOrder[offset] = offset;
+      }
+      return {
+        eventOrder,
+        rankByOffset: eventOrder,
+        sectionEnds: new Uint32Array([eventCount]),
+        linearSections: new Uint8Array([1]),
+        sectionCount: 1,
+      };
+    }
+
+    const { remainingParents, roots, sortBranchGroup } =
+      this.createBranchTraversalWorkspace();
+    const parentStarts = this.parentStarts!;
+    const parentOffsets = this.parentOffsets!;
+    const childStarts = this.childStarts!;
+    const childOffsets = this.childOffsets!;
+
+    const stack: number[] = [];
+    for (let index = roots.length - 1; index >= 0; index--) {
+      stack.push(roots[index]!);
+    }
+
+    const eventOrder = new Uint32Array(eventCount);
+    const rankByOffset = remainingParents;
+    const sectionEnds = new Uint32Array(eventCount);
+    const linearSections = new Uint8Array(eventCount);
+    const prefixFrontier = new Uint8Array(eventCount);
+    const readyParentCoverage = new Uint32Array(eventCount);
+    const newlyReady: number[] = [];
+
+    let readyCount = roots.length;
+    let prefixFrontierSize = 0;
+    let missingReadyParentPairs = 0;
+    let sectionCount = 0;
+    let sectionStart = 0;
+    let sectionIsLinear = true;
+    let resultLength = 0;
+
+    while (stack.length > 0) {
+      const eventOffset = stack.pop()!;
+      const orderIndex = resultLength;
+      eventOrder[orderIndex] = eventOffset;
+      rankByOffset[eventOffset] = orderIndex;
+      resultLength++;
+      readyCount--;
+
+      const parentStart = parentStarts[eventOffset]!;
+      const parentEnd = parentStarts[eventOffset + 1]!;
+      const parentCount = parentEnd - parentStart;
+      const prefixFrontierSizeBefore = prefixFrontierSize;
+      let parentsInPrefixFrontier = 0;
+
+      // Remove the popped ready root's coverage while replacing its live
+      // parents with the event itself. All arithmetic uses the ready count
+      // after the pop, matching the standalone planner exactly.
+      for (let cursor = parentStart; cursor < parentEnd; cursor++) {
+        const parentOffset = parentOffsets[cursor]!;
+        const previousCoverage = readyParentCoverage[parentOffset]!;
+        if (previousCoverage === 0) {
+          throw new Error("Invalid packed replay ready-parent coverage");
+        }
+        const nextCoverage = previousCoverage - 1;
+        readyParentCoverage[parentOffset] = nextCoverage;
+
+        if (prefixFrontier[parentOffset] !== 1) {
+          continue;
+        }
+        parentsInPrefixFrontier++;
+        missingReadyParentPairs -= readyCount - nextCoverage;
+        prefixFrontier[parentOffset] = 0;
+        prefixFrontierSize--;
+      }
+
+      if (orderIndex === sectionStart) {
+        sectionIsLinear =
+          parentCount === prefixFrontierSizeBefore &&
+          parentsInPrefixFrontier === prefixFrontierSizeBefore;
+      } else if (
+        parentCount !== 1 ||
+        parentOffsets[parentStart] !== eventOrder[orderIndex - 1]
+      ) {
+        sectionIsLinear = false;
+      }
+
+      missingReadyParentPairs -=
+        prefixFrontierSizeBefore - parentsInPrefixFrontier;
+      prefixFrontier[eventOffset] = 1;
+      prefixFrontierSize++;
+      missingReadyParentPairs += readyCount - readyParentCoverage[eventOffset]!;
+
+      newlyReady.length = 0;
+      const childStart = childStarts[eventOffset]!;
+      const childEnd = childStarts[eventOffset + 1]!;
+      for (let cursor = childStart; cursor < childEnd; cursor++) {
+        const childOffset = childOffsets[cursor]!;
+        const remaining = remainingParents[childOffset]! - 1;
+        remainingParents[childOffset] = remaining;
+        if (remaining !== 0) {
+          continue;
+        }
+
+        const childParentStart = parentStarts[childOffset]!;
+        const childParentEnd = parentStarts[childOffset + 1]!;
+        let childParentsInPrefixFrontier = 0;
+        for (
+          let parentCursor = childParentStart;
+          parentCursor < childParentEnd;
+          parentCursor++
+        ) {
+          const parentOffset = parentOffsets[parentCursor]!;
+          if (prefixFrontier[parentOffset] === 1) {
+            childParentsInPrefixFrontier++;
+          }
+          readyParentCoverage[parentOffset] =
+            readyParentCoverage[parentOffset]! + 1;
+        }
+        missingReadyParentPairs +=
+          prefixFrontierSize - childParentsInPrefixFrontier;
+        readyCount++;
+        newlyReady.push(childOffset);
+      }
+
+      if (readyCount === 0 || missingReadyParentPairs === 0) {
+        sectionEnds[sectionCount] = orderIndex + 1;
+        linearSections[sectionCount] = sectionIsLinear ? 1 : 0;
+        sectionCount++;
+        sectionStart = orderIndex + 1;
+      }
+
+      if (newlyReady.length > 1) {
+        sortBranchGroup(newlyReady);
+      }
+      for (let index = newlyReady.length - 1; index >= 0; index--) {
+        stack.push(newlyReady[index]!);
+      }
+    }
+
+    if (resultLength !== eventCount) {
+      throw new Error("Cycle detected in packed event graph");
+    }
+    if (sectionStart !== eventCount) {
+      throw new Error("Packed critical replay plan did not cover every event");
+    }
+
+    return {
+      eventOrder,
+      rankByOffset,
+      sectionEnds: sectionEnds.slice(0, sectionCount),
+      linearSections: linearSections.slice(0, sectionCount),
+      sectionCount,
+    };
+  }
+
+  private createBranchTraversalWorkspace(): PackedBranchTraversalWorkspace {
+    const remainingParents = new Uint32Array(this.count);
+    const exclusiveSpan = new Uint32Array(this.count);
+    const longestPath = new Uint32Array(this.count);
+    const roots: number[] = [];
+    const parentStarts = this.parentStarts!;
+    const childStarts = this.childStarts!;
+    const childOffsets = this.childOffsets!;
+
+    for (let offset = 0; offset < this.count; offset++) {
+      const parentCount = parentStarts[offset + 1]! - parentStarts[offset]!;
+      remainingParents[offset] = parentCount;
+      if (parentCount === 0) {
+        roots.push(offset);
+      }
+    }
+
+    // Packed insertion offsets are topological ranks. Accumulate the size of
+    // each exclusive single-parent branch in reverse order; multi-parent
+    // merge suffixes are shared and therefore do not belong to either branch.
+    for (let offset = this.count - 1; offset >= 0; offset--) {
+      let span = 1;
+      let path = 1;
+      const start = childStarts[offset]!;
+      const end = childStarts[offset + 1]!;
+      for (let cursor = start; cursor < end; cursor++) {
+        const childOffset = childOffsets[cursor]!;
+        if (remainingParents[childOffset] === 1) {
+          span += exclusiveSpan[childOffset]!;
+        }
+        path = Math.max(path, 1 + longestPath[childOffset]!);
+      }
+      exclusiveSpan[offset] = span;
+      longestPath[offset] = path;
+    }
+
+    const compareExclusive = (left: number, right: number): number => {
+      const difference = exclusiveSpan[left]! - exclusiveSpan[right]!;
+      return difference === 0
+        ? compareEventIds(this.idAt(left)!, this.idAt(right)!)
+        : difference;
+    };
+    const compareLongest = (left: number, right: number): number => {
+      const difference = longestPath[left]! - longestPath[right]!;
+      return difference === 0
+        ? compareEventIds(this.idAt(left)!, this.idAt(right)!)
+        : difference;
+    };
+    const sortBranchGroup = (group: number[]): void => {
+      const hasLongExclusiveBranch = group.some(
+        (offset) => exclusiveSpan[offset]! > MAX_EXCLUSIVE_BRANCH_SPAN,
+      );
+      group.sort(hasLongExclusiveBranch ? compareLongest : compareExclusive);
+    };
+    if (roots.length > 1) {
+      sortBranchGroup(roots);
+    }
+
+    return { remainingParents, roots, sortBranchGroup };
   }
 
   *iterateEvents(): IterableIterator<GraphEvent> {

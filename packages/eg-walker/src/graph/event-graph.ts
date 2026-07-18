@@ -28,6 +28,7 @@ import type {
 import {
   buildPackedLinearEventGraphBase,
   PackedEventGraphBase,
+  type PackedBranchReplayLayout,
   type PackedCanonicalIdRun,
 } from "./internals/packed-event-graph-base";
 import {
@@ -70,6 +71,7 @@ export interface PackedLinearReplayView {
 export interface PackedReplayPlanningView extends PackedLinearReplayView {
   offsetOf(id: EventId): number | undefined;
   getBranchPreservingOrderOffsets(): Uint32Array;
+  buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout;
   eventAt(offset: number): GraphEvent | undefined;
   parentCountAt(offset: number): number;
   parentOffsetAt(offset: number, parentIndex: number): number | undefined;

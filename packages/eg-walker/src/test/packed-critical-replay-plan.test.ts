@@ -127,11 +127,24 @@ describe("packed critical-section replay planning", () => {
       graph,
       "getBranchPreservingTopologicalOrder",
     );
+    const packedView = graph.getPackedReplayPlanningView()!;
+    const legacyOrder = packedView.getBranchPreservingOrderOffsets();
+    const standaloneOrder = vi.spyOn(
+      packedView,
+      "getBranchPreservingOrderOffsets",
+    );
 
     const compact = planPackedCriticalReplaySections(graph);
 
     expect(compact).not.toBeNull();
     expect(materializedOrder).not.toHaveBeenCalled();
+    expect(standaloneOrder).not.toHaveBeenCalled();
+    standaloneOrder.mockRestore();
+    for (let orderIndex = 0; orderIndex < legacyOrder.length; orderIndex++) {
+      const eventOffset = legacyOrder[orderIndex]!;
+      expect(compact!.eventOffsetAt(orderIndex)).toBe(eventOffset);
+      expect(compact!.orderIndexOfOffset(eventOffset)).toBe(orderIndex);
+    }
 
     const expected = planCriticalReplaySections(graph);
     expect(compact!.sectionCount).toBe(expected.length);

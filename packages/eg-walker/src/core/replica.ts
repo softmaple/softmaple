@@ -25,6 +25,7 @@ import type {
 import { compareEventIds } from "../graph/event-id";
 import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
+import { TransientUtf16RopeEditor } from "../text/transient-utf16-rope";
 import {
   CriticalCheckpointStore,
   MAX_RETAINED_CHECKPOINTS,
@@ -100,6 +101,11 @@ import {
   inspectCausalEventBatch,
   type CausalEventBatch,
 } from "./causal-event-batch";
+
+type Utf16DocumentView = Pick<
+  PersistentUtf16Rope,
+  "length" | "hasSurrogateCodeUnits" | "codeUnitAt"
+>;
 
 type LazyEventGraphSource = () => EventGraph;
 
@@ -1334,16 +1340,18 @@ export class EgWalkerReplica {
     }
   }
 
-  private validateIndex(index: number, allowEnd: boolean): void {
+  private validateIndex(
+    index: number,
+    allowEnd: boolean,
+    document: Utf16DocumentView = this.documentBuffer,
+  ): void {
     if (!Number.isSafeInteger(index)) {
       throw new Error(`Index ${index} must be a safe integer`);
     }
-    const max = allowEnd
-      ? this.documentBuffer.length
-      : this.documentBuffer.length - 1;
+    const max = allowEnd ? document.length : document.length - 1;
     if (index < 0 || index > max) {
       throw new Error(
-        `Index ${index} out of bounds [0, ${max}] for document of length ${this.documentBuffer.length}`,
+        `Index ${index} out of bounds [0, ${max}] for document of length ${document.length}`,
       );
     }
   }
@@ -1356,19 +1364,22 @@ export class EgWalkerReplica {
    * lone surrogates in the merged text. Rejecting at the public boundary keeps
    * the CRDT layer free of mid-surrogate operations.
    */
-  private assertNotMidSurrogate(index: number): void {
+  private assertNotMidSurrogate(
+    index: number,
+    document: Utf16DocumentView = this.documentBuffer,
+  ): void {
     if (
       index <= 0 ||
-      index >= this.documentBuffer.length ||
-      !this.documentBuffer.hasSurrogateCodeUnits
+      index >= document.length ||
+      !document.hasSurrogateCodeUnits
     ) {
       return;
     }
-    const high = this.documentBuffer.codeUnitAt(index - 1)!;
+    const high = document.codeUnitAt(index - 1)!;
     if (high < 0xd800 || high > 0xdbff) {
       return;
     }
-    const low = this.documentBuffer.codeUnitAt(index)!;
+    const low = document.codeUnitAt(index)!;
     if (low >= 0xdc00 && low <= 0xdfff) {
       throw new Error(
         `Index ${index} falls between surrogate halves of a single code point`,
@@ -1378,6 +1389,7 @@ export class EgWalkerReplica {
 
   private validateLocalOperation(
     operation: ExternalOperation,
+    document: Utf16DocumentView = this.documentBuffer,
   ): ExternalOperation | null {
     if (operation.type === OPERATION_TYPE.INSERT) {
       // Empty inserts are no-ops; skip index validation.
@@ -1385,8 +1397,8 @@ export class EgWalkerReplica {
         return null;
       }
       assertWellFormedUtf16(operation.text, "insert text");
-      this.validateIndex(operation.index, true);
-      this.assertNotMidSurrogate(operation.index);
+      this.validateIndex(operation.index, true, document);
+      this.assertNotMidSurrogate(operation.index, document);
       return operation;
     }
 
@@ -1400,15 +1412,15 @@ export class EgWalkerReplica {
     if (operation.length <= 0) {
       return null;
     }
-    this.validateIndex(operation.index, false);
-    this.assertNotMidSurrogate(operation.index);
+    this.validateIndex(operation.index, false, document);
+    this.assertNotMidSurrogate(operation.index, document);
 
-    if (operation.index + operation.length > this.documentBuffer.length) {
+    if (operation.index + operation.length > document.length) {
       throw new Error(
-        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${this.documentBuffer.length}`,
+        `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${document.length}`,
       );
     }
-    this.assertNotMidSurrogate(operation.index + operation.length);
+    this.assertNotMidSurrogate(operation.index + operation.length, document);
 
     return operation;
   }
@@ -1990,6 +2002,10 @@ export class EgWalkerReplica {
     startSection: number,
     endSection: number,
   ): void {
+    // These sections precede the retained checkpoint window, so no
+    // intermediate persistent root is observable. Apply their splices to a
+    // one-shot piece index and freeze once at the section-range boundary.
+    const editor = new TransientUtf16RopeEditor(this.documentBuffer);
     let pendingKind: "insert" | "delete" | null = null;
     let pendingIndex = 0;
     let pendingLength = 0;
@@ -1997,20 +2013,14 @@ export class EgWalkerReplica {
 
     const flush = (): void => {
       if (pendingKind === "insert") {
-        this.applyPlainDocumentOperation({
-          type: OPERATION_TYPE.INSERT,
-          index: pendingIndex,
-          text:
-            pendingInsertParts.length === 1
-              ? pendingInsertParts[0]!
-              : pendingInsertParts.join(""),
-        });
+        editor.insert(
+          pendingIndex,
+          pendingInsertParts.length === 1
+            ? pendingInsertParts[0]!
+            : pendingInsertParts.join(""),
+        );
       } else if (pendingKind === "delete") {
-        this.applyPlainDocumentOperation({
-          type: OPERATION_TYPE.DELETE,
-          index: pendingIndex,
-          length: pendingLength,
-        });
+        editor.delete(pendingIndex, pendingLength);
       }
       pendingKind = null;
       pendingLength = 0;
@@ -2042,11 +2052,14 @@ export class EgWalkerReplica {
         }
 
         flush();
-        this.validateLocalOperation({
-          type: OPERATION_TYPE.INSERT,
-          index: operationIndex,
-          text: content,
-        });
+        this.validateLocalOperation(
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: operationIndex,
+            text: content,
+          },
+          editor,
+        );
         pendingKind = "insert";
         pendingIndex = operationIndex;
         pendingLength = operationLength;
@@ -2058,31 +2071,35 @@ export class EgWalkerReplica {
         continue;
       }
       if (pendingKind === "delete" && operationIndex === pendingIndex) {
-        const virtualDocumentLength =
-          this.documentBuffer.length - pendingLength;
+        const virtualDocumentLength = editor.length - pendingLength;
         if (operationIndex + operationLength > virtualDocumentLength) {
           throw new Error(
             `Delete range [${operationIndex}, ${operationIndex + operationLength}) exceeds document length ${virtualDocumentLength}`,
           );
         }
         const combinedLength = pendingLength + operationLength;
-        this.assertNotMidSurrogate(operationIndex + combinedLength);
+        this.assertNotMidSurrogate(operationIndex + combinedLength, editor);
         pendingLength = combinedLength;
         continue;
       }
 
       flush();
-      this.validateLocalOperation({
-        type: OPERATION_TYPE.DELETE,
-        index: operationIndex,
-        length: operationLength,
-      });
+      this.validateLocalOperation(
+        {
+          type: OPERATION_TYPE.DELETE,
+          index: operationIndex,
+          length: operationLength,
+        },
+        editor,
+      );
       pendingKind = "delete";
       pendingIndex = operationIndex;
       pendingLength = operationLength;
     }
 
     flush();
+    this.documentBuffer = editor.finish();
+    this.documentCache = null;
     if (end > start) {
       this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
     }

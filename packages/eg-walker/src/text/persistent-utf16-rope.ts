@@ -436,6 +436,17 @@ export class PersistentUtf16Rope {
     return collectLeaves(this.root).map((candidate) => candidate.length);
   }
 
+  /** Ordered leaf boundaries used when an assembler preserves interior leaves. */
+  getLeafBoundaries(): ReadonlyArray<number> {
+    const boundaries = [0];
+    let end = 0;
+    for (const candidate of collectLeaves(this.root)) {
+      end += candidate.length;
+      boundaries.push(end);
+    }
+    return boundaries;
+  }
+
   getMaxBranchWidth(): number {
     let max = 0;
     const stack: RopeNode[] = [this.root];

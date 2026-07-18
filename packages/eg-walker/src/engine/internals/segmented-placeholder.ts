@@ -146,6 +146,7 @@ export class SegmentedPlaceholderState<Owner extends object> {
   private sliceRoot: SliceNode<Owner> | null = null;
   private readonly allocatedSegmentIds = new Set<EventId>();
   private readonly boundaryNodes = new Map<number, SegmentNode>();
+  private readonly reservedBoundaryIds = new Map<number, EventId>();
   private readonly directPathNodes: SegmentNode[] = [];
   private mutationPrepareLengthBefore = 0;
   private mutationEffectLengthBefore = 0;
@@ -500,7 +501,7 @@ export class SegmentedPlaceholderState<Owner extends object> {
     if (requiresSplit) {
       let rightId: EventId;
       try {
-        rightId = this.allocateFreshSegmentId();
+        rightId = this.takeReservedBoundaryId(absoluteOffset + 1);
       } catch (error) {
         this.directPathNodes.length = 0;
         this.structuralOperationCount = operationCountBeforeValidation;
@@ -606,10 +607,9 @@ export class SegmentedPlaceholderState<Owner extends object> {
   }
 
   /**
-   * Range-delete hot path that retains a logical boundary for every selected
-   * UTF-16 unit. Packed scalar events use these stable boundaries as their
-   * independent native-recovery targets while sharing the range mutation and
-   * ranked-sequence weight update.
+   * Range-delete hot path for independent packed scalar events. Stable segment
+   * IDs are reserved in scalar order, but their treap nodes remain lazy until
+   * a later transition or native-recovery snapshot needs the exact boundary.
    */
   deletePrepareVisibleUnitsInSlice(
     slice: PlaceholderPhysicalSlice<Owner>,
@@ -624,11 +624,22 @@ export class SegmentedPlaceholderState<Owner extends object> {
     );
   }
 
+  /**
+   * Materialize the two logical boundaries needed to persist an exact lazy
+   * delete target. Cold replay keeps targets as numeric coordinates and calls
+   * this only when runtime sequence records are requested for native recovery.
+   */
+  materializeLogicalRangeBoundaries(start: number, end: number): void {
+    this.assertRange(start, end);
+    this.ensureLogicalBoundary(start);
+    this.ensureLogicalBoundary(end);
+  }
+
   private deletePrepareVisibleRangesInSlice(
     slice: PlaceholderPhysicalSlice<Owner>,
     localStart: number,
     maxLength: number,
-    preserveUnitBoundaries: boolean,
+    reserveUnitBoundaryIds: boolean,
   ): PlaceholderDeleteResult<Owner> {
     this.assertOwnedSlice(slice);
     if (
@@ -645,11 +656,11 @@ export class SegmentedPlaceholderState<Owner extends object> {
       slice.end,
       maxLength,
     );
-    if (preserveUnitBoundaries) {
+    if (reserveUnitBoundaryIds) {
       for (const range of ranges) {
         for (let offset = range.start; offset < range.end; offset++) {
-          this.ensureLogicalBoundary(offset);
-          this.ensureLogicalBoundary(offset + 1);
+          this.reserveLogicalBoundaryId(offset);
+          this.reserveLogicalBoundaryId(offset + 1);
         }
       }
     }
@@ -1113,6 +1124,27 @@ export class SegmentedPlaceholderState<Owner extends object> {
     this.insertLogicalBoundary(offset);
   }
 
+  private reserveLogicalBoundaryId(offset: number): void {
+    if (
+      offset === 0 ||
+      offset === this.length ||
+      this.boundaryNodes.has(offset) ||
+      this.reservedBoundaryIds.has(offset)
+    ) {
+      return;
+    }
+    this.reservedBoundaryIds.set(offset, this.allocateFreshSegmentId());
+  }
+
+  private takeReservedBoundaryId(offset: number): EventId {
+    const reserved = this.reservedBoundaryIds.get(offset);
+    if (reserved === undefined) {
+      return this.allocateFreshSegmentId();
+    }
+    this.reservedBoundaryIds.delete(offset);
+    return reserved;
+  }
+
   private insertLogicalBoundary(offset: number): void {
     this.directPathNodes.length = 0;
     let node: SegmentNode | null = this.root;
@@ -1144,7 +1176,7 @@ export class SegmentedPlaceholderState<Owner extends object> {
     // Allocate and validate the stable ID before changing span lengths or
     // topology. Lazy propagation below is therefore entered only after the
     // external allocator has succeeded.
-    const rightId = this.allocateFreshSegmentId();
+    const rightId = this.takeReservedBoundaryId(offset);
     for (let index = 0; index < this.directPathNodes.length; index++) {
       this.push(this.directPathNodes[index]!);
     }

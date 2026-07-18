@@ -491,6 +491,27 @@ export class DeleteTargetIndex {
     return this.runEventTargetCount > 0;
   }
 
+  /**
+   * Split placeholder logical segments only at native-recovery boundaries.
+   * Runtime replay keeps these targets as stable numeric ranges, so eagerly
+   * splitting every scalar unit would add O(k log n) work to cold load while
+   * providing no benefit until sequence records are serialized.
+   */
+  materializePlaceholderTargetBoundaries(): void {
+    for (const group of this.groups.values()) {
+      let target = this.groupHeads[group] ?? EMPTY_HANDLE;
+      while (target !== EMPTY_HANDLE) {
+        if (this.kindOf(target) === DELETE_TARGET_KIND.PLACEHOLDER) {
+          this.placeholderStateOf(target).materializeLogicalRangeBoundaries(
+            this.placeholderStartOf(target),
+            this.placeholderEndOf(target),
+          );
+        }
+        target = this.targetNext[target] ?? EMPTY_HANDLE;
+      }
+    }
+  }
+
   materializeRunEventTargetsOf(
     deleteEventId: EventId,
     resolveItemId: (eventId: EventId) => EventId,

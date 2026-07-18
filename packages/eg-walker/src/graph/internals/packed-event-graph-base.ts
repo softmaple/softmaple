@@ -531,7 +531,9 @@ export class PackedEventGraphBase {
       );
       group.sort(hasLongExclusiveBranch ? compareLongest : compareExclusive);
     };
-    sortBranchGroup(roots);
+    if (roots.length > 1) {
+      sortBranchGroup(roots);
+    }
 
     const stack: number[] = [];
     for (let index = roots.length - 1; index >= 0; index--) {
@@ -558,7 +560,9 @@ export class PackedEventGraphBase {
         remainingParents[childOffset] = remaining;
         if (remaining === 0) newlyReady.push(childOffset);
       }
-      sortBranchGroup(newlyReady);
+      if (newlyReady.length > 1) {
+        sortBranchGroup(newlyReady);
+      }
       for (let index = newlyReady.length - 1; index >= 0; index--) {
         stack.push(newlyReady[index]!);
       }

@@ -617,6 +617,10 @@ describe("packed critical-section replay planning", () => {
       SegmentedPlaceholderState.prototype,
       "deletePrepareVisibleUnitsInSlice",
     );
+    const materializeBoundaries = vi.spyOn(
+      SegmentedPlaceholderState.prototype,
+      "materializeLogicalRangeBoundaries",
+    );
     const packed = new EgWalkerReplica(
       "packed-delete-run",
       initialText,
@@ -625,6 +629,7 @@ describe("packed critical-section replay planning", () => {
     const packedRangeDeletes = rangeDelete.mock.calls.filter(
       ([, localStart, maxLength]) => localStart === 1 && maxLength === 63,
     ).length;
+    const eagerBoundaryCalls = materializeBoundaries.mock.calls.length;
 
     rangeDelete.mockClear();
     const object = new EgWalkerReplica(
@@ -636,6 +641,7 @@ describe("packed critical-section replay planning", () => {
     rangeDelete.mockRestore();
 
     expect(packedRangeDeletes).toBe(1);
+    expect(eagerBoundaryCalls).toBe(0);
     expect(objectRangeDeletes).toBe(0);
     expect(packed.getText()).toBe("x".repeat(64));
     expect(packed.getText()).toBe(object.getText());
@@ -676,6 +682,8 @@ describe("packed critical-section replay planning", () => {
     });
 
     const packedTargets = packedEngine.getDeleteTargetRecords();
+    expect(materializeBoundaries).toHaveBeenCalled();
+    materializeBoundaries.mockRestore();
     expect(packedEngine.getSequenceRecords()).toEqual(
       objectEngine.getSequenceRecords(),
     );

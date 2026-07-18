@@ -576,7 +576,7 @@ export class EgWalkerEngine {
 
   getSequenceRecords(): EngineSequenceRecord[] {
     this.flushPendingInsert();
-    this.materializeRunDeleteTargets();
+    this.materializeSnapshotDeleteTargets();
     const items = this.sequence.toArray();
     if (this.segmentedPlaceholders.size === 0) {
       return items.map(recordFromItem);
@@ -639,7 +639,7 @@ export class EgWalkerEngine {
 
   getDeleteTargetRecords(): DeleteTargetRecord[] {
     this.flushPendingInsert();
-    this.materializeRunDeleteTargets();
+    this.materializeSnapshotDeleteTargets();
     const records = this.deleteTargets.entries((target) =>
       target.state
         .logicalSegmentsInRange(target.start, target.end)
@@ -684,6 +684,11 @@ export class EgWalkerEngine {
       (eventId) => this.resolveRunDeleteTargetItem(eventId).id,
     );
     this.samplePeakSequenceRecordCount();
+  }
+
+  private materializeSnapshotDeleteTargets(): void {
+    this.materializeRunDeleteTargets();
+    this.deleteTargets.materializePlaceholderTargetBoundaries();
   }
 
   captureRecoveryState(): EngineRecoveryState {
@@ -1317,7 +1322,11 @@ export class EgWalkerEngine {
     }
 
     const appendedEvents = orderIndex - startOrderIndex;
-    if (appendedEvents < 2 || contentStart < 0 || contentEnd <= contentStart) {
+    if (
+      appendedEvents === 0 ||
+      contentStart < 0 ||
+      contentEnd <= contentStart
+    ) {
       return startOrderIndex;
     }
     const appendedText = plan.sliceInsertedContent(contentStart, contentEnd);

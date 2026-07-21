@@ -216,8 +216,62 @@ describe("packed critical-section replay planning", () => {
     }
   });
 
+  it("matches the general planner across contiguous strict chains and branch boundaries", () => {
+    const events: GraphEvent[] = [event("root", [], 0)];
+    let timestamp = 1;
+    let leftParent = "root";
+    for (let index = 0; index < 64; index++) {
+      const id = `left:${index}`;
+      events.push(event(id, [leftParent], timestamp++));
+      leftParent = id;
+    }
+    let rightParent = "root";
+    for (let index = 0; index < 32; index++) {
+      const id = `right:${index}`;
+      events.push(event(id, [rightParent], timestamp++));
+      rightParent = id;
+    }
+    events.push(event("merge", [leftParent, rightParent], timestamp++));
+    let tailParent = "merge";
+    for (let index = 0; index < 16; index++) {
+      const id = `tail:${index}`;
+      events.push(event(id, [tailParent], timestamp++));
+      tailParent = id;
+    }
+    events.push(
+      event("fan:left", [tailParent], timestamp++),
+      event("fan:right", [tailParent], timestamp++),
+      event("join", ["fan:left", "fan:right"], timestamp++),
+      event("leaf", ["join"], timestamp++),
+    );
+
+    const graph = pack(events);
+    const compact = planPackedCriticalReplaySections(graph)!;
+    const expected = planCriticalReplaySections(graph);
+
+    expect(compact.strictChainRunCount).toBeGreaterThan(0);
+    expect(compact.strictChainEventCount).toBeGreaterThan(64);
+    expect(compact.sectionCount).toBe(expected.length);
+    for (let sectionIndex = 0; sectionIndex < expected.length; sectionIndex++) {
+      expect(
+        compact.materializeSection(sectionIndex).map(({ id }) => id),
+      ).toEqual(expected[sectionIndex]!.events.map(({ id }) => id));
+      expect(compact.isLinearSection(sectionIndex)).toBe(
+        isLinear(
+          expected[sectionIndex]!.events,
+          expected[sectionIndex]!.baseFrontier,
+        ),
+      );
+    }
+    for (let orderIndex = 0; orderIndex < compact.eventCount; orderIndex++) {
+      expect(
+        compact.orderIndexOfOffset(compact.eventOffsetAt(orderIndex)),
+      ).toBe(orderIndex);
+    }
+  });
+
   it("keeps full frontier accounting constant as strict chains grow", () => {
-    for (const branchLength of [16, 128, 1_024]) {
+    for (const branchLength of [16, 128, 1_024, 1_025]) {
       const events: GraphEvent[] = [event("root", [], 0)];
       let leftParent = "root";
       let rightParent = "root";

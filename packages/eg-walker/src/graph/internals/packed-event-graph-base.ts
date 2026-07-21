@@ -735,6 +735,49 @@ export class PackedEventGraphBase {
           remainingParents[chainEventOffset] === 0
         ) {
           let chainTailOffset = -1;
+          const chainEmitsCut =
+            readyCount === 0 || missingReadyParentPairs === 0;
+          const chainSectionIsLinear = prefixFrontierSize === 1;
+          if (!chainEmitsCut && resultLength === sectionStart) {
+            sectionIsLinear = chainSectionIsLinear;
+          }
+
+          // Packed insertion offsets are topological ranks. Long operation-
+          // granularity runs are normally stored as consecutive one-parent
+          // offsets, so prove that compact CSR shape directly and skip child
+          // offset loads plus parent-counter writes for every interior event.
+          while (chainEventOffset + 1 < eventCount) {
+            const chainChildOffset = chainEventOffset + 1;
+            const chainChildStart = childStarts[chainEventOffset]!;
+            const chainChildParentStart = parentStarts[chainChildOffset]!;
+            if (
+              childStarts[chainEventOffset + 1] !== chainChildStart + 1 ||
+              parentStarts[chainChildOffset + 1] !==
+                chainChildParentStart + 1 ||
+              parentOffsets[chainChildParentStart] !== chainEventOffset
+            ) {
+              break;
+            }
+
+            eventOrder[resultLength] = chainEventOffset;
+            rankByOffset[chainEventOffset] = resultLength;
+            resultLength++;
+            strictChainEventCount++;
+            if (chainEmitsCut) {
+              sectionEnds[sectionCount] = resultLength;
+              linearSections[sectionCount] = chainSectionIsLinear ? 1 : 0;
+              sectionCount++;
+              sectionStart = resultLength;
+            }
+
+            chainTailOffset = chainEventOffset;
+            chainEventOffset = chainChildOffset;
+          }
+
+          // The general tier preserves arbitrary non-adjacent packed DAGs.
+          // Interior remaining-parent slots are dead once their event is
+          // emitted and immediately become inverse ranks, so only the final
+          // held-out child needs to be marked ready before it reaches stack.
           while (true) {
             const chainChildStart = childStarts[chainEventOffset]!;
             const chainChildEnd = childStarts[chainEventOffset + 1]!;
@@ -752,19 +795,13 @@ export class PackedEventGraphBase {
               break;
             }
 
-            const chainOrderIndex = resultLength;
-            if (chainOrderIndex === sectionStart) {
-              sectionIsLinear = prefixFrontierSize === 1;
-            }
-            eventOrder[chainOrderIndex] = chainEventOffset;
-            rankByOffset[chainEventOffset] = chainOrderIndex;
+            eventOrder[resultLength] = chainEventOffset;
+            rankByOffset[chainEventOffset] = resultLength;
             resultLength++;
             strictChainEventCount++;
-            remainingParents[chainChildOffset] = 0;
-
-            if (readyCount === 0 || missingReadyParentPairs === 0) {
+            if (chainEmitsCut) {
               sectionEnds[sectionCount] = resultLength;
-              linearSections[sectionCount] = sectionIsLinear ? 1 : 0;
+              linearSections[sectionCount] = chainSectionIsLinear ? 1 : 0;
               sectionCount++;
               sectionStart = resultLength;
             }
@@ -775,6 +812,7 @@ export class PackedEventGraphBase {
 
           if (chainTailOffset !== -1) {
             strictChainRunCount++;
+            remainingParents[chainEventOffset] = 0;
             prefixFrontier[eventOffset] = 0;
             readyParentCoverage[eventOffset] = 0;
             prefixFrontier[chainTailOffset] = 1;
@@ -813,7 +851,7 @@ export class PackedEventGraphBase {
   private createBranchTraversalWorkspace(): PackedBranchTraversalWorkspace {
     const remainingParents = new Uint32Array(this.count);
     const exclusiveSpan = new Uint32Array(this.count);
-    const longestPath = new Uint32Array(this.count);
+    let longestPath: Uint32Array | null = null;
     const roots: number[] = [];
     const parentStarts = this.parentStarts!;
     const childStarts = this.childStarts!;
@@ -830,9 +868,16 @@ export class PackedEventGraphBase {
     // Packed insertion offsets are topological ranks. Accumulate the size of
     // each exclusive single-parent branch in reverse order; multi-parent
     // merge suffixes are shared and therefore do not belong to either branch.
+    //
+    // Longest-path ordering is needed only after some exclusive branch crosses
+    // MAX_EXCLUSIVE_BRANCH_SPAN. Most collaborative traces never cross that
+    // threshold, so allocating and filling another event-sized column for
+    // every child edge is pure cold-load overhead. Activate it lazily at the
+    // first long branch. Because children have larger topological offsets,
+    // only the already-visited suffix needs a one-time backfill.
+    let nextCombinedOffset = -1;
     for (let offset = this.count - 1; offset >= 0; offset--) {
       let span = 1;
-      let path = 1;
       const start = childStarts[offset]!;
       const end = childStarts[offset + 1]!;
       for (let cursor = start; cursor < end; cursor++) {
@@ -840,10 +885,46 @@ export class PackedEventGraphBase {
         if (remainingParents[childOffset] === 1) {
           span += exclusiveSpan[childOffset]!;
         }
-        path = Math.max(path, 1 + longestPath[childOffset]!);
       }
       exclusiveSpan[offset] = span;
-      longestPath[offset] = path;
+      if (span > MAX_EXCLUSIVE_BRANCH_SPAN) {
+        longestPath = new Uint32Array(this.count);
+        for (
+          let backfillOffset = this.count - 1;
+          backfillOffset >= offset;
+          backfillOffset--
+        ) {
+          let backfillPath = 1;
+          const backfillStart = childStarts[backfillOffset]!;
+          const backfillEnd = childStarts[backfillOffset + 1]!;
+          for (let cursor = backfillStart; cursor < backfillEnd; cursor++) {
+            backfillPath = Math.max(
+              backfillPath,
+              1 + longestPath[childOffsets[cursor]!]!,
+            );
+          }
+          longestPath[backfillOffset] = backfillPath;
+        }
+        nextCombinedOffset = offset - 1;
+        break;
+      }
+    }
+    if (longestPath !== null) {
+      for (let offset = nextCombinedOffset; offset >= 0; offset--) {
+        let span = 1;
+        let path = 1;
+        const start = childStarts[offset]!;
+        const end = childStarts[offset + 1]!;
+        for (let cursor = start; cursor < end; cursor++) {
+          const childOffset = childOffsets[cursor]!;
+          if (remainingParents[childOffset] === 1) {
+            span += exclusiveSpan[childOffset]!;
+          }
+          path = Math.max(path, 1 + longestPath[childOffset]!);
+        }
+        exclusiveSpan[offset] = span;
+        longestPath[offset] = path;
+      }
     }
 
     const compareExclusive = (left: number, right: number): number => {
@@ -853,15 +934,19 @@ export class PackedEventGraphBase {
         : difference;
     };
     const compareLongest = (left: number, right: number): number => {
-      const difference = longestPath[left]! - longestPath[right]!;
+      const difference = longestPath![left]! - longestPath![right]!;
       return difference === 0
         ? compareEventIds(this.idAt(left)!, this.idAt(right)!)
         : difference;
     };
     const sortBranchGroup = (group: number[]): void => {
-      const hasLongExclusiveBranch = group.some(
-        (offset) => exclusiveSpan[offset]! > MAX_EXCLUSIVE_BRANCH_SPAN,
-      );
+      let hasLongExclusiveBranch = false;
+      for (let index = 0; index < group.length; index++) {
+        if (exclusiveSpan[group[index]!]! > MAX_EXCLUSIVE_BRANCH_SPAN) {
+          hasLongExclusiveBranch = true;
+          break;
+        }
+      }
       group.sort(hasLongExclusiveBranch ? compareLongest : compareExclusive);
     };
     if (roots.length > 1) {

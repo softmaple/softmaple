@@ -47,6 +47,7 @@ up automatically.
 | [`event-graph-diff.property.test.ts`](./event-graph-diff.property.test.ts)                           | `diffVersions` matches expanded causal-set differences; frontier expansion covers the whole graph.      |
 | [`packed-linear-replay.property.test.ts`](./packed-linear-replay.property.test.ts)                   | Packed exact-linear replay matches ordinary replay for valid shrinkable UTF-16 edit scripts.            |
 | [`packed-critical-replay-plan.property.test.ts`](./packed-critical-replay-plan.property.test.ts)     | Packed numeric critical-section cuts match the general planner for shrinkable causal DAGs.              |
+| [`packed-delete-target-index.property.test.ts`](./packed-delete-target-index.property.test.ts)       | Out-of-order packed delete keys materialize in stable replay order.                                     |
 | [`deferred-text-materialization.property.test.ts`](./deferred-text-materialization.property.test.ts) | Deferred cold replay produces the same text and transient records as eager replay.                      |
 
 ## Shared helpers

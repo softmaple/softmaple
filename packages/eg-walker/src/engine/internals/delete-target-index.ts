@@ -48,6 +48,7 @@ export type DeleteTargetHandle = number;
 type DeleteOwners = DeleteTargetGroupHandle | Set<DeleteTargetGroupHandle>;
 
 const EMPTY_HANDLE = 0;
+const EMPTY_PACKED_ORDER_GROUPS = new Uint32Array(0);
 const INITIAL_CAPACITY = 16;
 const MAX_UINT32 = 0xffff_ffff;
 
@@ -123,6 +124,9 @@ const readIdRef = (
 export class DeleteTargetIndex {
   private readonly groups = new Map<EventId, DeleteTargetGroupHandle>();
   private readonly byItem = new Map<EventId, DeleteOwners>();
+  private packedOrderGroups = EMPTY_PACKED_ORDER_GROUPS;
+  private packedOrderStart = 0;
+  private packedGroupCount = 0;
 
   private groupCount = 0;
   private groupCapacity = INITIAL_CAPACITY;
@@ -154,6 +158,7 @@ export class DeleteTargetIndex {
   clear(): void {
     this.groups.clear();
     this.byItem.clear();
+    this.packedOrderGroups = EMPTY_PACKED_ORDER_GROUPS;
     this.groupHeads.fill(0, 0, this.groupCount + 1);
     this.groupTails.fill(0, 0, this.groupCount + 1);
     this.groupCommitted.fill(0, 0, this.groupCount + 1);
@@ -166,6 +171,8 @@ export class DeleteTargetIndex {
     this.placeholderStateRefs = new WeakMap();
     this.placeholderStates = [undefined];
     this.groupCount = 0;
+    this.packedOrderStart = 0;
+    this.packedGroupCount = 0;
     this.targetCount = 0;
     this.targetFreeHead = EMPTY_HANDLE;
     this.runEventTargetCount = 0;
@@ -236,6 +243,30 @@ export class DeleteTargetIndex {
     return group;
   }
 
+  /** Configure the dense delete-key lane for one packed replay order range. */
+  configurePackedOrderRange(
+    startOrderIndex: number,
+    endOrderIndex: number,
+  ): void {
+    if (
+      !Number.isSafeInteger(startOrderIndex) ||
+      !Number.isSafeInteger(endOrderIndex) ||
+      startOrderIndex < 0 ||
+      endOrderIndex < startOrderIndex ||
+      endOrderIndex - startOrderIndex >= MAX_UINT32
+    ) {
+      throw new Error(
+        `Invalid packed delete order range ${startOrderIndex}..${endOrderIndex}`,
+      );
+    }
+    if (this.packedGroupCount !== 0) {
+      throw new Error("Packed delete offsets are already active");
+    }
+    const length = endOrderIndex - startOrderIndex;
+    this.packedOrderGroups = new Uint32Array(length);
+    this.packedOrderStart = startOrderIndex;
+  }
+
   appendItem(group: DeleteTargetGroupHandle, itemId: EventId): void {
     this.assertActiveGroup(group);
     const target = this.allocateTarget(DELETE_TARGET_KIND.ITEM);
@@ -279,6 +310,19 @@ export class DeleteTargetIndex {
     this.addGroupMembership(group);
   }
 
+  commitPackedRecord(
+    deleteOrderIndex: number,
+    group: DeleteTargetGroupHandle,
+  ): void {
+    this.assertActiveGroup(group);
+    const localIndex = this.assertPackedOrderAvailable(deleteOrderIndex);
+    this.packedGroupCount++;
+    this.packedOrderGroups[localIndex] = group;
+    this.groupCommitted[group] = 1;
+    this.activeGroup = EMPTY_HANDLE;
+    this.addGroupMembership(group);
+  }
+
   abortRecord(group: DeleteTargetGroupHandle): void {
     this.assertActiveGroup(group);
     let target = this.groupHeads[group] ?? EMPTY_HANDLE;
@@ -301,6 +345,14 @@ export class DeleteTargetIndex {
   firstTargetOf(deleteEventId: EventId): DeleteTargetHandle {
     const group = this.groups.get(deleteEventId);
     return group === undefined
+      ? EMPTY_HANDLE
+      : (this.groupHeads[group] ?? EMPTY_HANDLE);
+  }
+
+  /** First target node for a packed delete replay order index. */
+  firstTargetOfPackedOrder(orderIndex: number): DeleteTargetHandle {
+    const group = this.packedGroupAtOrder(orderIndex);
+    return group === EMPTY_HANDLE
       ? EMPTY_HANDLE
       : (this.groupHeads[group] ?? EMPTY_HANDLE);
   }
@@ -394,6 +446,20 @@ export class DeleteTargetIndex {
     }
   }
 
+  /** Store a typed-run target without materializing the packed delete ID. */
+  recordPackedRunEvent(deleteOrderIndex: number, targetEventId: EventId): void {
+    const group = this.beginRecord();
+    try {
+      this.appendRunEvent(group, targetEventId);
+      this.commitPackedRecord(deleteOrderIndex, group);
+    } catch (error) {
+      if (this.activeGroup === group) {
+        this.abortRecord(group);
+      }
+      throw error;
+    }
+  }
+
   /** Store one placeholder range without allocating a runtime target object. */
   recordPlaceholderRange(
     deleteEventId: EventId,
@@ -405,6 +471,25 @@ export class DeleteTargetIndex {
     try {
       this.appendPlaceholderRange(group, state, start, end);
       this.commitRecord(deleteEventId, group);
+    } catch (error) {
+      if (this.activeGroup === group) {
+        this.abortRecord(group);
+      }
+      throw error;
+    }
+  }
+
+  /** Store a placeholder target without materializing the packed delete ID. */
+  recordPackedPlaceholderRange(
+    deleteOrderIndex: number,
+    state: SegmentedPlaceholderState<AugmentedCRDTItem>,
+    start: number,
+    end: number,
+  ): void {
+    const group = this.beginRecord();
+    try {
+      this.appendPlaceholderRange(group, state, start, end);
+      this.commitPackedRecord(deleteOrderIndex, group);
     } catch (error) {
       if (this.activeGroup === group) {
         this.abortRecord(group);
@@ -485,6 +570,11 @@ export class DeleteTargetIndex {
     for (const group of this.groups.values()) {
       this.materializeRunEventTargetsInGroup(group, resolveItemId);
     }
+    for (const group of this.packedOrderGroups) {
+      if (group !== EMPTY_HANDLE) {
+        this.materializeRunEventTargetsInGroup(group, resolveItemId);
+      }
+    }
   }
 
   hasRunEventTargets(): boolean {
@@ -499,16 +589,132 @@ export class DeleteTargetIndex {
    */
   materializePlaceholderTargetBoundaries(): void {
     for (const group of this.groups.values()) {
-      let target = this.groupHeads[group] ?? EMPTY_HANDLE;
-      while (target !== EMPTY_HANDLE) {
-        if (this.kindOf(target) === DELETE_TARGET_KIND.PLACEHOLDER) {
-          this.placeholderStateOf(target).materializeLogicalRangeBoundaries(
-            this.placeholderStartOf(target),
-            this.placeholderEndOf(target),
-          );
-        }
-        target = this.targetNext[target] ?? EMPTY_HANDLE;
+      this.materializePlaceholderTargetBoundariesInGroup(group);
+    }
+    for (const group of this.packedOrderGroups) {
+      if (group !== EMPTY_HANDLE) {
+        this.materializePlaceholderTargetBoundariesInGroup(group);
       }
+    }
+  }
+
+  materializePackedRecords(
+    resolveDeleteEventId: (orderIndex: number) => EventId,
+  ): void {
+    if (this.packedGroupCount === 0) {
+      this.releasePackedOrderRange();
+      return;
+    }
+    for (
+      let localIndex = 0;
+      localIndex < this.packedOrderGroups.length;
+      localIndex++
+    ) {
+      const group = this.packedOrderGroups[localIndex] ?? EMPTY_HANDLE;
+      if (group === EMPTY_HANDLE) {
+        continue;
+      }
+      const orderIndex = this.packedOrderStart + localIndex;
+      this.materializePackedRecord(
+        orderIndex,
+        resolveDeleteEventId(orderIndex),
+      );
+    }
+    this.releasePackedOrderRange();
+  }
+
+  materializePackedRecord(orderIndex: number, deleteEventId: EventId): void {
+    const localIndex = this.packedLocalIndex(orderIndex);
+    const group = this.packedOrderGroups[localIndex] ?? EMPTY_HANDLE;
+    if (group === EMPTY_HANDLE) {
+      return;
+    }
+    const replaced = this.groups.get(deleteEventId);
+    if (replaced !== undefined && replaced !== group) {
+      throw new Error(`Duplicate materialized delete event ${deleteEventId}`);
+    }
+    this.groups.set(deleteEventId, group);
+    this.packedOrderGroups[localIndex] = EMPTY_HANDLE;
+    this.packedGroupCount--;
+  }
+
+  hasPackedRecords(): boolean {
+    return this.packedGroupCount > 0;
+  }
+
+  hasPackedOrderRange(): boolean {
+    return this.packedOrderGroups.length > 0;
+  }
+
+  /** Reject an invalid or duplicate packed key before replay mutates state. */
+  assertPackedOrderAvailable(orderIndex: number): number {
+    const localIndex = this.packedLocalIndex(orderIndex);
+    if ((this.packedOrderGroups[localIndex] ?? EMPTY_HANDLE) !== EMPTY_HANDLE) {
+      throw new Error(`Duplicate packed delete order index ${orderIndex}`);
+    }
+    return localIndex;
+  }
+
+  assertPackedOrderRangeAvailable(
+    startOrderIndex: number,
+    endOrderIndex: number,
+  ): void {
+    if (
+      !Number.isSafeInteger(endOrderIndex) ||
+      endOrderIndex < startOrderIndex
+    ) {
+      throw new Error(
+        `Invalid packed delete order range ${startOrderIndex}..${endOrderIndex}`,
+      );
+    }
+    if (startOrderIndex === endOrderIndex) {
+      return;
+    }
+    const start = this.packedLocalIndex(startOrderIndex);
+    const end = this.packedLocalIndex(endOrderIndex - 1) + 1;
+    for (let localIndex = start; localIndex < end; localIndex++) {
+      if (
+        (this.packedOrderGroups[localIndex] ?? EMPTY_HANDLE) !== EMPTY_HANDLE
+      ) {
+        throw new Error(
+          `Duplicate packed delete order index ${this.packedOrderStart + localIndex}`,
+        );
+      }
+    }
+  }
+
+  releasePackedOrderRange(): void {
+    if (this.packedGroupCount !== 0) {
+      throw new Error(
+        "Cannot release packed delete keys before materialization",
+      );
+    }
+    this.packedOrderGroups = EMPTY_PACKED_ORDER_GROUPS;
+    this.packedOrderStart = 0;
+  }
+
+  materializeRunEventTargetsOfPackedOrder(
+    orderIndex: number,
+    resolveItemId: (eventId: EventId) => EventId,
+  ): void {
+    const group = this.packedGroupAtOrder(orderIndex);
+    if (group !== EMPTY_HANDLE) {
+      this.materializeRunEventTargetsInGroup(group, resolveItemId);
+    }
+  }
+
+  private materializePlaceholderTargetBoundariesInGroup(
+    group: DeleteTargetGroupHandle,
+  ): void {
+    let target = this.groupHeads[group] ?? EMPTY_HANDLE;
+    while (target !== EMPTY_HANDLE) {
+      if (this.kindOf(target) === DELETE_TARGET_KIND.PLACEHOLDER) {
+        this.placeholderStateOf(target).materializeLogicalRangeBoundaries(
+          this.placeholderStartOf(target),
+          this.placeholderEndOf(target),
+        );
+      }
+      target = this.targetNext[target] ?? EMPTY_HANDLE;
     }
   }
 
@@ -570,7 +776,6 @@ export class DeleteTargetIndex {
     this.targetStateRefs[target] = 0;
     this.targetStarts[target] = 0;
     this.targetEnds[target] = 0;
-    this.targetItemIds[target] = undefined;
     return target;
   }
 
@@ -803,6 +1008,23 @@ export class DeleteTargetIndex {
         `Invalid placeholder delete target [${start}, ${end}) for length ${state.length}`,
       );
     }
+  }
+
+  private packedGroupAtOrder(orderIndex: number): DeleteTargetGroupHandle {
+    const localIndex = this.packedLocalIndex(orderIndex);
+    return this.packedOrderGroups[localIndex] ?? EMPTY_HANDLE;
+  }
+
+  private packedLocalIndex(orderIndex: number): number {
+    const localIndex = orderIndex - this.packedOrderStart;
+    if (
+      !Number.isSafeInteger(orderIndex) ||
+      localIndex < 0 ||
+      localIndex >= this.packedOrderGroups.length
+    ) {
+      throw new Error(`Invalid packed delete order index ${orderIndex}`);
+    }
+    return localIndex;
   }
 
   private ensureGroupCapacity(required: number): void {

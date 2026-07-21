@@ -178,6 +178,7 @@ export class EgWalkerEngine {
   private prepareViewMayContainSurrogatePairs = false;
   private deferTextMaterialization = false;
   private canonicalizeDeleteTargetOrder = false;
+  private packedReplayPlan: PackedCriticalReplayPlan | null = null;
   private packedInsertTail: AugmentedCRDTItem | null = null;
   private packedInsertNextPrepareIndex = -1;
   private readonly packedInsertTailResult: InsertTailResult = { item: null };
@@ -235,6 +236,11 @@ export class EgWalkerEngine {
       eventGraph: graph,
       collectTransformedOperations: false,
     });
+    this.packedReplayPlan = plan;
+    this.deleteTargets.configurePackedOrderRange(
+      startOrderIndex,
+      endOrderIndex,
+    );
     this.deferTextMaterialization =
       this.resultingText.length === 0 ||
       eventCount >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS;
@@ -293,10 +299,25 @@ export class EgWalkerEngine {
   ): void {
     const start = plan.sectionStartAt(startSectionIndex);
     const end = plan.sectionEndAt(endSectionIndex - 1);
+    const materializeDeleteKeys = this.deleteTargets.hasPackedOrderRange();
     this.eventOrder.clear();
     for (let orderIndex = start; orderIndex < end; orderIndex++) {
-      this.eventOrder.set(plan.eventIdAt(orderIndex), orderIndex - start);
+      const eventOffset = plan.eventOffsetAt(orderIndex);
+      const eventId = plan.eventIdAtKnownOffset(eventOffset);
+      if (materializeDeleteKeys) {
+        this.deleteTargets.materializePackedRecord(orderIndex, eventId);
+      }
+      this.eventOrder.set(eventId, orderIndex - start);
     }
+    if (materializeDeleteKeys) {
+      if (this.deleteTargets.hasPackedRecords()) {
+        throw new Error(
+          "Packed retention did not materialize every delete key",
+        );
+      }
+      this.deleteTargets.releasePackedOrderRange();
+    }
+    this.packedReplayPlan = null;
     this.eventIndexesComplete = true;
   }
 
@@ -385,6 +406,7 @@ export class EgWalkerEngine {
    * graph that already contains {@link event}.
    */
   applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
+    this.materializePackedDeleteTargets();
     if (this.eventIndexesComplete && !this.eventOrder.has(event.id)) {
       this.eventOrder.set(event.id, this.eventOrder.size);
     }
@@ -431,6 +453,7 @@ export class EgWalkerEngine {
 
   /** Move the transient prepare view without applying a new event. */
   transitionPrepareView(version: Version, graph: EventGraph): void {
+    this.materializePackedDeleteTargets();
     this.flushPendingInsert();
     this.graph = graph;
     const { retreat, advance } = this.diffVersions(
@@ -677,6 +700,7 @@ export class EgWalkerEngine {
   }
 
   private materializeRunDeleteTargets(): void {
+    this.materializePackedDeleteTargets();
     if (!this.deleteTargets.hasRunEventTargets()) {
       return;
     }
@@ -684,6 +708,23 @@ export class EgWalkerEngine {
       (eventId) => this.resolveRunDeleteTargetItem(eventId).id,
     );
     this.samplePeakSequenceRecordCount();
+  }
+
+  private materializePackedDeleteTargets(): void {
+    if (!this.deleteTargets.hasPackedOrderRange()) {
+      return;
+    }
+    const plan = this.packedReplayPlan;
+    if (plan === null) {
+      throw new Error("Packed delete targets have no replay plan");
+    }
+    this.deleteTargets.materializePackedRecords((orderIndex) =>
+      plan.eventIdAt(orderIndex),
+    );
+    if (this.deleteTargets.hasPackedRecords()) {
+      throw new Error("Packed delete target materialization is incomplete");
+    }
+    this.packedReplayPlan = null;
   }
 
   private materializeSnapshotDeleteTargets(): void {
@@ -732,6 +773,7 @@ export class EgWalkerEngine {
       this.resultingText.hasSurrogateCodeUnits ||
       items.some((item) => recordContentHasSurrogateCodeUnits(item.content));
     this.canonicalizeDeleteTargetOrder = false;
+    this.packedReplayPlan = null;
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -905,11 +947,7 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.collectDeletePrepareDelta(
-            plan.eventIdAtKnownOffset(offset),
-            -1,
-            deltas,
-          );
+          this.collectPackedDeletePrepareDelta(plan, offset, rank, -1, deltas);
         }
       }
     }
@@ -926,11 +964,7 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.collectDeletePrepareDelta(
-            plan.eventIdAtKnownOffset(offset),
-            1,
-            deltas,
-          );
+          this.collectPackedDeletePrepareDelta(plan, offset, rank, 1, deltas);
         }
       }
     }
@@ -978,10 +1012,17 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.deleteTargets.materializeRunEventTargetsOf(
-            plan.eventIdAtKnownOffset(offset),
-            resolveItemId,
-          );
+          if (this.deleteTargets.firstTargetOfPackedOrder(rank) !== 0) {
+            this.deleteTargets.materializeRunEventTargetsOfPackedOrder(
+              rank,
+              resolveItemId,
+            );
+          } else {
+            this.deleteTargets.materializeRunEventTargetsOf(
+              plan.eventIdAtKnownOffset(offset),
+              resolveItemId,
+            );
+          }
         }
       }
     }
@@ -998,10 +1039,17 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.deleteTargets.materializeRunEventTargetsOf(
-            plan.eventIdAtKnownOffset(offset),
-            resolveItemId,
-          );
+          if (this.deleteTargets.firstTargetOfPackedOrder(rank) !== 0) {
+            this.deleteTargets.materializeRunEventTargetsOfPackedOrder(
+              rank,
+              resolveItemId,
+            );
+          } else {
+            this.deleteTargets.materializeRunEventTargetsOf(
+              plan.eventIdAtKnownOffset(offset),
+              resolveItemId,
+            );
+          }
         }
       }
     }
@@ -1184,10 +1232,10 @@ export class EgWalkerEngine {
     eventOffset: number,
     mayContinuePreviousInsert: boolean,
   ): void {
-    const eventId = plan.eventIdAtKnownOffset(eventOffset);
     const operationIndex = plan.operationIndexAtKnownOffset(eventOffset);
     const operationLength = plan.operationLengthAtKnownOffset(eventOffset);
     if (plan.isInsertAtKnownOffset(eventOffset)) {
+      const eventId = plan.eventIdAtKnownOffset(eventOffset);
       const canonicalRun = plan.canonicalIdRunAtKnownOffset(eventOffset);
       const canonicalSequence =
         canonicalRun === undefined
@@ -1234,18 +1282,19 @@ export class EgWalkerEngine {
     this.packedInsertTail = null;
     this.packedInsertNextPrepareIndex = -1;
     this.assertOperationInPrepareView(
-      eventId,
+      eventOffset,
       operationIndex,
       operationLength,
       true,
     );
     applyDelete(
-      eventId,
+      null,
       operationIndex,
       operationLength,
       this.deleteDeps,
       false,
       this.deferTextMaterialization,
+      plan.orderIndexOfKnownOffset(eventOffset),
     );
   }
 
@@ -1433,6 +1482,10 @@ export class EgWalkerEngine {
     if (appendedEvents < 2) {
       return startOrderIndex;
     }
+    this.deleteTargets.assertPackedOrderRangeAvailable(
+      startOrderIndex,
+      orderIndex,
+    );
 
     if (placeholder !== undefined) {
       const state = placeholder.state;
@@ -1458,9 +1511,8 @@ export class EgWalkerEngine {
           absoluteOffset < range.end;
           absoluteOffset++
         ) {
-          const eventOffset = plan.eventOffsetAt(startOrderIndex + consumed);
-          this.deleteTargets.recordPlaceholderRange(
-            plan.eventIdAtKnownOffset(eventOffset),
+          this.deleteTargets.recordPackedPlaceholderRange(
+            startOrderIndex + consumed,
             state,
             absoluteOffset,
             absoluteOffset + 1,
@@ -1492,9 +1544,8 @@ export class EgWalkerEngine {
         );
       }
       for (let consumed = 0; consumed < appendedEvents; consumed++) {
-        const eventOffset = plan.eventOffsetAt(startOrderIndex + consumed);
-        this.deleteTargets.recordRunEvent(
-          plan.eventIdAtKnownOffset(eventOffset),
+        this.deleteTargets.recordPackedRunEvent(
+          startOrderIndex + consumed,
           `${run.replicaId}:${run.startSequence + consumed}`,
         );
       }
@@ -1580,6 +1631,7 @@ export class EgWalkerEngine {
     this.prepareViewMayContainSurrogatePairs =
       this.resultingText.hasSurrogateCodeUnits;
     this.canonicalizeDeleteTargetOrder = false;
+    this.packedReplayPlan = null;
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -1727,7 +1779,7 @@ export class EgWalkerEngine {
    * retreat/advance, before any sequence, text, or delete-target mutation.
    */
   private assertOperationInPrepareView(
-    eventId: EventId,
+    eventId: EventId | number,
     operationIndex: number,
     operationLength: number,
     isDelete: boolean,
@@ -1750,7 +1802,10 @@ export class EgWalkerEngine {
     }
   }
 
-  private assertPrepareScalarBoundary(index: number, eventId: EventId): void {
+  private assertPrepareScalarBoundary(
+    index: number,
+    eventId: EventId | number,
+  ): void {
     if (!this.prepareViewMayContainSurrogatePairs) {
       return;
     }
@@ -1932,7 +1987,39 @@ export class EgWalkerEngine {
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
-    let target = this.deleteTargets.firstTargetOf(eventId);
+    this.collectDeletePrepareTargets(
+      this.deleteTargets.firstTargetOf(eventId),
+      delta,
+      deltas,
+    );
+  }
+
+  private collectPackedDeletePrepareDelta(
+    plan: PackedCriticalReplayPlan,
+    eventOffset: number,
+    orderIndex: number,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    const packedTarget =
+      this.deleteTargets.firstTargetOfPackedOrder(orderIndex);
+    if (packedTarget !== 0) {
+      this.collectDeletePrepareTargets(packedTarget, delta, deltas);
+      return;
+    }
+    this.collectDeletePrepareDelta(
+      plan.eventIdAtKnownOffset(eventOffset),
+      delta,
+      deltas,
+    );
+  }
+
+  private collectDeletePrepareTargets(
+    firstTarget: number,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    let target = firstTarget;
     while (target !== 0) {
       const kind = this.deleteTargets.kindOf(target);
       if (kind === DELETE_TARGET_KIND.ITEM) {

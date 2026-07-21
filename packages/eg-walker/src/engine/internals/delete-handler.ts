@@ -20,13 +20,17 @@ export interface DeleteHandlerDeps {
 }
 
 export const applyDelete = (
-  eventId: EventId,
+  eventId: EventId | null,
   operationIndex: number,
   operationLength: number,
   deps: DeleteHandlerDeps,
   collectTransformedOperations: boolean,
   deferTextMaterialization: boolean,
+  packedOrderIndex?: number,
 ): ReadonlyArray<ExternalOperation> => {
+  if (eventId === null && packedOrderIndex === undefined) {
+    throw new Error("Delete event ID is required outside packed replay");
+  }
   const {
     sequence,
     deleteTargets,
@@ -36,6 +40,11 @@ export const applyDelete = (
     itemToEffectIndex,
     deleteText,
   } = deps;
+  if (packedOrderIndex !== undefined) {
+    // Packed-order validation must precede every sequence, text, and target
+    // mutation. The commit below is then infallible for this replay step.
+    deleteTargets.assertPackedOrderAvailable(packedOrderIndex);
+  }
 
   // Any concurrent insert or delete breaks the typed-run we may have been
   // coalescing into the pending-insert buffer. Flush before we start carving
@@ -240,7 +249,11 @@ export const applyDelete = (
     throw error;
   }
 
-  deleteTargets.commitRecord(eventId, targetGroup);
+  if (packedOrderIndex === undefined) {
+    deleteTargets.commitRecord(eventId!, targetGroup);
+  } else {
+    deleteTargets.commitPackedRecord(packedOrderIndex, targetGroup);
+  }
 
   return outputDeleteIndexes === null
     ? NO_TRANSFORMED_OPERATIONS

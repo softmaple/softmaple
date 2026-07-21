@@ -849,11 +849,23 @@ describe("packed critical-section replay planning", () => {
     const plan = planPackedCriticalReplaySections(graph);
     expect(plan).not.toBeNull();
     const objectOrder = graph.getBranchPreservingTopologicalOrder();
-    expect(objectOrder.findIndex(({ id }) => id === "other:0")).toBeLessThan(
-      objectOrder.findIndex(({ id }) => id === "delete:0"),
+    const deleteOrderIndex = objectOrder.findIndex(
+      ({ id }) => id === "delete:0",
     );
+    expect(objectOrder.findIndex(({ id }) => id === "other:0")).toBeLessThan(
+      deleteOrderIndex,
+    );
+    expect(plan!.eventIdAt(deleteOrderIndex)).toBe("delete:0");
+    expect(plan!.eventOffsetAt(deleteOrderIndex)).not.toBe(deleteOrderIndex);
 
-    const lazyTarget = vi.spyOn(DeleteTargetIndex.prototype, "recordRunEvent");
+    const packedLazyTarget = vi.spyOn(
+      DeleteTargetIndex.prototype,
+      "recordPackedRunEvent",
+    );
+    const stringLazyTarget = vi.spyOn(
+      DeleteTargetIndex.prototype,
+      "recordRunEvent",
+    );
     const packedEngine = new EgWalkerEngine();
     const packedGenerated = packedEngine.generatePackedSectionRange(
       plan!,
@@ -864,8 +876,10 @@ describe("packed critical-section replay planning", () => {
       PersistentUtf16Rope.from(""),
     );
     packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
-    const lazyTargetCount = lazyTarget.mock.calls.length;
-    lazyTarget.mockRestore();
+    const packedLazyTargetCount = packedLazyTarget.mock.calls.length;
+    const stringLazyTargetCount = stringLazyTarget.mock.calls.length;
+    packedLazyTarget.mockRestore();
+    stringLazyTarget.mockRestore();
 
     const objectEngine = new EgWalkerEngine();
     const objectGenerated = objectEngine.generate(objectOrder, "", {
@@ -874,7 +888,8 @@ describe("packed critical-section replay planning", () => {
       collectTransformedOperations: false,
     });
 
-    expect(lazyTargetCount).toBe(15);
+    expect(packedLazyTargetCount).toBe(15);
+    expect(stringLazyTargetCount).toBe(0);
     expect(packedGenerated.text).toBe("x".repeat(16));
     expect(packedGenerated.text).toBe(objectGenerated.text);
     expect(packedGenerated.stats.sequenceRecordCount).toBe(3);
@@ -1003,6 +1018,8 @@ describe("packed critical-section replay planning", () => {
     expect(packedEngine.getDeleteTargetRecords()).toEqual(
       objectEngine.getDeleteTargetRecords(),
     );
+    packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
+    packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
     expect(packed.stats.retreatCount).toBe(object.stats.retreatCount);
     expect(packed.stats.advanceCount).toBe(object.stats.advanceCount);
     for (const version of [

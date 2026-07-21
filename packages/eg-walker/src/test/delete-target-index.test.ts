@@ -198,6 +198,122 @@ describe("DeleteTargetIndex", () => {
   });
 
   describe("packed target arena", () => {
+    it("keeps packed delete keys numeric until replay-order materialization", () => {
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        8,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const index = new DeleteTargetIndex();
+      index.configurePackedOrderRange(10, 15);
+
+      index.recordPackedPlaceholderRange(12, state, 2, 4);
+      const itemGroup = index.beginRecord();
+      index.appendItem(itemGroup, "item:left");
+      index.commitPackedRecord(10, itemGroup);
+      index.recordPackedRunEvent(14, "author:4");
+
+      expect(index.entries()).toEqual([]);
+      expect(index.hasPackedRecords()).toBe(true);
+      expect(index.kindOf(index.firstTargetOfPackedOrder(10))).toBe(
+        DELETE_TARGET_KIND.ITEM,
+      );
+      expect(index.kindOf(index.firstTargetOfPackedOrder(12))).toBe(
+        DELETE_TARGET_KIND.PLACEHOLDER,
+      );
+      expect(index.kindOf(index.firstTargetOfPackedOrder(14))).toBe(
+        DELETE_TARGET_KIND.RUN_EVENT,
+      );
+      expect(() => index.firstTargetOfPackedOrder(9)).toThrow(
+        "Invalid packed delete order index",
+      );
+      expect(() => index.firstTargetOfPackedOrder(15)).toThrow(
+        "Invalid packed delete order index",
+      );
+
+      index.materializeRunEventTargetsOfPackedOrder(14, () => "author:4:0");
+      index.extendMembership("item:left", "item:right");
+      index.materializePackedRecords((orderIndex) => `delete:${orderIndex}`);
+
+      expect(index.hasPackedRecords()).toBe(false);
+      expect(index.hasPackedOrderRange()).toBe(false);
+      expect(
+        index.entries(({ start, end }) => [`placeholder:${start}:${end}`]),
+      ).toEqual([
+        {
+          deleteEventId: "delete:10",
+          targetIds: ["item:left", "item:right"],
+        },
+        {
+          deleteEventId: "delete:12",
+          targetIds: ["placeholder:2:4"],
+        },
+        { deleteEventId: "delete:14", targetIds: ["author:4:0"] },
+      ]);
+    });
+
+    it("rejects duplicate packed ranks without replacing the live target", () => {
+      const index = new DeleteTargetIndex();
+      index.configurePackedOrderRange(0, 2);
+      index.recordPackedRunEvent(0, "author:0");
+
+      expect(() => index.assertPackedOrderRangeAvailable(0, 2)).toThrow(
+        "Duplicate packed delete order index 0",
+      );
+      expect(() => index.recordPackedRunEvent(0, "author:1")).toThrow(
+        "Duplicate packed delete order index 0",
+      );
+      expect(index.runEventIdOf(index.firstTargetOfPackedOrder(0))).toBe(
+        "author:0",
+      );
+      index.materializeRunEventTargetsOfPackedOrder(0, () => "author:0:0");
+      index.materializePackedRecords((orderIndex) => `delete:${orderIndex}`);
+      expect(index.targetsOf("delete:0")).toEqual(["author:0:0"]);
+      expect(index.hasRunEventTargets()).toBe(false);
+    });
+
+    it("keeps a packed target retryable after an ID collision", () => {
+      const index = new DeleteTargetIndex();
+      index.record("collision", ["existing"]);
+      index.configurePackedOrderRange(10, 11);
+      const group = index.beginRecord();
+      index.appendItem(group, "packed");
+      index.commitPackedRecord(10, group);
+
+      expect(() => index.materializePackedRecord(10, "collision")).toThrow(
+        "Duplicate materialized delete event collision",
+      );
+      expect(index.targetsOf("collision")).toEqual(["existing"]);
+      expect(index.hasPackedRecords()).toBe(true);
+      expect(index.itemIdOf(index.firstTargetOfPackedOrder(10))).toBe("packed");
+
+      index.materializePackedRecord(10, "delete:10");
+      index.releasePackedOrderRange();
+      expect(index.entries()).toEqual([
+        { deleteEventId: "collision", targetIds: ["existing"] },
+        { deleteEventId: "delete:10", targetIds: ["packed"] },
+      ]);
+    });
+
+    it("clears and reuses packed order ranges above the uint16 boundary", () => {
+      const index = new DeleteTargetIndex();
+      index.configurePackedOrderRange(65_535, 70_002);
+      index.recordPackedRunEvent(65_536, "author:1");
+      index.recordPackedRunEvent(70_000, "author:2");
+      expect(index.firstTargetOfPackedOrder(65_536)).not.toBe(0);
+      expect(index.firstTargetOfPackedOrder(70_000)).not.toBe(0);
+
+      index.clear();
+      index.configurePackedOrderRange(7, 9);
+      expect(index.hasPackedRecords()).toBe(false);
+      expect(index.hasRunEventTargets()).toBe(false);
+      expect(index.firstTargetOfPackedOrder(7)).toBe(0);
+      index.recordPackedRunEvent(8, "author:3");
+      expect(index.runEventIdOf(index.firstTargetOfPackedOrder(8))).toBe(
+        "author:3",
+      );
+    });
+
     it("walks mixed targets through allocation-free numeric cursors", () => {
       const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
         8,

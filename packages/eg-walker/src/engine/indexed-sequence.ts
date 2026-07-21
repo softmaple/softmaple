@@ -25,12 +25,6 @@ export class IndexOutOfRangeError extends Error {
   }
 }
 
-interface WeightDelta {
-  prepare: number;
-  effect: number;
-  anchor: number;
-}
-
 type WeightKind = "prepare" | "effect" | "anchor";
 
 type WeightOffsetResolver<T> = (
@@ -64,6 +58,10 @@ export class IndexedSequence<T extends object> {
   private locationsByItem = new WeakMap<T, ItemLocation<T>>();
   private readonly leafOrder = new OrderMaintenanceList<LeafNode<T>>();
   private structuralOperationCount = 0;
+  private weightUpdateGeneration = 0;
+  private weightUpdateActive = false;
+  private readonly weightUpdateLevelA: IndexedNode<T>[] = [];
+  private readonly weightUpdateLevelB: IndexedNode<T>[] = [];
 
   /**
    * Build a ranked sequence from an already ordered record list in linear time.
@@ -312,11 +310,17 @@ export class IndexedSequence<T extends object> {
   }
 
   clear(): void {
+    if (this.weightUpdateActive) {
+      throw new Error("Cannot clear IndexedSequence during a batch update");
+    }
     this.root = null;
     this.locationsByItem = new WeakMap<T, ItemLocation<T>>();
     if (this.maintainOrder) {
       this.leafOrder.resetFromItems([]);
     }
+    this.weightUpdateGeneration = 0;
+    this.weightUpdateLevelA.length = 0;
+    this.weightUpdateLevelB.length = 0;
     this.structuralOperationCount = 0;
   }
 
@@ -450,7 +454,24 @@ export class IndexedSequence<T extends object> {
    * internal node instead of once per event.
    */
   updateItems(items: Iterable<T>): void {
-    const leafDeltas = new Map<LeafNode<T>, WeightDelta>();
+    if (this.weightUpdateActive) {
+      throw new Error("Cannot update IndexedSequence reentrantly");
+    }
+
+    this.weightUpdateActive = true;
+    try {
+      this.updateItemsWithScratch(items);
+    } finally {
+      this.weightUpdateLevelA.length = 0;
+      this.weightUpdateLevelB.length = 0;
+      this.weightUpdateActive = false;
+    }
+  }
+
+  private updateItemsWithScratch(items: Iterable<T>): void {
+    const generation = this.nextWeightUpdateGeneration();
+    let current = this.weightUpdateLevelA;
+    let next = this.weightUpdateLevelB;
     for (const item of items) {
       this.structuralOperationCount++;
       const location = this.resolveLocation(item);
@@ -476,45 +497,61 @@ export class IndexedSequence<T extends object> {
       leaf.prepareWeights[offset] = newPrepare;
       leaf.effectWeights[offset] = newEffect;
       leaf.anchorWeights[offset] = newAnchor;
-      addWeightDelta(leafDeltas, leaf, prepareDelta, effectDelta, anchorDelta);
+      addPendingNodeWeightDelta(
+        current,
+        leaf,
+        generation,
+        prepareDelta,
+        effectDelta,
+        anchorDelta,
+      );
     }
 
-    let pending = new Map<IndexedNode<T>, WeightDelta>();
-    for (const [leaf, delta] of leafDeltas) {
-      this.structuralOperationCount++;
-      leaf.prepareSum += delta.prepare;
-      leaf.effectSum += delta.effect;
-      leaf.anchorSum += delta.anchor;
-      if (leaf.parent !== null) {
-        addWeightDelta(
-          pending,
-          leaf.parent,
-          delta.prepare,
-          delta.effect,
-          delta.anchor,
-        );
-      }
-    }
-
-    while (pending.size > 0) {
-      const next = new Map<IndexedNode<T>, WeightDelta>();
-      for (const [node, delta] of pending) {
+    while (current.length > 0) {
+      for (const node of current) {
         this.structuralOperationCount++;
-        node.prepareSum += delta.prepare;
-        node.effectSum += delta.effect;
-        node.anchorSum += delta.anchor;
+        const prepareDelta = node.pendingPrepareDelta;
+        const effectDelta = node.pendingEffectDelta;
+        const anchorDelta = node.pendingAnchorDelta;
+        node.prepareSum += prepareDelta;
+        node.effectSum += effectDelta;
+        node.anchorSum += anchorDelta;
         if (node.parent !== null) {
-          addWeightDelta(
+          addPendingNodeWeightDelta(
             next,
             node.parent,
-            delta.prepare,
-            delta.effect,
-            delta.anchor,
+            generation,
+            prepareDelta,
+            effectDelta,
+            anchorDelta,
           );
         }
       }
-      pending = next;
+      current.length = 0;
+      const completed = current;
+      current = next;
+      next = completed;
     }
+  }
+
+  private nextWeightUpdateGeneration(): number {
+    this.weightUpdateGeneration++;
+    if (Number.isSafeInteger(this.weightUpdateGeneration)) {
+      return this.weightUpdateGeneration;
+    }
+
+    if (this.root !== null) {
+      const stack: IndexedNode<T>[] = [this.root];
+      while (stack.length > 0) {
+        const node = stack.pop()!;
+        node.pendingWeightGeneration = 0;
+        if (node.kind === "internal") {
+          stack.push(...node.children);
+        }
+      }
+    }
+    this.weightUpdateGeneration = 1;
+    return this.weightUpdateGeneration;
   }
 
   /**
@@ -1468,21 +1505,25 @@ export class IndexedSequence<T extends object> {
   }
 }
 
-const addWeightDelta = <K>(
-  deltas: Map<K, WeightDelta>,
-  key: K,
+const addPendingNodeWeightDelta = <T extends object>(
+  touched: IndexedNode<T>[],
+  node: IndexedNode<T>,
+  generation: number,
   prepare: number,
   effect: number,
   anchor: number,
 ): void => {
-  const existing = deltas.get(key);
-  if (existing === undefined) {
-    deltas.set(key, { prepare, effect, anchor });
+  if (node.pendingWeightGeneration !== generation) {
+    node.pendingWeightGeneration = generation;
+    node.pendingPrepareDelta = prepare;
+    node.pendingEffectDelta = effect;
+    node.pendingAnchorDelta = anchor;
+    touched.push(node);
     return;
   }
-  existing.prepare += prepare;
-  existing.effect += effect;
-  existing.anchor += anchor;
+  node.pendingPrepareDelta += prepare;
+  node.pendingEffectDelta += effect;
+  node.pendingAnchorDelta += anchor;
 };
 
 const sumWeights = (weights: ReadonlyArray<number>): number =>

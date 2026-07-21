@@ -250,6 +250,62 @@ describe("IndexedSequence object-anchored hot paths", () => {
     );
   });
 
+  it("rejects reentrant mutations and releases reusable scratch state", () => {
+    const items = createItems(96);
+    const missing: WeightedItem = {
+      id: "missing",
+      prepare: 7,
+      effect: 11,
+    };
+    let sequence: IndexedSequence<WeightedItem> | undefined;
+    let nestedAction: "update" | "clear" | null = null;
+    sequence = new IndexedSequence<WeightedItem>(
+      (item) => {
+        if (nestedAction === "update" && item === items[0]) {
+          nestedAction = null;
+          sequence!.updateItems([items[1]!]);
+        } else if (nestedAction === "clear" && item === items[0]) {
+          nestedAction = null;
+          sequence!.clear();
+        }
+        return item.prepare;
+      },
+      (item) => item.effect,
+      items,
+      undefined,
+      true,
+    );
+
+    for (const index of [0, 40, 70]) {
+      Object.assign(items[index]!, {
+        prepare: (index % 3) + 2,
+        effect: (index % 5) + 3,
+      });
+    }
+    nestedAction = "update";
+
+    expect(() => sequence!.updateItems([items[0]!])).toThrow(/reentrantly/);
+    nestedAction = "clear";
+    expect(() => sequence!.updateItems([items[0]!])).toThrow(
+      /during a batch update/,
+    );
+    sequence.updateItems([
+      items[0]!,
+      items[40]!,
+      items[70]!,
+      missing,
+      items[0]!,
+    ]);
+
+    expect(sequence.prepareLength).toBe(
+      items.reduce((sum, item) => sum + item.prepare, 0),
+    );
+    expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(
+      items.reduce((sum, item) => sum + item.effect, 0),
+    );
+    expect(sequence.toArray()).toEqual(items);
+  });
+
   it("keeps adjacency and ranks correct when a 32-item leaf splits", () => {
     const items = createItems(64);
     const sequence = new IndexedSequence<WeightedItem>(

@@ -16,6 +16,10 @@ interface NodeBase<T extends object> {
   prepareSum: number;
   effectSum: number;
   anchorSum: number;
+  pendingWeightGeneration: number;
+  pendingPrepareDelta: number;
+  pendingEffectDelta: number;
+  pendingAnchorDelta: number;
 }
 
 export interface LeafNode<T extends object>
@@ -57,6 +61,10 @@ export const createLeaf = <T extends object>(): LeafNode<T> => ({
   prepareSum: 0,
   effectSum: 0,
   anchorSum: 0,
+  pendingWeightGeneration: 0,
+  pendingPrepareDelta: 0,
+  pendingEffectDelta: 0,
+  pendingAnchorDelta: 0,
 });
 
 export const createInternal = <T extends object>(
@@ -81,6 +89,10 @@ export const createInternal = <T extends object>(
     prepareSum,
     effectSum,
     anchorSum,
+    pendingWeightGeneration: 0,
+    pendingPrepareDelta: 0,
+    pendingEffectDelta: 0,
+    pendingAnchorDelta: 0,
   };
   for (let index = 0; index < children.length; index++) {
     const child = children[index];

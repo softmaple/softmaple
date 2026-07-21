@@ -20,6 +20,7 @@ describe("property: packed critical replay planning", () => {
 
         expect(compact).not.toBeNull();
         expect(compact!.sectionCount).toBe(expected.length);
+        let frontier = new Set<EventId>();
         for (
           let sectionIndex = 0;
           sectionIndex < expected.length;
@@ -34,6 +35,26 @@ describe("property: packed critical replay planning", () => {
               expected[sectionIndex]!.baseFrontier,
             ),
           );
+          expect(
+            versionsEqual(frontier, expected[sectionIndex]!.baseFrontier),
+          ).toBe(true);
+          frontier = compact!.advanceFrontierRange(
+            frontier,
+            sectionIndex,
+            sectionIndex + 1,
+          );
+          expect(
+            versionsEqual(frontier, expected[sectionIndex]!.endFrontier),
+          ).toBe(true);
+        }
+        for (
+          let orderIndex = 0;
+          orderIndex < compact!.eventCount;
+          orderIndex++
+        ) {
+          expect(
+            compact!.orderIndexOfOffset(compact!.eventOffsetAt(orderIndex)),
+          ).toBe(orderIndex);
         }
       }),
       fcParams(),

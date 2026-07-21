@@ -31,6 +31,8 @@ export class PackedCriticalReplayPlan {
     private readonly sectionEnds: Uint32Array,
     private readonly linearSections: Uint8Array,
     readonly sectionCount: number,
+    readonly strictChainEventCount: number,
+    readonly strictChainRunCount: number,
   ) {
     this.numericFrontier = new Uint8Array(eventOrder.length);
   }
@@ -473,5 +475,7 @@ export const planPackedCriticalReplaySections = (
     layout.sectionEnds,
     layout.linearSections,
     layout.sectionCount,
+    layout.strictChainEventCount,
+    layout.strictChainRunCount,
   );
 };

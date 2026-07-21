@@ -167,6 +167,82 @@ describe("packed critical-section replay planning", () => {
     ).toEqual(expected.flatMap(({ events }) => events.map(({ id }) => id)));
   });
 
+  it("fast-forwards strict chains across deferred and singleton cuts", () => {
+    const graph = pack([
+      event("root", [], 0),
+      event("left:0", ["root"], 1),
+      event("right:0", ["root"], 2),
+      event("left:1", ["left:0"], 3),
+      event("right:1", ["right:0"], 4),
+      event("left:2", ["left:1"], 5),
+      event("right:2", ["right:1"], 6),
+      event("left:3", ["left:2"], 7),
+      event("merge", ["left:3", "right:2"], 8),
+      event("tail:0", ["merge"], 9),
+      event("tail:1", ["tail:0"], 10),
+      event("tail:2", ["tail:1"], 11),
+      event("leaf", ["tail:2"], 12),
+    ]);
+
+    const compact = planPackedCriticalReplaySections(graph)!;
+    const expected = planCriticalReplaySections(graph);
+
+    expect(compact.strictChainEventCount).toBe(6);
+    expect(compact.sectionCount).toBe(expected.length);
+    expect(
+      Array.from({ length: compact.eventCount }, (_, orderIndex) =>
+        compact.eventIdAt(orderIndex),
+      ),
+    ).toEqual(expected.flatMap(({ events }) => events.map(({ id }) => id)));
+
+    let frontier = new Set<EventId>();
+    for (let sectionIndex = 0; sectionIndex < expected.length; sectionIndex++) {
+      expect(
+        versionsEqual(frontier, expected[sectionIndex]!.baseFrontier),
+      ).toBe(true);
+      frontier = compact.advanceFrontierRange(
+        frontier,
+        sectionIndex,
+        sectionIndex + 1,
+      );
+      expect(versionsEqual(frontier, expected[sectionIndex]!.endFrontier)).toBe(
+        true,
+      );
+    }
+    for (let orderIndex = 0; orderIndex < compact.eventCount; orderIndex++) {
+      expect(
+        compact.orderIndexOfOffset(compact.eventOffsetAt(orderIndex)),
+      ).toBe(orderIndex);
+    }
+  });
+
+  it("keeps full frontier accounting constant as strict chains grow", () => {
+    for (const branchLength of [16, 128, 1_024]) {
+      const events: GraphEvent[] = [event("root", [], 0)];
+      let leftParent = "root";
+      let rightParent = "root";
+      for (let index = 0; index < branchLength; index++) {
+        const left = `left:${index}`;
+        const right = `right:${index}`;
+        events.push(
+          event(left, [leftParent], index * 2 + 1),
+          event(right, [rightParent], index * 2 + 2),
+        );
+        leftParent = left;
+        rightParent = right;
+      }
+      events.push(
+        event("merge", [leftParent, rightParent], branchLength * 2 + 1),
+      );
+
+      const compact = planPackedCriticalReplaySections(pack(events))!;
+
+      expect(compact.strictChainEventCount).toBe(2 * (branchLength - 2));
+      expect(compact.strictChainRunCount).toBe(2);
+      expect(compact.eventCount - compact.strictChainEventCount).toBe(6);
+    }
+  });
+
   it("replays obsolete nonlinear cuts in bounded engine lifetimes", () => {
     const events: GraphEvent[] = [];
     let parents: EventId[] = [];

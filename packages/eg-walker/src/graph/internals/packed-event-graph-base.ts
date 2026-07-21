@@ -93,6 +93,10 @@ export interface PackedBranchReplayLayout {
   readonly sectionEnds: Uint32Array;
   readonly linearSections: Uint8Array;
   readonly sectionCount: number;
+  /** Events emitted without repeating unchanged strict-chain bookkeeping. */
+  readonly strictChainEventCount: number;
+  /** Maximal strict-chain spans emitted by the fast path. */
+  readonly strictChainRunCount: number;
 }
 
 interface PackedBranchTraversalWorkspace {
@@ -567,6 +571,8 @@ export class PackedEventGraphBase {
         sectionEnds: empty,
         linearSections: new Uint8Array(),
         sectionCount: 0,
+        strictChainEventCount: 0,
+        strictChainRunCount: 0,
       };
     }
 
@@ -581,6 +587,8 @@ export class PackedEventGraphBase {
         sectionEnds: new Uint32Array([eventCount]),
         linearSections: new Uint8Array([1]),
         sectionCount: 1,
+        strictChainEventCount: 0,
+        strictChainRunCount: 0,
       };
     }
 
@@ -611,6 +619,8 @@ export class PackedEventGraphBase {
     let sectionStart = 0;
     let sectionIsLinear = true;
     let resultLength = 0;
+    let strictChainEventCount = 0;
+    let strictChainRunCount = 0;
 
     while (stack.length > 0) {
       const eventOffset = stack.pop()!;
@@ -703,6 +713,77 @@ export class PackedEventGraphBase {
         sectionStart = orderIndex + 1;
       }
 
+      // A strict p -> v -> c chain leaves every frontier cardinality and
+      // ready-parent coverage total unchanged while replacing p with v.
+      // Hold the sole newly-ready event out of the stack, emit v, and replace
+      // it with c without repeating the parent/child edge scans.
+      // Stop before a leaf, fan-out, or fan-in boundary; the normal loop owns
+      // those state transitions.
+      if (
+        newlyReady.length === 1 &&
+        childEnd - childStart === 1 &&
+        childOffsets[childStart] === newlyReady[0] &&
+        prefixFrontier[eventOffset] === 1 &&
+        readyParentCoverage[eventOffset] === 1
+      ) {
+        let chainEventOffset = newlyReady[0]!;
+        const chainEventParentStart = parentStarts[chainEventOffset]!;
+        const chainEventParentEnd = parentStarts[chainEventOffset + 1]!;
+        if (
+          chainEventParentEnd - chainEventParentStart === 1 &&
+          parentOffsets[chainEventParentStart] === eventOffset &&
+          remainingParents[chainEventOffset] === 0
+        ) {
+          let chainTailOffset = -1;
+          while (true) {
+            const chainChildStart = childStarts[chainEventOffset]!;
+            const chainChildEnd = childStarts[chainEventOffset + 1]!;
+            if (chainChildEnd - chainChildStart !== 1) {
+              break;
+            }
+            const chainChildOffset = childOffsets[chainChildStart]!;
+            const chainChildParentStart = parentStarts[chainChildOffset]!;
+            const chainChildParentEnd = parentStarts[chainChildOffset + 1]!;
+            if (
+              chainChildParentEnd - chainChildParentStart !== 1 ||
+              parentOffsets[chainChildParentStart] !== chainEventOffset ||
+              remainingParents[chainChildOffset] !== 1
+            ) {
+              break;
+            }
+
+            const chainOrderIndex = resultLength;
+            if (chainOrderIndex === sectionStart) {
+              sectionIsLinear = prefixFrontierSize === 1;
+            }
+            eventOrder[chainOrderIndex] = chainEventOffset;
+            rankByOffset[chainEventOffset] = chainOrderIndex;
+            resultLength++;
+            strictChainEventCount++;
+            remainingParents[chainChildOffset] = 0;
+
+            if (readyCount === 0 || missingReadyParentPairs === 0) {
+              sectionEnds[sectionCount] = resultLength;
+              linearSections[sectionCount] = sectionIsLinear ? 1 : 0;
+              sectionCount++;
+              sectionStart = resultLength;
+            }
+
+            chainTailOffset = chainEventOffset;
+            chainEventOffset = chainChildOffset;
+          }
+
+          if (chainTailOffset !== -1) {
+            strictChainRunCount++;
+            prefixFrontier[eventOffset] = 0;
+            readyParentCoverage[eventOffset] = 0;
+            prefixFrontier[chainTailOffset] = 1;
+            readyParentCoverage[chainTailOffset] = 1;
+            newlyReady[0] = chainEventOffset;
+          }
+        }
+      }
+
       if (newlyReady.length > 1) {
         sortBranchGroup(newlyReady);
       }
@@ -724,6 +805,8 @@ export class PackedEventGraphBase {
       sectionEnds: sectionEnds.slice(0, sectionCount),
       linearSections: linearSections.slice(0, sectionCount),
       sectionCount,
+      strictChainEventCount,
+      strictChainRunCount,
     };
   }
 

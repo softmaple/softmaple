@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
 import type { EventId, GraphEvent } from "../types";
 
@@ -45,6 +47,7 @@ describe("pinned eg-walker reference conformance", () => {
     (idMode) => {
       // Arrange
       const runs = loadPinnedReferenceRuns();
+      const codec = new ColumnarEventGraphCodec();
 
       // Act
       let eventCount = 0;
@@ -57,9 +60,22 @@ describe("pinned eg-walker reference conformance", () => {
           eventGraph: graph,
           eventOrder: events,
         }).text;
+        const packedGraph = codec.decodeBinary(codec.encodeBinary(graph));
+        const packedActual = new EgWalkerReplica(
+          `conformance-${idMode}`,
+          "",
+          packedGraph,
+        ).getText();
 
         // Assert
         expect(actual, `reference run ${runIndex}`).toBe(run.endContent);
+        expect(
+          packedGraph.getPackedReplayPlanningView(),
+          `packed reference run ${runIndex}`,
+        ).not.toBeNull();
+        expect(packedActual, `packed reference run ${runIndex}`).toBe(
+          run.endContent,
+        );
       }
       expect(runs).toHaveLength(EXPECTED_RUN_COUNT);
       expect(eventCount).toBe(EXPECTED_EVENT_COUNT);

@@ -53,6 +53,7 @@ describe("RopeRecordContent", () => {
           appendText: () => undefined,
           appendRope: () => undefined,
           appendSlice: () => undefined,
+          appendLeafRange: () => undefined,
         },
         -1,
         1,

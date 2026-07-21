@@ -131,6 +131,38 @@ describe("PersistentUtf16Rope", () => {
     ).toThrow(/Invalid rope slice/);
   });
 
+  it("reuses one source traversal across whole-leaf assembly ranges", () => {
+    const original = PersistentUtf16Rope.from(
+      "x".repeat(UTF16_ROPE_TARGET_LEAF * 64),
+    );
+    const originalLeaves = original.getLeafIdentities();
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const assembled = PersistentUtf16Rope.assemble((assembler) => {
+      for (
+        let startLeaf = 0;
+        startLeaf < originalLeaves.length;
+        startLeaf += 4
+      ) {
+        assembler.appendLeafRange(
+          original,
+          startLeaf,
+          Math.min(startLeaf + 4, originalLeaves.length),
+        );
+      }
+    });
+    const stats = PersistentUtf16Rope.getInstrumentation();
+
+    expect(assembled.toString()).toBe(original.toString());
+    expect(assembled.getLeafIdentities()).toEqual(originalLeaves);
+    expect(stats.nodeVisits).toBe(original.nodeCount);
+    expect(() =>
+      PersistentUtf16Rope.assemble((assembler) => {
+        assembler.appendLeafRange(original, -1, 1);
+      }),
+    ).toThrow(/Invalid rope leaf range/);
+  });
+
   it("touches only a root-to-leaf path for a point edit", () => {
     const rope = PersistentUtf16Rope.from("x".repeat(2_048 * 2_000));
     PersistentUtf16Rope.resetInstrumentation();

@@ -60,6 +60,12 @@ export interface Utf16RopeAssembler {
   appendText(text: string): void;
   appendRope(rope: PersistentUtf16Rope): void;
   appendSlice(rope: PersistentUtf16Rope, start: number, end?: number): void;
+  /** Donate whole source leaves in `[startLeaf, endLeaf)` by identity. */
+  appendLeafRange(
+    rope: PersistentUtf16Rope,
+    startLeaf: number,
+    endLeaf: number,
+  ): void;
 }
 
 const counters = {
@@ -234,6 +240,10 @@ export class PersistentUtf16Rope {
     write: (assembler: Utf16RopeAssembler) => void,
   ): PersistentUtf16Rope {
     const leaves: LeafNode[] = [];
+    const sourceLeavesByRope = new WeakMap<
+      PersistentUtf16Rope,
+      ReadonlyArray<LeafNode>
+    >();
     let textParts: string[] = [];
     const flushText = (): void => {
       if (textParts.length === 0) {
@@ -241,6 +251,31 @@ export class PersistentUtf16Rope {
       }
       leaves.push(...chunkText(textParts.join("")));
       textParts = [];
+    };
+    const sourceLeavesOf = (
+      rope: PersistentUtf16Rope,
+    ): ReadonlyArray<LeafNode> => {
+      let sourceLeaves = sourceLeavesByRope.get(rope);
+      if (sourceLeaves === undefined) {
+        sourceLeaves = collectLeaves(rope.root);
+        sourceLeavesByRope.set(rope, sourceLeaves);
+      }
+      return sourceLeaves;
+    };
+    const appendLeafRange = (
+      rope: PersistentUtf16Rope,
+      startLeaf: number,
+      endLeaf: number,
+    ): void => {
+      const sourceLeaves = sourceLeavesOf(rope);
+      assertLeafRange(startLeaf, endLeaf, sourceLeaves.length);
+      if (startLeaf === endLeaf) {
+        return;
+      }
+      flushText();
+      for (let index = startLeaf; index < endLeaf; index++) {
+        leaves.push(sourceLeaves[index]!);
+      }
     };
 
     const assembler: Utf16RopeAssembler = {
@@ -253,21 +288,21 @@ export class PersistentUtf16Rope {
         if (rope.length === 0) {
           return;
         }
-        flushText();
-        appendLeaves(rope.root, leaves);
+        appendLeafRange(rope, 0, sourceLeavesOf(rope).length);
       },
       appendSlice: (rope, start, end = rope.length) => {
         assertSlice(start, end, rope.length);
         if (start === end) {
           return;
         }
-        flushText();
         if (start === 0 && end === rope.length) {
-          appendLeaves(rope.root, leaves);
+          appendLeafRange(rope, 0, sourceLeavesOf(rope).length);
           return;
         }
+        flushText();
         collectSliceLeaves(rope.root, start, end, 0, leaves);
       },
+      appendLeafRange,
     };
 
     write(assembler);
@@ -809,6 +844,24 @@ const assertSlice = (start: number, end: number, total: number): void => {
   ) {
     throw new Error(
       `Invalid rope slice [${start}, ${end}) for length ${total}`,
+    );
+  }
+};
+
+const assertLeafRange = (
+  start: number,
+  end: number,
+  leafCount: number,
+): void => {
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    end > leafCount
+  ) {
+    throw new Error(
+      `Invalid rope leaf range [${start}, ${end}) for ${leafCount} leaves`,
     );
   }
 };

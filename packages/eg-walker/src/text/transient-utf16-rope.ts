@@ -26,13 +26,15 @@ type Piece = RopePiece | TextPiece;
 class PieceNode {
   left: PieceNode | null = null;
   right: PieceNode | null = null;
+  piece: Piece;
   totalLength: number;
   hasSurrogateCodeUnits: boolean;
 
   constructor(
-    readonly piece: Piece,
+    piece: Piece,
     readonly priority: number,
   ) {
+    this.piece = piece;
     this.totalLength = pieceLength(piece);
     this.hasSurrogateCodeUnits = piece.hasSurrogateCodeUnits;
   }
@@ -212,14 +214,14 @@ export class TransientUtf16RopeEditor {
     }
 
     const localIndex = index - leftLength;
-    const leftPiece = this.createNode(slicePiece(root.piece, 0, localIndex));
+    const originalPiece = root.piece;
+    const originalRight = root.right;
+    root.piece = slicePiece(originalPiece, 0, localIndex);
+    root.right = null;
     const rightPiece = this.createNode(
-      slicePiece(root.piece, localIndex, ownLength),
+      slicePiece(originalPiece, localIndex, ownLength),
     );
-    return [
-      mergeNodes(root.left, leftPiece),
-      mergeNodes(rightPiece, root.right),
-    ];
+    return [updateNode(root), mergeNodes(rightPiece, originalRight)];
   }
 
   private appendPieces(assembler: Utf16RopeAssembler): void {
@@ -366,7 +368,7 @@ const appendCompactedPiece = (
     assembler.appendText(piece.rope.slice(piece.start, sharedStart));
   }
   if (sharedStart < sharedEnd) {
-    assembler.appendSlice(piece.rope, sharedStart, sharedEnd);
+    assembler.appendLeafRange(piece.rope, sharedStartIndex, sharedEndIndex);
   }
   if (sharedEnd < piece.end) {
     assembler.appendText(piece.rope.slice(sharedEnd, piece.end));

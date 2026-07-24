@@ -991,6 +991,7 @@ export class EgWalkerReplica {
       0,
       events.length - MAX_RETAINED_CHECKPOINTS,
     );
+    const eventCountAfterBatch = eventCountBeforeBatch + events.length;
     this.replayCausalLinearPrefix(events, checkpointStart);
     for (let index = checkpointStart; index < events.length; index++) {
       const event = events[index]!;
@@ -1002,6 +1003,7 @@ export class EgWalkerReplica {
         new Set([event.id]),
         this.documentBuffer,
         eventCountBeforeBatch + index + 1,
+        eventCountAfterBatch,
       );
     }
 
@@ -1494,6 +1496,7 @@ export class EgWalkerReplica {
       return;
     }
     const sections = planCriticalReplaySections(graph);
+    const graphEventCount = graph.getEventCount();
     let replayedEventCount = 0;
     let aggregateStats: EngineStats | null = null;
     let retainedEngine: EgWalkerEngine | null = null;
@@ -1544,6 +1547,7 @@ export class EgWalkerReplica {
           section.baseFrontier,
           replayedEventCount,
           sections.length === 1,
+          graphEventCount,
         );
       } else {
         const engine = new EgWalkerEngine();
@@ -1581,6 +1585,7 @@ export class EgWalkerReplica {
           section.endFrontier,
           this.documentBuffer,
           replayedEventCount,
+          graphEventCount,
         );
       }
       sectionIndex++;
@@ -1748,6 +1753,7 @@ export class EgWalkerReplica {
           this.currentVersion,
           this.documentBuffer,
           replayedEventCount,
+          plan.eventCount,
         );
       }
       sectionIndex = sectionEnd;
@@ -1820,6 +1826,7 @@ export class EgWalkerReplica {
             new Set([event.id]),
             this.documentBuffer,
             replayedEventCount,
+            eventCount,
           );
         }
       }
@@ -1842,6 +1849,7 @@ export class EgWalkerReplica {
           new Set([eventId]),
           this.documentBuffer,
           replayedEventCount,
+          eventCount,
         );
       }
     }
@@ -1984,6 +1992,7 @@ export class EgWalkerReplica {
           new Set([plan.eventIdAt(orderIndex)]),
           this.documentBuffer,
           eventCountBeforeSection + orderIndex - start + 1,
+          plan.eventCount,
         );
       }
     }
@@ -2111,6 +2120,7 @@ export class EgWalkerReplica {
     baseVersion: Version,
     eventCountBeforeSection: number,
     retainTrailingCheckpoints: boolean,
+    validatedEventCount: number,
   ): void {
     const checkpointStart = retainTrailingCheckpoints
       ? Math.max(0, events.length - MAX_RETAINED_CHECKPOINTS)
@@ -2125,6 +2135,7 @@ export class EgWalkerReplica {
           new Set([event.id]),
           this.documentBuffer,
           eventCountBeforeSection + index + 1,
+          validatedEventCount,
         );
       }
     }

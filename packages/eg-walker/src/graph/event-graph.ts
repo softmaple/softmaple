@@ -107,6 +107,10 @@ export class EventGraph {
   private packedBase: PackedEventGraphBase | null = null;
   /** Events appended after the immutable packed prefix. */
   private readonly events: Map<EventId, GraphEvent> = new Map();
+  /** Mutable-tail events indexed by insertion rank relative to packed base. */
+  private readonly tailEventsByInsertionRank: GraphEvent[] = [];
+  /** Maximum parent insertion rank for each mutable-tail event. */
+  private readonly maximumParentInsertionRanks: number[] = [];
   /** Mutable-tail children, including tail children of packed parents. */
   private readonly childrenMap: Map<EventId, Set<EventId>> = new Map();
   private readonly frontier: Set<EventId> = new Set();
@@ -163,6 +167,8 @@ export class EventGraph {
   clear(): void {
     this.packedBase = null;
     this.events.clear();
+    this.tailEventsByInsertionRank.length = 0;
+    this.maximumParentInsertionRanks.length = 0;
     this.childrenMap.clear();
     this.insertionRank.clear();
     this.frontier.clear();
@@ -204,10 +210,16 @@ export class EventGraph {
       throw new EventAlreadyExistsError(event.id);
     }
 
+    let maximumParentInsertionRank = -1;
     for (const parentId of event.parentVersion) {
-      if (!this.hasEvent(parentId)) {
+      const parentRank = this.insertionRankOf(parentId);
+      if (parentRank === undefined) {
         throw new MissingParentError(parentId);
       }
+      maximumParentInsertionRank = Math.max(
+        maximumParentInsertionRank,
+        parentRank,
+      );
     }
 
     // Strict causal batches construct final storage objects in an opaque
@@ -219,6 +231,8 @@ export class EventGraph {
       stored.id,
       (this.packedBase?.count ?? 0) + this.insertionRank.size,
     );
+    this.tailEventsByInsertionRank.push(stored);
+    this.maximumParentInsertionRanks.push(maximumParentInsertionRank);
     this.frontier.add(stored.id);
 
     for (const parentId of stored.parentVersion) {
@@ -242,6 +256,8 @@ export class EventGraph {
       this.childrenMap.delete(eventId);
       this.insertionRank.delete(eventId);
       this.events.delete(eventId);
+      this.tailEventsByInsertionRank.pop();
+      this.maximumParentInsertionRanks.pop();
 
       for (const parentId of parents) {
         const siblings = this.childrenMap.get(parentId);
@@ -308,6 +324,118 @@ export class EventGraph {
    */
   getEventCount(): number {
     return (this.packedBase?.count ?? 0) + this.events.size;
+  }
+
+  /**
+   * Check that every event in an insertion-rank suffix descends from every
+   * frontier event of a trusted critical checkpoint.
+   *
+   * @internal The critical version's closure is exactly the prefix before the
+   * cut. While validation remains successful, one parent after the cut proves
+   * the next event descends from the whole frontier. If all parents are inside
+   * the cut, every frontier event must be a direct parent because frontier
+   * events are maximal within their own closure.
+   */
+  isInsertionSuffixDominatedBy(
+    version: ReadonlySet<EventId>,
+    checkpointEventCount: number,
+    validatedEventCount: number,
+  ): boolean {
+    const eventCount = this.getEventCount();
+    if (
+      !Number.isSafeInteger(checkpointEventCount) ||
+      !Number.isSafeInteger(validatedEventCount) ||
+      checkpointEventCount <= 0 ||
+      validatedEventCount < checkpointEventCount ||
+      validatedEventCount > eventCount ||
+      version.size === 0
+    ) {
+      return false;
+    }
+
+    const frontierRanks: number[] = [];
+    let latestFrontierRank = -1;
+    for (const frontierId of version) {
+      const frontierRank = this.insertionRankOf(frontierId);
+      if (frontierRank === undefined || frontierRank >= checkpointEventCount) {
+        return false;
+      }
+      frontierRanks.push(frontierRank);
+      latestFrontierRank = Math.max(latestFrontierRank, frontierRank);
+    }
+    if (latestFrontierRank !== checkpointEventCount - 1) {
+      return false;
+    }
+
+    const packedCount = this.packedBase?.count ?? 0;
+    const packedStart = Math.max(validatedEventCount, checkpointEventCount);
+    if (this.packedBase !== null && packedStart < packedCount) {
+      for (let offset = packedStart; offset < packedCount; offset++) {
+        const parentCount = this.packedBase.parentCountAt(offset);
+        let maximumParentRank = -1;
+        for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+          maximumParentRank = Math.max(
+            maximumParentRank,
+            this.packedBase.parentOffsetAt(offset, parentIndex) ?? -1,
+          );
+        }
+        if (
+          maximumParentRank < checkpointEventCount &&
+          !this.packedEventHasEveryParent(offset, frontierRanks)
+        ) {
+          return false;
+        }
+      }
+    }
+
+    const tailStart = Math.max(validatedEventCount, packedCount) - packedCount;
+    for (
+      let tailIndex = tailStart;
+      tailIndex < this.maximumParentInsertionRanks.length;
+      tailIndex++
+    ) {
+      if (
+        this.maximumParentInsertionRanks[tailIndex]! >= checkpointEventCount
+      ) {
+        continue;
+      }
+      const parents = this.tailEventsByInsertionRank[tailIndex]?.parentVersion;
+      if (
+        parents === undefined ||
+        parents.size < version.size ||
+        !setContainsEvery(parents, version)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private packedEventHasEveryParent(
+    eventOffset: number,
+    requiredParentOffsets: ReadonlyArray<number>,
+  ): boolean {
+    const base = this.packedBase;
+    if (base === null) {
+      return false;
+    }
+    const parentCount = base.parentCountAt(eventOffset);
+    if (parentCount < requiredParentOffsets.length) {
+      return false;
+    }
+    for (const requiredOffset of requiredParentOffsets) {
+      let found = false;
+      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+        if (base.parentOffsetAt(eventOffset, parentIndex) === requiredOffset) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** @internal Return the greatest canonical sequence for one replica. */
@@ -756,6 +884,18 @@ export class EventGraph {
     };
   }
 }
+
+const setContainsEvery = <T>(
+  values: ReadonlySet<T>,
+  required: ReadonlySet<T>,
+): boolean => {
+  for (const value of required) {
+    if (!values.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};
 
 const cloneGraphEvent = (event: GraphEvent): GraphEvent => ({
   id: event.id,

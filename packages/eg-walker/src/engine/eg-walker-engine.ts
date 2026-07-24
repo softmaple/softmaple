@@ -179,6 +179,9 @@ export class EgWalkerEngine {
   private deferTextMaterialization = false;
   private canonicalizeDeleteTargetOrder = false;
   private packedReplayPlan: PackedCriticalReplayPlan | null = null;
+  private objectInsertTail: AugmentedCRDTItem | null = null;
+  private objectInsertNextPrepareIndex = -1;
+  private readonly objectInsertTailResult: InsertTailResult = { item: null };
   private packedInsertTail: AugmentedCRDTItem | null = null;
   private packedInsertNextPrepareIndex = -1;
   private readonly packedInsertTailResult: InsertTailResult = { item: null };
@@ -207,12 +210,22 @@ export class EgWalkerEngine {
     const transformedOperations: ExternalOperation[] | undefined =
       collectTransformedOperations ? [] : undefined;
 
-    for (const event of events) {
+    let eventIndex = 0;
+    while (eventIndex < events.length) {
+      const event = events[eventIndex]!;
       const transformed = this.processEvent(
         event,
         collectTransformedOperations,
       );
       transformedOperations?.push(...transformed);
+      eventIndex++;
+
+      if (
+        !collectTransformedOperations &&
+        options.integrationMode !== "linear-oracle"
+      ) {
+        eventIndex = this.extendObjectInsertRun(events, eventIndex, event);
+      }
     }
 
     return this.finishGeneration(transformedOperations);
@@ -774,6 +787,9 @@ export class EgWalkerEngine {
       items.some((item) => recordContentHasSurrogateCodeUnits(item.content));
     this.canonicalizeDeleteTargetOrder = false;
     this.packedReplayPlan = null;
+    this.objectInsertTail = null;
+    this.objectInsertNextPrepareIndex = -1;
+    this.objectInsertTailResult.item = null;
     this.pendingInsert.reset();
     this.retreatCount = 0;
     this.advanceCount = 0;
@@ -885,6 +901,118 @@ export class EgWalkerEngine {
     this.processedEventCount++;
     this.samplePeakSequenceRecordCount();
     return eventOffset;
+  }
+
+  /**
+   * Absorb a canonical sole-parent scalar insert chain into one typed-run
+   * mutation during object-backed replay.
+   *
+   * The ordinary per-event path already coalesces these events into one CRDT
+   * record, but still updates the ranked sequence and allocates replay
+   * bookkeeping once per scalar. Cold and checkpoint replay do not return
+   * transformed operations, so validate the whole suffix first and extend
+   * the shared record once. EventItemIndex resolves every skipped canonical
+   * ID through the run interval and RecordSplitter materializes interior
+   * anchors only if a later branch or delete needs them.
+   */
+  private extendObjectInsertRun(
+    events: ReadonlyArray<GraphEvent>,
+    startEventIndex: number,
+    currentEvent: GraphEvent,
+  ): number {
+    const tail = this.objectInsertTail;
+    if (
+      tail === null ||
+      typeof tail.content !== "string" ||
+      tail.run === null
+    ) {
+      return startEventIndex;
+    }
+
+    const run = tail.run;
+    const firstSequence = run.startSequence + tail.content.length;
+    let expectedSequence = firstSequence;
+    let expectedPrepareIndex = this.objectInsertNextPrepareIndex;
+    let previousEventId = currentEvent.id;
+    let eventIndex = startEventIndex;
+    const appendedTextParts: string[] = [];
+
+    while (eventIndex < events.length) {
+      const event = events[eventIndex]!;
+      const operation = event.operation;
+      if (
+        event.parentVersion.size !== 1 ||
+        !event.parentVersion.has(previousEventId) ||
+        operation.type !== OPERATION_TYPE.INSERT ||
+        operation.text.length !== 1 ||
+        operation.index !== expectedPrepareIndex
+      ) {
+        break;
+      }
+
+      const codeUnit = operation.text.charCodeAt(0);
+      if (codeUnit >= 0xd800 && codeUnit <= 0xdfff) {
+        break;
+      }
+      const parsed = parseEventId(event.id);
+      if (
+        parsed === null ||
+        parsed.replicaId !== run.replicaId ||
+        parsed.sequence !== expectedSequence ||
+        !this.eventItems.canExtendRunItem(tail, appendedTextParts.length + 1)
+      ) {
+        break;
+      }
+
+      appendedTextParts.push(operation.text);
+      expectedPrepareIndex++;
+      expectedSequence++;
+      previousEventId = event.id;
+      eventIndex++;
+    }
+
+    const appendedEvents = eventIndex - startEventIndex;
+    if (appendedEvents === 0) {
+      return startEventIndex;
+    }
+    const appendedText = appendedTextParts.join("");
+    if (
+      appendedText.length !== appendedEvents ||
+      this.sequence.prepareIndexAfter(tail) !==
+        this.objectInsertNextPrepareIndex ||
+      !canExtendTypedRun(
+        tail,
+        run.replicaId,
+        firstSequence,
+        appendedEvents,
+        this.insertDeps,
+      )
+    ) {
+      return startEventIndex;
+    }
+
+    // The tail may end in a high surrogate immediately before an existing
+    // low surrogate. Inserting the first skipped code unit at that boundary
+    // must fail exactly as the scalar path would; subsequent boundaries are
+    // behind known non-surrogate inserts and therefore cannot split a pair.
+    this.assertOperationInPrepareView(
+      events[startEventIndex]!.id,
+      this.objectInsertNextPrepareIndex,
+      1,
+      false,
+    );
+    applyTypedRunExtension(
+      tail,
+      appendedText,
+      this.insertDeps,
+      this.deferTextMaterialization,
+    );
+    this.objectInsertNextPrepareIndex = expectedPrepareIndex;
+    this.currentVersion = new Set([previousEventId]);
+    this.nonConflictingRunCount += appendedEvents;
+    this.processedEventCount += appendedEvents;
+    this.samplePeakSequenceRecordCount();
+    return eventIndex;
   }
 
   private applyPackedPrepareTransition(
@@ -1642,6 +1770,9 @@ export class EgWalkerEngine {
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle =
       options.integrationMode === "linear-oracle";
+    this.objectInsertTail = null;
+    this.objectInsertNextPrepareIndex = -1;
+    this.objectInsertTailResult.item = null;
     this.packedInsertTail = null;
     this.packedInsertNextPrepareIndex = -1;
     this.packedInsertTailResult.item = null;
@@ -1749,7 +1880,14 @@ export class EgWalkerEngine {
         this.insertDeps,
         collectTransformedOperations,
         this.deferTextMaterialization,
+        null,
+        collectTransformedOperations ? undefined : this.objectInsertTailResult,
       );
+      if (!collectTransformedOperations) {
+        this.objectInsertTail = this.objectInsertTailResult.item;
+        this.objectInsertNextPrepareIndex =
+          operation.index + operation.text.length;
+      }
       // Monotonic for the lifetime of this replay engine: deleted/retreated
       // records can become prepare-visible again, so seeing one surrogate code
       // unit once means future parent views may contain a scalar pair.
@@ -1764,6 +1902,11 @@ export class EgWalkerEngine {
       operation.length,
       true,
     );
+    if (!collectTransformedOperations) {
+      this.objectInsertTail = null;
+      this.objectInsertNextPrepareIndex = -1;
+      this.objectInsertTailResult.item = null;
+    }
     return applyDelete(
       event.id,
       operation.index,

@@ -31,12 +31,19 @@ import {
   type PackedBranchReplayLayout,
   type PackedCanonicalIdRun,
 } from "./internals/packed-event-graph-base";
-import { RankedDiffVersionsWorkspace } from "./internals/ranked-diff-versions";
+import {
+  RankedDiffVersionsWorkspace,
+  type RankedDiffVersionsView,
+  type RankedVersionTransition,
+} from "./internals/ranked-diff-versions";
 import {
   getBranchPreservingTopologicalOrder as computeBranchPreservingTopologicalOrder,
   getTopologicalOrder as computeTopologicalOrder,
 } from "./internals/topological-order";
-import { RankedReplayOrderWorkspace } from "./internals/ranked-replay-order";
+import {
+  RankedReplayOrderWorkspace,
+  type RankedReplayOrderView,
+} from "./internals/ranked-replay-order";
 
 export {
   EventAlreadyExistsError,
@@ -44,6 +51,8 @@ export {
 } from "./event-graph-errors";
 
 const EMPTY_EVENT_IDS: ReadonlySet<EventId> = new Set();
+
+type TailChildInsertionRanks = number | number[];
 
 export interface EventGraphAppendTransaction {
   commit(): void;
@@ -107,8 +116,14 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
  */
 export class EventGraph {
   private packedBase: PackedEventGraphBase | null = null;
-  /** Events appended after the immutable packed prefix. */
-  private readonly events: Map<EventId, GraphEvent> = new Map();
+  /**
+   * Relative tail index for events appended after the immutable packed prefix.
+   *
+   * The event payload already lives in `tailEventsByInsertionRank`; keeping a
+   * second ID -> GraphEvent Map duplicated every tail entry and forced the
+   * graph to maintain a separate ID -> insertion-rank Map.
+   */
+  private readonly tailIndexById: Map<EventId, number> = new Map();
   /** Mutable-tail events indexed by insertion rank relative to packed base. */
   private readonly tailEventsByInsertionRank: GraphEvent[] = [];
   /**
@@ -126,17 +141,38 @@ export class EventGraph {
   private readonly rankedReplayOrderWorkspace =
     new RankedReplayOrderWorkspace();
   private rankedReplayOrderWorkspaceInUse = false;
-  /** Mutable-tail children, including tail children of packed parents. */
-  private readonly childrenMap: Map<EventId, Set<EventId>> = new Map();
+  /**
+   * Numeric mutable-tail children, including tail children of packed parents.
+   *
+   * Nearly all paper-trace nodes have one child. Store that rank directly and
+   * promote to an array only at a real branch, avoiding one Set allocation
+   * (and one repeated child ID reference) per linear event.
+   */
+  private readonly tailChildrenByTailIndex: Array<
+    TailChildInsertionRanks | undefined
+  > = [];
+  /** Tail children of immutable packed parents, keyed by packed offset. */
+  private readonly tailChildrenByPackedParentRank: Map<
+    number,
+    TailChildInsertionRanks
+  > = new Map();
   private readonly frontier: Set<EventId> = new Set();
   /**
-   * Monotonically increasing rank assigned to each event in the order it was
-   * inserted into the graph. Because `addEvent` rejects events whose parents
-   * are not already present, `insertionRank(parent) < insertionRank(child)`
-   * for every edge, so the rank is a valid (cheap) topological index that
-   * does not require a full Kahn pass to compute.
+   * Stable callback table shared by numeric object-tail traversals.
+   *
+   * Keeping this object for the graph lifetime avoids allocating a view and
+   * four capturing closures for every conflicting event.
    */
-  private readonly insertionRank: Map<EventId, number> = new Map();
+  private readonly rankedTraversalView: RankedDiffVersionsView &
+    RankedReplayOrderView = {
+    eventCount: () => this.tailEventsByInsertionRank.length,
+    insertionRankOf: (id) => this.tailIndexById.get(id),
+    eventIdAt: (rank) => this.tailEventsByInsertionRank[rank]?.id,
+    forEachParentRank: (rank, visit) =>
+      this.forEachTailParentInsertionRank(rank, visit),
+    forEachChildRank: (rank, visit) =>
+      this.forEachTailChildInsertionRank(rank, visit),
+  };
   private metadata: Record<string, unknown> = {};
   /**
    * Memoized output of {@link getTopologicalOrder}. Invalidated whenever the
@@ -183,14 +219,14 @@ export class EventGraph {
    */
   clear(): void {
     this.packedBase = null;
-    this.events.clear();
+    this.tailIndexById.clear();
     this.tailEventsByInsertionRank.length = 0;
     this.parentRankDescriptors.length = 0;
     this.multiParentInsertionRanks.length = 0;
     this.rankedDiffWorkspace.release();
     this.rankedReplayOrderWorkspace.release();
-    this.childrenMap.clear();
-    this.insertionRank.clear();
+    this.tailChildrenByTailIndex.length = 0;
+    this.tailChildrenByPackedParentRank.clear();
     this.frontier.clear();
     this.metadata = {};
     this.invalidateDerivedCaches();
@@ -201,7 +237,7 @@ export class EventGraph {
    * after this call; the normal success path is constant-time.
    */
   beginAppendTransaction(): EventGraphAppendTransaction {
-    const startingEventCount = this.events.size;
+    const startingEventCount = this.tailEventsByInsertionRank.length;
     const startingFrontier = Array.from(this.frontier);
     let active = true;
     return {
@@ -226,7 +262,10 @@ export class EventGraph {
    * Add an event to the graph
    */
   addEvent(event: GraphEvent): void {
-    if (this.hasEvent(event.id)) {
+    if (
+      this.tailIndexById.has(event.id) ||
+      (this.packedBase?.has(event.id) ?? false)
+    ) {
       throw new EventAlreadyExistsError(event.id);
     }
 
@@ -276,52 +315,73 @@ export class EventGraph {
         maximumParentInsertionRank;
       parentRankDescriptor = encodeMultiParentStart(multiParentStart);
     }
-    this.events.set(stored.id, stored);
-    this.insertionRank.set(
-      stored.id,
-      (this.packedBase?.count ?? 0) + this.insertionRank.size,
-    );
+    const tailIndex = this.tailEventsByInsertionRank.length;
+    const insertionRank = (this.packedBase?.count ?? 0) + tailIndex;
+    this.tailIndexById.set(stored.id, tailIndex);
     this.tailEventsByInsertionRank.push(stored);
+    this.tailChildrenByTailIndex.push(undefined);
     this.parentRankDescriptors.push(parentRankDescriptor);
     this.frontier.add(stored.id);
 
+    let parentIndex = 0;
     for (const parentId of stored.parentVersion) {
-      const children = this.childrenMap.get(parentId) ?? new Set();
-      children.add(stored.id);
-      this.childrenMap.set(parentId, children);
+      const parentRank =
+        parentCount === 1
+          ? maximumParentInsertionRank
+          : this.multiParentInsertionRanks[multiParentStart + 1 + parentIndex];
+      if (parentRank === undefined) {
+        throw new Error(`Event graph is missing parent rank for ${stored.id}`);
+      }
+      this.appendTailChildRank(parentRank, insertionRank);
       this.frontier.delete(parentId);
+      parentIndex++;
     }
     this.invalidateDerivedCaches();
   }
 
   private rollbackAppendedEvents(startingEventCount: number): void {
-    const appended = Array.from(this.events.keys()).slice(startingEventCount);
-    for (let index = appended.length - 1; index >= 0; index--) {
-      const eventId = appended[index]!;
-      const parents =
-        this.events.get(eventId)?.parentVersion ?? EMPTY_EVENT_IDS;
+    const packedCount = this.packedBase?.count ?? 0;
+    while (this.tailEventsByInsertionRank.length > startingEventCount) {
+      const tailIndex = this.tailEventsByInsertionRank.length - 1;
+      const event = this.tailEventsByInsertionRank[tailIndex]!;
+      const eventId = event.id;
+      const insertionRank = packedCount + tailIndex;
+      const parentRankDescriptor = this.parentRankDescriptors[tailIndex] ?? -1;
 
       this.frontier.delete(eventId);
-      this.childrenMap.delete(eventId);
-      this.insertionRank.delete(eventId);
-      this.events.delete(eventId);
-      this.tailEventsByInsertionRank.pop();
-      const parentRankDescriptor = this.parentRankDescriptors.pop();
-      if (parentRankDescriptor !== undefined && parentRankDescriptor < -1) {
-        this.multiParentInsertionRanks.length =
-          decodeMultiParentStart(parentRankDescriptor);
+      if (this.tailChildrenByTailIndex[tailIndex] !== undefined) {
+        throw new Error(
+          `Event graph rollback found retained child of ${eventId}`,
+        );
       }
+      this.tailChildrenByTailIndex.pop();
+      this.tailIndexById.delete(eventId);
+      this.tailEventsByInsertionRank.pop();
 
-      for (const parentId of parents) {
-        const siblings = this.childrenMap.get(parentId);
-        siblings?.delete(eventId);
-        if (siblings !== undefined && siblings.size === 0) {
-          this.childrenMap.delete(parentId);
+      let parentIndex = 0;
+      for (const parentId of event.parentVersion) {
+        const parentRank =
+          event.parentVersion.size === 1
+            ? parentRankDescriptor
+            : this.multiParentInsertionRanks[
+                decodeMultiParentStart(parentRankDescriptor) + 1 + parentIndex
+              ];
+        if (parentRank === undefined || parentRank < 0) {
+          throw new Error(`Event graph is missing parent rank for ${eventId}`);
+        }
+        if (this.removeLastTailChildRank(parentRank, insertionRank)) {
           const baseChildCount = this.packedBaseChildCount(parentId);
           if (baseChildCount === 0 && this.hasEvent(parentId)) {
             this.frontier.add(parentId);
           }
         }
+        parentIndex++;
+      }
+
+      this.parentRankDescriptors.pop();
+      if (parentRankDescriptor < -1) {
+        this.multiParentInsertionRanks.length =
+          decodeMultiParentStart(parentRankDescriptor);
       }
     }
     this.invalidateDerivedCaches();
@@ -331,7 +391,7 @@ export class EventGraph {
    * Get an event by ID
    */
   getEvent(id: EventId): GraphEvent | undefined {
-    const event = this.events.get(id);
+    const event = this.tailEventById(id);
     if (event !== undefined) {
       return cloneGraphEvent(event);
     }
@@ -345,7 +405,7 @@ export class EventGraph {
    * `undefined` distinguishes a missing event from a stored DELETE event.
    */
   isInsertEvent(id: EventId): boolean | undefined {
-    const event = this.events.get(id);
+    const event = this.tailEventById(id);
     if (event !== undefined) {
       return event.operation.type === OPERATION_TYPE.INSERT;
     }
@@ -359,7 +419,7 @@ export class EventGraph {
    * Check if an event exists in the graph
    */
   hasEvent(id: EventId): boolean {
-    return this.events.has(id) || (this.packedBase?.has(id) ?? false);
+    return this.tailIndexById.has(id) || (this.packedBase?.has(id) ?? false);
   }
 
   /**
@@ -376,7 +436,52 @@ export class EventGraph {
    * materialising a new array.
    */
   getEventCount(): number {
-    return (this.packedBase?.count ?? 0) + this.events.size;
+    return (
+      (this.packedBase?.count ?? 0) + this.tailEventsByInsertionRank.length
+    );
+  }
+
+  /**
+   * Report the object-tail adjacency shape without exposing its storage.
+   *
+   * @internal Structural tests use this to ensure linear histories do not
+   * regress to allocating one child container per event.
+   */
+  getObjectTailStructureStats(): {
+    readonly tailEvents: number;
+    readonly parentEntries: number;
+    readonly branchArrays: number;
+    readonly childEdges: number;
+  } {
+    let branchArrays = 0;
+    let childEdges = 0;
+    let parentEntries = 0;
+    const countChildren = (
+      childRanks: TailChildInsertionRanks | undefined,
+    ): void => {
+      if (childRanks === undefined) {
+        return;
+      }
+      parentEntries++;
+      if (typeof childRanks === "number") {
+        childEdges++;
+      } else {
+        branchArrays++;
+        childEdges += childRanks.length;
+      }
+    };
+    for (const childRanks of this.tailChildrenByTailIndex) {
+      countChildren(childRanks);
+    }
+    for (const childRanks of this.tailChildrenByPackedParentRank.values()) {
+      countChildren(childRanks);
+    }
+    return {
+      tailEvents: this.tailEventsByInsertionRank.length,
+      parentEntries,
+      branchArrays,
+      childEdges,
+    };
   }
 
   /**
@@ -494,8 +599,8 @@ export class EventGraph {
   /** @internal Return the greatest canonical sequence for one replica. */
   getMaximumSequenceForReplica(replicaId: string): number | null {
     let maximum = this.packedBase?.maximumSequenceForReplica(replicaId);
-    for (const id of this.events.keys()) {
-      const parsed = parseEventId(id);
+    for (const event of this.tailEventsByInsertionRank) {
+      const parsed = parseEventId(event.id);
       if (
         parsed?.replicaId === replicaId &&
         (maximum === undefined || parsed.sequence > maximum)
@@ -510,7 +615,7 @@ export class EventGraph {
   getPackedLinearReplayView(): PackedLinearReplayView | null {
     if (
       this.packedBase === null ||
-      this.events.size !== 0 ||
+      this.tailEventsByInsertionRank.length !== 0 ||
       !this.packedBase.isExactLinear()
     ) {
       return null;
@@ -520,7 +625,10 @@ export class EventGraph {
 
   /** @internal Return numeric packed-DAG columns for allocation-light replay. */
   getPackedReplayPlanningView(): PackedReplayPlanningView | null {
-    if (this.packedBase === null || this.events.size !== 0) {
+    if (
+      this.packedBase === null ||
+      this.tailEventsByInsertionRank.length !== 0
+    ) {
       return null;
     }
     return this.packedBase;
@@ -553,7 +661,7 @@ export class EventGraph {
     if (this.packedBase !== null && this.packedBase.count > 0) {
       previousId = this.packedBase.idAt(this.packedBase.count - 1) ?? null;
     }
-    for (const event of this.events.values()) {
+    for (const event of this.tailEventsByInsertionRank) {
       if (previousId === null) {
         if (event.parentVersion.size !== 0) {
           return false;
@@ -579,7 +687,7 @@ export class EventGraph {
     if (this.packedBase !== null) {
       yield* this.packedBase.iterateEvents();
     }
-    for (const event of this.events.values()) {
+    for (const event of this.tailEventsByInsertionRank) {
       yield cloneGraphEvent(event);
     }
   }
@@ -587,7 +695,9 @@ export class EventGraph {
   /** Stream event IDs without reconstructing operations or parent sets. */
   *iterateEventIdsInInsertionOrder(): IterableIterator<EventId> {
     if (this.packedBase !== null) yield* this.packedBase.iterateIds();
-    yield* this.events.keys();
+    for (const event of this.tailEventsByInsertionRank) {
+      yield event.id;
+    }
   }
 
   /**
@@ -600,7 +710,7 @@ export class EventGraph {
     // including numeric bounds, UTF-16 slices, IDs and causal parent edges.
     // Reconstructing those events here would repeat the same work on every
     // lazy snapshot access.
-    for (const event of this.events.values()) {
+    for (const event of this.tailEventsByInsertionRank) {
       validate(cloneGraphEvent(event));
     }
   }
@@ -677,7 +787,10 @@ export class EventGraph {
     left: ReadonlySet<EventId>,
     right: ReadonlySet<EventId>,
   ): { readonly onlyInLeft: Set<EventId>; readonly onlyInRight: Set<EventId> } {
-    if (this.packedBase !== null && this.events.size === 0) {
+    if (
+      this.packedBase !== null &&
+      this.tailEventsByInsertionRank.length === 0
+    ) {
       return this.packedBase.diffVersions(left, right);
     }
     if (this.packedBase === null) {
@@ -689,13 +802,7 @@ export class EventGraph {
         this.rankedDiffWorkspaceInUse = true;
       }
       try {
-        return workspace.diff(left, right, {
-          eventCount: this.events.size,
-          insertionRankOf: (id) => this.insertionRank.get(id),
-          eventIdAt: (rank) => this.tailEventsByInsertionRank[rank]?.id,
-          forEachParentRank: (rank, visit) =>
-            this.forEachTailParentInsertionRank(rank, visit),
-        });
+        return workspace.diff(left, right, this.rankedTraversalView);
       } finally {
         if (ownsPrimaryWorkspace) {
           this.rankedDiffWorkspaceInUse = false;
@@ -720,6 +827,35 @@ export class EventGraph {
   }
 
   /**
+   * Return an object-only version transition in insertion-topological order.
+   *
+   * @internal Packed and mixed graphs retain their storage-specific diff
+   * paths and return `null`.
+   */
+  getRankedVersionTransition(
+    left: ReadonlySet<EventId>,
+    right: ReadonlySet<EventId>,
+  ): RankedVersionTransition | null {
+    if (this.packedBase !== null) {
+      return null;
+    }
+    const workspace = this.rankedDiffWorkspaceInUse
+      ? new RankedDiffVersionsWorkspace()
+      : this.rankedDiffWorkspace;
+    const ownsPrimaryWorkspace = workspace === this.rankedDiffWorkspace;
+    if (ownsPrimaryWorkspace) {
+      this.rankedDiffWorkspaceInUse = true;
+    }
+    try {
+      return workspace.diffOrdered(left, right, this.rankedTraversalView);
+    } finally {
+      if (ownsPrimaryWorkspace) {
+        this.rankedDiffWorkspaceInUse = false;
+      }
+    }
+  }
+
+  /**
    * Return a numeric branch-preserving order for an object-only suffix.
    *
    * @internal Packed and packed-plus-tail graphs return `null` so callers can
@@ -739,15 +875,7 @@ export class EventGraph {
       this.rankedReplayOrderWorkspaceInUse = true;
     }
     try {
-      return workspace.order(replayEventIds, {
-        eventCount: this.events.size,
-        insertionRankOf: (id) => this.insertionRank.get(id),
-        eventIdAt: (rank) => this.tailEventsByInsertionRank[rank]?.id,
-        forEachParentRank: (rank, visit) =>
-          this.forEachTailParentInsertionRank(rank, visit),
-        forEachChildRank: (rank, visit) =>
-          this.forEachTailChildInsertionRank(rank, visit),
-      });
+      return workspace.order(replayEventIds, this.rankedTraversalView);
     } finally {
       if (ownsPrimaryWorkspace) {
         this.rankedReplayOrderWorkspaceInUse = false;
@@ -820,7 +948,10 @@ export class EventGraph {
       return this.cachedBranchPreservingOrder;
     }
 
-    if (this.packedBase !== null && this.events.size === 0) {
+    if (
+      this.packedBase !== null &&
+      this.tailEventsByInsertionRank.length === 0
+    ) {
       const offsets = this.packedBase.getBranchPreservingOrderOffsets();
       this.cachedBranchPreservingOrder = Object.freeze(
         Array.from(offsets, (offset) =>
@@ -847,10 +978,29 @@ export class EventGraph {
 
   /** Allocation-free child traversal that does not expose the backing set. */
   *iterateChildren(id: EventId): IterableIterator<EventId> {
-    if (this.packedBase?.has(id)) {
-      yield* this.packedBase.iterateChildren(id);
+    const packedBase = this.packedBase;
+    const packedOffset = packedBase?.offsetOf(id);
+    let childRanks: TailChildInsertionRanks | undefined;
+    if (packedBase !== null && packedOffset !== undefined) {
+      yield* packedBase.iterateChildren(id);
+      childRanks = this.tailChildrenByPackedParentRank.get(packedOffset);
+    } else {
+      const tailIndex = this.tailIndexById.get(id);
+      childRanks =
+        tailIndex === undefined
+          ? undefined
+          : this.tailChildrenByTailIndex[tailIndex];
     }
-    yield* this.childrenMap.get(id) ?? EMPTY_EVENT_IDS;
+    if (childRanks === undefined) {
+      return;
+    }
+    if (typeof childRanks === "number") {
+      yield this.requireTailEventIdAtInsertionRank(childRanks);
+      return;
+    }
+    for (const childRank of childRanks) {
+      yield this.requireTailEventIdAtInsertionRank(childRank);
+    }
   }
 
   /**
@@ -862,7 +1012,7 @@ export class EventGraph {
 
   /** Allocation-free parent traversal that does not expose the backing set. */
   iterateParents(id: EventId): IterableIterator<EventId> {
-    const event = this.events.get(id);
+    const event = this.tailEventById(id);
     if (event !== undefined) {
       return event.parentVersion.values();
     }
@@ -965,8 +1115,106 @@ export class EventGraph {
     return EventGraph.fromPackedBase(packed.base, packed.frontier, metadata);
   }
 
+  private tailEventById(id: EventId): GraphEvent | undefined {
+    const tailIndex = this.tailIndexById.get(id);
+    return tailIndex === undefined
+      ? undefined
+      : this.tailEventsByInsertionRank[tailIndex];
+  }
+
+  private requireTailEventIdAtInsertionRank(rank: number): EventId {
+    const tailIndex = rank - (this.packedBase?.count ?? 0);
+    const eventId = this.tailEventsByInsertionRank[tailIndex]?.id;
+    if (eventId === undefined) {
+      throw new Error(`Event graph is missing tail insertion rank ${rank}`);
+    }
+    return eventId;
+  }
+
+  private appendTailChildRank(parentRank: number, childRank: number): void {
+    const packedCount = this.packedBase?.count ?? 0;
+    const tailIndex = parentRank - packedCount;
+    const existing =
+      tailIndex >= 0
+        ? this.tailChildrenByTailIndex[tailIndex]
+        : this.tailChildrenByPackedParentRank.get(parentRank);
+    if (existing === undefined) {
+      if (tailIndex >= 0) {
+        this.tailChildrenByTailIndex[tailIndex] = childRank;
+      } else {
+        this.tailChildrenByPackedParentRank.set(parentRank, childRank);
+      }
+    } else if (typeof existing === "number") {
+      const promoted = [existing, childRank];
+      if (tailIndex >= 0) {
+        this.tailChildrenByTailIndex[tailIndex] = promoted;
+      } else {
+        this.tailChildrenByPackedParentRank.set(parentRank, promoted);
+      }
+    } else {
+      existing.push(childRank);
+    }
+  }
+
+  /**
+   * Remove the newest tail child and return whether no tail children remain.
+   *
+   * Append transactions rollback the global tail in reverse insertion order,
+   * so each parent adjacency is also unwound in strict LIFO order.
+   */
+  private removeLastTailChildRank(
+    parentRank: number,
+    childRank: number,
+  ): boolean {
+    const packedCount = this.packedBase?.count ?? 0;
+    const tailIndex = parentRank - packedCount;
+    const existing =
+      tailIndex >= 0
+        ? this.tailChildrenByTailIndex[tailIndex]
+        : this.tailChildrenByPackedParentRank.get(parentRank);
+    if (existing === undefined) {
+      throw new Error(`Event graph is missing child rank ${childRank}`);
+    }
+    if (typeof existing === "number") {
+      if (existing !== childRank) {
+        throw new Error(
+          `Event graph child rollback order mismatch for rank ${parentRank}`,
+        );
+      }
+      if (tailIndex >= 0) {
+        this.tailChildrenByTailIndex[tailIndex] = undefined;
+      } else {
+        this.tailChildrenByPackedParentRank.delete(parentRank);
+      }
+      return true;
+    }
+
+    if (existing[existing.length - 1] !== childRank) {
+      throw new Error(
+        `Event graph child rollback order mismatch for rank ${parentRank}`,
+      );
+    }
+    existing.pop();
+    if (existing.length === 0) {
+      if (tailIndex >= 0) {
+        this.tailChildrenByTailIndex[tailIndex] = undefined;
+      } else {
+        this.tailChildrenByPackedParentRank.delete(parentRank);
+      }
+      return true;
+    }
+    if (existing.length === 1) {
+      if (tailIndex >= 0) {
+        this.tailChildrenByTailIndex[tailIndex] = existing[0]!;
+      } else {
+        this.tailChildrenByPackedParentRank.set(parentRank, existing[0]!);
+      }
+    }
+    return false;
+  }
+
   private requireStoredEvent(id: EventId): GraphEvent {
-    const tail = this.events.get(id);
+    const tail = this.tailEventById(id);
     if (tail !== undefined) return tail;
     const offset = this.packedBase?.offsetOf(id);
     const event =
@@ -978,7 +1226,7 @@ export class EventGraph {
   }
 
   private parentCountOf(id: EventId): number {
-    const tail = this.events.get(id);
+    const tail = this.tailEventById(id);
     if (tail !== undefined) return tail.parentVersion.size;
     const offset = this.packedBase?.offsetOf(id);
     return offset === undefined ? 0 : this.packedBase!.parentCountAt(offset);
@@ -986,7 +1234,13 @@ export class EventGraph {
 
   private insertionRankOf(id: EventId): number | undefined {
     const baseRank = this.packedBase?.offsetOf(id);
-    return baseRank ?? this.insertionRank.get(id);
+    if (baseRank !== undefined) {
+      return baseRank;
+    }
+    const tailIndex = this.tailIndexById.get(id);
+    return tailIndex === undefined
+      ? undefined
+      : (this.packedBase?.count ?? 0) + tailIndex;
   }
 
   private maximumParentInsertionRankAt(tailIndex: number): number {
@@ -1033,17 +1287,17 @@ export class EventGraph {
     tailIndex: number,
     visit: (childRank: number) => void,
   ): void {
-    const eventId = this.tailEventsByInsertionRank[tailIndex]?.id;
-    if (eventId === undefined) {
+    if (this.tailEventsByInsertionRank[tailIndex] === undefined) {
       throw new Error(
         `Event graph is missing tail insertion rank ${tailIndex}`,
       );
     }
-    for (const childId of this.childrenMap.get(eventId) ?? EMPTY_EVENT_IDS) {
-      const childRank = this.insertionRank.get(childId);
-      if (childRank === undefined) {
-        throw new Error(`Event graph is missing child ${childId}`);
-      }
+    const childRanks = this.tailChildrenByTailIndex[tailIndex];
+    if (typeof childRanks === "number") {
+      visit(childRanks);
+      return;
+    }
+    for (const childRank of childRanks ?? []) {
       visit(childRank);
     }
   }

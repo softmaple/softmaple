@@ -267,6 +267,12 @@ describe("diffVersions topological diff", () => {
       }
       return { onlyInLeft, onlyInRight };
     };
+    const insertionRanks = new Map(
+      Array.from(
+        graph.iterateEventIdsInInsertionOrder(),
+        (id, rank) => [id, rank] as const,
+      ),
+    );
 
     for (let trial = 0; trial < 30; trial++) {
       const left = new Set<EventId>([ids[rng() % ids.length]!]);
@@ -275,6 +281,20 @@ describe("diffVersions topological diff", () => {
       const actual = graph.diffVersions(left, right);
       expect(actual.onlyInLeft).toEqual(expected.onlyInLeft);
       expect(actual.onlyInRight).toEqual(expected.onlyInRight);
+
+      const transition = graph.getRankedVersionTransition(left, right)!;
+      expect(new Set(transition.retreat)).toEqual(expected.onlyInLeft);
+      expect(new Set(transition.advance)).toEqual(expected.onlyInRight);
+      expect(transition.retreat.map((id) => insertionRanks.get(id)!)).toEqual(
+        transition.retreat
+          .map((id) => insertionRanks.get(id)!)
+          .sort((a, b) => b - a),
+      );
+      expect(transition.advance.map((id) => insertionRanks.get(id)!)).toEqual(
+        transition.advance
+          .map((id) => insertionRanks.get(id)!)
+          .sort((a, b) => a - b),
+      );
     }
   });
 

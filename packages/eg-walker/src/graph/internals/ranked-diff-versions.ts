@@ -8,10 +8,17 @@ const DIFF_COLOR = {
 } as const;
 
 export interface RankedDiffVersionsView {
-  readonly eventCount: number;
+  eventCount(): number;
   insertionRankOf(id: EventId): number | undefined;
   eventIdAt(rank: number): EventId | undefined;
   forEachParentRank(rank: number, visit: (parentRank: number) => void): void;
+}
+
+export interface RankedVersionTransition {
+  /** Child-before-parent order for retreating the left-only suffix. */
+  readonly retreat: EventId[];
+  /** Parent-before-child order for advancing the right-only suffix. */
+  readonly advance: EventId[];
 }
 
 /**
@@ -28,6 +35,12 @@ export class RankedDiffVersionsWorkspace {
   private readonly touchedRanks: number[] = [];
   private readonly heap = new NumericMaxHeap();
   private visitedRankCount = 0;
+  private activeView: RankedDiffVersionsView | null = null;
+  private pendingDivergent = 0;
+  private propagatedColor: number = DIFF_COLOR.NONE;
+  private readonly paintParentRank = (parentRank: number): void => {
+    this.paintRank(parentRank, this.propagatedColor);
+  };
 
   get lastVisitedRankCount(): number {
     return this.visitedRankCount;
@@ -37,6 +50,9 @@ export class RankedDiffVersionsWorkspace {
     this.colors = new Uint8Array(0);
     this.touchedRanks.length = 0;
     this.heap.clear();
+    this.activeView = null;
+    this.pendingDivergent = 0;
+    this.propagatedColor = DIFF_COLOR.NONE;
   }
 
   diff(
@@ -47,54 +63,50 @@ export class RankedDiffVersionsWorkspace {
     readonly onlyInLeft: Set<EventId>;
     readonly onlyInRight: Set<EventId>;
   } {
-    this.visitedRankCount = 0;
-    this.ensureCapacity(view.eventCount);
     const onlyInLeft = new Set<EventId>();
     const onlyInRight = new Set<EventId>();
-    let pendingDivergent = 0;
+    this.run(left, right, view, onlyInLeft, onlyInRight, null, null);
+    return { onlyInLeft, onlyInRight };
+  }
 
-    const paintRank = (rank: number, addedColor: number): void => {
-      const existing = this.colors[rank] ?? DIFF_COLOR.NONE;
-      const merged = existing | addedColor;
-      if (merged === existing) {
-        return;
-      }
-      this.colors[rank] = merged;
-      if (existing === DIFF_COLOR.NONE) {
-        this.touchedRanks.push(rank);
-        this.heap.push(rank);
-        if (merged !== DIFF_COLOR.COMMON) {
-          pendingDivergent++;
-        }
-      } else if (
-        existing !== DIFF_COLOR.COMMON &&
-        merged === DIFF_COLOR.COMMON
-      ) {
-        pendingDivergent--;
-      }
-    };
+  /**
+   * Return the same diff directly in insertion-topological transition order.
+   *
+   * This avoids allocating two string Sets only for the replay engine to
+   * iterate, rank, and sort them immediately afterward.
+   */
+  diffOrdered(
+    left: ReadonlySet<EventId>,
+    right: ReadonlySet<EventId>,
+    view: RankedDiffVersionsView,
+  ): RankedVersionTransition {
+    const retreat: EventId[] = [];
+    const advanceDescending: EventId[] = [];
+    this.run(left, right, view, null, null, retreat, advanceDescending);
+    advanceDescending.reverse();
+    return { retreat, advance: advanceDescending };
+  }
 
-    const paintVersion = (
-      version: ReadonlySet<EventId>,
-      color: number,
-    ): void => {
-      for (const id of version) {
-        const rank = view.insertionRankOf(id);
-        if (rank !== undefined) {
-          paintRank(rank, color);
-        }
-      }
-    };
-    let propagatedColor: number = DIFF_COLOR.NONE;
-    const paintParentRank = (parentRank: number): void => {
-      paintRank(parentRank, propagatedColor);
-    };
+  private run(
+    left: ReadonlySet<EventId>,
+    right: ReadonlySet<EventId>,
+    view: RankedDiffVersionsView,
+    onlyInLeft: Set<EventId> | null,
+    onlyInRight: Set<EventId> | null,
+    retreat: EventId[] | null,
+    advanceDescending: EventId[] | null,
+  ): void {
+    this.visitedRankCount = 0;
+    this.ensureCapacity(view.eventCount());
+    this.activeView = view;
+    this.pendingDivergent = 0;
+    this.propagatedColor = DIFF_COLOR.NONE;
 
     try {
-      paintVersion(left, DIFF_COLOR.LEFT);
-      paintVersion(right, DIFF_COLOR.RIGHT);
+      this.paintVersion(left, DIFF_COLOR.LEFT);
+      this.paintVersion(right, DIFF_COLOR.RIGHT);
 
-      while (this.heap.size > 0 && pendingDivergent > 0) {
+      while (this.heap.size > 0 && this.pendingDivergent > 0) {
         const rank = this.heap.pop()!;
         this.visitedRankCount++;
         const finalColor = this.colors[rank] ?? DIFF_COLOR.NONE;
@@ -104,24 +116,58 @@ export class RankedDiffVersionsWorkspace {
         }
 
         if (finalColor === DIFF_COLOR.LEFT) {
-          onlyInLeft.add(id);
-          pendingDivergent--;
+          onlyInLeft?.add(id);
+          retreat?.push(id);
+          this.pendingDivergent--;
         } else if (finalColor === DIFF_COLOR.RIGHT) {
-          onlyInRight.add(id);
-          pendingDivergent--;
+          onlyInRight?.add(id);
+          advanceDescending?.push(id);
+          this.pendingDivergent--;
         }
 
-        propagatedColor = finalColor;
-        view.forEachParentRank(rank, paintParentRank);
+        this.propagatedColor = finalColor;
+        view.forEachParentRank(rank, this.paintParentRank);
       }
-
-      return { onlyInLeft, onlyInRight };
     } finally {
       for (const rank of this.touchedRanks) {
         this.colors[rank] = DIFF_COLOR.NONE;
       }
       this.touchedRanks.length = 0;
       this.heap.clear();
+      this.activeView = null;
+      this.pendingDivergent = 0;
+      this.propagatedColor = DIFF_COLOR.NONE;
+    }
+  }
+
+  private paintVersion(version: ReadonlySet<EventId>, color: number): void {
+    const view = this.activeView;
+    if (view === null) {
+      throw new Error("Ranked diff workspace is not active");
+    }
+    for (const id of version) {
+      const rank = view.insertionRankOf(id);
+      if (rank !== undefined) {
+        this.paintRank(rank, color);
+      }
+    }
+  }
+
+  private paintRank(rank: number, addedColor: number): void {
+    const existing = this.colors[rank] ?? DIFF_COLOR.NONE;
+    const merged = existing | addedColor;
+    if (merged === existing) {
+      return;
+    }
+    this.colors[rank] = merged;
+    if (existing === DIFF_COLOR.NONE) {
+      this.touchedRanks.push(rank);
+      this.heap.push(rank);
+      if (merged !== DIFF_COLOR.COMMON) {
+        this.pendingDivergent++;
+      }
+    } else if (existing !== DIFF_COLOR.COMMON && merged === DIFF_COLOR.COMMON) {
+      this.pendingDivergent--;
     }
   }
 

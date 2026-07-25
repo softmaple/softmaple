@@ -149,6 +149,69 @@ describe("EventGraph", () => {
         }),
       ).toThrow("Missing parent event: missing-parent");
     });
+
+    it("keeps linear child adjacency scalar and restores promotions on rollback", () => {
+      const { graph } = buildLinearHistory(512);
+      const before = graph.serialize();
+      const linearStats = graph.getObjectTailStructureStats();
+
+      expect(linearStats).toEqual({
+        tailEvents: 512,
+        parentEntries: 511,
+        branchArrays: 0,
+        childEdges: 511,
+      });
+      expect(graph.getChildren("n-0")).toEqual(new Set(["n-1"]));
+
+      const transaction = graph.beginAppendTransaction();
+      graph.addEvent({
+        id: "branch-a",
+        timestamp: 1_000,
+        parentVersion: new Set(["n-0"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 1,
+          text: "a",
+        },
+      });
+      graph.addEvent({
+        id: "branch-b",
+        timestamp: 1_001,
+        parentVersion: new Set(["n-0"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 1,
+          text: "b",
+        },
+      });
+      graph.addEvent({
+        id: "branch-merge",
+        timestamp: 1_002,
+        parentVersion: new Set(["branch-a", "branch-b"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 2,
+          text: "m",
+        },
+      });
+
+      expect(graph.getChildren("n-0")).toEqual(
+        new Set(["n-1", "branch-a", "branch-b"]),
+      );
+      expect(graph.getObjectTailStructureStats()).toEqual({
+        tailEvents: 515,
+        parentEntries: 513,
+        branchArrays: 1,
+        childEdges: 515,
+      });
+
+      transaction.rollback();
+
+      expect(graph.getObjectTailStructureStats()).toEqual(linearStats);
+      expect(graph.getChildren("n-0")).toEqual(new Set(["n-1"]));
+      expect(graph.getFrontier()).toEqual(new Set(["n-511"]));
+      expect(graph.serialize()).toEqual(before);
+    });
   });
 
   describe("getTopologicalOrder", () => {

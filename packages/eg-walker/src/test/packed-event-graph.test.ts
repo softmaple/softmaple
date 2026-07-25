@@ -82,6 +82,12 @@ describe("packed event graph", () => {
     });
     expect(graph.getFrontier()).toEqual(new Set(["merge"]));
     expect(graph.getChildren("left")).toEqual(new Set(["merge"]));
+    expect(graph.getObjectTailStructureStats()).toEqual({
+      tailEvents: 1,
+      parentEntries: 2,
+      branchArrays: 0,
+      childEdges: 2,
+    });
     expect(
       graph.diffVersions(new Set(["merge"]), new Set(["left"])).onlyInLeft,
     ).toEqual(new Set(["right", "merge"]));
@@ -90,6 +96,12 @@ describe("packed event graph", () => {
     expect(graph.getEventCount()).toBe(3);
     expect(graph.getFrontier()).toEqual(new Set(["left", "right"]));
     expect(graph.getChildren("left")).toEqual(new Set());
+    expect(graph.getObjectTailStructureStats()).toEqual({
+      tailEvents: 0,
+      parentEntries: 0,
+      branchArrays: 0,
+      childEdges: 0,
+    });
     expect(graph.serialize()).toEqual(buildBranchingGraph().serialize());
   });
 

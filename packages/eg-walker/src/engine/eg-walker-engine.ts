@@ -2351,6 +2351,27 @@ export class EgWalkerEngine {
     targetVersion: ReadonlySet<EventId>,
   ): { retreat: EventId[]; advance: EventId[] } {
     this.ensureEventIndexes();
+    const rankedTransition = this.graph.getRankedVersionTransition(
+      currentVersion,
+      targetVersion,
+    );
+    if (rankedTransition !== null) {
+      if (this.eventOrder.size === this.graph.getEventCount()) {
+        return {
+          retreat: rankedTransition.retreat,
+          advance: rankedTransition.advance,
+        };
+      }
+      return {
+        retreat: rankedTransition.retreat.filter((id) =>
+          this.eventOrder.has(id),
+        ),
+        advance: rankedTransition.advance.filter((id) =>
+          this.eventOrder.has(id),
+        ),
+      };
+    }
+
     const { onlyInLeft, onlyInRight } = this.graph.diffVersions(
       currentVersion,
       targetVersion,

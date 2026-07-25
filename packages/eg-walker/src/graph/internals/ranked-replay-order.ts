@@ -2,7 +2,7 @@ import type { EventId } from "../../types";
 import { compareEventIds } from "../event-id";
 
 export interface RankedReplayOrderView {
-  readonly eventCount: number;
+  eventCount(): number;
   insertionRankOf(id: EventId): number | undefined;
   eventIdAt(rank: number): EventId | undefined;
   forEachParentRank(rank: number, visit: (parentRank: number) => void): void;
@@ -35,7 +35,7 @@ export class RankedReplayOrderWorkspace {
     replayEventIds: ReadonlySet<EventId>,
     view: RankedReplayOrderView,
   ): ReadonlyArray<EventId> {
-    this.ensureCapacity(view.eventCount);
+    this.ensureCapacity(view.eventCount());
     const ordered: EventId[] = [];
     let parentCount = 0;
     const countParent = (parentRank: number): void => {

@@ -247,7 +247,9 @@ describe("FugueOrderIndex structural bounds", () => {
       oracleEngine.getDeleteTargetRecords(),
     );
     expect(indexed.stats.fugueRebuilds).toBe(0);
-    expect(indexed.stats.fugueMarkerOperations).toBe(3 * count + 3);
+    // The object prepare transition isolates the whole canonical span at its
+    // boundaries, so marker maintenance stays constant as the run grows.
+    expect(indexed.stats.fugueMarkerOperations).toBeLessThanOrEqual(6);
   });
 
   it("matches generated compound traces without production conflict scans", () => {

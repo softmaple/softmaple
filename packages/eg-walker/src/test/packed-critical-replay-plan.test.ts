@@ -582,7 +582,8 @@ describe("packed critical-section replay planning", () => {
     const objectUpdateCount = updateItem.mock.calls.length;
     updateItem.mockRestore();
     expect(packed.getText()).toBe(object.getText());
-    expect(packedUpdateCount).toBeLessThan(objectUpdateCount);
+    expect(packedUpdateCount).toBeLessThanOrEqual(objectUpdateCount);
+    expect(objectUpdateCount).toBeLessThan(10);
     expect(packed.getReplayStats().peakSequenceRecordCount).toBeLessThan(100);
 
     const divergent = editingEvent(
@@ -685,6 +686,10 @@ describe("packed critical-section replay planning", () => {
       RecordSplitter.prototype,
       "isolateRunSliceForEvent",
     );
+    const objectSpanIsolation = vi.spyOn(
+      RecordSplitter.prototype,
+      "isolateRunSpanForEvents",
+    );
     const packed = new EgWalkerReplica("packed-span", "", pack(events));
     const packedSpanCalls = spanIsolation.mock.calls.filter(
       ([replicaId, firstSequence, eventCount]) =>
@@ -696,6 +701,7 @@ describe("packed critical-section replay planning", () => {
 
     spanIsolation.mockClear();
     scalarIsolation.mockClear();
+    objectSpanIsolation.mockClear();
     const object = new EgWalkerReplica(
       "object-span",
       "",
@@ -704,12 +710,18 @@ describe("packed critical-section replay planning", () => {
     const objectScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
       /^a:[3-7]$/.test(eventId),
     ).length;
+    const objectSpanCalls = objectSpanIsolation.mock.calls.filter(
+      ([firstEventId, eventCount]) =>
+        firstEventId === "a:3" && eventCount === 5,
+    ).length;
     spanIsolation.mockRestore();
     scalarIsolation.mockRestore();
+    objectSpanIsolation.mockRestore();
 
     expect(packedSpanCalls).toBe(2);
     expect(packedScalarCalls).toBe(0);
-    expect(objectScalarCalls).toBe(10);
+    expect(objectSpanCalls).toBe(2);
+    expect(objectScalarCalls).toBe(0);
     expect(packed.getText()).toBe(`aaa${"b".repeat(10)}`);
     expect(packed.getText()).toBe(object.getText());
     expect(packed.getReplayStats().engineRetreats).toBe(7);

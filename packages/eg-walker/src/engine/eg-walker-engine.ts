@@ -109,6 +109,11 @@ const versionsEqual = (
   return true;
 };
 
+const ascendingNumber = (left: number, right: number): number => left - right;
+const descendingNumber = (left: number, right: number): number => right - left;
+const descendingEventId = (left: EventId, right: EventId): number =>
+  compareEventIds(right, left);
+
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
  *
@@ -118,6 +123,7 @@ const versionsEqual = (
  */
 export class EgWalkerEngine {
   private readonly eventOrder = new Map<EventId, number>();
+  private readonly eventIdsByOrder: EventId[] = [];
   private eventIndexesComplete = false;
   private processedEventCount = 0;
   private graph = new EventGraph();
@@ -185,7 +191,7 @@ export class EgWalkerEngine {
   private packedInsertTail: AugmentedCRDTItem | null = null;
   private packedInsertNextPrepareIndex = -1;
   private readonly packedInsertTailResult: InsertTailResult = { item: null };
-  private readonly packedPrepareDeltas = new Map<AugmentedCRDTItem, number>();
+  private readonly prepareDeltas = new Map<AugmentedCRDTItem, number>();
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -314,6 +320,7 @@ export class EgWalkerEngine {
     const end = plan.sectionEndAt(endSectionIndex - 1);
     const materializeDeleteKeys = this.deleteTargets.hasPackedOrderRange();
     this.eventOrder.clear();
+    this.eventIdsByOrder.length = 0;
     for (let orderIndex = start; orderIndex < end; orderIndex++) {
       const eventOffset = plan.eventOffsetAt(orderIndex);
       const eventId = plan.eventIdAtKnownOffset(eventOffset);
@@ -321,6 +328,7 @@ export class EgWalkerEngine {
         this.deleteTargets.materializePackedRecord(orderIndex, eventId);
       }
       this.eventOrder.set(eventId, orderIndex - start);
+      this.eventIdsByOrder.push(eventId);
     }
     if (materializeDeleteKeys) {
       if (this.deleteTargets.hasPackedRecords()) {
@@ -402,11 +410,13 @@ export class EgWalkerEngine {
       deleteTargets: state.deleteTargets,
     });
     engine.eventOrder.clear();
+    engine.eventIdsByOrder.length = 0;
     state.eventOrder.forEach((eventId, index) => {
       if (!graph.hasEvent(eventId)) {
         throw new Error(`Recovery state references missing event ${eventId}`);
       }
       engine.eventOrder.set(eventId, index);
+      engine.eventIdsByOrder.push(eventId);
     });
     engine.eventIndexesComplete = state.eventIndexesComplete;
     engine.restoreStats(state.stats);
@@ -421,7 +431,9 @@ export class EgWalkerEngine {
   applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
     this.materializePackedDeleteTargets();
     if (this.eventIndexesComplete && !this.eventOrder.has(event.id)) {
-      this.eventOrder.set(event.id, this.eventOrder.size);
+      const order = this.eventOrder.size;
+      this.eventOrder.set(event.id, order);
+      this.eventIdsByOrder.push(event.id);
     }
     this.graph = graph;
 
@@ -473,12 +485,7 @@ export class EgWalkerEngine {
       this.currentVersion,
       version,
     );
-    for (const eventId of retreat) {
-      this.retreat(eventId);
-    }
-    for (const eventId of advance) {
-      this.advance(eventId);
-    }
+    this.applyObjectPrepareTransition(retreat, advance);
     this.currentVersion = new Set(version);
   }
 
@@ -747,18 +754,12 @@ export class EgWalkerEngine {
 
   captureRecoveryState(): EngineRecoveryState {
     this.flushPendingInsert();
-    const eventOrder = Array.from(this.eventOrder, ([eventId, index]) => ({
-      eventId,
-      index,
-    }))
-      .sort((left, right) => left.index - right.index)
-      .map(({ eventId }) => eventId);
     return {
       currentVersion: new Set(this.currentVersion),
       textBuffer: this.resultingText,
       sequenceRecords: this.getSequenceRecords(),
       deleteTargets: this.getDeleteTargetRecords(),
-      eventOrder,
+      eventOrder: this.eventIdsByOrder.slice(),
       eventIndexesComplete: this.eventIndexesComplete,
       stats: this.getStats(),
     };
@@ -770,6 +771,7 @@ export class EgWalkerEngine {
       : itemsFromRecords(state.sequenceRecords ?? []);
 
     this.eventOrder.clear();
+    this.eventIdsByOrder.length = 0;
     this.eventIndexesComplete = false;
     this.graph = state.graph;
     this.eventItems.clear();
@@ -850,12 +852,7 @@ export class EgWalkerEngine {
       event.parentVersion,
     );
 
-    for (const eventId of retreat) {
-      this.retreat(eventId);
-    }
-    for (const eventId of advance) {
-      this.advance(eventId);
-    }
+    this.applyObjectPrepareTransition(retreat, advance);
 
     const transformed = this.apply(event, collectTransformedOperations);
     this.currentVersion = new Set([event.id]);
@@ -1015,13 +1012,149 @@ export class EgWalkerEngine {
     return eventIndex;
   }
 
+  /**
+   * Apply one object-backed prepare-view transition as typed-run spans.
+   *
+   * Scalar retreat/advance used to split a coalesced run once per event and
+   * update the ranked sequence after every split. Resolve participating
+   * delete targets first, isolate only run-span boundaries, accumulate all
+   * prepare deltas, and refresh ranked weights once.
+   */
+  private applyObjectPrepareTransition(
+    retreat: ReadonlyArray<EventId>,
+    advance: ReadonlyArray<EventId>,
+  ): void {
+    const deltas = this.prepareDeltas;
+    deltas.clear();
+
+    const materializeDeleteTargets = this.deleteTargets.hasRunEventTargets();
+    const resolveItemId = (eventId: EventId): EventId =>
+      this.resolveRunDeleteTargetItem(eventId).id;
+    const materializeAndCount = (eventIds: ReadonlyArray<EventId>): number => {
+      let knownEventCount = 0;
+      for (const eventId of eventIds) {
+        if (!this.eventOrder.has(eventId)) {
+          continue;
+        }
+        const isInsert = this.graph.isInsertEvent(eventId);
+        if (isInsert === undefined) {
+          continue;
+        }
+        knownEventCount++;
+        if (!isInsert && materializeDeleteTargets) {
+          this.deleteTargets.materializeRunEventTargetsOf(
+            eventId,
+            resolveItemId,
+          );
+        }
+      }
+      return knownEventCount;
+    };
+
+    const retreated = materializeAndCount(retreat);
+    const advanced = materializeAndCount(advance);
+    this.collectObjectInsertPrepareSpans(retreat, -1, deltas);
+    this.collectObjectInsertPrepareSpans(advance, 1, deltas);
+    this.collectObjectDeletePrepareDeltas(retreat, -1, deltas);
+    this.collectObjectDeletePrepareDeltas(advance, 1, deltas);
+    this.applyCollectedPrepareDeltas(deltas);
+    this.retreatCount += retreated;
+    this.advanceCount += advanced;
+  }
+
+  private collectObjectInsertPrepareSpans(
+    eventIds: ReadonlyArray<EventId>,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    let groupStart = 0;
+    while (groupStart < eventIds.length) {
+      const firstId = eventIds[groupStart]!;
+      if (
+        !this.eventOrder.has(firstId) ||
+        this.graph.isInsertEvent(firstId) !== true
+      ) {
+        groupStart++;
+        continue;
+      }
+
+      const first = parseEventId(firstId);
+      let groupEnd = groupStart + 1;
+      if (first !== null) {
+        let expectedSequence = first.sequence + delta;
+        while (groupEnd < eventIds.length) {
+          const nextId = eventIds[groupEnd]!;
+          if (
+            !this.eventOrder.has(nextId) ||
+            this.graph.isInsertEvent(nextId) !== true
+          ) {
+            break;
+          }
+          const next = parseEventId(nextId);
+          if (
+            next === null ||
+            next.replicaId !== first.replicaId ||
+            next.sequence !== expectedSequence
+          ) {
+            break;
+          }
+          expectedSequence += delta;
+          groupEnd++;
+        }
+      }
+
+      const groupLength = groupEnd - groupStart;
+      let consumed = 0;
+      while (consumed < groupLength) {
+        const eventIndex =
+          delta === 1 ? groupStart + consumed : groupEnd - consumed - 1;
+        const eventId = eventIds[eventIndex]!;
+        const item = this.recordSplitter.isolateRunSpanForEvents(
+          eventId,
+          groupLength - consumed,
+        );
+        if (item === null) {
+          this.collectInsertPrepareDelta(eventId, delta, deltas);
+          consumed++;
+          continue;
+        }
+
+        const isolatedEventCount = item.content.length;
+        if (
+          isolatedEventCount <= 0 ||
+          isolatedEventCount > groupLength - consumed
+        ) {
+          throw new Error(`Invalid typed-run transition span at ${eventId}`);
+        }
+        this.collectPrepareDeltaForItem(item, delta, deltas);
+        consumed += isolatedEventCount;
+      }
+      groupStart = groupEnd;
+    }
+  }
+
+  private collectObjectDeletePrepareDeltas(
+    eventIds: ReadonlyArray<EventId>,
+    delta: 1 | -1,
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
+    for (const eventId of eventIds) {
+      if (
+        this.eventOrder.has(eventId) &&
+        this.graph.isInsertEvent(eventId) === false
+      ) {
+        this.collectDeletePrepareDelta(eventId, delta, deltas);
+      }
+    }
+  }
+
   private applyPackedPrepareTransition(
     plan: PackedCriticalReplayPlan,
     transition: PackedLocalVersionTransition,
     rangeStart: number,
     rangeEnd: number,
   ): void {
-    const deltas = this.packedPrepareDeltas;
+    const deltas = this.prepareDeltas;
     deltas.clear();
 
     // Lazy scalar delete targets may still share one typed-run record. Split
@@ -1097,6 +1230,12 @@ export class EgWalkerEngine {
       }
     }
 
+    this.applyCollectedPrepareDeltas(deltas);
+  }
+
+  private applyCollectedPrepareDeltas(
+    deltas: Map<AugmentedCRDTItem, number>,
+  ): void {
     if (deltas.size === 0) {
       return;
     }
@@ -1736,6 +1875,7 @@ export class EgWalkerEngine {
       options.eventOrder ?? options.eventGraph?.getTopologicalOrder() ?? events;
     graphEvents.forEach((event, index) => {
       this.eventOrder.set(event.id, index);
+      this.eventIdsByOrder.push(event.id);
       if (!options.eventGraph) {
         this.graph.addEvent(event);
       }
@@ -1745,6 +1885,7 @@ export class EgWalkerEngine {
 
   private resetState(initialText: string, options: GenerateOptions): void {
     this.eventOrder.clear();
+    this.eventIdsByOrder.length = 0;
     this.eventIndexesComplete = false;
     this.graph = options.eventGraph ?? new EventGraph();
     this.eventItems.clear();
@@ -1776,7 +1917,7 @@ export class EgWalkerEngine {
     this.packedInsertTail = null;
     this.packedInsertNextPrepareIndex = -1;
     this.packedInsertTailResult.item = null;
-    this.packedPrepareDeltas.clear();
+    this.prepareDeltas.clear();
     this.placeholderCounter = 0;
 
     if (this.resultingText.length === 0) {
@@ -1983,133 +2124,6 @@ export class EgWalkerEngine {
     }
   }
 
-  private retreat(eventId: EventId): void {
-    if (!this.eventOrder.has(eventId)) {
-      return;
-    }
-    const isInsert = this.graph.isInsertEvent(eventId);
-    if (isInsert === undefined) {
-      return;
-    }
-    this.adjustPrepareState(eventId, isInsert, -1);
-    this.retreatCount++;
-  }
-
-  private advance(eventId: EventId): void {
-    if (!this.eventOrder.has(eventId)) {
-      return;
-    }
-    const isInsert = this.graph.isInsertEvent(eventId);
-    if (isInsert === undefined) {
-      return;
-    }
-
-    this.adjustPrepareState(eventId, isInsert, 1);
-    this.advanceCount++;
-  }
-
-  private adjustPrepareState(
-    eventId: EventId,
-    isInsert: boolean,
-    delta: 1 | -1,
-  ): void {
-    if (isInsert) {
-      const eventItems = this.recordSplitter.isolateRunSliceForEvent(eventId);
-      if (typeof eventItems === "string") {
-        const item = this.requireItem(eventItems);
-        item.prepareState += delta;
-        this.sequence.updateItem(item);
-        return;
-      }
-      for (const itemId of eventItems ?? []) {
-        const item = this.requireItem(itemId);
-        item.prepareState += delta;
-        this.sequence.updateItem(item);
-      }
-      return;
-    }
-
-    const firstTarget = this.deleteTargets.firstTargetOf(eventId);
-    if (firstTarget === 0) {
-      return;
-    }
-    const secondTarget = this.deleteTargets.nextTarget(firstTarget);
-    if (secondTarget === 0) {
-      const kind = this.deleteTargets.kindOf(firstTarget);
-      if (kind === DELETE_TARGET_KIND.ITEM) {
-        const item = this.requireItem(this.deleteTargets.itemIdOf(firstTarget));
-        item.prepareState += delta;
-        this.sequence.updateItem(item);
-        return;
-      }
-      if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
-        const item = this.adjustRunEventPrepareState(
-          this.deleteTargets.runEventIdOf(firstTarget),
-          delta,
-        );
-        this.sequence.updateItem(item);
-        return;
-      }
-
-      const affected = this.deleteTargets
-        .placeholderStateOf(firstTarget)
-        .adjustPrepareRange(
-          this.deleteTargets.placeholderStartOf(firstTarget),
-          this.deleteTargets.placeholderEndOf(firstTarget),
-          delta,
-        );
-      if (affected.length === 1) {
-        const owner = affected[0]?.owner;
-        if (owner !== null && owner !== undefined) {
-          this.sequence.updateItem(owner);
-        }
-      } else {
-        const dirty = new Set<AugmentedCRDTItem>();
-        for (const slice of affected) {
-          const owner = slice.owner;
-          if (owner !== null) {
-            dirty.add(owner);
-          }
-        }
-        this.sequence.updateItems(dirty);
-      }
-      return;
-    }
-
-    const dirty = new Set<AugmentedCRDTItem>();
-    let target = firstTarget;
-    while (target !== 0) {
-      const kind = this.deleteTargets.kindOf(target);
-      if (kind === DELETE_TARGET_KIND.ITEM) {
-        const item = this.requireItem(this.deleteTargets.itemIdOf(target));
-        item.prepareState += delta;
-        dirty.add(item);
-      } else if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
-        dirty.add(
-          this.adjustRunEventPrepareState(
-            this.deleteTargets.runEventIdOf(target),
-            delta,
-          ),
-        );
-      } else {
-        for (const slice of this.deleteTargets
-          .placeholderStateOf(target)
-          .adjustPrepareRange(
-            this.deleteTargets.placeholderStartOf(target),
-            this.deleteTargets.placeholderEndOf(target),
-            delta,
-          )) {
-          const item = slice.owner;
-          if (item !== null) {
-            dirty.add(item);
-          }
-        }
-      }
-      target = this.deleteTargets.nextTarget(target);
-    }
-    this.sequence.updateItems(dirty);
-  }
-
   private collectInsertPrepareDelta(
     eventId: EventId,
     delta: 1 | -1,
@@ -2211,15 +2225,6 @@ export class EgWalkerEngine {
       throw new Error(`Typed-run delete target ${eventId} is not isolated`);
     }
     this.samplePeakSequenceRecordCount();
-    return item;
-  }
-
-  private adjustRunEventPrepareState(
-    eventId: EventId,
-    delta: 1 | -1,
-  ): AugmentedCRDTItem {
-    const item = this.resolveRunDeleteTargetItem(eventId);
-    item.prepareState += delta;
     return item;
   }
 
@@ -2357,27 +2362,36 @@ export class EgWalkerEngine {
     };
   }
 
-  // Pre-materialise the topological rank per id so the sort comparator
-  // doesn't pay two `eventOrder.get()` calls per comparison. When two ids
-  // share a rank (unknown ids both default to MAX_SAFE_INTEGER), fall back
-  // to {@link compareEventIds} for a stable lex tiebreak.
+  // Sort dense numeric ranks and translate them through the parallel ID
+  // column. This avoids allocating one `{ id, order }` object per diff event
+  // while still paying only one eventOrder lookup per ID.
   private sortByEventOrder(
     ids: Iterable<EventId>,
     descending: boolean,
   ): EventId[] {
-    const ranked = Array.from(ids, (id) => ({
-      id,
-      order: this.eventOrder.get(id) ?? Number.MAX_SAFE_INTEGER,
-    }));
-    ranked.sort((left, right) => {
-      if (left.order !== right.order) {
-        return descending ? right.order - left.order : left.order - right.order;
+    const orders: number[] = [];
+    const unknownIds: EventId[] = [];
+    for (const id of ids) {
+      const order = this.eventOrder.get(id);
+      if (order === undefined) {
+        unknownIds.push(id);
+      } else {
+        orders.push(order);
       }
-      return descending
-        ? compareEventIds(right.id, left.id)
-        : compareEventIds(left.id, right.id);
+    }
+    orders.sort(descending ? descendingNumber : ascendingNumber);
+    unknownIds.sort(descending ? descendingEventId : compareEventIds);
+
+    const knownIds = orders.map((order) => {
+      const eventId = this.eventIdsByOrder[order];
+      if (eventId === undefined) {
+        throw new Error(`Event order ${order} has no event ID`);
+      }
+      return eventId;
     });
-    return ranked.map(({ id }) => id);
+    return descending
+      ? [...unknownIds, ...knownIds]
+      : [...knownIds, ...unknownIds];
   }
 
   private ensureEventIndexes(): void {
@@ -2385,8 +2399,10 @@ export class EgWalkerEngine {
       return;
     }
     this.eventOrder.clear();
+    this.eventIdsByOrder.length = 0;
     this.graph.getTopologicalOrder().forEach((event, index) => {
       this.eventOrder.set(event.id, index);
+      this.eventIdsByOrder.push(event.id);
     });
     this.eventIndexesComplete = true;
   }

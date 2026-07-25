@@ -162,14 +162,6 @@ describe("diffVersions topological diff", () => {
     const left = branch("L");
     const right = branch("R");
 
-    // Spy on the allocation-free parent iterator so we can observe how many distinct events the
-    // diff walks. Only the 10 branch events plus the shared tip need to
-    // be visited; the 499 pre-tip events MUST remain untouched.
-    const iterateParents = graph.iterateParents.bind(graph);
-    const spy = vi.spyOn(graph, "iterateParents").mockImplementation((id) => {
-      return iterateParents(id);
-    });
-
     const diff = graph.diffVersions(
       new Set([left[left.length - 1]!]),
       new Set([right[right.length - 1]!]),
@@ -178,21 +170,11 @@ describe("diffVersions topological diff", () => {
     expect(diff.onlyInLeft).toEqual(new Set(left));
     expect(diff.onlyInRight).toEqual(new Set(right));
 
-    const visited = new Set<EventId>();
-    for (const call of spy.mock.calls) {
-      visited.add(call[0] as EventId);
-    }
     // Only the 10 branch events should have their parents looked up; the
     // shared tip and earlier prefix events are never popped because the
     // traversal terminates as soon as both branches converge. This is
     // dramatically smaller than the total graph size of 510.
-    expect(visited.size).toBeLessThanOrEqual(10);
-    for (let i = 0; i < 100; i++) {
-      // None of the deep ancestors should have been touched.
-      expect(visited.has(ids[i]!)).toBe(false);
-    }
-
-    spy.mockRestore();
+    expect(graph.getLastObjectDiffTraversalCount()).toBeLessThanOrEqual(10);
   });
 
   it("does not traverse beyond the merge base when comparing concurrent tips", () => {
@@ -214,30 +196,16 @@ describe("diffVersions topological diff", () => {
       operation: { type: OPERATION_TYPE.INSERT, index: 50, text: "R" },
     });
 
-    const iterateParents = graph.iterateParents.bind(graph);
-    const spy = vi.spyOn(graph, "iterateParents").mockImplementation((id) => {
-      return iterateParents(id);
-    });
-
     const diff = graph.diffVersions(new Set(["L-tip"]), new Set(["R-tip"]));
     expect(diff).toEqual({
       onlyInLeft: new Set(["L-tip"]),
       onlyInRight: new Set(["R-tip"]),
     });
 
-    const visited = new Set<EventId>();
-    for (const call of spy.mock.calls) {
-      visited.add(call[0] as EventId);
-    }
     // Only the two tips and the shared prefix tip are popped from the
     // heap; the merge-base bookkeeping prevents walking into the deeper
     // prefix once both branches converge on `tip`.
-    expect(visited.has("L-tip")).toBe(true);
-    expect(visited.has("R-tip")).toBe(true);
-    expect(visited.size).toBeLessThanOrEqual(3);
-    expect(visited.has(ids[0]!)).toBe(false);
-
-    spy.mockRestore();
+    expect(graph.getLastObjectDiffTraversalCount()).toBe(2);
   });
 
   it("matches expandVersion-based diff results on randomised graphs", () => {
@@ -456,6 +424,250 @@ describe("diffVersions topological diff", () => {
       onlyInLeft: new Set(["left"]),
       onlyInRight: new Set(["right"]),
     });
+  });
+
+  it("isolates re-entrant object queries and resets numeric scratch state", () => {
+    const { graph } = buildLinearHistory(1, "shared-object");
+    graph.addEvent({
+      id: "object-left",
+      timestamp: 1,
+      parentVersion: new Set(["shared-object-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "L" },
+    });
+    graph.addEvent({
+      id: "object-right",
+      timestamp: 2,
+      parentVersion: new Set(["shared-object-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "R" },
+    });
+
+    let nestedDiff: ReturnType<EventGraph["diffVersions"]> | undefined;
+    class ReentrantVersion extends Set<EventId> {
+      private entered = false;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        if (!this.entered) {
+          this.entered = true;
+          nestedDiff = graph.diffVersions(
+            new Set(["object-right"]),
+            new Set(["object-left"]),
+          );
+        }
+        yield* super[Symbol.iterator]();
+      }
+    }
+
+    expect(
+      graph.diffVersions(
+        new ReentrantVersion(["object-left"]),
+        new Set(["object-right"]),
+      ),
+    ).toEqual({
+      onlyInLeft: new Set(["object-left"]),
+      onlyInRight: new Set(["object-right"]),
+    });
+    expect(nestedDiff).toEqual({
+      onlyInLeft: new Set(["object-right"]),
+      onlyInRight: new Set(["object-left"]),
+    });
+
+    class ThrowOnceVersion extends Set<EventId> {
+      private failed = false;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        for (const id of super[Symbol.iterator]()) {
+          yield id;
+          if (!this.failed) {
+            this.failed = true;
+            throw new Error("object iterator failed");
+          }
+        }
+      }
+    }
+
+    expect(() =>
+      graph.diffVersions(
+        new ThrowOnceVersion(["object-left"]),
+        new Set(["object-right"]),
+      ),
+    ).toThrow("object iterator failed");
+    expect(
+      graph.diffVersions(new Set(["object-left"]), new Set(["object-right"])),
+    ).toEqual({
+      onlyInLeft: new Set(["object-left"]),
+      onlyInRight: new Set(["object-right"]),
+    });
+  });
+
+  it("restores multi-parent rank storage after failed and rolled-back appends", () => {
+    const { graph } = buildLinearHistory(1, "rank-root");
+    graph.addEvent({
+      id: "rank-left",
+      timestamp: 1,
+      parentVersion: new Set(["rank-root-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "L" },
+    });
+    graph.addEvent({
+      id: "rank-right",
+      timestamp: 2,
+      parentVersion: new Set(["rank-root-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "R" },
+    });
+
+    expect(() =>
+      graph.addEvent({
+        id: "failed-merge",
+        timestamp: 3,
+        parentVersion: new Set(["rank-left", "missing-parent"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "F" },
+      }),
+    ).toThrow("missing-parent");
+
+    const transaction = graph.beginAppendTransaction();
+    graph.addEvent({
+      id: "rolled-back-merge",
+      timestamp: 4,
+      parentVersion: new Set(["rank-left", "rank-right"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "M" },
+    });
+    graph.addEvent({
+      id: "rolled-back-tail",
+      timestamp: 5,
+      parentVersion: new Set(["rolled-back-merge"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 3, text: "T" },
+    });
+    transaction.rollback();
+
+    expect(graph.hasEvent("failed-merge")).toBe(false);
+    expect(graph.hasEvent("rolled-back-merge")).toBe(false);
+    expect(graph.hasEvent("rolled-back-tail")).toBe(false);
+
+    graph.addEvent({
+      id: "stable-merge",
+      timestamp: 6,
+      parentVersion: new Set(["rank-right", "rank-left"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "S" },
+    });
+    expect(
+      graph.diffVersions(new Set(["stable-merge"]), new Set(["rank-left"])),
+    ).toEqual({
+      onlyInLeft: new Set(["stable-merge", "rank-right"]),
+      onlyInRight: new Set(),
+    });
+  });
+
+  it("derives parent-rank sidecars from the stored defensive copy", () => {
+    const { graph } = buildLinearHistory(1, "copy-root");
+    graph.addEvent({
+      id: "copy-left",
+      timestamp: 1,
+      parentVersion: new Set(["copy-root-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "L" },
+    });
+    graph.addEvent({
+      id: "copy-right",
+      timestamp: 2,
+      parentVersion: new Set(["copy-root-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "R" },
+    });
+
+    class ChangingParents extends Set<EventId> {
+      iterations = 0;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        this.iterations++;
+        yield "copy-left";
+        if (this.iterations > 1) {
+          yield "copy-right";
+        }
+      }
+    }
+
+    const parents = new ChangingParents(["copy-left", "copy-right"]);
+    graph.addEvent({
+      id: "copied-child",
+      timestamp: 3,
+      parentVersion: parents,
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
+    });
+
+    expect(parents.iterations).toBe(1);
+    expect(graph.getParents("copied-child")).toEqual(new Set(["copy-left"]));
+    expect(
+      graph.diffVersions(new Set(["copied-child"]), new Set(["copy-left"])),
+    ).toEqual({
+      onlyInLeft: new Set(["copied-child"]),
+      onlyInRight: new Set(),
+    });
+  });
+
+  it("isolates re-entrant ranked replay orders and resets after errors", () => {
+    const { graph } = buildLinearHistory(1, "order-root");
+    graph.addEvent({
+      id: "order-left",
+      timestamp: 1,
+      parentVersion: new Set(["order-root-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "L" },
+    });
+    graph.addEvent({
+      id: "order-right",
+      timestamp: 2,
+      parentVersion: new Set(["order-root-0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "R" },
+    });
+    graph.addEvent({
+      id: "order-merge",
+      timestamp: 3,
+      parentVersion: new Set(["order-left", "order-right"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "M" },
+    });
+
+    let nestedOrder: ReadonlyArray<EventId> | null | undefined;
+    class ReentrantReplaySet extends Set<EventId> {
+      private entered = false;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        if (!this.entered) {
+          this.entered = true;
+          nestedOrder = graph.getRankedReplayOrder(
+            new Set(["order-right", "order-left"]),
+          );
+        }
+        yield* super[Symbol.iterator]();
+      }
+    }
+
+    expect(
+      graph.getRankedReplayOrder(
+        new ReentrantReplaySet(["order-left", "order-right", "order-merge"]),
+      ),
+    ).toEqual(["order-left", "order-right", "order-merge"]);
+    expect(nestedOrder).toEqual(["order-left", "order-right"]);
+
+    class ThrowOnceReplaySet extends Set<EventId> {
+      private failed = false;
+
+      override *[Symbol.iterator](): SetIterator<EventId> {
+        for (const id of super[Symbol.iterator]()) {
+          yield id;
+          if (!this.failed) {
+            this.failed = true;
+            throw new Error("replay iterator failed");
+          }
+        }
+      }
+    }
+
+    expect(() =>
+      graph.getRankedReplayOrder(
+        new ThrowOnceReplaySet(["order-left", "order-right"]),
+      ),
+    ).toThrow("replay iterator failed");
+    expect(
+      graph.getRankedReplayOrder(
+        new Set(["order-left", "order-right", "order-merge"]),
+      ),
+    ).toEqual(["order-left", "order-right", "order-merge"]);
   });
 
   it("stops packed CSR traversal at a deep shared-history boundary", () => {

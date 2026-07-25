@@ -119,6 +119,11 @@ const getBranchPreservingReplayOrder = (
   graph: EventGraph,
   replayEventIds: ReadonlySet<EventId>,
 ): ReadonlyArray<EventId> => {
+  const rankedOrder = graph.getRankedReplayOrder(replayEventIds);
+  if (rankedOrder !== null) {
+    return rankedOrder;
+  }
+
   const remainingParents = new Map<EventId, number>();
   const children = new Map<EventId, EventId[]>();
   const roots: EventId[] = [];

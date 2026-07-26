@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { compareEventIds } from "../graph/event-id";
+import {
+  compareEventIds,
+  compareEventIdSortKeys,
+  createEventIdSortKey,
+  parseEventId,
+} from "../graph/event-id";
 import type { EventId, GraphEvent } from "../types";
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { EgWalkerReplica } from "../core/replica";
 import { EventGraph } from "../graph/event-graph";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { cloneEvent, createPrng } from "./test-helpers";
@@ -84,6 +90,45 @@ const buildCanonical = (
 };
 
 describe("compareEventIds (numeric suffix tie-break)", () => {
+  it("parses the canonical sequence boundaries", () => {
+    expect(parseEventId("replica:0")).toEqual({
+      replicaId: "replica",
+      sequence: 0,
+    });
+    expect(parseEventId("team:replica:42")).toEqual({
+      replicaId: "team:replica",
+      sequence: 42,
+    });
+    expect(parseEventId("replica:9007199254740991")).toEqual({
+      replicaId: "replica",
+      sequence: Number.MAX_SAFE_INTEGER,
+    });
+  });
+
+  it("rejects non-canonical and unsafe sequence suffixes", () => {
+    const invalidIds: EventId[] = [
+      "replica",
+      ":0",
+      "replica:",
+      "replica:00",
+      "replica:01",
+      "replica:+1",
+      "replica:-1",
+      "replica:1.0",
+      "replica:1e2",
+      "replica: 1",
+      "replica:1 ",
+      "replica:\u0661",
+      "replica:\uff11",
+      "replica:9007199254740992",
+      "replica:99999999999999999999999999999999999999999999999999",
+    ];
+
+    for (const id of invalidIds) {
+      expect(parseEventId(id), id).toBeNull();
+    }
+  });
+
   it("orders r1:10 after r1:2 numerically", () => {
     expect(compareEventIds("r1:2", "r1:10")).toBeLessThan(0);
     expect(compareEventIds("r1:10", "r1:2")).toBeGreaterThan(0);
@@ -105,6 +150,88 @@ describe("compareEventIds (numeric suffix tie-break)", () => {
     expect(compareEventIds("rev-a", "rev-b")).toBeLessThan(0);
     expect(compareEventIds("r1:abc", "r1:abd")).toBeLessThan(0);
     expect(compareEventIds("r1:abc", "r1:abc")).toBe(0);
+  });
+
+  it("defines a transitive total order across canonical and custom IDs", () => {
+    // Arrange
+    const ids: EventId[] = ["a:1x", "a:10", "a:2"];
+
+    // Act
+    const sorted = [...ids].sort(compareEventIds);
+
+    // Assert
+    expect(sorted).toEqual(["a:2", "a:10", "a:1x"]);
+    expect(compareEventIds("a:2", "a:10")).toBeLessThan(0);
+    expect(compareEventIds("a:10", "a:1x")).toBeLessThan(0);
+    expect(compareEventIds("a:2", "a:1x")).toBeLessThan(0);
+  });
+
+  it("keeps cached sort keys identical to direct comparison", () => {
+    const ids: EventId[] = [
+      "alice:0",
+      "alice:2",
+      "alice:10",
+      "bob:1",
+      "custom",
+      "alice:01",
+      "alice:unsafe9007199254740992",
+    ];
+    for (const left of ids) {
+      for (const right of ids) {
+        expect(
+          Math.sign(
+            compareEventIdSortKeys(
+              createEventIdSortKey(left),
+              createEventIdSortKey(right),
+            ),
+          ),
+        ).toBe(Math.sign(compareEventIds(left, right)));
+      }
+    }
+  });
+
+  it("keeps mixed-ID concurrent inserts convergent across delivery orders", () => {
+    // Arrange
+    const events: GraphEvent[] = [
+      {
+        id: "a:2",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 0,
+      },
+      {
+        id: "a:10",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+        timestamp: 1,
+      },
+      {
+        id: "a:1x",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "C" },
+        timestamp: 2,
+      },
+    ];
+    const deliveryOrders = [
+      events,
+      [events[1]!, events[2]!, events[0]!],
+      [events[2]!, events[0]!, events[1]!],
+      [events[0]!, events[2]!, events[1]!],
+      [events[1]!, events[0]!, events[2]!],
+      [events[2]!, events[1]!, events[0]!],
+    ];
+
+    // Act
+    const observed = new Set(
+      deliveryOrders.map((order) => {
+        const replica = new EgWalkerReplica("mixed-id-order");
+        order.forEach((event) => replica.applyRemoteEvent(cloneEvent(event)));
+        return replica.getText();
+      }),
+    );
+
+    // Assert
+    expect(observed).toEqual(new Set(["ABC"]));
   });
 
   it("keeps concurrent inserts under double-digit sequence numbers stable", () => {

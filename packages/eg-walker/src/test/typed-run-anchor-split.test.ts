@@ -37,6 +37,8 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../types";
 import { cloneEvent } from "./test-helpers";
 
@@ -87,6 +89,111 @@ const replayUnderEveryDeliveryOrder = (
 };
 
 describe("typed-run coalescing — anchor + split convergence", () => {
+  it("keeps coalescing observationally equivalent to per-event records", () => {
+    // Arrange
+    const insert = (
+      id: string,
+      parents: ReadonlyArray<string>,
+      index: number,
+      text: string,
+    ): GraphEvent => ({
+      id,
+      parentVersion: new Set(parents),
+      operation: { type: OPERATION_TYPE.INSERT, index, text },
+      timestamp: 0,
+    });
+    const contiguousIds = [
+      insert("b:0", [], 0, "A"),
+      insert("a:0", [], 0, "B"),
+      insert("a:1", ["b:0", "a:0"], 1, "C"),
+      insert("b:1", ["b:0", "a:0"], 1, "D"),
+    ];
+    const sequenceGaps = [
+      insert("b:0", [], 0, "A"),
+      insert("a:0", [], 0, "B"),
+      insert("a:2", ["b:0", "a:0"], 1, "C"),
+      insert("b:2", ["b:0", "a:0"], 1, "D"),
+    ];
+
+    // Act
+    const replay = (events: ReadonlyArray<GraphEvent>): Set<string> =>
+      replayUnderEveryDeliveryOrder(events);
+    const coalesced = replay(contiguousIds);
+    const uncoalesced = replay(sequenceGaps);
+
+    // Assert
+    expect(coalesced).toEqual(new Set(["BCDA"]));
+    expect(coalesced).toEqual(uncoalesced);
+  });
+
+  it("preserves run origins across valid topological orders", () => {
+    // Arrange
+    const events: GraphEvent[] = [
+      {
+        id: "A:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        timestamp: 0,
+      },
+      {
+        id: "A:1",
+        parentVersion: new Set(["A:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "b" },
+        timestamp: 1,
+      },
+      {
+        id: "X:0",
+        parentVersion: new Set(["A:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "X" },
+        timestamp: 2,
+      },
+    ];
+    const graph = EventGraph.fromEvents(events);
+    const orders = [events, [events[0]!, events[2]!, events[1]!]];
+
+    // Act
+    const observed = orders.map(
+      (order) =>
+        new EgWalkerEngine().generate(order, "", {
+          eventGraph: graph,
+          eventOrder: order,
+        }).text,
+    );
+
+    // Assert
+    expect(observed).toEqual(["abX", "abX"]);
+  });
+
+  it("converges when an old fork arrives before or after checkpoint eviction", () => {
+    // Arrange
+    const chain = linearTypedRun(
+      "A",
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN",
+    );
+    const fork: GraphEvent = {
+      id: "X:0",
+      parentVersion: new Set(["A:0"]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "X" },
+      timestamp: 100,
+    };
+    const earlyFork = new EgWalkerReplica("early");
+    const lateFork = new EgWalkerReplica("late");
+
+    // Act
+    earlyFork.applyRemoteEvent(cloneEvent(chain[0]!));
+    earlyFork.applyRemoteEvent(cloneEvent(fork));
+    chain
+      .slice(1)
+      .forEach((event) => earlyFork.applyRemoteEvent(cloneEvent(event)));
+    chain.forEach((event) => lateFork.applyRemoteEvent(cloneEvent(event)));
+    lateFork.applyRemoteEvent(cloneEvent(fork));
+
+    // Assert
+    expect(earlyFork.getPendingRemoteCount()).toBe(0);
+    expect(lateFork.getPendingRemoteCount()).toBe(0);
+    expect(earlyFork.getText()).toBe(lateFork.getText());
+  });
+
   it("converges when one peer anchors at the run's right edge and another splits it inside", () => {
     // A types "abcde" as one typed-run record.
     // B forks at A:4, inserts "X" at index 5 (right of the run).

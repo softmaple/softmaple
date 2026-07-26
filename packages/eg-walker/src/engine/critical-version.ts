@@ -45,14 +45,14 @@ export class CriticalVersionAnalyzer {
    * O(|V| * (|V| + |E|)) repeated `isAncestor` walk.
    */
   isCritical(graph: EventGraph, version: Version): boolean {
-    const allEvents = graph.getAllEvents();
+    const eventCount = graph.getEventCount();
     const before = graph.expandVersion(version);
 
     if (before.size === 0) {
-      return allEvents.length === 0;
+      return eventCount === 0;
     }
 
-    const outsideCount = allEvents.length - before.size;
+    const outsideCount = eventCount - before.size;
     if (outsideCount === 0) {
       return true;
     }
@@ -129,7 +129,7 @@ const collectStrictDescendants = (
 ): Set<EventId> => {
   const descendants = new Set<EventId>();
   const stack: EventId[] = [];
-  for (const child of graph.getChildren(start)) {
+  for (const child of graph.iterateChildren(start)) {
     stack.push(child);
   }
   while (stack.length > 0) {
@@ -138,7 +138,7 @@ const collectStrictDescendants = (
       continue;
     }
     descendants.add(current);
-    for (const child of graph.getChildren(current)) {
+    for (const child of graph.iterateChildren(current)) {
       if (!descendants.has(child)) {
         stack.push(child);
       }

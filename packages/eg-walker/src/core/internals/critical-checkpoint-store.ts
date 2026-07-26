@@ -1,26 +1,40 @@
 import type { CriticalVersionAnalyzer } from "../../engine/critical-version";
 import type { ReplayCheckpoint } from "../../engine/partial-replay";
 import type { EventGraph } from "../../graph/event-graph";
-import type { EventId } from "../../types";
+import type { EventId, Version } from "../../types";
+import { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 
-const MAX_RETAINED_CHECKPOINTS = 32;
+export const MAX_RETAINED_CHECKPOINTS = 32;
 
-export interface CriticalCheckpoint extends ReplayCheckpoint {
+export type CriticalCheckpoint = ReplayCheckpoint & {
+  readonly textBuffer: PersistentUtf16Rope;
   /**
    * Number of events present when this checkpoint was captured.
    *
-   * Checkpoints are currently captured only for singleton frontiers, which
-   * means every event up to this count is causally included by the checkpoint.
-   * Later criticality checks can therefore inspect only events added after this
-   * cut point instead of expanding the checkpoint's full ancestor closure.
+   * Runtime checkpoints are captured only after the replay planner has proven
+   * that the version's ancestor closure is exactly this insertion prefix.
+   * Later criticality checks can therefore inspect only events added after the
+   * cut instead of expanding the checkpoint's full ancestor closure.
    */
   readonly eventCount: number;
-}
+  /** Runtime-only cursor; omitted from native and portable persistence. */
+  criticalityValidation?: {
+    validatedEventCount: number;
+    invalid: boolean;
+    requiresFullValidation: boolean;
+  };
+};
 
 export interface CriticalCheckpointSnapshot {
   readonly version: ReadonlyArray<EventId>;
   readonly text: string;
   readonly eventCount: number;
+}
+
+export interface CriticalCheckpointStoreSnapshot {
+  readonly checkpoints: ReadonlyArray<CriticalCheckpoint>;
+  readonly hits: number;
+  readonly misses: number;
 }
 
 export class CriticalCheckpointStore {
@@ -53,10 +67,47 @@ export class CriticalCheckpointStore {
     return this.missCount;
   }
 
+  get uniqueTextBytes(): number {
+    const seen = new Set<object>();
+    return this.checkpoints.reduce(
+      (bytes, checkpoint) =>
+        bytes + checkpoint.textBuffer.collectUniqueLeafBytes(seen),
+      0,
+    );
+  }
+
+  snapshotForTransaction(): CriticalCheckpointStoreSnapshot {
+    return {
+      checkpoints: this.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        version: new Set(checkpoint.version),
+        criticalityValidation:
+          checkpoint.criticalityValidation === undefined
+            ? undefined
+            : { ...checkpoint.criticalityValidation },
+      })),
+      hits: this.hitCount,
+      misses: this.missCount,
+    };
+  }
+
+  restoreTransaction(snapshot: CriticalCheckpointStoreSnapshot): void {
+    this.checkpoints = snapshot.checkpoints.map((checkpoint) => ({
+      ...checkpoint,
+      version: new Set(checkpoint.version),
+      criticalityValidation:
+        checkpoint.criticalityValidation === undefined
+          ? undefined
+          : { ...checkpoint.criticalityValidation },
+    }));
+    this.hitCount = snapshot.hits;
+    this.missCount = snapshot.misses;
+  }
+
   toSnapshot(): ReadonlyArray<CriticalCheckpointSnapshot> {
     return this.checkpoints.map((checkpoint) => ({
       version: Array.from(checkpoint.version),
-      text: checkpoint.text,
+      text: checkpoint.textBuffer.toString(),
       eventCount: checkpoint.eventCount,
     }));
   }
@@ -64,16 +115,27 @@ export class CriticalCheckpointStore {
   restore(checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>): void {
     this.checkpoints = checkpoints
       .slice(-MAX_RETAINED_CHECKPOINTS)
-      .map((checkpoint) => ({
-        version: new Set(checkpoint.version),
-        text: checkpoint.text,
-        eventCount: checkpoint.eventCount,
-      }));
+      .map((checkpoint) => {
+        const version = new Set(checkpoint.version);
+        return {
+          version,
+          textBuffer: PersistentUtf16Rope.from(checkpoint.text),
+          eventCount: checkpoint.eventCount,
+          criticalityValidation: {
+            validatedEventCount: checkpoint.eventCount,
+            invalid: false,
+            requiresFullValidation: true,
+          },
+        };
+      });
     this.hitCount = 0;
     this.missCount = 0;
   }
 
-  maybeAdvance(graph: EventGraph, document: string): void {
+  maybeAdvance(
+    graph: EventGraph,
+    document: string | PersistentUtf16Rope,
+  ): void {
     const frontier = graph.getFrontier();
     if (frontier.size !== 1) {
       return;
@@ -82,15 +144,61 @@ export class CriticalCheckpointStore {
     // that frontier. The singleton frontier is therefore critical by
     // definition, so avoid the analyzer's full ancestor expansion on the
     // sequential hot path.
-    const last = this.checkpoints[this.checkpoints.length - 1];
-    if (last && versionsEqual(last.version, frontier)) {
-      return;
+    this.record(frontier, document, graph.getEventCount());
+  }
+
+  /**
+   * Record a frontier already proven critical by the replay planner.
+   *
+   * Unlike {@link maybeAdvance}, this accepts multi-tip frontiers. During a
+   * full replay the planner can prove that every remaining event descends
+   * from the complete frontier, so retaining its shared rope root is a safe
+   * Section 3.5 checkpoint without re-running graph-wide critical analysis.
+   */
+  record(
+    version: Version,
+    document: string | PersistentUtf16Rope,
+    eventCount: number,
+    validatedEventCount: number = eventCount,
+  ): CriticalCheckpoint {
+    if (
+      !Number.isSafeInteger(validatedEventCount) ||
+      validatedEventCount < eventCount
+    ) {
+      throw new Error(
+        `Checkpoint validation cursor ${validatedEventCount} precedes cut ${eventCount}`,
+      );
     }
-    this.append({
-      version: new Set(frontier),
-      text: document,
-      eventCount: graph.getEventCount(),
-    });
+    const last = this.checkpoints[this.checkpoints.length - 1];
+    if (last && versionsEqual(last.version, version)) {
+      const validation = last.criticalityValidation;
+      if (
+        validation !== undefined &&
+        !validation.invalid &&
+        !validation.requiresFullValidation
+      ) {
+        validation.validatedEventCount = Math.max(
+          validation.validatedEventCount,
+          validatedEventCount,
+        );
+      }
+      return last;
+    }
+    const checkpoint: CriticalCheckpoint = {
+      version: new Set(version),
+      textBuffer:
+        typeof document === "string"
+          ? PersistentUtf16Rope.from(document)
+          : document,
+      eventCount,
+      criticalityValidation: {
+        validatedEventCount,
+        invalid: false,
+        requiresFullValidation: false,
+      },
+    };
+    this.append(checkpoint);
+    return checkpoint;
   }
 
   pickFor(graph: EventGraph): CriticalCheckpoint | null {
@@ -112,40 +220,47 @@ export class CriticalCheckpointStore {
     graph: EventGraph,
     candidate: CriticalCheckpoint,
   ): boolean {
-    if (candidate.version.size !== 1) {
-      return this.analyzer.isCritical(graph, candidate.version);
+    const validation = (candidate.criticalityValidation ??= {
+      validatedEventCount: candidate.eventCount,
+      invalid: false,
+      requiresFullValidation: false,
+    });
+    if (validation.invalid) {
+      return false;
     }
 
-    const [frontierId] = candidate.version;
-
-    const outsideCount = graph.getEventCount() - candidate.eventCount;
-    if (outsideCount <= 0) {
-      return true;
+    const eventCount = graph.getEventCount();
+    const untrusted = validation.requiresFullValidation;
+    if (
+      untrusted &&
+      graph.expandVersion(candidate.version).size !== candidate.eventCount
+    ) {
+      validation.invalid = true;
+      return false;
     }
-
-    let descendantsAfterCheckpoint = 0;
-    // The checkpoint frontier was singleton and childless when captured.
-    // Therefore every reachable descendant must have been inserted after
-    // `candidate.eventCount`; count unique descendants without checking ranks.
-    const stack = Array.from(graph.getChildren(frontierId!));
-    const visited = new Set<EventId>(stack);
-
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      descendantsAfterCheckpoint++;
-      if (descendantsAfterCheckpoint === outsideCount) {
+    if (
+      !graph.isInsertionSuffixDominatedBy(
+        candidate.version,
+        candidate.eventCount,
+        validation.validatedEventCount,
+      )
+    ) {
+      // Native input can contain a valid but redundant (non-frontier)
+      // version. Preserve compatibility through the general analyzer while
+      // keeping every internally recorded canonical frontier on the cursor
+      // path.
+      if (untrusted && this.analyzer.isCritical(graph, candidate.version)) {
+        validation.validatedEventCount = eventCount;
         return true;
       }
-
-      for (const child of graph.getChildren(current)) {
-        if (!visited.has(child)) {
-          visited.add(child);
-          stack.push(child);
-        }
-      }
+      validation.invalid = true;
+      return false;
     }
-
-    return false;
+    if (untrusted) {
+      validation.requiresFullValidation = false;
+    }
+    validation.validatedEventCount = eventCount;
+    return true;
   }
 
   private append(checkpoint: CriticalCheckpoint): void {

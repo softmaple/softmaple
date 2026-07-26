@@ -46,6 +46,9 @@ export interface IntegratedApplyRemoteEventResult {
    * - The event was a no-op at the visible layer (empty insert,
    *   zero-length delete, or a delete fully covering already-deleted
    *   characters).
+   * - Accepting the event also flushed one or more previously-buffered
+   *   descendants. The call changed the document through multiple events, so
+   *   no single position operation describes the full visible delta.
    *
    * Consumers driving selection mapping should treat `null` as
    * "remap from text diff" rather than skipping the remap entirely.
@@ -65,3 +68,15 @@ export type ApplyRemoteEventResult =
   | IntegratedApplyRemoteEventResult
   | BufferedApplyRemoteEventResult
   | DuplicateApplyRemoteEventResult;
+
+/**
+ * Result of atomically accepting a remote batch.
+ *
+ * `results` is aligned with the caller's input. `operations` follows actual
+ * causal integration order and is `null` when replay or a multi-operation
+ * effect prevents an exact position-operation sequence from being reported.
+ */
+export interface ApplyRemoteEventsResult {
+  readonly results: ReadonlyArray<ApplyRemoteEventResult>;
+  readonly operations: ReadonlyArray<PositionOperation> | null;
+}

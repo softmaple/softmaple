@@ -29,6 +29,27 @@ describe("EgWalkerReplica", () => {
       expect(() => api.insert(-1, "x")).toThrow("Index -1 out of bounds");
     });
 
+    it("rejects non-integer indexes before mutating the event graph", () => {
+      // Arrange
+      const api = new EgWalkerReplica("test", "abc");
+
+      // Act / Assert
+      expect(() => api.insert(Number.NaN, "X")).toThrow(
+        "Index NaN must be a safe integer",
+      );
+      expect(() => api.insert(1.5, "X")).toThrow(
+        "Index 1.5 must be a safe integer",
+      );
+      expect(() => api.delete(1, 1.5)).toThrow(
+        "Delete length 1.5 must be a safe integer",
+      );
+      expect(api.exportEventGraph()).toHaveLength(0);
+      expect(api.getText()).toBe("abc");
+
+      api.insert(3, "!");
+      expect(api.getText()).toBe("abc!");
+    });
+
     it("should throw error for index beyond document length", () => {
       const api = new EgWalkerReplica("r1", "Hello");
       expect(() => api.insert(10, "x")).toThrow("Index 10 out of bounds");

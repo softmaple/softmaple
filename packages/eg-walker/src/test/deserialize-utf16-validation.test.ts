@@ -45,6 +45,7 @@ describe("deserialize / prebuilt EventGraph reject malformed UTF-16", () => {
       text: serialized.text,
       eventGraph: {
         ...serialized.eventGraph,
+        version: ["evil:0"],
         events: [
           ...serialized.eventGraph.events,
           {

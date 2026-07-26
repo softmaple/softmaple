@@ -1,6 +1,7 @@
 import type { EventId } from "../../types";
 import { IndexedSequence } from "../indexed-sequence";
 import type { AugmentedCRDTItem, TypedRun } from "./engine-types";
+import { materializeRecordContent } from "./record-content";
 
 const decoder = new TextDecoder();
 
@@ -36,7 +37,7 @@ export const recordFromItem = (
 ): EngineSequenceRecord => ({
   id: item.id,
   eventId: item.eventId,
-  content: item.content,
+  content: materializeRecordContent(item.content),
   originLeft: item.originLeft,
   originRight: item.originRight,
   everDeleted: item.everDeleted,

@@ -10,16 +10,16 @@
  * tie-breaks in {@link EventGraph.getTopologicalOrder} /
  * {@link EventGraph.getBranchPreservingTopologicalOrder}.
  *
- * This helper compares the prefix (everything up to the last `:`)
- * lexicographically and then the suffix numerically when both suffixes
- * parse as non-negative integers. Custom or legacy IDs that do not match
- * the `prefix:numericSuffix` shape fall back to lexicographic ordering
- * end-to-end so that pre-existing event graphs remain comparable.
+ * This helper compares canonical IDs by prefix and then numeric sequence.
+ * Canonical IDs sort before custom / legacy IDs, which are ordered
+ * lexicographically. Keeping the two shapes in disjoint sort partitions is
+ * load-bearing: switching pair-by-pair between numeric and raw string
+ * comparison produces a non-transitive comparator for mixed ID sets.
  */
 
 import type { EventId } from "../types";
 
-const NUMERIC_SUFFIX = /^(0|[1-9]\d*)$/;
+const MAX_SAFE_SEQUENCE_DIGITS = 16;
 
 /**
  * Compare two event IDs with numeric-aware semantics on the
@@ -44,7 +44,56 @@ export const compareEventIds = (left: EventId, right: EventId): number => {
     return 0;
   }
 
+  if (leftSplit) {
+    return -1;
+  }
+  if (rightSplit) {
+    return 1;
+  }
+
   return left < right ? -1 : 1;
+};
+
+/** Parsed once for hot balanced-tree comparators. */
+export interface EventIdSortKey {
+  readonly id: EventId;
+  readonly prefix: string | null;
+  readonly sequence: number;
+}
+
+export const createEventIdSortKey = (id: EventId): EventIdSortKey => {
+  const parsed = splitTrailingSequence(id);
+  return {
+    id,
+    prefix: parsed?.prefix ?? null,
+    sequence: parsed?.sequence ?? 0,
+  };
+};
+
+/** Compare pre-parsed keys with exactly the same ordering as compareEventIds. */
+export const compareEventIdSortKeys = (
+  left: EventIdSortKey,
+  right: EventIdSortKey,
+): number => {
+  if (left.id === right.id) {
+    return 0;
+  }
+  if (left.prefix !== null && right.prefix !== null) {
+    if (left.prefix !== right.prefix) {
+      return left.prefix < right.prefix ? -1 : 1;
+    }
+    if (left.sequence !== right.sequence) {
+      return left.sequence < right.sequence ? -1 : 1;
+    }
+    return 0;
+  }
+  if (left.prefix !== null) {
+    return -1;
+  }
+  if (right.prefix !== null) {
+    return 1;
+  }
+  return left.id < right.id ? -1 : 1;
 };
 
 interface ParsedEventId {
@@ -54,17 +103,37 @@ interface ParsedEventId {
 
 const splitTrailingSequence = (id: EventId): ParsedEventId | null => {
   const colonIndex = id.lastIndexOf(":");
-  if (colonIndex <= 0 || colonIndex === id.length - 1) {
+  const suffixStart = colonIndex + 1;
+  const suffixLength = id.length - suffixStart;
+  if (
+    colonIndex <= 0 ||
+    suffixLength === 0 ||
+    suffixLength > MAX_SAFE_SEQUENCE_DIGITS
+  ) {
     return null;
   }
-  const suffix = id.slice(colonIndex + 1);
-  if (!NUMERIC_SUFFIX.test(suffix)) {
+
+  let codeUnit = id.charCodeAt(suffixStart);
+  if (
+    codeUnit < 48 ||
+    codeUnit > 57 ||
+    (codeUnit === 48 && suffixLength !== 1)
+  ) {
     return null;
   }
-  const sequence = Number(suffix);
-  if (!Number.isSafeInteger(sequence)) {
+
+  let sequence = codeUnit - 48;
+  for (let index = suffixStart + 1; index < id.length; index++) {
+    codeUnit = id.charCodeAt(index);
+    if (codeUnit < 48 || codeUnit > 57) {
+      return null;
+    }
+    sequence = sequence * 10 + (codeUnit - 48);
+  }
+  if (sequence > Number.MAX_SAFE_INTEGER) {
     return null;
   }
+
   return { prefix: id.slice(0, colonIndex), sequence };
 };
 

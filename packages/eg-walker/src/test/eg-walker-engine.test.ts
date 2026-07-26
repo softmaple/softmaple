@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { RopeRecordContent } from "../engine/internals/record-content";
 import { EventGraph } from "../graph/event-graph";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { EventId, GraphEvent } from "../types";
 
 describe("EgWalkerEngine", () => {
@@ -33,6 +35,503 @@ describe("EgWalkerEngine", () => {
     expect(generated.stats.advanceCount).toBe(0);
   });
 
+  it("can replay without retaining transformed operations", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 1,
+      },
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "B" },
+        timestamp: 2,
+      },
+    ];
+
+    const generated = new EgWalkerEngine().generate(events, "", {
+      collectTransformedOperations: false,
+    });
+
+    expect(generated.text).toBe("AB");
+    expect(generated.transformedOperations).toEqual([]);
+    expect(generated.stats.eventsProcessed).toBe(events.length);
+  });
+
+  it("materializes cold-replay text once and remains incrementally usable", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "ab" },
+        timestamp: 1,
+      },
+      {
+        id: "alice:1",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "X" },
+        timestamp: 2,
+      },
+      {
+        id: "bob:0",
+        parentVersion: new Set(["alice:0"]),
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        timestamp: 3,
+      },
+    ];
+    const graph = EventGraph.fromEvents(events);
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+
+    PersistentUtf16Rope.resetInstrumentation();
+    const coldEngine = new EgWalkerEngine();
+    const cold = coldEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+    const ropeStats = PersistentUtf16Rope.getInstrumentation();
+
+    expect(cold.text).toBe(eager.text);
+    expect(coldEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(coldEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+    expect(cold.stats.sequenceTreeOperations).toBeLessThan(
+      eager.stats.sequenceTreeOperations,
+    );
+    expect(ropeStats.joins).toBe(0);
+    expect(ropeStats.splits).toBe(0);
+
+    const next: GraphEvent = {
+      id: "merge:0",
+      parentVersion: graph.getFrontier(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: cold.text.length,
+        text: "!",
+      },
+      timestamp: 4,
+    };
+    graph.addEvent(next);
+
+    const eagerApplied = eagerEngine.applyEvent(next, graph);
+    const coldApplied = coldEngine.applyEvent(next, graph);
+    expect(coldApplied.text).toBe(eagerApplied.text);
+    expect(coldApplied.transformedOperations).toEqual(
+      eagerApplied.transformedOperations,
+    );
+  });
+
+  it("keeps checkpoint delete boundaries logical until an insert needs a physical anchor", () => {
+    const events: GraphEvent[] = Array.from({ length: 80 }, (_, index) => ({
+      id: `delete-${index}`,
+      parentVersion: new Set<EventId>(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+      timestamp: index,
+    }));
+    const graph = EventGraph.fromEvents(events);
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    const deferredEngine = new EgWalkerEngine();
+    const deferred = deferredEngine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+
+    expect(deferred.text).toBe(eager.text);
+    expect(deferred.text).toBe("acdef");
+    expect(deferred.stats.sequenceRecordCount).toBe(1);
+    expect(eager.stats.sequenceRecordCount).toBe(3);
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+
+    const insert: GraphEvent = {
+      id: "merge-insert",
+      parentVersion: graph.getFrontier(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "X" },
+      timestamp: events.length,
+    };
+    graph.addEvent(insert);
+    const eagerApplied = eagerEngine.applyEvent(insert, graph);
+    const deferredApplied = deferredEngine.applyEvent(insert, graph);
+
+    expect(deferredApplied.text).toBe("aXcdef");
+    expect(deferredApplied.text).toBe(eagerApplied.text);
+    expect(deferredApplied.transformedOperations).toEqual(
+      eagerApplied.transformedOperations,
+    );
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+
+    const restoredEngine = EgWalkerEngine.fromSnapshotState({
+      graph,
+      currentVersion: deferredEngine.getCurrentVersion(),
+      text: deferredEngine.getText(),
+      sequenceRecords: deferredEngine.getSequenceRecords(),
+      deleteTargets: deferredEngine.getDeleteTargetRecords(),
+    });
+    const divergent: GraphEvent = {
+      id: "divergent-insert",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "Y" },
+      timestamp: events.length + 1,
+    };
+    graph.addEvent(divergent);
+
+    const eagerDivergent = eagerEngine.applyEvent(divergent, graph);
+    const deferredDivergent = deferredEngine.applyEvent(divergent, graph);
+    const restoredDivergent = restoredEngine.applyEvent(divergent, graph);
+
+    expect(deferredDivergent.text).toBe(eagerDivergent.text);
+    expect(restoredDivergent.text).toBe(eagerDivergent.text);
+    expect(deferredDivergent.transformedOperations).toEqual(
+      eagerDivergent.transformedOperations,
+    );
+    expect(restoredDivergent.transformedOperations).toEqual(
+      eagerDivergent.transformedOperations,
+    );
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      restoredEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      restoredEngine.getDeleteTargetRecords(),
+    );
+  });
+
+  it("canonicalizes delete targets across eager and deferred replay", () => {
+    const mergeParents = new Set<EventId>(["bob:0", "dave:0"]);
+    const concurrent: GraphEvent[] = [
+      {
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 10,
+          text: "xI",
+        },
+        timestamp: 0,
+      },
+      {
+        id: "dave:0",
+        parentVersion: new Set(),
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        timestamp: 1,
+      },
+      {
+        id: "bob:1",
+        parentVersion: mergeParents,
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 10,
+        },
+        timestamp: 2,
+      },
+      {
+        id: "dave:1",
+        parentVersion: mergeParents,
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        timestamp: 3,
+      },
+    ];
+    const events = [
+      ...concurrent,
+      ...Array.from({ length: 60 }, (_, offset): GraphEvent => {
+        const sequence = offset + 4;
+        return {
+          id: `pad:${sequence}`,
+          parentVersion:
+            sequence === 4
+              ? new Set(["bob:1", "dave:1"])
+              : new Set([`pad:${sequence - 1}`]),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: sequence - 3,
+            text: "x",
+          },
+          timestamp: sequence,
+        };
+      }),
+    ];
+    const graph = EventGraph.fromEvents(events);
+    const eventOrder = graph.getBranchPreservingTopologicalOrder();
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(eventOrder, "abcdefghij", {
+      eventGraph: graph,
+      eventOrder,
+    });
+    const deferredEngine = new EgWalkerEngine();
+    const deferred = deferredEngine.generate(eventOrder, "abcdefghij", {
+      eventGraph: graph,
+      eventOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(deferred.text).toBe(eager.text);
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+  });
+
+  it("deletes segmented effect ranges without shifting later spans", () => {
+    const hidden: GraphEvent = {
+      id: "hidden",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+      timestamp: 0,
+    };
+    const visibleBranch = Array.from(
+      { length: 63 },
+      (_, index): GraphEvent => ({
+        id: `visible-branch:${index}`,
+        parentVersion:
+          index === 0
+            ? new Set<EventId>()
+            : new Set([`visible-branch:${index - 1}`]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 6 + index,
+          text: "X",
+        },
+        timestamp: index + 1,
+      }),
+    );
+    const events = [hidden, ...visibleBranch];
+    const graph = EventGraph.fromEvents(events);
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+
+    const suffix = "X".repeat(visibleBranch.length);
+    expect(generated.text).toBe(`abdef${suffix}`);
+
+    const spanningDelete: GraphEvent = {
+      id: "spanning-delete",
+      parentVersion: new Set([visibleBranch.at(-1)!.id]),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 4 },
+      timestamp: 2,
+    };
+    graph.addEvent(spanningDelete);
+
+    expect(engine.applyEvent(spanningDelete, graph).text).toBe(`af${suffix}`);
+  });
+
+  it("records every segmented range for concurrent deletes across a hidden gap", () => {
+    const hidden: GraphEvent = {
+      id: "hidden-gap",
+      parentVersion: new Set(),
+      operation: { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+      timestamp: 0,
+    };
+    const suffixEvents = Array.from(
+      { length: 62 },
+      (_, index): GraphEvent => ({
+        id: `suffix:${index}`,
+        parentVersion: new Set([
+          index === 0 ? hidden.id : `suffix:${index - 1}`,
+        ]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 5 + index,
+          text: "X",
+        },
+        timestamp: index + 1,
+      }),
+    );
+    const branchParent = suffixEvents.at(-1)!.id;
+    const firstDelete: GraphEvent = {
+      id: "delete:first",
+      parentVersion: new Set([branchParent]),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 4 },
+      timestamp: 63,
+    };
+    const events = [hidden, ...suffixEvents, firstDelete];
+    const graph = EventGraph.fromEvents(events);
+    const engine = new EgWalkerEngine();
+    const generated = engine.generate(events, "abcdef", {
+      eventGraph: graph,
+      eventOrder: events,
+      collectTransformedOperations: false,
+    });
+    const expected = `a${"X".repeat(suffixEvents.length)}`;
+
+    expect(generated.text).toBe(expected);
+
+    const concurrentDelete: GraphEvent = {
+      id: "delete:concurrent",
+      parentVersion: new Set([branchParent]),
+      operation: { type: OPERATION_TYPE.DELETE, index: 1, length: 4 },
+      timestamp: 64,
+    };
+    graph.addEvent(concurrentDelete);
+
+    expect(engine.applyEvent(concurrentDelete, graph).text).toBe(expected);
+  });
+
+  it("defers a large checkpoint suffix while retaining checkpoint leaves", () => {
+    const checkpointText = "x".repeat(2_048 * 64);
+    const checkpointBuffer = PersistentUtf16Rope.from(checkpointText);
+    const checkpointLeaves = new Set(checkpointBuffer.getLeafIdentities());
+    const root: GraphEvent = {
+      id: "root:0",
+      parentVersion: new Set(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: checkpointText,
+      },
+      timestamp: 0,
+    };
+    const events = Array.from(
+      { length: 96 },
+      (_, index): GraphEvent => ({
+        id: `suffix:${index}`,
+        parentVersion: new Set([index === 0 ? root.id : `suffix:${index - 1}`]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: checkpointText.length + index,
+          text: "!",
+        },
+        timestamp: index + 1,
+      }),
+    );
+    const graph = EventGraph.fromEvents([root, ...events]);
+
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(events, "", {
+      initialVersion: new Set([root.id]),
+      initialTextBuffer: checkpointBuffer,
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    PersistentUtf16Rope.resetInstrumentation();
+    const deferredEngine = new EgWalkerEngine();
+    const toRope = vi.spyOn(RopeRecordContent.prototype, "toRope");
+    const deferred = (() => {
+      try {
+        const generated = deferredEngine.generate(events, "", {
+          initialVersion: new Set([root.id]),
+          initialTextBuffer: checkpointBuffer,
+          eventGraph: graph,
+          eventOrder: events,
+          collectTransformedOperations: false,
+        });
+        expect(toRope).not.toHaveBeenCalled();
+        return generated;
+      } finally {
+        toRope.mockRestore();
+      }
+    })();
+    const ropeStats = PersistentUtf16Rope.getInstrumentation();
+    const sharedLeaves = deferred.textBuffer
+      .getLeafIdentities()
+      .filter((candidate) => checkpointLeaves.has(candidate));
+
+    expect(deferred.text).toBe(eager.text);
+    expect(deferred.stats.sequenceTreeOperations).toBeLessThan(
+      eager.stats.sequenceTreeOperations,
+    );
+    expect(sharedLeaves).toHaveLength(checkpointLeaves.size);
+    expect(ropeStats).toMatchObject({
+      joins: 0,
+      splits: 0,
+      flattenCount: 0,
+      flattenedCodeUnits: 0,
+    });
+
+    const next: GraphEvent = {
+      id: "suffix:96",
+      parentVersion: new Set(["suffix:95"]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: deferred.textBuffer.length,
+        text: "?",
+      },
+      timestamp: 97,
+    };
+    graph.addEvent(next);
+    const applied = deferredEngine.applyEvent(next, graph);
+    expect(applied.text).toBe(`${deferred.text}?`);
+    expect(applied.transformedOperations).toEqual([
+      {
+        type: OPERATION_TYPE.INSERT,
+        index: deferred.textBuffer.length,
+        text: "?",
+      },
+    ]);
+  });
+
+  it("keeps a tiny checkpoint suffix on the eager splice path", () => {
+    const checkpointBuffer = PersistentUtf16Rope.from("x".repeat(8_192));
+    const root: GraphEvent = {
+      id: "root:0",
+      parentVersion: new Set(),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: "x".repeat(8_192),
+      },
+      timestamp: 0,
+    };
+    const event: GraphEvent = {
+      id: "suffix:0",
+      parentVersion: new Set([root.id]),
+      operation: {
+        type: OPERATION_TYPE.INSERT,
+        index: checkpointBuffer.length,
+        text: "!",
+      },
+      timestamp: 1,
+    };
+    const graph = EventGraph.fromEvents([root, event]);
+    PersistentUtf16Rope.resetInstrumentation();
+
+    const generated = new EgWalkerEngine().generate([event], "", {
+      initialVersion: new Set([root.id]),
+      initialTextBuffer: checkpointBuffer,
+      eventGraph: graph,
+      eventOrder: [event],
+      collectTransformedOperations: false,
+    });
+
+    expect(generated.text).toBe(`${"x".repeat(8_192)}!`);
+    expect(PersistentUtf16Rope.getInstrumentation().joins).toBe(1);
+  });
+
   it("treats overlapping concurrent deletes as idempotent effect deletes", () => {
     const events: GraphEvent[] = [
       {
@@ -54,29 +553,26 @@ describe("EgWalkerEngine", () => {
     expect(generated.text).toBe("aef");
   });
 
-  it("handles empty inserts and deletes that run past visible prepare items", () => {
-    const generated = new EgWalkerEngine().generate(
-      [
-        {
-          id: "noop:0",
-          parentVersion: new Set(),
-          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
-          timestamp: 1,
-        },
-        {
-          id: "delete:0",
-          parentVersion: new Set(["noop:0"]),
-          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 4 },
-          timestamp: 2,
-        },
-      ],
-      "a",
-    );
-
-    expect(generated.text).toBe("");
-    expect(generated.transformedOperations).toEqual([
-      { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
-    ]);
+  it("rejects deletes that run past the parent document", () => {
+    expect(() =>
+      new EgWalkerEngine().generate(
+        [
+          {
+            id: "noop:0",
+            parentVersion: new Set(),
+            operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+            timestamp: 1,
+          },
+          {
+            id: "delete:0",
+            parentVersion: new Set(["noop:0"]),
+            operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 4 },
+            timestamp: 2,
+          },
+        ],
+        "a",
+      ),
+    ).toThrow(/exceeds parent document length 1/);
   });
 
   it("exports sequence records for snapshot restore plumbing", () => {
@@ -465,12 +961,12 @@ describe("branch-preserving topological traversal", () => {
     // Kahn-lex visits a, b, c (lexicographic tie-break on ready set).
     const kahnOrderIds = graph.getTopologicalOrder().map((event) => event.id);
     expect(kahnOrderIds).toEqual(["a:0", "b:0", "c:0"]);
-    // The branch-preserving DFS visits a, c, b (continues down a's
-    // branch before popping b from the roots).
+    // The branch-preserving DFS visits the one-event b branch first, then
+    // leaves the longer a/c branch applied as the final root traversal.
     const branchOrderIds = graph
       .getBranchPreservingTopologicalOrder()
       .map((event) => event.id);
-    expect(branchOrderIds).toEqual(["a:0", "c:0", "b:0"]);
+    expect(branchOrderIds).toEqual(["b:0", "a:0", "c:0"]);
 
     const kahnText = new EgWalkerEngine().generate(
       graph.getTopologicalOrder(),

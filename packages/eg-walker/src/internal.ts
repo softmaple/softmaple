@@ -13,6 +13,10 @@ export {
 } from "./engine/eg-walker-engine";
 export { IndexedSequence } from "./engine/indexed-sequence";
 export {
+  FugueOrderIndex,
+  type FugueOrderStats,
+} from "./engine/internals/fugue-order-index";
+export {
   itemFromRecord,
   itemsFromRecords,
   recordFromItem,
@@ -37,7 +41,33 @@ export {
   type ParentOverride,
 } from "./graph/columnar-codec";
 export {
+  encodeTopologicallyOrderedEventsBinary,
+  type TopologicalEventGraphEncoding,
+} from "./graph/columnar-codec/topological-binary-encoder";
+export {
   NativeSnapshotCodec,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
 } from "./core/native-snapshot";
+export type {
+  CreateNativeSnapshotOptions,
+  NativeSnapshotResumeCacheMode,
+} from "./core/replica";
+export {
+  PortableSnapshotCodec,
+  PORTABLE_SNAPSHOT_FORMAT_VERSION,
+  type PortableSnapshot,
+} from "./core/portable-snapshot";
+export {
+  PersistentUtf16Rope,
+  UTF16_ROPE_BRANCH_FACTOR,
+  UTF16_ROPE_MAX_LEAF,
+  UTF16_ROPE_MIN_LEAF,
+  UTF16_ROPE_TARGET_LEAF,
+  type Utf16RopeInstrumentation,
+} from "./text/persistent-utf16-rope";
+export {
+  PaperEventAdapter,
+  type PaperEventExpansion,
+  type PaperEventIdentity,
+} from "./conformance/paper-event-adapter";

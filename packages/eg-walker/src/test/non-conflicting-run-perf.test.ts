@@ -369,16 +369,169 @@ describe("Section 3.4 non-conflicting-run fast path", () => {
     const graph = EventGraph.fromEvents(events);
     const ordered = graph.getTopologicalOrder();
 
-    const generated = new EgWalkerEngine().generate(ordered, "", {
+    const generated = new EgWalkerEngine().generate(ordered, "a", {
       eventGraph: graph,
     });
 
-    // The delete event is concurrent to the typed-run prefix; its parent
-    // version is empty, so when the engine retreats the run-events back to
-    // that parent the document the delete observes is empty. The delete
-    // therefore produces no characters removed (the slot it targets is
-    // entirely retreated), and the final text is just the typed run.
+    // The delete event is concurrent to the typed-run prefix and valid in its
+    // empty event frontier because the initial document contains "a". It
+    // removes that initial character after the pending run has been flushed.
     expect(generated.text).toBe("x".repeat(1_000));
+  });
+
+  it("extends an object-backed canonical suffix with one structural update", () => {
+    const events = buildLinearInsertTrace(2_048);
+    const graph = EventGraph.fromEvents(events);
+    const batchedEngine = new EgWalkerEngine();
+    const batched = batchedEngine.generate(events, "", {
+      eventGraph: graph,
+      collectTransformedOperations: false,
+    });
+    const scalarEngine = new EgWalkerEngine();
+    const scalar = scalarEngine.generate(events, "", {
+      eventGraph: graph,
+    });
+
+    expect(batched.text).toBe(scalar.text);
+    expect(batched.transformedOperations).toEqual([]);
+    expect(scalar.transformedOperations).toEqual(
+      events.map(({ operation }) => operation),
+    );
+    expect(batchedEngine.getSequenceRecords()).toEqual(
+      scalarEngine.getSequenceRecords(),
+    );
+    expect(batchedEngine.getDeleteTargetRecords()).toEqual(
+      scalarEngine.getDeleteTargetRecords(),
+    );
+    expect([...batchedEngine.captureRecoveryState().currentVersion]).toEqual([
+      ...scalarEngine.captureRecoveryState().currentVersion,
+    ]);
+    expect(batched.stats).toMatchObject({
+      eventsProcessed: events.length,
+      nonConflictingRunCount: events.length,
+      fullReplayCount: 0,
+      sequenceRecordCount: 1,
+    });
+    expect(batched.stats.sequenceTreeOperations * 16).toBeLessThan(
+      scalar.stats.sequenceTreeOperations,
+    );
+  });
+
+  it("resolves skipped run ids across interior branch and delete splits", () => {
+    const linear = Array.from(
+      { length: 64 },
+      (_, index): GraphEvent => ({
+        id: `A:${index}`,
+        parentVersion: new Set(index === 0 ? [] : [`A:${index - 1}`]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index,
+          text: "x",
+        },
+        timestamp: index,
+      }),
+    );
+    const events: GraphEvent[] = [
+      ...linear,
+      {
+        id: "B:0",
+        parentVersion: new Set(["A:31"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 16,
+          text: "B",
+        },
+        timestamp: 64,
+      },
+      {
+        id: "C:0",
+        parentVersion: new Set(["A:63"]),
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 20,
+          length: 8,
+        },
+        timestamp: 65,
+      },
+    ];
+    const graph = EventGraph.fromEvents(events);
+    const batchedEngine = new EgWalkerEngine();
+    const batched = batchedEngine.generate(events, "", {
+      eventGraph: graph,
+      collectTransformedOperations: false,
+    });
+    const scalarEngine = new EgWalkerEngine();
+    const scalar = scalarEngine.generate(events, "", {
+      eventGraph: graph,
+      collectTransformedOperations: false,
+      integrationMode: "linear-oracle",
+    });
+
+    expect(batched.text).toBe(`${"x".repeat(16)}B${"x".repeat(40)}`);
+    expect(batched.text).toBe(scalar.text);
+    expect(batchedEngine.getSequenceRecords()).toEqual(
+      scalarEngine.getSequenceRecords(),
+    );
+    expect(batchedEngine.getDeleteTargetRecords()).toEqual(
+      scalarEngine.getDeleteTargetRecords(),
+    );
+    expect(batched.stats).toMatchObject({
+      eventsProcessed: events.length,
+      nonConflictingRunCount: 64,
+      fullReplayCount: 2,
+      retreatCount: scalar.stats.retreatCount,
+      advanceCount: scalar.stats.advanceCount,
+    });
+  });
+
+  it("stops object run batching at scalar and canonical-id barriers", () => {
+    const inserts = [
+      ["A:0", "a"],
+      ["A:1", "b"],
+      ["A:2", "🙂"],
+      ["A:3", "c"],
+      ["A:4", "d"],
+      ["A:05", "X"],
+      ["A:6", "e"],
+      ["A:7", "f"],
+    ] as const;
+    let prepareIndex = 0;
+    const events = inserts.map(([id, text], index): GraphEvent => {
+      const event: GraphEvent = {
+        id,
+        parentVersion: new Set(index === 0 ? [] : [inserts[index - 1]![0]]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: prepareIndex,
+          text,
+        },
+        timestamp: index,
+      };
+      prepareIndex += text.length;
+      return event;
+    });
+    const graph = EventGraph.fromEvents(events);
+    const batchedEngine = new EgWalkerEngine();
+    const batched = batchedEngine.generate(events, "", {
+      eventGraph: graph,
+      collectTransformedOperations: false,
+    });
+    const scalarEngine = new EgWalkerEngine();
+    const scalar = scalarEngine.generate(events, "", {
+      eventGraph: graph,
+      collectTransformedOperations: false,
+      integrationMode: "linear-oracle",
+    });
+
+    expect(batched.text).toBe("ab🙂cdXef");
+    expect(batched.text).toBe(scalar.text);
+    expect(batchedEngine.getSequenceRecords()).toEqual(
+      scalarEngine.getSequenceRecords(),
+    );
+    expect(
+      batchedEngine.getSequenceRecords().map(({ content }) => content),
+    ).toEqual(["ab", "\ud83d", "\ude42", "cd", "X", "ef"]);
+    expect(batched.stats.sequenceRecordCount).toBe(6);
   });
 
   it("returns the post-event document from incremental applyEvent calls", () => {

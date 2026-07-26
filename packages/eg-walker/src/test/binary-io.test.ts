@@ -100,11 +100,11 @@ describe("BinaryReader.readVarint hardening", () => {
   it("reads zigzag delta Uint32 arrays without changing the wire format", () => {
     const writer = new BinaryWriter();
     writer.writeZigZagDeltaArray([10, 8, 20]);
+    const bytes = writer.toUint8Array();
 
     expect(
-      Array.from(
-        new BinaryReader(writer.toUint8Array()).readZigZagDeltaUint32Array(),
-      ),
+      Array.from(new BinaryReader(bytes).readZigZagDeltaUint32Array()),
     ).toEqual([10, 8, 20]);
+    expect(new BinaryReader(bytes).readZigZagDeltaArray()).toEqual([10, 8, 20]);
   });
 });

@@ -1,0 +1,1415 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { OPERATION_TYPE } from "../constants/operation-types";
+import {
+  EgWalkerReplica,
+  selectPackedLinearBridgeEventLimit,
+} from "../core/replica";
+import { planCriticalReplaySections } from "../engine/critical-section-replay-plan";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { IndexedSequence } from "../engine/indexed-sequence";
+import { DeleteTargetIndex } from "../engine/internals/delete-target-index";
+import { RecordSplitter } from "../engine/internals/record-splitter";
+import { SegmentedPlaceholderState } from "../engine/internals/segmented-placeholder";
+import {
+  PackedCriticalReplayPlan,
+  planPackedCriticalReplaySections,
+} from "../engine/packed-critical-replay-plan";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { EventGraph } from "../graph/event-graph";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
+import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
+
+const event = (
+  id: EventId,
+  parents: ReadonlyArray<EventId>,
+  timestamp: number,
+): GraphEvent => ({
+  id,
+  operation: { type: OPERATION_TYPE.INSERT, index: 0, text: id },
+  parentVersion: new Set(parents),
+  timestamp,
+});
+
+const editingEvent = (
+  id: EventId,
+  parents: ReadonlyArray<EventId>,
+  operation: ExternalOperation,
+  timestamp: number,
+): GraphEvent => ({
+  id,
+  operation,
+  parentVersion: new Set(parents),
+  timestamp,
+});
+
+const pack = (events: ReadonlyArray<GraphEvent>): EventGraph => {
+  const codec = new ColumnarEventGraphCodec();
+  return codec.decodeBinary(codec.encodeBinary(EventGraph.fromEvents(events)));
+};
+
+const prepareText = (engine: EgWalkerEngine): string => {
+  let text = "";
+  for (let index = 0; index < engine.getPrepareLength(); index++) {
+    const codeUnit = engine.getPrepareCodeUnitAt(index);
+    if (codeUnit === undefined) {
+      throw new Error(`Missing prepare code unit ${index}`);
+    }
+    text += String.fromCharCode(codeUnit);
+  }
+  return text;
+};
+
+const versionsEqual = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean =>
+  left.size === right.size && Array.from(left).every((id) => right.has(id));
+
+const isLinear = (
+  events: ReadonlyArray<GraphEvent>,
+  base: Version,
+): boolean => {
+  const first = events[0];
+  if (first === undefined) return true;
+  if (!versionsEqual(first.parentVersion, base)) return false;
+  for (let index = 1; index < events.length; index++) {
+    const previous = events[index - 1]!;
+    const current = events[index]!;
+    if (
+      current.parentVersion.size !== 1 ||
+      !current.parentVersion.has(previous.id)
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+describe("packed critical-section replay planning", () => {
+  it("adapts linear bridge width from deterministic record pressure", () => {
+    const baseline = new EgWalkerEngine().getStats();
+
+    expect(
+      selectPackedLinearBridgeEventLimit({
+        ...baseline,
+        eventsProcessed: 32_768,
+        peakSequenceRecordCount: 1_024,
+      }),
+    ).toBe(32);
+    expect(
+      selectPackedLinearBridgeEventLimit({
+        ...baseline,
+        eventsProcessed: 131_073,
+        peakSequenceRecordCount: 1_024,
+      }),
+    ).toBe(16);
+    expect(
+      selectPackedLinearBridgeEventLimit({
+        ...baseline,
+        eventsProcessed: 32_768,
+        peakSequenceRecordCount: 4_097,
+      }),
+    ).toBe(8);
+  });
+
+  it("matches the general planner without materialising a full event order", () => {
+    const graph = pack([
+      event("root", [], 0),
+      event("a:0", ["root"], 1),
+      event("a:1", ["a:0"], 2),
+      event("b:0", ["root"], 3),
+      event("b:1", ["b:0"], 4),
+      event("merge", ["a:1", "b:1"], 5),
+      event("tail", ["merge"], 6),
+    ]);
+    const materializedOrder = vi.spyOn(
+      graph,
+      "getBranchPreservingTopologicalOrder",
+    );
+    const packedView = graph.getPackedReplayPlanningView()!;
+    const legacyOrder = packedView.getBranchPreservingOrderOffsets();
+    const standaloneOrder = vi.spyOn(
+      packedView,
+      "getBranchPreservingOrderOffsets",
+    );
+
+    const compact = planPackedCriticalReplaySections(graph);
+
+    expect(compact).not.toBeNull();
+    expect(materializedOrder).not.toHaveBeenCalled();
+    expect(standaloneOrder).not.toHaveBeenCalled();
+    standaloneOrder.mockRestore();
+    for (let orderIndex = 0; orderIndex < legacyOrder.length; orderIndex++) {
+      const eventOffset = legacyOrder[orderIndex]!;
+      expect(compact!.eventOffsetAt(orderIndex)).toBe(eventOffset);
+      expect(compact!.orderIndexOfOffset(eventOffset)).toBe(orderIndex);
+    }
+
+    const expected = planCriticalReplaySections(graph);
+    expect(compact!.sectionCount).toBe(expected.length);
+    for (let sectionIndex = 0; sectionIndex < expected.length; sectionIndex++) {
+      const actualEvents = compact!.materializeSection(sectionIndex);
+      expect(actualEvents.map(({ id }) => id)).toEqual(
+        expected[sectionIndex]!.events.map(({ id }) => id),
+      );
+      expect(compact!.isLinearSection(sectionIndex)).toBe(
+        isLinear(
+          expected[sectionIndex]!.events,
+          expected[sectionIndex]!.baseFrontier,
+        ),
+      );
+    }
+    expect(
+      compact!
+        .materializeSectionRange(0, compact!.sectionCount)
+        .map(({ id }) => id),
+    ).toEqual(expected.flatMap(({ events }) => events.map(({ id }) => id)));
+  });
+
+  it("fast-forwards strict chains across deferred and singleton cuts", () => {
+    const graph = pack([
+      event("root", [], 0),
+      event("left:0", ["root"], 1),
+      event("right:0", ["root"], 2),
+      event("left:1", ["left:0"], 3),
+      event("right:1", ["right:0"], 4),
+      event("left:2", ["left:1"], 5),
+      event("right:2", ["right:1"], 6),
+      event("left:3", ["left:2"], 7),
+      event("merge", ["left:3", "right:2"], 8),
+      event("tail:0", ["merge"], 9),
+      event("tail:1", ["tail:0"], 10),
+      event("tail:2", ["tail:1"], 11),
+      event("leaf", ["tail:2"], 12),
+    ]);
+
+    const compact = planPackedCriticalReplaySections(graph)!;
+    const expected = planCriticalReplaySections(graph);
+
+    expect(compact.strictChainEventCount).toBe(6);
+    expect(compact.sectionCount).toBe(expected.length);
+    expect(
+      Array.from({ length: compact.eventCount }, (_, orderIndex) =>
+        compact.eventIdAt(orderIndex),
+      ),
+    ).toEqual(expected.flatMap(({ events }) => events.map(({ id }) => id)));
+
+    let frontier = new Set<EventId>();
+    for (let sectionIndex = 0; sectionIndex < expected.length; sectionIndex++) {
+      expect(
+        versionsEqual(frontier, expected[sectionIndex]!.baseFrontier),
+      ).toBe(true);
+      frontier = compact.advanceFrontierRange(
+        frontier,
+        sectionIndex,
+        sectionIndex + 1,
+      );
+      expect(versionsEqual(frontier, expected[sectionIndex]!.endFrontier)).toBe(
+        true,
+      );
+    }
+    for (let orderIndex = 0; orderIndex < compact.eventCount; orderIndex++) {
+      expect(
+        compact.orderIndexOfOffset(compact.eventOffsetAt(orderIndex)),
+      ).toBe(orderIndex);
+    }
+  });
+
+  it("matches the general planner across contiguous strict chains and branch boundaries", () => {
+    const events: GraphEvent[] = [event("root", [], 0)];
+    let timestamp = 1;
+    let leftParent = "root";
+    for (let index = 0; index < 64; index++) {
+      const id = `left:${index}`;
+      events.push(event(id, [leftParent], timestamp++));
+      leftParent = id;
+    }
+    let rightParent = "root";
+    for (let index = 0; index < 32; index++) {
+      const id = `right:${index}`;
+      events.push(event(id, [rightParent], timestamp++));
+      rightParent = id;
+    }
+    events.push(event("merge", [leftParent, rightParent], timestamp++));
+    let tailParent = "merge";
+    for (let index = 0; index < 16; index++) {
+      const id = `tail:${index}`;
+      events.push(event(id, [tailParent], timestamp++));
+      tailParent = id;
+    }
+    events.push(
+      event("fan:left", [tailParent], timestamp++),
+      event("fan:right", [tailParent], timestamp++),
+      event("join", ["fan:left", "fan:right"], timestamp++),
+      event("leaf", ["join"], timestamp++),
+    );
+
+    const graph = pack(events);
+    const compact = planPackedCriticalReplaySections(graph)!;
+    const expected = planCriticalReplaySections(graph);
+
+    expect(compact.strictChainRunCount).toBeGreaterThan(0);
+    expect(compact.strictChainEventCount).toBeGreaterThan(64);
+    expect(compact.sectionCount).toBe(expected.length);
+    for (let sectionIndex = 0; sectionIndex < expected.length; sectionIndex++) {
+      expect(
+        compact.materializeSection(sectionIndex).map(({ id }) => id),
+      ).toEqual(expected[sectionIndex]!.events.map(({ id }) => id));
+      expect(compact.isLinearSection(sectionIndex)).toBe(
+        isLinear(
+          expected[sectionIndex]!.events,
+          expected[sectionIndex]!.baseFrontier,
+        ),
+      );
+    }
+    for (let orderIndex = 0; orderIndex < compact.eventCount; orderIndex++) {
+      expect(
+        compact.orderIndexOfOffset(compact.eventOffsetAt(orderIndex)),
+      ).toBe(orderIndex);
+    }
+  });
+
+  it("keeps full frontier accounting constant as strict chains grow", () => {
+    for (const branchLength of [16, 128, 1_024, 1_025]) {
+      const events: GraphEvent[] = [event("root", [], 0)];
+      let leftParent = "root";
+      let rightParent = "root";
+      for (let index = 0; index < branchLength; index++) {
+        const left = `left:${index}`;
+        const right = `right:${index}`;
+        events.push(
+          event(left, [leftParent], index * 2 + 1),
+          event(right, [rightParent], index * 2 + 2),
+        );
+        leftParent = left;
+        rightParent = right;
+      }
+      events.push(
+        event("merge", [leftParent, rightParent], branchLength * 2 + 1),
+      );
+
+      const compact = planPackedCriticalReplaySections(pack(events))!;
+
+      expect(compact.strictChainEventCount).toBe(2 * (branchLength - 2));
+      expect(compact.strictChainRunCount).toBe(2);
+      expect(compact.eventCount - compact.strictChainEventCount).toBe(6);
+    }
+  });
+
+  it("replays obsolete nonlinear cuts in bounded engine lifetimes", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 100; layer++) {
+      const left = `left:${layer}`;
+      const right = `right:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+          layer * 2,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          layer * 2 + 1,
+        ),
+      );
+      parents = [left, right];
+    }
+
+    const source = EventGraph.fromEvents(events);
+    const order = source.getBranchPreservingTopologicalOrder();
+    const expected = new EgWalkerEngine().generate(order, "", {
+      eventGraph: source,
+      eventOrder: order,
+    }).text;
+    const packedGraph = pack(events);
+    const compact = planPackedCriticalReplaySections(packedGraph);
+    expect(compact?.sectionCount).toBe(100);
+    expect(
+      Array.from({ length: compact!.sectionCount }, (_, sectionIndex) =>
+        compact!.isLinearSection(sectionIndex),
+      ),
+    ).not.toContain(true);
+
+    const generate = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+    const materialize = vi.spyOn(
+      PackedCriticalReplayPlan.prototype,
+      "materializeSectionRange",
+    );
+    const stringDiff = vi.spyOn(EventGraph.prototype, "diffVersions");
+    const replica = new EgWalkerReplica("packed-layers", "", packedGraph);
+
+    expect(replica.getText()).toBe(expected);
+    // One bounded engine covers the 68 obsolete cuts; the trailing 32 cuts
+    // remain independent so each can still seed a retained checkpoint.
+    expect(generate).toHaveBeenCalledTimes(33);
+    expect(materialize).not.toHaveBeenCalled();
+    expect(stringDiff).not.toHaveBeenCalled();
+  });
+
+  it("bridges short linear gaps between obsolete nonlinear cuts", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 100; layer++) {
+      const left = `left:${layer}`;
+      const right = `right:${layer}`;
+      const merge = `merge:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: layer * 2, text: "L" },
+          layer * 3,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: layer * 2, text: "R" },
+          layer * 3 + 1,
+        ),
+        editingEvent(
+          merge,
+          [left, right],
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: (layer + 1) * 2,
+            text: "",
+          },
+          layer * 3 + 2,
+        ),
+      );
+      parents = [merge];
+    }
+
+    const source = EventGraph.fromEvents(events);
+    const order = source.getBranchPreservingTopologicalOrder();
+    const expected = new EgWalkerEngine().generate(order, "", {
+      eventGraph: source,
+      eventOrder: order,
+    }).text;
+    const packedGraph = pack(events);
+    const compact = planPackedCriticalReplaySections(packedGraph);
+    expect(compact?.sectionCount).toBe(200);
+
+    const generate = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+    generate.mockClear();
+    const replica = new EgWalkerReplica(
+      "packed-linear-bridges",
+      "",
+      packedGraph,
+    );
+
+    expect(replica.getText()).toBe(expected);
+    // The 168 obsolete cuts become one N-(short L)-N range plus one direct
+    // trailing L cut. Only the 16 nonlinear cuts in the retained 32-section
+    // checkpoint window still need independent engines.
+    expect(generate).toHaveBeenCalledTimes(17);
+  });
+
+  it("widens obsolete bridges after a low-pressure nonlinear range", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    let timestamp = 0;
+    for (let layer = 0; layer < 50; layer++) {
+      const left = `left-wide:${layer}`;
+      const right = `right-wide:${layer}`;
+      const merge = `merge-wide:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+          timestamp++,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          timestamp++,
+        ),
+        editingEvent(
+          merge,
+          [left, right],
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "m" },
+          timestamp++,
+        ),
+      );
+      let parent = merge;
+      for (let gap = 0; gap < 15; gap++) {
+        const id = `gap-wide:${layer}:${gap}`;
+        events.push(
+          editingEvent(
+            id,
+            [parent],
+            { type: OPERATION_TYPE.INSERT, index: 0, text: "g" },
+            timestamp++,
+          ),
+        );
+        parent = id;
+      }
+      parents = [parent];
+    }
+
+    const source = EventGraph.fromEvents(events);
+    const order = source.getBranchPreservingTopologicalOrder();
+    const expected = new EgWalkerEngine().generate(order, "", {
+      eventGraph: source,
+      eventOrder: order,
+    }).text;
+    const generate = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+    generate.mockClear();
+
+    const replica = new EgWalkerReplica(
+      "packed-adaptive-bridges",
+      "",
+      pack(events),
+    );
+
+    expect(replica.getText()).toBe(expected);
+    // The first 16-event gap is kept direct at the conservative width of 8.
+    // Its low-pressure engine then raises the deterministic hard-bounded
+    // width to 32, so the remaining obsolete ranges share one engine.
+    expect(generate.mock.calls.length).toBeGreaterThan(1);
+    expect(generate.mock.calls.length).toBeLessThan(10);
+    generate.mockRestore();
+  });
+
+  it("continues from a retained numeric replay engine", () => {
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 40; layer++) {
+      const left = `left:${layer}`;
+      const right = `right:${layer}`;
+      events.push(
+        editingEvent(
+          left,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+          layer * 2,
+        ),
+        editingEvent(
+          right,
+          parents,
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "R" },
+          layer * 2 + 1,
+        ),
+      );
+      parents = [left, right];
+    }
+
+    const replica = new EgWalkerReplica("packed-retained", "", pack(events));
+    const replayCount = replica.getReplayStats().fullReplays;
+    const merge = editingEvent(
+      "merge:40",
+      parents,
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+      80,
+    );
+    const divergent = editingEvent(
+      "divergent:40",
+      [parents[0]!],
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "D" },
+      81,
+    );
+
+    expect(replica.applyRemoteEvent(merge).status).toBe("integrated");
+    expect(replica.applyRemoteEvent(divergent).status).toBe("integrated");
+
+    const reference = new EgWalkerReplica(
+      "object-retained",
+      "",
+      EventGraph.fromEvents([...events, merge, divergent]),
+    );
+    expect(replica.getText()).toBe(reference.getText());
+    expect(replica.getReplayStats().fullReplays).toBe(replayCount);
+    expect(replica.getReplayStats().incrementalApplies).toBe(2);
+  });
+
+  it("splits a packed middle-position typed run after a stale-version fork", () => {
+    const events: GraphEvent[] = [
+      editingEvent(
+        "root",
+        [],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        0,
+      ),
+    ];
+    let leftParent = "root";
+    let rightParent = "root";
+    for (let sequence = 0; sequence < 80; sequence++) {
+      const left = `left:${sequence}`;
+      const right = `right:${sequence}`;
+      events.push(
+        editingEvent(
+          left,
+          [leftParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "L" },
+          sequence * 2 + 1,
+        ),
+        editingEvent(
+          right,
+          [rightParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "R" },
+          sequence * 2 + 2,
+        ),
+      );
+      leftParent = left;
+      rightParent = right;
+    }
+
+    const updateItem = vi.spyOn(IndexedSequence.prototype, "updateItem");
+    const packed = new EgWalkerReplica("packed-runs", "", pack(events));
+    const packedUpdateCount = updateItem.mock.calls.length;
+    updateItem.mockClear();
+    const object = new EgWalkerReplica(
+      "object-runs",
+      "",
+      EventGraph.fromEvents(events),
+    );
+    const objectUpdateCount = updateItem.mock.calls.length;
+    updateItem.mockRestore();
+    expect(packed.getText()).toBe(object.getText());
+    expect(packedUpdateCount).toBeLessThanOrEqual(objectUpdateCount);
+    expect(objectUpdateCount).toBeLessThan(10);
+    expect(packed.getReplayStats().peakSequenceRecordCount).toBeLessThan(100);
+
+    const divergent = editingEvent(
+      "fork",
+      ["left:20"],
+      { type: OPERATION_TYPE.INSERT, index: 21, text: "X" },
+      1_000,
+    );
+    expect(packed.applyRemoteEvent(divergent).status).toBe("integrated");
+
+    const reference = new EgWalkerReplica(
+      "reference-runs",
+      "",
+      EventGraph.fromEvents([...events, divergent]),
+    );
+    expect(packed.getText()).toBe(reference.getText());
+    expect([...packed.serialize().eventGraph.version].sort()).toEqual(
+      [...reference.serialize().eventGraph.version].sort(),
+    );
+  });
+
+  it("batches typed-run prepare spans across retreat, advance, and delete membership", () => {
+    const events: GraphEvent[] = [];
+    let timestamp = 0;
+    let aParent: EventId | null = null;
+    for (let sequence = 0; sequence < 3; sequence++) {
+      const id = `a:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          aParent === null ? [] : [aParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "a" },
+          timestamp++,
+        ),
+      );
+      aParent = id;
+    }
+    events.push(
+      editingEvent(
+        "c:0",
+        ["a:2"],
+        { type: OPERATION_TYPE.INSERT, index: 3, text: "" },
+        timestamp++,
+      ),
+    );
+    for (let sequence = 3; sequence < 8; sequence++) {
+      const id = `a:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [aParent!],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "a" },
+          timestamp++,
+        ),
+      );
+      aParent = id;
+    }
+    events.push(
+      editingEvent(
+        "delete:0",
+        ["a:7"],
+        { type: OPERATION_TYPE.DELETE, index: 2, length: 5 },
+        timestamp++,
+      ),
+    );
+
+    let bParent: EventId = "a:2";
+    for (let sequence = 0; sequence < 10; sequence++) {
+      const id = `b:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [bParent],
+          { type: OPERATION_TYPE.INSERT, index: 3 + sequence, text: "b" },
+          timestamp++,
+        ),
+      );
+      bParent = id;
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["delete:0", "b:9"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        timestamp++,
+      ),
+      editingEvent(
+        "final:0",
+        ["c:0", "merge:0"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        timestamp,
+      ),
+    );
+
+    const spanIsolation = vi.spyOn(
+      RecordSplitter.prototype,
+      "isolateRunSpanForCanonicalEvents",
+    );
+    const scalarIsolation = vi.spyOn(
+      RecordSplitter.prototype,
+      "isolateRunSliceForEvent",
+    );
+    const objectSpanIsolation = vi.spyOn(
+      RecordSplitter.prototype,
+      "isolateRunSpanForEvents",
+    );
+    const packed = new EgWalkerReplica("packed-span", "", pack(events));
+    const packedSpanCalls = spanIsolation.mock.calls.filter(
+      ([replicaId, firstSequence, eventCount]) =>
+        replicaId === "a" && firstSequence === 3 && eventCount === 5,
+    ).length;
+    const packedScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
+      /^a:[3-7]$/.test(eventId),
+    ).length;
+
+    spanIsolation.mockClear();
+    scalarIsolation.mockClear();
+    objectSpanIsolation.mockClear();
+    const object = new EgWalkerReplica(
+      "object-span",
+      "",
+      EventGraph.fromEvents(events),
+    );
+    const objectScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
+      /^a:[3-7]$/.test(eventId),
+    ).length;
+    const objectSpanCalls = objectSpanIsolation.mock.calls.filter(
+      ([firstEventId, eventCount]) =>
+        firstEventId === "a:3" && eventCount === 5,
+    ).length;
+    spanIsolation.mockRestore();
+    scalarIsolation.mockRestore();
+    objectSpanIsolation.mockRestore();
+
+    expect(packedSpanCalls).toBe(2);
+    expect(packedScalarCalls).toBe(0);
+    expect(objectSpanCalls).toBe(2);
+    expect(objectScalarCalls).toBe(0);
+    expect(packed.getText()).toBe(`aaa${"b".repeat(10)}`);
+    expect(packed.getText()).toBe(object.getText());
+    expect(packed.getReplayStats().engineRetreats).toBe(7);
+    expect(packed.getReplayStats().engineAdvances).toBe(6);
+    expect(packed.getReplayStats().engineRetreats).toBe(
+      object.getReplayStats().engineRetreats,
+    );
+    expect(packed.getReplayStats().engineAdvances).toBe(
+      object.getReplayStats().engineAdvances,
+    );
+    expect([...packed.serialize().eventGraph.version].sort()).toEqual(
+      [...object.serialize().eventGraph.version].sort(),
+    );
+  });
+
+  it("batches a causal scalar-delete run into one placeholder range mutation", () => {
+    const initialText = "x".repeat(128);
+    const events: GraphEvent[] = [];
+    let parent: EventId | null = null;
+    for (let sequence = 0; sequence < 64; sequence++) {
+      const id = `delete:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          parent === null ? [] : [parent],
+          { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+          sequence,
+        ),
+      );
+      parent = id;
+    }
+    events.push(
+      editingEvent(
+        "other:0",
+        [],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        64,
+      ),
+      editingEvent(
+        "merge:0",
+        ["delete:63", "other:0"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        65,
+      ),
+    );
+
+    const rangeDelete = vi.spyOn(
+      SegmentedPlaceholderState.prototype,
+      "deletePrepareVisibleUnitsInSlice",
+    );
+    const materializeBoundaries = vi.spyOn(
+      SegmentedPlaceholderState.prototype,
+      "materializeLogicalRangeBoundaries",
+    );
+    const packed = new EgWalkerReplica(
+      "packed-delete-run",
+      initialText,
+      pack(events),
+    );
+    const packedRangeDeletes = rangeDelete.mock.calls.filter(
+      ([, localStart, maxLength]) => localStart === 1 && maxLength === 63,
+    ).length;
+    const eagerBoundaryCalls = materializeBoundaries.mock.calls.length;
+
+    rangeDelete.mockClear();
+    const object = new EgWalkerReplica(
+      "object-delete-run",
+      initialText,
+      EventGraph.fromEvents(events),
+    );
+    const objectRangeDeletes = rangeDelete.mock.calls.length;
+    rangeDelete.mockRestore();
+
+    expect(packedRangeDeletes).toBe(1);
+    expect(eagerBoundaryCalls).toBe(0);
+    expect(objectRangeDeletes).toBe(0);
+    expect(packed.getText()).toBe("x".repeat(64));
+    expect(packed.getText()).toBe(object.getText());
+    expect(packed.getReplayStats().engineRetreats).toBe(
+      object.getReplayStats().engineRetreats,
+    );
+    expect(packed.getReplayStats().engineAdvances).toBe(
+      object.getReplayStats().engineAdvances,
+    );
+    expect(packed.getReplayStats().sequenceTreeOperations).toBeLessThan(
+      object.getReplayStats().sequenceTreeOperations,
+    );
+
+    const packedGraph = pack(events);
+    const packedPlan = planPackedCriticalReplaySections(packedGraph);
+    expect(packedPlan).not.toBeNull();
+    const packedEngine = new EgWalkerEngine();
+    packedEngine.generatePackedSectionRange(
+      packedPlan!,
+      0,
+      packedPlan!.sectionCount,
+      packedGraph,
+      new Set(),
+      PersistentUtf16Rope.from(initialText),
+    );
+    packedEngine.preparePackedRetention(
+      packedPlan!,
+      0,
+      packedPlan!.sectionCount,
+    );
+
+    const objectEngine = new EgWalkerEngine();
+    const objectOrder = packedGraph.getBranchPreservingTopologicalOrder();
+    objectEngine.generate(objectOrder, initialText, {
+      eventGraph: packedGraph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    const packedTargets = packedEngine.getDeleteTargetRecords();
+    expect(materializeBoundaries).toHaveBeenCalled();
+    materializeBoundaries.mockRestore();
+    expect(packedEngine.getSequenceRecords()).toEqual(
+      objectEngine.getSequenceRecords(),
+    );
+    expect(packedTargets).toEqual(objectEngine.getDeleteTargetRecords());
+    expect(
+      new Set(packedTargets.flatMap(({ targetIds }) => targetIds)).size,
+    ).toBe(64);
+
+    const restoredEngine = EgWalkerEngine.fromRecoveryState(
+      packedEngine.captureRecoveryState(),
+      packedGraph,
+    );
+    const partialDeleteVersion = new Set<EventId>(["delete:62"]);
+    packedEngine.transitionPrepareView(partialDeleteVersion, packedGraph);
+    objectEngine.transitionPrepareView(partialDeleteVersion, packedGraph);
+    restoredEngine.transitionPrepareView(partialDeleteVersion, packedGraph);
+
+    expect(packedEngine.getPrepareLength()).toBe(65);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+    expect(restoredEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+  });
+
+  it("keeps batched typed-run delete targets lazy and recovery-safe", () => {
+    const events: GraphEvent[] = [];
+    let insertParent: EventId | null = null;
+    for (let sequence = 0; sequence < 32; sequence++) {
+      const id = `source:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          insertParent === null ? [] : [insertParent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "x" },
+          sequence,
+        ),
+      );
+      insertParent = id;
+    }
+    events.push(
+      editingEvent(
+        "other:0",
+        ["source:31"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        32,
+      ),
+    );
+
+    let deleteParent: EventId = "source:31";
+    for (let sequence = 0; sequence < 16; sequence++) {
+      const id = `delete:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [deleteParent],
+          { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+          33 + sequence,
+        ),
+      );
+      deleteParent = id;
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["other:0", "delete:15"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        49,
+      ),
+    );
+
+    const graph = pack(events);
+    const plan = planPackedCriticalReplaySections(graph);
+    expect(plan).not.toBeNull();
+    const objectOrder = graph.getBranchPreservingTopologicalOrder();
+    const deleteOrderIndex = objectOrder.findIndex(
+      ({ id }) => id === "delete:0",
+    );
+    expect(objectOrder.findIndex(({ id }) => id === "other:0")).toBeLessThan(
+      deleteOrderIndex,
+    );
+    expect(plan!.eventIdAt(deleteOrderIndex)).toBe("delete:0");
+    expect(plan!.eventOffsetAt(deleteOrderIndex)).not.toBe(deleteOrderIndex);
+
+    const packedLazyTarget = vi.spyOn(
+      DeleteTargetIndex.prototype,
+      "recordPackedRunEvent",
+    );
+    const stringLazyTarget = vi.spyOn(
+      DeleteTargetIndex.prototype,
+      "recordRunEvent",
+    );
+    const packedEngine = new EgWalkerEngine();
+    const packedGenerated = packedEngine.generatePackedSectionRange(
+      plan!,
+      0,
+      plan!.sectionCount,
+      graph,
+      new Set(),
+      PersistentUtf16Rope.from(""),
+    );
+    packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
+    const packedLazyTargetCount = packedLazyTarget.mock.calls.length;
+    const stringLazyTargetCount = stringLazyTarget.mock.calls.length;
+    packedLazyTarget.mockRestore();
+    stringLazyTarget.mockRestore();
+
+    const objectEngine = new EgWalkerEngine();
+    const objectGenerated = objectEngine.generate(objectOrder, "", {
+      eventGraph: graph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(packedLazyTargetCount).toBe(15);
+    expect(stringLazyTargetCount).toBe(0);
+    expect(packedGenerated.text).toBe("x".repeat(16));
+    expect(packedGenerated.text).toBe(objectGenerated.text);
+    expect(packedGenerated.stats.sequenceRecordCount).toBe(3);
+    expect(packedGenerated.stats.sequenceRecordCount).toBeLessThan(
+      objectGenerated.stats.sequenceRecordCount,
+    );
+    expect(packedGenerated.stats.sequenceTreeOperations).toBeLessThan(
+      objectGenerated.stats.sequenceTreeOperations,
+    );
+
+    const partialVersion = new Set<EventId>(["delete:14"]);
+    packedEngine.transitionPrepareView(partialVersion, graph);
+    objectEngine.transitionPrepareView(partialVersion, graph);
+    expect(packedEngine.getPrepareLength()).toBe(17);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+
+    const fullVersion = graph.getFrontier();
+    packedEngine.transitionPrepareView(fullVersion, graph);
+    objectEngine.transitionPrepareView(fullVersion, graph);
+    const packedRecords = packedEngine.getSequenceRecords();
+    const packedTargets = packedEngine.getDeleteTargetRecords();
+    expect(packedRecords).toEqual(objectEngine.getSequenceRecords());
+    expect(packedTargets).toEqual(objectEngine.getDeleteTargetRecords());
+    expect(
+      packedEngine.getStats().peakSequenceRecordCount,
+    ).toBeGreaterThanOrEqual(packedEngine.getStats().sequenceRecordCount);
+
+    const restoredEngine = EgWalkerEngine.fromRecoveryState(
+      packedEngine.captureRecoveryState(),
+      graph,
+    );
+    const middleVersion = new Set<EventId>(["delete:7"]);
+    packedEngine.transitionPrepareView(middleVersion, graph);
+    objectEngine.transitionPrepareView(middleVersion, graph);
+    restoredEngine.transitionPrepareView(middleVersion, graph);
+    expect(packedEngine.getPrepareLength()).toBe(24);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+    expect(restoredEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+  });
+
+  it("materializes lazy delete targets before collecting insert transition deltas", () => {
+    const events: GraphEvent[] = [];
+    let parent: EventId | null = null;
+    for (let sequence = 0; sequence < 8; sequence++) {
+      const id = `a:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          parent === null ? [] : [parent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "a" },
+          sequence,
+        ),
+      );
+      parent = id;
+    }
+    for (let sequence = 0; sequence < 3; sequence++) {
+      events.push(
+        editingEvent(
+          `delete:${sequence}`,
+          [sequence === 0 ? "a:7" : `delete:${sequence - 1}`],
+          { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+          8 + sequence,
+        ),
+      );
+    }
+    let bParent: EventId = "a:1";
+    for (let sequence = 0; sequence < 12; sequence++) {
+      const id = `b:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          [bParent],
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: sequence === 0 ? 2 : 3,
+            text: sequence === 0 ? "B" : "",
+          },
+          11 + sequence,
+        ),
+      );
+      bParent = id;
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["delete:2", "b:11"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        23,
+      ),
+    );
+
+    const graph = pack(events);
+    const plan = planPackedCriticalReplaySections(graph);
+    expect(plan).not.toBeNull();
+    const objectOrder = graph.getBranchPreservingTopologicalOrder();
+    expect(objectOrder.findIndex(({ id }) => id === "delete:2")).toBeLessThan(
+      objectOrder.findIndex(({ id }) => id === "b:0"),
+    );
+
+    const packedEngine = new EgWalkerEngine();
+    const packed = packedEngine.generatePackedSectionRange(
+      plan!,
+      0,
+      plan!.sectionCount,
+      graph,
+      new Set(),
+      PersistentUtf16Rope.from(""),
+    );
+    const objectEngine = new EgWalkerEngine();
+    const object = objectEngine.generate(objectOrder, "", {
+      eventGraph: graph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(packed.text).toBe(object.text);
+    expect(packedEngine.getPrepareLength()).toBe(
+      objectEngine.getPrepareLength(),
+    );
+    expect(packedEngine.getDeleteTargetRecords()).toEqual(
+      objectEngine.getDeleteTargetRecords(),
+    );
+    packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
+    packedEngine.preparePackedRetention(plan!, 0, plan!.sectionCount);
+    expect(packed.stats.retreatCount).toBe(object.stats.retreatCount);
+    expect(packed.stats.advanceCount).toBe(object.stats.advanceCount);
+    for (const version of [
+      new Set<EventId>(["b:11"]),
+      new Set<EventId>(["delete:2"]),
+      new Set<EventId>(["a:1"]),
+      graph.getFrontier(),
+    ]) {
+      packedEngine.transitionPrepareView(version, graph);
+      objectEngine.transitionPrepareView(version, graph);
+      expect(prepareText(packedEngine)).toBe(prepareText(objectEngine));
+    }
+  });
+
+  it("canonicalizes older item memberships after lazy target splits", () => {
+    const events: GraphEvent[] = [];
+    let parent: EventId | null = null;
+    for (let sequence = 0; sequence < 10; sequence++) {
+      const id = `source:${sequence}`;
+      events.push(
+        editingEvent(
+          id,
+          parent === null ? [] : [parent],
+          { type: OPERATION_TYPE.INSERT, index: sequence, text: "x" },
+          sequence,
+        ),
+      );
+      parent = id;
+    }
+    events.push(
+      editingEvent(
+        "old:0",
+        ["source:9"],
+        { type: OPERATION_TYPE.DELETE, index: 2, length: 4 },
+        10,
+      ),
+    );
+    for (let sequence = 0; sequence < 3; sequence++) {
+      events.push(
+        editingEvent(
+          `delete:${sequence}`,
+          [sequence === 0 ? "source:9" : `delete:${sequence - 1}`],
+          { type: OPERATION_TYPE.DELETE, index: 2, length: 1 },
+          11 + sequence,
+        ),
+      );
+    }
+    events.push(
+      editingEvent(
+        "merge:0",
+        ["old:0", "delete:2"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        14,
+      ),
+    );
+
+    const graph = pack(events);
+    const plan = planPackedCriticalReplaySections(graph);
+    expect(plan).not.toBeNull();
+    const objectOrder = graph.getBranchPreservingTopologicalOrder();
+    expect(objectOrder.findIndex(({ id }) => id === "old:0")).toBeLessThan(
+      objectOrder.findIndex(({ id }) => id === "delete:0"),
+    );
+    const packedEngine = new EgWalkerEngine();
+    const packed = packedEngine.generatePackedSectionRange(
+      plan!,
+      0,
+      plan!.sectionCount,
+      graph,
+      new Set(),
+      PersistentUtf16Rope.from(""),
+    );
+    const objectEngine = new EgWalkerEngine();
+    const object = objectEngine.generate(objectOrder, "", {
+      eventGraph: graph,
+      eventOrder: objectOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(packed.text).toBe(object.text);
+    expect(packedEngine.getSequenceRecords()).toEqual(
+      objectEngine.getSequenceRecords(),
+    );
+    expect(packedEngine.getDeleteTargetRecords()).toEqual(
+      objectEngine.getDeleteTargetRecords(),
+    );
+
+    const restored = EgWalkerEngine.fromRecoveryState(
+      packedEngine.captureRecoveryState(),
+      graph,
+    );
+    const version = new Set<EventId>(["delete:1"]);
+    packedEngine.transitionPrepareView(version, graph);
+    objectEngine.transitionPrepareView(version, graph);
+    restored.transitionPrepareView(version, graph);
+    expect(prepareText(packedEngine)).toBe(prepareText(objectEngine));
+    expect(prepareText(restored)).toBe(prepareText(objectEngine));
+  });
+
+  it("retains numeric replay across a rope seed and overlapping deletes", () => {
+    const initialText = "x".repeat(100);
+    const events: GraphEvent[] = [];
+    let parents: EventId[] = [];
+    for (let layer = 0; layer < 40; layer++) {
+      const left = `delete-left:${layer}`;
+      const right = `delete-right:${layer}`;
+      const operation: ExternalOperation = {
+        type: OPERATION_TYPE.DELETE,
+        index: 0,
+        length: 1,
+      };
+      events.push(
+        editingEvent(left, parents, operation, layer * 2),
+        editingEvent(right, parents, operation, layer * 2 + 1),
+      );
+      parents = [left, right];
+    }
+
+    const replica = new EgWalkerReplica(
+      "packed-delete-retained",
+      initialText,
+      pack(events),
+    );
+    const merge = editingEvent(
+      "delete-merge:40",
+      parents,
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+      80,
+    );
+    const divergent = editingEvent(
+      "delete-divergent:40",
+      [parents[0]!],
+      { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+      81,
+    );
+
+    replica.applyRemoteEvent(merge);
+    replica.applyRemoteEvent(divergent);
+    const reference = new EgWalkerReplica(
+      "object-delete-retained",
+      initialText,
+      EventGraph.fromEvents([...events, merge, divergent]),
+    );
+
+    expect(replica.getText()).toBe(reference.getText());
+    expect(replica.getReplayStats().incrementalApplies).toBe(2);
+  });
+
+  it("stores a long post-merge tail as numeric singleton cuts", () => {
+    const events: GraphEvent[] = [
+      event("root", [], 0),
+      event("a", ["root"], 1),
+      event("b", ["root"], 2),
+      event("merge", ["a", "b"], 3),
+    ];
+    let parent = "merge";
+    for (let index = 0; index < 2_000; index++) {
+      const id = `tail:${index}`;
+      events.push(event(id, [parent], index + 4));
+      parent = id;
+    }
+
+    const compact = planPackedCriticalReplaySections(pack(events));
+
+    expect(compact).not.toBeNull();
+    expect(compact!.eventCount).toBe(events.length);
+    expect(compact!.sectionCount).toBe(2_003);
+    expect(compact!.isLinearSection(0)).toBe(true);
+    expect(compact!.isLinearSection(1)).toBe(false);
+    expect(compact!.isLinearSection(compact!.sectionCount - 1)).toBe(true);
+    expect(
+      compact!
+        .materializeSection(compact!.sectionCount - 1)
+        .map(({ id }) => id),
+    ).toEqual(["tail:1999"]);
+  });
+
+  it("preserves document, frontier, checkpoints, and engine stats in cold replay", () => {
+    const events = [
+      editingEvent(
+        "replica:0",
+        [],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "abcd" },
+        0,
+      ),
+      editingEvent(
+        "custom-a",
+        ["replica:0"],
+        { type: OPERATION_TYPE.DELETE, index: 1, length: 1 },
+        1,
+      ),
+      editingEvent(
+        "replica:1",
+        ["custom-a"],
+        { type: OPERATION_TYPE.INSERT, index: 1, text: "Y" },
+        2,
+      ),
+      editingEvent(
+        "other:0",
+        ["replica:0"],
+        { type: OPERATION_TYPE.INSERT, index: 4, text: "X" },
+        3,
+      ),
+      editingEvent(
+        "merge-id",
+        ["replica:1", "other:0"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+        4,
+      ),
+      editingEvent(
+        "tail-id",
+        ["merge-id"],
+        { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+        5,
+      ),
+    ];
+    const packedGraph = pack(events);
+    const materializedOrder = vi.spyOn(
+      packedGraph,
+      "getBranchPreservingTopologicalOrder",
+    );
+    const objectReplica = new EgWalkerReplica(
+      "object",
+      "",
+      EventGraph.fromEvents(events),
+    );
+    const packedReplica = new EgWalkerReplica("packed", "", packedGraph);
+
+    expect(materializedOrder).not.toHaveBeenCalled();
+    expect(packedReplica.getText()).toBe(objectReplica.getText());
+    expect([...packedReplica.serialize().eventGraph.version].sort()).toEqual(
+      [...objectReplica.serialize().eventGraph.version].sort(),
+    );
+    expect(packedReplica.getReplayStats()).toEqual(
+      objectReplica.getReplayStats(),
+    );
+  });
+
+  it("streams obsolete linear cuts from packed operation columns", () => {
+    const events: GraphEvent[] = [
+      editingEvent(
+        "root:0",
+        [],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "abcd" },
+        0,
+      ),
+      editingEvent(
+        "left:0",
+        ["root:0"],
+        { type: OPERATION_TYPE.INSERT, index: 4, text: "L" },
+        1,
+      ),
+      editingEvent(
+        "right:0",
+        ["root:0"],
+        { type: OPERATION_TYPE.INSERT, index: 4, text: "R" },
+        2,
+      ),
+      editingEvent(
+        "merge:0",
+        ["left:0", "right:0"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "M" },
+        3,
+      ),
+    ];
+
+    let parent = "merge:0";
+    let documentLength = 7;
+    const tailOperations: ExternalOperation[] = [
+      { type: OPERATION_TYPE.INSERT, index: 7, text: "x" },
+      { type: OPERATION_TYPE.INSERT, index: 8, text: "y" },
+      { type: OPERATION_TYPE.DELETE, index: 7, length: 1 },
+      { type: OPERATION_TYPE.DELETE, index: 7, length: 1 },
+    ];
+    for (let index = tailOperations.length; index < 50; index++) {
+      tailOperations.push({
+        type: OPERATION_TYPE.INSERT,
+        index: documentLength,
+        text: String.fromCharCode(97 + (index % 26)),
+      });
+      documentLength++;
+    }
+
+    for (let index = 0; index < tailOperations.length; index++) {
+      const id = `tail:${index}`;
+      events.push(
+        editingEvent(id, [parent], tailOperations[index]!, index + 4),
+      );
+      parent = id;
+    }
+
+    const packedGraph = pack(events);
+    const materializedOrder = vi.spyOn(
+      packedGraph,
+      "getBranchPreservingTopologicalOrder",
+    );
+    const objectReplica = new EgWalkerReplica(
+      "object-tail",
+      "",
+      EventGraph.fromEvents(events),
+    );
+    const packedReplica = new EgWalkerReplica("packed-tail", "", packedGraph);
+
+    expect(materializedOrder).not.toHaveBeenCalled();
+    expect(packedReplica.getText()).toBe(objectReplica.getText());
+    expect(packedReplica.getReplayStats()).toEqual(
+      objectReplica.getReplayStats(),
+    );
+  });
+
+  it("collapses exact packed chains and handles empty packed graphs", () => {
+    const linear = planPackedCriticalReplaySections(
+      pack([
+        event("r:0", [], 0),
+        event("r:1", ["r:0"], 1),
+        event("r:2", ["r:1"], 2),
+      ]),
+    );
+    expect(linear?.sectionCount).toBe(1);
+    expect(linear?.sectionEventCountAt(0)).toBe(3);
+    expect(linear?.isLinearSection(0)).toBe(true);
+
+    const empty = planPackedCriticalReplaySections(pack([]));
+    expect(empty?.eventCount).toBe(0);
+    expect(empty?.sectionCount).toBe(0);
+  });
+});

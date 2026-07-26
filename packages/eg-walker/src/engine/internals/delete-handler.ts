@@ -1,16 +1,13 @@
-import { OPERATION_TYPE } from "../../constants/operation-types";
-import type { EventId, ExternalOperation, GraphEvent } from "../../types";
+import type { EventId, ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
-import { coalesceDeleteRuns, deleteText } from "./text-utils";
+import { coalesceDeleteRuns } from "./text-utils";
 
-type DeleteOperation = Extract<
-  ExternalOperation,
-  { type: typeof OPERATION_TYPE.DELETE }
->;
+const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
+  Object.freeze([]);
 
 export interface DeleteHandlerDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
@@ -19,15 +16,21 @@ export interface DeleteHandlerDeps {
   readonly pendingInsert: PendingInsertBuffer;
   readonly flushPendingInsert: () => void;
   readonly itemToEffectIndex: (target: AugmentedCRDTItem) => number;
-  readonly getResultingText: () => string;
-  readonly setResultingText: (text: string) => void;
+  readonly deleteText: (index: number, length: number) => void;
 }
 
 export const applyDelete = (
-  event: GraphEvent,
-  operation: DeleteOperation,
+  eventId: EventId | null,
+  operationIndex: number,
+  operationLength: number,
   deps: DeleteHandlerDeps,
-): ExternalOperation[] => {
+  collectTransformedOperations: boolean,
+  deferTextMaterialization: boolean,
+  packedOrderIndex?: number,
+): ReadonlyArray<ExternalOperation> => {
+  if (eventId === null && packedOrderIndex === undefined) {
+    throw new Error("Delete event ID is required outside packed replay");
+  }
   const {
     sequence,
     deleteTargets,
@@ -35,9 +38,13 @@ export const applyDelete = (
     pendingInsert,
     flushPendingInsert,
     itemToEffectIndex,
-    getResultingText,
-    setResultingText,
+    deleteText,
   } = deps;
+  if (packedOrderIndex !== undefined) {
+    // Packed-order validation must precede every sequence, text, and target
+    // mutation. The commit below is then infallible for this replay step.
+    deleteTargets.assertPackedOrderAvailable(packedOrderIndex);
+  }
 
   // Any concurrent insert or delete breaks the typed-run we may have been
   // coalescing into the pending-insert buffer. Flush before we start carving
@@ -49,89 +56,206 @@ export const applyDelete = (
   if (!pendingInsert.isEmpty()) {
     flushPendingInsert();
   }
-  const deletedItemIds: EventId[] = [];
-  const outputDeleteIndexes: number[] = [];
-  let remaining = operation.length;
+  const targetGroup = deleteTargets.beginRecord();
+  const outputDeleteIndexes: number[] | null = collectTransformedOperations
+    ? []
+    : null;
+  let remaining = operationLength;
 
-  while (remaining > 0) {
-    // A delete event whose `length` runs past the prepare-visible items at
-    // the engine's current parent version legitimately stops short — this is
-    // exercised by the "deletes that run past visible prepare items" test.
-    // The previous implementation wrapped the throwing
-    // `prepareIndexToPositionAndOffset` in a catch-all try/catch, which also
-    // swallowed real bugs (e.g. ranked-B-tree aggregate corruption). Use the
-    // explicit non-throwing variant for the expected end-of-text case, and
-    // let other errors surface.
-    const landing = sequence.tryPrepareIndexToPositionAndOffset(
-      operation.index,
-      false,
-    );
-    if (!landing) {
-      break;
-    }
-    const candidate = sequence.at(landing.position);
-    if (!candidate) {
-      // The ranked B-tree just told us the prepare-weight prefix sum lands
-      // on `landing.position`, so a missing record there means the tree's
-      // aggregates disagree with its children — a structural bug we want to
-      // surface, not silently truncate the delete around.
-      throw new Error(
-        `Engine bug: prepare-index ${operation.index} landed at sequence position ` +
-          `${landing.position} but no record exists there (remaining=${remaining}).`,
+  try {
+    while (remaining > 0) {
+      const landing = sequence.prepareIndexToPositionAndOffset(
+        operationIndex,
+        false,
       );
-    }
-
-    // Multi-character records (placeholders and typed-run leaves coalesced
-    // by Section 3.4) are split on demand so the deleted slice is its own
-    // record. Single-character records and per-code-unit paste fragments
-    // skip the split entirely and are marked in place.
-    const isMultiCharRecord =
-      (candidate.eventId === PLACEHOLDER_EVENT_ID || candidate.run !== null) &&
-      candidate.content.length > 1;
-    if (isMultiCharRecord) {
-      const availableInRecord =
-        candidate.content.length - landing.offsetInRecord;
-      const toDelete = Math.min(remaining, availableInRecord);
-      const middle = recordSplitter.splitRecordForDelete(
-        landing.position,
-        landing.offsetInRecord,
-        toDelete,
-      );
-
-      deletedItemIds.push(middle.id);
-      // A concurrent delete that lands on an already-effect-deleted slice
-      // (e.g. after retreating an overlapping sibling) must NOT remove
-      // characters from the text again. Without this, two concurrent
-      // deletes of the same region replay to a shorter string than full
-      // replay produces.
-      if (!middle.everDeleted) {
-        const effectIndex = itemToEffectIndex(middle);
-        for (let k = 0; k < toDelete; k++) {
-          outputDeleteIndexes.push(effectIndex);
-        }
-        setResultingText(deleteText(getResultingText(), effectIndex, toDelete));
+      const candidate = sequence.at(landing.position);
+      if (!candidate) {
+        // The ranked B-tree just told us the prepare-weight prefix sum lands
+        // on `landing.position`, so a missing record there means the tree's
+        // aggregates disagree with its children — a structural bug we want to
+        // surface, not silently truncate the delete around.
+        throw new Error(
+          `Engine bug: prepare-index ${operationIndex} landed at sequence position ` +
+            `${landing.position} but no record exists there (remaining=${remaining}).`,
+        );
       }
 
-      middle.everDeleted = true;
-      middle.prepareState += 1;
-      sequence.updateItem(middle);
-      remaining -= toDelete;
-      continue;
-    }
+      const placeholder = candidate.placeholder;
+      if (placeholder !== undefined) {
+        const state = placeholder.state;
+        if (deferTextMaterialization) {
+          if (remaining === 1) {
+            const absoluteOffset = placeholder.start + landing.offsetInRecord;
+            state.deletePrepareVisibleUnitInSlice(
+              placeholder,
+              landing.offsetInRecord,
+            );
+            deleteTargets.appendPlaceholderRange(
+              targetGroup,
+              state,
+              absoluteOffset,
+              absoluteOffset + 1,
+            );
+            sequence.updateItem(candidate);
+            remaining = 0;
+            continue;
+          }
+          const result = state.deletePrepareVisibleInSlice(
+            placeholder,
+            landing.offsetInRecord,
+            remaining,
+          );
+          let deletedLength = 0;
+          for (const range of result.ranges) {
+            deleteTargets.appendPlaceholderRange(
+              targetGroup,
+              state,
+              range.start,
+              range.end,
+            );
+            deletedLength += range.end - range.start;
+          }
+          if (deletedLength === 0) {
+            throw new Error(
+              `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
+            );
+          }
+          sequence.updateItem(candidate);
+          remaining -= deletedLength;
+          continue;
+        }
 
-    deletedItemIds.push(candidate.id);
-    if (!candidate.everDeleted) {
-      const effectIndex = itemToEffectIndex(candidate);
-      outputDeleteIndexes.push(effectIndex);
-      setResultingText(deleteText(getResultingText(), effectIndex, 1));
+        const absoluteStart = placeholder.start + landing.offsetInRecord;
+        const ranges = state.collectPrepareVisibleRanges(
+          absoluteStart,
+          placeholder.end,
+          remaining,
+        );
+        let deletedLength = 0;
+        const affected = new Set<AugmentedCRDTItem>();
+        for (const range of ranges) {
+          deleteTargets.appendPlaceholderRange(
+            targetGroup,
+            state,
+            range.start,
+            range.end,
+          );
+
+          if (!deferTextMaterialization) {
+            const effectRanges = state.collectEffectVisibleRanges(
+              range.start,
+              range.end,
+            );
+            // Delete disjoint effect-visible spans from right to left. Removing
+            // an earlier span first would shift the effect indexes of every
+            // later span while the placeholder state still describes the
+            // pre-delete document.
+            for (let index = effectRanges.length - 1; index >= 0; index--) {
+              const effectRange = effectRanges[index];
+              if (effectRange === undefined) {
+                continue;
+              }
+              const effectIndex =
+                itemToEffectIndex(candidate) +
+                state.effectLengthInRange(placeholder.start, effectRange.start);
+              const effectLength = effectRange.end - effectRange.start;
+              if (collectTransformedOperations) {
+                for (let index = 0; index < effectLength; index++) {
+                  outputDeleteIndexes?.push(effectIndex);
+                }
+              }
+              deleteText(effectIndex, effectLength);
+            }
+          }
+
+          for (const slice of state.applyDeleteRange(range.start, range.end)) {
+            const owner = slice.owner;
+            if (owner !== null) {
+              affected.add(owner);
+            }
+          }
+          deletedLength += range.end - range.start;
+        }
+        if (deletedLength === 0) {
+          throw new Error(
+            `Engine bug: segmented placeholder ${candidate.id} had positive prepare weight but no visible range`,
+          );
+        }
+        sequence.updateItems(affected);
+        remaining -= deletedLength;
+        continue;
+      }
+
+      // Multi-character records (placeholders and typed-run leaves coalesced
+      // by Section 3.4) are split on demand so the deleted slice is its own
+      // record. Single-character records and per-code-unit paste fragments
+      // skip the split entirely and are marked in place.
+      const isMultiCharRecord =
+        (candidate.eventId === PLACEHOLDER_EVENT_ID ||
+          candidate.run !== null) &&
+        candidate.content.length > 1;
+      if (isMultiCharRecord) {
+        const availableInRecord =
+          candidate.content.length - landing.offsetInRecord;
+        const toDelete = Math.min(remaining, availableInRecord);
+        const middle = recordSplitter.splitRecordForDelete(
+          candidate,
+          landing.offsetInRecord,
+          toDelete,
+        );
+
+        deleteTargets.appendItem(targetGroup, middle.id);
+        // A concurrent delete that lands on an already-effect-deleted slice
+        // (e.g. after retreating an overlapping sibling) must NOT remove
+        // characters from the text again. Without this, two concurrent
+        // deletes of the same region replay to a shorter string than full
+        // replay produces.
+        if (!middle.everDeleted) {
+          if (!deferTextMaterialization) {
+            const effectIndex = itemToEffectIndex(middle);
+            if (collectTransformedOperations) {
+              for (let k = 0; k < toDelete; k++) {
+                outputDeleteIndexes?.push(effectIndex);
+              }
+            }
+            deleteText(effectIndex, toDelete);
+          }
+        }
+
+        middle.everDeleted = true;
+        middle.prepareState += 1;
+        sequence.updateItem(middle);
+        remaining -= toDelete;
+        continue;
+      }
+
+      deleteTargets.appendItem(targetGroup, candidate.id);
+      if (!candidate.everDeleted) {
+        if (!deferTextMaterialization) {
+          const effectIndex = itemToEffectIndex(candidate);
+          if (collectTransformedOperations) {
+            outputDeleteIndexes?.push(effectIndex);
+          }
+          deleteText(effectIndex, 1);
+        }
+      }
+      candidate.everDeleted = true;
+      candidate.prepareState += 1;
+      sequence.updateItem(candidate);
+      remaining -= 1;
     }
-    candidate.everDeleted = true;
-    candidate.prepareState += 1;
-    sequence.updateItem(candidate);
-    remaining -= 1;
+  } catch (error) {
+    deleteTargets.abortRecord(targetGroup);
+    throw error;
   }
 
-  deleteTargets.record(event.id, deletedItemIds);
+  if (packedOrderIndex === undefined) {
+    deleteTargets.commitRecord(eventId!, targetGroup);
+  } else {
+    deleteTargets.commitPackedRecord(packedOrderIndex, targetGroup);
+  }
 
-  return coalesceDeleteRuns(outputDeleteIndexes);
+  return outputDeleteIndexes === null
+    ? NO_TRANSFORMED_OPERATIONS
+    : coalesceDeleteRuns(outputDeleteIndexes);
 };

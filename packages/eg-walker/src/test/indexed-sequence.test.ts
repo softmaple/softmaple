@@ -35,6 +35,12 @@ describe("IndexedSequence", () => {
     expect(sequence.prepareIndexToPosition(1, false)).toBe(2);
     expect(sequence.nextPrepareVisiblePosition(1)).toBe(2);
     expect(sequence.effectIndexBeforePosition(3)).toBe(2);
+    expect(sequence.prepareIndexAfter(items[0]!)).toBe(1);
+    expect(sequence.prepareIndexAfter(items[1]!)).toBe(1);
+    expect(sequence.prepareIndexAfter(items[2]!)).toBe(2);
+    expect(
+      sequence.prepareIndexAfter({ id: "missing", prepare: 1, effect: 1 }),
+    ).toBe(-1);
 
     items[1]!.prepare = 1;
     items[2]!.effect = 1;
@@ -43,6 +49,72 @@ describe("IndexedSequence", () => {
 
     expect(sequence.prepareIndexToPosition(1, false)).toBe(1);
     expect(sequence.effectIndexBeforePosition(4)).toBe(4);
+    expect(sequence.prepareIndexAfter(items[1]!)).toBe(2);
+  });
+
+  it("distinguishes visible code-unit lookups from insertion boundaries across hidden gaps", () => {
+    const item = {
+      id: "a-hidden-b-visible-c",
+      visibleOffsets: [0, 2],
+      length: 3,
+    };
+    const sequence = new IndexedSequence(
+      (candidate: typeof item) => candidate.visibleOffsets.length,
+      (candidate: typeof item) => candidate.length,
+      [item],
+      undefined,
+      false,
+      (candidate, visibleOffset, kind) =>
+        kind === "prepare"
+          ? candidate.visibleOffsets[visibleOffset]!
+          : visibleOffset,
+    );
+
+    expect(sequence.prepareIndexToPositionAndOffset(0, false)).toEqual({
+      position: 0,
+      offsetInRecord: 0,
+    });
+    expect(sequence.prepareIndexToPositionAndOffset(1, false)).toEqual({
+      position: 0,
+      offsetInRecord: 2,
+    });
+    expect(sequence.prepareBoundaryToPositionAndOffset(0)).toEqual({
+      position: 0,
+      offsetInRecord: 0,
+    });
+    expect(sequence.prepareBoundaryToPositionAndOffset(1)).toEqual({
+      position: 0,
+      offsetInRecord: 1,
+    });
+    expect(sequence.prepareBoundaryToPositionAndOffset(2)).toEqual({
+      position: 0,
+      offsetInRecord: 3,
+    });
+    expect(() => sequence.prepareBoundaryToPositionAndOffset(3)).toThrow(
+      /out of bounds/,
+    );
+  });
+
+  it("indexes zero-width delete anchors independently of prepare visibility", () => {
+    const items = [
+      { id: "retreated", state: 0, effect: 1 },
+      { id: "deleted", state: 2, effect: 0 },
+      { id: "visible", state: 1, effect: 1 },
+    ];
+    const sequence = new IndexedSequence(
+      (item: (typeof items)[number]) => (item.state === 1 ? 1 : 0),
+      (item: (typeof items)[number]) => item.effect,
+      items,
+      (item) => (item.state === 0 ? 0 : 1),
+    );
+
+    expect(sequence.nextPrepareVisiblePosition(0)).toBe(2);
+    expect(sequence.nextPrepareAnchorPosition(0)).toBe(1);
+    expect(sequence.nextPrepareAnchorPosition(2)).toBe(2);
+
+    items[1]!.state = 0;
+    sequence.updateItem(items[1]!);
+    expect(sequence.nextPrepareAnchorPosition(0)).toBe(2);
   });
 
   it("distinguishes out-of-range lookups from structural errors via tryPrepareIndexToPositionAndOffset", () => {
@@ -141,6 +213,58 @@ describe("IndexedSequence", () => {
     expect(sequence.positionOf(items[2_000]!)).toBe(2_000);
   });
 
+  it("compares resident item order in constant time across leaf splits", () => {
+    const sequence = new IndexedSequence<SequenceModelItem>(
+      (item) => item.prepare,
+      (item) => item.effect,
+      [],
+      undefined,
+      true,
+    );
+    const oracle: SequenceModelItem[] = [];
+
+    for (let index = 0; index < 2_000; index++) {
+      const value = {
+        id: `ordered-${index}`,
+        prepare: 1,
+        effect: 1,
+      };
+      const position = (index * 17) % (oracle.length + 1);
+      sequence.insert(position, value);
+      oracle.splice(position, 0, value);
+    }
+
+    const operationsBefore = sequence.getStructuralOperationCount();
+    for (let index = 1; index < oracle.length; index++) {
+      expect(sequence.compareOrder(oracle[index - 1]!, oracle[index]!)).toBe(
+        -1,
+      );
+      expect(sequence.compareOrder(oracle[index]!, oracle[index - 1]!)).toBe(1);
+    }
+    expect(sequence.compareOrder(oracle[500]!, oracle[500]!)).toBe(0);
+    expect(sequence.getStructuralOperationCount()).toBe(operationsBefore);
+
+    const restored = [...oracle].reverse();
+    sequence.resetFromRecords(restored);
+    expect(sequence.compareOrder(restored[0]!, restored.at(-1)!)).toBe(-1);
+    expect(() =>
+      sequence.compareOrder(restored[0]!, {
+        id: "missing",
+        prepare: 1,
+        effect: 1,
+      }),
+    ).toThrow(/unavailable/);
+
+    const untracked = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      restored,
+    );
+    expect(() => untracked.compareOrder(restored[0]!, restored[1]!)).toThrow(
+      /tracking is disabled/,
+    );
+  });
+
   it("bulk-builds the same ranked indexes as incremental insertion", () => {
     const items = Array.from({ length: 5_000 }, (_, index) => ({
       id: `bulk-built-${index}`,
@@ -193,6 +317,46 @@ describe("IndexedSequence", () => {
     );
     expect(bulk.effectIndexBeforePosition(3_000)).toBe(
       incremental.effectIndexBeforePosition(3_000),
+    );
+  });
+
+  it("inserts a contiguous run with one ranked-tree lookup", () => {
+    const initial = Array.from({ length: 63 }, (_, index) => ({
+      id: `initial-${index}`,
+      prepare: index % 3 === 0 ? 0 : 1,
+      effect: index % 5 === 0 ? 0 : 1,
+    }));
+    const inserted = Array.from({ length: 3 }, (_, index) => ({
+      id: `inserted-${index}`,
+      prepare: 1,
+      effect: index % 2,
+    }));
+    const bulk = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      initial,
+    );
+    const scalar = new IndexedSequence(
+      (item: SequenceModelItem) => item.prepare,
+      (item: SequenceModelItem) => item.effect,
+      initial,
+    );
+
+    bulk.insertMany(31, inserted);
+    for (const [offset, item] of inserted.entries()) {
+      scalar.insert(31 + offset, item);
+    }
+
+    expect(bulk.toArray()).toEqual(scalar.toArray());
+    for (const item of inserted) {
+      expect(bulk.positionOf(item)).toBe(scalar.positionOf(item));
+    }
+    expect(bulk.prepareLength).toBe(scalar.prepareLength);
+    expect(bulk.effectIndexBeforePosition(50)).toBe(
+      scalar.effectIndexBeforePosition(50),
+    );
+    expect(bulk.getStructuralOperationCount()).toBeLessThan(
+      scalar.getStructuralOperationCount(),
     );
   });
 

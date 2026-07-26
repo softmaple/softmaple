@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
@@ -65,7 +65,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
 
     // Act
@@ -85,7 +87,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
     restored.insert(2, "L");
 
@@ -105,13 +109,54 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().incrementalApplies).toBe(2);
   });
 
+  it("should fall back when one parent does not cover a restored multi-frontier", () => {
+    // Arrange: empty inserts retain the seeded text as a plain-index engine
+    // record while leaving a two-event frontier in the snapshot.
+    const replica = new EgWalkerReplica("alice", "S");
+    replica.applyRemoteEvents([
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: "insert", index: 0, text: "" },
+        timestamp: 0,
+      },
+      {
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: { type: "insert", index: 0, text: "" },
+        timestamp: 1,
+      },
+    ]);
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      replica.createNativeSnapshot({ resumeCache: "rebuild" }),
+      "alice",
+    );
+
+    // Act: alice:0 alone does not causally cover the restored
+    // {alice:0, bob:0} engine base.
+    restored.applyRemoteEvent({
+      id: "alice:1",
+      parentVersion: new Set(["alice:0"]),
+      operation: { type: "insert", index: 1, text: "A" },
+      timestamp: 2,
+    });
+
+    // Assert
+    const stats = restored.getReplayStats();
+    expect(restored.getText()).toBe("SA");
+    expect(stats.replayCacheCoverageChecks).toBe(2);
+    expect(stats.fullReplays + stats.partialReplays).toBe(1);
+  });
+
   it("should partial replay bounded concurrent remote edits after snapshot restore", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
     restored.insert(2, "L");
 
@@ -129,9 +174,10 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getText()).toContain("L");
     expect(restored.getText()).toContain("R");
     expect(stats.fullReplays).toBe(0);
-    expect(stats.partialReplays).toBe(1);
-    expect(stats.criticalCheckpointHits).toBe(1);
-    expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
+    expect(stats.partialReplays).toBe(0);
+    expect(stats.criticalCheckpointHits).toBe(0);
+    expect(stats.lastReplaySource).toBe(REPLAY_SOURCE.INCREMENTAL);
+    expect(stats.replayCacheEvents).toBe(2);
   });
 
   it("should restore retained checkpoints for older bounded concurrent remote edits", () => {
@@ -141,7 +187,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(1, "B");
     replica.insert(2, "C");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
     restored.insert(3, "L");
 
@@ -266,7 +314,9 @@ describe("EgWalkerReplica native snapshots", () => {
     const codec = new NativeSnapshotCodec();
 
     // Act
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const sequence = sequenceFromRecords(decoded.sequenceRecords);
 
     // Assert
@@ -286,6 +336,121 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(sequence.effectIndexBeforePosition(sequence.length)).toBe(2);
   });
 
+  it("should not rebuild a missing resume cache by default", () => {
+    // Arrange
+    const source = new EgWalkerReplica("alice", "");
+    source.insert(0, "A");
+    source.insert(1, "B");
+    const cold = EgWalkerReplica.fromNativeSnapshot(
+      source.createNativeSnapshot({ resumeCache: "none" }),
+      "alice",
+    );
+    const generate = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const snapshot = cold.createNativeSnapshot();
+
+      // Assert
+      expect(snapshot.sequenceRecords).toEqual([]);
+      expect(snapshot.deleteTargets).toEqual([]);
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("should rebuild a missing resume cache only when explicitly requested", () => {
+    // Arrange
+    const source = new EgWalkerReplica("alice", "");
+    source.insert(0, "A");
+    source.insert(1, "B");
+    const cold = EgWalkerReplica.fromNativeSnapshot(
+      source.createNativeSnapshot({ resumeCache: "none" }),
+      "alice",
+    );
+    const generate = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      // Act
+      const snapshot = cold.createNativeSnapshot({ resumeCache: "rebuild" });
+
+      // Assert
+      expect(snapshot.sequenceRecords).toHaveLength(1);
+      expect(snapshot.sequenceRecords[0]?.content).toBe("AB");
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("should rebuild restored runtime records after replay-cache eviction", () => {
+    // Arrange
+    const source = new EgWalkerReplica("alice", "");
+    source.insert(0, "A");
+    const sourceSnapshot = source.createNativeSnapshot({
+      resumeCache: "rebuild",
+    });
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      sourceSnapshot,
+      "local",
+    );
+    let parent = sourceSnapshot.currentVersion[0]!;
+    for (let index = 0; index < 4_097; index++) {
+      const id = `remote:${index}`;
+      restored.applyRemoteEvent({
+        id,
+        parentVersion: new Set([parent]),
+        operation: { type: "insert", index: index + 1, text: "x" },
+        timestamp: index,
+      });
+      parent = id;
+    }
+    expect(restored.getReplayStats().replayCacheEvents).toBe(0);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const rebuilt = restored.createNativeSnapshot({ resumeCache: "rebuild" });
+    const resumed = EgWalkerReplica.fromNativeSnapshot(
+      codec.decode(codec.encode(rebuilt)),
+      "resumed",
+    );
+    resumed.insert(resumed.getText().length, "Z");
+
+    // Assert
+    expect(
+      rebuilt.sequenceRecords.reduce(
+        (length, record) => length + record.content.length,
+        0,
+      ),
+    ).toBe(rebuilt.text.length);
+    expect(resumed.getText()).toBe(`${rebuilt.text}Z`);
+  });
+
+  it("should omit the complete resume extension when requested", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    replica.delete(0, 1);
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const snapshot = replica.createNativeSnapshot({ resumeCache: "none" });
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      codec.decode(codec.encode(snapshot)),
+      "alice",
+    );
+    restored.insert(1, "C");
+
+    // Assert
+    expect(snapshot.sequenceRecords).toEqual([]);
+    expect(snapshot.deleteTargets).toEqual([]);
+    expect(snapshot.checkpoints).toEqual([]);
+    expect(restored.getText()).toBe("BC");
+    expect(restored.getReplayStats().fullReplays).toBe(0);
+  });
+
   it("should store runtime records outside the JSON header", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
@@ -295,7 +460,9 @@ describe("EgWalkerReplica native snapshots", () => {
     const codec = new NativeSnapshotCodec();
 
     // Act
-    const bytes = codec.encode(replica.createNativeSnapshot());
+    const bytes = codec.encode(
+      replica.createNativeSnapshot({ resumeCache: "rebuild" }),
+    );
     const body = bytes.subarray(NATIVE_SNAPSHOT_FORMAT_VERSION.length);
     const reader = new BinaryReader(body);
     const header = JSON.parse(
@@ -509,15 +676,21 @@ describe("EgWalkerReplica native snapshots", () => {
     const codec = new NativeSnapshotCodec();
 
     // Act
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    const readOnlySnapshot = restored.createNativeSnapshot();
     restored.insert(1, "C");
-    const editedSnapshot = restored.createNativeSnapshot();
+    const editedSnapshot = restored.createNativeSnapshot({
+      resumeCache: "rebuild",
+    });
 
     // Assert
     expect(decoded.deleteTargets).toEqual([
       { deleteEventId: "alice:2", targetIds: ["alice:0:0"] },
     ]);
+    expect(readOnlySnapshot.deleteTargets).toEqual(decoded.deleteTargets);
     expect(restored.getText()).toBe("BC");
     expect(restored.getReplayStats().fullReplays).toBe(0);
     expect(editedSnapshot.deleteTargets).toEqual(decoded.deleteTargets);
@@ -529,7 +702,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
 
     // Act
@@ -621,7 +796,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decoded = codec.decode(
+      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    );
     const originalGetTopologicalOrder =
       EventGraph.prototype.getTopologicalOrder;
     EventGraph.prototype.getTopologicalOrder = () => {
@@ -651,8 +828,9 @@ describe("EgWalkerReplica native snapshots", () => {
     replica.insert(3, "d");
     replica.insert(4, "e");
     replica.insert(5, "f");
-    const snapshot = replica.createNativeSnapshot();
+    const snapshot = replica.createNativeSnapshot({ resumeCache: "rebuild" });
     const graph = EventGraph.deserialize(snapshot.eventGraph);
+    const snapshotEventCount = graph.getEventCount();
     const remote = {
       id: "bob:0",
       parentVersion: new Set(["alice:2"]),
@@ -667,6 +845,7 @@ describe("EgWalkerReplica native snapshots", () => {
       sequenceRecords: snapshot.sequenceRecords,
       deleteTargets: snapshot.deleteTargets,
     });
+    expect(engine.getStats().eventsProcessed).toBe(snapshotEventCount);
 
     // Act
     const result = engine.applyEvent(remote, graph);
@@ -677,6 +856,7 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(engine.getStats().sequenceRecordCount).toBeGreaterThan(
       snapshot.sequenceRecords.length,
     );
+    expect(engine.getStats().eventsProcessed).toBe(snapshotEventCount + 1);
   });
 
   it("should reject snapshots whose frontier does not match the event graph", () => {

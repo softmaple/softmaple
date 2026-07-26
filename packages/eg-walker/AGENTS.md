@@ -31,6 +31,9 @@ This package implements the eg-walker CRDT algorithm for text collaboration, foc
 - Run tests: `pnpm --filter @softmaple/eg-walker test`
 - Run typecheck: `pnpm --filter @softmaple/eg-walker typecheck`
 - Run build: `pnpm --filter @softmaple/eg-walker build`
+- Use the `javascript-testing-expert` skill for `fast-check` or
+  `@fast-check/vitest` property tests. Do not invoke it solely for regular
+  example-based Vitest tests.
 
 ### Commit Guidelines
 

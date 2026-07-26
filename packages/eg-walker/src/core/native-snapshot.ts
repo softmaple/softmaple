@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import {
   BinaryReader,
   BinaryWriter,
@@ -27,6 +28,12 @@ import type { CriticalCheckpointSnapshot } from "./internals/critical-checkpoint
 
 export const NATIVE_SNAPSHOT_FORMAT_VERSION = "EGWS1" as const;
 
+/**
+ * Optional fast-resume extension. Unlike PortableSnapshot/EGWP1 this format
+ * can persist transient sequence records, delete targets, and checkpoints, so
+ * it is not the paper-aligned portable persistence boundary. Runtime-record
+ * arrays are empty when no resume cache was available or requested.
+ */
 export interface NativeSnapshot {
   readonly formatVersion: typeof NATIVE_SNAPSHOT_FORMAT_VERSION;
   readonly text: string;
@@ -82,28 +89,39 @@ const decodedRuntimeStateCache = new WeakMap<
 
 export class NativeSnapshotCodec {
   encode(snapshot: NativeSnapshot): Uint8Array {
-    const validated = validateNativeSnapshot(snapshot);
-    const graph = EventGraph.deserialize(validated.eventGraph);
-    const header = headerFromSnapshot(validated);
-    const body = new BinaryWriter();
-    body.writeBytes(
-      encodeCompressedSectionIfSmaller(encoder.encode(JSON.stringify(header))),
-    );
-    body.writeBytes(
-      encodeCompressedSectionIfSmaller(columnarCodec.encodeBinary(graph)),
-    );
-    body.writeBytes(
-      encodeRuntimeState({
-        sequenceRecords: validated.sequenceRecords,
-        deleteTargets: validated.deleteTargets,
-      }),
-    );
+    const { snapshot: validated, graph } =
+      validateNativeSnapshotWithGraph(snapshot);
+    try {
+      const header = headerFromSnapshot(validated);
+      const events =
+        graph.getLinearReplayOrder() ?? graph.getTopologicalOrder();
+      const graphBytes = encodeTopologicallyOrderedEventsBinary(
+        events,
+        graph.getMetadata(),
+        Array.from(graph.getFrontier()),
+      ).binary;
+      const body = new BinaryWriter();
+      body.writeBytes(
+        encodeCompressedSectionIfSmaller(
+          encoder.encode(JSON.stringify(header)),
+        ),
+      );
+      body.writeBytes(encodeCompressedSectionIfSmaller(graphBytes));
+      body.writeBytes(
+        encodeRuntimeState({
+          sequenceRecords: validated.sequenceRecords,
+          deleteTargets: validated.deleteTargets,
+        }),
+      );
 
-    const payload = body.toUint8Array();
-    const out = new Uint8Array(MAGIC_BYTES.byteLength + payload.byteLength);
-    out.set(MAGIC_BYTES, 0);
-    out.set(payload, MAGIC_BYTES.byteLength);
-    return out;
+      const payload = body.toUint8Array();
+      const out = new Uint8Array(MAGIC_BYTES.byteLength + payload.byteLength);
+      out.set(MAGIC_BYTES, 0);
+      out.set(payload, MAGIC_BYTES.byteLength);
+      return out;
+    } finally {
+      graph.releaseTraversalCaches();
+    }
   }
 
   decode(bytes: Uint8Array): NativeSnapshot {
@@ -874,7 +892,12 @@ const validateNativeSnapshotHeaderRecord = (
   };
 };
 
-export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
+const validateNativeSnapshotWithGraph = (
+  value: unknown,
+): {
+  readonly snapshot: NativeSnapshot;
+  readonly graph: EventGraph;
+} => {
   const snapshot = expectRecord(value, "native snapshot");
   const formatVersion = snapshot.formatVersion;
   if (formatVersion !== NATIVE_SNAPSHOT_FORMAT_VERSION) {
@@ -924,22 +947,29 @@ export const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
       `Invalid native snapshot: eventCount ${eventCount} does not match event graph length ${eventGraph.events.length}`,
     );
   }
-  validateGraphMatchesHeader(EventGraph.deserialize(eventGraph), header);
+  const graph = EventGraph.deserialize(eventGraph);
+  validateGraphMatchesHeader(graph, header);
 
   return {
-    formatVersion,
-    text,
-    initialText,
-    currentVersion,
-    eventCount,
-    nextSequenceNumber,
-    metadata,
-    sequenceRecords,
-    deleteTargets,
-    checkpoints,
-    eventGraph,
+    snapshot: {
+      formatVersion,
+      text,
+      initialText,
+      currentVersion,
+      eventCount,
+      nextSequenceNumber,
+      metadata,
+      sequenceRecords,
+      deleteTargets,
+      checkpoints,
+      eventGraph,
+    },
+    graph,
   };
 };
+
+export const validateNativeSnapshot = (value: unknown): NativeSnapshot =>
+  validateNativeSnapshotWithGraph(value).snapshot;
 
 const expectSequenceRecords = (
   value: unknown,

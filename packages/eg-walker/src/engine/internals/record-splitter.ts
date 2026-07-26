@@ -3,8 +3,9 @@ import type { EventId } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
 import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
-import { EventItemIndex } from "./event-item-index";
+import { EventItemIndex, type EventItems } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
+import type { RecordContent } from "./record-content";
 
 interface RecordSplitterDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
@@ -13,6 +14,10 @@ interface RecordSplitterDeps {
   readonly originLeftIndex: OriginLeftIndex;
   readonly deleteTargets: DeleteTargetIndex;
   readonly nextPlaceholderId: () => EventId;
+  readonly onRecordSplit?: (
+    left: AugmentedCRDTItem,
+    right: AugmentedCRDTItem,
+  ) => void;
 }
 
 /**
@@ -40,25 +45,43 @@ export class RecordSplitter {
    * - **Placeholder:** right gets a fresh placeholder id; both halves stay
    *   anonymous, owned by the engine-internal `PLACEHOLDER_EVENT_ID`.
    * - **Typed-run record:** right inherits the run's replicaId with
-   *   `startSequence` advanced by `offsetInRecord`, and the `eventItems`
-   *   entry for every event whose sequence moved to the right half is
-   *   repointed from `left.id` to `right.id` so retreat / advance still
-   *   land on the right slice.
+   *   `startSequence` advanced by `offsetInRecord` and is registered as one
+   *   numeric range, so retreat / advance resolve either half logarithmically.
    */
   splitRecordAt(position: number, offsetInRecord: number): number {
-    const { sequence, itemsById, originLeftIndex, deleteTargets } = this.deps;
+    const { sequence } = this.deps;
     const left = sequence.at(position);
     if (!left || offsetInRecord <= 0 || offsetInRecord >= left.content.length) {
       return position + (offsetInRecord > 0 ? 1 : 0);
     }
 
-    const leftOriginalLength = left.content.length;
+    this.splitRecord(left, offsetInRecord);
+    return position + 1;
+  }
+
+  private splitRecord(
+    left: AugmentedCRDTItem,
+    offsetInRecord: number,
+  ): AugmentedCRDTItem {
+    const { sequence, itemsById, originLeftIndex, deleteTargets } = this.deps;
+    if (offsetInRecord <= 0 || offsetInRecord >= left.content.length) {
+      throw new Error(
+        `Record split offset ${offsetInRecord} is invalid for ${left.id}`,
+      );
+    }
+
+    const leftOriginalContent = left.content;
     const rightContent = left.content.slice(offsetInRecord);
     left.content = left.content.slice(0, offsetInRecord);
-    sequence.updateItem(left);
 
     const right = this.buildSplitRightHalf(left, offsetInRecord, rightContent);
-    sequence.insert(position + 1, right);
+    if (!sequence.updateAndInsertAfter(left, right)) {
+      // The sequence still carries the old cached weights because the fused
+      // mutation did not run. Restore the object too before surfacing the
+      // violated internal invariant.
+      left.content = leftOriginalContent;
+      throw new Error(`Record ${left.id} missing from sequence index`);
+    }
     itemsById.set(right.id, right);
 
     // Existing items with `originLeft = left.id` were anchored to the
@@ -67,19 +90,21 @@ export class RecordSplitter {
     // references over. `originRight = left.id` references still point
     // at the left edge of the original record, which is unchanged.
     originLeftIndex.rewriteReferences(left.id, right.id, itemsById);
+    // A typed-run right half is the causal continuation of the left half.
+    // Track it only after rewriting old right-boundary references; tracking it
+    // first would make the rewrite move its own originLeft to itself.
+    originLeftIndex.track(right.id, right.originLeft);
     // Extend any prior delete-target memberships to cover {@link right}
     // as well. The pre-split record was already part of `deleteTargets`
     // for every event in this set; both halves now share the same
     // `everDeleted` and `prepareState` and must move together under
     // future retreat / advance calls for those events.
     deleteTargets.extendMembership(left.id, right.id);
-    this.rewriteEventItemsForRunSplit(
-      left,
-      right,
-      offsetInRecord,
-      leftOriginalLength,
-    );
-    return position + 1;
+    if (left.run !== null) {
+      this.deps.eventItems.registerRunItem(right);
+    }
+    this.deps.onRecordSplit?.(left, right);
+    return right;
   }
 
   /**
@@ -92,20 +117,16 @@ export class RecordSplitter {
    * shape for each side.
    */
   splitRecordForDelete(
-    position: number,
+    candidate: AugmentedCRDTItem,
     offsetInRecord: number,
     length: number,
   ): AugmentedCRDTItem {
+    let middle = candidate;
     if (offsetInRecord > 0) {
-      const afterPrefix = this.splitRecordAt(position, offsetInRecord);
-      position = afterPrefix;
-    }
-    const middle = this.deps.sequence.at(position);
-    if (!middle) {
-      throw new Error(`Record split missing record at position ${position}`);
+      middle = this.splitRecord(candidate, offsetInRecord);
     }
     if (length < middle.content.length) {
-      this.splitRecordAt(position, length);
+      this.splitRecord(middle, length);
     }
     return middle;
   }
@@ -116,26 +137,29 @@ export class RecordSplitter {
    * still holds more than this one event's code unit is carved into prefix /
    * slice / suffix records via {@link splitRecordAt}, which also remaps the
    * other events' `eventItems` entries to point at the new neighbours.
-   * After the call, `eventItems.get(eventId)` references exactly the slice
-   * to toggle.
+   * Returns the exact scalar/array references that the caller should toggle;
+   * this avoids a second event-index lookup after split bookkeeping.
    */
-  isolateRunSliceForEvent(eventId: EventId): void {
-    const { sequence, itemsById, eventItems } = this.deps;
+  isolateRunSliceForEvent(eventId: EventId): EventItems | undefined {
+    const { itemsById, eventItems } = this.deps;
     const items = eventItems.get(eventId);
-    if (!items || items.length === 0) {
+    if (
+      items === undefined ||
+      (typeof items !== "string" && items.length === 0)
+    ) {
       // Event hasn't been integrated yet (e.g. a delete-only or pre-effect
       // retreat). Nothing to toggle.
-      return;
+      return items;
     }
-    if (items.length > 1) {
+    if (typeof items !== "string" && items.length > 1) {
       // Multi-character INSERT events stay one record per code unit, each with
       // its own id and `run === null`. The retreat / advance loop already
       // toggles every slice in order; no isolation is needed.
-      return;
+      return items;
     }
-    const itemId = items[0];
+    const itemId = typeof items === "string" ? items : items[0];
     if (itemId === undefined) {
-      return;
+      return items;
     }
     const record = itemsById.get(itemId);
     if (!record) {
@@ -146,7 +170,13 @@ export class RecordSplitter {
     if (record.run === null) {
       // Placeholder or per-code-unit paste record — nothing to coalesce, so
       // the slice is already this event's whole contribution.
-      return;
+      return items;
+    }
+    if (record.content.length === 1) {
+      // Direct event mappings are rewritten with every typed-run split, so a
+      // one-code-unit record is already the exact slice. Avoid reparsing the
+      // canonical id on repeat retreat/advance transitions.
+      return items;
     }
     const parsed = parseEventId(eventId);
     if (parsed === null || parsed.replicaId !== record.run.replicaId) {
@@ -154,45 +184,153 @@ export class RecordSplitter {
       // The run-extension guard in `applyInsert` only seeds runs from
       // canonical `replicaId:sequence` ids, so this should be unreachable;
       // bail out conservatively rather than splitting at a wrong offset.
-      return;
+      return items;
     }
     const offsetInRecord = parsed.sequence - record.run.startSequence;
     if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
       // Same defensive bail-out: the eventItems entry should never point at
       // a record whose run no longer covers this event's sequence.
-      return;
+      return items;
     }
     if (offsetInRecord === 0 && record.content.length === 1) {
       // Slice is already its own record.
-      return;
+      return items;
     }
 
-    let position = sequence.positionOf(record);
-    if (position === -1) {
-      throw new Error(`Record ${record.id} missing from sequence index`);
-    }
+    let middle = record;
     if (offsetInRecord > 0) {
-      position = this.splitRecordAt(position, offsetInRecord);
+      middle = this.splitRecord(record, offsetInRecord);
     }
-    const middle = sequence.at(position);
-    if (middle && middle.content.length > 1) {
-      this.splitRecordAt(position, 1);
+    if (middle.content.length > 1) {
+      this.splitRecord(middle, 1);
     }
+    return middle.id;
+  }
+
+  /**
+   * Isolate as much as possible of a contiguous canonical scalar-event span
+   * inside its current typed-run record. At most the two outer boundaries are
+   * split; callers repeat at the next sequence when an existing record
+   * boundary falls inside the requested interval.
+   *
+   * Resolving through {@link EventItemIndex.get} preserves direct-event map
+   * precedence. `null` therefore means the caller must retain the exact
+   * scalar compatibility path for this event.
+   */
+  isolateRunSpanForEvents(
+    firstEventId: EventId,
+    maximumEventCount: number,
+  ): AugmentedCRDTItem | null {
+    const parsed = parseEventId(firstEventId);
+    if (
+      parsed === null ||
+      !Number.isSafeInteger(maximumEventCount) ||
+      maximumEventCount <= 0
+    ) {
+      return null;
+    }
+
+    const { itemsById, eventItems } = this.deps;
+    const items = eventItems.get(firstEventId);
+    if (typeof items !== "string") {
+      return null;
+    }
+    const record = itemsById.get(items);
+    if (
+      record === undefined ||
+      record.run === null ||
+      typeof record.content !== "string" ||
+      record.run.replicaId !== parsed.replicaId
+    ) {
+      return null;
+    }
+
+    return this.isolateCanonicalRunSpan(
+      record,
+      parsed.sequence,
+      maximumEventCount,
+    );
+  }
+
+  /** Packed equivalent that consumes already-decoded canonical ID columns. */
+  isolateRunSpanForCanonicalEvents(
+    replicaId: string,
+    firstSequence: number,
+    maximumEventCount: number,
+  ): AugmentedCRDTItem | null {
+    if (
+      !Number.isSafeInteger(firstSequence) ||
+      firstSequence < 0 ||
+      !Number.isSafeInteger(maximumEventCount) ||
+      maximumEventCount <= 0
+    ) {
+      return null;
+    }
+    const record = this.deps.eventItems.getRunItem(replicaId, firstSequence);
+    if (
+      record === undefined ||
+      record.run === null ||
+      typeof record.content !== "string" ||
+      record.run.replicaId !== replicaId
+    ) {
+      return null;
+    }
+    return this.isolateCanonicalRunSpan(
+      record,
+      firstSequence,
+      maximumEventCount,
+    );
+  }
+
+  private isolateCanonicalRunSpan(
+    record: AugmentedCRDTItem,
+    firstSequence: number,
+    maximumEventCount: number,
+  ): AugmentedCRDTItem | null {
+    if (record.run === null || typeof record.content !== "string") {
+      return null;
+    }
+    const offsetInRecord = firstSequence - record.run.startSequence;
+    if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
+      return null;
+    }
+    const availableEvents = record.content.length - offsetInRecord;
+    const isolatedEventCount = Math.min(maximumEventCount, availableEvents);
+    if (isolatedEventCount <= 0) {
+      return null;
+    }
+
+    let middle = record;
+    if (offsetInRecord > 0) {
+      middle = this.splitRecord(record, offsetInRecord);
+    }
+    if (isolatedEventCount < middle.content.length) {
+      this.splitRecord(middle, isolatedEventCount);
+    }
+    return middle;
   }
 
   private buildSplitRightHalf(
     left: AugmentedCRDTItem,
     offsetInRecord: number,
-    rightContent: string,
+    rightContent: RecordContent,
   ): AugmentedCRDTItem {
     if (left.run !== null) {
+      if (typeof rightContent !== "string") {
+        throw new Error("Typed-run split content must be materialized text");
+      }
       const startSequence = left.run.startSequence + offsetInRecord;
       return {
         id: `${left.run.replicaId}:${startSequence}:0`,
         eventId: `${left.run.replicaId}:${startSequence}`,
         content: rightContent,
-        originLeft: null,
-        originRight: null,
+        // A typed run compresses a chain of per-event CRDT records. Splitting
+        // must restore the chain boundary instead of erasing it, otherwise the
+        // two halves can be integrated in different orders for the same DAG.
+        // At record granularity `left.id` is the stable name of that boundary;
+        // every event that lands there recomputes the same anchor after split.
+        originLeft: left.id,
+        originRight: left.originRight,
         everDeleted: left.everDeleted,
         prepareState: left.prepareState,
         run: {
@@ -201,6 +339,28 @@ export class RecordSplitter {
         },
       };
     }
+
+    const leftPlaceholder = left.placeholder;
+    if (leftPlaceholder !== undefined) {
+      const rightPlaceholder = leftPlaceholder.state.splitPhysicalSlice(
+        leftPlaceholder,
+        offsetInRecord,
+      );
+      const right: AugmentedCRDTItem = {
+        id: leftPlaceholder.state.segmentIdAtBoundary(rightPlaceholder.start),
+        eventId: PLACEHOLDER_EVENT_ID,
+        content: rightContent,
+        originLeft: null,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: null,
+        placeholder: rightPlaceholder,
+      };
+      rightPlaceholder.attachOwner(right);
+      return right;
+    }
+
     return {
       id: this.deps.nextPlaceholderId(),
       eventId: PLACEHOLDER_EVENT_ID,
@@ -211,24 +371,5 @@ export class RecordSplitter {
       prepareState: left.prepareState,
       run: null,
     };
-  }
-
-  private rewriteEventItemsForRunSplit(
-    left: AugmentedCRDTItem,
-    right: AugmentedCRDTItem,
-    offsetInRecord: number,
-    leftOriginalLength: number,
-  ): void {
-    if (left.run === null) {
-      return;
-    }
-    const { eventItems } = this.deps;
-    eventItems.rewriteDirectReferencesForRunSplit(
-      left,
-      right,
-      offsetInRecord,
-      leftOriginalLength,
-    );
-    eventItems.registerRunItem(right);
   }
 }

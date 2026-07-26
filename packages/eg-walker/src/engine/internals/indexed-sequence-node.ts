@@ -1,4 +1,6 @@
-export const LEAF_CAPACITY = 64;
+import type { OrderMaintenanceItem } from "./order-maintenance-list";
+
+export const LEAF_CAPACITY = 32;
 export const BRANCH_FACTOR = 32;
 
 export type IndexedNode<T extends object> = LeafNode<T> | InternalNode<T>;
@@ -13,13 +15,20 @@ interface NodeBase<T extends object> {
   size: number;
   prepareSum: number;
   effectSum: number;
+  anchorSum: number;
+  pendingWeightGeneration: number;
+  pendingPrepareDelta: number;
+  pendingEffectDelta: number;
+  pendingAnchorDelta: number;
 }
 
-export interface LeafNode<T extends object> extends NodeBase<T> {
+export interface LeafNode<T extends object>
+  extends NodeBase<T>, OrderMaintenanceItem {
   readonly kind: "leaf";
   readonly items: T[];
   readonly prepareWeights: number[];
   readonly effectWeights: number[];
+  readonly anchorWeights: number[];
 }
 
 export interface InternalNode<T extends object> extends NodeBase<T> {
@@ -43,9 +52,19 @@ export const createLeaf = <T extends object>(): LeafNode<T> => ({
   items: [],
   prepareWeights: [],
   effectWeights: [],
+  anchorWeights: [],
+  orderLabel: 0,
+  orderPrevious: null,
+  orderNext: null,
+  orderGeneration: 0,
   size: 0,
   prepareSum: 0,
   effectSum: 0,
+  anchorSum: 0,
+  pendingWeightGeneration: 0,
+  pendingPrepareDelta: 0,
+  pendingEffectDelta: 0,
+  pendingAnchorDelta: 0,
 });
 
 export const createInternal = <T extends object>(
@@ -54,10 +73,12 @@ export const createInternal = <T extends object>(
   let size = 0;
   let prepareSum = 0;
   let effectSum = 0;
+  let anchorSum = 0;
   for (const child of children) {
     size += child.size;
     prepareSum += child.prepareSum;
     effectSum += child.effectSum;
+    anchorSum += child.anchorSum;
   }
   const node: InternalNode<T> = {
     kind: "internal",
@@ -67,6 +88,11 @@ export const createInternal = <T extends object>(
     size,
     prepareSum,
     effectSum,
+    anchorSum,
+    pendingWeightGeneration: 0,
+    pendingPrepareDelta: 0,
+    pendingEffectDelta: 0,
+    pendingAnchorDelta: 0,
   };
   for (let index = 0; index < children.length; index++) {
     const child = children[index];

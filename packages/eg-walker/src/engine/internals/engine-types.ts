@@ -1,5 +1,8 @@
 import type { EventGraph } from "../../graph/event-graph";
+import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
+import type { RecordContent } from "./record-content";
+import type { PlaceholderPhysicalSlice } from "./segmented-placeholder";
 
 export const PLACEHOLDER_EVENT_ID = "__placeholder__";
 export const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
@@ -38,19 +41,22 @@ export interface TypedRun {
  * `run === null` and a real `eventId`); we do not coalesce them, since the
  * per-code-unit IDs already serve as anchors for concurrent siblings.
  *
- * `content` is mutable to support in-place run extension and splits
- * without invalidating the `WeakMap` location index in
- * `IndexedSequence`.
+ * `content` is mutable to support in-place run extension and splits without
+ * invalidating the `WeakMap` location index in `IndexedSequence`. Ordinary
+ * and typed-run records use strings; checkpoint placeholders use immutable
+ * rope views that split without materializing the retained document.
  */
 export interface AugmentedCRDTItem {
   readonly id: EventId;
   readonly eventId: EventId;
-  content: string;
+  content: RecordContent;
   originLeft: EventId | null;
   readonly originRight: EventId | null;
   everDeleted: boolean;
   prepareState: number;
   run: TypedRun | null;
+  /** Deferred checkpoint state; absent from ordinary and serialized records. */
+  placeholder?: PlaceholderPhysicalSlice<AugmentedCRDTItem>;
 }
 
 export interface EngineStats {
@@ -100,11 +106,27 @@ export interface EngineStats {
    * swap if it wants a lifetime-of-replica figure.
    */
   readonly peakSequenceRecordCount: number;
+  readonly integrationProbeCount: number;
+  readonly fugueComparisons: number;
+  readonly fugueMarkerOperations: number;
+  readonly fugueRotations: number;
+  readonly fugueRebuilds: number;
+  readonly sequenceTreeOperations: number;
 }
 
 export interface GenerateOptions {
   readonly initialVersion?: ReadonlySet<EventId>;
+  readonly initialTextBuffer?: PersistentUtf16Rope;
   readonly eventGraph?: EventGraph;
+  /**
+   * Whether batch replay should retain every transformed operation.
+   *
+   * Defaults to `true` for compatibility. Full-replay callers that only need
+   * the resulting document can disable collection to avoid retaining an
+   * operation array proportional to the number of replayed events. The
+   * generated result returns an empty array when collection is disabled.
+   */
+  readonly collectTransformedOperations?: boolean;
   /**
    * Topological rank source for prepare/effect retreat/advance ordering.
    *
@@ -114,15 +136,19 @@ export interface GenerateOptions {
    * checkpoint replay.
    */
   readonly eventOrder?: ReadonlyArray<GraphEvent>;
+  /** Test-only slow oracle; production always uses FugueOrderIndex. */
+  readonly integrationMode?: "indexed" | "linear-oracle";
 }
 
 export interface GeneratedDocument {
   readonly text: string;
+  readonly textBuffer: PersistentUtf16Rope;
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
   readonly stats: EngineStats;
 }
 
 export interface IncrementalApplyResult {
   readonly text: string;
+  readonly textBuffer: PersistentUtf16Rope;
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
 }

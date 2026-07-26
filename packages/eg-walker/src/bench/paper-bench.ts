@@ -1,0 +1,1913 @@
+import { performance } from "node:perf_hooks";
+import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import { EgWalkerReplica } from "../core/replica";
+import { NativeSnapshotCodec } from "../core/native-snapshot";
+import { PortableSnapshotCodec } from "../core/portable-snapshot";
+import { EventGraph } from "../graph/event-graph";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import type { GraphEvent } from "../types";
+import {
+  loadPaperTrace,
+  parseDatasetList,
+  PAPER_DATASETS,
+  type PaperDataset,
+  type PaperTraceGranularity,
+} from "./paper-traces";
+import {
+  DEFAULT_PAPER_BENCHMARK_APPLY_API,
+  DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS,
+  PAPER_BENCHMARK_GRANULARITY,
+  parsePaperBenchmarkApplyApi,
+  parsePaperBenchmarkApplyBatchEvents,
+  parsePaperBenchmarkGranularity,
+  type PaperBenchmarkApplyApi,
+  type PaperBenchmarkApplyBatchEvents,
+} from "./paper-bench-options";
+import { applyRemoteEventsInBatches } from "./paper-bench-apply";
+import { loadPaperTraceCausalBatches } from "./paper-trace-causal-batches";
+import {
+  buildNativePaperPayload,
+  measureNativePaperPayload,
+  type NativePaperPayload,
+} from "./paper-bench-native";
+import { paperRootFromPackageRoot } from "./paper-bench-paths";
+import { measurePersistenceMetrics } from "./persistence-metrics";
+
+const sourcePackageRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const DEFAULT_PAPER_ROOT = paperRootFromPackageRoot(sourcePackageRoot);
+
+type BenchCase = Pick<
+  CliOptions,
+  "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+> & {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly gateBudget?: Phase6GateBudget;
+};
+
+interface Phase6GateBudget {
+  readonly maxPortableSnapshotBytes: number;
+  readonly maxPortableSnapshotEncodeMs: number;
+  readonly maxPortableSnapshotDecodeMs: number;
+  readonly maxPortableSnapshotRestoreMs: number;
+  readonly maxPortableSnapshotMaterializeMs: number;
+  readonly maxPortableSnapshotDecodeHeapBytes?: number;
+  readonly maxPortableSnapshotRestoreHeapBytes?: number;
+  readonly maxPortableSnapshotMaterializeHeapBytes?: number;
+  readonly maxPortableSnapshotHeapBytes?: number;
+}
+
+interface CliOptions {
+  readonly datasets: PaperDataset[];
+  readonly runs: number;
+  readonly paperRoot: string;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyApi: PaperBenchmarkApplyApi;
+  readonly memory: boolean;
+  readonly memoryWorker: boolean;
+  readonly memoryRun?: number;
+  readonly applyOnly: boolean;
+  readonly nativeOnly: boolean;
+  readonly nativeOnlyWorker: boolean;
+  readonly planPhase0: boolean;
+  readonly phase6Gates: boolean;
+  readonly help: boolean;
+}
+
+interface ApplyBenchResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyApi: PaperBenchmarkApplyApi;
+  readonly applyCalls: number;
+  readonly txns: number;
+  readonly patches: number;
+  readonly events: number;
+  readonly finalTextLength: number;
+  readonly finalTextValidated: boolean;
+  readonly loadConvertMs: number;
+  readonly applyMs: number;
+  readonly totalMs: number;
+  readonly fullReplays: number;
+  readonly partialReplays: number;
+  readonly incrementalApplies: number;
+  readonly retreats: number;
+  readonly advances: number;
+  readonly sequenceRecords: number;
+  readonly peakSequenceRecords: number;
+  readonly sequenceTreeOperations: number;
+}
+
+interface NativeBenchResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly txns: number;
+  readonly patches: number;
+  readonly events: number;
+  readonly frontierSize: number;
+  readonly finalTextLength: number;
+  readonly finalTextValidated: boolean;
+  readonly loadConvertMs: number;
+  readonly graphEncodeMs: number;
+  readonly binaryBytes: number;
+  readonly nativeDecodeMs: number;
+  readonly nativeLoadMs: number;
+  readonly nativeMaterializeMs: number;
+  readonly heapBeforeDecodeBytes: number;
+  readonly arrayBuffersBeforeDecodeBytes: number;
+  readonly rssBeforeDecodeBytes: number;
+  readonly heapAfterDecodeBytes: number;
+  readonly arrayBuffersAfterDecodeBytes: number;
+  readonly rssAfterDecodeBytes: number;
+  readonly heapAfterLoadBytes: number;
+  readonly arrayBuffersAfterLoadBytes: number;
+  readonly rssAfterLoadBytes: number;
+  readonly nativeDecodeHeapBytes: number;
+  readonly nativeLoadHeapBytes: number;
+  readonly nativeTotalHeapBytes: number;
+  readonly nativeDecodeArrayBufferBytes: number;
+  readonly nativeLoadArrayBufferBytes: number;
+  readonly nativeTotalArrayBufferBytes: number;
+  readonly fullReplays: number;
+  readonly partialReplays: number;
+  readonly incrementalApplies: number;
+  readonly retreats: number;
+  readonly advances: number;
+  readonly checkpointCount: number;
+  readonly checkpointHits: number;
+  readonly checkpointMisses: number;
+  readonly sequenceRecords: number;
+  readonly peakSequenceRecords: number;
+  readonly replayCacheEvents: number;
+  readonly replayCacheBytes: number;
+  readonly textBufferNodes: number;
+  readonly integrationProbes: number;
+  readonly fugueComparisons: number;
+  readonly fugueMarkerOperations: number;
+  readonly fugueRotations: number;
+  readonly fugueRebuilds: number;
+  readonly sequenceTreeOperations: number;
+}
+
+interface PreparedNativeBench {
+  readonly payload: NativePaperPayload;
+  readonly txns: number;
+  readonly patches: number;
+  readonly loadConvertMs: number;
+  readonly graphEncodeMs: number;
+}
+
+interface PreparedApplyBench {
+  readonly txnCount: number;
+  readonly patchCount: number;
+  readonly eventCount: number;
+  readonly limited: boolean;
+  readonly expectedText: string;
+  apply(replica: EgWalkerReplica): number;
+}
+
+interface BenchResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyCalls: number;
+  readonly txns: number;
+  readonly patches: number;
+  readonly events: number;
+  readonly finalTextLength: number;
+  readonly loadConvertMs: number;
+  readonly applyMs: number;
+  readonly totalMs: number;
+  readonly jsonBytes: number;
+  readonly binaryBytes: number;
+  readonly nativeDecodeMs: number;
+  readonly nativeLoadMs: number;
+  readonly portableSnapshotEncodeMs: number;
+  readonly portableSnapshotDecodeMs: number;
+  readonly portableSnapshotRestoreMs: number;
+  readonly portableSnapshotMaterializeMs: number;
+  readonly portableSnapshotBytes: number;
+  readonly nativeSnapshotEncodeMs: number;
+  readonly nativeSnapshotDecodeMs: number;
+  readonly nativeSnapshotRestoreMs: number;
+  readonly nativeSnapshotBytes: number;
+  readonly nativeSnapshotFullReplays: number;
+  readonly nativeSnapshotPartialReplays: number;
+  readonly nativeSnapshotIncrementalApplies: number;
+  readonly fullReplays: number;
+  readonly partialReplays: number;
+  readonly incrementalApplies: number;
+  readonly retreats: number;
+  readonly advances: number;
+  readonly checkpointHits: number;
+  readonly checkpointMisses: number;
+  readonly sequenceRecords: number;
+  readonly peakSequenceRecords: number;
+}
+
+interface MemoryResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly maxTxns?: number;
+  readonly maxEvents?: number;
+  readonly granularity: PaperTraceGranularity;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyCalls: number;
+  readonly heapBeforeBytes: number;
+  readonly heapAfterDecodeBytes: number;
+  readonly heapAfterLoadBytes: number;
+  readonly heapAfterPortableSnapshotDecodeBytes: number;
+  readonly heapAfterPortableSnapshotRestoreBytes: number;
+  readonly heapAfterPortableSnapshotMaterializeBytes: number;
+  readonly heapAfterNativeSnapshotDecodeBytes: number;
+  readonly heapAfterNativeSnapshotRestoreBytes: number;
+  readonly nativeDecodeHeapBytes: number;
+  readonly nativeLoadHeapBytes: number;
+  readonly portableSnapshotDecodeHeapBytes: number;
+  readonly portableSnapshotRestoreHeapBytes: number;
+  readonly portableSnapshotMaterializeHeapBytes: number;
+  readonly portableSnapshotHeapBytes: number;
+  readonly nativeSnapshotDecodeHeapBytes: number;
+  readonly nativeSnapshotRestoreHeapBytes: number;
+  readonly nativeSnapshotHeapBytes: number;
+  readonly nativeDecodeMs: number;
+  readonly nativeLoadMs: number;
+  readonly portableSnapshotDecodeMs: number;
+  readonly portableSnapshotRestoreMs: number;
+  readonly portableSnapshotMaterializeMs: number;
+  readonly nativeSnapshotDecodeMs: number;
+  readonly nativeSnapshotRestoreMs: number;
+}
+
+const readOptionValue = (
+  args: ReadonlyArray<string>,
+  index: number,
+  name: string,
+): string => {
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`Missing value for ${name}`);
+  }
+  return value;
+};
+
+const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
+  let datasets: PaperDataset[] = ["S1"];
+  let runs = 1;
+  let paperRoot = DEFAULT_PAPER_ROOT;
+  let maxTxns: number | undefined;
+  let maxEvents: number | undefined;
+  let granularity: PaperTraceGranularity = PAPER_BENCHMARK_GRANULARITY;
+  let applyBatchEvents: PaperBenchmarkApplyBatchEvents =
+    DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS;
+  let applyApi: PaperBenchmarkApplyApi = DEFAULT_PAPER_BENCHMARK_APPLY_API;
+  let memory = false;
+  let memoryWorker = false;
+  let memoryRun: number | undefined;
+  let applyOnly = false;
+  let nativeOnly = false;
+  let nativeOnlyWorker = false;
+  let planPhase0 = false;
+  let phase6Gates = false;
+  let help = false;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--") {
+      continue;
+    }
+    if (arg === "--datasets") {
+      datasets = parseDatasetList(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--datasets=")) {
+      datasets = parseDatasetList(arg.slice("--datasets=".length));
+      continue;
+    }
+    if (arg === "--runs") {
+      runs = Number(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--runs=")) {
+      runs = Number(arg.slice("--runs=".length));
+      continue;
+    }
+    if (arg === "--paper-root") {
+      paperRoot = readOptionValue(args, index, arg);
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--paper-root=")) {
+      paperRoot = arg.slice("--paper-root=".length);
+      continue;
+    }
+    if (arg === "--max-txns") {
+      maxTxns = Number(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--max-txns=")) {
+      maxTxns = Number(arg.slice("--max-txns=".length));
+      continue;
+    }
+    if (arg === "--max-events") {
+      maxEvents = Number(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--max-events=")) {
+      maxEvents = Number(arg.slice("--max-events=".length));
+      continue;
+    }
+    if (arg === "--granularity") {
+      granularity = parsePaperBenchmarkGranularity(
+        readOptionValue(args, index, arg),
+      );
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--granularity=")) {
+      granularity = parsePaperBenchmarkGranularity(
+        arg.slice("--granularity=".length),
+      );
+      continue;
+    }
+    if (arg === "--apply-batch-events") {
+      applyBatchEvents = parsePaperBenchmarkApplyBatchEvents(
+        readOptionValue(args, index, arg),
+      );
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--apply-batch-events=")) {
+      applyBatchEvents = parsePaperBenchmarkApplyBatchEvents(
+        arg.slice("--apply-batch-events=".length),
+      );
+      continue;
+    }
+    if (arg === "--apply-api") {
+      applyApi = parsePaperBenchmarkApplyApi(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--apply-api=")) {
+      applyApi = parsePaperBenchmarkApplyApi(arg.slice("--apply-api=".length));
+      continue;
+    }
+    if (arg === "--memory") {
+      memory = true;
+      continue;
+    }
+    if (arg === "--apply-only") {
+      applyOnly = true;
+      continue;
+    }
+    if (arg === "--native-only") {
+      nativeOnly = true;
+      continue;
+    }
+    if (arg === "--native-only-worker") {
+      nativeOnly = true;
+      nativeOnlyWorker = true;
+      continue;
+    }
+    if (arg === "--plan-phase0") {
+      planPhase0 = true;
+      continue;
+    }
+    if (arg === "--phase6-gates") {
+      phase6Gates = true;
+      continue;
+    }
+    if (arg === "--memory-worker") {
+      memoryWorker = true;
+      continue;
+    }
+    if (arg === "--memory-run") {
+      memoryRun = Number(readOptionValue(args, index, arg));
+      index++;
+      continue;
+    }
+    if (arg?.startsWith("--memory-run=")) {
+      memoryRun = Number(arg.slice("--memory-run=".length));
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      help = true;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (!Number.isInteger(runs) || runs <= 0) {
+    throw new Error(`--runs must be a positive integer, got ${runs}`);
+  }
+  if (maxTxns !== undefined && (!Number.isInteger(maxTxns) || maxTxns <= 0)) {
+    throw new Error(`--max-txns must be a positive integer, got ${maxTxns}`);
+  }
+  if (
+    maxEvents !== undefined &&
+    (!Number.isInteger(maxEvents) || maxEvents <= 0)
+  ) {
+    throw new Error(
+      `--max-events must be a positive integer, got ${maxEvents}`,
+    );
+  }
+  if (
+    memoryRun !== undefined &&
+    (!Number.isInteger(memoryRun) || memoryRun <= 0)
+  ) {
+    throw new Error(
+      `--memory-run must be a positive integer, got ${memoryRun}`,
+    );
+  }
+
+  return {
+    datasets,
+    runs,
+    paperRoot: resolve(paperRoot),
+    maxTxns,
+    maxEvents,
+    granularity,
+    applyBatchEvents,
+    applyApi,
+    memory,
+    memoryWorker,
+    memoryRun,
+    applyOnly,
+    nativeOnly,
+    nativeOnlyWorker,
+    planPhase0,
+    phase6Gates,
+    help,
+  };
+};
+
+const printUsage = (defaultPaperRoot = DEFAULT_PAPER_ROOT): void => {
+  console.log(`Usage:
+  pnpm --filter @softmaple/eg-walker paper-bench -- [options]
+
+Options:
+  --datasets S1,S2   Comma-separated datasets, or "all". Default: S1
+  --runs 3           Number of runs per dataset. Default: 1
+  --paper-root PATH  Path to egwalker-paper. Default: ${defaultPaperRoot}
+  --max-txns 100     Limit each dataset to the first N txns; skips final text check
+  --max-events 1000  Limit each dataset to the first N converted events; skips final text check
+  --granularity MODE Paper benchmarks require operation. Default: operation
+  --apply-batch-events N|all
+                     Remote receive batch size. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS}
+  --apply-api MODE   Apply-only ingestion API: causal or detailed. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_API}
+  --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
+                     in a separate --expose-gc process
+  --apply-only       Measure conversion and public batch receive only; skip all persistence work
+  --native-only      Build an EGW3 payload outside the timed lane, then measure
+                     decode, replica load/replay, and final text materialization
+  --plan-phase0      Run the persistence guardrail suite:
+                     S1/S2/S3/A1 full, plus C1/C2 bounded 3k and 10k
+  --phase6-gates     Run calibrated Phase 6 portable-persistence gates:
+                     S1 operation-granularity 1k, 2k, and 4k events
+
+Known datasets: ${PAPER_DATASETS.join(", ")}`);
+};
+
+const cloneEvent = (event: GraphEvent): GraphEvent => ({
+  id: event.id,
+  parentVersion: new Set(event.parentVersion),
+  operation:
+    event.operation.type === "insert"
+      ? { ...event.operation }
+      : { ...event.operation },
+  timestamp: event.timestamp,
+});
+
+const utf8Bytes = (value: string): number =>
+  new TextEncoder().encode(value).byteLength;
+
+const formatNumber = (value: number): string =>
+  Number.isInteger(value) ? String(value) : value.toFixed(2);
+
+const runGc = (): void => {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (!gc) {
+    throw new Error("Memory worker requires node --expose-gc");
+  }
+  gc();
+};
+
+const usedHeap = (): number => process.memoryUsage().heapUsed;
+
+const printResult = (result: BenchResult): void => {
+  console.log(
+    [
+      "paper-bench",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `maxTxns=${result.maxTxns ?? "none"}`,
+      `maxEvents=${result.maxEvents ?? "none"}`,
+      `granularity=${result.granularity}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyCalls=${result.applyCalls}`,
+      `txns=${result.txns}`,
+      `patches=${result.patches}`,
+      `events=${result.events}`,
+      `text=${result.finalTextLength}`,
+      `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
+      `applyMs=${formatNumber(result.applyMs)}`,
+      `totalMs=${formatNumber(result.totalMs)}`,
+      `jsonBytes=${result.jsonBytes}`,
+      `binaryBytes=${result.binaryBytes}`,
+      `nativeDecodeMs=${formatNumber(result.nativeDecodeMs)}`,
+      `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
+      `portableSnapshotEncodeMs=${formatNumber(result.portableSnapshotEncodeMs)}`,
+      `portableSnapshotDecodeMs=${formatNumber(result.portableSnapshotDecodeMs)}`,
+      `portableSnapshotRestoreMs=${formatNumber(result.portableSnapshotRestoreMs)}`,
+      `portableSnapshotMaterializeMs=${formatNumber(result.portableSnapshotMaterializeMs)}`,
+      `portableSnapshotBytes=${result.portableSnapshotBytes}`,
+      `nativeSnapshotEncodeMs=${formatNumber(result.nativeSnapshotEncodeMs)}`,
+      `nativeSnapshotDecodeMs=${formatNumber(result.nativeSnapshotDecodeMs)}`,
+      `nativeSnapshotRestoreMs=${formatNumber(result.nativeSnapshotRestoreMs)}`,
+      `nativeSnapshotBytes=${result.nativeSnapshotBytes}`,
+      `nativeSnapshotFullReplays=${result.nativeSnapshotFullReplays}`,
+      `nativeSnapshotPartialReplays=${result.nativeSnapshotPartialReplays}`,
+      `nativeSnapshotIncrementalApplies=${result.nativeSnapshotIncrementalApplies}`,
+      `fullReplays=${result.fullReplays}`,
+      `partialReplays=${result.partialReplays}`,
+      `incrementalApplies=${result.incrementalApplies}`,
+      `retreats=${result.retreats}`,
+      `advances=${result.advances}`,
+      `checkpointHits=${result.checkpointHits}`,
+      `checkpointMisses=${result.checkpointMisses}`,
+      `sequenceRecords=${result.sequenceRecords}`,
+      `peakSequenceRecords=${result.peakSequenceRecords}`,
+    ].join(" "),
+  );
+};
+
+const printApplyResult = (result: ApplyBenchResult): void => {
+  console.log(
+    [
+      "paper-bench-apply",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `maxTxns=${result.maxTxns ?? "none"}`,
+      `maxEvents=${result.maxEvents ?? "none"}`,
+      `granularity=${result.granularity}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyApi=${result.applyApi}`,
+      `applyCalls=${result.applyCalls}`,
+      `txns=${result.txns}`,
+      `patches=${result.patches}`,
+      `events=${result.events}`,
+      `text=${result.finalTextLength}`,
+      `finalTextValidated=${result.finalTextValidated}`,
+      `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
+      `applyMs=${formatNumber(result.applyMs)}`,
+      `totalMs=${formatNumber(result.totalMs)}`,
+      `fullReplays=${result.fullReplays}`,
+      `partialReplays=${result.partialReplays}`,
+      `incrementalApplies=${result.incrementalApplies}`,
+      `retreats=${result.retreats}`,
+      `advances=${result.advances}`,
+      `sequenceRecords=${result.sequenceRecords}`,
+      `peakSequenceRecords=${result.peakSequenceRecords}`,
+      `sequenceTreeOperations=${result.sequenceTreeOperations}`,
+    ].join(" "),
+  );
+};
+
+const printNativeResult = (result: NativeBenchResult): void => {
+  console.log(
+    [
+      "paper-bench-native",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `maxTxns=${result.maxTxns ?? "none"}`,
+      `maxEvents=${result.maxEvents ?? "none"}`,
+      `granularity=${result.granularity}`,
+      `txns=${result.txns}`,
+      `patches=${result.patches}`,
+      `events=${result.events}`,
+      `frontier=${result.frontierSize}`,
+      `text=${result.finalTextLength}`,
+      `finalTextValidated=${result.finalTextValidated}`,
+      `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
+      `graphEncodeMs=${formatNumber(result.graphEncodeMs)}`,
+      `binaryBytes=${result.binaryBytes}`,
+      `nativeDecodeMs=${formatNumber(result.nativeDecodeMs)}`,
+      `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
+      `nativeMaterializeMs=${formatNumber(result.nativeMaterializeMs)}`,
+      `heapBeforeDecodeBytes=${result.heapBeforeDecodeBytes}`,
+      `arrayBuffersBeforeDecodeBytes=${result.arrayBuffersBeforeDecodeBytes}`,
+      `rssBeforeDecodeBytes=${result.rssBeforeDecodeBytes}`,
+      `heapAfterDecodeBytes=${result.heapAfterDecodeBytes}`,
+      `arrayBuffersAfterDecodeBytes=${result.arrayBuffersAfterDecodeBytes}`,
+      `rssAfterDecodeBytes=${result.rssAfterDecodeBytes}`,
+      `heapAfterLoadBytes=${result.heapAfterLoadBytes}`,
+      `arrayBuffersAfterLoadBytes=${result.arrayBuffersAfterLoadBytes}`,
+      `rssAfterLoadBytes=${result.rssAfterLoadBytes}`,
+      `nativeDecodeHeapBytes=${result.nativeDecodeHeapBytes}`,
+      `nativeLoadHeapBytes=${result.nativeLoadHeapBytes}`,
+      `nativeTotalHeapBytes=${result.nativeTotalHeapBytes}`,
+      `nativeDecodeArrayBufferBytes=${result.nativeDecodeArrayBufferBytes}`,
+      `nativeLoadArrayBufferBytes=${result.nativeLoadArrayBufferBytes}`,
+      `nativeTotalArrayBufferBytes=${result.nativeTotalArrayBufferBytes}`,
+      `fullReplays=${result.fullReplays}`,
+      `partialReplays=${result.partialReplays}`,
+      `incrementalApplies=${result.incrementalApplies}`,
+      `retreats=${result.retreats}`,
+      `advances=${result.advances}`,
+      `checkpointCount=${result.checkpointCount}`,
+      `checkpointHits=${result.checkpointHits}`,
+      `checkpointMisses=${result.checkpointMisses}`,
+      `sequenceRecords=${result.sequenceRecords}`,
+      `peakSequenceRecords=${result.peakSequenceRecords}`,
+      `replayCacheEvents=${result.replayCacheEvents}`,
+      `replayCacheBytes=${result.replayCacheBytes}`,
+      `textBufferNodes=${result.textBufferNodes}`,
+      `integrationProbes=${result.integrationProbes}`,
+      `fugueComparisons=${result.fugueComparisons}`,
+      `fugueMarkerOperations=${result.fugueMarkerOperations}`,
+      `fugueRotations=${result.fugueRotations}`,
+      `fugueRebuilds=${result.fugueRebuilds}`,
+      `sequenceTreeOperations=${result.sequenceTreeOperations}`,
+    ].join(" "),
+  );
+};
+
+const printMemoryResult = (result: MemoryResult): void => {
+  console.log(
+    [
+      "paper-bench-memory",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `maxTxns=${result.maxTxns ?? "none"}`,
+      `maxEvents=${result.maxEvents ?? "none"}`,
+      `granularity=${result.granularity}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyCalls=${result.applyCalls}`,
+      `heapBeforeBytes=${result.heapBeforeBytes}`,
+      `heapAfterDecodeBytes=${result.heapAfterDecodeBytes}`,
+      `heapAfterLoadBytes=${result.heapAfterLoadBytes}`,
+      `heapAfterPortableSnapshotDecodeBytes=${result.heapAfterPortableSnapshotDecodeBytes}`,
+      `heapAfterPortableSnapshotRestoreBytes=${result.heapAfterPortableSnapshotRestoreBytes}`,
+      `heapAfterPortableSnapshotMaterializeBytes=${result.heapAfterPortableSnapshotMaterializeBytes}`,
+      `heapAfterNativeSnapshotDecodeBytes=${result.heapAfterNativeSnapshotDecodeBytes}`,
+      `heapAfterNativeSnapshotRestoreBytes=${result.heapAfterNativeSnapshotRestoreBytes}`,
+      `nativeDecodeHeapBytes=${result.nativeDecodeHeapBytes}`,
+      `nativeLoadHeapBytes=${result.nativeLoadHeapBytes}`,
+      `portableSnapshotDecodeHeapBytes=${result.portableSnapshotDecodeHeapBytes}`,
+      `portableSnapshotRestoreHeapBytes=${result.portableSnapshotRestoreHeapBytes}`,
+      `portableSnapshotMaterializeHeapBytes=${result.portableSnapshotMaterializeHeapBytes}`,
+      `portableSnapshotHeapBytes=${result.portableSnapshotHeapBytes}`,
+      `nativeSnapshotDecodeHeapBytes=${result.nativeSnapshotDecodeHeapBytes}`,
+      `nativeSnapshotRestoreHeapBytes=${result.nativeSnapshotRestoreHeapBytes}`,
+      `nativeSnapshotHeapBytes=${result.nativeSnapshotHeapBytes}`,
+      `nativeDecodeMs=${formatNumber(result.nativeDecodeMs)}`,
+      `nativeLoadMs=${formatNumber(result.nativeLoadMs)}`,
+      `portableSnapshotDecodeMs=${formatNumber(result.portableSnapshotDecodeMs)}`,
+      `portableSnapshotRestoreMs=${formatNumber(result.portableSnapshotRestoreMs)}`,
+      `portableSnapshotMaterializeMs=${formatNumber(result.portableSnapshotMaterializeMs)}`,
+      `nativeSnapshotDecodeMs=${formatNumber(result.nativeSnapshotDecodeMs)}`,
+      `nativeSnapshotRestoreMs=${formatNumber(result.nativeSnapshotRestoreMs)}`,
+    ].join(" "),
+  );
+};
+
+const applyLoadedPaperTrace = (
+  dataset: PaperDataset,
+  run: number,
+  loaded: ReturnType<typeof loadPaperTrace>,
+  applyBatchEvents: PaperBenchmarkApplyBatchEvents,
+): {
+  readonly replica: EgWalkerReplica;
+  readonly text: string;
+  readonly applyCalls: number;
+} => {
+  const replica = new EgWalkerReplica(`paper-bench:${dataset}:${run}`);
+  let applyCalls: number;
+  try {
+    applyCalls = applyRemoteEventsInBatches(
+      replica,
+      loaded.events,
+      applyBatchEvents,
+    );
+  } catch (error) {
+    throw new Error(
+      `${dataset}: failed applying remote event batches of ${applyBatchEvents}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const pending = replica.getPendingRemoteCount();
+  if (pending !== 0) {
+    throw new Error(`${dataset}: ${pending} remote events remain buffered`);
+  }
+
+  const text = replica.getText();
+  if (!loaded.limited && text !== loaded.trace.endContent) {
+    throw new Error(
+      `${dataset}: final text mismatch, got ${text.length} UTF-16 code units, expected ${loaded.trace.endContent.length}`,
+    );
+  }
+
+  return { replica, text, applyCalls };
+};
+
+const applyPaperTrace = (
+  paperRoot: string,
+  dataset: PaperDataset,
+  run: number,
+  options: Pick<
+    CliOptions,
+    "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+  >,
+): {
+  readonly loaded: ReturnType<typeof loadPaperTrace>;
+  readonly replica: EgWalkerReplica;
+  readonly text: string;
+  readonly applyCalls: number;
+} => {
+  const loaded = loadPaperTrace(paperRoot, dataset, options);
+  return {
+    loaded,
+    ...applyLoadedPaperTrace(dataset, run, loaded, options.applyBatchEvents),
+  };
+};
+
+const printProgress = (
+  phase: "converted" | "applied",
+  benchCase: BenchCase,
+  run: number,
+  startedAt: number,
+  events: number,
+  applyCalls: number,
+): void => {
+  console.log(
+    [
+      "paper-bench-progress",
+      `phase=${phase}`,
+      `dataset=${benchCase.dataset}`,
+      `label=${benchCase.label}`,
+      `run=${run}`,
+      `elapsedMs=${formatNumber(performance.now() - startedAt)}`,
+      `events=${events}`,
+      `applyBatchEvents=${benchCase.applyBatchEvents}`,
+      `applyCalls=${applyCalls}`,
+    ].join(" "),
+  );
+};
+
+const prepareNativeBench = (
+  paperRoot: string,
+  benchCase: BenchCase,
+): PreparedNativeBench => {
+  const startedAt = performance.now();
+  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  const convertedAt = performance.now();
+  const payload = buildNativePaperPayload(
+    loaded.events,
+    loaded.limited ? undefined : loaded.trace.endContent,
+  );
+  const encodedAt = performance.now();
+  return {
+    payload,
+    txns: loaded.txnCount,
+    patches: loaded.patchCount,
+    loadConvertMs: convertedAt - startedAt,
+    graphEncodeMs: encodedAt - convertedAt,
+  };
+};
+
+const runNativeDatasetOnce = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+): NativeBenchResult => {
+  const prepared = prepareNativeBench(paperRoot, benchCase);
+
+  // Native-only runs execute in an --expose-gc worker. The measurement helper
+  // collects only between timed phases, after this conversion frame has been
+  // dropped, so source events and encoder state are not part of the baseline.
+  const measured = measureNativePaperPayload(
+    prepared.payload,
+    `paper-native-only:${benchCase.dataset}:${benchCase.label}:${run}`,
+    runGc,
+  );
+  const stats = measured.replayStats;
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    maxTxns: benchCase.maxTxns,
+    maxEvents: benchCase.maxEvents,
+    granularity: benchCase.granularity,
+    txns: prepared.txns,
+    patches: prepared.patches,
+    events: measured.eventCount,
+    frontierSize: measured.frontierSize,
+    finalTextLength: measured.finalTextLength,
+    finalTextValidated: measured.finalTextValidated,
+    loadConvertMs: prepared.loadConvertMs,
+    graphEncodeMs: prepared.graphEncodeMs,
+    binaryBytes: measured.binaryBytes,
+    nativeDecodeMs: measured.nativeDecodeMs,
+    nativeLoadMs: measured.nativeLoadMs,
+    nativeMaterializeMs: measured.nativeMaterializeMs,
+    heapBeforeDecodeBytes: measured.heapBeforeDecodeBytes,
+    arrayBuffersBeforeDecodeBytes: measured.arrayBuffersBeforeDecodeBytes,
+    rssBeforeDecodeBytes: measured.rssBeforeDecodeBytes,
+    heapAfterDecodeBytes: measured.heapAfterDecodeBytes,
+    arrayBuffersAfterDecodeBytes: measured.arrayBuffersAfterDecodeBytes,
+    rssAfterDecodeBytes: measured.rssAfterDecodeBytes,
+    heapAfterLoadBytes: measured.heapAfterLoadBytes,
+    arrayBuffersAfterLoadBytes: measured.arrayBuffersAfterLoadBytes,
+    rssAfterLoadBytes: measured.rssAfterLoadBytes,
+    nativeDecodeHeapBytes: measured.nativeDecodeHeapBytes,
+    nativeLoadHeapBytes: measured.nativeLoadHeapBytes,
+    nativeTotalHeapBytes: measured.nativeTotalHeapBytes,
+    nativeDecodeArrayBufferBytes: measured.nativeDecodeArrayBufferBytes,
+    nativeLoadArrayBufferBytes: measured.nativeLoadArrayBufferBytes,
+    nativeTotalArrayBufferBytes: measured.nativeTotalArrayBufferBytes,
+    fullReplays: stats.fullReplays,
+    partialReplays: stats.partialReplays,
+    incrementalApplies: stats.incrementalApplies,
+    retreats: stats.engineRetreats,
+    advances: stats.engineAdvances,
+    checkpointCount: stats.checkpointCount,
+    checkpointHits: stats.criticalCheckpointHits,
+    checkpointMisses: stats.criticalCheckpointMisses,
+    sequenceRecords: stats.sequenceRecordCount,
+    peakSequenceRecords: stats.peakSequenceRecordCount,
+    replayCacheEvents: stats.replayCacheEvents,
+    replayCacheBytes: stats.replayCacheBytes,
+    textBufferNodes: stats.textBufferNodeCount,
+    integrationProbes: stats.integrationProbeCount,
+    fugueComparisons: stats.fugueComparisons,
+    fugueMarkerOperations: stats.fugueMarkerOperations,
+    fugueRotations: stats.fugueRotations,
+    fugueRebuilds: stats.fugueRebuilds,
+    sequenceTreeOperations: stats.sequenceTreeOperations,
+  };
+};
+
+const runDatasetOnce = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+): BenchResult => {
+  const startedAt = performance.now();
+  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  const convertedAt = performance.now();
+  printProgress(
+    "converted",
+    benchCase,
+    run,
+    startedAt,
+    loaded.events.length,
+    0,
+  );
+  const applyStartedAt = performance.now();
+  const { replica, text, applyCalls } = applyLoadedPaperTrace(
+    benchCase.dataset,
+    run,
+    loaded,
+    benchCase.applyBatchEvents,
+  );
+  const appliedAt = performance.now();
+  printProgress(
+    "applied",
+    benchCase,
+    run,
+    startedAt,
+    loaded.events.length,
+    applyCalls,
+  );
+
+  const serialized = replica.serialize();
+  const jsonBytes = utf8Bytes(JSON.stringify(serialized));
+  const graph = EventGraph.fromEvents(
+    replica.exportEventGraph().map((event) => cloneEvent(event)),
+  );
+  const codec = new ColumnarEventGraphCodec();
+  const binary = codec.encodeBinary(graph);
+  const decodedAt = performance.now();
+  const decodedGraph = codec.decodeBinary(binary);
+  const loadedAt = performance.now();
+  const nativeReplica = new EgWalkerReplica(
+    `paper-native-load:${benchCase.dataset}:${benchCase.label}:${run}`,
+    "",
+    decodedGraph,
+  );
+  const nativeLoadedAt = performance.now();
+  if (nativeReplica.getText() !== text) {
+    throw new Error(
+      `${benchCase.dataset}: native load text mismatch, got ${nativeReplica.getText().length} UTF-16 code units, expected ${text.length}`,
+    );
+  }
+  const persistence = measurePersistenceMetrics(
+    replica,
+    text,
+    `${benchCase.dataset}:${benchCase.label}:${run}`,
+  );
+  const stats = replica.getReplayStats();
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    maxTxns: benchCase.maxTxns,
+    maxEvents: benchCase.maxEvents,
+    granularity: benchCase.granularity,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyCalls,
+    txns: loaded.txnCount,
+    patches: loaded.patchCount,
+    events: loaded.events.length,
+    finalTextLength: text.length,
+    loadConvertMs: convertedAt - startedAt,
+    applyMs: appliedAt - applyStartedAt,
+    totalMs: convertedAt - startedAt + appliedAt - applyStartedAt,
+    jsonBytes,
+    binaryBytes: binary.byteLength,
+    nativeDecodeMs: loadedAt - decodedAt,
+    nativeLoadMs: nativeLoadedAt - loadedAt,
+    ...persistence,
+    fullReplays: stats.fullReplays,
+    partialReplays: stats.partialReplays,
+    incrementalApplies: stats.incrementalApplies,
+    retreats: stats.engineRetreats,
+    advances: stats.engineAdvances,
+    checkpointHits: stats.criticalCheckpointHits,
+    checkpointMisses: stats.criticalCheckpointMisses,
+    sequenceRecords: stats.sequenceRecordCount,
+    peakSequenceRecords: stats.peakSequenceRecordCount,
+  };
+};
+
+const runApplyDatasetOnce = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
+): ApplyBenchResult => {
+  const startedAt = performance.now();
+  const prepared = prepareApplyBench(paperRoot, benchCase, applyApi);
+  const convertedAt = performance.now();
+  printProgress("converted", benchCase, run, startedAt, prepared.eventCount, 0);
+  const applyStartedAt = performance.now();
+  const replica = new EgWalkerReplica(
+    `paper-bench:${benchCase.dataset}:${run}:${applyApi}`,
+  );
+  let applyCalls: number;
+  try {
+    applyCalls = prepared.apply(replica);
+  } catch (error) {
+    throw new Error(
+      `${benchCase.dataset}: ${applyApi} apply failed with batch size ${benchCase.applyBatchEvents}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const pending = replica.getPendingRemoteCount();
+  if (pending !== 0) {
+    throw new Error(
+      `${benchCase.dataset}: ${pending} remote events remain buffered`,
+    );
+  }
+  const text = replica.getText();
+  if (!prepared.limited && text !== prepared.expectedText) {
+    throw new Error(
+      `${benchCase.dataset}: final text mismatch, got ${text.length} UTF-16 code units, expected ${prepared.expectedText.length}`,
+    );
+  }
+  const appliedAt = performance.now();
+  printProgress(
+    "applied",
+    benchCase,
+    run,
+    startedAt,
+    prepared.eventCount,
+    applyCalls,
+  );
+  const stats = replica.getReplayStats();
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    maxTxns: benchCase.maxTxns,
+    maxEvents: benchCase.maxEvents,
+    granularity: benchCase.granularity,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyApi,
+    applyCalls,
+    txns: prepared.txnCount,
+    patches: prepared.patchCount,
+    events: prepared.eventCount,
+    finalTextLength: text.length,
+    finalTextValidated: !prepared.limited,
+    loadConvertMs: convertedAt - startedAt,
+    applyMs: appliedAt - applyStartedAt,
+    totalMs: appliedAt - startedAt,
+    fullReplays: stats.fullReplays,
+    partialReplays: stats.partialReplays,
+    incrementalApplies: stats.incrementalApplies,
+    retreats: stats.engineRetreats,
+    advances: stats.engineAdvances,
+    sequenceRecords: stats.sequenceRecordCount,
+    peakSequenceRecords: stats.peakSequenceRecordCount,
+    sequenceTreeOperations: stats.sequenceTreeOperations,
+  };
+};
+
+const prepareApplyBench = (
+  paperRoot: string,
+  benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
+): PreparedApplyBench => {
+  if (applyApi === "causal") {
+    const loaded = loadPaperTraceCausalBatches(paperRoot, benchCase.dataset, {
+      batchEvents: benchCase.applyBatchEvents,
+      maxTxns: benchCase.maxTxns,
+      maxEvents: benchCase.maxEvents,
+    });
+    return {
+      txnCount: loaded.txnCount,
+      patchCount: loaded.patchCount,
+      eventCount: loaded.eventCount,
+      limited: loaded.limited,
+      expectedText: loaded.trace.endContent,
+      apply: (replica): number => {
+        for (const batch of loaded.batches) {
+          replica.applyCausalBatch(batch);
+        }
+        return loaded.batchCount;
+      },
+    };
+  }
+
+  const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
+  return {
+    txnCount: loaded.txnCount,
+    patchCount: loaded.patchCount,
+    eventCount: loaded.events.length,
+    limited: loaded.limited,
+    expectedText: loaded.trace.endContent,
+    apply: (replica): number =>
+      applyRemoteEventsInBatches(
+        replica,
+        loaded.events,
+        benchCase.applyBatchEvents,
+      ),
+  };
+};
+
+const buildPersistencePayload = (
+  paperRoot: string,
+  dataset: PaperDataset,
+  run: number,
+  options: Pick<
+    CliOptions,
+    "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+  >,
+): {
+  readonly binary: Uint8Array;
+  readonly portableSnapshotBinary: Uint8Array;
+  readonly nativeSnapshotBinary: Uint8Array;
+  readonly text: string;
+  readonly applyCalls: number;
+} => {
+  const { replica, text, applyCalls } = applyPaperTrace(
+    paperRoot,
+    dataset,
+    run,
+    options,
+  );
+  const graph = EventGraph.fromEvents(
+    replica.exportEventGraph().map((event) => cloneEvent(event)),
+  );
+  const binary = new ColumnarEventGraphCodec().encodeBinary(graph);
+  const portableSnapshotBinary = new PortableSnapshotCodec()
+    .encode(replica.createPortableSnapshot())
+    .slice();
+  const nativeSnapshotBinary = new NativeSnapshotCodec().encode(
+    replica.createNativeSnapshot(),
+  );
+  return {
+    binary,
+    portableSnapshotBinary,
+    nativeSnapshotBinary,
+    text,
+    applyCalls,
+  };
+};
+
+const measurePersistenceMemory = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+): MemoryResult => {
+  const {
+    binary,
+    portableSnapshotBinary,
+    nativeSnapshotBinary,
+    text,
+    applyCalls,
+  } = buildPersistencePayload(paperRoot, benchCase.dataset, run, benchCase);
+  const codec = new ColumnarEventGraphCodec();
+  const portableSnapshotCodec = new PortableSnapshotCodec();
+  const nativeSnapshotCodec = new NativeSnapshotCodec();
+
+  runGc();
+  const heapBeforeBytes = usedHeap();
+  const decodeStartedAt = performance.now();
+  const decodedGraph = codec.decodeBinary(binary);
+  const decodedAt = performance.now();
+  runGc();
+  const heapAfterDecodeBytes = usedHeap();
+
+  const loadStartedAt = performance.now();
+  const nativeReplica = new EgWalkerReplica(
+    `paper-native-memory:${benchCase.dataset}:${benchCase.label}:${run}`,
+    "",
+    decodedGraph,
+  );
+  const loadedAt = performance.now();
+  if (nativeReplica.getText() !== text) {
+    throw new Error(
+      `${benchCase.dataset}: native memory load text mismatch, got ${nativeReplica.getText().length} UTF-16 code units, expected ${text.length}`,
+    );
+  }
+  runGc();
+  const heapAfterLoadBytes = usedHeap();
+
+  runGc();
+  const portableSnapshotHeapBeforeBytes = usedHeap();
+  const portableSnapshotDecodeStartedAt = performance.now();
+  const decodedPortableSnapshot = portableSnapshotCodec.decode(
+    portableSnapshotBinary,
+  );
+  const portableSnapshotDecodedAt = performance.now();
+  runGc();
+  const heapAfterPortableSnapshotDecodeBytes = usedHeap();
+  const portableSnapshotReplica = EgWalkerReplica.fromPortableSnapshot(
+    decodedPortableSnapshot,
+    `paper-portable-snapshot-memory:${benchCase.dataset}:${benchCase.label}:${run}`,
+  );
+  const portableSnapshotRestoredAt = performance.now();
+  runGc();
+  const heapAfterPortableSnapshotRestoreBytes = usedHeap();
+  portableSnapshotReplica.applyRemoteEvents([]);
+  const portableSnapshotMaterializedAt = performance.now();
+  if (
+    portableSnapshotReplica.getText() !== text ||
+    portableSnapshotReplica.exportEventGraph().length !==
+      decodedGraph.getEventCount()
+  ) {
+    throw new Error(`${benchCase.dataset}: portable snapshot memory mismatch`);
+  }
+  runGc();
+  const heapAfterPortableSnapshotMaterializeBytes = usedHeap();
+
+  runGc();
+  const nativeSnapshotHeapBeforeBytes = usedHeap();
+  const nativeSnapshotDecodeStartedAt = performance.now();
+  const decodedNativeSnapshot =
+    nativeSnapshotCodec.decode(nativeSnapshotBinary);
+  const nativeSnapshotDecodedAt = performance.now();
+  runGc();
+  const heapAfterNativeSnapshotDecodeBytes = usedHeap();
+  const nativeSnapshotReplica = EgWalkerReplica.fromNativeSnapshot(
+    decodedNativeSnapshot,
+    `paper-native-snapshot-memory:${benchCase.dataset}:${benchCase.label}:${run}`,
+  );
+  const nativeSnapshotRestoredAt = performance.now();
+  if (nativeSnapshotReplica.getText() !== text) {
+    throw new Error(`${benchCase.dataset}: native snapshot memory mismatch`);
+  }
+  const nativeSnapshotStats = nativeSnapshotReplica.getReplayStats();
+  if (nativeSnapshotStats.fullReplays !== 0) {
+    throw new Error(
+      `${benchCase.dataset}: native snapshot memory restore unexpectedly performed ${nativeSnapshotStats.fullReplays} full replay(s)`,
+    );
+  }
+  runGc();
+  const heapAfterNativeSnapshotRestoreBytes = usedHeap();
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    maxTxns: benchCase.maxTxns,
+    maxEvents: benchCase.maxEvents,
+    granularity: benchCase.granularity,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyCalls,
+    heapBeforeBytes,
+    heapAfterDecodeBytes,
+    heapAfterLoadBytes,
+    heapAfterPortableSnapshotDecodeBytes,
+    heapAfterPortableSnapshotRestoreBytes,
+    heapAfterPortableSnapshotMaterializeBytes,
+    heapAfterNativeSnapshotDecodeBytes,
+    heapAfterNativeSnapshotRestoreBytes,
+    nativeDecodeHeapBytes: heapAfterDecodeBytes - heapBeforeBytes,
+    nativeLoadHeapBytes: heapAfterLoadBytes - heapAfterDecodeBytes,
+    portableSnapshotDecodeHeapBytes:
+      heapAfterPortableSnapshotDecodeBytes - portableSnapshotHeapBeforeBytes,
+    portableSnapshotRestoreHeapBytes:
+      heapAfterPortableSnapshotRestoreBytes -
+      heapAfterPortableSnapshotDecodeBytes,
+    portableSnapshotMaterializeHeapBytes:
+      heapAfterPortableSnapshotMaterializeBytes -
+      heapAfterPortableSnapshotRestoreBytes,
+    portableSnapshotHeapBytes:
+      heapAfterPortableSnapshotMaterializeBytes -
+      portableSnapshotHeapBeforeBytes,
+    nativeSnapshotDecodeHeapBytes:
+      heapAfterNativeSnapshotDecodeBytes - nativeSnapshotHeapBeforeBytes,
+    nativeSnapshotRestoreHeapBytes:
+      heapAfterNativeSnapshotRestoreBytes - heapAfterNativeSnapshotDecodeBytes,
+    nativeSnapshotHeapBytes:
+      heapAfterNativeSnapshotRestoreBytes - nativeSnapshotHeapBeforeBytes,
+    nativeDecodeMs: decodedAt - decodeStartedAt,
+    nativeLoadMs: loadedAt - loadStartedAt,
+    portableSnapshotDecodeMs:
+      portableSnapshotDecodedAt - portableSnapshotDecodeStartedAt,
+    portableSnapshotRestoreMs:
+      portableSnapshotRestoredAt - portableSnapshotDecodedAt,
+    portableSnapshotMaterializeMs:
+      portableSnapshotMaterializedAt - portableSnapshotRestoredAt,
+    nativeSnapshotDecodeMs:
+      nativeSnapshotDecodedAt - nativeSnapshotDecodeStartedAt,
+    nativeSnapshotRestoreMs: nativeSnapshotRestoredAt - nativeSnapshotDecodedAt,
+  };
+};
+
+const runMemoryWorkerProcess = (
+  options: CliOptions,
+  benchCase: BenchCase,
+  run: number,
+): void => {
+  const script = process.argv[1];
+  if (!script) {
+    throw new Error("Cannot locate paper-bench script for memory worker");
+  }
+
+  const args = [
+    "--expose-gc",
+    ...process.execArgv,
+    script,
+    "--memory-worker",
+    "--datasets",
+    benchCase.dataset,
+    "--runs",
+    "1",
+    "--memory-run",
+    String(run),
+    "--paper-root",
+    options.paperRoot,
+    "--granularity",
+    benchCase.granularity,
+    "--apply-batch-events",
+    String(benchCase.applyBatchEvents),
+  ];
+  if (benchCase.maxTxns !== undefined) {
+    args.push("--max-txns", String(benchCase.maxTxns));
+  }
+  if (benchCase.maxEvents !== undefined) {
+    args.push("--max-events", String(benchCase.maxEvents));
+  }
+  if (options.phase6Gates) {
+    args.push("--phase6-gates");
+  }
+
+  const result = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  if (result.stdout.length > 0) {
+    process.stdout.write(result.stdout);
+  }
+  if (result.stderr.length > 0) {
+    process.stderr.write(result.stderr);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `${benchCase.label}: memory worker failed with exit code ${result.status ?? "unknown"}`,
+    );
+  }
+};
+
+const runNativeOnlyWorkerProcess = (
+  options: CliOptions,
+  benchCase: BenchCase,
+  run: number,
+): NativeBenchResult => {
+  const script = process.argv[1];
+  if (!script) {
+    throw new Error("Cannot locate paper-bench script for native-only worker");
+  }
+
+  const args = [
+    "--expose-gc",
+    ...process.execArgv,
+    script,
+    "--native-only-worker",
+    "--datasets",
+    benchCase.dataset,
+    "--runs",
+    "1",
+    "--memory-run",
+    String(run),
+    "--paper-root",
+    options.paperRoot,
+    "--granularity",
+    benchCase.granularity,
+  ];
+  if (benchCase.maxTxns !== undefined) {
+    args.push("--max-txns", String(benchCase.maxTxns));
+  }
+  if (benchCase.maxEvents !== undefined) {
+    args.push("--max-events", String(benchCase.maxEvents));
+  }
+
+  const worker = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (worker.error) {
+    throw worker.error;
+  }
+  if (worker.status !== 0) {
+    const detail = worker.stderr.trim() || worker.stdout.trim();
+    throw new Error(
+      `Native-only worker failed${worker.signal ? ` with signal ${worker.signal}` : ` with status ${worker.status}`}: ${detail}`,
+    );
+  }
+
+  try {
+    return JSON.parse(worker.stdout) as NativeBenchResult;
+  } catch (error) {
+    throw new Error(
+      `Native-only worker returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
+const mean = (values: ReadonlyArray<number>): number =>
+  values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const printNativeSummaries = (
+  results: ReadonlyArray<NativeBenchResult>,
+): void => {
+  for (const label of new Set(results.map((result) => result.label))) {
+    const datasetResults = results.filter((result) => result.label === label);
+    const first = datasetResults[0];
+    if (!first) {
+      continue;
+    }
+    const decodeTimes = datasetResults.map((result) => result.nativeDecodeMs);
+    const loadTimes = datasetResults.map((result) => result.nativeLoadMs);
+    const materializeTimes = datasetResults.map(
+      (result) => result.nativeMaterializeMs,
+    );
+    console.log(
+      [
+        "paper-bench-native-summary",
+        `dataset=${first.dataset}`,
+        `label=${label}`,
+        `runs=${datasetResults.length}`,
+        `maxTxns=${first.maxTxns ?? "none"}`,
+        `maxEvents=${first.maxEvents ?? "none"}`,
+        `granularity=${first.granularity}`,
+        `events=${first.events}`,
+        `binaryBytes=${first.binaryBytes}`,
+        `finalTextValidated=${datasetResults.every((result) => result.finalTextValidated)}`,
+        `meanNativeDecodeMs=${formatNumber(mean(decodeTimes))}`,
+        `minNativeDecodeMs=${formatNumber(Math.min(...decodeTimes))}`,
+        `maxNativeDecodeMs=${formatNumber(Math.max(...decodeTimes))}`,
+        `meanNativeLoadMs=${formatNumber(mean(loadTimes))}`,
+        `minNativeLoadMs=${formatNumber(Math.min(...loadTimes))}`,
+        `maxNativeLoadMs=${formatNumber(Math.max(...loadTimes))}`,
+        `meanNativeMaterializeMs=${formatNumber(mean(materializeTimes))}`,
+        `meanNativeTotalMs=${formatNumber(
+          mean(
+            datasetResults.map(
+              (result) =>
+                result.nativeDecodeMs +
+                result.nativeLoadMs +
+                result.nativeMaterializeMs,
+            ),
+          ),
+        )}`,
+        `meanNativeDecodeHeapBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.nativeDecodeHeapBytes)),
+        )}`,
+        `meanNativeLoadHeapBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.nativeLoadHeapBytes)),
+        )}`,
+        `meanNativeTotalHeapBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.nativeTotalHeapBytes)),
+        )}`,
+        `meanNativeDecodeArrayBufferBytes=${formatNumber(
+          mean(
+            datasetResults.map((result) => result.nativeDecodeArrayBufferBytes),
+          ),
+        )}`,
+        `meanNativeLoadArrayBufferBytes=${formatNumber(
+          mean(
+            datasetResults.map((result) => result.nativeLoadArrayBufferBytes),
+          ),
+        )}`,
+        `meanNativeTotalArrayBufferBytes=${formatNumber(
+          mean(
+            datasetResults.map((result) => result.nativeTotalArrayBufferBytes),
+          ),
+        )}`,
+        `meanRssAfterLoadBytes=${formatNumber(
+          mean(datasetResults.map((result) => result.rssAfterLoadBytes)),
+        )}`,
+      ].join(" "),
+    );
+  }
+};
+
+const printApplySummaries = (
+  results: ReadonlyArray<ApplyBenchResult>,
+): void => {
+  for (const label of new Set(results.map((result) => result.label))) {
+    const datasetResults = results.filter((result) => result.label === label);
+    const first = datasetResults[0];
+    if (!first) {
+      continue;
+    }
+    const convertTimes = datasetResults.map((result) => result.loadConvertMs);
+    const applyTimes = datasetResults.map((result) => result.applyMs);
+    console.log(
+      [
+        "paper-bench-apply-summary",
+        `dataset=${first.dataset}`,
+        `label=${label}`,
+        `runs=${datasetResults.length}`,
+        `maxTxns=${first.maxTxns ?? "none"}`,
+        `maxEvents=${first.maxEvents ?? "none"}`,
+        `granularity=${first.granularity}`,
+        `applyBatchEvents=${first.applyBatchEvents}`,
+        `applyApi=${first.applyApi}`,
+        `applyCalls=${first.applyCalls}`,
+        `events=${first.events}`,
+        `finalTextValidated=${datasetResults.every((result) => result.finalTextValidated)}`,
+        `meanLoadConvertMs=${formatNumber(mean(convertTimes))}`,
+        `meanApplyMs=${formatNumber(mean(applyTimes))}`,
+        `minApplyMs=${formatNumber(Math.min(...applyTimes))}`,
+        `maxApplyMs=${formatNumber(Math.max(...applyTimes))}`,
+        `meanTotalMs=${formatNumber(
+          mean(datasetResults.map((result) => result.totalMs)),
+        )}`,
+        `meanEventsPerSecond=${formatNumber(
+          (first.events * 1_000) / mean(applyTimes),
+        )}`,
+      ].join(" "),
+    );
+  }
+};
+
+const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
+  for (const label of new Set(results.map((result) => result.label))) {
+    const datasetResults = results.filter((result) => result.label === label);
+    const first = datasetResults[0];
+    if (!first) {
+      continue;
+    }
+    const applyTimes = datasetResults.map((result) => result.applyMs);
+    const totalTimes = datasetResults.map((result) => result.totalMs);
+    const nativeDecodeTimes = datasetResults.map(
+      (result) => result.nativeDecodeMs,
+    );
+    const nativeLoadTimes = datasetResults.map((result) => result.nativeLoadMs);
+    const portableSnapshotDecodeTimes = datasetResults.map(
+      (result) => result.portableSnapshotDecodeMs,
+    );
+    const portableSnapshotRestoreTimes = datasetResults.map(
+      (result) => result.portableSnapshotRestoreMs,
+    );
+    const portableSnapshotMaterializeTimes = datasetResults.map(
+      (result) => result.portableSnapshotMaterializeMs,
+    );
+    const portableSnapshotBytes = datasetResults.map(
+      (result) => result.portableSnapshotBytes,
+    );
+    console.log(
+      [
+        "paper-bench-summary",
+        `dataset=${first.dataset}`,
+        `label=${label}`,
+        `runs=${datasetResults.length}`,
+        `maxTxns=${first.maxTxns ?? "none"}`,
+        `maxEvents=${first.maxEvents ?? "none"}`,
+        `granularity=${first.granularity}`,
+        `applyBatchEvents=${first.applyBatchEvents}`,
+        `applyCalls=${first.applyCalls}`,
+        `meanApplyMs=${formatNumber(mean(applyTimes))}`,
+        `minApplyMs=${formatNumber(Math.min(...applyTimes))}`,
+        `maxApplyMs=${formatNumber(Math.max(...applyTimes))}`,
+        `meanTotalMs=${formatNumber(mean(totalTimes))}`,
+        `meanNativeDecodeMs=${formatNumber(mean(nativeDecodeTimes))}`,
+        `meanNativeLoadMs=${formatNumber(mean(nativeLoadTimes))}`,
+        `meanPortableSnapshotDecodeMs=${formatNumber(mean(portableSnapshotDecodeTimes))}`,
+        `minPortableSnapshotDecodeMs=${formatNumber(Math.min(...portableSnapshotDecodeTimes))}`,
+        `maxPortableSnapshotDecodeMs=${formatNumber(Math.max(...portableSnapshotDecodeTimes))}`,
+        `meanPortableSnapshotRestoreMs=${formatNumber(mean(portableSnapshotRestoreTimes))}`,
+        `minPortableSnapshotRestoreMs=${formatNumber(Math.min(...portableSnapshotRestoreTimes))}`,
+        `maxPortableSnapshotRestoreMs=${formatNumber(Math.max(...portableSnapshotRestoreTimes))}`,
+        `meanPortableSnapshotMaterializeMs=${formatNumber(mean(portableSnapshotMaterializeTimes))}`,
+        `meanPortableSnapshotBytes=${formatNumber(mean(portableSnapshotBytes))}`,
+      ].join(" "),
+    );
+  }
+};
+
+const MB = 1024 * 1024;
+
+const phase6GateBudgets: Readonly<Record<string, Phase6GateBudget>> = {
+  "S1-events-1000-operation": {
+    maxPortableSnapshotBytes: 12 * 1024,
+    maxPortableSnapshotEncodeMs: 40,
+    maxPortableSnapshotDecodeMs: 10,
+    maxPortableSnapshotRestoreMs: 10,
+    maxPortableSnapshotMaterializeMs: 25,
+    maxPortableSnapshotDecodeHeapBytes: 8 * MB,
+    maxPortableSnapshotRestoreHeapBytes: 8 * MB,
+    maxPortableSnapshotMaterializeHeapBytes: 16 * MB,
+    maxPortableSnapshotHeapBytes: 24 * MB,
+  },
+  "S1-events-2000-operation": {
+    maxPortableSnapshotBytes: 24 * 1024,
+    maxPortableSnapshotEncodeMs: 60,
+    maxPortableSnapshotDecodeMs: 10,
+    maxPortableSnapshotRestoreMs: 10,
+    maxPortableSnapshotMaterializeMs: 50,
+    maxPortableSnapshotDecodeHeapBytes: 8 * MB,
+    maxPortableSnapshotRestoreHeapBytes: 8 * MB,
+    maxPortableSnapshotMaterializeHeapBytes: 32 * MB,
+    maxPortableSnapshotHeapBytes: 48 * MB,
+  },
+  "S1-events-4000-operation": {
+    maxPortableSnapshotBytes: 40 * 1024,
+    maxPortableSnapshotEncodeMs: 100,
+    maxPortableSnapshotDecodeMs: 10,
+    maxPortableSnapshotRestoreMs: 10,
+    maxPortableSnapshotMaterializeMs: 100,
+    maxPortableSnapshotDecodeHeapBytes: 8 * MB,
+    maxPortableSnapshotRestoreHeapBytes: 8 * MB,
+    maxPortableSnapshotMaterializeHeapBytes: 64 * MB,
+    maxPortableSnapshotHeapBytes: 96 * MB,
+  },
+};
+
+const phase6GateBudgetFor = (label: string): Phase6GateBudget => {
+  const budget = phase6GateBudgets[label];
+  if (!budget) {
+    throw new Error(`Missing Phase 6 gate budget for ${label}`);
+  }
+  return budget;
+};
+
+const phase6GateCase = (
+  dataset: PaperDataset,
+  options: Pick<
+    CliOptions,
+    "maxTxns" | "maxEvents" | "granularity" | "applyBatchEvents"
+  >,
+): BenchCase => {
+  const label = labelForCase(dataset, options);
+  return {
+    dataset,
+    label,
+    maxTxns: options.maxTxns,
+    maxEvents: options.maxEvents,
+    granularity: options.granularity,
+    applyBatchEvents: options.applyBatchEvents,
+    gateBudget: phase6GateBudgetFor(label),
+  };
+};
+
+const assertUnderBudget = (
+  label: string,
+  metric: string,
+  actual: number,
+  max: number | undefined,
+): void => {
+  if (max === undefined || actual <= max) {
+    return;
+  }
+  throw new Error(
+    `${label}: ${metric} ${formatNumber(actual)} exceeded Phase 6 gate ${formatNumber(max)}`,
+  );
+};
+
+const assertPhase6BenchGate = (
+  result: BenchResult,
+  budget: Phase6GateBudget | undefined,
+): void => {
+  if (!budget) {
+    return;
+  }
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotBytes",
+    result.portableSnapshotBytes,
+    budget.maxPortableSnapshotBytes,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotEncodeMs",
+    result.portableSnapshotEncodeMs,
+    budget.maxPortableSnapshotEncodeMs,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotDecodeMs",
+    result.portableSnapshotDecodeMs,
+    budget.maxPortableSnapshotDecodeMs,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotRestoreMs",
+    result.portableSnapshotRestoreMs,
+    budget.maxPortableSnapshotRestoreMs,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotMaterializeMs",
+    result.portableSnapshotMaterializeMs,
+    budget.maxPortableSnapshotMaterializeMs,
+  );
+};
+
+const assertPhase6MemoryGate = (
+  result: MemoryResult,
+  budget: Phase6GateBudget | undefined,
+): void => {
+  if (!budget) {
+    return;
+  }
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotDecodeHeapBytes",
+    result.portableSnapshotDecodeHeapBytes,
+    budget.maxPortableSnapshotDecodeHeapBytes,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotRestoreHeapBytes",
+    result.portableSnapshotRestoreHeapBytes,
+    budget.maxPortableSnapshotRestoreHeapBytes,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotMaterializeHeapBytes",
+    result.portableSnapshotMaterializeHeapBytes,
+    budget.maxPortableSnapshotMaterializeHeapBytes,
+  );
+  assertUnderBudget(
+    result.label,
+    "portableSnapshotHeapBytes",
+    result.portableSnapshotHeapBytes,
+    budget.maxPortableSnapshotHeapBytes,
+  );
+};
+
+const buildBenchCases = (options: CliOptions): BenchCase[] => {
+  if (options.phase6Gates && options.memoryWorker) {
+    return options.datasets.map((dataset) =>
+      phase6GateCase(dataset, {
+        maxTxns: options.maxTxns,
+        maxEvents: options.maxEvents,
+        granularity: options.granularity,
+        applyBatchEvents: options.applyBatchEvents,
+      }),
+    );
+  }
+
+  if (options.phase6Gates) {
+    return [1_000, 2_000, 4_000].map((maxEvents) =>
+      phase6GateCase("S1", {
+        maxTxns: undefined,
+        maxEvents,
+        granularity: PAPER_BENCHMARK_GRANULARITY,
+        applyBatchEvents: options.applyBatchEvents,
+      }),
+    );
+  }
+
+  if (!options.planPhase0) {
+    return options.datasets.map((dataset) => ({
+      dataset,
+      label: labelForCase(dataset, options),
+      maxTxns: options.maxTxns,
+      maxEvents: options.maxEvents,
+      granularity: options.granularity,
+      applyBatchEvents: options.applyBatchEvents,
+    }));
+  }
+
+  return [
+    ...(["S1", "S2", "S3", "A1"] as const).map((dataset) => ({
+      dataset,
+      label: labelForCase(dataset, {
+        maxTxns: undefined,
+        maxEvents: undefined,
+        granularity: options.granularity,
+      }),
+      granularity: options.granularity,
+      applyBatchEvents: options.applyBatchEvents,
+    })),
+    ...(["C1", "C2"] as const).flatMap((dataset) =>
+      [3_000, 10_000].map((maxEvents) => ({
+        dataset,
+        label: labelForCase(dataset, {
+          maxTxns: undefined,
+          maxEvents,
+          granularity: options.granularity,
+        }),
+        maxEvents,
+        granularity: options.granularity,
+        applyBatchEvents: options.applyBatchEvents,
+      })),
+    ),
+  ];
+};
+
+const labelForCase = (
+  dataset: PaperDataset,
+  options: Pick<CliOptions, "maxTxns" | "maxEvents" | "granularity">,
+): string => {
+  const limit =
+    options.maxEvents !== undefined
+      ? `events-${options.maxEvents}`
+      : options.maxTxns !== undefined
+        ? `txns-${options.maxTxns}`
+        : "full";
+  return `${dataset}-${limit}-${options.granularity}`;
+};
+
+const main = (): void => {
+  const options = parseCliOptions(process.argv.slice(2));
+  if (options.help) {
+    printUsage(options.paperRoot);
+    return;
+  }
+  if (
+    options.nativeOnly &&
+    (options.memory ||
+      options.memoryWorker ||
+      options.planPhase0 ||
+      options.phase6Gates)
+  ) {
+    throw new Error(
+      "--native-only cannot be combined with --memory, --plan-phase0, or --phase6-gates",
+    );
+  }
+  if (
+    options.applyOnly &&
+    (options.nativeOnly ||
+      options.memory ||
+      options.memoryWorker ||
+      options.planPhase0 ||
+      options.phase6Gates)
+  ) {
+    throw new Error(
+      "--apply-only cannot be combined with --native-only, --memory, --plan-phase0, or --phase6-gates",
+    );
+  }
+  const benchCases = buildBenchCases(options);
+  if (options.nativeOnlyWorker) {
+    const benchCase = benchCases[0];
+    if (!benchCase || benchCases.length !== 1) {
+      throw new Error("Native-only worker requires one benchmark case");
+    }
+    const result = runNativeDatasetOnce(
+      options.paperRoot,
+      options.memoryRun ?? 1,
+      benchCase,
+    );
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
+  if (options.memoryWorker) {
+    const benchCase = benchCases[0];
+    if (!benchCase) {
+      throw new Error("Memory worker requires one benchmark case");
+    }
+    const memoryResult = measurePersistenceMemory(
+      options.paperRoot,
+      options.memoryRun ?? 1,
+      benchCase,
+    );
+    assertPhase6MemoryGate(memoryResult, benchCase.gateBudget);
+    printMemoryResult(memoryResult);
+    return;
+  }
+
+  const results: BenchResult[] = [];
+
+  console.log(
+    [
+      "paper-bench-config",
+      `paperRoot=${options.paperRoot}`,
+      `datasets=${options.datasets.join(",")}`,
+      `cases=${benchCases.map((benchCase) => benchCase.label).join(",")}`,
+      `runs=${options.runs}`,
+      `maxTxns=${options.maxTxns ?? "none"}`,
+      `maxEvents=${options.maxEvents ?? "none"}`,
+      `granularity=${options.granularity}`,
+      `applyBatchEvents=${options.applyBatchEvents}`,
+      `applyApi=${options.applyApi}`,
+      `applyOnly=${options.applyOnly}`,
+      `nativeOnly=${options.nativeOnly}`,
+      `memory=${options.memory}`,
+      `planPhase0=${options.planPhase0}`,
+      `phase6Gates=${options.phase6Gates}`,
+    ].join(" "),
+  );
+
+  if (options.applyOnly) {
+    const applyResults: ApplyBenchResult[] = [];
+    for (const benchCase of benchCases) {
+      for (let run = 1; run <= options.runs; run++) {
+        const result = runApplyDatasetOnce(
+          options.paperRoot,
+          run,
+          benchCase,
+          options.applyApi,
+        );
+        applyResults.push(result);
+        printApplyResult(result);
+      }
+    }
+    printApplySummaries(applyResults);
+    return;
+  }
+
+  if (options.nativeOnly) {
+    const nativeResults: NativeBenchResult[] = [];
+    for (const benchCase of benchCases) {
+      for (let run = 1; run <= options.runs; run++) {
+        const result = runNativeOnlyWorkerProcess(options, benchCase, run);
+        nativeResults.push(result);
+        printNativeResult(result);
+      }
+    }
+    printNativeSummaries(nativeResults);
+    return;
+  }
+
+  for (const benchCase of benchCases) {
+    for (let run = 1; run <= options.runs; run++) {
+      const result = runDatasetOnce(options.paperRoot, run, benchCase);
+      assertPhase6BenchGate(result, benchCase.gateBudget);
+      results.push(result);
+      printResult(result);
+      if (options.memory) {
+        runMemoryWorkerProcess(options, benchCase, run);
+      }
+    }
+  }
+
+  printSummaries(results);
+};
+
+try {
+  main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+}

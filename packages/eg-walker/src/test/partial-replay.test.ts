@@ -2,11 +2,36 @@ import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
-import { PartialReplayManager } from "../engine/partial-replay";
+import {
+  PartialReplayManager,
+  type ReplayCheckpoint,
+} from "../engine/partial-replay";
 import { EventGraph } from "../graph/event-graph";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { GraphEvent } from "../types";
 
 describe("PartialReplayManager", () => {
+  it("should reject checkpoints without document content", () => {
+    // Arrange
+    const manager = new PartialReplayManager();
+    const graph = new EventGraph();
+    const missingContent = {
+      version: new Set(),
+    } as unknown as ReplayCheckpoint;
+
+    // Act
+    const replay = () => manager.replayFromCheckpoint(graph, missingContent);
+
+    // Assert
+    expect(replay).toThrow(/requires text or textBuffer content/);
+    expect(
+      manager.replayFromCheckpoint(graph, {
+        version: new Set(),
+        text: "",
+      }).text,
+    ).toBe("");
+  });
+
   it("partially replays from a critical checkpoint using the full graph", () => {
     const graph = new EventGraph();
     const events: GraphEvent[] = [
@@ -303,6 +328,55 @@ describe("PartialReplayManager", () => {
 
     expect(result.text).toBe(`${"x".repeat(2500)}!${"x".repeat(2500)}`);
     expect(result.stats.eventsProcessed).toBe(1);
+  });
+
+  it("should replay a small suffix without flattening the checkpoint rope", () => {
+    // Arrange
+    const insertionIndex = 1024 * 1024;
+    const checkpointText = "x".repeat(insertionIndex * 2);
+    const checkpointBuffer = PersistentUtf16Rope.from(checkpointText);
+    const events: GraphEvent[] = [
+      {
+        id: "root:0",
+        parentVersion: new Set(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 0,
+          text: checkpointText,
+        },
+        timestamp: 1,
+      },
+      {
+        id: "suffix:0",
+        parentVersion: new Set(["root:0"]),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: insertionIndex,
+          text: "!",
+        },
+        timestamp: 2,
+      },
+    ];
+    const graph = EventGraph.fromEvents(events);
+    PersistentUtf16Rope.resetInstrumentation();
+
+    // Act
+    const result = new PartialReplayManager().replayFromCheckpoint(graph, {
+      version: new Set(["root:0"]),
+      textBuffer: checkpointBuffer,
+    });
+
+    // Assert
+    expect(result.textBuffer.length).toBe(checkpointText.length + 1);
+    expect(
+      result.textBuffer.slice(insertionIndex - 1, insertionIndex + 2),
+    ).toBe("x!x");
+    expect(result.stats.eventsProcessed).toBe(1);
+    expect(result.stats.sequenceRecordCount).toBe(3);
+    expect(PersistentUtf16Rope.getInstrumentation()).toMatchObject({
+      flattenCount: 0,
+      flattenedCodeUnits: 0,
+    });
   });
 });
 

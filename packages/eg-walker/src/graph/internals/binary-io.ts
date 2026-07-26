@@ -1,7 +1,15 @@
+import type {
+  PackedIntegerColumn,
+  PackedUnsignedIntegerColumn,
+} from "./packed-numeric-columns";
+
 export const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x33]); // EGW3
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+// `ignoreBOM: true` means "treat a leading UTF-8 BOM as content" in the
+// Encoding API. Inserted text may legitimately begin with U+FEFF, so the
+// persistence codec must not silently discard it.
+const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
 export const encodeText = (value: string): Uint8Array =>
   textEncoder.encode(value);
@@ -172,6 +180,24 @@ export class BinaryReader {
     return values;
   }
 
+  readVarintPackedUnsignedArray(): PackedUnsignedIntegerColumn {
+    const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of varint array");
+    }
+    let values: PackedUnsignedIntegerColumn = new Uint32Array(length);
+    for (let index = 0; index < length; index++) {
+      const value = this.readVarint();
+      if (value > 0xffff_ffff && values instanceof Uint32Array) {
+        const wideValues = new Float64Array(length);
+        wideValues.set(values.subarray(0, index));
+        values = wideValues;
+      }
+      values[index] = value;
+    }
+    return values;
+  }
+
   readZigZagVarint(): number {
     return zigzagDecode(this.readVarint());
   }
@@ -201,6 +227,66 @@ export class BinaryReader {
       previous = value;
     }
     return out;
+  }
+
+  readZigZagDeltaPackedUnsignedArray(): PackedUnsignedIntegerColumn {
+    const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of zigzag delta array");
+    }
+    let values: PackedUnsignedIntegerColumn = new Uint32Array(length);
+    let previous = 0;
+    for (let index = 0; index < length; index++) {
+      const value = previous + this.readZigZagVarint();
+      if (!Number.isSafeInteger(value)) {
+        throw new Error(`Invalid safe-integer delta value ${value}`);
+      }
+      if ((value < 0 || value > 0xffff_ffff) && values instanceof Uint32Array) {
+        const wideValues = new Float64Array(length);
+        wideValues.set(values.subarray(0, index));
+        values = wideValues;
+      }
+      values[index] = value;
+      previous = value;
+    }
+    return values;
+  }
+
+  readZigZagDeltaPackedIntegerArray(): PackedIntegerColumn {
+    const length = this.readVarint();
+    if (length > this.remainingByteLength) {
+      throw new Error("Unexpected end of zigzag delta array");
+    }
+    let values: PackedIntegerColumn = new Int32Array(length);
+    let previous = 0;
+    let hasNegativeValue = false;
+    for (let index = 0; index < length; index++) {
+      const value = previous + this.readZigZagVarint();
+      if (!Number.isSafeInteger(value)) {
+        throw new Error(`Invalid safe-integer delta value ${value}`);
+      }
+      if (values instanceof Int32Array) {
+        if (value < -0x8000_0000 || value > 0x7fff_ffff) {
+          const widerValues: Uint32Array | Float64Array =
+            !hasNegativeValue && value >= 0 && value <= 0xffff_ffff
+              ? new Uint32Array(length)
+              : new Float64Array(length);
+          widerValues.set(values.subarray(0, index));
+          values = widerValues;
+        }
+      } else if (
+        values instanceof Uint32Array &&
+        (value < 0 || value > 0xffff_ffff)
+      ) {
+        const wideValues = new Float64Array(length);
+        wideValues.set(values.subarray(0, index));
+        values = wideValues;
+      }
+      values[index] = value;
+      hasNegativeValue ||= value < 0;
+      previous = value;
+    }
+    return values;
   }
 
   readString(): string {

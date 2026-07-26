@@ -10,6 +10,7 @@ import {
 import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { EventGraph } from "../graph/event-graph";
 import { BinaryWriter, encodeText } from "../graph/internals/binary-io";
 import type { GraphEvent } from "../types";
 
@@ -86,6 +87,34 @@ describe("PortableSnapshot", () => {
 
     expect(restored.exportEventGraph().at(-1)?.id).toBe("author:2");
     expect(restored.getText()).toBe("base🙂xy");
+  });
+
+  it("preserves application graph metadata", () => {
+    const graph = EventGraph.fromEvents(concurrentEvents);
+    graph.setMetadata({
+      documentId: "doc-42",
+      nested: { stable: true },
+    });
+    const source = new EgWalkerReplica("receiver", "", graph);
+    const codec = new PortableSnapshotCodec();
+
+    const decoded = codec.decode(codec.encode(source.createPortableSnapshot()));
+    const restored = EgWalkerReplica.fromPortableSnapshot(decoded, "receiver");
+
+    expect(restored.serialize().eventGraph.metadata).toMatchObject({
+      documentId: "doc-42",
+      nested: { stable: true },
+    });
+  });
+
+  it("rejects runtime metadata when creating a portable snapshot", () => {
+    const graph = EventGraph.fromEvents(concurrentEvents);
+    graph.setMetadata({ replayCache: { records: [] } });
+    const source = new EgWalkerReplica("receiver", "", graph);
+
+    expect(() => source.createPortableSnapshot()).toThrow(
+      /runtime metadata replayCache is forbidden/,
+    );
   });
 
   it("skips IDs owned by the replica selected at restore time", () => {

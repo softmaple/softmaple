@@ -90,6 +90,7 @@ import {
   validateNativeSnapshotHeaderOnly,
 } from "./native-snapshot";
 import {
+  assertPortableSnapshotMetadata,
   createPortableSnapshotGraphSource,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
   registerTrustedPortableSnapshot,
@@ -433,7 +434,9 @@ export class EgWalkerReplica {
     try {
       const events =
         graph.getLinearReplayOrder() ?? graph.getTopologicalOrder();
-      const encoded = encodeTopologicallyOrderedEventsBinary(events);
+      const metadata = graph.getMetadata();
+      assertPortableSnapshotMetadata(metadata);
+      const encoded = encodeTopologicallyOrderedEventsBinary(events, metadata);
       return registerTrustedPortableSnapshot({
         formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
         text: this.getText(),

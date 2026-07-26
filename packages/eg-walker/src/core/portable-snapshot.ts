@@ -54,6 +54,18 @@ const FORBIDDEN_RUNTIME_METADATA = new Set([
   "ropeNodes",
 ]);
 
+export const assertPortableSnapshotMetadata = (
+  metadata: Readonly<Record<string, unknown>>,
+): void => {
+  for (const key of Object.keys(metadata)) {
+    if (FORBIDDEN_RUNTIME_METADATA.has(key)) {
+      throw new Error(
+        `Invalid portable snapshot: runtime metadata ${key} is forbidden`,
+      );
+    }
+  }
+};
+
 export class PortableSnapshotCodec {
   encode(snapshot: PortableSnapshot): Uint8Array {
     const existingProof = matchingProof(snapshot);
@@ -217,13 +229,7 @@ const validatePortableSnapshotGraph = (
     if (!sameIds(graph.getFrontier(), new Set(snapshot.currentVersion))) {
       throw new Error("Invalid portable snapshot: frontier mismatch");
     }
-    for (const key of Object.keys(graph.getMetadata())) {
-      if (FORBIDDEN_RUNTIME_METADATA.has(key)) {
-        throw new Error(
-          `Invalid portable snapshot: runtime metadata ${key} is forbidden`,
-        );
-      }
-    }
+    assertPortableSnapshotMetadata(graph.getMetadata());
     if (validateMaterializedText) {
       const eventOrder = graph.getBranchPreservingTopologicalOrder();
       const generated = new EgWalkerEngine().generate(

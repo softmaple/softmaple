@@ -1,6 +1,7 @@
 import lz4 from "lz4js";
 
 import { OPERATION_TYPE } from "../../constants/operation-types";
+import { assertWellFormedUtf16 } from "../../core/invariants";
 import type { EventId, GraphEvent } from "../../types";
 import { parseEventId } from "../event-id";
 import { BINARY_MAGIC, BinaryWriter, encodeText } from "../internals/binary-io";
@@ -136,6 +137,10 @@ const assertEvent = (event: GraphEvent, eventOffset: number): void => {
     if (typeof event.operation.text !== "string") {
       throw new Error(`Event ${event.id} has invalid insert text`);
     }
+    assertWellFormedUtf16(
+      event.operation.text,
+      `Event ${event.id} insert text`,
+    );
     return;
   }
   if (event.operation.type === OPERATION_TYPE.DELETE) {

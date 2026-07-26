@@ -208,6 +208,30 @@ describe("topological EGW3 binary encoder", () => {
       error: /invalid insert text/,
     },
     {
+      name: "lone high surrogate",
+      events: [
+        event(
+          "a:0",
+          [],
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "\ud800" },
+          0,
+        ),
+      ],
+      error: /lone high surrogate/,
+    },
+    {
+      name: "lone low surrogate",
+      events: [
+        event(
+          "a:0",
+          [],
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "\udc00" },
+          0,
+        ),
+      ],
+      error: /lone low surrogate/,
+    },
+    {
       name: "delete length",
       events: [
         event(

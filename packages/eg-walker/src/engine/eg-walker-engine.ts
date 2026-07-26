@@ -183,7 +183,6 @@ export class EgWalkerEngine {
   private useLinearIntegrationOracle = false;
   private prepareViewMayContainSurrogatePairs = false;
   private deferTextMaterialization = false;
-  private canonicalizeDeleteTargetOrder = false;
   private packedReplayPlan: PackedCriticalReplayPlan | null = null;
   private objectInsertTail: AugmentedCRDTItem | null = null;
   private objectInsertNextPrepareIndex = -1;
@@ -688,7 +687,7 @@ export class EgWalkerEngine {
         .logicalSegmentsInRange(target.start, target.end)
         .map(({ id }) => id),
     );
-    if (!this.canonicalizeDeleteTargetOrder) {
+    if (!records.some((record) => record.targetIds.length > 1)) {
       return records;
     }
 
@@ -787,7 +786,6 @@ export class EgWalkerEngine {
     this.prepareViewMayContainSurrogatePairs =
       this.resultingText.hasSurrogateCodeUnits ||
       items.some((item) => recordContentHasSurrogateCodeUnits(item.content));
-    this.canonicalizeDeleteTargetOrder = false;
     this.packedReplayPlan = null;
     this.objectInsertTail = null;
     this.objectInsertNextPrepareIndex = -1;
@@ -1816,7 +1814,6 @@ export class EgWalkerEngine {
           `${run.replicaId}:${run.startSequence + consumed}`,
         );
       }
-      this.canonicalizeDeleteTargetOrder = true;
       middle.everDeleted = true;
       middle.prepareState += 1;
       this.sequence.updateItem(middle);
@@ -1899,7 +1896,6 @@ export class EgWalkerEngine {
       options.initialTextBuffer ?? PersistentUtf16Rope.from(initialText);
     this.prepareViewMayContainSurrogatePairs =
       this.resultingText.hasSurrogateCodeUnits;
-    this.canonicalizeDeleteTargetOrder = false;
     this.packedReplayPlan = null;
     this.pendingInsert.reset();
     this.retreatCount = 0;

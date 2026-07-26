@@ -218,6 +218,92 @@ describe("EgWalkerEngine", () => {
     );
   });
 
+  it("canonicalizes delete targets across eager and deferred replay", () => {
+    const mergeParents = new Set<EventId>(["bob:0", "dave:0"]);
+    const concurrent: GraphEvent[] = [
+      {
+        id: "bob:0",
+        parentVersion: new Set(),
+        operation: {
+          type: OPERATION_TYPE.INSERT,
+          index: 10,
+          text: "xI",
+        },
+        timestamp: 0,
+      },
+      {
+        id: "dave:0",
+        parentVersion: new Set(),
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        timestamp: 1,
+      },
+      {
+        id: "bob:1",
+        parentVersion: mergeParents,
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 10,
+        },
+        timestamp: 2,
+      },
+      {
+        id: "dave:1",
+        parentVersion: mergeParents,
+        operation: {
+          type: OPERATION_TYPE.DELETE,
+          index: 0,
+          length: 1,
+        },
+        timestamp: 3,
+      },
+    ];
+    const events = [
+      ...concurrent,
+      ...Array.from({ length: 60 }, (_, offset): GraphEvent => {
+        const sequence = offset + 4;
+        return {
+          id: `pad:${sequence}`,
+          parentVersion:
+            sequence === 4
+              ? new Set(["bob:1", "dave:1"])
+              : new Set([`pad:${sequence - 1}`]),
+          operation: {
+            type: OPERATION_TYPE.INSERT,
+            index: sequence - 3,
+            text: "x",
+          },
+          timestamp: sequence,
+        };
+      }),
+    ];
+    const graph = EventGraph.fromEvents(events);
+    const eventOrder = graph.getBranchPreservingTopologicalOrder();
+    const eagerEngine = new EgWalkerEngine();
+    const eager = eagerEngine.generate(eventOrder, "abcdefghij", {
+      eventGraph: graph,
+      eventOrder,
+    });
+    const deferredEngine = new EgWalkerEngine();
+    const deferred = deferredEngine.generate(eventOrder, "abcdefghij", {
+      eventGraph: graph,
+      eventOrder,
+      collectTransformedOperations: false,
+    });
+
+    expect(deferred.text).toBe(eager.text);
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+    expect(deferredEngine.getDeleteTargetRecords()).toEqual(
+      eagerEngine.getDeleteTargetRecords(),
+    );
+  });
+
   it("deletes segmented effect ranges without shifting later spans", () => {
     const hidden: GraphEvent = {
       id: "hidden",

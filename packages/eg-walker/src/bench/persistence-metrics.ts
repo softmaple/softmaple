@@ -29,7 +29,12 @@ export const measurePersistenceMetrics = (
   const portableEncodeStartedAt = performance.now();
   const portableBinary = portableCodec.encode(replica.createPortableSnapshot());
   const portableEncodedAt = performance.now();
-  const decodedPortable = portableCodec.decode(portableBinary);
+  // Model bytes that crossed a persistence boundary. The codec deliberately
+  // trusts the exact Uint8Array it just encoded, but that identity cannot
+  // survive a file write, network transfer, or structured clone.
+  const persistedPortableBinary = portableBinary.slice();
+  const portableDecodeStartedAt = performance.now();
+  const decodedPortable = portableCodec.decode(persistedPortableBinary);
   const portableDecodedAt = performance.now();
   const portableReplica = EgWalkerReplica.fromPortableSnapshot(
     decodedPortable,
@@ -68,7 +73,7 @@ export const measurePersistenceMetrics = (
 
   return {
     portableSnapshotEncodeMs: portableEncodedAt - portableEncodeStartedAt,
-    portableSnapshotDecodeMs: portableDecodedAt - portableEncodedAt,
+    portableSnapshotDecodeMs: portableDecodedAt - portableDecodeStartedAt,
     portableSnapshotRestoreMs: portableRestoredAt - portableDecodedAt,
     portableSnapshotMaterializeMs: portableMaterializedAt - portableRestoredAt,
     portableSnapshotBytes: portableBinary.byteLength,

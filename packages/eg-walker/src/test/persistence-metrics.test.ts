@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { measurePersistenceMetrics } from "../bench/persistence-metrics";
 import { EgWalkerReplica } from "../core/replica";
+import { EgWalkerEngine } from "../engine/eg-walker-engine";
 
 describe("measurePersistenceMetrics", () => {
   it("should report portable persistence separately from native resume state", () => {
@@ -23,5 +24,19 @@ describe("measurePersistenceMetrics", () => {
     expect(result.nativeSnapshotFullReplays).toBe(0);
     expect(Object.keys(result)).toContain("portableSnapshotDecodeMs");
     expect(Object.keys(result)).toContain("nativeSnapshotDecodeMs");
+  });
+
+  it("measures portable materialization after validation provenance is lost", () => {
+    const replica = new EgWalkerReplica("author", "base");
+    replica.insert(4, " text");
+    const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
+
+    try {
+      measurePersistenceMetrics(replica, replica.getText(), "persisted");
+
+      expect(generated).toHaveBeenCalled();
+    } finally {
+      generated.mockRestore();
+    }
   });
 });

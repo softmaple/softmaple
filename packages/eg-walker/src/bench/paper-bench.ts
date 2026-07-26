@@ -1113,9 +1113,9 @@ const buildPersistencePayload = (
     replica.exportEventGraph().map((event) => cloneEvent(event)),
   );
   const binary = new ColumnarEventGraphCodec().encodeBinary(graph);
-  const portableSnapshotBinary = new PortableSnapshotCodec().encode(
-    replica.createPortableSnapshot(),
-  );
+  const portableSnapshotBinary = new PortableSnapshotCodec()
+    .encode(replica.createPortableSnapshot())
+    .slice();
   const nativeSnapshotBinary = new NativeSnapshotCodec().encode(
     replica.createNativeSnapshot(),
   );

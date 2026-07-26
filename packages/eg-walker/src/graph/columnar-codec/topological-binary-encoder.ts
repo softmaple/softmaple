@@ -27,13 +27,15 @@ interface IdRunState {
  * emission are performed directly over the caller's immutable events. The
  * event order is significant and becomes the decoder's insertion order.
  *
- * For the same topological order and metadata, this produces byte-for-byte the
- * same EGW3 payload as `ColumnarEventGraphCodec.encodeBinary(graph)`, while
- * avoiding copied `GraphEvent`/`Set` objects and full per-event column arrays.
+ * When the source graph's frontier order is supplied, the same topological
+ * order and metadata produce byte-for-byte the same EGW3 payload as
+ * `ColumnarEventGraphCodec.encodeBinary(graph)`. Without it, the frontier order
+ * is reconstructed from the event stream.
  */
 export const encodeTopologicallyOrderedEventsBinary = (
   events: ReadonlyArray<GraphEvent>,
   metadata: Readonly<Record<string, unknown>> = {},
+  frontierOrder?: ReadonlyArray<EventId>,
 ): TopologicalEventGraphEncoding => {
   assertMetadata(metadata);
 
@@ -82,7 +84,7 @@ export const encodeTopologicallyOrderedEventsBinary = (
 
   const writer = new BinaryWriter();
   writer.writeBytes(BINARY_MAGIC);
-  const frontierIds = Array.from(frontier);
+  const frontierIds = resolveFrontierOrder(frontier, frontierOrder);
   writer.writeStringArray(frontierIds);
   writeOperationRuns(writer, events, operationRunCount);
   writeOperationIndexes(writer, events);
@@ -94,6 +96,31 @@ export const encodeTopologicallyOrderedEventsBinary = (
   writer.writeString(JSON.stringify(metadata));
 
   return { binary: writer.toUint8Array(), frontier: frontierIds };
+};
+
+const resolveFrontierOrder = (
+  frontier: ReadonlySet<EventId>,
+  frontierOrder: ReadonlyArray<EventId> | undefined,
+): EventId[] => {
+  if (frontierOrder === undefined) {
+    return Array.from(frontier);
+  }
+
+  const ordered = new Set<EventId>();
+  for (const eventId of frontierOrder as ReadonlyArray<unknown>) {
+    if (
+      typeof eventId !== "string" ||
+      !frontier.has(eventId) ||
+      ordered.has(eventId)
+    ) {
+      throw new Error("Supplied frontier order does not match event frontier");
+    }
+    ordered.add(eventId);
+  }
+  if (ordered.size !== frontier.size) {
+    throw new Error("Supplied frontier order does not match event frontier");
+  }
+  return Array.from(ordered);
 };
 
 const assertMetadata = (metadata: Readonly<Record<string, unknown>>): void => {

@@ -81,6 +81,64 @@ describe("topological EGW3 binary encoder", () => {
     expect(direct.frontier).toEqual([]);
   });
 
+  it("preserves source frontier order when it differs from wire order", () => {
+    const root = event(
+      "root:0",
+      [],
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "r" },
+      0,
+    );
+    const graph = new EventGraph();
+    for (const graphEvent of [
+      root,
+      event(
+        "z:0",
+        [root.id],
+        { type: OPERATION_TYPE.INSERT, index: 1, text: "z" },
+        1,
+      ),
+      event(
+        "a:0",
+        [root.id],
+        { type: OPERATION_TYPE.INSERT, index: 1, text: "a" },
+        2,
+      ),
+    ]) {
+      graph.addEvent(graphEvent);
+    }
+    const events = graph.getTopologicalOrder();
+    const frontier = Array.from(graph.getFrontier());
+
+    expect(events.map(({ id }) => id)).toEqual(["root:0", "a:0", "z:0"]);
+    expect(frontier).toEqual(["z:0", "a:0"]);
+    const direct = encodeTopologicallyOrderedEventsBinary(
+      events,
+      graph.getMetadata(),
+      frontier,
+    );
+
+    expect(direct.frontier).toEqual(frontier);
+    expect(direct.binary).toEqual(
+      new ColumnarEventGraphCodec().encodeBinary(graph),
+    );
+  });
+
+  it("rejects a supplied frontier order that does not match the events", () => {
+    const root = event(
+      "root:0",
+      [],
+      { type: OPERATION_TYPE.INSERT, index: 0, text: "r" },
+      0,
+    );
+
+    expect(() =>
+      encodeTopologicallyOrderedEventsBinary([root], {}, []),
+    ).toThrow(/frontier order does not match/);
+    expect(() =>
+      encodeTopologicallyOrderedEventsBinary([root], {}, ["root:0", "root:0"]),
+    ).toThrow(/frontier order does not match/);
+  });
+
   it("rejects duplicate IDs and parents that have not appeared", () => {
     const root = event(
       "replica:0",

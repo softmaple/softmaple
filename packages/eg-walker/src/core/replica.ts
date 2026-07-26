@@ -436,7 +436,11 @@ export class EgWalkerReplica {
         graph.getLinearReplayOrder() ?? graph.getTopologicalOrder();
       const metadata = graph.getMetadata();
       assertPortableSnapshotMetadata(metadata);
-      const encoded = encodeTopologicallyOrderedEventsBinary(events, metadata);
+      const encoded = encodeTopologicallyOrderedEventsBinary(
+        events,
+        metadata,
+        Array.from(graph.getFrontier()),
+      );
       return registerTrustedPortableSnapshot({
         formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
         text: this.getText(),

@@ -98,6 +98,7 @@ export class NativeSnapshotCodec {
       const graphBytes = encodeTopologicallyOrderedEventsBinary(
         events,
         graph.getMetadata(),
+        Array.from(graph.getFrontier()),
       ).binary;
       const body = new BinaryWriter();
       body.writeBytes(

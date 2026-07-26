@@ -1,0 +1,686 @@
+---
+title: "From Paper to Production: SoftMaple Eg-walker Engineering Retrospective and Performance Report"
+description: "How SoftMaple built a paper-aligned TypeScript Eg-walker, what changed under the hood, and how it performs against the paper artifact."
+date: "2026-07-26"
+author: "Yadong (Adam) Zhang"
+---
+
+# From Paper to Production: SoftMaple Eg-walker
+
+## Engineering Retrospective and Performance Report
+
+Collaborative text editing forces several costs into the same design: local
+edits must be immediate, offline branches must converge, documents must load
+quickly, and persisted state must remain small. Eg-walker offers an unusual
+answer: keep the event graph as durable truth, construct CRDT state only when a
+merge requires it, and discard that state again at critical versions.
+
+This article is both an engineering retrospective on bringing that idea into a
+production-oriented TypeScript package and a performance report comparing the
+result with the complete benchmark matrix published in the Eg-walker paper
+artifact.
+
+> **Version under review:** SoftMaple commit
+> [`1bc089be4ec063491996fefcdd6d4f45ade1a144`](https://github.com/softmaple/softmaple/commit/1bc089be4ec063491996fefcdd6d4f45ade1a144),
+> merged through [PR #801](https://github.com/softmaple/softmaple/pull/801).
+>
+> **Engineering credit:** Codex 5.6 Sol Ultra goal.
+
+The headline result is that the implementation now has a reproducible,
+paper-aligned benchmark framework, fast incremental and snapshot restore paths,
+and explicit measurement boundaries. It is not yet meaningful to compare its
+absolute TypeScript timings directly with the paper's optimized Rust
+implementation. The useful comparisons are:
+
+- SoftMaple against itself on the same machine and runtime;
+- SoftMaple native load against other JavaScript native-load paths;
+- Paper DT against the other systems measured by the paper;
+- performance shapes across sequential, concurrent, and asynchronous traces.
+
+## Executive summary
+
+- In the paper's official benchmark, Rust Eg-walker merges sequential traces in
+  1.77–3.58 ms. It is approximately 7–10× faster than the like-for-like
+  reference CRDT and 22–33× faster than Yjs on those traces.
+- On the asynchronous A1 trace, Paper DT is 4.8× faster than the reference CRDT,
+  about 10× faster than Yjs, and about 707× faster than the tested OT
+  implementation.
+- On A2, Paper DT finishes in 23.47 ms while OT takes about 61 minutes, a
+  difference of roughly 156,000×.
+- Highly concurrent C1 and C2 remain the difficult shape for Eg-walker. Paper DT
+  is close to the reference CRDT and slower than Yrs; on C2 it is also slower
+  than Yjs.
+- Paper DT's steady-state memory is 0.07–0.97 MiB across the seven datasets,
+  compared with 27–51 MiB for Yjs and 230–809 MiB for Automerge.
+- In SoftMaple's final full-trace snapshot baseline on Apple M1, native snapshot
+  restore takes 87–191 ms for S1, S2, S3, and A1 without a full history replay.
+- During the optimization cycle, the S3 native snapshot fell from 346 MB to
+  62.4 MB, while measured restore heap fell from approximately 1.43 GB to
+  135 MB.
+- SoftMaple's calibrated 1k/2k/4k operation-level gates pass. On a recent
+  verification run of the same gate suite, the 4,000-event batch applied in
+  7.52 ms on average, or approximately 532,000 events per second.
+
+## Scope and terminology
+
+The report uses the following names consistently:
+
+- **Paper DT:** the optimized Rust Eg-walker implementation in Diamond Types.
+- **Reference CRDT:** the paper authors' CRDT implementation sharing much of
+  Paper DT's infrastructure, included to reduce implementation-level bias.
+- **SoftMaple raw ingest:** reading a paper JSON trace, converting paper
+  positions and operations, allocating TypeScript event objects, and applying
+  them through the public remote-event API.
+- **SoftMaple native graph load:** decoding the EGW3 graph representation,
+  constructing a replica, and replaying it to obtain the current text.
+- **SoftMaple portable snapshot:** paper-aligned `EGWP1` persistence containing
+  current text and the event graph, but no temporary CRDT replay state.
+- **SoftMaple native snapshot:** optional `EGWS1` resume state containing
+  already-available runtime indexes and checkpoints.
+- **Yjs native update:** applying a precomputed Yjs binary update through
+  `Y.applyUpdateV2`.
+
+Raw ingest and native update are different workloads. A raw-ingest result must
+not be presented as an algorithmic win or loss against Yjs native loading.
+
+## Engineering retrospective
+
+The reference commit is not a small optimization patch. It changes 158 files,
+adds approximately 39,000 lines, and touches the event graph, replay engine,
+text storage, persistence formats, network synchronization, conformance tests,
+property tests, and benchmark infrastructure.
+
+The central engineering challenge was not simply implementing the paper's
+prepare/effect loop. It was preserving the meaning of that loop across
+JavaScript-specific boundaries while removing enough object allocation and
+repeated graph work to make large traces practical.
+
+### The architectural boundary
+
+SoftMaple separates three kinds of state:
+
+1. **Durable document state:** current text and the event graph.
+2. **Temporary replay state:** sequence records, placeholders, delete-target
+   indexes, and traversal state needed while crossing concurrent history.
+3. **Optional resume state:** a runtime optimization that can restore
+   already-built replay indexes without claiming to be the paper-minimal
+   persistent format.
+
+That distinction drives both the implementation and the benchmarks. Portable
+`EGWP1` snapshots represent the first category. Native `EGWS1` snapshots may
+include the third. Temporary replay structures do not silently become required
+durable metadata.
+
+### Convergence before speed
+
+The first gate was semantic: a valid event graph must converge independently of
+delivery order and topological traversal order.
+
+The commit addresses this through:
+
+- deterministic and transitive event-ID ordering;
+- preservation of paper-trace agent identity;
+- insertion integration against the event's parent view;
+- an independent scalar replay oracle;
+- delivery-order and traversal-order differential tests;
+- property tests covering batch application, pending dependencies, packed
+  replay, snapshots, and randomized suffixes.
+
+The external conformance lane pins the paper authors' reference corpus and
+checks 1,000 cases containing 91,678 atomic operations. This made correctness a
+prerequisite for every optimization rather than a final smoke test.
+
+### Atomic remote integration
+
+Remote changes naturally arrive in batches, but the original single-event
+shape repeatedly planned replay and could expose partial state when a later
+event was invalid.
+
+`applyRemoteEvents` now treats a batch as a staged transaction:
+
+1. Clone and validate event IDs, parents, operations, and UTF-16 boundaries.
+2. Stage graph changes, frontier updates, and missing-parent queues.
+3. Drain causally ready events through an iterative work queue.
+4. Apply the resulting text and replay changes against staged state.
+5. Commit graph, text, frontier, pending events, checkpoints, caches, and
+   diagnostics together.
+
+If validation or replay fails, no observable state is committed. The playground
+protocol was updated at the same time to exchange frontiers and known event IDs,
+calculate causal differences, and send JSON-safe parent arrays rather than
+serializing JavaScript `Set` objects.
+
+Atomic batching improves correctness, but it is also a performance primitive:
+the engine sees enough context to build one replay plan for a network batch.
+
+### Persistent text instead of repeated string splices
+
+JavaScript strings are immutable. Replaying thousands of inserts and deletes
+with repeated slicing can copy large prefixes and suffixes, while materialized
+checkpoint strings multiply memory use.
+
+SoftMaple moved current text and checkpoint text to structurally shared UTF-16
+ropes:
+
+- immutable roots make checkpoints cheap;
+- edits copy only paths to affected leaves;
+- unchanged chunks are shared across versions;
+- a transient form batches replay edits;
+- `getText()` flattens lazily and caches the result.
+
+The rope remains plain text storage. CRDT records refer to edits against it
+rather than becoming the document representation themselves.
+
+### Indexed and packed nonlinear replay
+
+Correct object-oriented replay still allocated too much and repeatedly scanned
+large graph regions. The optimized path therefore stays in compact numeric
+representations for as long as possible:
+
+- packed event-graph columns;
+- one-pass edge construction;
+- run-based event-ID lookup;
+- packed version differences and ranked replay order;
+- Euler-rank ancestry indexes;
+- segmented placeholders;
+- packed delete-target arenas;
+- batched typed runs and replay spans;
+- reusable traversal and tree-update scratch storage.
+
+Concurrent insert placement moved to `FugueOrderIndex`, which combines stable
+order-maintenance labels with deterministic indexed sibling ordering. The
+original linear integration logic remains as a test oracle, not the production
+hot path.
+
+The broader lesson was that the largest wins came from removing graph-wide work
+and per-event object construction. Micro-optimizing a loop mattered less than
+changing how often the loop had to run and what it operated on.
+
+### Persistence as two explicit products
+
+The paper's compact state and a fast process-resume image solve different
+problems. Treating them as one format would either make portable documents
+unnecessarily large or make resume benchmarks hide a full replay.
+
+SoftMaple exposes both:
+
+- `EGWP1` is portable, paper-aligned state: current text plus the event graph;
+- `EGWS1` is optional native resume state: compact runtime indexes and retained
+  checkpoints when they are already available.
+
+Benchmark output separates byte decode, lazy replica construction, explicit
+event-graph materialization, and native restoration. Native restore is required
+to report zero full replays.
+
+### The hardest bugs lived at representation boundaries
+
+Several of the most consequential failures were not mistakes in the headline
+algorithm. They appeared between representations:
+
+- paper offsets count Unicode scalar values; JavaScript APIs use UTF-16 code
+  units;
+- one paper transaction may contain many atomic events; a public edit may be a
+  compound operation;
+- an event's position belongs to its parent frontier, not necessarily the
+  receiver's current text;
+- in-memory parent sets are not directly JSON-serializable;
+- lazy decoded bytes must not remain accidentally mutable through caller-owned
+  buffers;
+- restored resume state must describe the same frontier as the persisted graph;
+- typed-run splits must update every dependent index atomically.
+
+This is why conformance, rollback, Unicode, snapshot, and differential tests
+belong in the engineering story. A faster replay that changes one character is
+not a performance improvement.
+
+## Test environments
+
+### Paper artifact
+
+The official comparison was collected on:
+
+- AMD Ryzen 7950X;
+- Linux 6.5;
+- 64 GB RAM;
+- Rust 1.78 in release mode with `-C target-cpu=native`;
+- Rust benchmarks pinned to one CPU core;
+- Node.js 22.2.0 for Yjs;
+- at least 100 iterations for reported timing results, except the hour-long OT
+  A2 case, which used 10.
+
+The paper reports standard deviation below 1.2% of the mean for the native
+benchmarks and below 6% for Yjs.
+
+### SoftMaple local baselines
+
+The SoftMaple results recorded with the reference commit were collected on:
+
+- Apple M1;
+- macOS;
+- 16 GB RAM;
+- Node.js 24.12.0.
+
+The operation-level verification figures in this report use three runs per
+case. Small cases remain sensitive to JIT warm-up and garbage collection, so
+they should be treated as regression signals rather than universal throughput
+claims.
+
+## Dataset characteristics
+
+The paper artifact contains seven editing traces:
+
+| Dataset | Shape        | Events | Average concurrency | Graph runs | Authors | Final document |
+| ------- | ------------ | -----: | ------------------: | ---------: | ------: | -------------: |
+| S1      | Sequential   |   779k |                0.00 |          1 |       2 |      307.2 KiB |
+| S2      | Sequential   | 1,105k |                0.00 |          1 |       1 |      166.3 KiB |
+| S3      | Sequential   | 2,339k |                0.00 |          1 |       2 |      119.5 KiB |
+| C1      | Concurrent   |   652k |                0.43 |     92,101 |       2 |      521.5 KiB |
+| C2      | Concurrent   |   608k |                0.44 |    133,626 |       2 |      516.3 KiB |
+| A1      | Asynchronous |   947k |                0.10 |        101 |     194 |       37.2 KiB |
+| A2      | Asynchronous |   698k |                6.11 |      2,430 |     299 |      222.0 KiB |
+
+S1–S3 exercise long non-conflicting histories. C1 and C2 contain many
+short-lived concurrent branches. A1 and A2 model Git-style asynchronous
+branches, with A2 having by far the highest average concurrency.
+
+## Complete paper-artifact timing comparison
+
+The following table reports mean time in milliseconds to merge the complete
+remote trace. Lower is better. Yrs is included because its results exist in the
+artifact, although the paper omits it from the final chart to save space.
+
+| Dataset | Paper DT | Reference CRDT |   Yjs |       Yrs | Automerge |           OT |
+| ------- | -------: | -------------: | ----: | --------: | --------: | -----------: |
+| S1      | **1.77** |          17.87 | 57.41 |      8.06 |    620.31 |         2.35 |
+| S2      | **2.68** |          19.08 | 85.18 |     11.17 |    747.24 |         2.84 |
+| S3      | **3.58** |          26.89 | 79.93 |      9.47 |  1,444.17 |         3.79 |
+| C1      |    56.14 |          52.45 | 84.11 | **11.78** | 11,848.03 |       365.50 |
+| C2      |    82.64 |          64.17 | 55.24 |  **8.69** | 24,636.28 |       378.43 |
+| A1      | **8.86** |          42.65 | 88.38 |     11.87 |    484.55 |     6,266.46 |
+| A2      |    23.47 |          26.18 | 74.19 | **12.80** |    519.80 | 3,664,266.29 |
+
+### Relative performance
+
+| Dataset | DT vs reference CRDT |    DT vs Yjs | DT vs Automerge |        DT vs OT |
+| ------- | -------------------: | -----------: | --------------: | --------------: |
+| S1      |         10.1× faster | 32.5× faster |     351× faster |     1.3× faster |
+| S2      |          7.1× faster | 31.8× faster |     279× faster |     1.1× faster |
+| S3      |          7.5× faster | 22.3× faster |     404× faster |     1.1× faster |
+| C1      |          1.1× slower |  1.5× faster |     211× faster |     6.5× faster |
+| C2      |          1.3× slower |  1.5× slower |     298× faster |     4.6× faster |
+| A1      |          4.8× faster | 10.0× faster |    54.7× faster |     707× faster |
+| A2      |          1.1× faster |  3.2× faster |    22.1× faster | 156,000× faster |
+
+The sequential results demonstrate the value of clearing temporary replay state
+at critical versions. The concurrent results show the opposite side of the
+algorithm: when the graph contains many live branches, Eg-walker performs work
+similar to a conventional sequence CRDT.
+
+A2 exposes OT's quadratic long-branch behavior. It also shows that Eg-walker is
+not automatically the fastest implementation on every graph: Yrs completes A2
+in 12.80 ms versus 23.47 ms for Paper DT.
+
+### Optimized document load
+
+Paper DT can persist the current document text separately from replay state.
+Its optimized load times are:
+
+| Dataset | Optimized Paper DT load |
+| ------- | ----------------------: |
+| S1      |                0.068 ms |
+| S2      |                0.037 ms |
+| S3      |                0.029 ms |
+| C1      |                0.121 ms |
+| C2      |                0.112 ms |
+| A1      |                0.012 ms |
+| A2      |                0.052 ms |
+
+These numbers are not remote-merge times. They demonstrate the architectural
+benefit of loading cached current text without first materializing all
+historical CRDT metadata.
+
+## Complete paper-artifact memory comparison
+
+Each cell is `peak / steady-state` memory in MiB.
+
+| Dataset |         Paper DT |  Reference CRDT |           Yjs |           Yrs |         Automerge |              OT |
+| ------- | ---------------: | --------------: | ------------: | ------------: | ----------------: | --------------: |
+| S1      |  **4.50 / 0.57** |   13.71 / 11.12 | 29.52 / 29.52 |   8.93 / 7.30 |   302.75 / 279.92 |    46.77 / 0.57 |
+| S2      |  **7.10 / 0.31** |     8.35 / 8.07 | 36.26 / 36.26 |  11.44 / 9.42 |   540.86 / 406.25 |    23.65 / 0.31 |
+| S3      | 14.21 / **0.22** |   14.26 / 12.42 | 45.21 / 45.21 |  11.93 / 9.94 | 1,036.12 / 808.67 |    24.14 / 0.22 |
+| C1      | 65.36 / **0.97** |   35.33 / 29.43 | 37.52 / 37.52 | 13.11 / 11.07 |   477.67 / 440.84 |   321.39 / 0.97 |
+| C2      | 75.81 / **0.96** |   33.36 / 32.46 | 27.32 / 27.32 |   8.85 / 7.52 |   586.26 / 487.22 |   322.07 / 0.96 |
+| A1      |  **7.31 / 0.07** |    11.16 / 9.84 | 51.02 / 51.02 | 12.22 / 10.56 |   262.99 / 229.73 |    33.27 / 0.07 |
+| A2      |  7.64 / **0.41** | **6.77 / 6.18** | 41.47 / 41.47 |   9.58 / 8.19 |   295.77 / 258.11 | 6,449.54 / 0.41 |
+
+### Memory interpretation
+
+- Paper DT's steady state is 0.07–0.97 MiB because temporary merge structures
+  can be discarded.
+- Yjs retains 27–51 MiB across the same traces, approximately 29–730× Paper
+  DT's steady-state footprint.
+- Automerge retains 230–809 MiB, approximately two to three orders of magnitude
+  more than Paper DT.
+- Paper DT's peak rises to 65–76 MiB for C1/C2 because replay must represent
+  substantial concurrency.
+- OT shares Eg-walker's compact steady-state shape, but reaches approximately
+  6.3 GiB at peak on A2 due to memoized transformations.
+
+Peak and steady-state values describe different product experiences. Peak
+matters when importing or reconstructing a large history; steady state matters
+for every open document during normal editing.
+
+## Complete paper-artifact storage comparison
+
+The following figures are KiB:
+
+| Dataset | DT full history | DT compact comparison form |   Yjs | Automerge, uncompressed |
+| ------- | --------------: | -------------------------: | ----: | ----------------------: |
+| S1      |           309.0 |                  **189.8** | 468.5 |                   857.3 |
+| S2      |           460.4 |                  **146.1** | 396.1 |                 1,145.5 |
+| S3      |           712.1 |                  **199.3** | 310.3 |                 1,860.6 |
+| C1      |       **456.0** |                      452.3 | 825.5 |                 1,535.5 |
+| C2      |       **660.7** |                      656.6 | 708.7 |                 1,691.5 |
+| A1      |           327.1 |                  **128.0** | 301.2 |                 1,411.7 |
+| A2      |           310.6 |                  **195.7** | 494.3 |                 1,087.4 |
+
+The full DT event history is smaller than uncompressed Automerge on every
+trace. The compact DT comparison form is smaller than Yjs on all seven traces,
+although the margin narrows for C2 because a highly concurrent event graph has
+many edges to encode.
+
+Compression policy matters. The paper disables DT's LZ4 and Automerge's gzip
+for the like-for-like storage comparison. These figures therefore describe
+format overhead rather than the smallest possible archive.
+
+## SoftMaple TypeScript performance
+
+### Full-trace raw-ingest baseline
+
+The reference commit records the following three-run Apple M1 baselines:
+
+| Workload                            | Mean total time | Native graph decode | Native graph load |
+| ----------------------------------- | --------------: | ------------------: | ----------------: |
+| S1, full patch import stress        |          8.74 s |             0.245 s |            7.74 s |
+| S2, full patch import stress        |         15.36 s |             0.097 s |           14.89 s |
+| S3, full patch import stress        |         25.51 s |             0.125 s |           25.49 s |
+| A1, full patch import stress        |         42.09 s |             0.060 s |            5.73 s |
+| C1, first 3,000 txns                |          1.57 s |                   — |           0.048 s |
+| C2, first 3,000 txns                |          1.52 s |                   — |           0.033 s |
+| A2, first 300 txns, operation-level |         10.90 s |             0.039 s |           0.315 s |
+
+The first four rows use the explicitly labelled patch-level import-stress lane.
+They are useful for tracking implementation regressions but are not
+paper-conformant timing results. Operation-level conversion emits one event per
+paper keystroke and is required for faithful concurrent/asynchronous reporting.
+
+The gap between EGW3 decode and native graph load shows that decoding bytes is
+not the dominant full sequential cost. Reconstructing and materializing replay
+state is.
+
+For A1 and bounded A2, native graph load is much faster than raw ingest. Their
+dominant cost is JSON conversion and per-event application rather than byte
+decode.
+
+### Concurrent replay improvement
+
+Before checkpoint and replay-order optimization, the bounded C1/C2 cases took
+approximately 4.5 seconds. Avoiding repeated full checkpoint ancestry
+expansion reduced them to approximately 2.0 seconds. Reusing the already
+computed partial-replay suffix order reduced them again:
+
+| Workload             | Earlier baseline | After checkpoint optimization | Final baseline |
+| -------------------- | ---------------: | ----------------------------: | -------------: |
+| C1, first 3,000 txns |           4.55 s |                        2.10 s |     **1.57 s** |
+| C2, first 3,000 txns |           4.47 s |                        2.05 s |     **1.52 s** |
+
+The resulting improvement is approximately 2.9× for both traces.
+
+The larger 10,000-transaction smoke cases complete in 16.37 seconds for C1 and
+14.85 seconds for C2. They are practical profiling targets but remain too slow
+for routine CI.
+
+### Native snapshot evolution
+
+The native snapshot lane measures an optional runtime extension, not the
+paper-minimal portable format.
+
+Initial snapshot adoption produced:
+
+| Dataset | Snapshot decode | Snapshot restore | Snapshot size |
+| ------- | --------------: | ---------------: | ------------: |
+| S1      |         0.575 s |          1.226 s |      159.9 MB |
+| S2      |         0.797 s |          1.145 s |      178.4 MB |
+| S3      |         2.470 s |          4.028 s |      346.5 MB |
+| A1      |         0.452 s |          1.017 s |      137.6 MB |
+
+After moving runtime state into compact binary columns, eliminating avoidable
+section copies, keeping content bytes as views, and deferring event indexes,
+the final recorded baseline became:
+
+| Dataset | Snapshot decode | Snapshot restore | Snapshot size | Decode heap | Restore heap |
+| ------- | --------------: | ---------------: | ------------: | ----------: | -----------: |
+| S1      |         0.258 s |          0.116 s |       35.7 MB |       54 MB |        72 MB |
+| S2      |         0.478 s |          0.107 s |       32.6 MB |       48 MB |        71 MB |
+| S3      |         0.788 s |          0.191 s |       62.4 MB |       89 MB |       135 MB |
+| A1      |         0.166 s |          0.087 s |       24.0 MB |       33 MB |        55 MB |
+
+The change is substantial:
+
+- S1 restore improved about 10.6× and snapshot size fell 77.7%.
+- S2 restore improved about 10.7× and snapshot size fell 81.7%.
+- S3 restore improved about 21.1× and snapshot size fell 82.0%.
+- A1 restore improved about 11.7× and snapshot size fell 82.6%.
+
+Every final gate case reported zero full replays after native snapshot restore.
+
+### Calibrated operation-level gates
+
+The reference commit adds fixed S1 operation-level gates at 1,000, 2,000, and
+4,000 events. A three-run verification on Apple M1 produced:
+
+| Events | Mean apply | Approx. throughput | Mean total | EGW3 decode | EGW3 load | Portable bytes |
+| -----: | ---------: | -----------------: | ---------: | ----------: | --------: | -------------: |
+|  1,000 |    3.10 ms |      323k events/s |   28.73 ms |     1.11 ms |   0.51 ms |       5.11 KiB |
+|  2,000 |    2.33 ms |      858k events/s |   19.48 ms |     0.25 ms |   0.18 ms |       9.66 KiB |
+|  4,000 |    7.52 ms |      532k events/s |   24.73 ms |     0.28 ms |   1.40 ms |      17.49 KiB |
+
+The 4,000-event case also reported:
+
+- portable decode: 0.16 ms;
+- lazy portable restore: 0.09 ms;
+- explicit graph materialization: 24.35 ms;
+- portable snapshot heap delta: approximately 0.70 MiB;
+- native snapshot size: approximately 6.62 KiB;
+- native snapshot heap delta: approximately 0.15 MiB;
+- 4,000 incremental applies;
+- zero retreats, advances, partial replays, or full replays.
+
+The non-monotonic 1k/2k results demonstrate why these values should not be
+treated as a polished microbenchmark. At this scale, bundling, JIT warm-up,
+garbage collection, and filesystem conversion overhead are visible. The gates
+are still valuable because they bound bytes, decode, restore, materialization,
+and heap on a fixed development machine.
+
+## Bottleneck analysis
+
+### Sequential traces
+
+Sequential edits predominantly use the incremental fast path. The remaining
+full-history cost is replay and materialization, not binary decoding. Persistent
+ropes and typed runs reduce the amount of copied text and per-character state,
+but operation-level full S1–S3 still represents 779,000 to 2.34 million atomic
+events.
+
+### Concurrent traces
+
+C1/C2 stress:
+
+- version difference calculation;
+- retreat/advance planning;
+- Fugue sibling integration;
+- ranked sequence weight updates;
+- delete-target lookup;
+- checkpoint selection.
+
+The largest measured improvement came from removing repeated graph-wide work,
+not from micro-optimizing individual array operations. After that change, the
+remaining cost is distributed across several indexed structures.
+
+### Asynchronous A2
+
+A2 is both a correctness and scalability challenge. Later operations may refer
+to positions inside a long earlier insertion, so collapsing that insertion into
+one compound event is not faithful. The correct operation-level path expands
+the trace to atomic events.
+
+A 300-transaction sample contains approximately 46,540 events and takes about
+11 seconds. A 600-transaction sample contains approximately 95,257 events and
+takes about 130 seconds. Full operation-level A2 is therefore not yet a routine
+benchmark target for the TypeScript implementation.
+
+### Persistence
+
+Portable snapshot byte decode and lazy replica construction are fast.
+Materializing the event graph is more expensive, as shown by the 24.35 ms
+materialization time in the 4,000-event gate.
+
+Native resume snapshots eliminate full replay, but they trade additional bytes
+for faster restoration. Reporting them separately is essential: otherwise a
+runtime cache can be mistaken for the compact durable format described by the
+paper.
+
+## Correctness gates behind the numbers
+
+The benchmark fails if:
+
+- remote events remain buffered;
+- an unbounded faithful trace does not match its expected final text;
+- portable snapshot round-trip changes the text or event count;
+- native snapshot restoration performs a full replay;
+- native binary encode/decode fails to reproduce the graph.
+
+Additional validation includes:
+
+- the pinned paper conformance corpus;
+- independent scalar replay;
+- traversal-order convergence;
+- randomized delivery;
+- batch rollback;
+- missing-parent buffering;
+- packed versus object replay differentials;
+- randomized edits after snapshot restoration;
+- UTF-16 and surrogate-pair boundary checks.
+
+These checks are part of the performance story. Optimizations to graph order,
+typed runs, or lazy state are unsafe unless convergence remains invariant.
+
+## Engineering lessons
+
+Four lessons from the work apply beyond Eg-walker.
+
+First, benchmark boundaries are part of the API. JSON import, native update
+application, graph decoding, lazy restoration, and full materialization answer
+different product questions. Combining them into one number makes both
+optimization and comparison less useful.
+
+Second, correctness oracles enable aggressive optimization. The packed replay
+path could replace object graphs and linear scans because an independent scalar
+implementation, differential indexes, and randomized delivery tests remained
+available to challenge it.
+
+Third, representation changes beat isolated micro-optimizations. The largest
+improvements came from eliminating repeated ancestry expansion, using shared
+rope roots, keeping graph data packed, and postponing object materialization.
+
+Finally, persistent truth should be smaller than runtime convenience. The
+portable/native snapshot split makes that rule visible. Fast resume state is
+valuable, but it should remain optional and honestly measured.
+
+## Limitations
+
+1. **Different hardware:** Paper DT and SoftMaple were measured on different
+   CPU architectures and operating systems.
+2. **Different runtimes:** optimized Rust and Node.js have fundamentally
+   different allocation and warm-up behavior.
+3. **Different inputs:** Yjs native update, SoftMaple raw JSON ingest, EGW3
+   graph load, and snapshot restore are distinct operations.
+4. **Historical patch results:** the full SoftMaple S1/S2/S3/A1 baseline uses
+   patch-level import stress. It must not be labelled paper-conformant.
+5. **Limited operation-level scale:** current calibrated gates stop at 4,000
+   events; full faithful traces contain hundreds of thousands or millions.
+6. **Small sample count:** the local verification uses three runs, unlike the
+   paper's 100 or more.
+7. **Memory measurement:** Node heap deltas do not include every form of native
+   or process memory and can vary with garbage collection.
+
+## Conclusions
+
+Commit `1bc089be4ec063491996fefcdd6d4f45ade1a144` establishes a credible
+performance baseline for SoftMaple Eg-walker:
+
+- paper datasets and operation semantics are represented explicitly;
+- raw ingest, native graph load, portable persistence, and native resume state
+  are measured separately;
+- concurrent replay smoke tests improved by approximately 2.9×;
+- native snapshot restore improved by roughly 10–21× across the full recorded
+  traces;
+- full snapshot sizes fell by approximately 78–83%;
+- native restoration no longer performs a full replay;
+- fixed operation-level performance and memory gates now protect the portable
+  persistence path.
+
+The implementation does not yet match the paper's optimized Rust runtime, nor
+does the available evidence justify such a claim. Its strongest result is
+methodological: performance is now reproducible, correctness-gated, and divided
+into honest phases. That makes future optimization measurable rather than
+anecdotal.
+
+The next benchmark milestone should be a fixed-machine, repeated,
+operation-level baseline for full S1, S2, S3, and A1, followed by profiles of
+full C1/C2 and a scalable faithful A2 conversion path.
+
+## Reproduction
+
+Build and test the package:
+
+```bash
+pnpm --filter @softmaple/eg-walker build
+pnpm --filter @softmaple/eg-walker test
+pnpm --filter @softmaple/eg-walker typecheck
+```
+
+Run the calibrated operation-level persistence gates:
+
+```bash
+pnpm --filter @softmaple/eg-walker paper-bench -- \
+  --phase6-gates \
+  --memory \
+  --runs 3
+```
+
+Run bounded concurrent smoke tests:
+
+```bash
+pnpm --filter @softmaple/eg-walker paper-bench -- \
+  --datasets C1,C2 \
+  --runs 3 \
+  --max-txns 3000
+```
+
+Run the faithful bounded A2 case:
+
+```bash
+pnpm --filter @softmaple/eg-walker paper-bench -- \
+  --datasets A2 \
+  --runs 3 \
+  --max-txns 300 \
+  --granularity operation
+```
+
+## Sources
+
+- [SoftMaple reference commit](https://github.com/softmaple/softmaple/commit/1bc089be4ec063491996fefcdd6d4f45ade1a144)
+- [SoftMaple paper benchmark documentation](https://github.com/softmaple/softmaple/blob/1bc089be4ec063491996fefcdd6d4f45ade1a144/packages/eg-walker/PAPER_BENCHMARKS.md)
+- [Collaborative Text Editing with Eg-walker: Better, Faster, Smaller](https://arxiv.org/abs/2409.14252)
+- [Eg-walker paper artifact](https://github.com/josephg/egwalker-paper)

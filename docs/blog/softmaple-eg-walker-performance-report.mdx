@@ -25,6 +25,11 @@ artifact.
 > merged through [PR #801](https://github.com/softmaple/softmaple/pull/801).
 >
 > **Engineering credit:** Codex 5.6 Sol Ultra goal.
+>
+> **Measurement note:** The official comparison tooling was rerun on the
+> current machine and its working results were updated. This report uses that
+> current-machine refresh where populated and labels retained publication
+> values explicitly.
 
 The headline result is that the implementation now has a reproducible,
 paper-aligned benchmark framework, fast incremental and snapshot restore paths,
@@ -41,10 +46,11 @@ implementation. The useful comparisons are:
 
 - In the paper's official benchmark, Rust Eg-walker merges sequential traces in
   1.77–3.58 ms. It is approximately 7–10× faster than the like-for-like
-  reference CRDT and 22–33× faster than Yjs on those traces.
+  reference CRDT. Against the current-machine Yjs refresh, it is approximately
+  20–30× faster on those traces.
 - On the asynchronous A1 trace, Paper DT is 4.8× faster than the reference CRDT,
-  about 10× faster than Yjs, and about 707× faster than the tested OT
-  implementation.
+  about 8.7× faster than the refreshed Yjs baseline, and about 707× faster than
+  the tested OT implementation.
 - On A2, Paper DT finishes in 23.47 ms while OT takes about 61 minutes, a
   difference of roughly 156,000×.
 - Highly concurrent C1 and C2 remain the difficult shape for Eg-walker. Paper DT
@@ -235,7 +241,7 @@ not a performance improvement.
 
 ## Test environments
 
-### Paper artifact
+### Published paper artifact
 
 The official comparison was collected on:
 
@@ -250,6 +256,26 @@ The official comparison was collected on:
 
 The paper reports standard deviation below 1.2% of the mean for the native
 benchmarks and below 6% for Yjs.
+
+### Current-machine refresh
+
+The official comparison tooling has also been rerun on the current Apple M1
+machine, and the artifact's working results have been updated. The populated
+refresh available for this report is the Yjs lane:
+
+- Apple M1;
+- macOS;
+- 16 GB RAM;
+- Node.js 24.12.0;
+- all seven S/C/A paper datasets;
+- updated CPU samples in `results/js.json` and `results/timings.json`;
+- updated memory samples in `results/yjs_memusage.json`.
+
+The native Rust, Automerge, Yrs, and OT lanes are currently empty in the
+refreshed working `timings.json`, so this report does not invent
+current-machine values for them. The complete comparison tables retain the
+paper's published values for those systems and use the refreshed local values
+for Yjs. Every table below marks this mixed provenance explicitly.
 
 ### SoftMaple local baselines
 
@@ -288,28 +314,30 @@ branches, with A2 having by far the highest average concurrency.
 The following table reports mean time in milliseconds to merge the complete
 remote trace. Lower is better. Yrs is included because its results exist in the
 artifact, although the paper omits it from the final chart to save space.
+Paper DT, Reference CRDT, Yrs, Automerge, and OT are the artifact's published
+values; the Yjs column is the updated current-machine rerun.
 
-| Dataset | Paper DT | Reference CRDT |   Yjs |       Yrs | Automerge |           OT |
-| ------- | -------: | -------------: | ----: | --------: | --------: | -----------: |
-| S1      | **1.77** |          17.87 | 57.41 |      8.06 |    620.31 |         2.35 |
-| S2      | **2.68** |          19.08 | 85.18 |     11.17 |    747.24 |         2.84 |
-| S3      | **3.58** |          26.89 | 79.93 |      9.47 |  1,444.17 |         3.79 |
-| C1      |    56.14 |          52.45 | 84.11 | **11.78** | 11,848.03 |       365.50 |
-| C2      |    82.64 |          64.17 | 55.24 |  **8.69** | 24,636.28 |       378.43 |
-| A1      | **8.86** |          42.65 | 88.38 |     11.87 |    484.55 |     6,266.46 |
-| A2      |    23.47 |          26.18 | 74.19 | **12.80** |    519.80 | 3,664,266.29 |
+| Dataset | Paper DT (published) | Reference CRDT (published) | Yjs (current machine) | Yrs (published) | Automerge (published) | OT (published) |
+| ------- | -------------------: | -------------------------: | --------------------: | --------------: | --------------------: | -------------: |
+| S1      |             **1.77** |                      17.87 |                 50.81 |            8.06 |                620.31 |           2.35 |
+| S2      |             **2.68** |                      19.08 |                 79.59 |           11.17 |                747.24 |           2.84 |
+| S3      |             **3.58** |                      26.89 |                 71.57 |            9.47 |              1,444.17 |           3.79 |
+| C1      |                56.14 |                      52.45 |                 79.18 |       **11.78** |             11,848.03 |         365.50 |
+| C2      |                82.64 |                      64.17 |                 48.86 |        **8.69** |             24,636.28 |         378.43 |
+| A1      |             **8.86** |                      42.65 |                 77.12 |           11.87 |                484.55 |       6,266.46 |
+| A2      |                23.47 |                      26.18 |                 65.63 |       **12.80** |                519.80 |   3,664,266.29 |
 
 ### Relative performance
 
 | Dataset | DT vs reference CRDT |    DT vs Yjs | DT vs Automerge |        DT vs OT |
 | ------- | -------------------: | -----------: | --------------: | --------------: |
-| S1      |         10.1× faster | 32.5× faster |     351× faster |     1.3× faster |
-| S2      |          7.1× faster | 31.8× faster |     279× faster |     1.1× faster |
-| S3      |          7.5× faster | 22.3× faster |     404× faster |     1.1× faster |
-| C1      |          1.1× slower |  1.5× faster |     211× faster |     6.5× faster |
-| C2      |          1.3× slower |  1.5× slower |     298× faster |     4.6× faster |
-| A1      |          4.8× faster | 10.0× faster |    54.7× faster |     707× faster |
-| A2      |          1.1× faster |  3.2× faster |    22.1× faster | 156,000× faster |
+| S1      |         10.1× faster | 28.8× faster |     351× faster |     1.3× faster |
+| S2      |          7.1× faster | 29.7× faster |     279× faster |     1.1× faster |
+| S3      |          7.5× faster | 20.0× faster |     404× faster |     1.1× faster |
+| C1      |          1.1× slower |  1.4× faster |     211× faster |     6.5× faster |
+| C2      |          1.3× slower |  1.7× slower |     298× faster |     4.6× faster |
+| A1      |          4.8× faster |  8.7× faster |    54.7× faster |     707× faster |
+| A2      |          1.1× faster |  2.8× faster |    22.1× faster | 156,000× faster |
 
 The sequential results demonstrate the value of clearing temporary replay state
 at critical versions. The concurrent results show the opposite side of the
@@ -341,17 +369,19 @@ historical CRDT metadata.
 
 ## Complete paper-artifact memory comparison
 
-Each cell is `peak / steady-state` memory in MiB.
+Each cell is `peak / steady-state` memory in MiB. As with the timing table, the
+Yjs column contains the updated current-machine measurement; all other columns
+retain the artifact's published results.
 
-| Dataset |         Paper DT |  Reference CRDT |           Yjs |           Yrs |         Automerge |              OT |
-| ------- | ---------------: | --------------: | ------------: | ------------: | ----------------: | --------------: |
-| S1      |  **4.50 / 0.57** |   13.71 / 11.12 | 29.52 / 29.52 |   8.93 / 7.30 |   302.75 / 279.92 |    46.77 / 0.57 |
-| S2      |  **7.10 / 0.31** |     8.35 / 8.07 | 36.26 / 36.26 |  11.44 / 9.42 |   540.86 / 406.25 |    23.65 / 0.31 |
-| S3      | 14.21 / **0.22** |   14.26 / 12.42 | 45.21 / 45.21 |  11.93 / 9.94 | 1,036.12 / 808.67 |    24.14 / 0.22 |
-| C1      | 65.36 / **0.97** |   35.33 / 29.43 | 37.52 / 37.52 | 13.11 / 11.07 |   477.67 / 440.84 |   321.39 / 0.97 |
-| C2      | 75.81 / **0.96** |   33.36 / 32.46 | 27.32 / 27.32 |   8.85 / 7.52 |   586.26 / 487.22 |   322.07 / 0.96 |
-| A1      |  **7.31 / 0.07** |    11.16 / 9.84 | 51.02 / 51.02 | 12.22 / 10.56 |   262.99 / 229.73 |    33.27 / 0.07 |
-| A2      |  7.64 / **0.41** | **6.77 / 6.18** | 41.47 / 41.47 |   9.58 / 8.19 |   295.77 / 258.11 | 6,449.54 / 0.41 |
+| Dataset | Paper DT (published) | Reference CRDT (published) | Yjs (current machine) | Yrs (published) | Automerge (published) |  OT (published) |
+| ------- | -------------------: | -------------------------: | --------------------: | --------------: | --------------------: | --------------: |
+| S1      |      **4.50 / 0.57** |              13.71 / 11.12 |         29.52 / 29.52 |     8.93 / 7.30 |       302.75 / 279.92 |    46.77 / 0.57 |
+| S2      |      **7.10 / 0.31** |                8.35 / 8.07 |         36.26 / 36.26 |    11.44 / 9.42 |       540.86 / 406.25 |    23.65 / 0.31 |
+| S3      |     14.21 / **0.22** |              14.26 / 12.42 |         45.21 / 45.21 |    11.93 / 9.94 |     1,036.12 / 808.67 |    24.14 / 0.22 |
+| C1      |     65.36 / **0.97** |              35.33 / 29.43 |         37.52 / 37.52 |   13.11 / 11.07 |       477.67 / 440.84 |   321.39 / 0.97 |
+| C2      |     75.81 / **0.96** |              33.36 / 32.46 |         27.32 / 27.32 |     8.85 / 7.52 |       586.26 / 487.22 |   322.07 / 0.96 |
+| A1      |      **7.31 / 0.07** |               11.16 / 9.84 |         51.02 / 51.02 |   12.22 / 10.56 |       262.99 / 229.73 |    33.27 / 0.07 |
+| A2      |      7.64 / **0.41** |            **6.77 / 6.18** |         41.47 / 41.47 |     9.58 / 8.19 |       295.77 / 258.11 | 6,449.54 / 0.41 |
 
 ### Memory interpretation
 

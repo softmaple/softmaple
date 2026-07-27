@@ -11,7 +11,7 @@
   <a href="https://discord.gg/Vwsuqq7dQD"><img src="https://img.shields.io/discord/922309919158456330.svg" alt="Discord Chat" /></a>
   <a href= "https://github.com/prettier/prettier"><img alt="code style: prettier" src="https://img.shields.io/badge/code_style-prettier-ff69b4.svg"></a>
   <a href="#license"><img src="https://img.shields.io/github/license/softmaple/softmaple.svg"></a>
-  <a href="https://gitpod.io/#https://github.com/softmaple/softmaple"><img src="https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod" alt="Gitpod Ready-to-Code"/></a>
+  <a href="https://app.ona.com/#https://github.com/softmaple/softmaple"><img src="https://ona.com/build-with-ona.svg" alt="Build with Ona"/></a>
 </p>
 
 ## Star History

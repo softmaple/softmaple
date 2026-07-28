@@ -178,7 +178,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@biomejs/biome": "2.3.11",
+    "@biomejs/biome": "2.3.15",
     "@chromatic-com/storybook": "^5.1.2",
     "@softmaple/typescript-config": "workspace:*",
     "@storybook/addon-a11y": "^10.3.6",

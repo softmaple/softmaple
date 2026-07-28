@@ -33,10 +33,10 @@
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.18",
-    "@turbo/gen": "^2.9.12",
+    "@turbo/gen": "^2.10.7",
     "@types/node": "^24.10.4",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3"
   },

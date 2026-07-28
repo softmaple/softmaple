@@ -1,12 +1,9 @@
 ---
 name: javascript-testing-expert
-description: Property-based JavaScript testing skill for writing, reviewing, and debugging fast-check or @fast-check/vitest tests. Use it for shrinkable generators, invariants, reproducibility, and deterministic property tests; do not trigger it for ordinary Vitest example tests or black-box e2e testing.
+description: Expert-level JavaScript testing skill focused on writing high-quality tests that find bugs, serve as documentation, and prevent regressions. Advocates for property-based testing with fast-check and protects against indeterministic code in tests. Does not cover black-box e2e testing.
 ---
 
-> **⚠️ Repository scope:** Use this skill specifically for property-based
-> testing with `fast-check` or `@fast-check/vitest`. Ordinary example-based
-> Vitest tests follow the repository's normal testing guidelines without
-> requiring this skill. It does not cover black-box e2e testing.
+> **⚠️ Scope:** Testing functions and components, not black-box e2e.
 
 **🏅 Main objectives:** use tests as a way to...
 

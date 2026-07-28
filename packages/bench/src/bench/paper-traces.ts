@@ -1,9 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { OPERATION_TYPE } from "../constants/operation-types";
-import { convertPaperTraceToAtomicEvents } from "../conformance/paper-trace-converter";
-import type { EventId, GraphEvent, Version } from "../types";
+import {
+  OPERATION_TYPE,
+  type EventId,
+  type GraphEvent,
+  type Version,
+} from "@softmaple/eg-walker";
+import { convertPaperTraceToAtomicEvents } from "@softmaple/eg-walker/internal";
 
 export const PAPER_DATASETS = [
   "S1",

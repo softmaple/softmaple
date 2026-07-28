@@ -10,11 +10,9 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: [
         "src/test/**",
-        "src/bench/**",
-        // Fixture adapters and scalar oracles are test/benchmark tooling.
+        // Fixture adapters and scalar oracles are test/conformance tooling.
         "src/conformance/**",
         "src/**/*.test.ts",
-        "src/**/*.bench.ts",
         "src/**/*.spec.ts",
         "src/**/*.d.ts",
         "src/**/index.ts",

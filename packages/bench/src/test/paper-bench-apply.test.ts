@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { applyRemoteEventsInBatches } from "../bench/paper-bench-apply";
-import { OPERATION_TYPE } from "../constants/operation-types";
-import { EgWalkerReplica } from "../core/replica";
-import type { GraphEvent } from "../types";
+import {
+  EgWalkerReplica,
+  OPERATION_TYPE,
+  type GraphEvent,
+} from "@softmaple/eg-walker";
 
 describe("applyRemoteEventsInBatches", () => {
   it.each([

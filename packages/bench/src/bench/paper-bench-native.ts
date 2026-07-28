@@ -1,9 +1,14 @@
 import { performance } from "node:perf_hooks";
 
-import { EgWalkerReplica } from "../core/replica";
-import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
-import type { EventId, GraphEvent } from "../types";
+import {
+  EgWalkerReplica,
+  type EventId,
+  type GraphEvent,
+} from "@softmaple/eg-walker";
+import {
+  ColumnarEventGraphCodec,
+  encodeTopologicallyOrderedEventsBinary,
+} from "@softmaple/eg-walker/internal";
 
 export interface NativePaperPayload {
   readonly binary: Uint8Array;

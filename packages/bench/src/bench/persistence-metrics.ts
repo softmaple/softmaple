@@ -1,8 +1,10 @@
 import { performance } from "node:perf_hooks";
 
-import { NativeSnapshotCodec } from "../core/native-snapshot";
-import { PortableSnapshotCodec } from "../core/portable-snapshot";
-import { EgWalkerReplica } from "../core/replica";
+import {
+  EgWalkerReplica,
+  NativeSnapshotCodec,
+  PortableSnapshotCodec,
+} from "@softmaple/eg-walker";
 
 export interface PersistenceMetrics {
   readonly portableSnapshotEncodeMs: number;

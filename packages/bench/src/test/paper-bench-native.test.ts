@@ -8,8 +8,7 @@ import {
   buildNativePaperPayload,
   measureNativePaperPayload,
 } from "../bench/paper-bench-native";
-import { OPERATION_TYPE } from "../constants/operation-types";
-import type { GraphEvent } from "../types";
+import { OPERATION_TYPE, type GraphEvent } from "@softmaple/eg-walker";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(testDirectory, "../..");

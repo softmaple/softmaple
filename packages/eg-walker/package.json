@@ -25,8 +25,6 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage --maxWorkers=50%",
-    "bench": "vitest bench --run",
-    "paper-bench": "node scripts/run-paper-bench.mjs",
     "test:conformance": "vitest run --config vitest.reference.config.ts",
     "typecheck": "tsc --noEmit"
   },

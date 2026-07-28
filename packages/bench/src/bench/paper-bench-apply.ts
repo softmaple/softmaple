@@ -1,5 +1,4 @@
-import type { EgWalkerReplica } from "../core/replica";
-import type { GraphEvent } from "../types";
+import type { EgWalkerReplica, GraphEvent } from "@softmaple/eg-walker";
 import type { PaperBenchmarkApplyBatchEvents } from "./paper-bench-options";
 
 /**

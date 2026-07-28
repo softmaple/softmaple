@@ -58,6 +58,7 @@ export {
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
   type PortableSnapshot,
 } from "./core/portable-snapshot";
+export { inspectCausalEventBatch } from "./core/causal-event-batch";
 export {
   PersistentUtf16Rope,
   UTF16_ROPE_BRANCH_FACTOR,
@@ -71,3 +72,9 @@ export {
   type PaperEventExpansion,
   type PaperEventIdentity,
 } from "./conformance/paper-event-adapter";
+export {
+  convertPaperTraceToAtomicEvents,
+  convertPaperTraceToAtomicSink,
+  type AtomicPaperTraceConversionSummary,
+  type ConvertAtomicPaperTraceOptions,
+} from "./conformance/paper-trace-converter";

@@ -10,10 +10,11 @@ import {
   streamPaperTraceToCausalBatches,
 } from "../bench/paper-trace-causal-batches";
 import type { PaperTrace } from "../bench/paper-traces";
-import { convertPaperTraceToAtomicEvents } from "../conformance/paper-trace-converter";
-import { OPERATION_TYPE } from "../constants/operation-types";
-import { inspectCausalEventBatch } from "../core/causal-event-batch";
-import type { GraphEvent } from "../types";
+import { OPERATION_TYPE, type GraphEvent } from "@softmaple/eg-walker";
+import {
+  convertPaperTraceToAtomicEvents,
+  inspectCausalEventBatch,
+} from "@softmaple/eg-walker/internal";
 
 const branchingTrace: PaperTrace = {
   kind: "concurrent",

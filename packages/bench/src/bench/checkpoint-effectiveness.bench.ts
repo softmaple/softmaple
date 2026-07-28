@@ -22,8 +22,7 @@
 
 import { afterAll, bench, describe } from "vitest";
 
-import { EgWalkerReplica } from "../core/replica";
-import { EventGraph } from "../graph/event-graph";
+import { EgWalkerReplica, EventGraph } from "@softmaple/eg-walker";
 import {
   buildCheckpointTrace,
   formatStatsLine,

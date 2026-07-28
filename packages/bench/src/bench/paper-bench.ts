@@ -3,12 +3,14 @@ import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { EgWalkerReplica } from "../core/replica";
-import { NativeSnapshotCodec } from "../core/native-snapshot";
-import { PortableSnapshotCodec } from "../core/portable-snapshot";
-import { EventGraph } from "../graph/event-graph";
-import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import type { GraphEvent } from "../types";
+import {
+  EgWalkerReplica,
+  EventGraph,
+  NativeSnapshotCodec,
+  PortableSnapshotCodec,
+  type GraphEvent,
+} from "@softmaple/eg-walker";
+import { ColumnarEventGraphCodec } from "@softmaple/eg-walker/internal";
 import {
   loadPaperTrace,
   parseDatasetList,
@@ -469,7 +471,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
 
 const printUsage = (defaultPaperRoot = DEFAULT_PAPER_ROOT): void => {
   console.log(`Usage:
-  pnpm --filter @softmaple/eg-walker paper-bench -- [options]
+  pnpm exec turbo run paper-bench --filter=@softmaple/bench -- [options]
 
 Options:
   --datasets S1,S2   Comma-separated datasets, or "all". Default: S1

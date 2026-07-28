@@ -682,10 +682,15 @@ pnpm --filter @softmaple/eg-walker test
 pnpm --filter @softmaple/eg-walker typecheck
 ```
 
+The reference commit predates the benchmark-package split. In the current
+repository layout, run its benchmark lanes through
+`@softmaple/bench` so Turborepo builds the engine dependency
+first.
+
 Run the calibrated operation-level persistence gates:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --phase6-gates \
   --memory \
   --runs 3
@@ -694,7 +699,7 @@ pnpm --filter @softmaple/eg-walker paper-bench -- \
 Run bounded concurrent smoke tests:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets C1,C2 \
   --runs 3 \
   --max-txns 3000
@@ -703,7 +708,7 @@ pnpm --filter @softmaple/eg-walker paper-bench -- \
 Run the faithful bounded A2 case:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets A2 \
   --runs 3 \
   --max-txns 300 \

@@ -7,7 +7,7 @@ import { paperRootFromPackageRoot } from "../bench/paper-bench-paths";
 describe("paperRootFromPackageRoot", () => {
   it("should locate the paper artifact independently of the process cwd", () => {
     // Arrange
-    const packageRoot = resolve("/workspace/softmaple/packages/eg-walker");
+    const packageRoot = resolve("/workspace/softmaple/packages/bench");
 
     // Act
     const paperRoot = paperRootFromPackageRoot(packageRoot);

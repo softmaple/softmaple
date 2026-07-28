@@ -7,6 +7,8 @@ on:
       - 'packages/eg-walker/**'
       - '!packages/eg-walker/**/*.md'
       - '!packages/eg-walker/coverage/**'
+      - 'packages/bench/**'
+      - '!packages/bench/**/*.md'
       - '.github/workflows/eg-walker-tests.yml'
       - 'pnpm-lock.yaml'
   pull_request:
@@ -15,6 +17,8 @@ on:
       - 'packages/eg-walker/**'
       - '!packages/eg-walker/**/*.md'
       - '!packages/eg-walker/coverage/**'
+      - 'packages/bench/**'
+      - '!packages/bench/**/*.md'
       - '.github/workflows/eg-walker-tests.yml'
       - 'pnpm-lock.yaml'
 
@@ -50,10 +54,16 @@ jobs:
       - name: Build eg-walker package
         run: pnpm --filter @softmaple/eg-walker build
 
+      - name: Check benchmark package
+        run: pnpm exec turbo run lint typecheck --filter=@softmaple/bench
+
       - name: Run unit tests with coverage
         run: pnpm --filter @softmaple/eg-walker test:coverage
         env:
           CI: true
+
+      - name: Run benchmark harness tests
+        run: pnpm --filter @softmaple/bench test -- --run
 
       - name: Report coverage to PR
         if: github.event_name == 'pull_request'

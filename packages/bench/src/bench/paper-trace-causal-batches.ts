@@ -2,12 +2,12 @@ import {
   createCausalEventBatchBuilder,
   type CausalEventBatch,
   type CausalEventBatchBuilder,
-} from "../core/causal-event-batch";
+} from "@softmaple/eg-walker";
 import {
   convertPaperTraceToAtomicSink,
   type AtomicPaperTraceConversionSummary,
   type ConvertAtomicPaperTraceOptions,
-} from "../conformance/paper-trace-converter";
+} from "@softmaple/eg-walker/internal";
 import type { PaperBenchmarkApplyBatchEvents } from "./paper-bench-options";
 import {
   readPaperTrace,

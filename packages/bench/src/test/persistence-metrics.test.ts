@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { measurePersistenceMetrics } from "../bench/persistence-metrics";
-import { EgWalkerReplica } from "../core/replica";
-import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
+import { EgWalkerEngine } from "@softmaple/eg-walker/internal";
 
 describe("measurePersistenceMetrics", () => {
   it("should report portable persistence separately from native resume state", () => {

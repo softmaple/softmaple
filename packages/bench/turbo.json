@@ -1,0 +1,20 @@
+{
+  "$schema": "https://v2-9-12.turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "bench": {
+      "dependsOn": ["^build"]
+    },
+    "paper-bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    }
+  }
+}

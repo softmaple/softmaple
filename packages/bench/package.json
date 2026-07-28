@@ -1,0 +1,27 @@
+{
+  "name": "@softmaple/bench",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Performance harnesses for @softmaple/eg-walker",
+  "scripts": {
+    "bench": "vitest bench --run",
+    "lint": "eslint .",
+    "paper-bench": "node scripts/run-paper-bench.mjs",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@softmaple/eg-walker": "workspace:*"
+  },
+  "devDependencies": {
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}

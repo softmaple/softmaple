@@ -8,10 +8,13 @@
  * the previous run.
  */
 
-import { OPERATION_TYPE } from "../constants/operation-types";
-import type { ReplaySource } from "../constants/replay-source";
-import type { EgWalkerReplica } from "../core/replica";
-import type { EventId, GraphEvent } from "../types";
+import {
+  OPERATION_TYPE,
+  type EgWalkerReplica,
+  type EventId,
+  type GraphEvent,
+  type ReplaySource,
+} from "@softmaple/eg-walker";
 
 const BASE_TIMESTAMP = 1_778_000_000_000;
 

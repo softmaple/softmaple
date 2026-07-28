@@ -9,7 +9,7 @@
 
 import { afterAll, bench, describe } from "vitest";
 
-import { EgWalkerReplica } from "../core/replica";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
 import {
   buildConcurrentSameIndexInserts,
   formatStatsLine,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EgWalkerReplica } from "../core/replica";
-import type { GraphEvent } from "../types";
+import { EgWalkerReplica, type GraphEvent } from "@softmaple/eg-walker";
 import {
   buildCheckpointTrace,
   buildConcurrentSameIndexInserts,

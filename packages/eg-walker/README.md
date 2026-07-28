@@ -130,46 +130,16 @@ See [`src/test/property/README.md`](src/test/property/README.md) for how to add 
 
 ### Benchmarks
 
-Benchmarks live in `src/bench/` and are separate from the unit-test suite.
-Run them manually — they never fail CI on timing:
+Standalone performance harnesses live in the sibling
+[`@softmaple/bench`](../bench/README.md) package,
+keeping benchmark code and dependencies outside this production package.
 
 ```bash
-pnpm --filter @softmaple/eg-walker bench
+pnpm exec turbo run bench --filter=@softmaple/bench
 ```
 
-| Scenario                                            | File                                     | What it stresses                              |
-| --------------------------------------------------- | ---------------------------------------- | --------------------------------------------- |
-| Long linear history (5k sequential inserts)         | `long-linear-history.bench.ts`           | Section 3.4 non-conflicting-run fast path     |
-| Concurrent same-index inserts (200 events)          | `concurrent-same-index-inserts.bench.ts` | YATA origin-left tie-breaking                 |
-| Long offline branch merge (2×1k events)             | `long-offline-branch-merge.bench.ts`     | Retreat/advance over a stale branch           |
-| Delete-heavy workload (2k events, ~70% deletes)     | `delete-heavy-workload.bench.ts`         | Delete-target-index and placeholder filtering |
-| Checkpoint effectiveness (100 linear + 20 siblings) | `checkpoint-effectiveness.bench.ts`      | `CriticalCheckpointStore` partial-replay path |
-
-Each scenario prints one stats line after the benchmark run, for example:
-
-```
-[bench:long-linear-history] events=5000 text=5000 fullReplays=1 partialReplays=0
-  incrementalApplies=4999 retreats=0 advances=0 checkpoints=32
-  sequenceRecords=1 peakSequenceRecords=1
-  checkpointHits=0 checkpointMisses=0 lastReplaySource=incremental
-```
-
-#### Interpreting replay stats
-
-| Field                   | Meaning                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `fullReplays`           | Cold-start or recovery replays over the full event graph. Should be 1 for linear workloads.                                           |
-| `partialReplays`        | Replays scoped to the divergent suffix using a `CriticalCheckpointStore` anchor. Replaces full replays for concurrent-sibling merges. |
-| `incrementalApplies`    | Events applied by advancing the existing engine state with no retreat. The dominant path for sequential editing.                      |
-| `retreats` / `advances` | Cumulative engine moves. Non-zero for concurrent merges; proportional to the size of the divergent suffix, not the full history.      |
-| `checkpoints`           | Retained critical-version checkpoints (capped at 32 via LRU). Higher means more reuse opportunities for future merges.                |
-| `checkpointHits`        | Times `CriticalCheckpointStore.pickFor` found a usable anchor — avoids a full replay.                                                 |
-| `checkpointMisses`      | Times no retained checkpoint dominated the divergent suffix — forced a full replay.                                                   |
-| `sequenceRecords`       | Live records in the ranked B-tree at the end of the scenario. Memory proxy.                                                           |
-| `peakSequenceRecords`   | High-water mark across the replica lifetime; stays visible even after deletes or engine rebuilds.                                     |
-| `lastReplaySource`      | `incremental`, `partial`, or `full` — which path handled the last event.                                                              |
-
-A healthy concurrent-merge workload shows `partialReplays > 0` and `checkpointHits > 0`, meaning the checkpoint store is being consulted and is avoiding full replays.
+The benchmark package also owns the paper-aligned dataset harness and its
+[measurement guide](../bench/PAPER_BENCHMARKS.md).
 
 ## References
 

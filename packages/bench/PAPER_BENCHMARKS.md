@@ -1,12 +1,13 @@
 # Eg-walker Paper-Aligned Benchmarks
 
-This document describes how to benchmark `@softmaple/eg-walker` against the
-datasets and measurement style used by the Eg-walker paper:
+This document describes how `@softmaple/bench` measures the
+`@softmaple/eg-walker` engine against the datasets and measurement style used
+by the Eg-walker paper:
 
 > Collaborative Text Editing with Eg-walker: Better, Faster, Smaller
 
 The goal is not to reproduce the paper's Rust Diamond Types numbers inside this
-TypeScript package. The goal is to build a repeatable local benchmark that uses
+TypeScript harness. The goal is to build a repeatable local benchmark that uses
 the same editing traces, records the same classes of metrics, and makes the
 comparison boundaries explicit.
 
@@ -93,7 +94,7 @@ The memory benchmark writes:
 This benchmark imports the paper JSON trace and applies events through
 `EgWalkerReplica.applyRemoteEvent`.
 
-This is useful as a stress test for this package:
+This is useful as a stress test for the `@softmaple/eg-walker` engine:
 
 - Can it ingest paper-scale traces?
 - Does it converge to `endContent`?
@@ -108,7 +109,7 @@ object allocation, `Set`/`Map` operations, and per-event API overhead.
 
 This is the fairer comparison to Yjs native update loading. The plan is:
 
-1. Convert each paper JSON trace into this package's own persistent format.
+1. Convert each paper JSON trace into the engine's own persistent format.
 2. Write native payload files such as `S1.egw`, `S2.egw`, ...
 3. Benchmark native decode/load separately from raw JSON import.
 
@@ -215,12 +216,12 @@ delete event.
 
 ## Current Script
 
-The package script is:
+The benchmark package script is:
 
 ```json
 {
   "scripts": {
-    "paper-bench": "tsx src/bench/paper-bench.ts"
+    "paper-bench": "node scripts/run-paper-bench.mjs"
   }
 }
 ```
@@ -228,14 +229,14 @@ The package script is:
 Baseline commands:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- --datasets S1 --runs 1
-pnpm --filter @softmaple/eg-walker paper-bench -- --datasets S1,S2,S3 --runs 1
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets S1 --runs 1
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets S1,S2,S3 --runs 1
 ```
 
 Use the isolated apply lane when measuring public remote-receive throughput:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets S1,C1 \
   --runs 3 \
   --apply-batch-events all \
@@ -252,7 +253,7 @@ and cold-load measurements.
 Phase 0 guardrail suite:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --paper-root /path/to/egwalker-paper \
   --plan-phase0 \
   --runs 1
@@ -266,7 +267,7 @@ This runs:
 Use memory mode for a separate `node --expose-gc` worker per case:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --paper-root /path/to/egwalker-paper \
   --plan-phase0 \
   --runs 1 \
@@ -300,17 +301,17 @@ Do not use full `--datasets all` as the first routine check. Full `C1` and
 smoke tests first:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets C1 \
   --runs 1 \
   --max-txns 3000
 
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets C2 \
   --runs 1 \
   --max-txns 3000
 
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets A2 \
   --runs 1 \
   --max-txns 300 \
@@ -318,8 +319,8 @@ pnpm --filter @softmaple/eg-walker paper-bench -- \
 ```
 
 The script defaults to the `egwalker-paper` artifact beside the repository. The
-path is derived from the `packages/eg-walker` location, so it does not depend on
-the process working directory:
+path is derived from the `packages/bench` location, so it does
+not depend on the process working directory:
 
 ```text
 /path/to/egwalker-paper
@@ -328,7 +329,7 @@ the process working directory:
 It also accepts an override:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets all \
   --runs 3 \
   --paper-root /path/to/egwalker-paper
@@ -338,7 +339,7 @@ Optional persistence memory measurement runs a second isolated process with
 `node --expose-gc` and prints a `paper-bench-memory` line:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets S1 \
   --runs 1 \
   --memory
@@ -356,7 +357,7 @@ during replay.
 `paper-bench` therefore always uses operation-level conversion:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets A2 \
   --runs 1 \
   --granularity operation
@@ -380,7 +381,7 @@ traces where patch-level indexes depend on positions inside a long inserted run.
 an out-of-bounds insert, while the bounded operation-level smoke test passes:
 
 ```bash
-pnpm --filter @softmaple/eg-walker paper-bench -- \
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --datasets A2 \
   --runs 1 \
   --max-txns 300 \
@@ -477,10 +478,12 @@ The benchmark must fail if:
 
 ## Expected Runtime
 
-The historical results below predate portable/native metric separation. Bare
-`snapshot*` names in those dated result blocks refer to the native `EGWS1`
-resume-state extension, not the portable `EGWP1` format. New runs print both
-names explicitly, and Phase 6 gates constrain only `portableSnapshot*` fields.
+The historical results below predate both the benchmark-package extraction and
+portable/native metric separation. Their recorded command strings are preserved
+as run. Bare `snapshot*` names in those dated result blocks refer to the native
+`EGWS1` resume-state extension, not the portable `EGWP1` format. New runs print
+both names explicitly, and Phase 6 gates constrain only
+`portableSnapshot*` fields.
 
 Current `--phase6-gates` thresholds were calibrated on 2026-07-12 with Node
 v24.12.0 on an Apple M1 from three S1 operation runs at 1,000, 2,000, and 4,000

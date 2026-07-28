@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OPERATION_TYPE } from "../constants/operation-types";
+import { OPERATION_TYPE } from "@softmaple/eg-walker";
 import {
   convertPaperTraceToEvents,
   type PaperTrace,

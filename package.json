@@ -34,7 +34,8 @@
   "devDependencies": {
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
-    "eslint": "^9.39.2",
+    "eslint": "^10.8.0",
+    "eslint-plugin-storybook": "10.5.5",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "^3.7.4",

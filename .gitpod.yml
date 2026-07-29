@@ -8,7 +8,6 @@ ports:
 
 vscode:
   extensions:
-    - esbenp.prettier-vscode
+    - biomejs.biome
     - eamodio.gitlens
     - dbaeumer.vscode-eslint
-    

@@ -66,9 +66,11 @@ process.on("exit", cleanupWorkDir);
 beforeAll(() => {
   workDir = mkdtempSync(join(tmpdir(), "awareness-biome-boundary-"));
   mkdirSync(join(workDir, "src"));
-  const realConfig = parseOwnBiomeConfig<{ files?: unknown }>(
-    readFileSync(REAL_BIOME_JSONC, "utf8"),
-  );
+  const realConfig = parseOwnBiomeConfig<{
+    files?: unknown;
+    root?: boolean;
+  }>(readFileSync(REAL_BIOME_JSONC, "utf8"));
+  realConfig.root = true;
   realConfig.files = { includes: ["**/*.ts"] };
   writeFileSync(
     join(workDir, "biome.json"),
@@ -93,12 +95,19 @@ function lintImport(specifier: string): { exitCode: number; output: string } {
   const fixture = join(workDir, "src", `fixture-${slug}.ts`);
   writeFileSync(fixture, `import "${specifier}";\n`);
   try {
-    // No `cwd` override: biome resolves its config from the linted
-    // file's location (workDir/src/fixture.ts → workDir/biome.json),
-    // so the test runner's cwd is irrelevant.
+    // Pass the isolated config explicitly. Once the monorepo has a root
+    // biome.json, relying on discovery would select that config from the
+    // test runner's cwd instead of the fixture config outside the repo.
     const stdout = execFileSync(
       process.execPath,
-      [BIOME_BIN, "lint", "--reporter=json", fixture],
+      [
+        BIOME_BIN,
+        "lint",
+        "--config-path",
+        join(workDir, "biome.json"),
+        "--reporter=json",
+        fixture,
+      ],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],

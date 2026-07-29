@@ -13,26 +13,22 @@ describe("applyRemoteEventsInBatches", () => {
     { batchEvents: 2 as const, expectedCalls: 3 },
     { batchEvents: 4 as const, expectedCalls: 2 },
     { batchEvents: "all" as const, expectedCalls: 1 },
-  ])(
-    "preserves trace semantics with batchEvents=$batchEvents",
-    ({ batchEvents, expectedCalls }) => {
-      const events = branchAndMergeTrace();
-      const replica = new EgWalkerReplica(`paper-batch-${batchEvents}`);
+  ])("preserves trace semantics with batchEvents=$batchEvents", ({
+    batchEvents,
+    expectedCalls,
+  }) => {
+    const events = branchAndMergeTrace();
+    const replica = new EgWalkerReplica(`paper-batch-${batchEvents}`);
 
-      const applyCalls = applyRemoteEventsInBatches(
-        replica,
-        events,
-        batchEvents,
-      );
-      const reference = referenceState(events);
+    const applyCalls = applyRemoteEventsInBatches(replica, events, batchEvents);
+    const reference = referenceState(events);
 
-      expect(applyCalls).toBe(expectedCalls);
-      expect(replica.getPendingRemoteCount()).toBe(0);
-      expect(replica.getText()).toBe(reference.text);
-      expect(sortedFrontier(replica)).toEqual(reference.frontier);
-      expect(canonicalEvents(replica)).toEqual(reference.events);
-    },
-  );
+    expect(applyCalls).toBe(expectedCalls);
+    expect(replica.getPendingRemoteCount()).toBe(0);
+    expect(replica.getText()).toBe(reference.text);
+    expect(sortedFrontier(replica)).toEqual(reference.frontier);
+    expect(canonicalEvents(replica)).toEqual(reference.events);
+  });
 
   it("does not call the receive API for an empty trace", () => {
     const replica = new EgWalkerReplica("paper-batch-empty");

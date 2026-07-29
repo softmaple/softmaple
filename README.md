@@ -9,7 +9,7 @@
 <p>
   <a href=".github/CONTRIBUTING.md#pull-requests"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
   <a href="https://discord.gg/Vwsuqq7dQD"><img src="https://img.shields.io/discord/922309919158456330.svg" alt="Discord Chat" /></a>
-  <a href= "https://github.com/prettier/prettier"><img alt="code style: prettier" src="https://img.shields.io/badge/code_style-prettier-ff69b4.svg"></a>
+  <a href="https://biomejs.dev/"><img alt="Formatted with Biome" src="https://img.shields.io/badge/Formatted_with-Biome-60a5fa?style=flat&logo=biome"></a>
   <a href="#license"><img src="https://img.shields.io/github/license/softmaple/softmaple.svg"></a>
 
   <a href="https://app.ona.com/#https://github.com/softmaple/softmaple"><img src="https://ona.com/build-with-ona.svg" alt="Build with Ona"/></a>

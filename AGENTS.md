@@ -9,14 +9,14 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
 - `pnpm dev` - Start development servers (Turbopack)
 - `pnpm build` - Build all workspaces
 - `pnpm lint` - Run ESLint
-- `pnpm format` - Prettier formatting
+- `pnpm format` - Biome formatting
 - `pnpm --filter @softmaple/web typecheck` - TypeScript checks
 - `pnpm --filter @softmaple/web test:e2e` - Playwright tests
 - `pnpm --filter @softmaple/db db:generate` - Regenerate Prisma client
 
 ## Coding Style & Naming Conventions
 
-- **Formatting:** 2-space indent, double quotes, semicolons (Prettier)
+- **Formatting:** 2-space indent, double quotes, semicolons (Biome)
 - **Components:** PascalCase filenames
 - **Utilities:** camelCase filenames
 - **Routes:** lowercase-hyphenated
@@ -92,12 +92,12 @@ const withLogging =
 ## Pre-commit Hooks and Code Quality
 
 **CRITICAL: Never use `--no-verify` flag when committing code.** Pre-commit hooks run essential quality checks including:
-- Code formatting with Prettier/Biome
+- Code formatting with Biome
 - Linting with ESLint
 - Type checking
 
 If pre-commit hooks fail, you must:
-1. Fix the issues (run `pnpm format` or `npx biome check --write`)
+1. Fix the issues (run `pnpm format`)
 2. Stage the fixes
 3. Retry the commit WITHOUT `--no-verify`
 

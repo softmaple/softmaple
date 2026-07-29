@@ -12,6 +12,9 @@ importers:
 
   .:
     devDependencies:
+      '@biomejs/biome':
+        specifier: 2.3.11
+        version: 2.3.11
       '@softmaple/eslint-config':
         specifier: workspace:*
         version: link:packages/eslint-config
@@ -30,9 +33,6 @@ importers:
       lint-staged:
         specifier: ^16.2.7
         version: 16.2.7
-      prettier:
-        specifier: ^3.7.4
-        version: 3.7.4
       turbo:
         specifier: ^2.10.7
         version: 2.10.7

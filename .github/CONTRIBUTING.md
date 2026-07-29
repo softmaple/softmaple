@@ -77,7 +77,8 @@ and then append your commit message details, for example:
 
 ### Code Styleguide
 
-All JavaScript code is linted with [Prettier](https://prettier.io/).
+JavaScript and TypeScript code is formatted with [Biome](https://biomejs.dev/)
+and linted with [ESLint](https://eslint.org/).
 
 ### Branch Name Conventions
 

@@ -1,5 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
+  "root": false,
   "vcs": {
     "enabled": false,
     "clientKind": "git",
@@ -12,7 +13,9 @@
       "**/e2e/**/*",
       "**/.vscode/**/*",
       "**/index.html",
-      "**/vite.config.js",
+      "**/playwright.config.ts",
+      "**/vite.config.ts",
+      "**/vitest.config.ts",
       "**/workspace-aliases.ts",
       "**/package.json",
       "**/tsconfig.json",
@@ -25,9 +28,23 @@
     "indentStyle": "space",
     "indentWidth": 2
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": {
+    "includes": [
+      "**",
+      "!**/playwright.config.ts",
+      "!**/vite.config.ts",
+      "!**/vitest.config.ts"
+    ],
+    "actions": { "source": { "organizeImports": "on" } }
+  },
   "linter": {
     "enabled": true,
+    "includes": [
+      "**",
+      "!**/playwright.config.ts",
+      "!**/vite.config.ts",
+      "!**/vitest.config.ts"
+    ],
     "rules": {
       "recommended": true,
       "complexity": {

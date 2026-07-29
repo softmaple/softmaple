@@ -1,4 +1,4 @@
 module.exports = {
-  "**/*.ts?(x)": (filenames) =>
-    filenames.map((file) => `prettier --write '${file}'`),
+  "**/*.{js,jsx,ts,tsx}":
+    "biome format --config-path=biome.json --write --no-errors-on-unmatched",
 };

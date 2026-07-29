@@ -103,10 +103,16 @@ export default defineConfig({
           __dirname,
           "src/providers/presence-provider.tsx",
         ),
-        "hooks/use-presence": path.resolve(__dirname, "src/hooks/use-presence.ts"),
+        "hooks/use-presence": path.resolve(
+          __dirname,
+          "src/hooks/use-presence.ts",
+        ),
         "hooks/use-self": path.resolve(__dirname, "src/hooks/use-self.ts"),
         "hooks/use-others": path.resolve(__dirname, "src/hooks/use-others.ts"),
-        "hooks/use-connection": path.resolve(__dirname, "src/hooks/use-connection.ts"),
+        "hooks/use-connection": path.resolve(
+          __dirname,
+          "src/hooks/use-connection.ts",
+        ),
         "hooks/use-update-presence": path.resolve(
           __dirname,
           "src/hooks/use-update-presence.ts",
@@ -115,7 +121,10 @@ export default defineConfig({
           __dirname,
           "src/hooks/use-update-typing.ts",
         ),
-        "hooks/use-activity": path.resolve(__dirname, "src/hooks/use-activity.ts"),
+        "hooks/use-activity": path.resolve(
+          __dirname,
+          "src/hooks/use-activity.ts",
+        ),
         "hooks/use-presence-cursors": path.resolve(
           __dirname,
           "src/hooks/use-presence-cursors.ts",

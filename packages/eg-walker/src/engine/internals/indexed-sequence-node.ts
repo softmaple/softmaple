@@ -23,7 +23,8 @@ interface NodeBase<T extends object> {
 }
 
 export interface LeafNode<T extends object>
-  extends NodeBase<T>, OrderMaintenanceItem {
+  extends NodeBase<T>,
+    OrderMaintenanceItem {
   readonly kind: "leaf";
   readonly items: T[];
   readonly prepareWeights: number[];

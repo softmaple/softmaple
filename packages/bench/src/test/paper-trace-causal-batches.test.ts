@@ -175,14 +175,16 @@ describe("paper trace causal batches", () => {
     });
   });
 
-  it.each([0, -1, 1.5, Number.POSITIVE_INFINITY])(
-    "rejects invalid batch size %s",
-    (batchEvents) => {
-      expect(() =>
-        convertPaperTraceToCausalBatches("C1", branchingTrace, batchEvents),
-      ).toThrow(/batch size must be a positive safe integer or all/);
-    },
-  );
+  it.each([
+    0,
+    -1,
+    1.5,
+    Number.POSITIVE_INFINITY,
+  ])("rejects invalid batch size %s", (batchEvents) => {
+    expect(() =>
+      convertPaperTraceToCausalBatches("C1", branchingTrace, batchEvents),
+    ).toThrow(/batch size must be a positive safe integer or all/);
+  });
 
   it("loads a transaction-limited trace directly into causal batches", () => {
     const paperRoot = mkdtempSync(join(tmpdir(), "eg-walker-paper-traces-"));

@@ -1,5 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
+  "root": false,
   "vcs": {
     "enabled": false,
     "clientKind": "git",
@@ -14,7 +15,9 @@
       "**/package.json",
       "**/tsconfig.json",
       "**/tsup.config.ts",
-      "**/vitest.config.ts"
+      "**/vite.config.ts",
+      "**/vitest.config.ts",
+      "**/vitest.shims.d.ts"
     ]
   },
   "formatter": {
@@ -22,9 +25,13 @@
     "indentStyle": "space",
     "indentWidth": 2
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": {
+    "includes": ["**", "!**/vite.config.ts", "!**/vitest.shims.d.ts"],
+    "actions": { "source": { "organizeImports": "on" } }
+  },
   "linter": {
     "enabled": true,
+    "includes": ["**", "!**/vite.config.ts", "!**/vitest.shims.d.ts"],
     "rules": {
       "recommended": true,
       "complexity": {

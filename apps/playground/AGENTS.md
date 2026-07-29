@@ -137,4 +137,4 @@ pnpm --filter playground typecheck
 - **DO NOT use `pnpm dev`** directly - use `pnpm --filter playground dev`
 - Biome configuration is in `biome.json` at the project root
 - Pre-commit hooks will run Biome automatically on staged files
-- If Biome and Prettier conflict, Biome takes precedence in this project
+- Biome is the formatter and linter for this project

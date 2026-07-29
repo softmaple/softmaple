@@ -18,11 +18,13 @@ import {
 export type StreamPaperTraceCausalBatchesOptions =
   ConvertAtomicPaperTraceOptions;
 
-export interface StreamPaperTraceCausalBatchesResult extends AtomicPaperTraceConversionSummary {
+export interface StreamPaperTraceCausalBatchesResult
+  extends AtomicPaperTraceConversionSummary {
   readonly batchCount: number;
 }
 
-export interface ConvertedPaperTraceCausalBatches extends StreamPaperTraceCausalBatchesResult {
+export interface ConvertedPaperTraceCausalBatches
+  extends StreamPaperTraceCausalBatchesResult {
   readonly batches: ReadonlyArray<CausalEventBatch>;
 }
 
@@ -32,7 +34,8 @@ export interface LoadPaperTraceCausalBatchesOptions {
   readonly maxEvents?: number;
 }
 
-export interface LoadedPaperTraceCausalBatches extends ConvertedPaperTraceCausalBatches {
+export interface LoadedPaperTraceCausalBatches
+  extends ConvertedPaperTraceCausalBatches {
   readonly dataset: PaperDataset;
   readonly trace: PaperTrace;
   readonly txnCount: number;

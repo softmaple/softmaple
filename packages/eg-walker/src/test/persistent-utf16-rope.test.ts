@@ -10,21 +10,20 @@ import {
 } from "../text/persistent-utf16-rope";
 
 describe("PersistentUtf16Rope", () => {
-  it.each([1_023, 1_024, 2_048, 4_096, 4_097, 131_073])(
-    "balances %i UTF-16 code units within leaf/fan-out bounds",
-    (length) => {
-      const rope = PersistentUtf16Rope.from("x".repeat(length));
-      const leaves = rope.getLeafLengths();
+  it.each([
+    1_023, 1_024, 2_048, 4_096, 4_097, 131_073,
+  ])("balances %i UTF-16 code units within leaf/fan-out bounds", (length) => {
+    const rope = PersistentUtf16Rope.from("x".repeat(length));
+    const leaves = rope.getLeafLengths();
 
-      expect(rope.getMaxBranchWidth()).toBeLessThanOrEqual(
-        UTF16_ROPE_BRANCH_FACTOR,
-      );
-      if (leaves.length > 1) {
-        expect(Math.min(...leaves)).toBeGreaterThanOrEqual(UTF16_ROPE_MIN_LEAF);
-      }
-      expect(Math.max(...leaves)).toBeLessThanOrEqual(UTF16_ROPE_MAX_LEAF);
-    },
-  );
+    expect(rope.getMaxBranchWidth()).toBeLessThanOrEqual(
+      UTF16_ROPE_BRANCH_FACTOR,
+    );
+    if (leaves.length > 1) {
+      expect(Math.min(...leaves)).toBeGreaterThanOrEqual(UTF16_ROPE_MIN_LEAF);
+    }
+    expect(Math.max(...leaves)).toBeLessThanOrEqual(UTF16_ROPE_MAX_LEAF);
+  });
 
   it("supports boundary-spanning UTF-16 edits and slices", () => {
     const originalText = "a".repeat(UTF16_ROPE_TARGET_LEAF) + "😀tail";

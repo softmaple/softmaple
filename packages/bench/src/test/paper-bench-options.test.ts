@@ -53,12 +53,17 @@ describe("parsePaperBenchmarkApplyBatchEvents", () => {
     expect(parsePaperBenchmarkApplyBatchEvents("all")).toBe("all");
   });
 
-  it.each(["", "0", "-1", "1.5", "Infinity", "9007199254740992", "ALL"])(
-    "should reject invalid batch size %j",
-    (requested) => {
-      expect(() => parsePaperBenchmarkApplyBatchEvents(requested)).toThrow(
-        /positive safe integer or "all"/,
-      );
-    },
-  );
+  it.each([
+    "",
+    "0",
+    "-1",
+    "1.5",
+    "Infinity",
+    "9007199254740992",
+    "ALL",
+  ])("should reject invalid batch size %j", (requested) => {
+    expect(() => parsePaperBenchmarkApplyBatchEvents(requested)).toThrow(
+      /positive safe integer or "all"/,
+    );
+  });
 });

@@ -42,45 +42,45 @@ const referenceRoot =
 const conformancePath = join(referenceRoot, "testdata", "conformance.json");
 
 describe("pinned eg-walker reference conformance", () => {
-  it.each<EventIdMode>(["canonical", "padded"])(
-    "should match every official run with %s IDs",
-    (idMode) => {
-      // Arrange
-      const runs = loadPinnedReferenceRuns();
-      const codec = new ColumnarEventGraphCodec();
+  it.each<EventIdMode>([
+    "canonical",
+    "padded",
+  ])("should match every official run with %s IDs", (idMode) => {
+    // Arrange
+    const runs = loadPinnedReferenceRuns();
+    const codec = new ColumnarEventGraphCodec();
 
-      // Act
-      let eventCount = 0;
-      for (let runIndex = 0; runIndex < runs.length; runIndex++) {
-        const run = runs[runIndex]!;
-        const events = convertReferenceRun(run, idMode);
-        eventCount += events.length;
-        const graph = EventGraph.fromEvents(events);
-        const actual = new EgWalkerEngine().generate(events, "", {
-          eventGraph: graph,
-          eventOrder: events,
-        }).text;
-        const packedGraph = codec.decodeBinary(codec.encodeBinary(graph));
-        const packedActual = new EgWalkerReplica(
-          `conformance-${idMode}`,
-          "",
-          packedGraph,
-        ).getText();
+    // Act
+    let eventCount = 0;
+    for (let runIndex = 0; runIndex < runs.length; runIndex++) {
+      const run = runs[runIndex]!;
+      const events = convertReferenceRun(run, idMode);
+      eventCount += events.length;
+      const graph = EventGraph.fromEvents(events);
+      const actual = new EgWalkerEngine().generate(events, "", {
+        eventGraph: graph,
+        eventOrder: events,
+      }).text;
+      const packedGraph = codec.decodeBinary(codec.encodeBinary(graph));
+      const packedActual = new EgWalkerReplica(
+        `conformance-${idMode}`,
+        "",
+        packedGraph,
+      ).getText();
 
-        // Assert
-        expect(actual, `reference run ${runIndex}`).toBe(run.endContent);
-        expect(
-          packedGraph.getPackedReplayPlanningView(),
-          `packed reference run ${runIndex}`,
-        ).not.toBeNull();
-        expect(packedActual, `packed reference run ${runIndex}`).toBe(
-          run.endContent,
-        );
-      }
-      expect(runs).toHaveLength(EXPECTED_RUN_COUNT);
-      expect(eventCount).toBe(EXPECTED_EVENT_COUNT);
-    },
-  );
+      // Assert
+      expect(actual, `reference run ${runIndex}`).toBe(run.endContent);
+      expect(
+        packedGraph.getPackedReplayPlanningView(),
+        `packed reference run ${runIndex}`,
+      ).not.toBeNull();
+      expect(packedActual, `packed reference run ${runIndex}`).toBe(
+        run.endContent,
+      );
+    }
+    expect(runs).toHaveLength(EXPECTED_RUN_COUNT);
+    expect(eventCount).toBe(EXPECTED_EVENT_COUNT);
+  });
 });
 
 // Helpers

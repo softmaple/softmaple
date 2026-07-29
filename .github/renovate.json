@@ -77,7 +77,7 @@
       "matchPackageNames": [
         "vite",
         "vite-tsconfig-paths",
-        "prettier",
+        "@biomejs/biome",
         "/^@vitejs\\//",
         "tailwindcss",
         "/^@tailwindcss\\//",

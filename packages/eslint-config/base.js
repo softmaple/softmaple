@@ -1,8 +1,8 @@
-import js from "@eslint/js"
-import eslintConfigPrettier from "eslint-config-prettier/flat"
-import onlyWarn from "eslint-plugin-only-warn"
-import turboPlugin from "eslint-plugin-turbo"
-import tseslint from "typescript-eslint"
+import js from "@eslint/js";
+import eslintConfigPrettier from "eslint-config-prettier/flat";
+import "eslint-plugin-only-warn";
+import turboPlugin from "eslint-plugin-turbo";
+import tseslint from "typescript-eslint";
 
 /**
  * A shared ESLint configuration for the repository.
@@ -24,17 +24,13 @@ export const config = [
         "error",
         {
           selector: "TSEnumDeclaration",
-          message: "Enums are not allowed. Use const objects with 'as const' instead for better performance and smaller bundle size.",
+          message:
+            "Enums are not allowed. Use const objects with 'as const' instead for better performance and smaller bundle size.",
         },
       ],
     },
   },
   {
-    plugins: {
-      onlyWarn,
-    },
-  },
-  {
     ignores: ["dist/**"],
   },
-]
+];

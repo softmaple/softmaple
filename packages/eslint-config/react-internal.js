@@ -1,3 +1,4 @@
+import { fixupPluginRules } from "@eslint/compat";
 import js from "@eslint/js";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 import pluginReact from "eslint-plugin-react";
@@ -16,7 +17,12 @@ export const config = [
   js.configs.recommended,
   eslintConfigPrettier,
   ...tseslint.configs.recommended,
-  pluginReact.configs.flat.recommended,
+  {
+    ...pluginReact.configs.flat.recommended,
+    plugins: {
+      react: fixupPluginRules(pluginReact),
+    },
+  },
   {
     languageOptions: {
       ...pluginReact.configs.flat.recommended.languageOptions,
@@ -32,7 +38,8 @@ export const config = [
     },
     settings: { react: { version: "detect" } },
     rules: {
-      ...pluginReactHooks.configs.recommended.rules,
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       // React scope no longer necessary with new JSX transform.
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",

@@ -18,7 +18,7 @@ import {
  * @returns {ReturnType<Linter["verify"]>}
  */
 function lintWithPatterns(patterns, code) {
-  const linter = new Linter({ configType: "flat" });
+  const linter = new Linter();
   return linter.verify(code, [
     {
       rules: {
@@ -38,7 +38,7 @@ function lintWithPatterns(patterns, code) {
  * @returns {ReturnType<Linter["verify"]>}
  */
 function lintWithConfig(flatConfig, code, relativeFilename) {
-  const linter = new Linter({ configType: "flat" });
+  const linter = new Linter();
   return linter.verify(code, flatConfig, { filename: relativeFilename });
 }
 
@@ -52,7 +52,11 @@ test("eg-walker patterns forbid importing @softmaple/awareness", () => {
     'import { PresenceBar } from "@softmaple/awareness";\n',
   );
   const restricted = findRestrictedImportMessages(messages);
-  assert.equal(restricted.length, 1, "expected exactly one restricted-import error");
+  assert.equal(
+    restricted.length,
+    1,
+    "expected exactly one restricted-import error",
+  );
   assert.match(restricted[0].message, /@softmaple\/awareness/);
 });
 

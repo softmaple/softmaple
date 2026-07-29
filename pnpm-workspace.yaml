@@ -3,13 +3,16 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
-  '@prisma/client': true
-  '@prisma/engines': true
+  "@prisma/client": true
+  "@prisma/engines": true
   core-js-pure: true
   esbuild: true
   prisma: true
   sharp: true
   unrs-resolver: true
 overrides:
-  '@types/react': 19.2.17
-  '@types/react-dom': 19.2.3
+  "@types/react": 19.2.17
+  "@types/react-dom": 19.2.3
+peerDependencyRules:
+  allowedVersions:
+    "eslint-plugin-react@7.37.5>eslint": "10"

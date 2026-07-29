@@ -1,3 +1,4 @@
+import { fixupPluginRules } from "@eslint/compat";
 import js from "@eslint/js";
 import pluginNext from "@next/eslint-plugin-next";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
@@ -20,6 +21,9 @@ export const nextJsConfig = [
   ...tseslint.configs.recommended,
   {
     ...pluginReact.configs.flat.recommended,
+    plugins: {
+      react: fixupPluginRules(pluginReact),
+    },
     languageOptions: {
       ...pluginReact.configs.flat.recommended.languageOptions,
       globals: {
@@ -42,10 +46,14 @@ export const nextJsConfig = [
     },
     settings: { react: { version: "detect" }, next: { rootDir: "apps/web" } },
     rules: {
-      ...pluginReactHooks.configs.recommended.rules,
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       // React scope no longer necessary with new JSX transform.
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
     },
+  },
+  {
+    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts"],
   },
 ];

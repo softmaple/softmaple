@@ -34,11 +34,12 @@
     "@softmaple/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.18",
     "@turbo/gen": "^2.10.7",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "@types/node": "^24.10.4",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "tailwindcss": "^4.1.18",
-    "typescript": "^5.9.3"
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
   },
   "exports": {
     "./globals.css": "./src/styles/globals.css",

@@ -1,7 +1,6 @@
 {
   "extends": "@softmaple/typescript-config/nextjs.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
       "@softmaple/ui/*": ["../../packages/ui/src/*"],

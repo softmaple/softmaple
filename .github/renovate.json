@@ -50,6 +50,7 @@
       "groupName": "TypeScript",
       "matchPackageNames": [
         "typescript",
+        "@typescript/typescript6",
         "/^@types\\//",
         "/^@typescript-eslint\\//",
         "typescript-eslint"

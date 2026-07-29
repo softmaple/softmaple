@@ -24,7 +24,6 @@
     "noUncheckedSideEffectImports": true,
 
     /* shadcn ui */
-    "baseUrl": ".",
     "paths": {
       "@softmaple/editor/*": ["./src/*"],
       "@softmaple/md2latex/*": ["../md2latex/*"],

@@ -19,9 +19,10 @@
   "devDependencies": {
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "@types/node": "^24.10.4",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "^4.1.6"
   }
 }

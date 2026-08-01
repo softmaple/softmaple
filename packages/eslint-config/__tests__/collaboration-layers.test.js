@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { Linter } from "eslint";
 
 import {
+  blockModelBindingCollaborationPatterns,
+  blockModelCollaborationPatterns,
   egWalkerCollaborationConfig,
   egWalkerCollaborationPatterns,
 } from "../collaboration-layers.js";
@@ -66,6 +68,25 @@ test("eg-walker patterns forbid importing @softmaple/awareness subpaths", () => 
     'import { LiveCursor } from "@softmaple/awareness/components/live-cursor";\n',
   );
   assert.equal(findRestrictedImportMessages(messages).length, 1);
+});
+
+test("eg-walker patterns forbid reverse imports from block models and bindings", () => {
+  for (const specifier of [
+    "@softmaple/block-model",
+    "@softmaple/block-model/testing",
+    "@softmaple/binding-lexical",
+    "@softmaple/binding-lexical/react",
+  ]) {
+    const messages = lintWithPatterns(
+      egWalkerCollaborationPatterns,
+      `import x from "${specifier}";\n`,
+    );
+    assert.equal(
+      findRestrictedImportMessages(messages).length,
+      1,
+      `expected ${specifier} to be restricted`,
+    );
+  }
 });
 
 test("eg-walker patterns forbid editor frameworks (lexical, prosemirror, slate)", () => {
@@ -137,4 +158,47 @@ test("egWalkerCollaborationConfig does not match non-TS fixtures", () => {
   );
   // No matching config for a .md file -> no restricted-imports error.
   assert.equal(findRestrictedImportMessages(messages).length, 0);
+});
+
+test("block-model patterns allow EG-walker but forbid awareness, bindings, and editors", () => {
+  for (const specifier of [
+    "@softmaple/awareness",
+    "@softmaple/binding-lexical",
+    "@softmaple/binding-lexical/react",
+    "lexical",
+    "@lexical/react/LexicalComposer",
+  ]) {
+    const messages = lintWithPatterns(
+      blockModelCollaborationPatterns,
+      `import x from "${specifier}";\n`,
+    );
+    assert.equal(
+      findRestrictedImportMessages(messages).length,
+      1,
+      `expected ${specifier} to be restricted`,
+    );
+  }
+  const allowed = lintWithPatterns(
+    blockModelCollaborationPatterns,
+    'import { EgWalkerReplica } from "@softmaple/eg-walker";\nimport { captureAnchor } from "@softmaple/eg-walker/anchors";\n',
+  );
+  assert.equal(findRestrictedImportMessages(allowed).length, 0);
+});
+
+test("block-model binding patterns prevent bypassing the model API", () => {
+  for (const specifier of [
+    "@softmaple/eg-walker",
+    "@softmaple/eg-walker/anchors",
+  ]) {
+    const messages = lintWithPatterns(
+      blockModelBindingCollaborationPatterns,
+      `import x from "${specifier}";\n`,
+    );
+    assert.equal(findRestrictedImportMessages(messages).length, 1);
+  }
+  const allowed = lintWithPatterns(
+    blockModelBindingCollaborationPatterns,
+    'import { BlockReplica } from "@softmaple/block-model";\nimport { createEditor } from "lexical";\n',
+  );
+  assert.equal(findRestrictedImportMessages(allowed).length, 0);
 });

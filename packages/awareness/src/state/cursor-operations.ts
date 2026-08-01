@@ -4,10 +4,13 @@
 
 import type {
   CursorPosition,
+  PresenceSelection,
   PresenceUser,
-  SelectionRange,
 } from "../types/presence";
-import { updatePresenceUser } from "../types/presence";
+import {
+  selectionReferencesBlock,
+  updatePresenceUser,
+} from "../types/presence";
 import type { PresenceState } from "../types/state";
 
 /**
@@ -40,7 +43,7 @@ export const updateUserCursor = (
 export const updateUserSelection = (
   state: PresenceState,
   userId: string,
-  selection: SelectionRange | null,
+  selection: PresenceSelection | null,
 ): PresenceState => {
   const user = state.users.get(userId);
   if (user === undefined) {
@@ -76,8 +79,8 @@ export const getUsersSelectingBlock = (
   state: PresenceState,
   blockId: string,
 ): ReadonlyArray<PresenceUser> =>
-  Array.from(state.users.values()).filter(
-    (user) => user.selection?.blockId === blockId,
+  Array.from(state.users.values()).filter((user) =>
+    selectionReferencesBlock(user.selection, blockId),
   );
 
 /**

@@ -16,6 +16,7 @@ import {
   getTextareaCaretRect,
   getTextareaSelectionRects,
   type HighlightRect,
+  isLegacySelectionRange,
   LiveCursor,
   PresenceLayer,
   SelectionHighlight,
@@ -145,7 +146,10 @@ export function EditorSurface({
         );
         cursors.set(peer.userId, { x: local.left, y: local.top });
       }
-      if (peer.selection?.blockId === blockId) {
+      if (
+        isLegacySelectionRange(peer.selection) &&
+        peer.selection.blockId === blockId
+      ) {
         const rects = getTextareaSelectionRects(el, peer.selection);
         if (rects.length > 0) selections.set(peer.userId, rects);
       }
@@ -225,7 +229,7 @@ export function EditorSurface({
           // into the map). The extra `!peer.selection` check is for
           // the type narrower so the `peer.selection.from` / `.to`
           // reads below don't need a non-null assertion.
-          if (!rects || !peer.selection) return [];
+          if (!rects || !isLegacySelectionRange(peer.selection)) return [];
           const selectedText = text.slice(
             peer.selection.from,
             peer.selection.to,

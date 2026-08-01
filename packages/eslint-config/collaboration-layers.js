@@ -4,14 +4,17 @@
  * Enforces the boundaries documented in
  * `docs/design/collaboration-layers.md`:
  *
- * - `@softmaple/eg-walker` MUST NOT import `@softmaple/awareness` or any
- *   editor framework (Lexical, ProseMirror, Slate).
- * - `@softmaple/awareness` MUST NOT import `@softmaple/eg-walker` or any
- *   editor framework. The awareness package enforces this via Biome's
- *   `style/noRestrictedImports` in `packages/awareness/biome.jsonc` —
- *   if you change the deny list below, mirror the change there.
- * - Only `apps/*` may combine the two core packages with a concrete
- *   editor framework.
+ * - `@softmaple/eg-walker` MUST NOT import higher collaboration layers,
+ *   `@softmaple/awareness`, or any editor framework.
+ * - `@softmaple/block-model` may import `@softmaple/eg-walker`, but MUST NOT
+ *   import awareness, surface bindings, or editor frameworks.
+ * - `@softmaple/binding-lexical` may import the block model and Lexical, but
+ *   MUST NOT bypass the block model to import EG-walker directly.
+ * - `@softmaple/awareness` MUST NOT import a document model, surface binding,
+ *   or editor framework. Awareness enforces this via Biome's
+ *   `style/noRestrictedImports` in `packages/awareness/biome.jsonc`.
+ * - `apps/*` composes model bindings with awareness, transport, persistence,
+ *   identity, and UI.
  *
  * @module @softmaple/eslint-config/collaboration-layers
  */
@@ -21,12 +24,41 @@ const AWARENESS_PATTERNS = [
     group: ["@softmaple/awareness", "@softmaple/awareness/*"],
     message:
       "Cross-layer import: see docs/design/collaboration-layers.md. " +
-      "@softmaple/eg-walker must not depend on @softmaple/awareness.",
+      "Convergent document model packages must not depend on " +
+      "@softmaple/awareness.",
+  },
+];
+
+const EG_WALKER_PATTERNS = [
+  {
+    group: ["@softmaple/eg-walker", "@softmaple/eg-walker/*"],
+    message:
+      "Cross-layer import: see docs/design/collaboration-layers.md. " +
+      "A block-model binding must use @softmaple/block-model instead of " +
+      "depending on @softmaple/eg-walker directly.",
+  },
+];
+
+const BLOCK_MODEL_PATTERNS = [
+  {
+    group: ["@softmaple/block-model", "@softmaple/block-model/*"],
+    message:
+      "Reverse-layer import: see docs/design/collaboration-layers.md. " +
+      "@softmaple/eg-walker must not depend on @softmaple/block-model.",
+  },
+];
+
+const SURFACE_BINDING_PATTERNS = [
+  {
+    group: ["@softmaple/binding-*", "@softmaple/binding-*/**"],
+    message:
+      "Reverse-layer import: see docs/design/collaboration-layers.md. " +
+      "Document model packages must not depend on surface bindings.",
   },
 ];
 
 /**
- * Editor frameworks that `@softmaple/eg-walker` MUST NOT depend on.
+ * Editor frameworks that document model packages MUST NOT depend on.
  * The awareness package mirrors this list in its own `biome.jsonc`
  * because it does not run ESLint — keep them in sync when changing
  * either side (see `docs/design/collaboration-layers.md`).
@@ -43,33 +75,51 @@ const EDITOR_FRAMEWORK_PATTERNS = [
     group: ["lexical", "lexical/**", "@lexical/*", "@lexical/*/**"],
     message:
       "Editor-framework import: see docs/design/collaboration-layers.md. " +
-      "Core collaboration packages must be editor-class-agnostic; " +
-      "Lexical bindings belong in apps/* or a future bindings sub-path.",
+      "Document model and awareness packages must be surface-agnostic; " +
+      "Lexical integration belongs in @softmaple/binding-lexical.",
   },
   {
     group: ["prosemirror-*", "prosemirror-*/**"],
     message:
       "Editor-framework import: see docs/design/collaboration-layers.md. " +
-      "Core collaboration packages must be editor-class-agnostic; " +
-      "ProseMirror bindings belong in apps/* or a future bindings sub-path.",
+      "Document model and awareness packages must be surface-agnostic; " +
+      "ProseMirror integration belongs in a binding package or app staging.",
   },
   {
     group: ["slate", "slate/**", "slate-*", "slate-*/**"],
     message:
       "Editor-framework import: see docs/design/collaboration-layers.md. " +
-      "Core collaboration packages must be editor-class-agnostic; " +
-      "Slate bindings belong in apps/* or a future bindings sub-path.",
+      "Document model and awareness packages must be surface-agnostic; " +
+      "Slate integration belongs in a binding package or app staging.",
   },
 ];
 
 /**
  * `no-restricted-imports` patterns for `@softmaple/eg-walker`:
- * forbids `@softmaple/awareness` and any editor framework.
+ * forbids awareness, reverse model/binding imports, and editor frameworks.
  */
 export const egWalkerCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
+  ...BLOCK_MODEL_PATTERNS,
+  ...SURFACE_BINDING_PATTERNS,
   ...EDITOR_FRAMEWORK_PATTERNS,
 ];
+
+/**
+ * Patterns for `@softmaple/block-model`. The package is a document model
+ * layer over EG-walker, so EG-walker imports are intentionally allowed.
+ */
+export const blockModelCollaborationPatterns = [
+  ...AWARENESS_PATTERNS,
+  ...SURFACE_BINDING_PATTERNS,
+  ...EDITOR_FRAMEWORK_PATTERNS,
+];
+
+/**
+ * Patterns for a block-model surface binding such as binding-lexical.
+ * Surface frameworks are allowed here; importing EG-walker directly is not.
+ */
+export const blockModelBindingCollaborationPatterns = [...EG_WALKER_PATTERNS];
 
 /**
  * Concatenate one or more `no-restricted-imports` pattern arrays into

@@ -11,11 +11,8 @@
  * presence-state update functions or surfaced as a `PresenceEvent`.
  */
 
-import type {
-  CursorPosition,
-  PresenceUser,
-  SelectionRange,
-} from "../../types/presence";
+import type { CursorPosition, PresenceUser } from "../../types/presence";
+import { isPresenceSelection } from "../../types/presence";
 import type {
   ErrorPayload,
   JoinPayload,
@@ -31,12 +28,6 @@ const isCursorPosition = (value: unknown): value is CursorPosition =>
   isRecord(value) &&
   typeof value.blockId === "string" &&
   typeof value.offset === "number";
-
-const isSelectionRange = (value: unknown): value is SelectionRange =>
-  isRecord(value) &&
-  typeof value.blockId === "string" &&
-  typeof value.from === "number" &&
-  typeof value.to === "number";
 
 /**
  * `PresenceUser` requires `userId`, `name`, `color`, `status`, `lastActiveAt`.
@@ -69,7 +60,7 @@ export const isPresenceUser = (value: unknown): value is PresenceUser => {
   if (
     value.selection !== undefined &&
     value.selection !== null &&
-    !isSelectionRange(value.selection)
+    !isPresenceSelection(value.selection)
   ) {
     return false;
   }
@@ -139,7 +130,7 @@ export const isPresenceUpdatePayload = (
   if (
     updates.selection !== undefined &&
     updates.selection !== null &&
-    !isSelectionRange(updates.selection)
+    !isPresenceSelection(updates.selection)
   ) {
     return false;
   }

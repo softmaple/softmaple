@@ -54,7 +54,8 @@
         // around `/`, so an entry like `@softmaple/eg-walker` under
         // `patterns.group` silently does not match
         // `import "@softmaple/eg-walker"`. Globs
-        // (`@softmaple/eg-walker/**`, `@lexical/*`, etc.) stay in
+        // (`@softmaple/eg-walker/**`, `@softmaple/block-model/**`,
+        // `@lexical/*`, etc.) stay in
         // `patterns`. Keep this in sync with the matching ESLint rule
         // in `packages/eslint-config/collaboration-layers.js`; the
         // regression test in `test/biome-boundary.test.ts` will fail
@@ -64,8 +65,10 @@
           "options": {
             "paths": {
               "@softmaple/eg-walker": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker.",
-              "lexical": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Lexical bindings belong in apps/* or a future bindings sub-path.",
-              "slate": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Slate bindings belong in apps/* or a future bindings sub-path."
+              "@softmaple/block-model": "Cross-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a convergent document model.",
+              "@softmaple/binding-lexical": "Reverse-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a surface binding.",
+              "lexical": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; Lexical integration belongs in @softmaple/binding-lexical.",
+              "slate": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; Slate integration belongs in a binding package or app staging."
             },
             "patterns": [
               {
@@ -73,16 +76,24 @@
                 "message": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker."
               },
               {
+                "group": ["@softmaple/block-model/**"],
+                "message": "Cross-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a convergent document model."
+              },
+              {
+                "group": ["@softmaple/binding-lexical/**"],
+                "message": "Reverse-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a surface binding."
+              },
+              {
                 "group": ["lexical/**", "@lexical/*", "@lexical/*/**"],
-                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Lexical bindings belong in apps/* or a future bindings sub-path."
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; Lexical integration belongs in @softmaple/binding-lexical."
               },
               {
                 "group": ["prosemirror-*", "prosemirror-*/**"],
-                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; ProseMirror bindings belong in apps/* or a future bindings sub-path."
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; ProseMirror integration belongs in a binding package or app staging."
               },
               {
                 "group": ["slate/**", "slate-*", "slate-*/**"],
-                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Core collaboration packages must be editor-class-agnostic; Slate bindings belong in apps/* or a future bindings sub-path."
+                "message": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; Slate integration belongs in a binding package or app staging."
               }
             ]
           }

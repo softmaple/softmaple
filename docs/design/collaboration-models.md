@@ -17,12 +17,11 @@ A "collaboration model" is a tuple of three things:
 2. **Op shape** — what local edits and remote events look like.
 3. **Position shape** — how cursors and selections are addressed.
 
-The engines that implement these models are **siblings, not subclasses**.
-There is no shared `Operation` base type and no shared engine class.
-Each engine spells its model contract in its own TypeScript types;
-boundaries between packages cross with structural typing rather than
-shared imports (as already done for `PositionOperation` between
-`@softmaple/eg-walker` and `@softmaple/awareness`).
+The models have distinct contracts, not a shared `Operation` base type or
+engine class. An implementation may reuse a lower-level convergence
+primitive: `@softmaple/block-model` deliberately builds its stable block and
+mark semantics on EG-walker's sequence/DAG. Public model boundaries still use
+their own TypeScript types rather than a universal collaboration interface.
 
 ## Why three models, not one
 
@@ -34,9 +33,8 @@ ship the algorithm that is actually correct for its data shape.
 
 ## 1. Sequence model
 
-The collaborative document is a **flat sequence** of code units,
-graphemes, or characters. This is the model implemented today by
-`@softmaple/eg-walker`.
+The collaborative document is a **flat UTF-16 sequence**. This is the model
+implemented today by `@softmaple/eg-walker`.
 
 ### State shape
 
@@ -54,8 +52,8 @@ type SequenceOp =
   | { type: "delete"; index: number; length: number };
 ```
 
-Indices are in whichever unit the caller picks (UTF-16 code units,
-graphemes, UTF-32 code points). The engine does not normalise.
+Indices are UTF-16 code-unit boundaries. Public operations and anchors reject
+a position that splits a surrogate pair.
 
 ### Position shape
 
@@ -69,62 +67,89 @@ A single 1D index. When this model is exchanged with
 - `<textarea>` / `<input>`
 - CodeMirror (single-document mode)
 - Monaco
-- Lexical / ProseMirror / Slate **when the document is linearised**
-  (see "Lowering rich text to sequence" below)
+- A deliberately flattened rich-text surface with its own sequence binding
 
 ### Engine
 
 [`@softmaple/eg-walker`](../../packages/eg-walker/) — implements the
-Eg-walker paper. Index-based public API only.
+Eg-walker paper. Its base API is index-based; `./anchors` is the advanced
+stable sequence-position entry.
 
 ## 2. Block model
 
-The collaborative document is a **tree of blocks**, each block
-containing its own sequence (text, inline marks, etc.) or further
-nested blocks. There is **no engine for this model yet**; this section
-defines the slot.
+The collaborative document is an ordered block projection with stable IDs,
+block-local text, independent inline marks, and parent IDs for nested lists.
+This model is implemented by `@softmaple/block-model`.
 
-### State shape (sketch)
+### State shape
 
 ```ts
 type BlockId = string;
 
-interface BlockTree {
-  readonly root: BlockId;
-  readonly blocks: ReadonlyMap<BlockId, Block>;
+interface LinkAttributes {
+  readonly url: string;
+  readonly target?: string;
+  readonly rel?: string;
+  readonly title?: string;
+}
+
+interface BlockDocument {
+  readonly schemaVersion: 1;
+  readonly blocks: readonly Block[];
+}
+
+interface MarkSpan {
+  readonly kind:
+    | "bold" | "italic" | "underline" | "strike" | "inline-code" | "link";
+  readonly from: number;
+  readonly to: number;
+  readonly value: true | LinkAttributes;
 }
 
 interface Block {
   readonly id: BlockId;
-  readonly type: string;           // "paragraph", "heading", "list-item", …
-  readonly children: readonly BlockId[];
-  readonly text?: string;          // for leaf blocks with text
-  readonly attrs?: Readonly<Record<string, unknown>>;
+  readonly type:
+    | "paragraph" | "h1" | "h2" | "h3" | "quote" | "code"
+    | "bullet-list" | "number-list" | "check-list";
+  readonly text: string;
+  readonly attrs: {
+    readonly parentId: BlockId | null;
+    readonly language: string | null;
+    readonly theme: string | null;
+    readonly start: number | null;
+    readonly value: number | null;
+    readonly checked: boolean | null;
+  };
+  readonly marks: readonly MarkSpan[];
 }
 ```
 
-### Op shape (sketch)
+The flat array is canonical document order; `parentId` supplies list nesting
+without making ordering depend on recursive object traversal.
+
+### Op shape
 
 ```ts
-type BlockOp =
-  | { type: "insert-text"; blockId: BlockId; offset: number; text: string }
-  | { type: "delete-text"; blockId: BlockId; offset: number; length: number }
-  | { type: "split-block"; blockId: BlockId; offset: number; newId: BlockId }
-  | { type: "join-blocks"; first: BlockId; second: BlockId }
-  | { type: "insert-block"; parent: BlockId; index: number; block: Block }
-  | { type: "remove-block"; blockId: BlockId }
-  | { type: "set-attr"; blockId: BlockId; key: string; value: unknown };
+replica.transact((transaction) => {
+  transaction.insertText(blockId, offset, text);
+  transaction.deleteText(blockId, from, to);
+  transaction.splitBlock(blockId, offset);
+  transaction.joinBlock(blockId);
+  transaction.deleteBlock(blockId);
+  transaction.setBlock(blockId, fields);
+  transaction.setMark(blockId, from, to, kind, value);
+});
 ```
 
-This is illustrative. The real shape will be pinned by the first
-engine implementation, not designed in the abstract.
+One transaction produces one JSON-safe `RichTextEventBatch`. Its underlying
+EG events form a strict causal chain. Remote batches are buffered until their
+parents are present, deduplicated, then materialized and notified atomically.
 
 ### Position shape
 
-`{ blockId: BlockId, offset: number }` for cursors;
-`{ blockId: BlockId, from: number, to: number }` for selections.
-These already exist in `@softmaple/awareness` (`CursorPosition`,
-`SelectionRange`).
+Resolved positions use `{ blockId, offset }`. Persisted and awareness
+selection endpoints use `{ blockId, anchor: SequenceAnchor }`, preserving
+direction and cross-block ranges through concurrent edits.
 
 ### Surfaces
 
@@ -132,20 +157,20 @@ These already exist in `@softmaple/awareness` (`CursorPosition`,
 - Block editors (Notion-style)
 - Outliner-style apps
 
-### Lowering rich text to sequence
+### Engine
 
-It is possible to bind a Lexical / ProseMirror / Slate surface to the
-**sequence** engine by linearising the document with sentinel markers
-between blocks. This is a valid MVP for rich-text demos. Limitations:
+[`@softmaple/block-model`](../../packages/block-model/) — uses a deterministic
+event-backed bootstrap, stable raw block markers, Peritext-style anchored mark
+ranges, field-level causal LWW, and remove-wins block deletion. Marker and
+metadata atoms live in one EG sequence, while the public projection hides
+them and exposes blocks.
 
-- Structural ops (split, join, drag-reorder) become large
-  delete/insert pairs.
-- Block attributes (heading level, list type) ride along as sentinel
-  text and are fragile.
-- Per-block awareness mapping is harder.
+This is deliberate reuse of the sequence convergence core, not a transaction
+log demo: stable atom identities survive snapshots, checkpoints, deletion,
+and late branches. Lexical binds to this model through
+`@softmaple/binding-lexical`, not to raw EG indices.
 
-Treat lowering as a stepping stone, not a destination. A native block
-engine is the long-term answer for production-grade rich text.
+Block drag-reordering remains outside v1.
 
 ## 3. Object model
 
@@ -213,17 +238,16 @@ to round-trip through `CursorPosition`.
 
 ## Per-engine contract
 
-Every collaboration engine — present or future — must satisfy this
-informal contract. Each engine spells the types in its own package;
-they are not shared.
+Every collaboration engine — present or future — must cover this informal
+contract. Exact method names remain model-specific.
 
 | Method | Purpose |
 |---|---|
-| `apply(localOp)` | Translate a local intent into an event, advance state |
-| `applyRemoteEvent(event)` | Integrate, buffer, or dedupe a remote event |
-| `state()` | Read current convergent state |
-| `events()` | Iterate the event graph for sync / replication |
-| `subscribe(listener)` | Notify on integrated changes |
+| Local change entry | Translate local intent into event(s), advance state |
+| Remote integration | Integrate, buffer, or dedupe remote event(s) |
+| State read | Read the current convergent projection |
+| Event export | Iterate events or batches for sync / replication |
+| Serialization | Persist and validate a JSON-safe or binary representation |
 
 What an engine **must not** do, regardless of model:
 
@@ -233,31 +257,29 @@ What an engine **must not** do, regardless of model:
 - Expose surface-shaped types (DOM nodes, editor selections, React
   components).
 
-These are enforced for `@softmaple/eg-walker` today by the deny lists
-in `packages/eslint-config/collaboration-layers.js` (ESLint) and
-`packages/awareness/biome.jsonc` (Biome). Future engines must adopt
-the same template.
+These are enforced for both EG-walker and block-model by their package lint
+configs using the role-specific deny lists in
+`packages/eslint-config/collaboration-layers.js`. Future model engines must
+adopt a rule matching their actual dependency direction.
 
 ## Cross-model reuse
 
-Some plumbing genuinely *is* shared across models (event ID
-generation, columnar codec for the DAG, topological order). Today
-this lives inside `@softmaple/eg-walker/graph`. If and when a second
-engine ships and ends up with a near-identical graph layer, extract a
-shared graph package. **Not before.** Premature extraction is more
-expensive than duplication for two consumers.
+Block-model reuses EG-walker's public replica and stable-anchor APIs instead
+of copying event-ID, DAG, snapshot, or replay code. This direction is
+intentional: block-model adds semantics without making EG-walker understand
+blocks. A shared graph package would be justified only if a future model
+cannot reuse the sequence core but needs the same DAG implementation.
 
 ## Roadmap
 
 See [`collaboration-layers.md`](./collaboration-layers.md) for the
 hard rules and the project-wide roadmap. In short:
 
-- **Now** — sequence model only (`@softmaple/eg-walker`).
-- **Next** — surface bindings against the sequence model for
-  textarea, CodeMirror, and a lowered Lexical demo.
-- **Later** — block engine package, when a host demands real
-  block-aware convergence.
-- **Later still** — object engine package, after a canvas demo
+- **Now** — sequence and block models (`@softmaple/eg-walker` and
+  `@softmaple/block-model`) with the Lexical block binding.
+- **Next** — harden persistence/transport and add other surface bindings
+  against the appropriate existing model.
+- **Later** — object engine package, after a canvas demo
   proves the ops shape on raw awareness + transport.
 
 ## When to update this doc

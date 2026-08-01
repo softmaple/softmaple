@@ -92,6 +92,35 @@ describe("websocket validation", () => {
       ).toBe(true);
     });
 
+    it("accepts directional cross-block selection anchors", () => {
+      expect(
+        isPresenceUpdatePayload({
+          userId: "u-1",
+          updates: {
+            selection: {
+              anchor: {
+                blockId: "b2",
+                anchor: {
+                  type: "atom",
+                  eventId: "peer:4",
+                  offset: 2,
+                  affinity: "after",
+                },
+              },
+              focus: {
+                blockId: "b1",
+                anchor: {
+                  type: "boundary",
+                  edge: "start",
+                  affinity: "after",
+                },
+              },
+            },
+          },
+        }),
+      ).toBe(true);
+    });
+
     it("rejects malformed cursor / selection shapes", () => {
       expect(
         isPresenceUpdatePayload({

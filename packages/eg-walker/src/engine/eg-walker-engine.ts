@@ -919,7 +919,8 @@ export class EgWalkerEngine {
     if (
       tail === null ||
       typeof tail.content !== "string" ||
-      tail.run === null
+      tail.run === null ||
+      tail.originRight !== null
     ) {
       return startEventIndex;
     }

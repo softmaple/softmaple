@@ -13,6 +13,7 @@
 import { type ReactNode, useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
+import { selectionReferencesBlock } from "../types/presence";
 import { cx, toUserColorStyle } from "./internal-utils";
 
 export interface BlockActivityIndicatorProps {
@@ -60,7 +61,8 @@ export interface BlockActivityIndicatorProps {
 }
 
 const isUserInBlock = (user: PresenceUser, blockId: string): boolean =>
-  user.cursor?.blockId === blockId || user.selection?.blockId === blockId;
+  user.cursor?.blockId === blockId ||
+  selectionReferencesBlock(user.selection, blockId);
 
 const defaultFormatLabel = (users: ReadonlyArray<PresenceUser>): string => {
   if (users.length === 0) return "";

@@ -3,7 +3,11 @@
  * Based on docs/design/awareness-and-presence.md
  */
 
-import type { CursorPosition, PresenceUser, SelectionRange } from "./presence";
+import type {
+  CursorPosition,
+  PresenceSelection,
+  PresenceUser,
+} from "./presence";
 
 export const PRESENCE_EVENT = {
   JOIN: "presence:join",
@@ -68,7 +72,7 @@ export interface CursorEventData {
 
 export interface SelectionEventData {
   readonly type: typeof ACTIVITY_TYPE.SELECTION;
-  readonly range: SelectionRange | null;
+  readonly range: PresenceSelection | null;
 }
 
 export interface TypingEventData {

@@ -4,7 +4,7 @@
 
 import { useContext } from "react";
 import { PresenceContext } from "../providers/presence-context";
-import type { CursorPosition, SelectionRange } from "../types/presence";
+import type { CursorPosition, PresenceSelection } from "../types/presence";
 import { useTrailingEdgeThrottle } from "./internal/use-trailing-throttle";
 
 export { useUpdateTyping } from "./use-update-typing";
@@ -87,7 +87,7 @@ export const useUpdateSelection = (
   }
   const { updatePresence } = context;
 
-  return useTrailingEdgeThrottle<SelectionRange | Clear>((selection) => {
+  return useTrailingEdgeThrottle<PresenceSelection | Clear>((selection) => {
     updatePresence({ selection: selection ?? undefined });
   }, throttleMs);
 };

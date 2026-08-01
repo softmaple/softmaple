@@ -1,0 +1,18 @@
+{
+  "extends": "../typescript-config/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@softmaple/eg-walker": ["../eg-walker/dist/index.d.ts"],
+      "@softmaple/eg-walker/anchors": ["../eg-walker/dist/anchors.d.ts"],
+      "fast-check": ["../eg-walker/node_modules/fast-check"],
+      "vitest": ["../eg-walker/node_modules/vitest"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

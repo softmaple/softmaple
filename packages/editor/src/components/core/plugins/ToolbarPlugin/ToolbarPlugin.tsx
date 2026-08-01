@@ -29,16 +29,27 @@ import { FormatButtonGroup } from "@softmaple/editor/components/core/plugins/Too
 import { HistoryButtonGroup } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/HistoryButtonGroup";
 import { LinkButton } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/LinkButton";
 import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
+import {
+  DEFAULT_EDITOR_HISTORY_MODE,
+  isLocalEditorHistoryEnabled,
+  type EditorHistoryMode,
+} from "@softmaple/editor/components/core/editorOptions";
 
 type ToolbarPluginProps = {
   editor: LexicalEditor;
   activeEditor: LexicalEditor;
+  historyMode?: EditorHistoryMode;
   setActiveEditor: Dispatch<SetStateAction<LexicalEditor>>;
   setIsLinkEditMode: Dispatch<SetStateAction<boolean>>;
 };
 
 export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
-  const { editor, activeEditor, setActiveEditor } = props;
+  const {
+    editor,
+    activeEditor,
+    historyMode = DEFAULT_EDITOR_HISTORY_MODE,
+    setActiveEditor,
+  } = props;
 
   const [, setSelectedElementKey] = useState<NodeKey | null>(null);
   const [, setIsEditable] = useState(() => editor.isEditable());
@@ -157,7 +168,7 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
       // updateToolbarState("isUppercase", selection.hasFormat("uppercase"));
       // updateToolbarState("isCapitalize", selection.hasFormat("capitalize"));
     }
-  }, [activeEditor, editor, updateToolbarState]);
+  }, [activeEditor, updateToolbarState]);
 
   useEffect(() => {
     return editor.registerCommand(
@@ -178,6 +189,27 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
   }, [activeEditor, $updateToolbar]);
 
   useEffect(() => {
+    const historyRegistrations = isLocalEditorHistoryEnabled(historyMode)
+      ? [
+          activeEditor.registerCommand<boolean>(
+            CAN_UNDO_COMMAND,
+            (payload) => {
+              updateToolbarState("canUndo", payload);
+              return false;
+            },
+            COMMAND_PRIORITY_CRITICAL,
+          ),
+          activeEditor.registerCommand<boolean>(
+            CAN_REDO_COMMAND,
+            (payload) => {
+              updateToolbarState("canRedo", payload);
+              return false;
+            },
+            COMMAND_PRIORITY_CRITICAL,
+          ),
+        ]
+      : [];
+
     return mergeRegister(
       editor.registerEditableListener((editable) => {
         setIsEditable(editable);
@@ -187,29 +219,21 @@ export const ToolbarPlugin: FC<ToolbarPluginProps> = (props) => {
           $updateToolbar();
         });
       }),
-      activeEditor.registerCommand<boolean>(
-        CAN_UNDO_COMMAND,
-        (payload) => {
-          updateToolbarState("canUndo", payload);
-          return false;
-        },
-        COMMAND_PRIORITY_CRITICAL,
-      ),
-      activeEditor.registerCommand<boolean>(
-        CAN_REDO_COMMAND,
-        (payload) => {
-          updateToolbarState("canRedo", payload);
-          return false;
-        },
-        COMMAND_PRIORITY_CRITICAL,
-      ),
+      ...historyRegistrations,
     );
-  }, [$updateToolbar, activeEditor, editor, updateToolbarState]);
+  }, [$updateToolbar, activeEditor, editor, historyMode, updateToolbarState]);
 
   return (
     <div className="flex flex-wrap items-center gap-1 p-2 border-b">
-      <HistoryButtonGroup editor={activeEditor} toolbarState={toolbarState} />
-      <Separator orientation="vertical" className="h-6" />
+      {isLocalEditorHistoryEnabled(historyMode) ? (
+        <>
+          <HistoryButtonGroup
+            editor={activeEditor}
+            toolbarState={toolbarState}
+          />
+          <Separator orientation="vertical" className="h-6" />
+        </>
+      ) : null}
 
       {toolbarState.blockType in blockTypeToBlockName &&
         activeEditor === editor && (

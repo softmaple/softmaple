@@ -24,6 +24,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fromPlayground = (p: string) => path.resolve(here, p);
 
 export const workspaceAlias: Readonly<Record<string, string>> = {
+  "@softmaple/binding-lexical/react": fromPlayground(
+    "../../packages/binding-lexical/src/react.tsx",
+  ),
+  "@softmaple/binding-lexical": fromPlayground(
+    "../../packages/binding-lexical/src/index.ts",
+  ),
+  "@softmaple/block-model": fromPlayground(
+    "../../packages/block-model/src/index.ts",
+  ),
+  "@softmaple/editor": fromPlayground("../../packages/editor/src"),
+  "@softmaple/ui": fromPlayground("../../packages/ui/src"),
   "@softmaple/awareness/styles.css": fromPlayground(
     "../../packages/awareness/src/global.css",
   ),
@@ -38,6 +49,9 @@ export const workspaceAlias: Readonly<Record<string, string>> = {
   ),
   "@softmaple/awareness": fromPlayground(
     "../../packages/awareness/src/index.ts",
+  ),
+  "@softmaple/eg-walker/anchors": fromPlayground(
+    "../../packages/eg-walker/src/anchors.ts",
   ),
   "@softmaple/eg-walker": fromPlayground(
     "../../packages/eg-walker/src/index.ts",

@@ -17,7 +17,15 @@
     "check": "biome check"
   },
   "dependencies": {
+    "@lexical/code": "^0.44.0",
+    "@lexical/link": "^0.44.0",
+    "@lexical/list": "^0.44.0",
+    "@lexical/react": "^0.44.0",
+    "@lexical/rich-text": "^0.44.0",
     "@softmaple/awareness": "workspace:*",
+    "@softmaple/binding-lexical": "workspace:*",
+    "@softmaple/block-model": "workspace:*",
+    "@softmaple/editor": "workspace:*",
     "@softmaple/eg-walker": "workspace:*",
     "@softmaple/ui": "workspace:*",
     "@t3-oss/env-core": "^0.13.10",
@@ -38,6 +46,7 @@
     "dexie": "^4.2.1",
     "eventemitter3": "^5.0.1",
     "lucide-react": "^0.562.0",
+    "lexical": "^0.44.0",
     "nitro": "latest",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

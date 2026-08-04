@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   captureAnchor,
   createSequenceAnchorApi,
+  createSequenceAnchorProjection,
   insertWithAnchors,
   isSequenceAnchor,
   resolveAnchor,
@@ -14,6 +15,39 @@ import { EgWalkerReplica } from "../core/replica";
 import type { GraphEvent } from "../types";
 
 describe("captureAnchor", () => {
+  it("should batch capture and resolution through one immutable projection", () => {
+    // Arrange
+    const replica = bootstrapReplica("alice", "A😀BC");
+    const reference = bootstrapReplica("alice", "A😀BC");
+    const projection = createSequenceAnchorProjection(replica);
+    const boundaries = [0, 1, 3, 4, 5];
+
+    // Act
+    const batched = boundaries.flatMap((index) =>
+      (["before", "after"] as const).map((affinity) => {
+        const anchor = projection.captureAnchor(index, affinity);
+        return {
+          anchor,
+          resolved: projection.resolveAnchor(anchor),
+        };
+      }),
+    );
+    replica.insert(replica.getText().length, "!");
+
+    // Assert
+    expect(projection.text).toBe("A😀BC");
+    expect(batched.map(({ resolved }) => resolved)).toEqual(
+      boundaries.flatMap((index) => [index, index]),
+    );
+    expect(batched.map(({ anchor }) => anchor)).toEqual(
+      boundaries.flatMap((index) =>
+        (["before", "after"] as const).map((affinity) =>
+          captureAnchor(reference, index, affinity),
+        ),
+      ),
+    );
+  });
+
   it("should round-trip every visible code-point boundary", () => {
     // Arrange
     const replica = bootstrapReplica("alice", "A😀BC");

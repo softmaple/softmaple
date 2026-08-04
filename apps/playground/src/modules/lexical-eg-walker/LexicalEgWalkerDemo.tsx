@@ -7,10 +7,17 @@ import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
 import { LEXICAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
 import type { LexicalEditor } from "lexical";
 import { ArrowLeft, GitFork, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRoomPresence } from "./presence";
 import { RemoteSelectionLayer } from "./RemoteSelectionLayer";
-import { createRoomId } from "./room";
+import { createRoomId, resolveRoomId } from "./room";
 import { type PersistenceDisplayState, StatusRail } from "./StatusRail";
 import { toPresenceSelection, useLexicalRoom } from "./useLexicalRoom";
 
@@ -18,15 +25,36 @@ export interface LexicalEgWalkerDemoProps {
   readonly requestedRoom?: string;
 }
 
+interface RoomSessionValue<T> {
+  readonly sessionKey: string;
+  readonly value: T;
+}
+
 export function LexicalEgWalkerDemo({
   requestedRoom,
 }: LexicalEgWalkerDemoProps) {
-  const [roomId] = useState(() => requestedRoom ?? createRoomId());
+  const [generatedRoomId] = useState(createRoomId);
+  const roomId = resolveRoomId(requestedRoom, generatedRoomId);
   const presence = useRoomPresence(roomId);
   const room = useLexicalRoom(roomId, presence.identity.userId);
-  const [activeEditor, setActiveEditor] = useState<LexicalEditor>();
-  const [binding, setBinding] = useState<LexicalBinding | null>(null);
-  const [bindingError, setBindingError] = useState<Error | null>(null);
+  const sessionKey = JSON.stringify([roomId, presence.identity.userId]);
+  const [activeEditorState, setActiveEditorState] = useState<RoomSessionValue<
+    LexicalEditor | undefined
+  > | null>(null);
+  const [bindingState, setBindingState] =
+    useState<RoomSessionValue<LexicalBinding | null> | null>(null);
+  const [bindingErrorState, setBindingErrorState] =
+    useState<RoomSessionValue<Error> | null>(null);
+  const activeEditor =
+    activeEditorState?.sessionKey === sessionKey
+      ? activeEditorState.value
+      : undefined;
+  const binding =
+    bindingState?.sessionKey === sessionKey ? bindingState.value : null;
+  const bindingError =
+    bindingErrorState?.sessionKey === sessionKey
+      ? bindingErrorState.value
+      : null;
   const editorHostRef = useRef<HTMLDivElement>(null);
   const lexicalConfig = useMemo(
     () => ({
@@ -55,12 +83,37 @@ export function LexicalEgWalkerDemo({
     },
     [presence.updateSelection],
   );
+  const setActiveEditor = useCallback(
+    (update: SetStateAction<LexicalEditor | undefined>) => {
+      setActiveEditorState((current) => {
+        const previous =
+          current?.sessionKey === sessionKey ? current.value : undefined;
+        const value = typeof update === "function" ? update(previous) : update;
+        return { sessionKey, value };
+      });
+    },
+    [sessionKey],
+  );
   const updateBinding = useCallback(
     (nextBinding: LexicalBinding | null) => {
-      setBinding(nextBinding);
+      setBindingState((current) => {
+        if (nextBinding === null && current?.sessionKey !== sessionKey) {
+          return current;
+        }
+        return { sessionKey, value: nextBinding };
+      });
+      if (nextBinding !== null) {
+        setBindingErrorState((current) =>
+          current?.sessionKey === sessionKey ? null : current,
+        );
+      }
       room.onBindingChange(nextBinding);
     },
-    [room.onBindingChange],
+    [room.onBindingChange, sessionKey],
+  );
+  const reportBindingError = useCallback(
+    (value: Error) => setBindingErrorState({ sessionKey, value }),
+    [sessionKey],
   );
   const persistenceState: PersistenceDisplayState =
     room.persistence?.durability ?? "loading";
@@ -143,6 +196,7 @@ export function LexicalEgWalkerDemo({
               data-testid="lexical-room-ready"
             >
               <CoreEditor
+                key={sessionKey}
                 activeEditor={activeEditor}
                 setActiveEditor={setActiveEditor}
                 historyMode="disabled"
@@ -152,7 +206,7 @@ export function LexicalEgWalkerDemo({
                 <LexicalEgWalkerPlugin
                   replica={room.replica}
                   onBindingChange={updateBinding}
-                  onError={setBindingError}
+                  onError={reportBindingError}
                   onSelectionChange={updatePresenceSelection}
                 />
               </CoreEditor>

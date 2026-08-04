@@ -5,6 +5,7 @@ import {
 } from "@softmaple/awareness";
 import type {
   LexicalBinding,
+  LogicalSelection,
   LogicalSelectionPoint,
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
@@ -135,13 +136,25 @@ const toStableSelection = (
   selection: DirectionalSelectionRange,
 ): StableBlockSelection => selection;
 
+export const resolvePeerSelection = (
+  binding: Pick<LexicalBinding, "resolveSelection">,
+  peer: PresenceUser,
+): LogicalSelection | null => {
+  if (!isDirectionalSelectionRange(peer.selection)) return null;
+  try {
+    return binding.resolveSelection(toStableSelection(peer.selection));
+  } catch {
+    return null;
+  }
+};
+
 const measurePeer = (
   binding: LexicalBinding,
   host: HTMLElement,
   peer: PresenceUser,
 ): PeerGeometry | null => {
-  if (!isDirectionalSelectionRange(peer.selection)) return null;
-  const logical = binding.resolveSelection(toStableSelection(peer.selection));
+  const logical = resolvePeerSelection(binding, peer);
+  if (logical === null) return null;
   const anchor = resolveDomPoint(binding, logical.anchor);
   const focus = resolveDomPoint(binding, logical.focus);
   if (anchor === null || focus === null) return null;
@@ -209,12 +222,14 @@ export function RemoteSelectionLayer({
       characterData: true,
       subtree: true,
     });
+    const unsubscribeReplica = binding.replica.subscribe(measure);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
     return () => {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
+      unsubscribeReplica();
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };

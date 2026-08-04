@@ -1,7 +1,8 @@
 import type { EgWalkerReplica } from "@softmaple/eg-walker";
 import {
-  resolveAnchor,
+  createSequenceAnchorProjection,
   type SequenceAnchor,
+  type SequenceAnchorProjection,
 } from "@softmaple/eg-walker/anchors";
 
 import {
@@ -40,11 +41,23 @@ interface MarkerRecord {
   readonly position: number;
 }
 
+interface MarkerEventRecord {
+  readonly blockId: BlockId;
+  readonly eventId: string;
+  readonly sourceBlockId: BlockId | null;
+}
+
 interface DecodedUnit {
+  readonly blockId: BlockId;
   readonly from: number;
   readonly to: number;
   readonly rawFrom: number;
   readonly rawTo: number;
+}
+
+interface DecodedBoundary {
+  readonly offset: number;
+  readonly raw: number;
 }
 
 interface DecodedSegment {
@@ -56,6 +69,7 @@ interface DecodedSegment {
 export interface ProjectedBlock {
   readonly block: Block;
   readonly boundaries: ReadonlyMap<number, number>;
+  readonly anchorBoundaries: ReadonlyArray<DecodedBoundary>;
   readonly units: ReadonlyArray<DecodedUnit>;
   readonly rawStart: number;
   readonly rawEnd: number;
@@ -72,6 +86,7 @@ interface MutableProjectedBlock {
   readonly requestedAttrs: BlockAttributes;
   text: string;
   readonly boundaries: Map<number, number>;
+  readonly anchorBoundaries: DecodedBoundary[];
   readonly units: DecodedUnit[];
   readonly rawStart: number;
   rawEnd: number;
@@ -79,6 +94,7 @@ interface MutableProjectedBlock {
 
 interface ResolvedMarkEvent {
   readonly eventId: string;
+  readonly ownedBlockIds: ReadonlySet<BlockId>;
   readonly kind: MarkKind;
   readonly value: true | LinkAttributes | null;
   readonly start: number;
@@ -89,6 +105,7 @@ export const materializeBlockState = (
   replica: EgWalkerReplica,
   events: ReadonlyArray<RichTextEvent>,
 ): MaterializedBlockState => {
+  const sequenceProjection = createSequenceAnchorProjection(replica);
   const eventsById = new Map(events.map((event) => [event.id, event]));
   const parents = new Map(
     events.map((event) => [event.id, new Set(event.parentVersion)]),
@@ -96,11 +113,8 @@ export const materializeBlockState = (
   const assignments = collectFieldAssignments(events);
   const removalCauses = new Map<BlockId, Set<string>>();
   const joined = new Set<BlockId>();
-  const markerEvents: Array<{
-    readonly blockId: BlockId;
-    readonly eventId: string;
-    readonly sourceBlockId: BlockId | null;
-  }> = [];
+  const joinEvents = new Map<BlockId, string[]>();
+  const markerEvents: MarkerEventRecord[] = [];
   const seenBlocks = new Set<BlockId>();
 
   for (const event of events) {
@@ -130,6 +144,9 @@ export const materializeBlockState = (
         throw new Error("The deterministic bootstrap block cannot be joined");
       }
       joined.add(effect.blockId);
+      const blockJoinEvents = joinEvents.get(effect.blockId) ?? [];
+      blockJoinEvents.push(event.id);
+      joinEvents.set(effect.blockId, blockJoinEvents);
     }
   }
 
@@ -165,11 +182,12 @@ export const materializeBlockState = (
     }
   }
   const removed = new Set(removalCauses.keys());
+  const splitLineages = buildSplitLineages(markerEvents);
 
-  const rawText = replica.getText();
+  const rawText = sequenceProjection.text;
   const markers: MarkerRecord[] = markerEvents
     .map(({ blockId, eventId }) => {
-      const position = resolveAnchor(replica, markerAnchor(eventId));
+      const position = sequenceProjection.resolveAnchor(markerAnchor(eventId));
       if (rawText[position] !== BLOCK_MARKER) {
         throw new Error(`Block marker event ${eventId} is not present`);
       }
@@ -190,7 +208,12 @@ export const materializeBlockState = (
     const nextMarker = markers[index + 1];
     const segmentStart = marker.position + BLOCK_MARKER.length;
     const segmentEnd = nextMarker?.position ?? rawText.length;
-    const segment = decodeSegment(rawText, segmentStart, segmentEnd);
+    const segment = decodeSegment(
+      rawText,
+      segmentStart,
+      segmentEnd,
+      marker.blockId,
+    );
     if (removed.has(marker.blockId)) {
       continue;
     }
@@ -221,13 +244,24 @@ export const materializeBlockState = (
       },
       text: segment.text,
       boundaries: new Map(segment.boundaries),
+      anchorBoundaries: Array.from(segment.boundaries, ([offset, raw]) => ({
+        offset,
+        raw,
+      })),
       units: [...segment.units],
       rawStart: segmentStart,
       rawEnd: segmentEnd,
     });
   }
 
-  const resolvedMarks = resolveMarkEvents(replica, events);
+  const resolvedMarks = resolveMarkEvents(
+    sequenceProjection,
+    events,
+    markers,
+    parents,
+    removalCauses,
+    joinEvents,
+  );
   const visibleById = new Map<BlockId, BlockType>();
   const projectedBlocks = mutableBlocks.map((mutable) => {
     const attrs = normalizeOutputAttributes(
@@ -235,7 +269,12 @@ export const materializeBlockState = (
       mutable.requestedAttrs,
       visibleById,
     );
-    const marks = materializeMarks(mutable.units, resolvedMarks, parents);
+    const marks = materializeMarks(
+      mutable.units,
+      resolvedMarks,
+      parents,
+      splitLineages,
+    );
     const block: Block = Object.freeze({
       id: mutable.id,
       type: mutable.type,
@@ -247,6 +286,9 @@ export const materializeBlockState = (
     return Object.freeze({
       block,
       boundaries: mutable.boundaries,
+      anchorBoundaries: Object.freeze(
+        mutable.anchorBoundaries.map((boundary) => Object.freeze(boundary)),
+      ),
       units: Object.freeze([...mutable.units]),
       rawStart: mutable.rawStart,
       rawEnd: mutable.rawEnd,
@@ -261,6 +303,30 @@ export const materializeBlockState = (
     document,
     projectedBlocks: Object.freeze(projectedBlocks),
   });
+};
+
+const buildSplitLineages = (
+  markers: ReadonlyArray<MarkerEventRecord>,
+): ReadonlyMap<BlockId, ReadonlySet<BlockId>> => {
+  const sourceByBlock = new Map(
+    markers.map(({ blockId, sourceBlockId }) => [blockId, sourceBlockId]),
+  );
+  const lineages = new Map<BlockId, ReadonlySet<BlockId>>();
+
+  for (const { blockId } of markers) {
+    const lineage = new Set<BlockId>();
+    let current: BlockId | null = blockId;
+    while (current !== null) {
+      if (lineage.has(current)) {
+        throw new Error(`Cyclic split lineage at block ${current}`);
+      }
+      lineage.add(current);
+      current = sourceByBlock.get(current) ?? null;
+    }
+    lineages.set(blockId, lineage);
+  }
+
+  return lineages;
 };
 
 const collectFieldAssignments = (
@@ -387,6 +453,7 @@ const decodeSegment = (
   raw: string,
   start: number,
   end: number,
+  blockId: BlockId,
 ): DecodedSegment => {
   let text = "";
   const boundaries = new Map<number, number>([[0, start]]);
@@ -420,6 +487,7 @@ const decodeSegment = (
       rawIndex += visible.length;
     }
     units.push({
+      blockId,
       from: logicalFrom,
       to: text.length,
       rawFrom,
@@ -438,6 +506,10 @@ const appendSegment = (
   const logicalOffset = target.text.length;
   target.text += segment.text;
   for (const [offset, rawIndex] of segment.boundaries) {
+    target.anchorBoundaries.push({
+      offset: logicalOffset + offset,
+      raw: rawIndex,
+    });
     if (offset > 0 || !target.boundaries.has(logicalOffset)) {
       target.boundaries.set(logicalOffset + offset, rawIndex);
     }
@@ -453,21 +525,35 @@ const appendSegment = (
 };
 
 const resolveMarkEvents = (
-  replica: EgWalkerReplica,
+  projection: SequenceAnchorProjection,
   events: ReadonlyArray<RichTextEvent>,
+  markers: ReadonlyArray<MarkerRecord>,
+  parents: ReadonlyMap<string, ReadonlySet<string>>,
+  removalCauses: ReadonlyMap<BlockId, ReadonlySet<string>>,
+  joinEvents: ReadonlyMap<BlockId, ReadonlyArray<string>>,
 ): ReadonlyArray<ResolvedMarkEvent> =>
   events.flatMap((event): ResolvedMarkEvent[] => {
     if (event.effect.type !== "mark-set") {
       return [];
     }
-    const start = resolveAnchor(replica, event.effect.range.start);
-    const end = resolveAnchor(replica, event.effect.range.end);
+    const start = projection.resolveAnchor(event.effect.range.start);
+    const end = projection.resolveAnchor(event.effect.range.end);
     if (start >= end) {
       return [];
     }
     return [
       {
         eventId: event.id,
+        ownedBlockIds:
+          joinEvents.size === 0
+            ? new Set([event.effect.blockId])
+            : resolveMarkOwnership(
+                event.effect.blockId,
+                collectAncestors(event.id, parents),
+                markers,
+                removalCauses,
+                joinEvents,
+              ),
         kind: event.effect.kind,
         value: event.effect.value,
         start,
@@ -476,10 +562,73 @@ const resolveMarkEvents = (
     ];
   });
 
+const collectAncestors = (
+  eventId: string,
+  parents: ReadonlyMap<string, ReadonlySet<string>>,
+): ReadonlySet<string> => {
+  const ancestors = new Set<string>();
+  const stack = [...(parents.get(eventId) ?? [])];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (ancestors.has(current)) {
+      continue;
+    }
+    ancestors.add(current);
+    stack.push(...(parents.get(current) ?? []));
+  }
+  return ancestors;
+};
+
+/**
+ * Recover the visible block group that owned a mark range when it was set.
+ * Joined segments retain their originating IDs so older marks survive future
+ * joins, while a mark created after a join can still address the merged text.
+ */
+const resolveMarkOwnership = (
+  blockId: BlockId,
+  observedEventIds: ReadonlySet<string>,
+  markers: ReadonlyArray<MarkerRecord>,
+  removalCauses: ReadonlyMap<BlockId, ReadonlySet<string>>,
+  joinEvents: ReadonlyMap<BlockId, ReadonlyArray<string>>,
+): ReadonlySet<BlockId> => {
+  let visibleOwner: BlockId | null = null;
+  const ownedBlockIds = new Set<BlockId>();
+
+  for (const marker of markers) {
+    if (!observedEventIds.has(marker.eventId)) {
+      continue;
+    }
+    const blockRemovalCauses = removalCauses.get(marker.blockId);
+    const removed =
+      blockRemovalCauses !== undefined &&
+      setsIntersect(blockRemovalCauses, observedEventIds);
+    if (removed) {
+      continue;
+    }
+    const joinedBeforeMark = (joinEvents.get(marker.blockId) ?? []).some(
+      (eventId) => observedEventIds.has(eventId),
+    );
+    if (!joinedBeforeMark || visibleOwner === null) {
+      visibleOwner = marker.blockId;
+    }
+    if (visibleOwner === blockId) {
+      ownedBlockIds.add(marker.blockId);
+    }
+  }
+
+  // Unknown block IDs remain harmless no-ops, matching the previous lineage
+  // gate while keeping the declared owner available for split descendants.
+  if (ownedBlockIds.size === 0) {
+    ownedBlockIds.add(blockId);
+  }
+  return ownedBlockIds;
+};
+
 const materializeMarks = (
   units: ReadonlyArray<DecodedUnit>,
   markEvents: ReadonlyArray<ResolvedMarkEvent>,
   parents: ReadonlyMap<string, ReadonlySet<string>>,
+  splitLineages: ReadonlyMap<BlockId, ReadonlySet<BlockId>>,
 ): MarkSpan[] => {
   const spans: MarkSpan[] = [];
   for (const kind of [
@@ -491,12 +640,16 @@ const materializeMarks = (
     "link",
   ] as const) {
     for (const unit of units) {
-      const candidates = markEvents.filter(
-        (event) =>
+      const candidates = markEvents.filter((event) => {
+        const lineage = splitLineages.get(unit.blockId);
+        return (
           event.kind === kind &&
+          lineage !== undefined &&
+          setsIntersect(lineage, event.ownedBlockIds) &&
           event.start <= unit.rawFrom &&
-          unit.rawTo <= event.end,
-      );
+          unit.rawTo <= event.end
+        );
+      });
       if (candidates.length === 0) {
         continue;
       }
@@ -530,6 +683,18 @@ const materializeMarks = (
       left.to - right.to ||
       compareIds(left.kind, right.kind),
   );
+};
+
+const setsIntersect = <T>(
+  left: ReadonlySet<T>,
+  right: ReadonlySet<T>,
+): boolean => {
+  for (const value of left) {
+    if (right.has(value)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const sameMarkValue = (

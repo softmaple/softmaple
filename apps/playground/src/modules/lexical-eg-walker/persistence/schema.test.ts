@@ -70,6 +70,16 @@ describe("lexical EG-walker persistence schema", () => {
     expect(parsePersistenceStorage(null, ROOM_ID)).toEqual([]);
   });
 
+  it("runs domain validation before returning stored event batches", () => {
+    const rows = [createRoomRow(ROOM_ID, 1), createEventRow(ROOM_ID, batch, 2)];
+
+    expect(() =>
+      parsePersistenceStorage(encodeRows(rows), ROOM_ID, () => {
+        throw new Error("Invalid rich-text event");
+      }),
+    ).toThrow(/batch batch-1 is invalid: Invalid rich-text event/);
+  });
+
   it("rejects Set parent versions and duplicate event IDs", () => {
     expect(() =>
       WireBatchSchema.parse({

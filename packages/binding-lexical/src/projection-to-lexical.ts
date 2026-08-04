@@ -18,6 +18,7 @@ import {
   type ElementNode,
   type LexicalNode,
   type NodeKey,
+  type TextNode,
   type TextFormatType,
 } from "lexical";
 import type {
@@ -62,12 +63,11 @@ const activeMarks = (
 ): ReadonlyArray<ProjectedMark> =>
   marks.filter((mark) => mark.from <= from && mark.to >= to);
 
-const appendTextRun = (
+const appendMarkedTextNode = (
   parent: ElementNode,
-  text: string,
+  textNode: TextNode,
   marks: ReadonlyArray<ProjectedMark>,
 ): void => {
-  const textNode = $createTextNode(text);
   for (const [kind, format] of textFormats) {
     if (marks.some((mark) => mark.kind === kind)) {
       textNode.toggleFormat(format);
@@ -85,6 +85,12 @@ const appendTextRun = (
   linkNode.append(textNode);
   parent.append(linkNode);
 };
+
+const appendTextRun = (
+  parent: ElementNode,
+  text: string,
+  marks: ReadonlyArray<ProjectedMark>,
+): void => appendMarkedTextNode(parent, $createTextNode(text), marks);
 
 const createLink = (value: ProjectedLinkValue) =>
   $createLinkNode(value.url, {
@@ -120,7 +126,11 @@ const appendInlineContent = (
       continue;
     }
     if (content === "\t") {
-      parent.append($createTabNode());
+      appendMarkedTextNode(
+        parent,
+        $createTabNode(),
+        activeMarks(marks, from, to),
+      );
       continue;
     }
     appendTextRun(parent, content, activeMarks(marks, from, to));

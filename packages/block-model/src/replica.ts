@@ -1,6 +1,7 @@
 import { EgWalkerReplica, type GraphEvent } from "@softmaple/eg-walker";
 import {
   captureAnchor,
+  createSequenceAnchorProjection,
   resolveAnchor,
   type AnchorAffinity,
 } from "@softmaple/eg-walker/anchors";
@@ -449,11 +450,12 @@ class BlockTransactionContext implements BlockTransaction {
       }
       throw new Error("Mark range must be non-empty and forward");
     }
+    const projection = createSequenceAnchorProjection(this.egWalker);
     const range = {
-      start: captureAnchor(this.egWalker, rawFrom, affinity.start),
-      end: captureAnchor(this.egWalker, rawTo, affinity.end),
+      start: projection.captureAnchor(rawFrom, affinity.start),
+      end: projection.captureAnchor(rawTo, affinity.end),
     };
-    this.pushMetadata({ type: "mark-set", kind, value, range });
+    this.pushMetadata({ type: "mark-set", blockId, kind, value, range });
   }
 
   replaceDocument(next: BlockDocumentInput): ReadonlyArray<BlockId> {
@@ -475,6 +477,11 @@ class BlockTransactionContext implements BlockTransaction {
       const knownIndex = input.id ? existingIndex.get(input.id) : undefined;
       if (index === 0) {
         const first = this.state.document.blocks[0]!;
+        if (input.id !== undefined && input.id !== first.id) {
+          throw new Error(
+            `replaceDocument cannot replace first block ID ${first.id} with ${input.id}`,
+          );
+        }
         stableId = first.id;
         lastExistingIndex = 0;
       } else if (knownIndex !== undefined) {
@@ -888,7 +895,7 @@ const nearestBlockBoundary = (
     readonly raw: number;
   } | null = null;
   for (const projected of projectedBlocks) {
-    for (const [offset, raw] of projected.boundaries) {
+    for (const { offset, raw } of projected.anchorBoundaries) {
       if (best === null) {
         best = { blockId: projected.block.id, offset, raw };
         continue;

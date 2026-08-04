@@ -67,12 +67,14 @@ interface PendingLock {
 class FakeLockManager implements LockManagerLike {
   private readonly activeNames = new Set<string>();
   private readonly pending: PendingLock[] = [];
+  requestCount = 0;
 
   request(
     name: string,
     options: ExclusiveLockRequestOptions,
     callback: (lock: LockHandleLike) => Promise<void> | void,
   ): Promise<void> {
+    this.requestCount++;
     return new Promise<void>((resolve, reject) => {
       const request = { name, options, callback, resolve, reject };
       options.signal.addEventListener(
@@ -327,6 +329,27 @@ describe("TanStack DB persistence coordinator", () => {
     await coordinator.close();
   });
 
+  it("does not start leader election when storage is unavailable", async () => {
+    const broadcast = new MockBroadcastNetwork();
+    const locks = new FakeLockManager();
+    const coordinator = await createPersistenceCoordinator({
+      roomId: "room-a",
+      peerId: "a",
+      storage: null,
+      storageEventApi: null,
+      lockManager: locks,
+      channelFactory: broadcast.createChannel,
+    });
+
+    expect(locks.requestCount).toBe(0);
+    expect(coordinator.getSnapshot()).toMatchObject({
+      mode: "memory-only",
+      failureReason: "storage-unavailable",
+      leader: { status: "stopped", isLeader: false },
+    });
+    await coordinator.close();
+  });
+
   it("preserves corrupt storage and refuses to overwrite it", async () => {
     const storage = new SharedStorageBackend();
     const broadcast = new MockBroadcastNetwork();
@@ -381,5 +404,48 @@ describe("TanStack DB persistence coordinator", () => {
     });
     expect(storage.writes).toEqual([]);
     await coordinator.close();
+  });
+
+  it("releases leadership after degrading so a waiting tab can take over", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const storage = new SharedStorageBackend();
+    const broadcast = new MockBroadcastNetwork();
+    const locks = new FakeLockManager();
+    const tabA = storage.createTab("a");
+    const tabB = storage.createTab("b");
+    const a = await createPersistenceCoordinator({
+      roomId: "room-a",
+      peerId: "a",
+      storage: tabA,
+      storageEventApi: tabA,
+      lockManager: locks,
+      channelFactory: broadcast.createChannel,
+      repairDelayMs: 1_000,
+    });
+    const b = await createPersistenceCoordinator({
+      roomId: "room-a",
+      peerId: "b",
+      storage: tabB,
+      storageEventApi: tabB,
+      lockManager: locks,
+      channelFactory: broadcast.createChannel,
+      repairDelayMs: 1_000,
+    });
+    storage.quotaExceeded = true;
+
+    a.publishBatch(createBatch("quota-batch", "hello"));
+    await a.flushPending();
+    await tick();
+
+    expect(a.getSnapshot()).toMatchObject({
+      mode: "memory-only",
+      leader: { status: "stopped", isLeader: false },
+    });
+    expect(b.getSnapshot().leader).toMatchObject({
+      status: "leader",
+      isLeader: true,
+    });
+    await a.close();
+    await b.close();
   });
 });

@@ -110,4 +110,11 @@ describe("presence selections", () => {
       }),
     ).toBeNull();
   });
+
+  it("ignores malformed runtime selections when matching blocks", () => {
+    expect(selectionReferencesBlock({ anchor: null }, "paragraph-1")).toBe(
+      false,
+    );
+    expect(selectionReferencesBlock("invalid", "paragraph-1")).toBe(false);
+  });
 });

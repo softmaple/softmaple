@@ -5,7 +5,13 @@ import {
   type BlockReplica,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
-import { COLLABORATION_TAG, type LexicalEditor, type NodeKey } from "lexical";
+import { $isListItemNode } from "@lexical/list";
+import {
+  $getNodeByKey,
+  COLLABORATION_TAG,
+  type LexicalEditor,
+  type NodeKey,
+} from "lexical";
 import {
   pairProjectedKeysWithBlockIds,
   toBlockDocumentInput,
@@ -21,7 +27,12 @@ import {
   materializeLexicalDocument,
   type LexicalBlockIndex,
 } from "./projection-to-lexical";
-import type { ProjectedBlock, ProjectedDocument } from "./projection-types";
+import type {
+  ProjectedBlock,
+  ProjectedBlockAttributes,
+  ProjectedBlockType,
+  ProjectedDocument,
+} from "./projection-types";
 
 export interface StableBlockSelection {
   readonly anchor: BlockAnchor;
@@ -51,6 +62,180 @@ export interface LexicalBinding {
 const EMPTY_BLOCK_INDEX: LexicalBlockIndex = {
   blockIdToNodeKey: new Map(),
   nodeKeyToBlockId: new Map(),
+};
+
+interface NumberedListBoundary {
+  readonly blockId: string;
+  readonly attributes: ProjectedBlockAttributes;
+  readonly displayValue: number;
+}
+
+interface NumberedListState {
+  readonly boundaries: ReadonlyMap<string, NumberedListBoundary>;
+  readonly fallbackBoundaries: ReadonlyMap<string, NumberedListBoundary>;
+  readonly displayValues: ReadonlyMap<string, number>;
+}
+
+interface NumberedListContext {
+  readonly activeType: ProjectedBlockType;
+  readonly start: number;
+  readonly nextValue: number;
+  readonly overridden: boolean;
+  readonly boundary?: NumberedListBoundary;
+}
+
+const EMPTY_NUMBERED_LIST_STATE: NumberedListState = {
+  boundaries: new Map(),
+  fallbackBoundaries: new Map(),
+  displayValues: new Map(),
+};
+
+const numberedAttributes = (
+  start: number | null | undefined,
+  value: number | null | undefined,
+): ProjectedBlockAttributes => ({
+  ...(start == null ? {} : { start }),
+  ...(value == null ? {} : { value }),
+});
+
+const createNumberedListState = (
+  document: BlockDocument,
+): NumberedListState => {
+  const boundaries = new Map<string, NumberedListBoundary>();
+  const fallbackBoundaries = new Map<string, NumberedListBoundary>();
+  const displayValues = new Map<string, number>();
+  const contexts = new Map<string | null, NumberedListContext>();
+
+  for (const block of document.blocks) {
+    const parentId = block.attrs.parentId;
+    const previous = contexts.get(parentId);
+    if (block.type !== "number-list") {
+      contexts.set(parentId, {
+        activeType: block.type,
+        start: 1,
+        nextValue: 1,
+        overridden: false,
+      });
+      continue;
+    }
+
+    const attributes = numberedAttributes(block.attrs.start, block.attrs.value);
+    const continuesList = previous?.activeType === "number-list";
+    const expectedStart = continuesList
+      ? previous.start
+      : (attributes.start ?? 1);
+    const expectedValue = continuesList ? previous.nextValue : expectedStart;
+    const isBoundary =
+      attributes.start !== expectedStart || attributes.value !== expectedValue;
+    const start = isBoundary
+      ? (attributes.start ?? expectedStart)
+      : expectedStart;
+    const displayValue = isBoundary
+      ? (attributes.value ?? attributes.start ?? expectedValue)
+      : expectedValue;
+    const boundary = isBoundary
+      ? { blockId: block.id, attributes, displayValue }
+      : previous?.boundary;
+
+    if (boundary !== undefined) {
+      if (isBoundary) boundaries.set(block.id, boundary);
+      else fallbackBoundaries.set(block.id, boundary);
+    }
+    displayValues.set(block.id, displayValue);
+    contexts.set(parentId, {
+      activeType: "number-list",
+      start,
+      nextValue: displayValue + 1,
+      overridden: isBoundary || (previous?.overridden ?? false),
+      ...(boundary === undefined ? {} : { boundary }),
+    });
+  }
+
+  return { boundaries, fallbackBoundaries, displayValues };
+};
+
+const normalizeNumberedListProjection = (
+  projection: ProjectedDocument,
+  state: NumberedListState,
+): ProjectedDocument => {
+  const contexts = new Map<NodeKey | null, NumberedListContext>();
+  const stableIds = new Set(
+    projection.blocks.flatMap((block) =>
+      block.stableId === undefined ? [] : [block.stableId],
+    ),
+  );
+  const appliedBoundaries = new Set<string>();
+  const blocks = projection.blocks.map((block) => {
+    const parentKey = block.parentSourceKey ?? null;
+    const previous = contexts.get(parentKey);
+    if (block.type !== "number-list") {
+      contexts.set(parentKey, {
+        activeType: block.type,
+        start: 1,
+        nextValue: 1,
+        overridden: false,
+      });
+      return block;
+    }
+
+    const continuesList = previous?.activeType === "number-list";
+    const rawStart = block.attributes.start ?? 1;
+    const start = continuesList ? previous.start : rawStart;
+    const expectedValue = continuesList ? previous.nextValue : rawStart;
+    const directBoundary =
+      block.stableId === undefined
+        ? undefined
+        : state.boundaries.get(block.stableId);
+    const fallbackBoundary =
+      block.stableId === undefined
+        ? undefined
+        : state.fallbackBoundaries.get(block.stableId);
+    const candidate =
+      directBoundary ??
+      (fallbackBoundary !== undefined &&
+      !stableIds.has(fallbackBoundary.blockId)
+        ? fallbackBoundary
+        : undefined);
+    const boundary =
+      candidate !== undefined && !appliedBoundaries.has(candidate.blockId)
+        ? candidate
+        : undefined;
+    if (boundary !== undefined) appliedBoundaries.add(boundary.blockId);
+    const overridden =
+      boundary !== undefined || (previous?.overridden ?? false);
+    const displayValue =
+      boundary?.displayValue ??
+      (overridden ? expectedValue : (block.attributes.value ?? expectedValue));
+    const segmentStart = boundary?.attributes.start ?? start;
+    const attributes =
+      boundary?.attributes ??
+      (overridden
+        ? { start: segmentStart, value: displayValue }
+        : block.attributes);
+
+    contexts.set(parentKey, {
+      activeType: "number-list",
+      start: segmentStart,
+      nextValue: displayValue + 1,
+      overridden,
+    });
+    return attributes === block.attributes ? block : { ...block, attributes };
+  });
+  return { blocks };
+};
+
+const restoreNumberedListValues = (
+  blockIndex: LexicalBlockIndex,
+  state: NumberedListState,
+): void => {
+  for (const [blockId, value] of state.displayValues) {
+    const nodeKey = blockIndex.blockIdToNodeKey.get(blockId);
+    if (nodeKey === undefined) continue;
+    const item = $getNodeByKey(nodeKey);
+    if ($isListItemNode(item) && item.getValue() !== value) {
+      item.setValue(value);
+    }
+  }
 };
 
 const normalizeBatches = (
@@ -217,6 +402,19 @@ const reconcileReplacementBlockIds = (
   return { blocks };
 };
 
+const blockIndexForProjection = (
+  blocks: ReadonlyArray<ProjectedBlock>,
+  blockIds: ReadonlyArray<string>,
+): LexicalBlockIndex => {
+  const nodeKeyToBlockId = pairProjectedKeysWithBlockIds(blocks, blockIds);
+  return {
+    blockIdToNodeKey: new Map(
+      [...nodeKeyToBlockId].map(([key, id]) => [id, key] as const),
+    ),
+    nodeKeyToBlockId,
+  };
+};
+
 export const createLexicalBinding = ({
   editor,
   replica,
@@ -226,11 +424,13 @@ export const createLexicalBinding = ({
   },
   onSelectionChange,
 }: LexicalBindingOptions): LexicalBinding => {
+  const restoreReadOnlyOnDestroy = enableEditingOnReady && !editor.isEditable();
   let destroyed = false;
   let isComposing = false;
   let isApplyingRemote = false;
   let hasPendingCompositionUpdate = false;
   let blockIndex = EMPTY_BLOCK_INDEX;
+  let numberedListState = EMPTY_NUMBERED_LIST_STATE;
   let queuedRemoteBatches: RichTextEventBatch[] = [];
   let pendingSelection: StableBlockSelection | null = null;
   let previousSelectionJson = "";
@@ -260,6 +460,8 @@ export const createLexicalBinding = ({
     selection: StableBlockSelection | null = pendingSelection,
   ): void => {
     if (destroyed) return;
+    const document = replica.getDocument();
+    numberedListState = createNumberedListState(document);
     const logical =
       selection === null ? null : resolveStableSelection(selection, replica);
     isApplyingRemote = true;
@@ -267,12 +469,24 @@ export const createLexicalBinding = ({
       editor.update(
         () => {
           blockIndex = materializeLexicalDocument(
-            toMaterializedDocument(replica.getDocument()),
+            toMaterializedDocument(document),
           );
           if (logical !== null) restoreLogicalSelection(logical, blockIndex);
         },
         { discrete: true, tag: COLLABORATION_TAG },
       );
+      if (numberedListState.displayValues.size > 0) {
+        editor.update(
+          () => {
+            restoreNumberedListValues(blockIndex, numberedListState);
+          },
+          {
+            discrete: true,
+            skipTransforms: true,
+            tag: COLLABORATION_TAG,
+          },
+        );
+      }
     } finally {
       isApplyingRemote = false;
       pendingSelection = null;
@@ -285,8 +499,28 @@ export const createLexicalBinding = ({
     const rawProjection = editor
       .getEditorState()
       .read(() => projectLexicalDocument(blockIndex.nodeKeyToBlockId));
-    const projected = reconcileReplacementBlockIds(rawProjection, document);
+    const reconciled = reconcileReplacementBlockIds(rawProjection, document);
+    const projected = normalizeNumberedListProjection(
+      reconciled,
+      numberedListState,
+    );
     if (projectionMatchesDocument(projected, document)) {
+      blockIndex = blockIndexForProjection(
+        projected.blocks,
+        document.blocks.map(({ id }) => id),
+      );
+      if (numberedListState.displayValues.size > 0) {
+        editor.update(
+          () => {
+            restoreNumberedListValues(blockIndex, numberedListState);
+          },
+          {
+            discrete: true,
+            skipTransforms: true,
+            tag: COLLABORATION_TAG,
+          },
+        );
+      }
       publishSelection();
       return;
     }
@@ -294,18 +528,21 @@ export const createLexicalBinding = ({
       const blockIds = transaction.replaceDocument(
         toBlockDocumentInput(projected),
       );
-      blockIndex = {
-        blockIdToNodeKey: new Map(
-          [...pairProjectedKeysWithBlockIds(projected.blocks, blockIds)].map(
-            ([key, id]) => [id, key] as const,
-          ),
-        ),
-        nodeKeyToBlockId: pairProjectedKeysWithBlockIds(
-          projected.blocks,
-          blockIds,
-        ),
-      };
+      blockIndex = blockIndexForProjection(projected.blocks, blockIds);
     });
+    numberedListState = createNumberedListState(replica.getDocument());
+    if (numberedListState.displayValues.size > 0) {
+      editor.update(
+        () => {
+          restoreNumberedListValues(blockIndex, numberedListState);
+        },
+        {
+          discrete: true,
+          skipTransforms: true,
+          tag: COLLABORATION_TAG,
+        },
+      );
+    }
     publishSelection();
   };
 
@@ -318,7 +555,13 @@ export const createLexicalBinding = ({
       const contentChanged = dirtyElements.size > 0 || dirtyLeaves.size > 0;
       if (isComposing) {
         hasPendingCompositionUpdate ||= contentChanged;
-        publishSelection();
+        if (!hasPendingCompositionUpdate) {
+          try {
+            publishSelection();
+          } catch (error) {
+            reportError(error);
+          }
+        }
         return;
       }
       try {
@@ -355,6 +598,9 @@ export const createLexicalBinding = ({
     queueMicrotask(flushComposition);
   };
   const unregisterRoot = editor.registerRootListener((nextRoot) => {
+    if (currentRoot !== null && currentRoot !== nextRoot && isComposing) {
+      flushComposition();
+    }
     currentRoot?.removeEventListener(
       "compositionstart",
       handleCompositionStart,
@@ -404,6 +650,7 @@ export const createLexicalBinding = ({
       unsubscribeReplica();
       unregisterRoot();
       unregisterUpdate();
+      if (restoreReadOnlyOnDestroy) editor.setEditable(false);
     },
   };
 };

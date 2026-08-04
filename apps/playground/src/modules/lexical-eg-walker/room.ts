@@ -4,3 +4,8 @@ export const createRoomId = (): string => {
   }
   return Math.random().toString(36).slice(2).padEnd(12, "0").slice(0, 12);
 };
+
+export const resolveRoomId = (
+  requestedRoom: string | undefined,
+  generatedRoom: string,
+): string => requestedRoom ?? generatedRoom;

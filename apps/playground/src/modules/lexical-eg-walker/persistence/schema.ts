@@ -30,6 +30,8 @@ export interface WireBatch {
   readonly events: ReadonlyArray<WireGraphEvent>;
 }
 
+export type WireBatchParser = (input: unknown) => WireBatch;
+
 export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.string(),
@@ -79,6 +81,9 @@ export const WireBatchSchema: z.ZodType<WireBatch> = z
       });
     }
   });
+
+export const parseWireBatch: WireBatchParser = (input) =>
+  WireBatchSchema.parse(input);
 
 export const RoomRowSchema = z
   .object({
@@ -177,6 +182,7 @@ const parseJson = (raw: string): unknown => {
 export const parsePersistenceStorage = (
   raw: string | null,
   expectedRoomId: string,
+  parseBatch: WireBatchParser = parseWireBatch,
 ): ReadonlyArray<PersistenceRow> => {
   if (raw === null) return [];
 
@@ -187,30 +193,42 @@ export const parsePersistenceStorage = (
     );
   }
 
-  const rows = Object.entries(parsed.data).map(([encodedKey, storedItem]) => {
-    const { data } = storedItem;
-    if (data.roomId !== expectedRoomId) {
-      throw new CorruptPersistenceStorageError(
-        `Persistence row belongs to room ${data.roomId}, expected ${expectedRoomId}`,
-      );
-    }
+  const rows: PersistenceRow[] = Object.entries(parsed.data).map(
+    ([encodedKey, storedItem]) => {
+      const { data } = storedItem;
+      if (data.roomId !== expectedRoomId) {
+        throw new CorruptPersistenceStorageError(
+          `Persistence row belongs to room ${data.roomId}, expected ${expectedRoomId}`,
+        );
+      }
 
-    const expectedEncodedKey = `s:${data.key}`;
-    if (encodedKey !== expectedEncodedKey) {
-      throw new CorruptPersistenceStorageError(
-        `Persistence row key ${encodedKey} does not match ${expectedEncodedKey}`,
-      );
-    }
-    if (
-      data.kind === PERSISTENCE_ROW_KIND.Event &&
-      data.key !== getEventRowKey(data.batch.batchId)
-    ) {
-      throw new CorruptPersistenceStorageError(
-        `Persistence event row key ${data.key} does not match its batch ID`,
-      );
-    }
-    return data;
-  });
+      const expectedEncodedKey = `s:${data.key}`;
+      if (encodedKey !== expectedEncodedKey) {
+        throw new CorruptPersistenceStorageError(
+          `Persistence row key ${encodedKey} does not match ${expectedEncodedKey}`,
+        );
+      }
+      if (data.kind === PERSISTENCE_ROW_KIND.Room) return data;
+
+      let batch: WireBatch;
+      try {
+        batch = parseBatch(data.batch);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown validation error";
+        throw new CorruptPersistenceStorageError(
+          `Persistence event batch ${data.batch.batchId} is invalid: ${message}`,
+        );
+      }
+
+      if (data.key !== getEventRowKey(batch.batchId)) {
+        throw new CorruptPersistenceStorageError(
+          `Persistence event row key ${data.key} does not match its batch ID`,
+        );
+      }
+      return { ...data, batch };
+    },
+  );
 
   const roomRows = rows.filter(
     (row): row is RoomRow => row.kind === PERSISTENCE_ROW_KIND.Room,

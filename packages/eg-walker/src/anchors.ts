@@ -62,6 +62,19 @@ export interface SequenceAnchorApi {
   getFrontier(): ReadonlySet<EventId>;
 }
 
+/**
+ * Immutable character projection that resolves many anchors with one replay.
+ *
+ * Create one projection for a logical editor update, resolve every anchor
+ * needed by that update, and then discard it. A projection is a snapshot: it
+ * does not observe edits applied to the replica after construction.
+ */
+export interface SequenceAnchorProjection {
+  readonly text: string;
+  captureAnchor(index: number, affinity: AnchorAffinity): SequenceAnchor;
+  resolveAnchor(anchor: SequenceAnchor): number;
+}
+
 interface SequenceAtom {
   readonly eventId: EventId;
   readonly offset: number;
@@ -69,9 +82,17 @@ interface SequenceAtom {
   readonly codeUnit: string;
 }
 
+interface SequenceAtomPosition {
+  readonly before: number;
+  readonly after: number;
+}
+
 interface SequenceProjection {
-  readonly atoms: ReadonlyArray<SequenceAtom>;
   readonly visibleAtoms: ReadonlyArray<SequenceAtom>;
+  readonly atomPositions: ReadonlyMap<
+    EventId,
+    ReadonlyMap<number, SequenceAtomPosition>
+  >;
   readonly text: string;
 }
 
@@ -94,9 +115,31 @@ export const captureAnchor = (
   replica: EgWalkerReplica,
   index: number,
   affinity: AnchorAffinity,
+): SequenceAnchor =>
+  createSequenceAnchorProjection(replica).captureAnchor(index, affinity);
+
+/**
+ * Reconstruct one immutable sequence projection for batched anchor work.
+ */
+export const createSequenceAnchorProjection = (
+  replica: EgWalkerReplica,
+): SequenceAnchorProjection => {
+  const projection = createProjection(replica);
+  return Object.freeze({
+    text: projection.text,
+    captureAnchor: (index: number, affinity: AnchorAffinity): SequenceAnchor =>
+      captureProjectedAnchor(projection, index, affinity),
+    resolveAnchor: (anchor: SequenceAnchor): number =>
+      resolveProjectedAnchor(projection, anchor),
+  });
+};
+
+const captureProjectedAnchor = (
+  projection: SequenceProjection,
+  index: number,
+  affinity: AnchorAffinity,
 ): SequenceAnchor => {
   assertAffinity(affinity);
-  const projection = createProjection(replica);
   assertBoundary(index, projection.text);
 
   if (affinity === "before") {
@@ -116,24 +159,25 @@ export const captureAnchor = (
 export const resolveAnchor = (
   replica: EgWalkerReplica,
   anchor: SequenceAnchor,
+): number => createSequenceAnchorProjection(replica).resolveAnchor(anchor);
+
+const resolveProjectedAnchor = (
+  projection: SequenceProjection,
+  anchor: SequenceAnchor,
 ): number => {
   assertSequenceAnchor(anchor);
-  const projection = createProjection(replica);
   if (anchor.type === "boundary") {
     return anchor.edge === "start" ? 0 : projection.text.length;
   }
 
-  let visibleIndex = 0;
-  for (const atom of projection.atoms) {
-    if (atom.eventId === anchor.eventId && atom.offset === anchor.offset) {
-      const resolved =
-        visibleIndex + (anchor.affinity === "after" && !atom.deleted ? 1 : 0);
-      assertBoundary(resolved, projection.text);
-      return resolved;
-    }
-    if (!atom.deleted) {
-      visibleIndex++;
-    }
+  const position = projection.atomPositions
+    .get(anchor.eventId)
+    ?.get(anchor.offset);
+  if (position !== undefined) {
+    const resolved =
+      anchor.affinity === "after" ? position.after : position.before;
+    assertBoundary(resolved, projection.text);
+    return resolved;
   }
 
   throw new Error(
@@ -264,13 +308,43 @@ const createProjection = (replica: EgWalkerReplica): SequenceProjection => {
     .getSequenceRecords()
     .flatMap((record) => atomsFromRecord(record, events));
   const visibleAtoms = atoms.filter((atom) => !atom.deleted);
+  const atomPositions = indexAtomPositions(atoms);
   const visibleText = visibleAtoms.map((atom) => atom.codeUnit).join("");
   if (visibleText !== generated.text) {
     throw new Error(
       "Stable anchor projection failed to reproduce document text",
     );
   }
-  return { atoms, visibleAtoms, text: visibleText };
+  return { visibleAtoms, atomPositions, text: visibleText };
+};
+
+const indexAtomPositions = (
+  atoms: ReadonlyArray<SequenceAtom>,
+): ReadonlyMap<EventId, ReadonlyMap<number, SequenceAtomPosition>> => {
+  const positions = new Map<EventId, Map<number, SequenceAtomPosition>>();
+  let visibleIndex = 0;
+
+  for (const atom of atoms) {
+    const eventPositions = positions.get(atom.eventId) ?? new Map();
+    if (eventPositions.has(atom.offset)) {
+      throw new Error(
+        `Stable anchor projection contains duplicate atom ${atom.eventId}:${atom.offset}`,
+      );
+    }
+    eventPositions.set(
+      atom.offset,
+      Object.freeze({
+        before: visibleIndex,
+        after: visibleIndex + (atom.deleted ? 0 : 1),
+      }),
+    );
+    positions.set(atom.eventId, eventPositions);
+    if (!atom.deleted) {
+      visibleIndex++;
+    }
+  }
+
+  return positions;
 };
 
 const assertStableBootstrap = (replica: EgWalkerReplica): void => {

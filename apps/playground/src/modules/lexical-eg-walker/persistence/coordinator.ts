@@ -22,7 +22,9 @@ import {
   type PersistenceRow,
   PersistenceRowSchema,
   parsePersistenceStorage,
+  parseWireBatch,
   type WireBatch,
+  type WireBatchParser,
 } from "./schema";
 
 export const PERSISTENCE_COORDINATOR_MODE = {
@@ -89,6 +91,7 @@ export interface CreatePersistenceCoordinatorOptions {
   readonly channelFactory?: BroadcastChannelFactory;
   readonly createId?: () => string;
   readonly now?: () => number;
+  readonly parseBatch?: WireBatchParser;
   readonly repairDelayMs?: number;
 }
 
@@ -176,6 +179,7 @@ export const createPersistenceCoordinator = async (
   options: CreatePersistenceCoordinatorOptions,
 ): Promise<PersistenceCoordinator> => {
   const now = options.now ?? Date.now;
+  const parseBatch = options.parseBatch ?? parseWireBatch;
   const repairDelayMs = options.repairDelayMs ?? 25;
   const storageKey = getPersistenceStorageKey(options.roomId);
   const storage =
@@ -190,6 +194,7 @@ export const createPersistenceCoordinator = async (
     peerId: options.peerId,
     channelFactory: options.channelFactory,
     createId: options.createId,
+    parseBatch,
   });
   const election = createLeaderElection({
     roomId: options.roomId,
@@ -213,6 +218,7 @@ export const createPersistenceCoordinator = async (
   let repairTimer: ReturnType<typeof setTimeout> | null = null;
   let flushPromise: Promise<void> | null = null;
   let flushRequested = false;
+  let electionReleased = false;
 
   const pendingBatchIds = (): string[] =>
     channel
@@ -255,6 +261,19 @@ export const createPersistenceCoordinator = async (
     notifyState();
   };
 
+  const releaseElection = (): void => {
+    if (electionReleased) return;
+    electionReleased = true;
+    void election.stop().catch((error: unknown) => {
+      if (closed) return;
+      notifyError(
+        error instanceof Error
+          ? error
+          : new Error("Failed to stop persistence leader election"),
+      );
+    });
+  };
+
   const disablePersistence = (
     reason: Exclude<FailureReason, null>,
     error?: Error,
@@ -262,6 +281,11 @@ export const createPersistenceCoordinator = async (
     if (closed) return;
     mode = PERSISTENCE_COORDINATOR_MODE.MemoryOnly;
     failureReason = reason;
+    if (repairTimer) {
+      clearTimeout(repairTimer);
+      repairTimer = null;
+    }
+    releaseElection();
     if (error) notifyError(error);
     const abandonedCollection = collection;
     collection = null;
@@ -292,7 +316,7 @@ export const createPersistenceCoordinator = async (
     if (storage === null) return false;
     try {
       const raw = storage.getItem(storageKey);
-      syncRows(parsePersistenceStorage(raw, options.roomId), raw);
+      syncRows(parsePersistenceStorage(raw, options.roomId, parseBatch), raw);
       eventBridge.dispatch(createStorageEvent(storageKey, storage));
       return true;
     } catch (error) {
@@ -426,30 +450,33 @@ export const createPersistenceCoordinator = async (
     }
   }
 
-  const unsubscribeLeader = election.subscribe((next) => {
-    leaderSnapshot = next;
-    if (next.status === "unsupported") {
-      disablePersistence(PERSISTENCE_FAILURE_REASON.WebLocksUnsupported);
-      return;
-    }
-    if (next.status === "error") {
-      disablePersistence(
-        PERSISTENCE_FAILURE_REASON.StorageError,
-        new Error(next.errorMessage ?? "Persistence leader election failed"),
-      );
-      return;
-    }
-    notifyState();
-    if (!next.isLeader || mode !== PERSISTENCE_COORDINATOR_MODE.Persistent) {
-      return;
-    }
+  let unsubscribeLeader = (): void => undefined;
+  if (mode === PERSISTENCE_COORDINATOR_MODE.Persistent) {
+    unsubscribeLeader = election.subscribe((next) => {
+      leaderSnapshot = next;
+      if (next.status === "unsupported") {
+        disablePersistence(PERSISTENCE_FAILURE_REASON.WebLocksUnsupported);
+        return;
+      }
+      if (next.status === "error") {
+        disablePersistence(
+          PERSISTENCE_FAILURE_REASON.StorageError,
+          new Error(next.errorMessage ?? "Persistence leader election failed"),
+        );
+        return;
+      }
+      notifyState();
+      if (!next.isLeader || mode !== PERSISTENCE_COORDINATOR_MODE.Persistent) {
+        return;
+      }
 
-    refreshFromStorage();
-    channel.requestRepair();
-    if (repairTimer) clearTimeout(repairTimer);
-    repairTimer = setTimeout(scheduleFlush, repairDelayMs);
-  });
-  election.start();
+      if (!refreshFromStorage()) return;
+      channel.requestRepair();
+      if (repairTimer) clearTimeout(repairTimer);
+      repairTimer = setTimeout(scheduleFlush, repairDelayMs);
+    });
+    election.start();
+  }
   channel.requestRepair();
 
   return {

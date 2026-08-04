@@ -1,6 +1,12 @@
 import { CodeNode } from "@lexical/code";
 import { $createLinkNode, LinkNode } from "@lexical/link";
-import { ListItemNode, ListNode } from "@lexical/list";
+import {
+  $createListItemNode,
+  $isListItemNode,
+  $isListNode,
+  ListItemNode,
+  ListNode,
+} from "@lexical/list";
 import { $createHeadingNode, HeadingNode, QuoteNode } from "@lexical/rich-text";
 import {
   $createParagraphNode,
@@ -150,6 +156,105 @@ describe("createLexicalBinding", () => {
     binding.destroy();
     editor.setRootElement(null);
     root.remove();
+  });
+
+  it("defers selection publication until composed text is committed", async () => {
+    const replica = createBlockReplica("ime-selection");
+    const editor = createTestEditor();
+    const root = document.createElement("div");
+    root.contentEditable = "true";
+    document.body.append(root);
+    editor.setRootElement(root);
+    const onError = vi.fn();
+    const onSelectionChange = vi.fn();
+    const binding = createLexicalBinding({
+      editor,
+      replica,
+      onError,
+      onSelectionChange,
+    });
+
+    root.dispatchEvent(new CompositionEvent("compositionstart"));
+    expect(() => {
+      editor.update(
+        () => {
+          const block = $getRoot().getFirstChild();
+          if (!$isElementNode(block)) throw new Error("Expected a block");
+          const text = $createTextNode("本地");
+          block.clear().append(text);
+          text.selectEnd();
+        },
+        { discrete: true },
+      );
+    }).not.toThrow();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(onSelectionChange).not.toHaveBeenCalled();
+
+    root.dispatchEvent(new CompositionEvent("compositionend"));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(replica.getDocument().blocks[0]?.text).toBe("本地");
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+
+    binding.destroy();
+    editor.setRootElement(null);
+    root.remove();
+  });
+
+  it("flushes composition state when the editor root is replaced", () => {
+    const replica = createBlockReplica("ime-root-replacement");
+    const editor = createTestEditor();
+    const firstRoot = document.createElement("div");
+    const secondRoot = document.createElement("div");
+    firstRoot.contentEditable = "true";
+    secondRoot.contentEditable = "true";
+    document.body.append(firstRoot, secondRoot);
+    editor.setRootElement(firstRoot);
+    const binding = createLexicalBinding({ editor, replica });
+
+    firstRoot.dispatchEvent(new CompositionEvent("compositionstart"));
+    editor.setRootElement(secondRoot);
+    editor.update(
+      () => {
+        const block = $getRoot().getFirstChild();
+        if (!$isElementNode(block)) throw new Error("Expected a block");
+        block.clear().append($createTextNode("committed"));
+      },
+      { discrete: true },
+    );
+
+    expect(replica.getDocument().blocks[0]?.text).toBe("committed");
+
+    binding.destroy();
+    editor.setRootElement(null);
+    firstRoot.remove();
+    secondRoot.remove();
+  });
+
+  it("restores read-only state only when the binding enabled editing", () => {
+    const readOnlyEditor = createTestEditor();
+    readOnlyEditor.setEditable(false);
+    const readOnlyBinding = createLexicalBinding({
+      editor: readOnlyEditor,
+      replica: createBlockReplica("read-only-lifecycle"),
+    });
+
+    expect(readOnlyEditor.isEditable()).toBe(true);
+    readOnlyBinding.destroy();
+    expect(readOnlyEditor.isEditable()).toBe(false);
+
+    const editableEditor = createTestEditor();
+    editableEditor.setEditable(true);
+    const editableBinding = createLexicalBinding({
+      editor: editableEditor,
+      replica: createBlockReplica("editable-lifecycle"),
+    });
+
+    editableBinding.destroy();
+    expect(editableEditor.isEditable()).toBe(true);
   });
 
   it("captures backwards cross-block selections without normalizing direction", () => {
@@ -340,6 +445,494 @@ describe("createLexicalBinding", () => {
     );
 
     expect(localChanges).toHaveBeenCalledTimes(1);
+    binding.destroy();
+  });
+
+  it("does not rewrite marks that span line-break and tab leaves", () => {
+    const replica = createBlockReplica("marked-inline-leaves");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "marked",
+            type: "paragraph",
+            text: "a\n\tb",
+            marks: [{ kind: "bold", from: 0, to: 4, value: true }],
+          },
+          { inputId: "edited", type: "paragraph", text: "before" },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const localChanges = vi.fn();
+    replica.subscribe((change) => {
+      if (change.origin === "local") localChanges(change);
+    });
+    const editedKey = binding
+      .getBlockIndex()
+      .blockIdToNodeKey.get(blockIds[1]!);
+    if (editedKey === undefined) throw new Error("Expected the edited block");
+
+    editor.update(
+      () => {
+        const edited = $getNodeByKey(editedKey);
+        if (!$isElementNode(edited)) throw new Error("Expected a block");
+        edited.clear().append($createTextNode("after"));
+      },
+      { discrete: true },
+    );
+
+    expect(localChanges).toHaveBeenCalledTimes(1);
+    expect(replica.getDocument().blocks[0]?.marks).toEqual([
+      { kind: "bold", from: 0, to: 4, value: true },
+    ]);
+    binding.destroy();
+  });
+
+  it("preserves incompatible ordered-list numbering across unrelated edits", () => {
+    const replica = createBlockReplica("numbered-list-boundaries");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "one",
+            type: "number-list",
+            text: "one",
+            attrs: { start: 1, value: 1 },
+          },
+          {
+            inputId: "two",
+            type: "number-list",
+            text: "two",
+            attrs: { start: 1, value: 2 },
+          },
+          {
+            inputId: "ten",
+            type: "number-list",
+            text: "ten",
+            attrs: { start: 10, value: 10 },
+          },
+          {
+            inputId: "eleven",
+            type: "number-list",
+            text: "eleven",
+            attrs: { start: 10, value: 11 },
+          },
+          { inputId: "edited", type: "paragraph", text: "before" },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const readValues = (): ReadonlyArray<number> =>
+      editor.getEditorState().read(() => {
+        const list = $getRoot().getFirstChild();
+        if (!$isListNode(list)) throw new Error("Expected an ordered list");
+        return list.getChildren().map((child) => {
+          if (!$isListItemNode(child)) throw new Error("Expected a list item");
+          return child.getValue();
+        });
+      });
+
+    expect(readValues()).toEqual([1, 2, 10, 11]);
+    const blockIndex = binding.getBlockIndex();
+    expect(Object.keys(blockIndex).sort()).toEqual([
+      "blockIdToNodeKey",
+      "nodeKeyToBlockId",
+    ]);
+
+    const localChanges = vi.fn();
+    replica.subscribe((change) => {
+      if (change.origin === "local") localChanges(change);
+    });
+    const editedKey = binding
+      .getBlockIndex()
+      .blockIdToNodeKey.get(blockIds[4]!);
+    if (editedKey === undefined) throw new Error("Expected the edited block");
+    editor.update(
+      () => {
+        const edited = $getNodeByKey(editedKey);
+        if (!$isElementNode(edited)) throw new Error("Expected a block");
+        edited.clear().append($createTextNode("after"));
+      },
+      { discrete: true },
+    );
+
+    expect(localChanges).toHaveBeenCalledTimes(1);
+    expect(readValues()).toEqual([1, 2, 10, 11]);
+    expect(
+      replica
+        .getDocument()
+        .blocks.slice(0, 4)
+        .map(({ attrs }) => attrs),
+    ).toMatchObject([
+      { start: 1, value: 1 },
+      { start: 1, value: 2 },
+      { start: 10, value: 10 },
+      { start: 10, value: 11 },
+    ]);
+
+    const tenKey = binding.getBlockIndex().blockIdToNodeKey.get(blockIds[2]!);
+    if (tenKey === undefined) throw new Error("Expected the ten list item");
+    editor.update(
+      () => {
+        const ten = $getNodeByKey(tenKey);
+        if (!$isListItemNode(ten)) throw new Error("Expected a list item");
+        ten.clear().append($createTextNode("ten updated"));
+      },
+      { discrete: true },
+    );
+
+    expect(localChanges).toHaveBeenCalledTimes(2);
+    expect(readValues()).toEqual([1, 2, 10, 11]);
+    expect(replica.getDocument().blocks[2]).toMatchObject({
+      id: blockIds[2],
+      type: "number-list",
+      text: "ten updated",
+      attrs: { start: 10, value: 10 },
+    });
+    binding.destroy();
+  });
+
+  it("continues numbering after an ordered-list reset when inserting an item", () => {
+    const replica = createBlockReplica("numbered-list-insertion");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "one",
+            type: "number-list",
+            text: "one",
+            attrs: { start: 1, value: 1 },
+          },
+          {
+            inputId: "two",
+            type: "number-list",
+            text: "two",
+            attrs: { start: 1, value: 2 },
+          },
+          {
+            inputId: "ten",
+            type: "number-list",
+            text: "ten",
+            attrs: { start: 10, value: 10 },
+          },
+          {
+            inputId: "twelve",
+            type: "number-list",
+            text: "twelve",
+            attrs: { start: 10, value: 11 },
+          },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const tenKey = binding.getBlockIndex().blockIdToNodeKey.get(blockIds[2]!);
+    if (tenKey === undefined) throw new Error("Expected the ten list item");
+
+    editor.update(
+      () => {
+        const ten = $getNodeByKey(tenKey);
+        if (!$isListItemNode(ten)) throw new Error("Expected a list item");
+        ten.insertAfter(
+          $createListItemNode().append($createTextNode("eleven")),
+        );
+      },
+      { discrete: true },
+    );
+
+    expect(
+      editor.getEditorState().read(() => {
+        const list = $getRoot().getFirstChild();
+        if (!$isListNode(list)) throw new Error("Expected an ordered list");
+        return list.getChildren().map((child) => {
+          if (!$isListItemNode(child)) throw new Error("Expected a list item");
+          return child.getValue();
+        });
+      }),
+    ).toEqual([1, 2, 10, 11, 12]);
+    expect(
+      replica.getDocument().blocks.map(({ text, attrs }) => ({
+        text,
+        start: attrs.start,
+        value: attrs.value,
+      })),
+    ).toEqual([
+      { text: "one", start: 1, value: 1 },
+      { text: "two", start: 1, value: 2 },
+      { text: "ten", start: 10, value: 10 },
+      { text: "eleven", start: 10, value: 11 },
+      { text: "twelve", start: 10, value: 12 },
+    ]);
+    binding.destroy();
+  });
+
+  it("keeps an insertion before the reset in the preceding number segment", () => {
+    const replica = createBlockReplica("numbered-list-before-reset");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "one",
+            type: "number-list",
+            text: "one",
+            attrs: { start: 1, value: 1 },
+          },
+          {
+            inputId: "two",
+            type: "number-list",
+            text: "two",
+            attrs: { start: 1, value: 2 },
+          },
+          {
+            inputId: "ten",
+            type: "number-list",
+            text: "ten",
+            attrs: { start: 10, value: 10 },
+          },
+          {
+            inputId: "eleven",
+            type: "number-list",
+            text: "eleven",
+            attrs: { start: 10, value: 11 },
+          },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const twoKey = binding.getBlockIndex().blockIdToNodeKey.get(blockIds[1]!);
+    if (twoKey === undefined) throw new Error("Expected the two list item");
+
+    editor.update(
+      () => {
+        const two = $getNodeByKey(twoKey);
+        if (!$isListItemNode(two)) throw new Error("Expected a list item");
+        two.insertAfter($createListItemNode().append($createTextNode("three")));
+      },
+      { discrete: true },
+    );
+
+    expect(
+      editor.getEditorState().read(() => {
+        const list = $getRoot().getFirstChild();
+        if (!$isListNode(list)) throw new Error("Expected an ordered list");
+        return list.getChildren().map((child) => {
+          if (!$isListItemNode(child)) throw new Error("Expected a list item");
+          return child.getValue();
+        });
+      }),
+    ).toEqual([1, 2, 3, 10, 11]);
+    expect(
+      replica.getDocument().blocks.map(({ text, attrs }) => ({
+        text,
+        start: attrs.start,
+        value: attrs.value,
+      })),
+    ).toEqual([
+      { text: "one", start: 1, value: 1 },
+      { text: "two", start: 1, value: 2 },
+      { text: "three", start: 1, value: 3 },
+      { text: "ten", start: 10, value: 10 },
+      { text: "eleven", start: 10, value: 11 },
+    ]);
+    binding.destroy();
+  });
+
+  it("transfers a deleted reset to the next surviving list item", () => {
+    const replica = createBlockReplica("numbered-list-deleted-reset");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "one",
+            type: "number-list",
+            text: "one",
+            attrs: { start: 1, value: 1 },
+          },
+          {
+            inputId: "two",
+            type: "number-list",
+            text: "two",
+            attrs: { start: 1, value: 2 },
+          },
+          {
+            inputId: "ten",
+            type: "number-list",
+            text: "ten",
+            attrs: { start: 10, value: 10 },
+          },
+          {
+            inputId: "eleven",
+            type: "number-list",
+            text: "eleven",
+            attrs: { start: 10, value: 11 },
+          },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const tenKey = binding.getBlockIndex().blockIdToNodeKey.get(blockIds[2]!);
+    if (tenKey === undefined) throw new Error("Expected the ten list item");
+
+    editor.update(
+      () => {
+        const ten = $getNodeByKey(tenKey);
+        if (!$isListItemNode(ten)) throw new Error("Expected a list item");
+        ten.remove();
+      },
+      { discrete: true },
+    );
+
+    expect(
+      editor.getEditorState().read(() => {
+        const list = $getRoot().getFirstChild();
+        if (!$isListNode(list)) throw new Error("Expected an ordered list");
+        return list.getChildren().map((child) => {
+          if (!$isListItemNode(child)) throw new Error("Expected a list item");
+          return child.getValue();
+        });
+      }),
+    ).toEqual([1, 2, 10]);
+    expect(replica.getDocument().blocks[2]).toMatchObject({
+      id: blockIds[3],
+      text: "eleven",
+      attrs: { start: 10, value: 10 },
+    });
+    binding.destroy();
+  });
+
+  it("preserves a start-only reset when replacing its list item", () => {
+    const replica = createBlockReplica("numbered-list-replacement");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "one",
+            type: "number-list",
+            text: "one",
+            attrs: { start: 1, value: 1 },
+          },
+          {
+            inputId: "ten",
+            type: "number-list",
+            text: "ten",
+            attrs: { start: 10 },
+          },
+          {
+            inputId: "eleven",
+            type: "number-list",
+            text: "eleven",
+            attrs: { start: 10, value: 11 },
+          },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const tenKey = binding.getBlockIndex().blockIdToNodeKey.get(blockIds[1]!);
+    if (tenKey === undefined) throw new Error("Expected the ten list item");
+
+    editor.update(
+      () => {
+        const ten = $getNodeByKey(tenKey);
+        if (!$isListItemNode(ten)) throw new Error("Expected a list item");
+        ten.replace(
+          $createListItemNode().append($createTextNode("ten replaced")),
+        );
+      },
+      { discrete: true },
+    );
+
+    expect(
+      editor.getEditorState().read(() => {
+        const list = $getRoot().getFirstChild();
+        if (!$isListNode(list)) throw new Error("Expected an ordered list");
+        return list.getChildren().map((child) => {
+          if (!$isListItemNode(child)) throw new Error("Expected a list item");
+          return child.getValue();
+        });
+      }),
+    ).toEqual([1, 10, 11]);
+    expect(replica.getDocument().blocks[1]).toMatchObject({
+      id: blockIds[1],
+      type: "number-list",
+      text: "ten replaced",
+      attrs: { start: 10, value: null },
+    });
+    binding.destroy();
+  });
+
+  it("remaps an equivalent replacement list item to its stable block", () => {
+    const replica = createBlockReplica("numbered-list-equivalent-replacement");
+    let blockIds: ReadonlyArray<string> = [];
+    replica.transact((transaction) => {
+      blockIds = transaction.replaceDocument({
+        blocks: [
+          {
+            inputId: "one",
+            type: "number-list",
+            text: "one",
+            attrs: { start: 1, value: 1 },
+          },
+          {
+            inputId: "ten",
+            type: "number-list",
+            text: "ten",
+            attrs: { start: 10, value: 10 },
+          },
+        ],
+      });
+    });
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const oldKey = binding.getBlockIndex().blockIdToNodeKey.get(blockIds[1]!);
+    if (oldKey === undefined) throw new Error("Expected the ten list item");
+    let replacementKey = "";
+
+    editor.update(
+      () => {
+        const ten = $getNodeByKey(oldKey);
+        if (!$isListItemNode(ten)) throw new Error("Expected a list item");
+        const text = $createTextNode("ten");
+        const replacement = $createListItemNode().append(text);
+        replacementKey = replacement.getKey();
+        ten.replace(replacement);
+        text.selectEnd();
+      },
+      { discrete: true },
+    );
+
+    const blockIndex = binding.getBlockIndex();
+    expect(replacementKey).not.toBe(oldKey);
+    expect(blockIndex.blockIdToNodeKey.get(blockIds[1]!)).toBe(replacementKey);
+    expect(blockIndex.nodeKeyToBlockId.get(replacementKey)).toBe(blockIds[1]);
+    expect(blockIndex.nodeKeyToBlockId.has(oldKey)).toBe(false);
+    expect(
+      editor.getEditorState().read(() => {
+        const replacement = $getNodeByKey(replacementKey);
+        if (!$isListItemNode(replacement)) {
+          throw new Error("Expected the replacement list item");
+        }
+        return replacement.getValue();
+      }),
+    ).toBe(10);
+    const selection = binding.captureSelection();
+    expect(selection).not.toBeNull();
+    if (selection === null) throw new Error("Expected a stable selection");
+    expect(binding.resolveSelection(selection)).toEqual({
+      anchor: { blockId: blockIds[1], offset: 3 },
+      focus: { blockId: blockIds[1], offset: 3 },
+    });
     binding.destroy();
   });
 

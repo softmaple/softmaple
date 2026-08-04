@@ -156,13 +156,13 @@ const cloneSequenceAnchor = (anchor: SequenceAnchor): SequenceAnchor =>
  * the responsibility of a document-order-aware binding.
  */
 export const selectionReferencesBlock = (
-  selection: PresenceSelection | null | undefined,
+  selection: unknown,
   blockId: string,
 ): boolean => {
-  if (selection == null) return false;
   if (isLegacySelectionRange(selection)) {
     return selection.blockId === blockId;
   }
+  if (!isDirectionalSelectionRange(selection)) return false;
   return (
     selection.anchor.blockId === blockId || selection.focus.blockId === blockId
   );

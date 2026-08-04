@@ -162,6 +162,40 @@ describe("persistence BroadcastChannel protocol", () => {
     expect(receiver.getKnownBatches()).toEqual([original]);
   });
 
+  it("validates domain batches before accepting channel messages", () => {
+    const network = new MockBroadcastNetwork();
+    const receiver = createPersistenceChannel({
+      roomId: "room-a",
+      peerId: "receiver",
+      channelFactory: network.createChannel,
+      parseBatch: (input) => {
+        const parsed = WireBatchSchema.parse(input);
+        const [firstEvent] = parsed.events;
+        if (firstEvent === undefined || !("effect" in firstEvent)) {
+          throw new Error("Rich-text effect is required");
+        }
+        return parsed;
+      },
+    });
+    const sender = createPersistenceChannel({
+      roomId: "room-a",
+      peerId: "sender",
+      channelFactory: network.createChannel,
+    });
+    const delivered: string[] = [];
+    const errors: string[] = [];
+    receiver.subscribeBatches((batch) => delivered.push(batch.batchId));
+    receiver.subscribeErrors((error) => errors.push(error.message));
+
+    sender.publishBatch(createBatch("structural-only", "hello"));
+
+    expect(delivered).toEqual([]);
+    expect(receiver.getKnownBatches()).toEqual([]);
+    expect(errors).toEqual([
+      "Invalid persistence batch: Rich-text effect is required",
+    ]);
+  });
+
   it("isolates rooms through channel names", () => {
     const network = new MockBroadcastNetwork();
     const a = createPersistenceChannel({

@@ -66,8 +66,17 @@ const compareMarkKinds = (
   right: ProjectedMarkKind,
 ): number => (left < right ? -1 : left > right ? 1 : 0);
 
+const isUnmarkableInlineGap = (
+  text: string,
+  from: number,
+  to: number,
+): boolean =>
+  from < to &&
+  Array.from(text.slice(from, to)).every((character) => character === "\n");
+
 const normalizeMarks = (
   marks: ReadonlyArray<ProjectedMark>,
+  text: string,
 ): ReadonlyArray<ProjectedMark> => {
   const sorted = [...marks].sort(
     (left, right) =>
@@ -82,7 +91,8 @@ const normalizeMarks = (
     if (
       previous !== undefined &&
       previous.kind === mark.kind &&
-      previous.to >= mark.from &&
+      (previous.to >= mark.from ||
+        isUnmarkableInlineGap(text, previous.to, mark.from)) &&
       sameLinkValue(previous.value, mark.value)
     ) {
       normalized[normalized.length - 1] = {
@@ -197,7 +207,7 @@ const projectInlineChildren = (
   }
   return {
     text: accumulator.text,
-    marks: normalizeMarks(accumulator.marks),
+    marks: normalizeMarks(accumulator.marks, accumulator.text),
   };
 };
 

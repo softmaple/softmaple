@@ -31,6 +31,11 @@ export interface RoomPresence {
   ) => void;
 }
 
+interface AdapterValue<T> {
+  readonly adapter: PresenceAdapter;
+  readonly value: T;
+}
+
 const randomId = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -78,25 +83,39 @@ export const useRoomPresence = (roomId: string): RoomPresence => {
     () => createRoomPresenceAdapter(roomId, identity),
     [identity, roomId],
   );
-  const [connectionState, setConnectionState] =
-    useState<AdapterConnectionState>("disconnected");
-  const [users, setUsers] = useState<ReadonlyArray<PresenceUser>>([]);
+  const [connectionStateState, setConnectionStateState] =
+    useState<AdapterValue<AdapterConnectionState> | null>(null);
+  const [usersState, setUsersState] = useState<AdapterValue<
+    ReadonlyArray<PresenceUser>
+  > | null>(null);
+  const connectionState =
+    connectionStateState?.adapter === adapter
+      ? connectionStateState.value
+      : "disconnected";
+  const users = usersState?.adapter === adapter ? usersState.value : [];
 
   useEffect(() => {
-    const unsubscribeConnection =
-      adapter.onConnectionChange(setConnectionState);
+    let cancelled = false;
+    const unsubscribeConnection = adapter.onConnectionChange((value) => {
+      if (cancelled) return;
+      setConnectionStateState({ adapter, value });
+    });
     const unsubscribePresence = adapter.onPresenceChange((presence) => {
-      setUsers(Array.from(presence.values()));
+      if (cancelled) return;
+      setUsersState({ adapter, value: Array.from(presence.values()) });
     });
     const unsubscribeError = adapter.onError(() => {
-      setConnectionState("error");
+      if (cancelled) return;
+      setConnectionStateState({ adapter, value: "error" });
     });
 
     void adapter.connect().catch(() => {
-      setConnectionState("error");
+      if (cancelled) return;
+      setConnectionStateState({ adapter, value: "error" });
     });
 
     return () => {
+      cancelled = true;
       unsubscribeError();
       unsubscribePresence();
       unsubscribeConnection();

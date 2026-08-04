@@ -24,26 +24,49 @@ export interface LexicalRoomState {
   readonly flush: () => Promise<void>;
 }
 
+interface SessionValue<T> {
+  readonly sessionKey: string;
+  readonly value: T;
+}
+
 const parseBatch = (batch: WireBatch): RichTextEventBatch =>
   parseRichTextEventBatch(batch);
 
 const wireBatch = (batch: RichTextEventBatch): WireBatch =>
   WireBatchSchema.parse(batch);
 
+export const parsePersistenceBatch = (input: unknown): WireBatch =>
+  wireBatch(parseRichTextEventBatch(input));
+
 export const useLexicalRoom = (
   roomId: string,
   peerId: string,
 ): LexicalRoomState => {
-  const [replica, setReplica] = useState<BlockReplica | null>(null);
-  const [persistence, setPersistence] =
-    useState<PersistenceCoordinatorSnapshot | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const bindingRef = useRef<LexicalBinding | null>(null);
-  const coordinatorRef = useRef<PersistenceCoordinator | null>(null);
+  const sessionKey = JSON.stringify([roomId, peerId]);
+  const [replicaState, setReplicaState] =
+    useState<SessionValue<BlockReplica> | null>(null);
+  const [persistenceState, setPersistenceState] =
+    useState<SessionValue<PersistenceCoordinatorSnapshot> | null>(null);
+  const [errorState, setErrorState] = useState<SessionValue<Error> | null>(
+    null,
+  );
+  const bindingRef = useRef<SessionValue<LexicalBinding> | null>(null);
+  const coordinatorRef = useRef<SessionValue<PersistenceCoordinator> | null>(
+    null,
+  );
 
-  const onBindingChange = useCallback((binding: LexicalBinding | null) => {
-    bindingRef.current = binding;
-  }, []);
+  const onBindingChange = useCallback(
+    (binding: LexicalBinding | null) => {
+      if (binding === null) {
+        if (bindingRef.current?.sessionKey === sessionKey) {
+          bindingRef.current = null;
+        }
+        return;
+      }
+      bindingRef.current = { sessionKey, value: binding };
+    },
+    [sessionKey],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -55,18 +78,25 @@ export const useLexicalRoom = (
 
     const start = async (): Promise<void> => {
       const nextReplica = createBlockReplica(peerId);
-      coordinator = await createPersistenceCoordinator({ roomId, peerId });
+      coordinator = await createPersistenceCoordinator({
+        roomId,
+        peerId,
+        parseBatch: parsePersistenceBatch,
+      });
       if (cancelled) {
         await coordinator.close();
         return;
       }
-      coordinatorRef.current = coordinator;
+      coordinatorRef.current = { sessionKey, value: coordinator };
 
       const applyIncoming = (batch: WireBatch): void => {
         const parsed = parseBatch(batch);
-        const binding = bindingRef.current;
-        if (binding === null) nextReplica.applyRemoteEvents(parsed);
-        else binding.applyRemoteEvents(parsed);
+        const bindingState = bindingRef.current;
+        if (bindingState?.sessionKey !== sessionKey) {
+          nextReplica.applyRemoteEvents(parsed);
+        } else {
+          bindingState.value.applyRemoteEvents(parsed);
+        }
       };
       unsubscribeBatches = coordinator.subscribeBatches((batch, source) => {
         if (source !== "local") applyIncoming(batch);
@@ -87,19 +117,25 @@ export const useLexicalRoom = (
           if (batch !== undefined) coordinator.publishBatch(wireBatch(batch));
         }
       });
-      unsubscribeState = coordinator.subscribeState(setPersistence);
-      unsubscribeErrors = coordinator.subscribeErrors(setError);
-      setPersistence(coordinator.getSnapshot());
-      setReplica(nextReplica);
+      unsubscribeState = coordinator.subscribeState((value) => {
+        setPersistenceState({ sessionKey, value });
+      });
+      unsubscribeErrors = coordinator.subscribeErrors((value) => {
+        setErrorState({ sessionKey, value });
+      });
+      setPersistenceState({ sessionKey, value: coordinator.getSnapshot() });
+      setReplicaState({ sessionKey, value: nextReplica });
     };
 
     void start().catch((reason: unknown) => {
       if (!cancelled) {
-        setError(
-          reason instanceof Error
-            ? reason
-            : new Error("Failed to initialize the collaboration room"),
-        );
+        setErrorState({
+          sessionKey,
+          value:
+            reason instanceof Error
+              ? reason
+              : new Error("Failed to initialize the collaboration room"),
+        });
       }
     });
 
@@ -111,8 +147,12 @@ export const useLexicalRoom = (
     return () => {
       cancelled = true;
       window.removeEventListener("pagehide", handlePageHide);
-      bindingRef.current = null;
-      coordinatorRef.current = null;
+      if (bindingRef.current?.sessionKey === sessionKey) {
+        bindingRef.current = null;
+      }
+      if (coordinatorRef.current?.sessionKey === sessionKey) {
+        coordinatorRef.current = null;
+      }
       unsubscribeErrors?.();
       unsubscribeState?.();
       unsubscribeReplica?.();
@@ -121,12 +161,20 @@ export const useLexicalRoom = (
         void coordinator.flushPending().finally(() => coordinator?.close());
       }
     };
-  }, [peerId, roomId]);
+  }, [peerId, roomId, sessionKey]);
 
-  const flush = useCallback(
-    async () => coordinatorRef.current?.flushPending(),
-    [],
-  );
+  const flush = useCallback(async () => {
+    const coordinatorState = coordinatorRef.current;
+    if (coordinatorState?.sessionKey === sessionKey) {
+      await coordinatorState.value.flushPending();
+    }
+  }, [sessionKey]);
+
+  const replica =
+    replicaState?.sessionKey === sessionKey ? replicaState.value : null;
+  const persistence =
+    persistenceState?.sessionKey === sessionKey ? persistenceState.value : null;
+  const error = errorState?.sessionKey === sessionKey ? errorState.value : null;
 
   return { replica, persistence, error, onBindingChange, flush };
 };

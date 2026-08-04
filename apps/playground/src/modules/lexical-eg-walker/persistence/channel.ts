@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { type WireBatch, WireBatchSchema } from "./schema";
+import {
+  parseWireBatch,
+  type WireBatch,
+  type WireBatchParser,
+  WireBatchSchema,
+} from "./schema";
 
 export const PERSISTENCE_CHANNEL_PROTOCOL_VERSION = 1 as const;
 export const PERSISTENCE_CHANNEL_MESSAGE_TYPE = {
@@ -87,6 +92,7 @@ export interface CreatePersistenceChannelOptions {
   readonly peerId: string;
   readonly channelFactory?: BroadcastChannelFactory;
   readonly createId?: () => string;
+  readonly parseBatch?: WireBatchParser;
 }
 
 export const getPersistenceChannelName = (roomId: string): string =>
@@ -118,6 +124,7 @@ export const createPersistenceChannel = ({
   peerId,
   channelFactory = createNativeBroadcastChannel,
   createId = () => crypto.randomUUID(),
+  parseBatch = parseWireBatch,
 }: CreatePersistenceChannelOptions): PersistenceChannel => {
   const channel = channelFactory(getPersistenceChannelName(roomId));
   const knownBatches = new Map<string, WireBatch>();
@@ -132,10 +139,18 @@ export const createPersistenceChannel = ({
   };
 
   const acceptBatch = (
-    candidate: WireBatch,
+    candidate: unknown,
     source: BatchDeliverySource,
-  ): boolean => {
-    const batch = WireBatchSchema.parse(candidate);
+  ): WireBatch | null => {
+    let batch: WireBatch;
+    try {
+      batch = parseBatch(candidate);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown validation error";
+      notifyError(new Error(`Invalid persistence batch: ${message}`));
+      return null;
+    }
     const existing = knownBatches.get(batch.batchId);
     if (existing) {
       if (serializeBatch(existing) !== serializeBatch(batch)) {
@@ -143,12 +158,12 @@ export const createPersistenceChannel = ({
           new Error(`Conflicting payloads received for batch ${batch.batchId}`),
         );
       }
-      return false;
+      return null;
     }
 
     knownBatches.set(batch.batchId, batch);
     for (const listener of batchListeners) listener(batch, source);
-    return true;
+    return batch;
   };
 
   const markDurable = (batchIds: ReadonlyArray<string>): string[] => {
@@ -225,8 +240,8 @@ export const createPersistenceChannel = ({
 
   return {
     publishBatch: (candidate) => {
-      const batch = WireBatchSchema.parse(candidate);
-      if (!acceptBatch(batch, "local")) return false;
+      const batch = acceptBatch(candidate, "local");
+      if (batch === null) return false;
       postMessage({
         protocolVersion: PERSISTENCE_CHANNEL_PROTOCOL_VERSION,
         type: PERSISTENCE_CHANNEL_MESSAGE_TYPE.Event,

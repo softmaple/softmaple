@@ -145,6 +145,7 @@ export type RichTextEffect =
   | { readonly type: "block-delete"; readonly blockId: BlockId }
   | {
       readonly type: "mark-set";
+      readonly blockId: BlockId;
       readonly kind: MarkKind;
       readonly value: true | LinkAttributes | null;
       readonly range: {

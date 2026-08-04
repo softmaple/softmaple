@@ -1,5 +1,8 @@
 import type { GraphEvent } from "@softmaple/eg-walker";
-import { isSequenceAnchor } from "@softmaple/eg-walker/anchors";
+import {
+  isSequenceAnchor,
+  type SequenceAnchor,
+} from "@softmaple/eg-walker/anchors";
 
 import {
   BLOCK_MARKER,
@@ -322,14 +325,32 @@ const parseEffect = (input: unknown, label: string): RichTextEffect => {
       const value = parseMarkValue(effect.kind, effect.value, `${label}.value`);
       return Object.freeze({
         type: "mark-set",
+        blockId: asNonEmptyString(effect.blockId, `${label}.blockId`),
         kind: effect.kind,
         value,
-        range: Object.freeze({ start: range.start, end: range.end }),
+        range: Object.freeze({
+          start: cloneSequenceAnchor(range.start),
+          end: cloneSequenceAnchor(range.end),
+        }),
       });
     }
     default:
       throw new Error(`${label}.type is invalid`);
   }
+};
+
+const cloneSequenceAnchor = (anchor: SequenceAnchor): SequenceAnchor => {
+  if (anchor.type === "atom") {
+    return Object.freeze({
+      type: "atom",
+      eventId: anchor.eventId,
+      offset: anchor.offset,
+      affinity: anchor.affinity,
+    });
+  }
+  return anchor.edge === "start"
+    ? Object.freeze({ type: "boundary", edge: "start", affinity: "after" })
+    : Object.freeze({ type: "boundary", edge: "end", affinity: "before" });
 };
 
 const parseCompleteFields = (

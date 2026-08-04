@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { EgWalkerReplica } from "@softmaple/eg-walker";
 
 import {
   BLOCK_MARKER,
@@ -9,7 +10,10 @@ import {
   isRichTextEventBatch,
   parseRichTextEventBatch,
   type BlockDocumentInput,
+  type RichTextEventBatch,
 } from "../index";
+import { materializeBlockState } from "../materialize";
+import { toGraphEvent } from "../wire";
 
 describe("BlockReplica", () => {
   it("should start from one fixed event-backed paragraph marker", () => {
@@ -138,6 +142,325 @@ describe("BlockReplica", () => {
         },
       ],
     });
+  });
+
+  it("should keep a last-block mark out of a later block", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+    });
+
+    // Act
+    replica.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "plain-block",
+        type: "paragraph",
+        text: "B",
+        marks: [],
+      });
+    });
+
+    // Assert
+    expect(replica.getDocument().blocks).toMatchObject([
+      { id: BOOTSTRAP_BLOCK_ID, marks: [{ kind: "bold", from: 0, to: 1 }] },
+      { id: "plain-block", text: "B", marks: [] },
+    ]);
+  });
+
+  it("should keep a block-end mark out of a block inserted before its successor", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "successor",
+        type: "paragraph",
+        text: "C",
+      });
+    });
+    replica.transact((transaction) => {
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+    });
+
+    // Act
+    replica.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "inserted",
+        type: "paragraph",
+        text: "B",
+        marks: [],
+      });
+    });
+
+    // Assert
+    expect(replica.getDocument().blocks).toMatchObject([
+      { id: BOOTSTRAP_BLOCK_ID, marks: [{ kind: "bold", from: 0, to: 1 }] },
+      { id: "inserted", text: "B", marks: [] },
+      { id: "successor", text: "C", marks: [] },
+    ]);
+  });
+
+  it("should let a block-end mark follow a split child", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+    });
+
+    // Act
+    let childId = "";
+    replica.transact((transaction) => {
+      childId = transaction.splitBlock(BOOTSTRAP_BLOCK_ID, 1);
+      transaction.insertText(childId, 0, "B");
+    });
+
+    // Assert
+    expect(replica.getDocument().blocks).toMatchObject([
+      { id: BOOTSTRAP_BLOCK_ID, text: "A", marks: [{ kind: "bold" }] },
+      { id: childId, text: "B", marks: [{ kind: "bold", from: 0, to: 1 }] },
+    ]);
+  });
+
+  it("should inherit concurrent same-block appends in every event and delivery order", () => {
+    for (const [caseIndex, [markReplicaId, textReplicaId]] of (
+      [
+        ["a-mark", "z-text"],
+        ["z-mark", "a-text"],
+      ] as const
+    ).entries()) {
+      // Arrange
+      const base = new BlockReplica(`append-base-${caseIndex}`);
+      base.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      });
+      const marked = BlockReplica.deserialize(base.serialize(), markReplicaId);
+      const appended = BlockReplica.deserialize(
+        base.serialize(),
+        textReplicaId,
+      );
+      const markBatch = marked.transact((transaction) => {
+        transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+      })!;
+      const appendBatch = appended.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 1, "X");
+      })!;
+
+      for (const [deliveryIndex, batches] of [
+        [markBatch, appendBatch],
+        [appendBatch, markBatch],
+      ].entries()) {
+        const receiver = BlockReplica.deserialize(
+          base.serialize(),
+          `append-receiver-${caseIndex}-${deliveryIndex}`,
+        );
+
+        // Act
+        receiver.applyRemoteEvents(batches);
+
+        // Assert
+        expect(receiver.getDocument().blocks[0]).toMatchObject({
+          text: "AX",
+          marks: [{ kind: "bold", from: 0, to: 2, value: true }],
+        });
+      }
+    }
+  });
+
+  it("should exclude concurrent independent blocks in every event and delivery order", () => {
+    for (const [caseIndex, [markReplicaId, blockReplicaId]] of (
+      [
+        ["a-mark", "z-block"],
+        ["z-mark", "a-block"],
+      ] as const
+    ).entries()) {
+      // Arrange
+      const base = new BlockReplica(`block-base-${caseIndex}`);
+      base.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      });
+      const marked = BlockReplica.deserialize(base.serialize(), markReplicaId);
+      const inserted = BlockReplica.deserialize(
+        base.serialize(),
+        blockReplicaId,
+      );
+      const markBatch = marked.transact((transaction) => {
+        transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+      })!;
+      const blockBatch = inserted.transact((transaction) => {
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: `independent-${caseIndex}`,
+          type: "paragraph",
+          text: "B",
+          marks: [],
+        });
+      })!;
+
+      for (const [deliveryIndex, batches] of [
+        [markBatch, blockBatch],
+        [blockBatch, markBatch],
+      ].entries()) {
+        const receiver = BlockReplica.deserialize(
+          base.serialize(),
+          `block-receiver-${caseIndex}-${deliveryIndex}`,
+        );
+
+        // Act
+        receiver.applyRemoteEvents(batches);
+
+        // Assert
+        expect(receiver.getDocument().blocks).toMatchObject([
+          {
+            id: BOOTSTRAP_BLOCK_ID,
+            text: "A",
+            marks: [{ kind: "bold", from: 0, to: 1, value: true }],
+          },
+          {
+            id: `independent-${caseIndex}`,
+            text: "B",
+            marks: [],
+          },
+        ]);
+      }
+    }
+  });
+
+  it("should preserve a joined block's originating marks", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "joined-marked",
+        type: "paragraph",
+        text: "B",
+      });
+      transaction.setMark("joined-marked", 0, 1, "bold", true);
+    });
+
+    // Act
+    replica.transact((transaction) => transaction.joinBlock("joined-marked"));
+
+    // Assert
+    expect(replica.getDocument().blocks).toMatchObject([
+      {
+        id: BOOTSTRAP_BLOCK_ID,
+        text: "AB",
+        marks: [{ kind: "bold", from: 1, to: 2, value: true }],
+      },
+    ]);
+  });
+
+  it("should apply a new mark across text that was already joined", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "joined-before-mark",
+        type: "paragraph",
+        text: "B",
+      });
+      transaction.joinBlock("joined-before-mark");
+    });
+
+    // Act
+    replica.transact((transaction) => {
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 2, "bold", true);
+    });
+
+    // Assert
+    expect(replica.getDocument().blocks).toMatchObject([
+      {
+        id: BOOTSTRAP_BLOCK_ID,
+        text: "AB",
+        marks: [{ kind: "bold", from: 0, to: 2, value: true }],
+      },
+    ]);
+  });
+
+  it("should keep joined mark ownership when its visible owner is later joined", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "P");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "marked-owner",
+        type: "paragraph",
+        text: "A",
+      });
+      transaction.insertBlock("marked-owner", {
+        id: "marked-origin",
+        type: "paragraph",
+        text: "B",
+      });
+      transaction.joinBlock("marked-origin");
+      transaction.setMark("marked-owner", 0, 2, "bold", true);
+    });
+
+    // Act
+    replica.transact((transaction) => transaction.joinBlock("marked-owner"));
+
+    // Assert
+    expect(replica.getDocument().blocks).toMatchObject([
+      {
+        id: BOOTSTRAP_BLOCK_ID,
+        text: "PAB",
+        marks: [{ kind: "bold", from: 1, to: 3, value: true }],
+      },
+    ]);
+  });
+
+  it("should exclude an independent block joined concurrently with a mark", () => {
+    for (const [caseIndex, [markReplicaId, joinReplicaId]] of (
+      [
+        ["a-mark", "z-join"],
+        ["z-mark", "a-join"],
+      ] as const
+    ).entries()) {
+      // Arrange
+      const base = new BlockReplica(`joined-base-${caseIndex}`);
+      base.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      });
+      const marked = BlockReplica.deserialize(base.serialize(), markReplicaId);
+      const joined = BlockReplica.deserialize(base.serialize(), joinReplicaId);
+      const markBatch = marked.transact((transaction) => {
+        transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+      })!;
+      const joinBatch = joined.transact((transaction) => {
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: `concurrent-joined-${caseIndex}`,
+          type: "paragraph",
+          text: "B",
+        });
+        transaction.joinBlock(`concurrent-joined-${caseIndex}`);
+      })!;
+
+      for (const [deliveryIndex, batches] of [
+        [markBatch, joinBatch],
+        [joinBatch, markBatch],
+      ].entries()) {
+        const receiver = BlockReplica.deserialize(
+          base.serialize(),
+          `joined-receiver-${caseIndex}-${deliveryIndex}`,
+        );
+
+        // Act
+        receiver.applyRemoteEvents(batches);
+
+        // Assert
+        expect(receiver.getDocument().blocks).toMatchObject([
+          {
+            id: BOOTSTRAP_BLOCK_ID,
+            text: "AB",
+            marks: [{ kind: "bold", from: 0, to: 1, value: true }],
+          },
+        ]);
+      }
+    }
   });
 
   it("should compose and independently clear every non-link mark", () => {
@@ -342,6 +665,31 @@ describe("BlockReplica", () => {
     expect(unchanged).toBeNull();
   });
 
+  it("should reject remapping a non-bootstrap stable ID into first position", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "second",
+        type: "paragraph",
+        text: "Second",
+      });
+    });
+
+    // Act / Assert
+    expect(() =>
+      replica.transact((transaction) => {
+        transaction.replaceDocument({
+          blocks: [{ id: "second", type: "h1", text: "Second" }],
+        });
+      }),
+    ).toThrow("cannot replace first block ID");
+    expect(replica.getDocument().blocks.map(({ id }) => id)).toEqual([
+      BOOTSTRAP_BLOCK_ID,
+      "second",
+    ]);
+  });
+
   it("should emit a minimal text splice when replaceDocument appends text", () => {
     // Arrange
     const base = new BlockReplica("seed");
@@ -413,6 +761,30 @@ describe("BlockReplica", () => {
     });
   });
 
+  it("should preserve the start boundary of a joined block", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "joined",
+        type: "paragraph",
+        text: "B",
+      });
+    });
+    const anchor = replica.captureBlockAnchor("joined", 0, "before");
+
+    // Act
+    replica.transact((transaction) => transaction.joinBlock("joined"));
+
+    // Assert
+    expect(replica.getDocument().blocks[0]?.text).toBe("AB");
+    expect(replica.resolveBlockAnchor(anchor)).toEqual({
+      blockId: BOOTSTRAP_BLOCK_ID,
+      offset: 1,
+    });
+  });
+
   it("should round-trip JSON-safe storage and reject corrupt wire batches", () => {
     // Arrange
     const source = new BlockReplica("source");
@@ -436,6 +808,81 @@ describe("BlockReplica", () => {
     expect(isRichTextEventBatch(batch)).toBe(true);
     expect(isRichTextEventBatch(corrupt)).toBe(false);
     expect(() => parseRichTextEventBatch(corrupt)).toThrow("must be an array");
+  });
+
+  it("should detach and freeze mark anchors parsed from the wire", () => {
+    // Arrange
+    const source = new BlockReplica("source");
+    const batch = source.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "AB");
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+    })!;
+    const wire = JSON.parse(JSON.stringify(batch)) as RichTextEventBatch;
+    const wireMark = wire.events.find(
+      ({ effect }) => effect.type === "mark-set",
+    );
+    if (
+      wireMark?.effect.type !== "mark-set" ||
+      wireMark.effect.range.start.type !== "atom"
+    ) {
+      throw new Error("Expected an atom-backed mark range");
+    }
+    const parsed = parseRichTextEventBatch(wire);
+    const parsedMark = parsed.events.find(
+      ({ effect }) => effect.type === "mark-set",
+    );
+    if (parsedMark?.effect.type !== "mark-set") {
+      throw new Error("Expected a parsed mark range");
+    }
+    const receiver = new BlockReplica("receiver");
+    receiver.applyRemoteEvents(wire);
+
+    // Act
+    const mutableStart = wireMark.effect.range.start as { offset: number };
+    mutableStart.offset = 999;
+
+    // Assert
+    expect(Object.isFrozen(parsedMark.effect.range.start)).toBe(true);
+    expect(() =>
+      receiver.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 2, "x");
+      }),
+    ).not.toThrow();
+  });
+
+  it("should replay the sequence once when materializing many anchors", () => {
+    // Arrange
+    const source = new BlockReplica("source");
+    source.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 1, "bold", true);
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "second",
+        type: "paragraph",
+        text: "B",
+      });
+      transaction.setMark("second", 0, 1, "italic", true);
+    });
+    const batches = source.exportEvents();
+    const bootstrap = batches.find(
+      ({ batchId }) => batchId === BOOTSTRAP_BATCH_ID,
+    )!;
+    const local = batches.find(
+      ({ batchId }) => batchId !== BOOTSTRAP_BATCH_ID,
+    )!;
+    const events = [...bootstrap.events, ...local.events];
+    const egWalker = new EgWalkerReplica("projection");
+    egWalker.applyRemoteEvents(events.map(toGraphEvent));
+    const exportSpy = vi.spyOn(egWalker, "exportEventGraph");
+
+    // Act / Assert
+    try {
+      const state = materializeBlockState(egWalker, events);
+      expect(state.document.blocks).toHaveLength(2);
+      expect(exportSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      exportSpy.mockRestore();
+    }
   });
 });
 

@@ -18,6 +18,8 @@ import {
   $createTabNode,
   $createTextNode,
   $getRoot,
+  $isParagraphNode,
+  $isTabNode,
   createEditor,
   type LexicalEditor,
 } from "lexical";
@@ -239,6 +241,75 @@ describe("Lexical projection", () => {
     expect(projection.blocks[1]?.parentSourceKey).toBe(
       projection.blocks[0]?.sourceKey,
     );
+  });
+
+  it("canonicalizes matching marks across line-break and tab leaves", () => {
+    const editor = createTestEditor();
+    const document: MaterializedDocument = {
+      blocks: [
+        {
+          id: "marked-inline-leaves",
+          type: "paragraph",
+          text: "a\n\tb",
+          marks: [
+            { kind: "bold", from: 0, to: 4 },
+            {
+              kind: "link",
+              from: 0,
+              to: 4,
+              value: { url: "https://example.com" },
+            },
+          ],
+        },
+      ],
+    };
+
+    editor.update(
+      () => {
+        materializeLexicalDocument(document);
+      },
+      { discrete: true },
+    );
+
+    expect(readProjection(editor).blocks[0]?.marks).toEqual(
+      document.blocks[0]?.marks,
+    );
+  });
+
+  it("preserves whether a tab is included in an inline mark", () => {
+    const editor = createTestEditor();
+    editor.update(
+      () => {
+        const paragraph = $createParagraphNode();
+        paragraph.append(
+          $createTextNode("a").toggleFormat("bold"),
+          $createTabNode(),
+          $createTextNode("b").toggleFormat("bold"),
+        );
+        $getRoot().append(paragraph);
+      },
+      { discrete: true },
+    );
+
+    expect(readProjection(editor).blocks[0]?.marks).toEqual([
+      { kind: "bold", from: 0, to: 1 },
+      { kind: "bold", from: 2, to: 3 },
+    ]);
+
+    editor.update(
+      () => {
+        const paragraph = $getRoot().getFirstChild();
+        if (!$isParagraphNode(paragraph)) throw new Error("Expected paragraph");
+        const tab = paragraph.getChildAtIndex(1);
+        if (!$isTabNode(tab)) throw new Error("Expected tab");
+        tab.toggleFormat("bold");
+      },
+      { discrete: true },
+    );
+
+    expect(readProjection(editor).blocks[0]?.marks).toEqual([
+      { kind: "bold", from: 0, to: 3 },
+    ]);
   });
 
   it("preserves interleaved nested list type order", () => {

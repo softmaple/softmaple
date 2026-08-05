@@ -190,7 +190,7 @@ Update this page whenever any of the following change:
 |---|---|---|---|
 | `<textarea>` | sequence | `apps/playground/src/modules/collaborative-editor/` | in-app |
 | (future) CodeMirror | sequence | `apps/playground/src/surface-bindings/` | not yet started |
-| Lexical | block | `packages/binding-lexical/` | standalone v1 binding |
+| Lexical | block | `packages/binding-lexical/` + playground WebSocket demo | standalone v1 binding; WS sync in `/demo/lexical-eg-walker` |
 
 This table is illustrative and will drift. The authoritative source
 is the directory layout.

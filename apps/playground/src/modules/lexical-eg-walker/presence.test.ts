@@ -18,6 +18,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const useBroadcastTransport = (): void => {
+  vi.stubGlobal("location", {
+    ...window.location,
+    search: "?transport=broadcast",
+    origin: "http://localhost:3000",
+  });
+};
+
 describe("room presence", () => {
   it("derives a stable label and palette color from a tab id", () => {
     expect(createRoomIdentity("a-fixed-1234")).toEqual({
@@ -31,6 +39,7 @@ describe("room presence", () => {
   });
 
   it("uses an isolated presence channel for each room", () => {
+    useBroadcastTransport();
     const identity = createRoomIdentity("peer-a");
     const first = createRoomPresenceAdapter("room-a", identity);
     const second = createRoomPresenceAdapter("room-b", identity);
@@ -41,6 +50,7 @@ describe("room presence", () => {
   });
 
   it("does not expose users from the previous room during a room switch", async () => {
+    useBroadcastTransport();
     vi.stubGlobal("BroadcastChannel", MockBroadcastChannel);
     const renders: Array<{
       readonly roomId: string;

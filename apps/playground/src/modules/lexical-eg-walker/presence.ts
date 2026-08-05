@@ -1,11 +1,14 @@
-import {
-  type AdapterConnectionState,
-  createBroadcastChannelAdapter,
-  type DirectionalSelectionRange,
-  type PresenceAdapter,
-  type PresenceUser,
+import type {
+  AdapterConnectionState,
+  DirectionalSelectionRange,
+  PresenceAdapter,
+  PresenceUser,
 } from "@softmaple/awareness";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type LexicalCollabTransportMode,
+  resolveLexicalRoomTransport,
+} from "./transport";
 
 const PRESENCE_COLORS = [
   "#475BD8",
@@ -22,18 +25,14 @@ export interface RoomIdentity {
 }
 
 export interface RoomPresence {
-  readonly adapter: PresenceAdapter;
+  readonly adapter: PresenceAdapter | null;
   readonly connectionState: AdapterConnectionState;
   readonly identity: RoomIdentity;
   readonly users: ReadonlyArray<PresenceUser>;
+  readonly transportMode: LexicalCollabTransportMode;
   readonly updateSelection: (
     selection: DirectionalSelectionRange | null,
   ) => void;
-}
-
-interface AdapterValue<T> {
-  readonly adapter: PresenceAdapter;
-  readonly value: T;
 }
 
 const randomId = (): string => crypto.randomUUID();
@@ -64,49 +63,73 @@ export const createRoomPresenceAdapter = (
   roomId: string,
   identity: RoomIdentity,
 ): PresenceAdapter =>
-  createBroadcastChannelAdapter({
-    roomId: `lexical-eg-walker:${roomId}`,
-    userInfo: identity,
-    heartbeatIntervalMs: 2_000,
-    offlineTimeoutMs: 7_000,
-    idleTimeoutMs: 30_000,
-  });
+  resolveLexicalRoomTransport(roomId).createPresenceAdapter(identity);
 
 export const useRoomPresence = (roomId: string): RoomPresence => {
   const [identity] = useState(createRoomIdentity);
-  const adapter = useMemo(
-    () => createRoomPresenceAdapter(roomId, identity),
-    [identity, roomId],
+  const transport = useMemo(
+    () => resolveLexicalRoomTransport(roomId),
+    [roomId],
   );
-  const [connectionStateState, setConnectionStateState] =
-    useState<AdapterValue<AdapterConnectionState> | null>(null);
-  const [usersState, setUsersState] = useState<AdapterValue<
-    ReadonlyArray<PresenceUser>
-  > | null>(null);
+  const sessionKey = roomId;
+  const [adapterState, setAdapterState] = useState<{
+    readonly sessionKey: string;
+    readonly adapter: PresenceAdapter;
+  } | null>(null);
+  const [connectionStateState, setConnectionStateState] = useState<{
+    readonly sessionKey: string;
+    readonly value: AdapterConnectionState;
+  } | null>(null);
+  const [usersState, setUsersState] = useState<{
+    readonly sessionKey: string;
+    readonly value: ReadonlyArray<PresenceUser>;
+  } | null>(null);
+  const adapterRef = useRef<PresenceAdapter | null>(null);
+
+  const adapter =
+    adapterState?.sessionKey === sessionKey ? adapterState.adapter : null;
   const connectionState =
-    connectionStateState?.adapter === adapter
+    connectionStateState?.sessionKey === sessionKey
       ? connectionStateState.value
       : "disconnected";
-  const users = usersState?.adapter === adapter ? usersState.value : [];
+  const users = usersState?.sessionKey === sessionKey ? usersState.value : [];
 
   useEffect(() => {
     let cancelled = false;
-    const unsubscribeConnection = adapter.onConnectionChange((value) => {
+    // Fresh adapter per effect instance avoids connect/disconnect races when
+    // React Strict Mode remounts and would otherwise close a shared socket.
+    const nextAdapter = transport.createPresenceAdapter(identity);
+    adapterRef.current = nextAdapter;
+
+    const unsubscribeConnection = nextAdapter.onConnectionChange((value) => {
       if (cancelled) return;
-      setConnectionStateState({ adapter, value });
+      setConnectionStateState({ sessionKey, value });
     });
-    const unsubscribePresence = adapter.onPresenceChange((presence) => {
+    const unsubscribePresence = nextAdapter.onPresenceChange((presence) => {
       if (cancelled) return;
-      setUsersState({ adapter, value: Array.from(presence.values()) });
+      setUsersState({
+        sessionKey,
+        value: Array.from(presence.values()),
+      });
     });
-    const unsubscribeError = adapter.onError(() => {
+    const unsubscribeError = nextAdapter.onError(() => {
       if (cancelled) return;
-      setConnectionStateState({ adapter, value: "error" });
+      setConnectionStateState({ sessionKey, value: "error" });
     });
 
-    void adapter.connect().catch(() => {
+    setAdapterState({ sessionKey, adapter: nextAdapter });
+    setConnectionStateState({
+      sessionKey,
+      value: nextAdapter.getConnectionState(),
+    });
+    setUsersState({
+      sessionKey,
+      value: Array.from(nextAdapter.getPresence().values()),
+    });
+
+    void nextAdapter.connect().catch(() => {
       if (cancelled) return;
-      setConnectionStateState({ adapter, value: "error" });
+      setConnectionStateState({ sessionKey, value: "error" });
     });
 
     return () => {
@@ -114,15 +137,20 @@ export const useRoomPresence = (roomId: string): RoomPresence => {
       unsubscribeError();
       unsubscribePresence();
       unsubscribeConnection();
-      void adapter.disconnect();
+      if (adapterRef.current === nextAdapter) {
+        adapterRef.current = null;
+      }
+      void nextAdapter.disconnect();
     };
-  }, [adapter]);
+  }, [identity, sessionKey, transport]);
 
   const updateSelection = useCallback(
     (selection: DirectionalSelectionRange | null) => {
-      adapter.updatePresence({ selection: selection ?? undefined });
+      adapterRef.current?.updatePresence({
+        selection: selection ?? undefined,
+      });
     },
-    [adapter],
+    [],
   );
 
   return {
@@ -130,6 +158,7 @@ export const useRoomPresence = (roomId: string): RoomPresence => {
     connectionState,
     identity,
     users,
+    transportMode: transport.mode,
     updateSelection,
   };
 };

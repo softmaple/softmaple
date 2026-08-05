@@ -14,6 +14,14 @@ export const env = createEnv({
 
   client: {
     VITE_APP_TITLE: z.string().min(1).optional(),
+    /** `websocket` (default) or `broadcast` for Lexical / online collab demos */
+    VITE_COLLAB_TRANSPORT: z.enum(["websocket", "broadcast"]).optional(),
+    /** Override document-sync WebSocket base URL (no roomId query) */
+    VITE_COLLAB_DOC_WS_URL: z.string().min(1).optional(),
+    /** Override presence WebSocket base URL (no roomId query) */
+    VITE_COLLAB_PRESENCE_WS_URL: z.string().min(1).optional(),
+    /** Override textarea SyncAdapter WebSocket URL */
+    VITE_COLLAB_SYNC_WS_URL: z.string().min(1).optional(),
   },
 
   /**

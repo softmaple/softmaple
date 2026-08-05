@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CollabTextEditor } from "@/components/collab-editor/CollabTextEditor";
 import { JoinRoomForm } from "@/components/collab-editor/JoinRoomForm";
@@ -9,6 +9,7 @@ import { RoomHeader } from "@/components/collab-editor/RoomHeader";
 import { useCollabEditor } from "@/modules/collab-editor/hooks/use-collab-editor";
 import { useRecentRooms } from "@/modules/collab-editor/hooks/use-recent-rooms";
 import { useTextChange } from "@/modules/collab-editor/hooks/use-text-change";
+import { resolveBrowserCollabEndpoints } from "@/modules/collab-transport/urls";
 import "@/styles/guofeng.css";
 
 export const Route = createFileRoute("/demo/online-collab-editor")({
@@ -22,6 +23,14 @@ function OnlineCollabEditor() {
   const [hasJoined, setHasJoined] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const syncWsUrl = useMemo(() => {
+    const endpoints = resolveBrowserCollabEndpoints({
+      envTransport: import.meta.env.VITE_COLLAB_TRANSPORT,
+      syncWsUrl: import.meta.env.VITE_COLLAB_SYNC_WS_URL,
+    });
+    return endpoints.syncWsUrl ?? undefined;
+  }, []);
+
   const {
     roomManager,
     currentRoom,
@@ -32,7 +41,7 @@ function OnlineCollabEditor() {
     createRoom,
     joinRoom,
     leaveRoom,
-  } = useCollabEditor();
+  } = useCollabEditor(syncWsUrl);
 
   const { recentRooms, isLoadingRooms } = useRecentRooms();
   // No need for a callback here - useCollabEditor already handles text updates

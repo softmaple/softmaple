@@ -59,6 +59,13 @@ function App() {
       link: "/demo/awareness-collab",
     },
     {
+      icon: <Globe className="w-12 h-12 text-cyan-400" />,
+      title: "Lexical × EG-walker (WebSocket)",
+      description:
+        "Rich-text collaboration with Lexical, block-model CRDT, WebSocket document sync, and presence. Open the same room link in two browsers to verify.",
+      link: "/demo/lexical-eg-walker",
+    },
+    {
       icon: <Zap className="w-12 h-12 text-cyan-400" />,
       title: "Powerful Server Functions",
       description:

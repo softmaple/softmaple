@@ -21,6 +21,7 @@ export type PersistenceDisplayState =
 export interface StatusRailProps {
   readonly roomId: string;
   readonly connectionState: AdapterConnectionState;
+  readonly transportMode?: "websocket" | "broadcast";
   readonly persistenceState: PersistenceDisplayState;
   readonly pendingCount: number;
   readonly storageBytes: number;
@@ -49,17 +50,26 @@ const persistenceLabel = (
   }
 };
 
-const connectionLabel = (state: AdapterConnectionState): string => {
+const connectionLabel = (
+  state: AdapterConnectionState,
+  transportMode: "websocket" | "broadcast" = "broadcast",
+): string => {
+  const channel =
+    transportMode === "websocket" ? "WebSocket" : "BroadcastChannel";
   switch (state) {
     case "connected":
-      return "Tabs connected";
+      return transportMode === "websocket"
+        ? "WebSocket connected"
+        : "Tabs connected";
     case "connecting":
     case "reconnecting":
-      return "Connecting tabs";
+      return `Connecting via ${channel}`;
     case "error":
-      return "Tab channel unavailable";
+      return `${channel} unavailable`;
     case "disconnected":
-      return "Working in this tab";
+      return transportMode === "websocket"
+        ? "WebSocket offline"
+        : "Working in this tab";
   }
 };
 
@@ -81,6 +91,7 @@ const StatusItem = ({
 export function StatusRail({
   roomId,
   connectionState,
+  transportMode = "broadcast",
   persistenceState,
   pendingCount,
   storageBytes,
@@ -100,6 +111,7 @@ export function StatusRail({
     <div
       className="relative z-20 flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[#CBD6E2] bg-white/92 px-3 py-2 text-[11px] font-medium tracking-[0.02em] text-[#526078] backdrop-blur md:px-5"
       data-testid="collaboration-status"
+      data-transport={transportMode}
     >
       <span
         aria-hidden
@@ -116,7 +128,7 @@ export function StatusRail({
       </button>
 
       <StatusItem icon={<Radio className="size-3.5" />}>
-        {connectionLabel(connectionState)}
+        {connectionLabel(connectionState, transportMode)}
       </StatusItem>
       <StatusItem icon={persistenceIcon}>
         {persistenceLabel(persistenceState, pendingCount)}

@@ -8,17 +8,19 @@ import {
   parseRichTextEventBatch,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createPersistenceCoordinator,
   type PersistenceCoordinator,
   type PersistenceCoordinatorSnapshot,
 } from "./persistence/coordinator";
 import { type WireBatch, WireBatchSchema } from "./persistence/schema";
+import { resolveLexicalRoomTransport } from "./transport";
 
 export interface LexicalRoomState {
   readonly replica: BlockReplica | null;
   readonly persistence: PersistenceCoordinatorSnapshot | null;
+  readonly transportMode: "websocket" | "broadcast";
   readonly error: Error | null;
   readonly onBindingChange: (binding: LexicalBinding | null) => void;
   readonly flush: () => Promise<void>;
@@ -49,6 +51,10 @@ export const useLexicalRoom = (
     useState<SessionValue<PersistenceCoordinatorSnapshot> | null>(null);
   const [errorState, setErrorState] = useState<SessionValue<Error> | null>(
     null,
+  );
+  const transport = useMemo(
+    () => resolveLexicalRoomTransport(roomId),
+    [roomId],
   );
   const bindingRef = useRef<SessionValue<LexicalBinding> | null>(null);
   const coordinatorRef = useRef<SessionValue<PersistenceCoordinator> | null>(
@@ -82,6 +88,7 @@ export const useLexicalRoom = (
         roomId,
         peerId,
         parseBatch: parsePersistenceBatch,
+        channelFactory: transport.channelFactory,
       });
       if (cancelled) {
         await coordinator.close();
@@ -169,7 +176,7 @@ export const useLexicalRoom = (
         void coordinator.flushPending().finally(() => coordinator?.close());
       }
     };
-  }, [peerId, roomId, sessionKey]);
+  }, [peerId, roomId, sessionKey, transport]);
 
   const flush = useCallback(async () => {
     const coordinatorState = coordinatorRef.current;
@@ -184,7 +191,14 @@ export const useLexicalRoom = (
     persistenceState?.sessionKey === sessionKey ? persistenceState.value : null;
   const error = errorState?.sessionKey === sessionKey ? errorState.value : null;
 
-  return { replica, persistence, error, onBindingChange, flush };
+  return {
+    replica,
+    persistence,
+    transportMode: transport.mode,
+    error,
+    onBindingChange,
+    flush,
+  };
 };
 
 export const toPresenceSelection = (

@@ -20,8 +20,14 @@ const roomFor = (testInfo: TestInfo): string =>
     .replaceAll("-", "")
     .slice(0, 6)}`;
 
-const openRoom = async (page: Page, roomId: string): Promise<RoomPage> => {
-  await page.goto(`/demo/lexical-eg-walker?room=${roomId}`);
+const openRoom = async (
+  page: Page,
+  roomId: string,
+  transport: "websocket" | "broadcast" = "websocket",
+): Promise<RoomPage> => {
+  await page.goto(
+    `/demo/lexical-eg-walker?room=${roomId}&transport=${transport}`,
+  );
 
   const demo = page.getByTestId("lexical-eg-walker-demo");
   const editor = page.getByRole("textbox", { name: "Rich text editor" });
@@ -29,6 +35,8 @@ const openRoom = async (page: Page, roomId: string): Promise<RoomPage> => {
   await expect(page.getByTestId("lexical-room-ready")).toBeVisible();
   await expect(editor).toHaveAttribute("contenteditable", "true");
   await expect(demo).toHaveAttribute("data-room-id", roomId);
+  await expect(demo).toHaveAttribute("data-transport", transport);
+  await expect(status).toHaveAttribute("data-transport", transport);
   await expect(demo).toHaveAttribute("data-persistence-mode", "persistent");
   await expect(status).not.toContainText("Unsaved · memory only");
   await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
@@ -72,7 +80,8 @@ const expectDurableAfter = async (
 const openSecondTab = async (
   context: BrowserContext,
   roomId: string,
-): Promise<RoomPage> => openRoom(await context.newPage(), roomId);
+  transport: "websocket" | "broadcast" = "websocket",
+): Promise<RoomPage> => openRoom(await context.newPage(), roomId, transport);
 
 test.describe("Lexical EG-walker cross-tab collaboration", () => {
   test("synchronizes text bidirectionally between two tabs", async ({
@@ -268,5 +277,48 @@ test.describe("Lexical EG-walker cross-tab collaboration", () => {
       "data-persistence-leader",
       "leader",
     );
+  });
+});
+
+test.describe("Lexical EG-walker WebSocket cross-browser", () => {
+  test("synchronizes text between two browser contexts over WebSocket", async ({
+    browser,
+  }, testInfo) => {
+    const roomId = roomFor(testInfo);
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+
+    try {
+      const first = await openRoom(pageA, roomId, "websocket");
+      const second = await openRoom(pageB, roomId, "websocket");
+
+      await expect(first.status).toContainText("WebSocket connected");
+      await expect(second.status).toContainText("WebSocket connected");
+
+      await appendText(first, "Hello across browsers");
+      await expectDocument(second, "Hello across browsers");
+
+      await appendText(second, " + reply");
+      await expectDocument(first, "Hello across browsers + reply");
+      await expectDocument(second, "Hello across browsers + reply");
+    } finally {
+      await contextA.close();
+      await contextB.close();
+    }
+  });
+
+  test("still syncs via BroadcastChannel when transport=broadcast", async ({
+    context,
+    page,
+  }, testInfo) => {
+    const roomId = roomFor(testInfo);
+    const first = await openRoom(page, roomId, "broadcast");
+    const second = await openSecondTab(context, roomId, "broadcast");
+
+    await expect(first.status).toContainText("Tabs connected");
+    await appendText(first, "Broadcast only");
+    await expectDocument(second, "Broadcast only");
   });
 });

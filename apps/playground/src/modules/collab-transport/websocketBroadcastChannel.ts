@@ -21,6 +21,7 @@ export interface WebSocketBroadcastChannelOptions {
   readonly reconnectDelayMs?: number;
   readonly maxReconnectAttempts?: number;
   readonly maxOutboundQueue?: number;
+  readonly connectionTimeoutMs?: number;
   readonly webSocketFactory?: (url: string) => WebSocket;
 }
 
@@ -68,6 +69,7 @@ export const createWebSocketBroadcastChannel = (
     wsUrl,
     reconnectDelayMs,
     maxReconnectAttempts,
+    connectionTimeoutMs: options.connectionTimeoutMs,
     webSocketFactory,
     isClosed: () => closed,
     getConnectionState: () => connectionState,

@@ -4,11 +4,13 @@ import type {
 } from "@/modules/lexical-eg-walker/persistence/channel";
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
+export const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
 
 export interface WebSocketLifecycleOptions {
   readonly wsUrl: string;
   readonly reconnectDelayMs: number;
   readonly maxReconnectAttempts: number;
+  readonly connectionTimeoutMs?: number;
   readonly webSocketFactory: (url: string) => WebSocket;
   readonly isClosed: () => boolean;
   readonly getConnectionState: () => TransportConnectionState;
@@ -41,14 +43,25 @@ const flushQueue = (
 export const createWebSocketLifecycle = (
   options: WebSocketLifecycleOptions,
 ): WebSocketLifecycle => {
+  const connectionTimeoutMs =
+    options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let connectionTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let socket: WebSocket | null = null;
 
+  const clearConnectionTimeout = (): void => {
+    if (connectionTimer === null) return;
+    clearTimeout(connectionTimer);
+    connectionTimer = null;
+  };
+
   const clearReconnect = (): void => {
-    if (reconnectTimer === null) return;
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    clearConnectionTimeout();
   };
 
   const scheduleReconnect = (): void => {
@@ -75,11 +88,24 @@ export const createWebSocketLifecycle = (
     }, exponential + jitter);
   };
 
+  const detachSocket = (current: WebSocket): void => {
+    if (socket === current) {
+      socket = null;
+      options.onSocket(null);
+    }
+  };
+
   const connect = (): void => {
     if (options.isClosed()) return;
     clearReconnect();
     if (options.getConnectionState() !== "reconnecting") {
       options.setConnectionState("connecting");
+    }
+
+    if (socket !== null) {
+      const previous = socket;
+      detachSocket(previous);
+      previous.close();
     }
 
     let currentSocket: WebSocket;
@@ -93,8 +119,19 @@ export const createWebSocketLifecycle = (
     socket = currentSocket;
     options.onSocket(currentSocket);
 
+    connectionTimer = setTimeout(() => {
+      connectionTimer = null;
+      if (options.isClosed()) return;
+      if (socket !== currentSocket) return;
+      if (currentSocket.readyState === WebSocket.OPEN) return;
+      detachSocket(currentSocket);
+      currentSocket.close();
+      scheduleReconnect();
+    }, connectionTimeoutMs);
+
     currentSocket.addEventListener("open", () => {
       if (socket !== currentSocket) return;
+      clearConnectionTimeout();
       reconnectAttempts = 0;
       options.setConnectionState("connected");
       flushQueue(socket, options.outboundQueue);
@@ -116,8 +153,8 @@ export const createWebSocketLifecycle = (
     currentSocket.addEventListener("close", () => {
       if (options.isClosed()) return;
       if (socket !== currentSocket) return;
-      socket = null;
-      options.onSocket(null);
+      clearConnectionTimeout();
+      detachSocket(currentSocket);
       scheduleReconnect();
     });
 

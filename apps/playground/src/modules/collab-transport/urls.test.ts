@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TransportConnectionState } from "@/modules/lexical-eg-walker/persistence/channel";
 import {
   buildSameOriginEndpoints,
   COLLAB_TRANSPORT,
@@ -10,6 +11,7 @@ import {
   buildDocWebSocketUrl,
   createWebSocketBroadcastChannel,
 } from "./websocketBroadcastChannel";
+import { createWebSocketLifecycle } from "./websocketBroadcastChannelLifecycle";
 
 type FakeSocket = {
   readyState: number;
@@ -142,6 +144,7 @@ describe("websocket broadcast channel", () => {
       url: "ws://localhost:3000/api/collab-doc",
       roomId: "room-1",
       reconnectDelayMs: 1_000,
+      connectionTimeoutMs: 60_000,
       webSocketFactory: () => {
         const next = createFakeSocket();
         sockets.push(next);
@@ -235,6 +238,7 @@ describe("websocket broadcast channel", () => {
       url: "ws://localhost:3000/api/collab-doc",
       roomId: "room-1",
       reconnectDelayMs: 1_000,
+      connectionTimeoutMs: 60_000,
       webSocketFactory: () => {
         const next = createFakeSocket();
         sockets.push(next);
@@ -246,10 +250,73 @@ describe("websocket broadcast channel", () => {
     first?.dispatch("close");
     vi.advanceTimersByTime(2_000);
     expect(sockets.length).toBeGreaterThanOrEqual(2);
+    sockets[1]?.setReadyState(1);
+    sockets[1]?.dispatch("open");
 
     const beforeLateClose = sockets.length;
     first?.dispatch("close");
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(beforeLateClose);
+  });
+
+  it("closes a hung connecting socket after connectionTimeoutMs and reconnects", () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+
+    const channel = createWebSocketBroadcastChannel({
+      url: "ws://localhost:3000/api/collab-doc",
+      roomId: "room-1",
+      reconnectDelayMs: 500,
+      connectionTimeoutMs: 1_000,
+      webSocketFactory: () => {
+        const next = createFakeSocket();
+        sockets.push(next);
+        return next as unknown as WebSocket;
+      },
+    });
+    channel.onconnectionchange = (state) => {
+      states.push(state);
+    };
+
+    expect(sockets).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    expect(sockets[0]?.close).toHaveBeenCalled();
+    expect(states).toContain("reconnecting");
+
+    vi.advanceTimersByTime(1_000);
+    expect(sockets.length).toBeGreaterThanOrEqual(2);
+    channel.close();
+  });
+
+  it("closes an existing socket before connect replaces it", () => {
+    const sockets: FakeSocket[] = [];
+    let connectionState: TransportConnectionState = "connecting";
+    const lifecycle = createWebSocketLifecycle({
+      wsUrl: "ws://localhost:3000/api/collab-doc?roomId=room-1",
+      reconnectDelayMs: 1_000,
+      maxReconnectAttempts: 3,
+      connectionTimeoutMs: 60_000,
+      webSocketFactory: () => {
+        const next = createFakeSocket();
+        sockets.push(next);
+        return next as unknown as WebSocket;
+      },
+      isClosed: () => false,
+      getConnectionState: () => connectionState,
+      setConnectionState: (next) => {
+        connectionState = next;
+      },
+      getMessageHandler: () => null,
+      getOpenHandler: () => null,
+      outboundQueue: [],
+      onSocket: () => undefined,
+    });
+
+    lifecycle.connect();
+    expect(sockets).toHaveLength(1);
+    lifecycle.connect();
+    expect(sockets[0]?.close).toHaveBeenCalled();
+    expect(sockets).toHaveLength(2);
   });
 });

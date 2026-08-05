@@ -250,6 +250,27 @@ describe("BlockActivityIndicator (design §5.4)", () => {
     selection: { blockId: "b1", from: 0, to: 5 },
   });
   const c = user("c", { name: "Cam", cursor: { blockId: "other", offset: 0 } });
+  const directional = user("directional", {
+    name: "Dia",
+    selection: {
+      anchor: {
+        blockId: "other",
+        anchor: {
+          type: "boundary",
+          edge: "end",
+          affinity: "before",
+        },
+      },
+      focus: {
+        blockId: "b1",
+        anchor: {
+          type: "boundary",
+          edge: "start",
+          affinity: "after",
+        },
+      },
+    },
+  });
 
   it("renders nothing when no one is in the block", () => {
     const html = renderToStaticMarkup(
@@ -270,6 +291,18 @@ describe("BlockActivityIndicator (design §5.4)", () => {
       <BlockActivityIndicator blockId="b1" users={[a, b, c]} />,
     );
     expect(html).toContain("2 people editing here");
+  });
+
+  it("counts a directional selection at either endpoint block", () => {
+    const focusHtml = renderToStaticMarkup(
+      <BlockActivityIndicator blockId="b1" users={[directional]} />,
+    );
+    const anchorHtml = renderToStaticMarkup(
+      <BlockActivityIndicator blockId="other" users={[directional]} />,
+    );
+
+    expect(focusHtml).toContain("Dia is editing this block");
+    expect(anchorHtml).toContain("Dia is editing this block");
   });
 
   it("excludes offline users by default", () => {

@@ -15,16 +15,31 @@ import { ShortcutsPlugin } from "@softmaple/editor/components/core/plugins/Short
 import { MarkdownPlugin } from "@softmaple/editor/components/core/plugins/MarkdownShortcutPlugin/MarkdownShortcutPlugin";
 import { isSafeUrl } from "@softmaple/editor/utils/sanitizeUrl";
 import type { LexicalEditor } from "lexical";
+import {
+  DEFAULT_EDITOR_HISTORY_MODE,
+  isLocalEditorHistoryEnabled,
+  type EditorHistoryMode,
+} from "@softmaple/editor/components/core/editorOptions";
+
+export type { EditorHistoryMode } from "@softmaple/editor/components/core/editorOptions";
 
 export type EditorProps = {
   className?: string;
   children?: ReactNode;
+  historyMode?: EditorHistoryMode;
   activeEditor: LexicalEditor | undefined;
   setActiveEditor: Dispatch<SetStateAction<LexicalEditor | undefined>>;
 };
 
 export const Editor: FC<EditorProps> = (props) => {
-  const { className, children, activeEditor, setActiveEditor, ...rest } = props;
+  const {
+    className,
+    children,
+    historyMode = DEFAULT_EDITOR_HISTORY_MODE,
+    activeEditor,
+    setActiveEditor,
+    ...rest
+  } = props;
 
   const [editor] = useLexicalComposerContext();
   const { historyState } = useSharedHistoryContext();
@@ -62,6 +77,7 @@ export const Editor: FC<EditorProps> = (props) => {
       <ToolbarPlugin
         editor={editor}
         activeEditor={activeEditor}
+        historyMode={historyMode}
         setActiveEditor={safeSetActiveEditor}
         setIsLinkEditMode={setIsLinkEditMode}
       />
@@ -72,7 +88,9 @@ export const Editor: FC<EditorProps> = (props) => {
       />
 
       <div className="bg-background relative block rounded-b-[10px]">
-        <HistoryPlugin externalHistoryState={historyState} />
+        {isLocalEditorHistoryEnabled(historyMode) ? (
+          <HistoryPlugin externalHistoryState={historyState} />
+        ) : null}
 
         <RichTextPlugin
           contentEditable={

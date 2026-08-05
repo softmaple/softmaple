@@ -8,6 +8,52 @@ import { fcParams } from "./run-config";
 import { runTrace } from "./trace-runner";
 
 describe("property: deferred cold-replay text materialization", () => {
+  it("should keep a new origin-right boundary out of an existing typed run", () => {
+    // Arrange
+    const params = {
+      initialText: "Hello, world!",
+      scripts: [
+        {
+          replicaId: "dave",
+          edits: [
+            { kind: "insert" as const, offsetSeed: 0, text: " " },
+            { kind: "delete" as const, offsetSeed: 0, lengthSeed: 0 },
+          ],
+        },
+        {
+          replicaId: "bob",
+          edits: [
+            { kind: "insert" as const, offsetSeed: 0, text: " " },
+            { kind: "insert" as const, offsetSeed: 0, text: "\uE000" },
+            { kind: "insert" as const, offsetSeed: 0.0625, text: " " },
+          ],
+        },
+      ],
+      syncEveryN: 1,
+    };
+    const trace = runTrace(params);
+    const graph = EventGraph.fromEvents(trace.events);
+    const eventOrder = graph.getBranchPreservingTopologicalOrder();
+
+    // Act
+    const eagerEngine = new EgWalkerEngine();
+    eagerEngine.generate(eventOrder, params.initialText, {
+      eventGraph: graph,
+      eventOrder,
+    });
+    const deferredEngine = new EgWalkerEngine();
+    deferredEngine.generate(eventOrder, params.initialText, {
+      eventGraph: graph,
+      eventOrder,
+      collectTransformedOperations: false,
+    });
+
+    // Assert
+    expect(deferredEngine.getSequenceRecords()).toEqual(
+      eagerEngine.getSequenceRecords(),
+    );
+  });
+
   it("should match eager replay for every generated concurrent trace", () => {
     fc.assert(
       fc.property(

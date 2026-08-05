@@ -42,9 +42,33 @@ importers:
 
   apps/playground:
     dependencies:
+      '@lexical/code':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@lexical/link':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@lexical/list':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@lexical/react':
+        specifier: ^0.44.0
+        version: 0.44.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(yjs@13.6.27)
+      '@lexical/rich-text':
+        specifier: ^0.44.0
+        version: 0.44.0
       '@softmaple/awareness':
         specifier: workspace:*
         version: link:../../packages/awareness
+      '@softmaple/binding-lexical':
+        specifier: workspace:*
+        version: link:../../packages/binding-lexical
+      '@softmaple/block-model':
+        specifier: workspace:*
+        version: link:../../packages/block-model
+      '@softmaple/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
       '@softmaple/eg-walker':
         specifier: workspace:*
         version: link:../../packages/eg-walker
@@ -102,6 +126,9 @@ importers:
       eventemitter3:
         specifier: ^5.0.1
         version: 5.0.1
+      lexical:
+        specifier: ^0.44.0
+        version: 0.44.0
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.8)
@@ -378,6 +405,89 @@ importers:
       '@types/node':
         specifier: ^24.10.4
         version: 24.10.4
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@24.10.4))(jiti@2.7.0)(postcss@8.5.14)(tsx@4.23.0)(typescript@5.9.3)(yaml@2.8.1)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.6(@types/node@24.10.4)(@vitest/browser-playwright@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@27.4.0(postcss@8.5.14))(vite@7.3.2(@types/node@24.10.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.0)(yaml@2.8.1))
+
+  packages/binding-lexical:
+    dependencies:
+      '@softmaple/block-model':
+        specifier: workspace:*
+        version: link:../block-model
+    devDependencies:
+      '@lexical/code':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@lexical/link':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@lexical/list':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@lexical/react':
+        specifier: ^0.44.0
+        version: 0.44.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(yjs@13.6.27)
+      '@lexical/rich-text':
+        specifier: ^0.44.0
+        version: 0.44.0
+      '@softmaple/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@softmaple/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/react':
+        specifier: 19.2.17
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: 19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      eslint:
+        specifier: ^10.8.0
+        version: 10.8.0(jiti@2.7.0)
+      jsdom:
+        specifier: ^27.4.0
+        version: 27.4.0(postcss@8.5.14)
+      lexical:
+        specifier: ^0.44.0
+        version: 0.44.0
+      react:
+        specifier: ^19.2.6
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.6
+        version: 19.2.8(react@19.2.8)
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@24.10.4))(jiti@2.7.0)(postcss@8.5.14)(tsx@4.23.0)(typescript@5.9.3)(yaml@2.8.1)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.6(@types/node@24.10.4)(@vitest/browser-playwright@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@27.4.0(postcss@8.5.14))(vite@7.3.2(@types/node@24.10.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.0)(yaml@2.8.1))
+
+  packages/block-model:
+    dependencies:
+      '@softmaple/eg-walker':
+        specifier: workspace:*
+        version: link:../eg-walker
+    devDependencies:
+      '@softmaple/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@softmaple/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      fast-check:
+        specifier: ^4.8.0
+        version: 4.8.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@24.10.4))(jiti@2.7.0)(postcss@8.5.14)(tsx@4.23.0)(typescript@5.9.3)(yaml@2.8.1)

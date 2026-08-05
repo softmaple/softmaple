@@ -314,6 +314,32 @@ describe("cursor-operations", () => {
     expect(getUsersSelectingBlock(state, "b2")).toHaveLength(0);
   });
 
+  it("getUsersSelectingBlock matches both directional endpoints", () => {
+    let state = setUser(makeState(), makeUser("a"));
+    state = updateUserSelection(state, "a", {
+      anchor: {
+        blockId: "b3",
+        anchor: {
+          type: "boundary",
+          edge: "end",
+          affinity: "before",
+        },
+      },
+      focus: {
+        blockId: "b1",
+        anchor: {
+          type: "boundary",
+          edge: "start",
+          affinity: "after",
+        },
+      },
+    });
+
+    expect(getUsersSelectingBlock(state, "b3")).toHaveLength(1);
+    expect(getUsersSelectingBlock(state, "b1")).toHaveLength(1);
+    expect(getUsersSelectingBlock(state, "b2")).toHaveLength(0);
+  });
+
   it("getCursorsByBlock groups users by their cursor block", () => {
     let state = makeState();
     state = setUser(state, makeUser("a"));

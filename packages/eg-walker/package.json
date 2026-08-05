@@ -13,6 +13,10 @@
     "./internal": {
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js"
+    },
+    "./anchors": {
+      "types": "./dist/anchors.d.ts",
+      "import": "./dist/anchors.js"
     }
   },
   "files": [

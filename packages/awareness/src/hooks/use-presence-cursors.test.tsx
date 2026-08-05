@@ -174,13 +174,37 @@ describe("usePeersInBlock", () => {
       createUser("b", {
         selection: { blockId: "intro", from: 0, to: 4 },
       }),
+      createUser("directional", {
+        selection: {
+          anchor: {
+            blockId: "body",
+            anchor: {
+              type: "boundary",
+              edge: "end",
+              affinity: "before",
+            },
+          },
+          focus: {
+            blockId: "intro",
+            anchor: {
+              type: "boundary",
+              edge: "start",
+              affinity: "after",
+            },
+          },
+        },
+      }),
       createUser("c", { cursor: { blockId: "body", offset: 1 } }),
     ];
     const { result, unmount } = renderHook(() => usePeersInBlock("intro"), {
       ...baseContext(),
       others,
     });
-    expect(result.current?.map((u) => u.userId)).toEqual(["a", "b"]);
+    expect(result.current?.map((u) => u.userId)).toEqual([
+      "a",
+      "b",
+      "directional",
+    ]);
     unmount();
   });
 

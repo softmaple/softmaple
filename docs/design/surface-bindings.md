@@ -16,8 +16,7 @@ This doc defines:
 - What a binding owns (and what it does **not** own).
 - Why we use "surface" rather than "editor".
 - The split between **surface bindings** and **transport adapters**.
-- The promotion rule: when a binding moves from `apps/*` into its own
-  package.
+- The promotion rule for moving app-local bindings into their own package.
 
 For the legal layering contract, see
 [`collaboration-layers.md`](./collaboration-layers.md). For the
@@ -46,15 +45,15 @@ primitives. For one surface instance, it:
 
 1. **Local ops → engine ops.** Observe the surface's native change
    events; produce engine-shaped ops (`insert(index, text)` /
-   `delete(index, length)` for sequence; future block / object ops
-   for the other models).
+   `delete(index, length)` for sequence or a `BlockReplica` transaction
+   for the block model).
 2. **Engine ops → surface mutations.** Apply remote events to the
    surface so the user sees the convergent state.
-3. **Surface selection → awareness position.** Read the native
-   selection; produce a `CursorPosition` / `SelectionRange` (or an
-   opaque blob for canvas) for `@softmaple/awareness`.
-4. **Awareness position → surface selection.** Restore a saved
-   selection back into the surface after a remote op shifts content.
+3. **Surface selection → stable model position.** Read the native
+   selection and produce dependency-free stable endpoints suitable for
+   awareness transport.
+4. **Stable model position → surface selection.** Resolve and restore a
+   saved directional selection after a remote op shifts content.
 5. **Lifecycle.** Subscribe on mount, unsubscribe on unmount.
 
 That is all a binding does. It is logical, not visual.
@@ -65,7 +64,8 @@ A binding **MUST NOT** include any of:
 
 - **CRDT internals.** The engine resolves conflicts; the binding
   applies the result.
-- **Event graph persistence.** That belongs in the engine package.
+- **Event or batch persistence.** Serialization belongs in the model;
+  choosing a database and durable-ack policy belongs in the host.
 - **Network transport.** WebSocket / WebRTC / BroadcastChannel are
   the job of a transport adapter (see below).
 - **User identity.** The binding does not care who is typing, only
@@ -73,8 +73,9 @@ A binding **MUST NOT** include any of:
 - **Visual cursor rendering.** Remote cursors are rendered by
   `@softmaple/awareness` components (`LiveCursor`,
   `SelectionHighlight`), not by the binding.
-- **Surface-specific UI components.** No React components, no CSS.
-  The binding is logical glue, not a widget.
+- **Surface-specific product UI.** A minimal framework lifecycle wrapper
+  such as `LexicalEgWalkerPlugin` is allowed in a separate entry, but the
+  binding owns no toolbar, cursor visuals, status UI, or CSS.
 
 If a "binding" starts growing any of these, it is two things stuck
 together. Split it.
@@ -86,13 +87,14 @@ keep them separate by giving them separate names:
 
 | Concern | Name | Direction | Lives in (today) |
 |---|---|---|---|
-| Surface ↔ engine, surface ↔ awareness | **Surface binding** | Surface ↔ Softmaple | `apps/*`, promoted to `@softmaple/binding-<surface>` later |
+| Surface ↔ engine, stable selection mapping | **Surface binding** | Surface ↔ Softmaple | `@softmaple/binding-<surface>` or app-local staging |
 | Replica ↔ replica wire transport | **Transport adapter** | Softmaple ↔ network | `@softmaple/awareness/adapters` |
 | Presence state → pixels | **Presence renderer** | Awareness → DOM | `@softmaple/awareness` components |
 
-A binding talks to **one engine** (the engine for its model) and to
-awareness independently. A transport adapter knows nothing about any
-surface and nothing about model internals; it moves opaque messages.
+A binding talks to **one model** and may expose structurally compatible
+selection values for awareness without owning awareness state. A transport
+adapter knows nothing about any surface and nothing about model internals; it
+moves opaque messages.
 
 ## Naming convention
 
@@ -105,14 +107,15 @@ surface and nothing about model internals; it moves opaque messages.
   (`createWebSocketAdapter`, `createBroadcastChannelAdapter`,
   `createNoopAdapter`).
 
-When awareness's deferred `bindings/<surface>` subpath ships (issue
-B2), it will follow the same surface-named convention.
+Awareness does not host concrete surface bindings; it consumes their
+dependency-free presence shapes at the app boundary.
 
 ## The promotion rule
 
-A binding starts life in `apps/playground/src/surface-bindings/`
-(staging area). It is promoted to a standalone
-`@softmaple/binding-<surface>` package **only when** at least one of:
+A binding normally starts life in `apps/playground/src/surface-bindings/`
+(staging area). Promote it to a standalone `@softmaple/binding-<surface>`
+package when the package boundary is part of a model's supported public
+surface or when at least one of these reuse signals exists:
 
 1. A second host (a second `apps/*` directory, or an external
    consumer) needs the same binding.
@@ -124,7 +127,8 @@ A binding starts life in `apps/playground/src/surface-bindings/`
 Until that bar is met, a binding stays in `apps/*`. This is
 deliberate: an in-app binding is cheap to refactor; a published
 package binding accrues a versioning contract. Promote on evidence,
-not on aspiration.
+not on aspiration. `@softmaple/binding-lexical` launched alongside the
+block-model public boundary and is the current standalone example.
 
 When promotion happens, the move is mechanical:
 
@@ -133,8 +137,9 @@ apps/playground/src/surface-bindings/codemirror/
     -> packages/binding-codemirror/src/
 ```
 
-The binding's `import` from the engine (`@softmaple/eg-walker`) and
-from awareness (`@softmaple/awareness`) does not change.
+The binding keeps importing the public engine/model for exactly one
+collaboration model. It must not bypass that model to reach lower CRDT
+internals; awareness remains an independent host concern.
 
 ## Per-model binding rules
 
@@ -145,9 +150,9 @@ allowable bindings per model:
 - **Sequence model** — `@softmaple/eg-walker`:
   textarea, CodeMirror, Monaco, lowered Lexical / ProseMirror /
   Slate.
-- **Block model** — *no engine yet*; once one exists, native
-  Lexical / ProseMirror / Slate bindings bind here, not to the
-  sequence engine.
+- **Block model** — `@softmaple/block-model`; native Lexical binds here
+  through `@softmaple/binding-lexical`. Future ProseMirror / Slate block
+  bindings use the same model boundary.
 - **Object model** — *no engine yet*; canvas / whiteboard bindings
   will bind here, never to the sequence engine via a shim.
 
@@ -185,7 +190,7 @@ Update this page whenever any of the following change:
 |---|---|---|---|
 | `<textarea>` | sequence | `apps/playground/src/modules/collaborative-editor/` | in-app |
 | (future) CodeMirror | sequence | `apps/playground/src/surface-bindings/` | not yet started |
-| (future) Lexical | sequence (lowered) → block | `apps/web/` | partial, in-app |
+| Lexical | block | `packages/binding-lexical/` | standalone v1 binding |
 
 This table is illustrative and will drift. The authoritative source
 is the directory layout.

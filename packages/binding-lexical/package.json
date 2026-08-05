@@ -1,0 +1,65 @@
+{
+  "name": "@softmaple/binding-lexical",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "draft": true,
+  "description": "Thin Lexical binding for the Softmaple EG-walker block model",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@softmaple/block-model": "workspace:*"
+  },
+  "peerDependencies": {
+    "@lexical/code": "^0.44.0",
+    "@lexical/link": "^0.44.0",
+    "@lexical/list": "^0.44.0",
+    "@lexical/react": "^0.44.0",
+    "@lexical/rich-text": "^0.44.0",
+    "lexical": "^0.44.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@lexical/code": "^0.44.0",
+    "@lexical/link": "^0.44.0",
+    "@lexical/list": "^0.44.0",
+    "@lexical/react": "^0.44.0",
+    "@lexical/rich-text": "^0.44.0",
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "^10.8.0",
+    "jsdom": "^27.4.0",
+    "lexical": "^0.44.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

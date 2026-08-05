@@ -10,6 +10,7 @@
 import { useContext, useMemo } from "react";
 import { PresenceContext } from "../providers/presence-context";
 import type { PresenceUser } from "../types/presence";
+import { selectionReferencesBlock } from "../types/presence";
 
 const PROVIDER_ERROR_MSG =
   "must be used within a PresenceProvider. " +
@@ -28,7 +29,8 @@ export interface UsePeersInBlockOptions {
 }
 
 const isUserInBlock = (user: PresenceUser, blockId: string): boolean =>
-  user.cursor?.blockId === blockId || user.selection?.blockId === blockId;
+  user.cursor?.blockId === blockId ||
+  selectionReferencesBlock(user.selection, blockId);
 
 /**
  * Hook returning peers currently editing the given `blockId`.

@@ -335,8 +335,8 @@ export class EgWalkerReplica {
    * Validation lives in {@link applyLocalOperation} so direct callers and
    * `insert`/`delete` get the same guarantees without duplicating checks.
    */
-  insert(index: number, text: string): void {
-    this.applyLocalOperation({
+  insert(index: number, text: string): GraphEvent | null {
+    return this.applyLocalOperation({
       type: OPERATION_TYPE.INSERT,
       index,
       text,
@@ -346,8 +346,8 @@ export class EgWalkerReplica {
   /**
    * Delete text at index - public API
    */
-  delete(index: number, length: number): void {
-    this.applyLocalOperation({
+  delete(index: number, length: number): GraphEvent | null {
+    return this.applyLocalOperation({
       type: OPERATION_TYPE.DELETE,
       index,
       length,
@@ -367,6 +367,26 @@ export class EgWalkerReplica {
       this.documentCache = this.documentBuffer.toString();
     }
     return this.documentCache;
+  }
+
+  /**
+   * Read-only copy of the current causal frontier.
+   *
+   * The returned set is detached from replica state. Mutating it cannot
+   * change the parents selected for a later local operation.
+   */
+  getFrontier(): Version {
+    return new Set(this.currentVersion);
+  }
+
+  /**
+   * Text supplied outside the event graph when this replica was created.
+   *
+   * Advanced stable-anchor consumers require this value to be empty and
+   * must create seed content with a deterministic insert event instead.
+   */
+  getInitialText(): string {
+    return this.initialText;
   }
 
   /**
@@ -622,10 +642,10 @@ export class EgWalkerReplica {
    * Local operations are always causally rooted at {@link currentVersion}, so
    * the engine can advance incrementally rather than replay from scratch.
    */
-  applyLocalOperation(operation: ExternalOperation): void {
+  applyLocalOperation(operation: ExternalOperation): GraphEvent | null {
     const validatedOperation = this.validateLocalOperation(operation);
     if (!validatedOperation) {
-      return;
+      return null;
     }
 
     const event: GraphEvent = {
@@ -639,7 +659,7 @@ export class EgWalkerReplica {
       this.ensureEventGraph().addEvent(event);
     } catch (error) {
       if (error instanceof EventAlreadyExistsError) {
-        return;
+        return null;
       }
       throw error;
     }
@@ -650,12 +670,13 @@ export class EgWalkerReplica {
       this.restoredSequenceRecords = null;
       this.restoredDeleteTargets = null;
       this.maybeAdvanceCheckpoint();
-      return;
+      return event;
     }
 
     // Local edits don't expose the engine's transformed operation; the caller
     // already knows what they typed. Discard the helper's return.
     this.advanceWithEvent(event);
+    return event;
   }
 
   /**

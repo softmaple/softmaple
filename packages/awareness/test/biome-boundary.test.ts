@@ -127,6 +127,10 @@ describe("biome collaboration-layers boundary", () => {
   it.each([
     "@softmaple/eg-walker",
     "@softmaple/eg-walker/internal",
+    "@softmaple/block-model",
+    "@softmaple/block-model/testing",
+    "@softmaple/binding-lexical",
+    "@softmaple/binding-lexical/react",
     "lexical",
     "lexical/LexicalEditor",
     "@lexical/react",

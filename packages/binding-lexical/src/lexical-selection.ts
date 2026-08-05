@@ -205,6 +205,11 @@ export const restoreLogicalSelection = (
   const range = $createRangeSelection();
   setPointAtOffset(range.anchor, anchorBlock, selection.anchor.offset);
   setPointAtOffset(range.focus, focusBlock, selection.focus.offset);
+  const current = $getSelection();
+  if (current !== null && $isRangeSelection(current)) {
+    range.format = current.format;
+    range.style = current.style;
+  }
   $setSelection(range);
   return true;
 };

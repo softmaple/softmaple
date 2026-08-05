@@ -116,24 +116,60 @@ const appendInlineContent = (
     }
   }
   const ordered = [...boundaries].sort((left, right) => left - right);
+  let openLinkNode: ReturnType<typeof createLink> | null = null;
+  let openLinkValue: ProjectedLinkValue | null = null;
+  const sameLink = (
+    left: ProjectedLinkValue,
+    right: ProjectedLinkValue,
+  ): boolean =>
+    left.url === right.url &&
+    (left.target ?? null) === (right.target ?? null) &&
+    (left.rel ?? null) === (right.rel ?? null) &&
+    (left.title ?? null) === (right.title ?? null);
+
   for (let index = 0; index < ordered.length - 1; index++) {
     const from = ordered[index];
     const to = ordered[index + 1];
     if (from === undefined || to === undefined || from === to) continue;
     const content = text.slice(from, to);
+    const segmentMarks = activeMarks(marks, from, to);
+    const link = segmentMarks.find((mark) => mark.kind === "link");
     if (content === "\n") {
+      openLinkNode = null;
+      openLinkValue = null;
       parent.append($createLineBreakNode());
       continue;
     }
     if (content === "\t") {
-      appendMarkedTextNode(
-        parent,
-        $createTabNode(),
-        activeMarks(marks, from, to),
-      );
+      openLinkNode = null;
+      openLinkValue = null;
+      appendMarkedTextNode(parent, $createTabNode(), segmentMarks);
       continue;
     }
-    appendTextRun(parent, content, activeMarks(marks, from, to));
+    if (link?.value !== undefined) {
+      if (
+        openLinkNode !== null &&
+        openLinkValue !== null &&
+        sameLink(openLinkValue, link.value)
+      ) {
+        openLinkNode.append($createTextNode(content));
+        continue;
+      }
+      const textNode = $createTextNode(content);
+      for (const [kind, format] of textFormats) {
+        if (segmentMarks.some((mark) => mark.kind === kind)) {
+          textNode.toggleFormat(format);
+        }
+      }
+      openLinkNode = createLink(link.value);
+      openLinkValue = link.value;
+      openLinkNode.append(textNode);
+      parent.append(openLinkNode);
+      continue;
+    }
+    openLinkNode = null;
+    openLinkValue = null;
+    appendTextRun(parent, content, segmentMarks);
   }
 };
 

@@ -187,6 +187,8 @@ test("block-model patterns allow EG-walker but forbid awareness, bindings, and e
 
 test("block-model binding patterns prevent bypassing the model API", () => {
   for (const specifier of [
+    "@softmaple/awareness",
+    "@softmaple/awareness/components/live-cursor",
     "@softmaple/eg-walker",
     "@softmaple/eg-walker/anchors",
   ]) {

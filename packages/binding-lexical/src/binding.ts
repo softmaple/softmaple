@@ -3,6 +3,8 @@ import {
   type BlockAnchor,
   type BlockDocument,
   type BlockReplica,
+  type LinkAttributes,
+  type MarkSpan,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import { $isListItemNode } from "@lexical/list";
@@ -32,6 +34,7 @@ import type {
   ProjectedBlockAttributes,
   ProjectedBlockType,
   ProjectedDocument,
+  ProjectedMark,
 } from "./projection-types";
 
 export interface StableBlockSelection {
@@ -126,7 +129,8 @@ const createNumberedListState = (
       : (attributes.start ?? 1);
     const expectedValue = continuesList ? previous.nextValue : expectedStart;
     const isBoundary =
-      attributes.start !== expectedStart || attributes.value !== expectedValue;
+      (attributes.start !== undefined && attributes.start !== expectedStart) ||
+      (attributes.value !== undefined && attributes.value !== expectedValue);
     const start = isBoundary
       ? (attributes.start ?? expectedStart)
       : expectedStart;
@@ -247,24 +251,30 @@ const compareLogicalPoints = (
   left: LogicalSelection["anchor"],
   right: LogicalSelection["anchor"],
   document: BlockDocument,
-): number => {
+): number | null => {
   if (left.blockId === right.blockId) return left.offset - right.offset;
   const leftIndex = document.blocks.findIndex(({ id }) => id === left.blockId);
   const rightIndex = document.blocks.findIndex(
     ({ id }) => id === right.blockId,
   );
+  if (leftIndex === -1 || rightIndex === -1) return null;
   return leftIndex - rightIndex;
 };
 
 const stableSelection = (
   logical: LogicalSelection,
   replica: BlockReplica,
-): StableBlockSelection => {
-  const order = compareLogicalPoints(
-    logical.anchor,
-    logical.focus,
-    replica.getDocument(),
-  );
+): StableBlockSelection | null => {
+  const document = replica.getDocument();
+  const blockIds = new Set(document.blocks.map(({ id }) => id));
+  if (
+    !blockIds.has(logical.anchor.blockId) ||
+    !blockIds.has(logical.focus.blockId)
+  ) {
+    return null;
+  }
+  const order = compareLogicalPoints(logical.anchor, logical.focus, document);
+  if (order === null) return null;
   const collapsed = order === 0;
   const anchorAffinity = collapsed ? "after" : order < 0 ? "after" : "before";
   const focusAffinity = collapsed ? "after" : order < 0 ? "before" : "after";
@@ -290,8 +300,43 @@ const resolveStableSelection = (
   focus: replica.resolveBlockAnchor(selection.focus),
 });
 
-const sameJson = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
+const sameLinkValue = (
+  left: ProjectedMark["value"],
+  right: LinkAttributes,
+): boolean => {
+  if (left === undefined) return false;
+  return (
+    left.url === right.url &&
+    (left.target ?? null) === (right.target ?? null) &&
+    (left.rel ?? null) === (right.rel ?? null) &&
+    (left.title ?? null) === (right.title ?? null)
+  );
+};
+
+const sameProjectedMark = (left: ProjectedMark, right: MarkSpan): boolean => {
+  if (
+    left.kind !== right.kind ||
+    left.from !== right.from ||
+    left.to !== right.to
+  ) {
+    return false;
+  }
+  if (left.kind === "link") {
+    return (
+      right.kind === "link" &&
+      right.value !== true &&
+      sameLinkValue(left.value, right.value)
+    );
+  }
+  return right.value === true;
+};
+
+const sameProjectedMarks = (
+  left: ReadonlyArray<ProjectedMark>,
+  right: ReadonlyArray<MarkSpan>,
+): boolean =>
+  left.length === right.length &&
+  left.every((mark, index) => sameProjectedMark(mark, right[index]!));
 
 const expectedParentId = (
   block: ProjectedBlock,
@@ -331,13 +376,7 @@ const projectionMatchesDocument = (
         (attributes.start ?? null) === block.attrs.start &&
         (attributes.value ?? null) === block.attrs.value &&
         (attributes.checked ?? null) === block.attrs.checked &&
-        sameJson(
-          projected.marks.map((mark) => ({
-            ...mark,
-            value: mark.kind === "link" ? mark.value : true,
-          })),
-          block.marks,
-        )
+        sameProjectedMarks(projected.marks, block.marks)
       );
     })
   );
@@ -429,6 +468,7 @@ export const createLexicalBinding = ({
   let isComposing = false;
   let isApplyingRemote = false;
   let hasPendingCompositionUpdate = false;
+  let hasPendingRemoteMaterialize = false;
   let blockIndex = EMPTY_BLOCK_INDEX;
   let numberedListState = EMPTY_NUMBERED_LIST_STATE;
   let queuedRemoteBatches: RichTextEventBatch[] = [];
@@ -444,7 +484,8 @@ export const createLexicalBinding = ({
     editor.getEditorState().read(() => {
       logical = captureLogicalSelection(blockIndex);
     });
-    return logical === null ? null : stableSelection(logical, replica);
+    if (logical === null) return null;
+    return stableSelection(logical, replica);
   };
 
   const publishSelection = (): void => {
@@ -546,7 +587,11 @@ export const createLexicalBinding = ({
     publishSelection();
   };
 
-  materialize(null);
+  try {
+    materialize(null);
+  } catch (error) {
+    reportError(error);
+  }
   if (enableEditingOnReady) editor.setEditable(true);
 
   const unregisterUpdate = editor.registerUpdateListener(
@@ -585,6 +630,11 @@ export const createLexicalBinding = ({
         queuedRemoteBatches = [];
         replica.applyRemoteEvents(queued);
       }
+      if (hasPendingRemoteMaterialize) {
+        hasPendingRemoteMaterialize = false;
+        materialize();
+        publishSelection();
+      }
     } catch (error) {
       reportError(error);
     }
@@ -613,7 +663,10 @@ export const createLexicalBinding = ({
 
   const unsubscribeReplica = replica.subscribe((change) => {
     if (destroyed || change.origin !== "remote") return;
-    if (isComposing) return;
+    if (isComposing) {
+      hasPendingRemoteMaterialize = true;
+      return;
+    }
     try {
       materialize();
       publishSelection();

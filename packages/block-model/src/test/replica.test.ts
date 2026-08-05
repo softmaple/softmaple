@@ -836,6 +836,7 @@ describe("BlockReplica", () => {
     }
     const receiver = new BlockReplica("receiver");
     receiver.applyRemoteEvents(wire);
+    const documentBeforeMutation = receiver.getDocument();
 
     // Act
     const mutableStart = wireMark.effect.range.start as { offset: number };
@@ -843,6 +844,7 @@ describe("BlockReplica", () => {
 
     // Assert
     expect(Object.isFrozen(parsedMark.effect.range.start)).toBe(true);
+    expect(receiver.getDocument()).toEqual(documentBeforeMutation);
     expect(() =>
       receiver.transact((transaction) => {
         transaction.insertText(BOOTSTRAP_BLOCK_ID, 2, "x");

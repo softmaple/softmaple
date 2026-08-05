@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -5,13 +6,15 @@ export default defineConfig({
     alias: [
       {
         find: "@softmaple/eg-walker/anchors",
-        replacement: new URL("../eg-walker/src/anchors.ts", import.meta.url)
-          .pathname,
+        replacement: fileURLToPath(
+          new URL("../eg-walker/src/anchors.ts", import.meta.url),
+        ),
       },
       {
         find: "@softmaple/eg-walker",
-        replacement: new URL("../eg-walker/src/index.ts", import.meta.url)
-          .pathname,
+        replacement: fileURLToPath(
+          new URL("../eg-walker/src/index.ts", import.meta.url),
+        ),
       },
     ],
   },

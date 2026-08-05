@@ -201,6 +201,17 @@ export const isBlockType = (value: unknown): value is BlockType =>
 export const isMarkKind = (value: unknown): value is MarkKind =>
   typeof value === "string" && MARK_KINDS.has(value);
 
+const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
+
+const isSafeLinkUrl = (url: string): boolean => {
+  try {
+    const { protocol } = new URL(url, "http://localhost");
+    return SAFE_LINK_PROTOCOLS.has(protocol);
+  } catch {
+    return false;
+  }
+};
+
 export const isLinkAttributes = (value: unknown): value is LinkAttributes => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -208,6 +219,7 @@ export const isLinkAttributes = (value: unknown): value is LinkAttributes => {
   const link = value as Record<string, unknown>;
   return (
     typeof link.url === "string" &&
+    isSafeLinkUrl(link.url) &&
     optionalString(link.target) &&
     optionalString(link.rel) &&
     optionalString(link.title)

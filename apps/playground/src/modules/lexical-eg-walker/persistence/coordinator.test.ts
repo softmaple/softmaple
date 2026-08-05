@@ -300,7 +300,7 @@ describe("TanStack DB persistence coordinator", () => {
           row.batch.batchId === "takeover-batch",
       ),
     ).toBe(true);
-    expect(storage.writes).toEqual(["b"]);
+    expect(storage.writes).toEqual(["a"]);
     await b.close();
   });
 

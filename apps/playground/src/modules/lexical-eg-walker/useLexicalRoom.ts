@@ -105,15 +105,23 @@ export const useLexicalRoom = (
         applyIncoming(batch);
       }
 
+      const localBatches = new Map(
+        nextReplica
+          .exportEvents()
+          .map((batch) => [batch.batchId, batch] as const),
+      );
       unsubscribeReplica = nextReplica.subscribe((change) => {
         if (change.origin !== "local" || coordinator === null) return;
-        const batches = new Map(
-          nextReplica
-            .exportEvents()
-            .map((batch) => [batch.batchId, batch] as const),
-        );
         for (const batchId of change.batchIds) {
-          const batch = batches.get(batchId);
+          if (!localBatches.has(batchId)) {
+            for (const batch of nextReplica.exportEvents()) {
+              localBatches.set(batch.batchId, batch);
+            }
+            break;
+          }
+        }
+        for (const batchId of change.batchIds) {
+          const batch = localBatches.get(batchId);
           if (batch !== undefined) coordinator.publishBatch(wireBatch(batch));
         }
       });

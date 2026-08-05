@@ -368,6 +368,8 @@ export const projectLexicalDocument = (
   const blocks: ProjectedBlock[] = [];
   for (const child of $getRoot().getChildren()) {
     if ($isListNode(child)) {
+      assertNoUnsupportedIndent(child);
+      assertNoUnsupportedAlignment(child);
       projectList(child, stableIds, blocks);
       continue;
     }

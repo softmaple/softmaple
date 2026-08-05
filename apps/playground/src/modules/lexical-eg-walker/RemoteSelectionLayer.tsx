@@ -9,7 +9,7 @@ import type {
   LogicalSelectionPoint,
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
-import { type RefObject, useLayoutEffect, useState } from "react";
+import { type RefObject, useLayoutEffect, useRef, useState } from "react";
 
 interface OverlayRect {
   readonly height: number;
@@ -193,6 +193,8 @@ export function RemoteSelectionLayer({
   users,
 }: RemoteSelectionLayerProps) {
   const [geometry, setGeometry] = useState<ReadonlyArray<PeerGeometry>>([]);
+  const usersRef = useRef(users);
+  usersRef.current = users;
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -205,7 +207,7 @@ export function RemoteSelectionLayer({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         setGeometry(
-          users.flatMap((peer) => {
+          usersRef.current.flatMap((peer) => {
             if (peer.userId === selfId) return [];
             const measured = measurePeer(binding, host, peer);
             return measured === null ? [] : [measured];
@@ -233,14 +235,14 @@ export function RemoteSelectionLayer({
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [binding, hostRef, selfId, users]);
+  }, [binding, hostRef, selfId]);
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {geometry.flatMap(({ peer, selection }) =>
-        selection.map((rect, index) => (
+        selection.map((rect) => (
           <span
-            key={`${peer.userId}:selection:${index}`}
+            key={`${peer.userId}:selection:${rect.left}:${rect.top}:${rect.width}:${rect.height}`}
             data-testid={`remote-selection-${peer.userId}`}
             className="absolute rounded-[3px]"
             style={{

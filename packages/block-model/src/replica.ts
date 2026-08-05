@@ -241,7 +241,11 @@ export class BlockReplica {
       document: this.state.document,
     });
     for (const listener of [...this.listeners]) {
-      listener(change);
+      try {
+        listener(change);
+      } catch {
+        // Isolate listener failures so one subscriber cannot block the rest.
+      }
     }
   }
 }
@@ -827,10 +831,32 @@ const sameBlockAttributes = (
   left.value === right.value &&
   left.checked === right.checked;
 
+const sameLinkAttributes = (
+  left: LinkAttributes,
+  right: LinkAttributes,
+): boolean =>
+  left.url === right.url &&
+  left.target === right.target &&
+  left.rel === right.rel &&
+  left.title === right.title;
+
+const sameMarkSpan = (left: MarkSpan, right: MarkSpan): boolean =>
+  left.kind === right.kind &&
+  left.from === right.from &&
+  left.to === right.to &&
+  (left.kind === "link"
+    ? sameLinkAttributes(
+        left.value as LinkAttributes,
+        right.value as LinkAttributes,
+      )
+    : left.value === right.value);
+
 const sameMarks = (
   left: ReadonlyArray<MarkSpan>,
   right: ReadonlyArray<MarkSpan>,
-): boolean => JSON.stringify(left) === JSON.stringify(right);
+): boolean =>
+  left.length === right.length &&
+  left.every((mark, index) => sameMarkSpan(mark, right[index]!));
 
 interface TextChange {
   readonly from: number;

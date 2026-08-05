@@ -75,7 +75,7 @@ export function LexicalEgWalkerDemo({
   const copyRoomLink = useCallback(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("room", roomId);
-    void navigator.clipboard?.writeText(url.toString());
+    void navigator.clipboard?.writeText(url.toString()).catch(() => undefined);
   }, [roomId]);
   const updatePresenceSelection = useCallback(
     (selection: StableBlockSelection | null) => {

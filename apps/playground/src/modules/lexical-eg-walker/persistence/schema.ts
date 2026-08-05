@@ -43,7 +43,7 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 
-const NonEmptyIdSchema = z.string().trim().min(1);
+const NonEmptyIdSchema = z.string().min(1);
 const ParentVersionSchema = z
   .array(NonEmptyIdSchema)
   .refine((parents) => new Set(parents).size === parents.length, {

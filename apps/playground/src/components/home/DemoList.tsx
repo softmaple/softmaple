@@ -33,12 +33,7 @@ export function DemoList() {
               to={demo.link}
               className="group relative flex flex-col gap-4 py-7 transition-colors md:flex-row md:items-start md:gap-8 md:py-9"
             >
-              <motion.span
-                className="absolute inset-x-[-1rem] inset-y-0 -z-10 rounded-sm bg-[var(--pg-surface)] opacity-0 md:inset-x-[-1.5rem]"
-                initial={false}
-                whileHover={reduceMotion ? undefined : { opacity: 1 }}
-                transition={spring}
-              />
+              <span className="absolute inset-x-[-1rem] inset-y-0 -z-10 rounded-sm bg-[var(--pg-surface)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 md:inset-x-[-1.5rem]" />
 
               <span className="font-[family-name:var(--font-mono)] text-sm text-[var(--pg-ink-muted)] tabular-nums">
                 {demo.id}
@@ -65,14 +60,12 @@ export function DemoList() {
                 </p>
               </div>
 
-              <motion.span
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center border border-[var(--pg-line)] text-[var(--pg-ink)] transition-colors group-hover:border-[var(--pg-ink)] group-hover:bg-[var(--pg-ink)] group-hover:text-[var(--pg-paper)]"
-                whileHover={reduceMotion ? undefined : { scale: 1.06 }}
-                transition={spring}
+              <span
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center border border-[var(--pg-line)] text-[var(--pg-ink)] transition-all duration-200 group-hover:border-[var(--pg-ink)] group-hover:bg-[var(--pg-ink)] group-hover:text-[var(--pg-paper)] group-hover:scale-105"
                 aria-hidden
               >
                 <ArrowUpRight size={18} />
-              </motion.span>
+              </span>
             </Link>
           </motion.li>
         ))}

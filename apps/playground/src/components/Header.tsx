@@ -122,37 +122,69 @@ export default function Header() {
               </div>
 
               <nav className="flex-1 overflow-y-auto p-4">
-                <Link
-                  to="/"
-                  onClick={() => setIsOpen(false)}
-                  className="mb-1 block rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-[var(--pg-ink)]/5"
+                <motion.div
+                  initial={reduceMotion ? false : "hidden"}
+                  animate="show"
+                  variants={{
+                    hidden: {},
+                    show: {
+                      transition: { staggerChildren: reduceMotion ? 0 : 0.04 },
+                    },
+                  }}
                 >
-                  Home
-                </Link>
-                {demos.map((demo) => (
-                  <Link
-                    key={demo.id}
-                    to={demo.link}
-                    onClick={() => setIsOpen(false)}
-                    className="mb-1 block rounded-sm px-3 py-2.5 text-sm hover:bg-[var(--pg-ink)]/5"
+                  <motion.div
+                    variants={{
+                      hidden: { opacity: 0, x: 12 },
+                      show: { opacity: 1, x: 0, transition: spring },
+                    }}
                   >
-                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--pg-ink-muted)]">
-                      {demo.id}
-                    </span>
-                    <span className="mt-0.5 block font-medium">
-                      {demo.title}
-                    </span>
-                  </Link>
-                ))}
-                <a
-                  href="https://docs.softmaple.ink"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setIsOpen(false)}
-                  className="mt-4 block rounded-sm border border-[var(--pg-line)] px-3 py-2.5 text-sm font-medium"
-                >
-                  Documentation
-                </a>
+                    <Link
+                      to="/"
+                      onClick={() => setIsOpen(false)}
+                      className="mb-1 block rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-[var(--pg-ink)]/5"
+                    >
+                      Home
+                    </Link>
+                  </motion.div>
+                  {demos.map((demo) => (
+                    <motion.div
+                      key={demo.id}
+                      variants={{
+                        hidden: { opacity: 0, x: 12 },
+                        show: { opacity: 1, x: 0, transition: spring },
+                      }}
+                    >
+                      <Link
+                        to={demo.link}
+                        onClick={() => setIsOpen(false)}
+                        className="mb-1 block rounded-sm px-3 py-2.5 text-sm hover:bg-[var(--pg-ink)]/5"
+                      >
+                        <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--pg-ink-muted)]">
+                          {demo.id}
+                        </span>
+                        <span className="mt-0.5 block font-medium">
+                          {demo.title}
+                        </span>
+                      </Link>
+                    </motion.div>
+                  ))}
+                  <motion.div
+                    variants={{
+                      hidden: { opacity: 0, x: 12 },
+                      show: { opacity: 1, x: 0, transition: spring },
+                    }}
+                  >
+                    <a
+                      href="https://docs.softmaple.ink"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setIsOpen(false)}
+                      className="mt-4 block rounded-sm border border-[var(--pg-line)] px-3 py-2.5 text-sm font-medium"
+                    >
+                      Documentation
+                    </a>
+                  </motion.div>
+                </motion.div>
               </nav>
             </motion.aside>
           </>

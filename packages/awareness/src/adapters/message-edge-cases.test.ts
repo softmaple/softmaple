@@ -691,7 +691,7 @@ describe("WebSocket adapter extra branches", () => {
     await expect(connectPromise).rejects.toThrow(/Connection timeout/);
   });
 
-  it("close event after open transitions to disconnected and schedules reconnect when enabled", async () => {
+  it("close event after open transitions to reconnecting when reconnect is enabled", async () => {
     const { createWebSocketAdapter } = await import("./websocket/websocket");
     const connection = vi.fn();
     const adapter = createWebSocketAdapter({
@@ -712,8 +712,8 @@ describe("WebSocket adapter extra branches", () => {
     await connectPromise;
 
     fakeSockets[0]?.emitClose();
-    expect(adapter.getConnectionState()).toBe("disconnected");
-    expect(connection).toHaveBeenCalledWith("disconnected");
+    expect(adapter.getConnectionState()).toBe("reconnecting");
+    expect(connection).toHaveBeenCalledWith("reconnecting");
   });
 
   it("emits errors when the underlying socket fires error", async () => {

@@ -73,6 +73,11 @@ class FakeWebSocket {
     this.emit("open", new Event("open"));
   };
 
+  emitClose = (): void => {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.emit("close", new Event("close"));
+  };
+
   emitMessage = (data: string): void => {
     this.emit("message", new MessageEvent("message", { data }));
   };
@@ -519,6 +524,38 @@ describe("WebSocket adapter public API", () => {
     expect(typeof adapter.connect).toBe("function");
     expect(typeof adapter.disconnect).toBe("function");
     expect(adapter.getConnectionState()).toBe("disconnected");
+  });
+
+  it("publishes reconnecting after an unexpected close and recovers", async () => {
+    vi.useFakeTimers();
+    const adapter = createWebSocketAdapter({
+      ...baseConfig,
+      reconnect: {
+        enabled: true,
+        maxAttempts: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 100,
+      },
+    });
+    const connection = vi.fn();
+    adapter.onConnectionChange(connection);
+
+    const connectPromise = adapter.connect();
+    fakeSockets[0]?.emitOpen();
+    await connectPromise;
+    expect(adapter.getConnectionState()).toBe("connected");
+
+    fakeSockets[0]?.emitClose();
+    expect(adapter.getConnectionState()).toBe("reconnecting");
+    expect(connection).toHaveBeenCalledWith("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(fakeSockets.length).toBeGreaterThanOrEqual(2);
+    fakeSockets[1]?.emitOpen();
+    expect(adapter.getConnectionState()).toBe("connected");
+
+    await adapter.disconnect();
+    vi.useRealTimers();
   });
 });
 

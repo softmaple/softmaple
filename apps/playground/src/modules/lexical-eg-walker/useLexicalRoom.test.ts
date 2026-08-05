@@ -24,6 +24,7 @@ const snapshot: PersistenceCoordinatorSnapshot = {
   storageBytes: 0,
   failureReason: null,
   errorMessage: null,
+  syncConnectionState: "connected",
 };
 
 const createCoordinator = (): PersistenceCoordinator => ({

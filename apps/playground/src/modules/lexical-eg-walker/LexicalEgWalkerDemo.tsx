@@ -18,7 +18,11 @@ import {
 import { useRoomPresence } from "./presence";
 import { RemoteSelectionLayer } from "./RemoteSelectionLayer";
 import { createRoomId, resolveRoomId } from "./room";
-import { type PersistenceDisplayState, StatusRail } from "./StatusRail";
+import {
+  mergeConnectionStates,
+  type PersistenceDisplayState,
+  StatusRail,
+} from "./StatusRail";
 import { toPresenceSelection, useLexicalRoom } from "./useLexicalRoom";
 
 export interface LexicalEgWalkerDemoProps {
@@ -124,6 +128,7 @@ export function LexicalEgWalkerDemo({
       className="flex min-h-[100svh] flex-col overflow-hidden bg-[#EEF3F7] text-[#17253D]"
       data-testid="lexical-eg-walker-demo"
       data-room-id={roomId}
+      data-transport={presence.transportMode}
       data-persistence-mode={room.persistence?.mode ?? "initializing"}
       data-persistence-durability={room.persistence?.durability ?? "loading"}
       data-persistence-leader={room.persistence?.leader.status ?? "stopped"}
@@ -131,7 +136,11 @@ export function LexicalEgWalkerDemo({
     >
       <StatusRail
         roomId={roomId}
-        connectionState={presence.connectionState}
+        connectionState={mergeConnectionStates(
+          presence.connectionState,
+          room.persistence?.syncConnectionState,
+        )}
+        transportMode={presence.transportMode}
         persistenceState={persistenceState}
         pendingCount={room.persistence?.pendingBatchIds.length ?? 0}
         storageBytes={room.persistence?.storageBytes ?? 0}
@@ -143,14 +152,18 @@ export function LexicalEgWalkerDemo({
         <div className="min-w-0">
           <div className="mb-1.5 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#475BD8]">
             <GitFork className="size-3.5" />
-            Causal canvas · local first
+            Causal canvas ·{" "}
+            {presence.transportMode === "websocket"
+              ? "WebSocket"
+              : "local first"}
           </div>
           <h1 className="font-serif text-2xl leading-tight tracking-[-0.025em] md:text-3xl">
             EG-walker × Lexical
           </h1>
           <p className="mt-1 max-w-xl text-xs leading-relaxed text-[#67758B] md:text-sm">
-            One document, any number of tabs. Changes converge through stable
-            sequence anchors and remain on this device after every tab closes.
+            {presence.transportMode === "websocket"
+              ? "One document across browsers. Document events and presence sync over WebSocket; a local copy remains on this device."
+              : "One document, any number of tabs. Changes converge through stable sequence anchors and remain on this device after every tab closes. Add ?transport=websocket for cross-browser sync."}
           </p>
         </div>
         <a

@@ -9,8 +9,10 @@ import {
   Database,
   LoaderCircle,
   Radio,
+  WifiOff,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import type { TransportConnectionState } from "./persistence/channel";
 
 export type PersistenceDisplayState =
   | "loading"
@@ -18,9 +20,27 @@ export type PersistenceDisplayState =
   | "saved"
   | "unsaved";
 
+const CONNECTION_RANK = {
+  error: 0,
+  disconnected: 1,
+  reconnecting: 2,
+  connecting: 3,
+  connected: 4,
+} as const satisfies Record<AdapterConnectionState, number>;
+
+/** Prefer the more degraded of presence + document sync states. */
+export const mergeConnectionStates = (
+  presence: AdapterConnectionState,
+  sync: TransportConnectionState | null | undefined,
+): AdapterConnectionState => {
+  if (sync == null) return presence;
+  return CONNECTION_RANK[presence] <= CONNECTION_RANK[sync] ? presence : sync;
+};
+
 export interface StatusRailProps {
   readonly roomId: string;
   readonly connectionState: AdapterConnectionState;
+  readonly transportMode?: "websocket" | "broadcast";
   readonly persistenceState: PersistenceDisplayState;
   readonly pendingCount: number;
   readonly storageBytes: number;
@@ -49,38 +69,71 @@ const persistenceLabel = (
   }
 };
 
-const connectionLabel = (state: AdapterConnectionState): string => {
+const connectionLabel = (
+  state: AdapterConnectionState,
+  transportMode: "websocket" | "broadcast" = "broadcast",
+): string => {
+  const channel =
+    transportMode === "websocket" ? "WebSocket" : "BroadcastChannel";
   switch (state) {
     case "connected":
-      return "Tabs connected";
+      return transportMode === "websocket"
+        ? "WebSocket connected"
+        : "Tabs connected";
     case "connecting":
+      return `Connecting via ${channel}…`;
     case "reconnecting":
-      return "Connecting tabs";
+      return `Reconnecting via ${channel}…`;
     case "error":
-      return "Tab channel unavailable";
+      return `${channel} unavailable — refresh to retry`;
     case "disconnected":
-      return "Working in this tab";
+      return transportMode === "websocket"
+        ? "WebSocket offline"
+        : "Working in this tab";
   }
 };
+
+const isReconnectWarningState = (state: AdapterConnectionState): boolean =>
+  state === "disconnected" || state === "reconnecting" || state === "error";
 
 const StatusItem = ({
   icon,
   children,
+  tone = "default",
 }: {
   icon: ReactNode;
   children: ReactNode;
-}) => (
-  <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-    <span aria-hidden className="text-[#475BD8]">
-      {icon}
+  tone?: "default" | "warn" | "danger";
+}) => {
+  const toneClass =
+    tone === "danger"
+      ? "text-[#B42318]"
+      : tone === "warn"
+        ? "text-[#B54708]"
+        : "text-[#526078]";
+  const iconClass =
+    tone === "danger"
+      ? "text-[#E45D6F]"
+      : tone === "warn"
+        ? "text-[#F79009]"
+        : "text-[#475BD8]";
+
+  return (
+    <span
+      className={`inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap ${toneClass}`}
+    >
+      <span aria-hidden className={iconClass}>
+        {icon}
+      </span>
+      <span className="truncate">{children}</span>
     </span>
-    <span className="truncate">{children}</span>
-  </span>
-);
+  );
+};
 
 export function StatusRail({
   roomId,
   connectionState,
+  transportMode = "broadcast",
   persistenceState,
   pendingCount,
   storageBytes,
@@ -96,10 +149,32 @@ export function StatusRail({
       <LoaderCircle className="size-3.5 motion-safe:animate-spin" />
     );
 
+  const connectionTone =
+    connectionState === "error" || connectionState === "disconnected"
+      ? "danger"
+      : connectionState === "reconnecting" || connectionState === "connecting"
+        ? "warn"
+        : "default";
+
+  const connectionIcon =
+    connectionState === "error" || connectionState === "disconnected" ? (
+      <WifiOff className="size-3.5" />
+    ) : connectionState === "reconnecting" ||
+      connectionState === "connecting" ? (
+      <LoaderCircle className="size-3.5 motion-safe:animate-spin" />
+    ) : (
+      <Radio className="size-3.5" />
+    );
+
   return (
+    // biome-ignore lint/a11y/useSemanticElements: transport status live region; <output> is for form-calculated values.
     <div
       className="relative z-20 flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[#CBD6E2] bg-white/92 px-3 py-2 text-[11px] font-medium tracking-[0.02em] text-[#526078] backdrop-blur md:px-5"
       data-testid="collaboration-status"
+      data-transport={transportMode}
+      data-connection-state={connectionState}
+      role="status"
+      aria-live="polite"
     >
       <span
         aria-hidden
@@ -115,9 +190,15 @@ export function StatusRail({
         <Copy className="size-3 opacity-50 transition-opacity group-hover:opacity-100" />
       </button>
 
-      <StatusItem icon={<Radio className="size-3.5" />}>
-        {connectionLabel(connectionState)}
+      <StatusItem icon={connectionIcon} tone={connectionTone}>
+        {connectionLabel(connectionState, transportMode)}
       </StatusItem>
+      {isReconnectWarningState(connectionState) &&
+      transportMode === "websocket" ? (
+        <span className="rounded-md border border-[#FEDF89] bg-[#FFFAEB] px-2 py-0.5 text-[10px] font-semibold text-[#B54708]">
+          Sync paused until reconnect
+        </span>
+      ) : null}
       <StatusItem icon={persistenceIcon}>
         {persistenceLabel(persistenceState, pendingCount)}
       </StatusItem>

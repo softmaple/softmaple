@@ -13,7 +13,17 @@ const config = defineConfig(({ mode }) => ({
   },
   plugins: [
     // Only load dev tools and nitro in non-test mode to prevent hanging processes
-    ...(mode !== "test" ? [devtools(), nitro()] : []),
+    ...(mode !== "test"
+      ? [
+          devtools(),
+          nitro({
+            serverDir: "./server",
+            features: {
+              websocket: true,
+            },
+          }),
+        ]
+      : []),
     // this is the plugin that enables path aliases
     viteTsConfigPaths({
       projects: ["./tsconfig.json"],

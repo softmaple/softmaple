@@ -34,6 +34,8 @@ class MockBroadcastNetwork {
 
 class MockBroadcastChannel implements BroadcastChannelLike {
   onmessage: BroadcastChannelLike["onmessage"] = null;
+  onopen: BroadcastChannelLike["onopen"] = null;
+  onconnectionchange: BroadcastChannelLike["onconnectionchange"] = null;
 
   constructor(
     readonly name: string,
@@ -211,5 +213,42 @@ describe("persistence BroadcastChannel protocol", () => {
 
     a.publishBatch(createBatch("batch-1", "hello"));
     expect(b.getKnownBatches()).toEqual([]);
+  });
+
+  it("requests repair when the transport fires onopen after reconnect", () => {
+    const network = new MockBroadcastNetwork();
+    let transport: MockBroadcastChannel | undefined;
+    const createChannel: BroadcastChannelFactory = (name) => {
+      const channel = network.createChannel(name) as MockBroadcastChannel;
+      transport = channel;
+      return channel;
+    };
+
+    const peer = createPersistenceChannel({
+      roomId: "room-a",
+      peerId: "a",
+      channelFactory: createChannel,
+      createId: () => "repair-reconnect",
+    });
+
+    const sent: unknown[] = [];
+    expect(transport).toBeDefined();
+    const originalPost = transport?.postMessage.bind(transport);
+    transport!.postMessage = (message: unknown) => {
+      sent.push(message);
+      originalPost(message);
+    };
+
+    transport?.onopen?.();
+
+    expect(sent).toContainEqual({
+      protocolVersion: PERSISTENCE_CHANNEL_PROTOCOL_VERSION,
+      type: PERSISTENCE_CHANNEL_MESSAGE_TYPE.RepairRequest,
+      roomId: "room-a",
+      senderId: "a",
+      requestId: "repair-reconnect",
+      knownBatchIds: [],
+    });
+    peer.close();
   });
 });

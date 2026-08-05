@@ -18,7 +18,11 @@ import {
 import { useRoomPresence } from "./presence";
 import { RemoteSelectionLayer } from "./RemoteSelectionLayer";
 import { createRoomId, resolveRoomId } from "./room";
-import { type PersistenceDisplayState, StatusRail } from "./StatusRail";
+import {
+  mergeConnectionStates,
+  type PersistenceDisplayState,
+  StatusRail,
+} from "./StatusRail";
 import { toPresenceSelection, useLexicalRoom } from "./useLexicalRoom";
 
 export interface LexicalEgWalkerDemoProps {
@@ -132,7 +136,10 @@ export function LexicalEgWalkerDemo({
     >
       <StatusRail
         roomId={roomId}
-        connectionState={presence.connectionState}
+        connectionState={mergeConnectionStates(
+          presence.connectionState,
+          room.persistence?.syncConnectionState,
+        )}
         transportMode={presence.transportMode}
         persistenceState={persistenceState}
         pendingCount={room.persistence?.pendingBatchIds.length ?? 0}

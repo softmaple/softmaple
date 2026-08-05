@@ -186,6 +186,47 @@ describe("websocket broadcast channel", () => {
     channel.close();
   });
 
+  it("fires onopen and connection callbacks across reconnect", () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const opens: number[] = [];
+    const states: string[] = [];
+
+    const channel = createWebSocketBroadcastChannel({
+      url: "ws://localhost:3000/api/collab-doc",
+      roomId: "room-1",
+      reconnectDelayMs: 1_000,
+      webSocketFactory: () => {
+        const next = createFakeSocket();
+        sockets.push(next);
+        return next as unknown as WebSocket;
+      },
+    });
+
+    channel.onconnectionchange = (state) => {
+      states.push(state);
+    };
+    channel.onopen = () => {
+      opens.push(opens.length);
+    };
+
+    sockets[0]?.setReadyState(1);
+    sockets[0]?.dispatch("open");
+    expect(opens).toHaveLength(1);
+    expect(states.at(-1)).toBe("connected");
+
+    sockets[0]?.dispatch("close");
+    expect(states.at(-1)).toBe("reconnecting");
+
+    vi.advanceTimersByTime(2_000);
+    expect(sockets.length).toBeGreaterThanOrEqual(2);
+    sockets[1]?.setReadyState(1);
+    sockets[1]?.dispatch("open");
+    expect(opens).toHaveLength(2);
+    expect(states.at(-1)).toBe("connected");
+    channel.close();
+  });
+
   it("ignores late close events from replaced sockets", () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];

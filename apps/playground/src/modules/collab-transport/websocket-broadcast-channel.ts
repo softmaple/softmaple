@@ -10,6 +10,8 @@ import type {
   BroadcastChannelFactory,
   BroadcastChannelLike,
   BroadcastMessageEvent,
+  TransportConnectionListener,
+  TransportConnectionState,
 } from "@/modules/lexical-eg-walker/persistence/channel";
 
 export interface WebSocketBroadcastChannelOptions {
@@ -48,12 +50,21 @@ export const createWebSocketBroadcastChannel = (
     options.webSocketFactory ?? ((url: string) => new WebSocket(url));
   const wsUrl = buildDocWebSocketUrl(options.url, options.roomId);
 
-  let handler: ((event: BroadcastMessageEvent) => void) | null = null;
+  let messageHandler: ((event: BroadcastMessageEvent) => void) | null = null;
+  let openHandler: (() => void) | null = null;
+  let connectionHandler: TransportConnectionListener | null = null;
   let socket: WebSocket | null = null;
   let closed = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
+  let connectionState: TransportConnectionState = "connecting";
   const outboundQueue: unknown[] = [];
+
+  const setConnectionState = (next: TransportConnectionState): void => {
+    if (connectionState === next) return;
+    connectionState = next;
+    connectionHandler?.(next);
+  };
 
   const clearReconnect = (): void => {
     if (reconnectTimer === null) return;
@@ -71,8 +82,12 @@ export const createWebSocketBroadcastChannel = (
 
   const scheduleReconnect = (): void => {
     if (closed || reconnectTimer !== null) return;
-    if (reconnectAttempts >= maxReconnectAttempts) return;
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      setConnectionState("error");
+      return;
+    }
 
+    setConnectionState("reconnecting");
     const attempt = reconnectAttempts;
     reconnectAttempts += 1;
     const exponential = Math.min(
@@ -93,6 +108,9 @@ export const createWebSocketBroadcastChannel = (
   const connect = (): void => {
     if (closed) return;
     clearReconnect();
+    if (connectionState !== "reconnecting") {
+      setConnectionState("connecting");
+    }
     let currentSocket: WebSocket;
     try {
       currentSocket = webSocketFactory(wsUrl);
@@ -105,15 +123,17 @@ export const createWebSocketBroadcastChannel = (
     currentSocket.addEventListener("open", () => {
       if (socket !== currentSocket) return;
       reconnectAttempts = 0;
+      setConnectionState("connected");
       flushQueue();
+      openHandler?.();
     });
 
     currentSocket.addEventListener("message", (event) => {
-      if (handler === null || socket !== currentSocket) return;
+      if (messageHandler === null || socket !== currentSocket) return;
       try {
         const data =
           typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        handler({ data });
+        messageHandler({ data });
       } catch {
         // Ignore malformed frames; the persistence channel validates payloads.
       }
@@ -135,10 +155,24 @@ export const createWebSocketBroadcastChannel = (
 
   return {
     get onmessage() {
-      return handler;
+      return messageHandler;
     },
     set onmessage(nextHandler) {
-      handler = nextHandler;
+      messageHandler = nextHandler;
+    },
+    get onopen() {
+      return openHandler;
+    },
+    set onopen(nextHandler) {
+      openHandler = nextHandler ?? null;
+    },
+    get onconnectionchange() {
+      return connectionHandler;
+    },
+    set onconnectionchange(nextHandler) {
+      connectionHandler = nextHandler ?? null;
+      // Replay current state so subscribers see the latest value immediately.
+      connectionHandler?.(connectionState);
     },
     postMessage: (message) => {
       if (closed) return;
@@ -156,7 +190,10 @@ export const createWebSocketBroadcastChannel = (
       closed = true;
       clearReconnect();
       outboundQueue.length = 0;
-      handler = null;
+      setConnectionState("disconnected");
+      messageHandler = null;
+      openHandler = null;
+      connectionHandler = null;
       const current = socket;
       socket = null;
       current?.close();

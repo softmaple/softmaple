@@ -8,6 +8,7 @@ import {
   type BatchListener,
   type BroadcastChannelFactory,
   createPersistenceChannel,
+  type TransportConnectionState,
 } from "./channel";
 import {
   createLeaderElection,
@@ -66,6 +67,7 @@ export interface PersistenceCoordinatorSnapshot {
   readonly storageBytes: number;
   readonly failureReason: FailureReason;
   readonly errorMessage: string | null;
+  readonly syncConnectionState: TransportConnectionState;
 }
 
 export interface PersistenceCoordinator {
@@ -248,12 +250,18 @@ export const createPersistenceCoordinator = async (
     storageBytes,
     failureReason,
     errorMessage: lastErrorMessage,
+    syncConnectionState: channel.getConnectionState(),
   });
 
   const notifyState = (): void => {
     const snapshot = getSnapshot();
     for (const listener of stateListeners) listener(snapshot);
   };
+
+  const unsubscribeSyncConnection = channel.subscribeConnection(() => {
+    if (closed) return;
+    notifyState();
+  });
 
   const notifyError = (error: Error): void => {
     lastErrorMessage = error.message;
@@ -508,6 +516,7 @@ export const createPersistenceCoordinator = async (
       unsubscribeBatches();
       unsubscribeAcks();
       unsubscribeChannelErrors();
+      unsubscribeSyncConnection();
       sourceEventApi?.removeEventListener("storage", handleStorageEvent);
       await flushPromise;
       await election.stop();

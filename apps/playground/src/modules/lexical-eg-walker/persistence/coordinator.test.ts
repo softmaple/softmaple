@@ -41,6 +41,8 @@ class MockBroadcastNetwork {
 
 class MockBroadcastChannel implements BroadcastChannelLike {
   onmessage: BroadcastChannelLike["onmessage"] = null;
+  onopen: BroadcastChannelLike["onopen"] = null;
+  onconnectionchange: BroadcastChannelLike["onconnectionchange"] = null;
 
   constructor(
     readonly name: string,

@@ -19,6 +19,7 @@ import type {
 } from "../types";
 import { DEFAULT_RECONNECT_CONFIG } from "../types";
 import {
+  cancelReconnect,
   cleanupWebSocket,
   clearConnectionTimeout,
   resetReconnectState,
@@ -218,10 +219,26 @@ export const createWebSocketAdapter = (
     }
   };
 
+  const beginReconnect = (): void => {
+    const { enabled, maxAttempts } = internal.reconnect.config;
+    if (enabled && internal.reconnect.attempts < maxAttempts) {
+      setState({ connectionState: "reconnecting" });
+      scheduleReconnect(internal, subscriptions, connectInternal);
+      return;
+    }
+    if (enabled) {
+      setState({ connectionState: "error" });
+      subscriptions.notifyError(
+        new Error(`Max reconnect attempts (${maxAttempts}) reached`),
+      );
+      return;
+    }
+    setState({ connectionState: "disconnected" });
+  };
+
   const handleClose = (): void => {
     stopHeartbeat(internal);
-    setState({ connectionState: "disconnected" });
-    scheduleReconnect(internal, subscriptions, connectInternal);
+    beginReconnect();
   };
 
   const handleError = (): void => {
@@ -237,7 +254,12 @@ export const createWebSocketAdapter = (
 
   const connectInternal = (): void => {
     cleanupWebSocket(internal, handlers);
-    setState({ connectionState: "connecting" });
+    setState({
+      connectionState:
+        internal.reconnect.isReconnecting || internal.reconnect.attempts > 0
+          ? "reconnecting"
+          : "connecting",
+    });
 
     // Build URL with roomId only (auth handled via message after connect)
     const wsUrl = buildUrl(config.url, config.roomId);
@@ -248,10 +270,13 @@ export const createWebSocketAdapter = (
     internal.socket.addEventListener("error", handleError);
 
     internal.connectionTimeoutId = setTimeout(() => {
-      if (internal.state.connectionState === "connecting") {
+      if (
+        internal.state.connectionState === "connecting" ||
+        internal.state.connectionState === "reconnecting"
+      ) {
         subscriptions.notifyError(new Error("Connection timeout"));
         cleanupWebSocket(internal, handlers);
-        scheduleReconnect(internal, subscriptions, connectInternal);
+        beginReconnect();
       }
     }, connectionTimeoutMs);
   };
@@ -290,11 +315,17 @@ export const createWebSocketAdapter = (
       }),
 
     disconnect: async (): Promise<void> => {
+      cancelReconnect(internal);
+
       if (
         internal.socket === null ||
         internal.socket.readyState === WebSocket.CLOSED
       ) {
-        setState({ connectionState: "disconnected" });
+        cleanupWebSocket(internal, handlers);
+        setState(
+          { connectionState: "disconnected", self: null, presence: new Map() },
+          true,
+        );
         return;
       }
 

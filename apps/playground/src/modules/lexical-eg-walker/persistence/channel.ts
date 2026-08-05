@@ -65,10 +65,29 @@ export interface BroadcastMessageEvent {
   readonly data: unknown;
 }
 
+/** Transport lifecycle for WebSocket-backed channels (BroadcastChannel stays connected). */
+export type TransportConnectionState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "error";
+
+export type TransportConnectionListener = (
+  state: TransportConnectionState,
+) => void;
+
 export interface BroadcastChannelLike {
   onmessage: ((event: BroadcastMessageEvent) => void) | null;
   postMessage(message: unknown): void;
   close(): void;
+  /**
+   * Optional. Fired when the underlying transport is ready, including after
+   * reconnect. Persistence uses this to request repair.
+   */
+  onopen?: (() => void) | null;
+  /** Optional. Connection lifecycle for UI / diagnostics. */
+  onconnectionchange?: TransportConnectionListener | null;
 }
 
 export type BroadcastChannelFactory = (name: string) => BroadcastChannelLike;
@@ -81,8 +100,10 @@ export interface PersistenceChannel {
   getKnownBatches(): ReadonlyArray<WireBatch>;
   getKnownBatchIds(): ReadonlySet<string>;
   getDurableBatchIds(): ReadonlySet<string>;
+  getConnectionState(): TransportConnectionState;
   subscribeBatches(listener: BatchListener): () => void;
   subscribeDurableAcks(listener: DurableAckListener): () => void;
+  subscribeConnection(listener: TransportConnectionListener): () => void;
   subscribeErrors(listener: ChannelErrorListener): () => void;
   close(): void;
 }
@@ -112,6 +133,8 @@ const createNativeBroadcastChannel: BroadcastChannelFactory = (name) => {
     set onmessage(nextHandler) {
       handler = nextHandler;
     },
+    onopen: null,
+    onconnectionchange: null,
     postMessage: (message) => nativeChannel.postMessage(message),
     close: () => nativeChannel.close(),
   };
@@ -131,11 +154,19 @@ export const createPersistenceChannel = ({
   const durableBatchIds = new Set<string>();
   const batchListeners = new Set<BatchListener>();
   const durableAckListeners = new Set<DurableAckListener>();
+  const connectionListeners = new Set<TransportConnectionListener>();
   const errorListeners = new Set<ChannelErrorListener>();
   let closed = false;
+  let connectionState: TransportConnectionState = "connected";
 
   const notifyError = (error: Error): void => {
     for (const listener of errorListeners) listener(error);
+  };
+
+  const setConnectionState = (next: TransportConnectionState): void => {
+    if (connectionState === next) return;
+    connectionState = next;
+    for (const listener of connectionListeners) listener(next);
   };
 
   const acceptBatch = (
@@ -238,6 +269,31 @@ export const createPersistenceChannel = ({
     }
   };
 
+  const requestRepair = (): string => {
+    const requestId = createId();
+    postMessage({
+      protocolVersion: PERSISTENCE_CHANNEL_PROTOCOL_VERSION,
+      type: PERSISTENCE_CHANNEL_MESSAGE_TYPE.RepairRequest,
+      roomId,
+      senderId: peerId,
+      requestId,
+      knownBatchIds: [...knownBatches.keys()],
+    });
+    return requestId;
+  };
+
+  channel.onconnectionchange = (state) => {
+    if (closed) return;
+    setConnectionState(state);
+  };
+
+  channel.onopen = () => {
+    if (closed) return;
+    setConnectionState("connected");
+    // Catch up on anything missed while the transport was down.
+    requestRepair();
+  };
+
   return {
     publishBatch: (candidate) => {
       const batch = acceptBatch(candidate, "local");
@@ -254,18 +310,7 @@ export const createPersistenceChannel = ({
     seedBatches: (batches) => {
       for (const batch of batches) acceptBatch(batch, "storage");
     },
-    requestRepair: () => {
-      const requestId = createId();
-      postMessage({
-        protocolVersion: PERSISTENCE_CHANNEL_PROTOCOL_VERSION,
-        type: PERSISTENCE_CHANNEL_MESSAGE_TYPE.RepairRequest,
-        roomId,
-        senderId: peerId,
-        requestId,
-        knownBatchIds: [...knownBatches.keys()],
-      });
-      return requestId;
-    },
+    requestRepair,
     broadcastDurableAck: (batchIds) => {
       const newlyDurable = markDurable(batchIds);
       if (newlyDurable.length === 0) return;
@@ -280,6 +325,7 @@ export const createPersistenceChannel = ({
     getKnownBatches: () => [...knownBatches.values()],
     getKnownBatchIds: () => new Set(knownBatches.keys()),
     getDurableBatchIds: () => new Set(durableBatchIds),
+    getConnectionState: () => connectionState,
     subscribeBatches: (listener) => {
       batchListeners.add(listener);
       return () => batchListeners.delete(listener);
@@ -287,6 +333,11 @@ export const createPersistenceChannel = ({
     subscribeDurableAcks: (listener) => {
       durableAckListeners.add(listener);
       return () => durableAckListeners.delete(listener);
+    },
+    subscribeConnection: (listener) => {
+      connectionListeners.add(listener);
+      listener(connectionState);
+      return () => connectionListeners.delete(listener);
     },
     subscribeErrors: (listener) => {
       errorListeners.add(listener);
@@ -296,9 +347,12 @@ export const createPersistenceChannel = ({
       if (closed) return;
       closed = true;
       channel.onmessage = null;
+      channel.onopen = null;
+      channel.onconnectionchange = null;
       channel.close();
       batchListeners.clear();
       durableAckListeners.clear();
+      connectionListeners.clear();
       errorListeners.clear();
     },
   };

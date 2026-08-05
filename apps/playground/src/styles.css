@@ -4,18 +4,35 @@
 
 @custom-variant dark (&:is(.dark *));
 
+:root {
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Playground Motion-inspired tokens */
+  --pg-paper: #f4f4f5;
+  --pg-surface: #ffffff;
+  --pg-ink: #0b0b0b;
+  --pg-ink-muted: #5c5c5c;
+  --pg-line: #e4e4e7;
+  --pg-accent: #e11d48;
+}
+
 body {
   @apply m-0;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
-    'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code {
-  font-family:
-    source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-family: var(--font-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 :root {
@@ -133,6 +150,7 @@ code {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--pg-paper);
+    color: var(--pg-ink);
   }
 }

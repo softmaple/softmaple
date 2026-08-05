@@ -41,3 +41,5 @@ apps/playground/src/routeTree.gen.ts
 
 *storybook.log
 storybook-static
+# next-agents-md
+.next-docs/

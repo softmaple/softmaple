@@ -8,6 +8,7 @@
  */
 
 import { defineWebSocketHandler } from "nitro";
+import type { EventHandler } from "nitro/h3";
 
 const ROOM_TOPIC_PREFIX = "sync:";
 
@@ -59,7 +60,7 @@ const parseSyncMessage = (raw: string): SyncMessage | null => {
 
 const topicFor = (roomId: string): string => `${ROOM_TOPIC_PREFIX}${roomId}`;
 
-export default defineWebSocketHandler({
+const handler: EventHandler = defineWebSocketHandler({
   open(peer) {
     peer.context.rooms = new Set<string>();
   },
@@ -137,3 +138,5 @@ export default defineWebSocketHandler({
     subscribed.clear();
   },
 });
+
+export default handler;

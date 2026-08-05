@@ -5,6 +5,7 @@
  */
 
 import { defineWebSocketHandler } from "nitro";
+import type { EventHandler } from "nitro/h3";
 
 const ROOM_TOPIC = "presence";
 
@@ -74,7 +75,7 @@ const send = (
   peer.send(message);
 };
 
-export default defineWebSocketHandler({
+const handler: EventHandler = defineWebSocketHandler({
   upgrade(request) {
     const url = new URL(request.url);
     const roomId = url.searchParams.get("roomId")?.trim();
@@ -191,3 +192,5 @@ export default defineWebSocketHandler({
     });
   },
 });
+
+export default handler;

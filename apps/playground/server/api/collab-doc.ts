@@ -10,6 +10,7 @@
  */
 
 import { defineWebSocketHandler } from "nitro";
+import type { EventHandler } from "nitro/h3";
 
 const ROOM_TOPIC = "doc";
 
@@ -77,7 +78,7 @@ const roomIdFromPeer = (peer: {
   return new URL(url).searchParams.get("roomId");
 };
 
-export default defineWebSocketHandler({
+const handler: EventHandler = defineWebSocketHandler({
   upgrade(request) {
     const url = new URL(request.url);
     const roomId = url.searchParams.get("roomId")?.trim();
@@ -151,3 +152,5 @@ export default defineWebSocketHandler({
     peer.unsubscribe(ROOM_TOPIC);
   },
 });
+
+export default handler;

@@ -291,6 +291,7 @@ describe("websocket broadcast channel", () => {
 
   it("closes an existing socket before connect replaces it", () => {
     const sockets: FakeSocket[] = [];
+    const sequence: Array<"factory" | "close"> = [];
     let connectionState: TransportConnectionState = "connecting";
     const lifecycle = createWebSocketLifecycle({
       wsUrl: "ws://localhost:3000/api/collab-doc?roomId=room-1",
@@ -298,6 +299,7 @@ describe("websocket broadcast channel", () => {
       maxReconnectAttempts: 3,
       connectionTimeoutMs: 60_000,
       webSocketFactory: () => {
+        sequence.push("factory");
         const next = createFakeSocket();
         sockets.push(next);
         return next as unknown as WebSocket;
@@ -315,8 +317,14 @@ describe("websocket broadcast channel", () => {
 
     lifecycle.connect();
     expect(sockets).toHaveLength(1);
+    const firstClose = sockets[0]?.close;
+    expect(firstClose).toBeDefined();
+    firstClose?.mockImplementation(() => {
+      sequence.push("close");
+    });
     lifecycle.connect();
-    expect(sockets[0]?.close).toHaveBeenCalled();
+    expect(firstClose).toHaveBeenCalled();
     expect(sockets).toHaveLength(2);
+    expect(sequence).toEqual(["factory", "close", "factory"]);
   });
 });

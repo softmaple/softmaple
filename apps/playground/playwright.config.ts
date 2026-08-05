@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { PLAYGROUND_PORT } from "./playground-port";
 
-const port = process.env.PLAYGROUND_PORT ?? "3000";
+const port = PLAYGROUND_PORT;
 const baseURL = `http://localhost:${port}`;
 
 /**
@@ -42,7 +43,7 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: `pnpm exec vite dev --port ${port}`,
+    command: `pnpm exec vite dev --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
   },

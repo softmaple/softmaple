@@ -11,6 +11,7 @@ import { defineWebSocketHandler } from "nitro";
 import type { EventHandler } from "nitro/h3";
 
 const ROOM_TOPIC_PREFIX = "sync:";
+const MAX_EVENTS_PER_ROOM = 500;
 
 type WireGraphEvent = {
   readonly id: string;
@@ -27,7 +28,7 @@ type SyncMessage = {
 
 type RoomState = {
   readonly events: Map<string, WireGraphEvent>;
-  readonly peers: Set<string>;
+  readonly connections: Set<object>;
 };
 
 const rooms = new Map<string, RoomState>();
@@ -38,9 +39,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const getRoom = (roomId: string): RoomState => {
   const existing = rooms.get(roomId);
   if (existing) return existing;
-  const created: RoomState = { events: new Map(), peers: new Set() };
+  const created: RoomState = { events: new Map(), connections: new Set() };
   rooms.set(roomId, created);
   return created;
+};
+
+const putEvent = (room: RoomState, event: WireGraphEvent): void => {
+  if (room.events.has(event.id)) {
+    room.events.set(event.id, event);
+    return;
+  }
+  while (room.events.size >= MAX_EVENTS_PER_ROOM) {
+    const oldest = room.events.keys().next().value;
+    if (oldest === undefined) break;
+    room.events.delete(oldest);
+  }
+  room.events.set(event.id, event);
 };
 
 const parseSyncMessage = (raw: string): SyncMessage | null => {
@@ -75,20 +89,19 @@ const handler: EventHandler = defineWebSocketHandler({
     if (!subscribed.has(parsed.roomId)) {
       peer.subscribe(topic);
       subscribed.add(parsed.roomId);
+      room.connections.add(peer);
     }
 
     switch (parsed.type) {
       case "join":
-        room.peers.add(parsed.userId);
         peer.publish(topic, parsed);
         return;
       case "leave":
-        room.peers.delete(parsed.userId);
         peer.publish(topic, parsed);
         return;
       case "event": {
         if (isRecord(parsed.data) && typeof parsed.data.id === "string") {
-          room.events.set(parsed.data.id, parsed.data as WireGraphEvent);
+          putEvent(room, parsed.data as WireGraphEvent);
         }
         peer.publish(topic, parsed);
         return;
@@ -134,6 +147,12 @@ const handler: EventHandler = defineWebSocketHandler({
     if (!subscribed) return;
     for (const roomId of subscribed) {
       peer.unsubscribe(topicFor(roomId));
+      const room = rooms.get(roomId);
+      if (!room) continue;
+      room.connections.delete(peer);
+      if (room.connections.size === 0) {
+        rooms.delete(roomId);
+      }
     }
     subscribed.clear();
   },

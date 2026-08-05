@@ -136,6 +136,9 @@ const handler: EventHandler = defineWebSocketHandler({
             : parsed.senderId;
         users.delete(userId);
         peer.publish(ROOM_TOPIC, parsed);
+        if (users.size === 0) {
+          rooms.delete(roomId);
+        }
         return;
       }
       case "presence:update": {
@@ -190,6 +193,9 @@ const handler: EventHandler = defineWebSocketHandler({
       timestamp: Date.now(),
       payload: { userId },
     });
+    if (users.size === 0) {
+      rooms.delete(roomId);
+    }
   },
 });
 

@@ -13,6 +13,7 @@ import { defineWebSocketHandler } from "nitro";
 import type { EventHandler } from "nitro/h3";
 
 const ROOM_TOPIC = "doc";
+const MAX_BATCHES_PER_ROOM = 500;
 
 type WireBatch = {
   readonly batchId: string;
@@ -34,6 +35,7 @@ type DocMessage = {
 
 type RoomState = {
   readonly batches: Map<string, WireBatch>;
+  readonly peers: Set<object>;
 };
 
 const rooms = new Map<string, RoomState>();
@@ -41,13 +43,30 @@ const rooms = new Map<string, RoomState>();
 const getRoom = (roomId: string): RoomState => {
   const existing = rooms.get(roomId);
   if (existing) return existing;
-  const created: RoomState = { batches: new Map() };
+  const created: RoomState = { batches: new Map(), peers: new Set() };
   rooms.set(roomId, created);
   return created;
 };
 
+const putBatch = (room: RoomState, batch: WireBatch): void => {
+  if (room.batches.has(batch.batchId)) {
+    room.batches.set(batch.batchId, batch);
+    return;
+  }
+  while (room.batches.size >= MAX_BATCHES_PER_ROOM) {
+    const oldest = room.batches.keys().next().value;
+    if (oldest === undefined) break;
+    room.batches.delete(oldest);
+  }
+  room.batches.set(batch.batchId, batch);
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) &&
+  value.every((item) => typeof item === "string" && item.length > 0);
 
 const parseDocMessage = (raw: string): DocMessage | null => {
   try {
@@ -59,6 +78,12 @@ const parseDocMessage = (raw: string): DocMessage | null => {
       return null;
     if (typeof parsed.senderId !== "string" || parsed.senderId.length === 0)
       return null;
+    if (
+      parsed.knownBatchIds !== undefined &&
+      !isStringArray(parsed.knownBatchIds)
+    ) {
+      return null;
+    }
     return parsed as unknown as DocMessage;
   } catch {
     return null;
@@ -98,6 +123,7 @@ const handler: EventHandler = defineWebSocketHandler({
       return;
     }
     peer.context.roomId = roomId;
+    getRoom(roomId).peers.add(peer);
     peer.subscribe(ROOM_TOPIC);
   },
 
@@ -113,7 +139,7 @@ const handler: EventHandler = defineWebSocketHandler({
     switch (parsed.type) {
       case "event": {
         if (parsed.batch && typeof parsed.batch.batchId === "string") {
-          room.batches.set(parsed.batch.batchId, parsed.batch);
+          putBatch(room, parsed.batch);
         }
         peer.publish(ROOM_TOPIC, parsed);
         return;
@@ -150,6 +176,14 @@ const handler: EventHandler = defineWebSocketHandler({
 
   close(peer) {
     peer.unsubscribe(ROOM_TOPIC);
+    const roomId = roomIdFromPeer(peer);
+    if (!roomId) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    room.peers.delete(peer);
+    if (room.peers.size === 0) {
+      rooms.delete(roomId);
+    }
   },
 });
 

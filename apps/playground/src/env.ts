@@ -1,6 +1,17 @@
 import { createEnv } from "@t3-oss/env-core";
 import { z } from "zod";
 
+const wsUrl = z
+  .url()
+  .refine(
+    (value) => {
+      const protocol = new URL(value).protocol;
+      return protocol === "ws:" || protocol === "wss:";
+    },
+    { message: "Must be a ws:// or wss:// URL" },
+  )
+  .optional();
+
 export const env = createEnv({
   server: {
     SERVER_URL: z.string().url().optional(),
@@ -17,11 +28,11 @@ export const env = createEnv({
     /** `websocket` (default) or `broadcast` for Lexical / online collab demos */
     VITE_COLLAB_TRANSPORT: z.enum(["websocket", "broadcast"]).optional(),
     /** Override document-sync WebSocket base URL (no roomId query) */
-    VITE_COLLAB_DOC_WS_URL: z.string().min(1).optional(),
+    VITE_COLLAB_DOC_WS_URL: wsUrl,
     /** Override presence WebSocket base URL (no roomId query) */
-    VITE_COLLAB_PRESENCE_WS_URL: z.string().min(1).optional(),
+    VITE_COLLAB_PRESENCE_WS_URL: wsUrl,
     /** Override textarea SyncAdapter WebSocket URL */
-    VITE_COLLAB_SYNC_WS_URL: z.string().min(1).optional(),
+    VITE_COLLAB_SYNC_WS_URL: wsUrl,
   },
 
   /**

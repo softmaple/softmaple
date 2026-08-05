@@ -2,6 +2,8 @@
  * Resolve collaboration WebSocket endpoints and transport mode for playground demos.
  */
 
+import { PLAYGROUND_PORT } from "../../../playground-port";
+
 export const COLLAB_TRANSPORT = {
   WebSocket: "websocket",
   Broadcast: "broadcast",
@@ -17,13 +19,15 @@ export interface CollabEndpoints {
   readonly syncWsUrl: string | null;
 }
 
-const trimTrailingSlash = (value: string): string =>
-  value.endsWith("/") ? value.slice(0, -1) : value;
-
 export const toWebSocketOrigin = (httpOrigin: string): string => {
   const url = new URL(httpOrigin);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return trimTrailingSlash(url.origin);
+  if (url.protocol === "https:") {
+    url.protocol = "wss:";
+  } else if (url.protocol === "http:") {
+    url.protocol = "ws:";
+  }
+  // Preserve existing ws:/wss: schemes as-is.
+  return url.origin;
 };
 
 export const resolveCollabTransport = (
@@ -69,13 +73,25 @@ export const buildSameOriginEndpoints = (
   };
 };
 
+const broadcastEndpoints = (): CollabEndpoints => ({
+  transport: COLLAB_TRANSPORT.Broadcast,
+  docWsUrl: null,
+  presenceWsUrl: null,
+  syncWsUrl: null,
+});
+
+const pickEndpoint = (
+  override: string | undefined,
+  fallback: string | null,
+): string | null => (override !== undefined ? override : fallback);
+
 export const resolveBrowserCollabEndpoints = (
   options: {
     readonly search?: string;
     readonly envTransport?: string | null;
-    readonly docWsUrl?: string | null;
-    readonly presenceWsUrl?: string | null;
-    readonly syncWsUrl?: string | null;
+    readonly docWsUrl?: string;
+    readonly presenceWsUrl?: string;
+    readonly syncWsUrl?: string;
     readonly locationOrigin?: string;
   } = {},
 ): CollabEndpoints => {
@@ -85,20 +101,20 @@ export const resolveBrowserCollabEndpoints = (
     options.envTransport,
   );
   if (transport === COLLAB_TRANSPORT.Broadcast) {
-    return buildSameOriginEndpoints("http://localhost", transport);
+    return broadcastEndpoints();
   }
 
   const origin =
     options.locationOrigin ??
     (typeof window === "undefined"
-      ? "http://localhost:3000"
+      ? `http://localhost:${PLAYGROUND_PORT}`
       : window.location.origin);
   const defaults = buildSameOriginEndpoints(origin, transport);
 
   return {
     transport,
-    docWsUrl: options.docWsUrl ?? defaults.docWsUrl,
-    presenceWsUrl: options.presenceWsUrl ?? defaults.presenceWsUrl,
-    syncWsUrl: options.syncWsUrl ?? defaults.syncWsUrl,
+    docWsUrl: pickEndpoint(options.docWsUrl, defaults.docWsUrl),
+    presenceWsUrl: pickEndpoint(options.presenceWsUrl, defaults.presenceWsUrl),
+    syncWsUrl: pickEndpoint(options.syncWsUrl, defaults.syncWsUrl),
   };
 };

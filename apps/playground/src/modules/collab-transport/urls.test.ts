@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSameOriginEndpoints,
   COLLAB_TRANSPORT,
@@ -11,6 +11,46 @@ import {
   createWebSocketBroadcastChannel,
 } from "./websocket-broadcast-channel";
 
+type FakeSocket = {
+  readyState: number;
+  send: (data: string) => void;
+  readonly close: ReturnType<typeof vi.fn>;
+  readonly addEventListener: (
+    type: string,
+    listener: (event: Event) => void,
+  ) => void;
+  setReadyState: (next: number) => void;
+  dispatch: (type: string, event?: Event) => void;
+};
+
+const createFakeSocket = (): FakeSocket => {
+  const listeners = new Map<string, Set<(event: Event) => void>>();
+  let readyState = 0;
+  return {
+    get readyState() {
+      return readyState;
+    },
+    set readyState(next) {
+      readyState = next;
+    },
+    setReadyState: (next) => {
+      readyState = next;
+    },
+    send: vi.fn(),
+    close: vi.fn(),
+    addEventListener: (type, listener) => {
+      const set = listeners.get(type) ?? new Set();
+      set.add(listener);
+      listeners.set(type, set);
+    },
+    dispatch: (type, event = new Event(type)) => {
+      for (const listener of listeners.get(type) ?? []) {
+        listener(event);
+      }
+    },
+  };
+};
+
 describe("collab transport urls", () => {
   it("maps http(s) origins to ws(s)", () => {
     expect(toWebSocketOrigin("http://localhost:3000")).toBe(
@@ -18,6 +58,9 @@ describe("collab transport urls", () => {
     );
     expect(toWebSocketOrigin("https://playground.example/")).toBe(
       "wss://playground.example",
+    );
+    expect(toWebSocketOrigin("wss://secure.example/collab")).toBe(
+      "wss://secure.example",
     );
   });
 
@@ -59,24 +102,15 @@ describe("collab transport urls", () => {
 });
 
 describe("websocket broadcast channel", () => {
-  it("queues messages until the socket opens", () => {
-    const listeners = new Map<string, Set<(event: Event) => void>>();
-    let readyState = 0;
-    const sent: string[] = [];
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    const socket = {
-      get readyState() {
-        return readyState;
-      },
-      send: (data: string) => {
-        sent.push(data);
-      },
-      close: vi.fn(),
-      addEventListener: (type: string, listener: (event: Event) => void) => {
-        const set = listeners.get(type) ?? new Set();
-        set.add(listener);
-        listeners.set(type, set);
-      },
+  it("queues messages until the socket opens", () => {
+    const socket = createFakeSocket();
+    const sent: string[] = [];
+    socket.send = (data: string) => {
+      sent.push(data);
     };
 
     const channel = createWebSocketBroadcastChannel({
@@ -88,10 +122,8 @@ describe("websocket broadcast channel", () => {
     channel.postMessage({ type: "event", roomId: "room-1" });
     expect(sent).toEqual([]);
 
-    readyState = 1;
-    for (const listener of listeners.get("open") ?? []) {
-      listener(new Event("open"));
-    }
+    socket.setReadyState(1);
+    socket.dispatch("open");
     expect(sent).toEqual([JSON.stringify({ type: "event", roomId: "room-1" })]);
     channel.close();
   });
@@ -100,5 +132,83 @@ describe("websocket broadcast channel", () => {
     expect(
       buildDocWebSocketUrl("ws://localhost:3000/api/collab-doc", "abc"),
     ).toBe("ws://localhost:3000/api/collab-doc?roomId=abc");
+  });
+
+  it("schedules reconnect after close and stops after channel.close", () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+
+    const channel = createWebSocketBroadcastChannel({
+      url: "ws://localhost:3000/api/collab-doc",
+      roomId: "room-1",
+      reconnectDelayMs: 1_000,
+      webSocketFactory: () => {
+        const next = createFakeSocket();
+        sockets.push(next);
+        return next as unknown as WebSocket;
+      },
+    });
+
+    expect(sockets).toHaveLength(1);
+    sockets[0]?.dispatch("close");
+    vi.advanceTimersByTime(2_000);
+    expect(sockets.length).toBeGreaterThanOrEqual(2);
+
+    const socketsAfterReconnect = sockets.length;
+    channel.close();
+    sockets[socketsAfterReconnect - 1]?.dispatch("close");
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(socketsAfterReconnect);
+  });
+
+  it("delivers parsed JSON to onmessage and ignores malformed frames", () => {
+    const socket = createFakeSocket();
+    const channel = createWebSocketBroadcastChannel({
+      url: "ws://localhost:3000/api/collab-doc",
+      roomId: "room-1",
+      webSocketFactory: () => socket as unknown as WebSocket,
+    });
+
+    const received: unknown[] = [];
+    channel.onmessage = (event) => {
+      received.push(event.data);
+    };
+
+    socket.dispatch("message", {
+      data: JSON.stringify({ type: "event", roomId: "room-1" }),
+    } as MessageEvent);
+    expect(received).toEqual([{ type: "event", roomId: "room-1" }]);
+
+    expect(() => {
+      socket.dispatch("message", { data: "not-json{" } as MessageEvent);
+    }).not.toThrow();
+    expect(received).toHaveLength(1);
+    channel.close();
+  });
+
+  it("ignores late close events from replaced sockets", () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+
+    createWebSocketBroadcastChannel({
+      url: "ws://localhost:3000/api/collab-doc",
+      roomId: "room-1",
+      reconnectDelayMs: 1_000,
+      webSocketFactory: () => {
+        const next = createFakeSocket();
+        sockets.push(next);
+        return next as unknown as WebSocket;
+      },
+    });
+
+    const first = sockets[0];
+    first?.dispatch("close");
+    vi.advanceTimersByTime(2_000);
+    expect(sockets.length).toBeGreaterThanOrEqual(2);
+
+    const beforeLateClose = sockets.length;
+    first?.dispatch("close");
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(beforeLateClose);
   });
 });

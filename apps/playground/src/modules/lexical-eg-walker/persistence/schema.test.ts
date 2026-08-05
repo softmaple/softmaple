@@ -139,4 +139,37 @@ describe("lexical EG-walker persistence schema", () => {
       /does not match/,
     );
   });
+
+  it("rejects duplicate event batches, multiple room rows, and mismatched event keys", () => {
+    const eventRow = createEventRow(ROOM_ID, batch, 2);
+    const duplicateEventRow = {
+      ...createEventRow(ROOM_ID, batch, 3),
+      key: "event:duplicate-batch-1",
+    };
+    expect(() =>
+      parsePersistenceStorage(
+        encodeRows([eventRow, duplicateEventRow]),
+        ROOM_ID,
+      ),
+    ).toThrow(CorruptPersistenceStorageError);
+
+    const duplicateRoomRow = {
+      ...createRoomRow(ROOM_ID, 2),
+      key: "room:duplicate-room-a",
+    };
+    expect(() =>
+      parsePersistenceStorage(
+        encodeRows([createRoomRow(ROOM_ID, 1), duplicateRoomRow]),
+        ROOM_ID,
+      ),
+    ).toThrow(/more than one room row/);
+
+    const mismatchedEventRow = {
+      ...eventRow,
+      key: "event:not-batch-1",
+    };
+    expect(() =>
+      parsePersistenceStorage(encodeRows([mismatchedEventRow]), ROOM_ID),
+    ).toThrow(/does not match its batch ID/);
+  });
 });

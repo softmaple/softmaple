@@ -117,9 +117,13 @@ export const blockModelCollaborationPatterns = [
 
 /**
  * Patterns for a block-model surface binding such as binding-lexical.
- * Surface frameworks are allowed here; importing EG-walker directly is not.
+ * Surface frameworks are allowed here; importing EG-walker directly or
+ * coupling the binding to awareness is not.
  */
-export const blockModelBindingCollaborationPatterns = [...EG_WALKER_PATTERNS];
+export const blockModelBindingCollaborationPatterns = [
+  ...EG_WALKER_PATTERNS,
+  ...AWARENESS_PATTERNS,
+];
 
 /**
  * Concatenate one or more `no-restricted-imports` pattern arrays into

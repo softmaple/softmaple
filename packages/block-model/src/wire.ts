@@ -14,6 +14,7 @@ import {
   METADATA_MARKER,
   TEXT_ESCAPE,
 } from "./constants";
+import { BLOCK_TYPE_SET, MARK_KIND_SET } from "./schema-values";
 import type {
   BlockAttributePatch,
   BlockFieldPatch,
@@ -27,25 +28,11 @@ import type {
   SerializedTextOperation,
 } from "./types";
 
-const BLOCK_TYPES: ReadonlySet<string> = new Set([
-  "paragraph",
-  "h1",
-  "h2",
-  "h3",
-  "quote",
-  "code",
-  "bullet-list",
-  "number-list",
-  "check-list",
-]);
-
-const MARK_KINDS: ReadonlySet<string> = new Set([
-  "bold",
-  "italic",
-  "underline",
-  "strike",
-  "inline-code",
-  "link",
+const SAFE_LINK_PROTOCOLS: ReadonlySet<string> = new Set([
+  "http:",
+  "https:",
+  "mailto:",
+  "tel:",
 ]);
 
 export const DEFAULT_BLOCK_FIELDS: CompleteBlockFields = Object.freeze({
@@ -178,7 +165,7 @@ export const normalizeFields = (
 });
 
 export const assertFieldPatch = (patch: BlockFieldPatch): void => {
-  if (patch.type !== undefined && !BLOCK_TYPES.has(patch.type)) {
+  if (patch.type !== undefined && !BLOCK_TYPE_SET.has(patch.type)) {
     throw new Error(`Unsupported block type ${String(patch.type)}`);
   }
   assertOptionalNullableString(patch.parentId, "parentId");
@@ -196,10 +183,20 @@ export const assertFieldPatch = (patch: BlockFieldPatch): void => {
 };
 
 export const isBlockType = (value: unknown): value is BlockType =>
-  typeof value === "string" && BLOCK_TYPES.has(value);
+  typeof value === "string" && BLOCK_TYPE_SET.has(value);
 
 export const isMarkKind = (value: unknown): value is MarkKind =>
-  typeof value === "string" && MARK_KINDS.has(value);
+  typeof value === "string" && MARK_KIND_SET.has(value);
+
+const isSafeLinkUrl = (url: string): boolean => {
+  try {
+    return SAFE_LINK_PROTOCOLS.has(
+      new URL(url, "https://softmaple.invalid").protocol,
+    );
+  } catch {
+    return false;
+  }
+};
 
 export const isLinkAttributes = (value: unknown): value is LinkAttributes => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -208,6 +205,7 @@ export const isLinkAttributes = (value: unknown): value is LinkAttributes => {
   const link = value as Record<string, unknown>;
   return (
     typeof link.url === "string" &&
+    isSafeLinkUrl(link.url) &&
     optionalString(link.target) &&
     optionalString(link.rel) &&
     optionalString(link.title)
@@ -455,6 +453,14 @@ const assertEffectCarrier = (
   operation: SerializedTextOperation,
   effect: RichTextEffect,
 ): void => {
+  if (effect.type === "bootstrap") {
+    if (
+      eventId !== BOOTSTRAP_EVENT_ID ||
+      effect.blockId !== BOOTSTRAP_BLOCK_ID
+    ) {
+      throw new Error("Bootstrap effect must use deterministic identities");
+    }
+  }
   if (effect.type === "bootstrap" || effect.type === "block-create") {
     if (operation.type !== "insert" || operation.text !== BLOCK_MARKER) {
       throw new Error(`${effect.type} requires a raw block marker insert`);

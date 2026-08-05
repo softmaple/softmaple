@@ -26,12 +26,20 @@ export interface ProjectedLinkValue {
   readonly title?: string | null;
 }
 
-export interface ProjectedMark {
-  readonly kind: ProjectedMarkKind;
+interface ProjectedMarkRange {
   readonly from: number;
   readonly to: number;
-  readonly value?: ProjectedLinkValue;
 }
+
+export type ProjectedMark =
+  | (ProjectedMarkRange & {
+      readonly kind: Exclude<ProjectedMarkKind, "link">;
+      readonly value?: never;
+    })
+  | (ProjectedMarkRange & {
+      readonly kind: "link";
+      readonly value: ProjectedLinkValue;
+    });
 
 export interface ProjectedBlockAttributes {
   readonly checked?: boolean;

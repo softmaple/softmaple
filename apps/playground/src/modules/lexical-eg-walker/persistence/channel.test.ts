@@ -1,53 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  type BroadcastChannelFactory,
-  type BroadcastChannelLike,
   createPersistenceChannel,
   getPersistenceChannelName,
   PERSISTENCE_CHANNEL_MESSAGE_TYPE,
   PERSISTENCE_CHANNEL_PROTOCOL_VERSION,
 } from "./channel";
 import { type WireBatch, WireBatchSchema } from "./schema";
-
-class MockBroadcastNetwork {
-  private readonly channels = new Map<string, Set<MockBroadcastChannel>>();
-
-  readonly createChannel: BroadcastChannelFactory = (name) => {
-    const channel = new MockBroadcastChannel(name, this);
-    const peers = this.channels.get(name) ?? new Set<MockBroadcastChannel>();
-    peers.add(channel);
-    this.channels.set(name, peers);
-    return channel;
-  };
-
-  deliver(sender: MockBroadcastChannel, message: unknown): void {
-    for (const peer of this.channels.get(sender.name) ?? []) {
-      if (peer === sender) continue;
-      peer.onmessage?.({ data: structuredClone(message) });
-    }
-  }
-
-  remove(channel: MockBroadcastChannel): void {
-    this.channels.get(channel.name)?.delete(channel);
-  }
-}
-
-class MockBroadcastChannel implements BroadcastChannelLike {
-  onmessage: BroadcastChannelLike["onmessage"] = null;
-
-  constructor(
-    readonly name: string,
-    private readonly network: MockBroadcastNetwork,
-  ) {}
-
-  postMessage(message: unknown): void {
-    this.network.deliver(this, message);
-  }
-
-  close(): void {
-    this.network.remove(this);
-  }
-}
+import { MockBroadcastNetwork } from "./test-helpers";
 
 const createBatch = (batchId: string, text: string): WireBatch =>
   WireBatchSchema.parse({
@@ -120,6 +79,8 @@ describe("persistence BroadcastChannel protocol", () => {
 
     expect(acknowledgements).toEqual([["batch-1"]]);
     expect([...b.getDurableBatchIds()]).toEqual(["batch-1"]);
+    a.close();
+    b.close();
   });
 
   it("rejects malformed messages and conflicting duplicate batches", () => {
@@ -160,6 +121,9 @@ describe("persistence BroadcastChannel protocol", () => {
     expect(errors[0]).toMatch(/Invalid persistence channel message/);
     expect(errors[1]).toMatch(/Conflicting payloads/);
     expect(receiver.getKnownBatches()).toEqual([original]);
+    raw.close();
+    receiver.close();
+    sender.close();
   });
 
   it("validates domain batches before accepting channel messages", () => {
@@ -194,6 +158,8 @@ describe("persistence BroadcastChannel protocol", () => {
     expect(errors).toEqual([
       "Invalid persistence batch: Rich-text effect is required",
     ]);
+    receiver.close();
+    sender.close();
   });
 
   it("isolates rooms through channel names", () => {
@@ -211,5 +177,7 @@ describe("persistence BroadcastChannel protocol", () => {
 
     a.publishBatch(createBatch("batch-1", "hello"));
     expect(b.getKnownBatches()).toEqual([]);
+    a.close();
+    b.close();
   });
 });

@@ -12,6 +12,12 @@ import Header from "@/components/Header";
 import TanStackQueryDevtools from "@/integrations/tanstack-query/devtools";
 import appCss from "@/styles.css?url";
 
+declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    readonly hideHeader?: boolean;
+  }
+}
+
 export interface MyRouterContext {
   queryClient: QueryClient;
 }

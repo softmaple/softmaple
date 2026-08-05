@@ -3,6 +3,7 @@ import {
   type BlockAnchor,
   type BlockDocument,
   type BlockReplica,
+  type MarkSpan,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import { $isListItemNode } from "@lexical/list";
@@ -25,6 +26,7 @@ import {
 import { projectLexicalDocument } from "./lexical-to-projection";
 import {
   materializeLexicalDocument,
+  type MaterializedDocument,
   type LexicalBlockIndex,
 } from "./projection-to-lexical";
 import type {
@@ -32,6 +34,8 @@ import type {
   ProjectedBlockAttributes,
   ProjectedBlockType,
   ProjectedDocument,
+  ProjectedLinkValue,
+  ProjectedMark,
 } from "./projection-types";
 
 export interface StableBlockSelection {
@@ -84,6 +88,8 @@ interface NumberedListContext {
   readonly boundary?: NumberedListBoundary;
 }
 
+type NumberedListSourceContext = Omit<NumberedListContext, "overridden">;
+
 const EMPTY_NUMBERED_LIST_STATE: NumberedListState = {
   boundaries: new Map(),
   fallbackBoundaries: new Map(),
@@ -104,7 +110,7 @@ const createNumberedListState = (
   const boundaries = new Map<string, NumberedListBoundary>();
   const fallbackBoundaries = new Map<string, NumberedListBoundary>();
   const displayValues = new Map<string, number>();
-  const contexts = new Map<string | null, NumberedListContext>();
+  const contexts = new Map<string | null, NumberedListSourceContext>();
 
   for (const block of document.blocks) {
     const parentId = block.attrs.parentId;
@@ -114,7 +120,6 @@ const createNumberedListState = (
         activeType: block.type,
         start: 1,
         nextValue: 1,
-        overridden: false,
       });
       continue;
     }
@@ -125,8 +130,12 @@ const createNumberedListState = (
       ? previous.start
       : (attributes.start ?? 1);
     const expectedValue = continuesList ? previous.nextValue : expectedStart;
+    const hasExplicitNumbering =
+      attributes.start !== undefined || attributes.value !== undefined;
     const isBoundary =
-      attributes.start !== expectedStart || attributes.value !== expectedValue;
+      hasExplicitNumbering &&
+      (attributes.start !== expectedStart ||
+        attributes.value !== expectedValue);
     const start = isBoundary
       ? (attributes.start ?? expectedStart)
       : expectedStart;
@@ -146,7 +155,6 @@ const createNumberedListState = (
       activeType: "number-list",
       start,
       nextValue: displayValue + 1,
-      overridden: isBoundary || (previous?.overridden ?? false),
       ...(boundary === undefined ? {} : { boundary }),
     });
   }
@@ -247,24 +255,26 @@ const compareLogicalPoints = (
   left: LogicalSelection["anchor"],
   right: LogicalSelection["anchor"],
   document: BlockDocument,
-): number => {
-  if (left.blockId === right.blockId) return left.offset - right.offset;
+): number | null => {
   const leftIndex = document.blocks.findIndex(({ id }) => id === left.blockId);
   const rightIndex = document.blocks.findIndex(
     ({ id }) => id === right.blockId,
   );
+  if (leftIndex < 0 || rightIndex < 0) return null;
+  if (left.blockId === right.blockId) return left.offset - right.offset;
   return leftIndex - rightIndex;
 };
 
 const stableSelection = (
   logical: LogicalSelection,
   replica: BlockReplica,
-): StableBlockSelection => {
+): StableBlockSelection | null => {
   const order = compareLogicalPoints(
     logical.anchor,
     logical.focus,
     replica.getDocument(),
   );
+  if (order === null) return null;
   const collapsed = order === 0;
   const anchorAffinity = collapsed ? "after" : order < 0 ? "after" : "before";
   const focusAffinity = collapsed ? "after" : order < 0 ? "before" : "after";
@@ -290,8 +300,35 @@ const resolveStableSelection = (
   focus: replica.resolveBlockAnchor(selection.focus),
 });
 
-const sameJson = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
+const sameLinkValue = (
+  left: ProjectedLinkValue,
+  right: MarkSpan["value"],
+): boolean =>
+  right !== true &&
+  left.url === right.url &&
+  left.target === right.target &&
+  left.rel === right.rel &&
+  left.title === right.title;
+
+const sameProjectedMarks = (
+  projected: ReadonlyArray<ProjectedMark>,
+  materialized: ReadonlyArray<MarkSpan>,
+): boolean =>
+  projected.length === materialized.length &&
+  projected.every((mark, index) => {
+    const other = materialized[index];
+    if (
+      other === undefined ||
+      mark.kind !== other.kind ||
+      mark.from !== other.from ||
+      mark.to !== other.to
+    ) {
+      return false;
+    }
+    return mark.kind === "link"
+      ? sameLinkValue(mark.value, other.value)
+      : other.value === true;
+  });
 
 const expectedParentId = (
   block: ProjectedBlock,
@@ -331,13 +368,7 @@ const projectionMatchesDocument = (
         (attributes.start ?? null) === block.attrs.start &&
         (attributes.value ?? null) === block.attrs.value &&
         (attributes.checked ?? null) === block.attrs.checked &&
-        sameJson(
-          projected.marks.map((mark) => ({
-            ...mark,
-            value: mark.kind === "link" ? mark.value : true,
-          })),
-          block.marks,
-        )
+        sameProjectedMarks(projected.marks, block.marks)
       );
     })
   );
@@ -429,7 +460,9 @@ export const createLexicalBinding = ({
   let isComposing = false;
   let isApplyingRemote = false;
   let hasPendingCompositionUpdate = false;
+  let hasMissedRemoteChange = false;
   let blockIndex = EMPTY_BLOCK_INDEX;
+  let materializedDocument: MaterializedDocument | null = null;
   let numberedListState = EMPTY_NUMBERED_LIST_STATE;
   let queuedRemoteBatches: RichTextEventBatch[] = [];
   let pendingSelection: StableBlockSelection | null = null;
@@ -439,12 +472,25 @@ export const createLexicalBinding = ({
     onError(error instanceof Error ? error : new Error(String(error)));
   };
 
+  const applyNumberedListValues = (): void => {
+    if (numberedListState.displayValues.size === 0) return;
+    editor.update(
+      () => {
+        restoreNumberedListValues(blockIndex, numberedListState);
+      },
+      {
+        discrete: true,
+        skipTransforms: true,
+        tag: COLLABORATION_TAG,
+      },
+    );
+  };
+
   const captureSelection = (): StableBlockSelection | null => {
-    let logical: LogicalSelection | null = null;
-    editor.getEditorState().read(() => {
-      logical = captureLogicalSelection(blockIndex);
+    return editor.getEditorState().read(() => {
+      const logical = captureLogicalSelection(blockIndex);
+      return logical === null ? null : stableSelection(logical, replica);
     });
-    return logical === null ? null : stableSelection(logical, replica);
   };
 
   const publishSelection = (): void => {
@@ -461,6 +507,7 @@ export const createLexicalBinding = ({
   ): void => {
     if (destroyed) return;
     const document = replica.getDocument();
+    const nextMaterializedDocument = toMaterializedDocument(document);
     numberedListState = createNumberedListState(document);
     const logical =
       selection === null ? null : resolveStableSelection(selection, replica);
@@ -469,24 +516,17 @@ export const createLexicalBinding = ({
       editor.update(
         () => {
           blockIndex = materializeLexicalDocument(
-            toMaterializedDocument(document),
+            nextMaterializedDocument,
+            materializedDocument === null
+              ? undefined
+              : { document: materializedDocument, index: blockIndex },
           );
           if (logical !== null) restoreLogicalSelection(logical, blockIndex);
         },
         { discrete: true, tag: COLLABORATION_TAG },
       );
-      if (numberedListState.displayValues.size > 0) {
-        editor.update(
-          () => {
-            restoreNumberedListValues(blockIndex, numberedListState);
-          },
-          {
-            discrete: true,
-            skipTransforms: true,
-            tag: COLLABORATION_TAG,
-          },
-        );
-      }
+      materializedDocument = nextMaterializedDocument;
+      applyNumberedListValues();
     } finally {
       isApplyingRemote = false;
       pendingSelection = null;
@@ -509,18 +549,7 @@ export const createLexicalBinding = ({
         projected.blocks,
         document.blocks.map(({ id }) => id),
       );
-      if (numberedListState.displayValues.size > 0) {
-        editor.update(
-          () => {
-            restoreNumberedListValues(blockIndex, numberedListState);
-          },
-          {
-            discrete: true,
-            skipTransforms: true,
-            tag: COLLABORATION_TAG,
-          },
-        );
-      }
+      applyNumberedListValues();
       publishSelection();
       return;
     }
@@ -530,23 +559,17 @@ export const createLexicalBinding = ({
       );
       blockIndex = blockIndexForProjection(projected.blocks, blockIds);
     });
+    materializedDocument = toMaterializedDocument(replica.getDocument());
     numberedListState = createNumberedListState(replica.getDocument());
-    if (numberedListState.displayValues.size > 0) {
-      editor.update(
-        () => {
-          restoreNumberedListValues(blockIndex, numberedListState);
-        },
-        {
-          discrete: true,
-          skipTransforms: true,
-          tag: COLLABORATION_TAG,
-        },
-      );
-    }
+    applyNumberedListValues();
     publishSelection();
   };
 
-  materialize(null);
+  try {
+    materialize(null);
+  } catch (error) {
+    reportError(error);
+  }
   if (enableEditingOnReady) editor.setEditable(true);
 
   const unregisterUpdate = editor.registerUpdateListener(
@@ -585,8 +608,14 @@ export const createLexicalBinding = ({
         queuedRemoteBatches = [];
         replica.applyRemoteEvents(queued);
       }
+      if (hasMissedRemoteChange) {
+        materialize();
+        publishSelection();
+      }
     } catch (error) {
       reportError(error);
+    } finally {
+      hasMissedRemoteChange = false;
     }
   };
 
@@ -613,7 +642,10 @@ export const createLexicalBinding = ({
 
   const unsubscribeReplica = replica.subscribe((change) => {
     if (destroyed || change.origin !== "remote") return;
-    if (isComposing) return;
+    if (isComposing) {
+      hasMissedRemoteChange = true;
+      return;
+    }
     try {
       materialize();
       publishSelection();

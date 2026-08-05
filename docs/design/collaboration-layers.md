@@ -15,7 +15,7 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
 
 ## Layers at a glance
 
-```
+```text
 @softmaple/eg-walker
     - convergent sequence, event graph, stable sequence anchors
                  ↓
@@ -210,7 +210,7 @@ awareness expresses the same independence boundary in Biome:
   frameworks.
 - **`@softmaple/binding-lexical`** (ESLint) — uses
   `blockModelBindingCollaborationPatterns`. It allows block-model,
-  Lexical, and React, while forbidding a direct EG-walker import.
+  Lexical, and React, while forbidding direct EG-walker and awareness imports.
 - **`@softmaple/awareness`** (Biome) — wired in via the
   `style/noRestrictedImports` rule in `packages/awareness/biome.jsonc`.
   Forbids EG-walker, block-model, binding-lexical, and editor frameworks

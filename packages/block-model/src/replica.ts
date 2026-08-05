@@ -89,11 +89,16 @@ export class BlockReplica {
 
     const nextBatches = new Map(this.batchesById);
     nextBatches.set(batch.batchId, batch);
-    const rebuilt = rebuildReplica(this.replicaId, nextBatches);
+    this.egWalker.applyRemoteEvents(batch.events.map(toGraphEvent));
+    const ordered = readyBatches(nextBatches);
     this.batchesById = nextBatches;
-    this.egWalker = rebuilt.egWalker;
-    this.integratedBatchIds = rebuilt.integratedBatchIds;
-    this.state = rebuilt.state;
+    this.integratedBatchIds = new Set(
+      ordered.map((orderedBatch) => orderedBatch.batchId),
+    );
+    this.state = materializeBlockState(
+      this.egWalker,
+      ordered.flatMap((orderedBatch) => [...orderedBatch.events]),
+    );
     this.notify("local", [batch.batchId]);
     return cloneBatch(batch);
   }
@@ -164,6 +169,11 @@ export class BlockReplica {
     );
   }
 
+  getBatch(batchId: string): RichTextEventBatch | null {
+    const batch = this.batchesById.get(batchId);
+    return batch === undefined ? null : cloneBatch(batch);
+  }
+
   serialize(): SerializedBlockReplica {
     return Object.freeze({
       schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
@@ -182,7 +192,22 @@ export class BlockReplica {
     if (!Array.isArray(serialized.batches)) {
       throw new Error("Serialized block replica batches must be an array");
     }
-    const batches = serialized.batches.map(parseBatch);
+    const batches = serialized.batches.flatMap((candidate) => {
+      try {
+        return [parseBatch(candidate)];
+      } catch {
+        const record =
+          candidate !== null &&
+          typeof candidate === "object" &&
+          !Array.isArray(candidate)
+            ? (candidate as Record<string, unknown>)
+            : null;
+        if (record?.batchId === BOOTSTRAP_BATCH_ID) {
+          throw new Error("Serialized block replica has an invalid bootstrap");
+        }
+        return [];
+      }
+    });
     const bootstrap = batches.find(
       (batch) => batch.batchId === BOOTSTRAP_BATCH_ID,
     );
@@ -192,9 +217,17 @@ export class BlockReplica {
       );
     }
     const replica = new BlockReplica(replicaId);
-    replica.applyRemoteEvents(
-      batches.filter((batch) => batch.batchId !== BOOTSTRAP_BATCH_ID),
+    const ordered = readyBatches(
+      new Map(batches.map((batch) => [batch.batchId, batch])),
     );
+    for (const batch of ordered) {
+      if (batch.batchId === BOOTSTRAP_BATCH_ID) continue;
+      try {
+        replica.applyRemoteEvents(batch);
+      } catch {
+        // Keep replaying independent valid batches after quarantining this one.
+      }
+    }
     return replica;
   }
 
@@ -241,7 +274,11 @@ export class BlockReplica {
       document: this.state.document,
     });
     for (const listener of [...this.listeners]) {
-      listener(change);
+      try {
+        listener(change);
+      } catch {
+        // A subscriber must not prevent delivery to the remaining listeners.
+      }
     }
   }
 }
@@ -269,6 +306,7 @@ class BlockTransactionContext implements BlockTransaction {
   private readonly events: RichTextEvent[] = [];
   private readonly initialParentVersion: ReadonlyArray<string>;
   private state: MaterializedBlockState;
+  private stateDirty = false;
 
   constructor(
     replicaId: string,
@@ -290,7 +328,7 @@ class BlockTransactionContext implements BlockTransaction {
     if (text.length === 0) {
       return;
     }
-    const projected = requireProjectedBlock(this.state, blockId);
+    const projected = requireProjectedBlock(this.currentState(), blockId);
     const rawIndex = rawBoundary(projected, offset);
     const encoded = encodeText(text);
     const graphEvent = this.egWalker.insert(rawIndex, encoded);
@@ -301,7 +339,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   deleteText(blockId: BlockId, from: number, to: number): void {
-    const projected = requireProjectedBlock(this.state, blockId);
+    const projected = requireProjectedBlock(this.currentState(), blockId);
     rawBoundary(projected, from);
     rawBoundary(projected, to);
     if (from > to) {
@@ -333,15 +371,16 @@ class BlockTransactionContext implements BlockTransaction {
         fromGraphEvent(graphEvent, { type: "text-delete", blockId }),
       );
     }
-    this.refresh();
+    this.stateDirty = true;
   }
 
+  /** Insert after a projected block; null anchors after the first block. */
   insertBlock(afterBlockId: BlockId | null, input: BlockInput): BlockId {
     assertBlockInput(input);
     const after =
       afterBlockId === null
-        ? this.state.projectedBlocks[0]
-        : requireProjectedBlock(this.state, afterBlockId);
+        ? this.currentState().projectedBlocks[0]
+        : requireProjectedBlock(this.currentState(), afterBlockId);
     if (after === undefined) {
       throw new Error("Cannot insert a block into an empty projection");
     }
@@ -360,7 +399,6 @@ class BlockTransactionContext implements BlockTransaction {
         fields: normalizeFields(input.type, input.attrs),
       }),
     );
-    this.refresh();
     if (input.text.length > 0) {
       this.insertText(blockId, 0, input.text);
     }
@@ -377,7 +415,7 @@ class BlockTransactionContext implements BlockTransaction {
     preferredBlockId?: BlockId,
   ): BlockId {
     assertFieldPatch(fields);
-    const source = requireProjectedBlock(this.state, blockId);
+    const source = requireProjectedBlock(this.currentState(), blockId);
     const rawIndex = rawBoundary(source, offset);
     const graphEvent = this.egWalker.insert(rawIndex, BLOCK_MARKER);
     if (graphEvent === null) {
@@ -396,7 +434,6 @@ class BlockTransactionContext implements BlockTransaction {
         }),
       }),
     );
-    this.refresh();
     return newBlockId;
   }
 
@@ -404,8 +441,9 @@ class BlockTransactionContext implements BlockTransaction {
     if (blockId === BOOTSTRAP_BLOCK_ID) {
       throw new Error("The bootstrap block cannot be joined");
     }
-    const projected = requireProjectedBlock(this.state, blockId);
-    const index = this.state.projectedBlocks.indexOf(projected);
+    const state = this.currentState();
+    const projected = requireProjectedBlock(state, blockId);
+    const index = state.projectedBlocks.indexOf(projected);
     if (index <= 0) {
       throw new Error("The first visible block cannot be joined");
     }
@@ -416,12 +454,12 @@ class BlockTransactionContext implements BlockTransaction {
     if (blockId === BOOTSTRAP_BLOCK_ID) {
       throw new Error("The bootstrap block cannot be deleted");
     }
-    requireProjectedBlock(this.state, blockId);
+    requireProjectedBlock(this.currentState(), blockId);
     this.pushMetadata({ type: "block-delete", blockId });
   }
 
   setBlock(blockId: BlockId, fields: BlockFieldPatch): void {
-    requireProjectedBlock(this.state, blockId);
+    requireProjectedBlock(this.currentState(), blockId);
     assertFieldPatch(fields);
     if (Object.keys(fields).length === 0) {
       return;
@@ -441,7 +479,7 @@ class BlockTransactionContext implements BlockTransaction {
       throw new Error(`Unsupported mark kind ${String(kind)}`);
     }
     assertMarkValue(kind, value);
-    const projected = requireProjectedBlock(this.state, blockId);
+    const projected = requireProjectedBlock(this.currentState(), blockId);
     const rawFrom = rawBoundary(projected, from);
     const rawTo = rawBoundary(projected, to);
     if (from >= to || rawFrom >= rawTo) {
@@ -463,7 +501,7 @@ class BlockTransactionContext implements BlockTransaction {
       throw new Error("A block document must contain at least one block");
     }
     next.blocks.forEach(assertBlockInput);
-    const before = this.state.document.blocks;
+    const before = this.currentState().document.blocks;
     const existingIndex = new Map(
       before.map((block, index) => [block.id, index]),
     );
@@ -476,7 +514,7 @@ class BlockTransactionContext implements BlockTransaction {
       let stableId: BlockId;
       const knownIndex = input.id ? existingIndex.get(input.id) : undefined;
       if (index === 0) {
-        const first = this.state.document.blocks[0]!;
+        const first = this.currentState().document.blocks[0]!;
         if (input.id !== undefined && input.id !== first.id) {
           throw new Error(
             `replaceDocument cannot replace first block ID ${first.id} with ${input.id}`,
@@ -520,7 +558,7 @@ class BlockTransactionContext implements BlockTransaction {
       const input = next.blocks[index]!;
       const stableId = selectedIds[index]!;
       const parentId = resolveInputParent(input, inputIds);
-      const current = requireBlock(this.state.document, stableId);
+      const current = requireBlock(this.currentState().document, stableId);
       const desiredFields = normalizeFields(input.type, {
         ...input.attrs,
         parentId,
@@ -540,7 +578,7 @@ class BlockTransactionContext implements BlockTransaction {
           this.insertText(stableId, textChange.from, textChange.insert);
         }
       }
-      const refreshed = requireBlock(this.state.document, stableId);
+      const refreshed = requireBlock(this.currentState().document, stableId);
       const desiredMarks = input.marks ?? [];
       if (!sameMarks(refreshed.marks, desiredMarks)) {
         for (const mark of refreshed.marks) {
@@ -579,14 +617,17 @@ class BlockTransactionContext implements BlockTransaction {
 
   private pushEvent(graphEvent: GraphEvent, effect: RichTextEffect): void {
     this.events.push(fromGraphEvent(graphEvent, effect));
-    this.refresh();
+    this.stateDirty = true;
   }
 
-  private refresh(): void {
+  private currentState(): MaterializedBlockState {
+    if (!this.stateDirty) return this.state;
     this.state = materializeBlockState(this.egWalker, [
       ...this.baseEvents,
       ...this.events,
     ]);
+    this.stateDirty = false;
+    return this.state;
   }
 
   private assertUnusedBlockId(blockId: string): void {
@@ -830,7 +871,28 @@ const sameBlockAttributes = (
 const sameMarks = (
   left: ReadonlyArray<MarkSpan>,
   right: ReadonlyArray<MarkSpan>,
-): boolean => JSON.stringify(left) === JSON.stringify(right);
+): boolean =>
+  left.length === right.length &&
+  left.every((mark, index) => {
+    const other = right[index];
+    if (
+      other === undefined ||
+      mark.kind !== other.kind ||
+      mark.from !== other.from ||
+      mark.to !== other.to
+    ) {
+      return false;
+    }
+    if (mark.value === true || other.value === true) {
+      return mark.value === other.value;
+    }
+    return (
+      mark.value.url === other.value.url &&
+      mark.value.target === other.value.target &&
+      mark.value.rel === other.value.rel &&
+      mark.value.title === other.value.title
+    );
+  });
 
 interface TextChange {
   readonly from: number;
@@ -889,30 +951,69 @@ const nearestBlockBoundary = (
   rawIndex: number,
   anchor: BlockAnchor,
 ): ResolvedBlockAnchor | null => {
-  let best: {
+  type BoundaryCandidate = {
     readonly blockId: BlockId;
     readonly offset: number;
     readonly raw: number;
-  } | null = null;
-  for (const projected of projectedBlocks) {
-    for (const { offset, raw } of projected.anchorBoundaries) {
-      if (best === null) {
-        best = { blockId: projected.block.id, offset, raw };
-        continue;
+  };
+  const choose = (
+    best: BoundaryCandidate | null,
+    candidate: BoundaryCandidate,
+  ): BoundaryCandidate => {
+    if (best === null) return candidate;
+    const distance = Math.abs(candidate.raw - rawIndex);
+    const bestDistance = Math.abs(best.raw - rawIndex);
+    const affinity: AnchorAffinity = anchor.anchor.affinity;
+    const preferredTie =
+      distance === bestDistance &&
+      ((candidate.raw === best.raw &&
+        candidate.blockId === anchor.blockId &&
+        best.blockId !== anchor.blockId) ||
+        (candidate.raw !== best.raw &&
+          // "after" affinity chooses the lower raw boundary on a tie.
+          (affinity === "after"
+            ? candidate.raw < best.raw
+            : candidate.raw > best.raw)));
+    return distance < bestDistance || preferredTie ? candidate : best;
+  };
+
+  let low = 0;
+  let high = projectedBlocks.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((projectedBlocks[middle]?.rawEnd ?? -1) < rawIndex) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  const blockIndexes = [low - 1, low, low + 1]
+    .filter((index) => index >= 0 && index < projectedBlocks.length)
+    .filter((index, position, indexes) => indexes.indexOf(index) === position)
+    .sort((left, right) => left - right);
+
+  let best: BoundaryCandidate | null = null;
+  for (const blockIndex of blockIndexes) {
+    const projected = projectedBlocks[blockIndex]!;
+    const boundaries = projected.anchorBoundaries;
+    let boundaryLow = 0;
+    let boundaryHigh = boundaries.length;
+    while (boundaryLow < boundaryHigh) {
+      const middle = Math.floor((boundaryLow + boundaryHigh) / 2);
+      if ((boundaries[middle]?.raw ?? -1) < rawIndex) {
+        boundaryLow = middle + 1;
+      } else {
+        boundaryHigh = middle;
       }
-      const distance = Math.abs(raw - rawIndex);
-      const bestDistance = Math.abs(best.raw - rawIndex);
-      const affinity: AnchorAffinity = anchor.anchor.affinity;
-      const preferredTie =
-        distance === bestDistance &&
-        ((raw === best.raw &&
-          projected.block.id === anchor.blockId &&
-          best.blockId !== anchor.blockId) ||
-          (raw !== best.raw &&
-            (affinity === "after" ? raw < best.raw : raw > best.raw)));
-      if (distance < bestDistance || preferredTie) {
-        best = { blockId: projected.block.id, offset, raw };
-      }
+    }
+    for (const boundaryIndex of [boundaryLow - 1, boundaryLow]) {
+      const boundary = boundaries[boundaryIndex];
+      if (boundary === undefined) continue;
+      best = choose(best, {
+        blockId: projected.block.id,
+        offset: boundary.offset,
+        raw: boundary.raw,
+      });
     }
   }
   return best === null

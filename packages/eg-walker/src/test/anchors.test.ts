@@ -13,6 +13,11 @@ import { NativeSnapshotCodec } from "../core/native-snapshot";
 import { PortableSnapshotCodec } from "../core/portable-snapshot";
 import { EgWalkerReplica } from "../core/replica";
 import type { GraphEvent } from "../types";
+import {
+  bootstrapReplica,
+  cloneEvent,
+  replicaFromEvents,
+} from "./replica-test-helpers";
 
 describe("captureAnchor", () => {
   it("should batch capture and resolution through one immutable projection", () => {
@@ -295,34 +300,19 @@ describe("isSequenceAnchor", () => {
     // Act / Assert
     expect(isSequenceAnchor(wire)).toBe(true);
     expect(isSequenceAnchor(malformed)).toBe(false);
+    expect(
+      isSequenceAnchor({
+        type: "boundary",
+        edge: "start",
+        affinity: "before",
+      }),
+    ).toBe(false);
+    expect(isSequenceAnchor(null)).toBe(false);
+    expect(isSequenceAnchor([])).toBe(false);
   });
 });
 
 // Helpers
-
-const bootstrapReplica = (replicaId: string, text: string): EgWalkerReplica => {
-  const replica = new EgWalkerReplica(replicaId);
-  replica.insert(0, text);
-  return replica;
-};
-
-const replicaFromEvents = (
-  replicaId: string,
-  events: ReadonlyArray<GraphEvent>,
-): EgWalkerReplica => {
-  const replica = new EgWalkerReplica(replicaId);
-  for (const event of events) {
-    replica.applyRemoteEvent(cloneEvent(event));
-  }
-  return replica;
-};
-
-const cloneEvent = (event: GraphEvent): GraphEvent => ({
-  id: event.id,
-  operation: { ...event.operation },
-  parentVersion: new Set(event.parentVersion),
-  timestamp: event.timestamp,
-});
 
 const remoteInsert = (
   id: string,

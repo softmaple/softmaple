@@ -11,3 +11,4 @@ export {
   type LogicalSelection,
   type LogicalSelectionPoint,
 } from "./lexical-selection";
+export type { LexicalBlockIndex } from "./projection-to-lexical";

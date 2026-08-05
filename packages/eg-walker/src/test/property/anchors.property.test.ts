@@ -8,6 +8,11 @@ import {
 } from "../../anchors";
 import { EgWalkerReplica } from "../../core/replica";
 import type { GraphEvent } from "../../types";
+import {
+  bootstrapReplica,
+  cloneEvent,
+  replicaFromEvents,
+} from "../replica-test-helpers";
 import { fcParams } from "./run-config";
 
 describe("property: stable sequence anchors", () => {
@@ -105,12 +110,6 @@ describe("property: stable sequence anchors", () => {
 
 // Helpers
 
-const bootstrapReplica = (replicaId: string, text: string): EgWalkerReplica => {
-  const replica = new EgWalkerReplica(replicaId);
-  replica.insert(0, text);
-  return replica;
-};
-
 const codePointBoundaries = (text: string): number[] => {
   const boundaries = [0];
   let index = 0;
@@ -120,21 +119,3 @@ const codePointBoundaries = (text: string): number[] => {
   }
   return boundaries;
 };
-
-const replicaFromEvents = (
-  replicaId: string,
-  events: ReadonlyArray<GraphEvent>,
-): EgWalkerReplica => {
-  const replica = new EgWalkerReplica(replicaId);
-  for (const event of events) {
-    replica.applyRemoteEvent(cloneEvent(event));
-  }
-  return replica;
-};
-
-const cloneEvent = (event: GraphEvent): GraphEvent => ({
-  id: event.id,
-  operation: { ...event.operation },
-  parentVersion: new Set(event.parentVersion),
-  timestamp: event.timestamp,
-});

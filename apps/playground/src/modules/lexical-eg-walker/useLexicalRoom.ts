@@ -1,7 +1,4 @@
-import type {
-  LexicalBinding,
-  StableBlockSelection,
-} from "@softmaple/binding-lexical";
+import type { LexicalBinding } from "@softmaple/binding-lexical";
 import {
   type BlockReplica,
   createBlockReplica,
@@ -24,10 +21,13 @@ export interface LexicalRoomState {
   readonly flush: () => Promise<void>;
 }
 
-interface SessionValue<T> {
+export interface SessionValue<T> {
   readonly sessionKey: string;
   readonly value: T;
 }
+
+export const sessionKeyFor = (roomId: string, peerId: string): string =>
+  JSON.stringify([roomId, peerId]);
 
 const parseBatch = (batch: WireBatch): RichTextEventBatch =>
   parseRichTextEventBatch(batch);
@@ -42,7 +42,7 @@ export const useLexicalRoom = (
   roomId: string,
   peerId: string,
 ): LexicalRoomState => {
-  const sessionKey = JSON.stringify([roomId, peerId]);
+  const sessionKey = sessionKeyFor(roomId, peerId);
   const [replicaState, setReplicaState] =
     useState<SessionValue<BlockReplica> | null>(null);
   const [persistenceState, setPersistenceState] =
@@ -107,14 +107,9 @@ export const useLexicalRoom = (
 
       unsubscribeReplica = nextReplica.subscribe((change) => {
         if (change.origin !== "local" || coordinator === null) return;
-        const batches = new Map(
-          nextReplica
-            .exportEvents()
-            .map((batch) => [batch.batchId, batch] as const),
-        );
         for (const batchId of change.batchIds) {
-          const batch = batches.get(batchId);
-          if (batch !== undefined) coordinator.publishBatch(wireBatch(batch));
+          const batch = nextReplica.getBatch(batchId);
+          if (batch !== null) coordinator.publishBatch(wireBatch(batch));
         }
       });
       unsubscribeState = coordinator.subscribeState((value) => {
@@ -178,7 +173,3 @@ export const useLexicalRoom = (
 
   return { replica, persistence, error, onBindingChange, flush };
 };
-
-export const toPresenceSelection = (
-  selection: StableBlockSelection | null,
-): StableBlockSelection | null => selection;

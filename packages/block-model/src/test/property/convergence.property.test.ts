@@ -2,18 +2,34 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import {
+  BLOCK_MARKER,
   BOOTSTRAP_BLOCK_ID,
   BlockReplica,
+  METADATA_MARKER,
+  TEXT_ESCAPE,
   type BlockType,
   type RichTextEventBatch,
 } from "../../index";
+
+const richTextArbitrary = fc.oneof(
+  fc.string(),
+  fc.string({
+    unit: fc.constantFrom(
+      "😀",
+      "𐐷",
+      BLOCK_MARKER,
+      METADATA_MARKER,
+      TEXT_ESCAPE,
+    ),
+  }),
+);
 
 describe("property: rich-text event DAG convergence", () => {
   it("should converge under out-of-order duplicate batch delivery", () => {
     fc.assert(
       fc.property(
-        fc.string(),
-        fc.string(),
+        richTextArbitrary,
+        richTextArbitrary,
         fc.constantFrom<BlockType>(
           "paragraph",
           "h1",

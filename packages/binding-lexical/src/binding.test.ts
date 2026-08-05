@@ -61,6 +61,22 @@ const replaceFirstBlock = (editor: LexicalEditor, text: string): void => {
 };
 
 describe("createLexicalBinding", () => {
+  it("reports an initial materialization failure and still creates a binding", () => {
+    const replica = createBlockReplica("initial-materialize-error");
+    const editor = createTestEditor();
+    const error = new Error("initial materialization failed");
+    vi.spyOn(editor, "update").mockImplementationOnce(() => {
+      throw error;
+    });
+    const onError = vi.fn();
+
+    const binding = createLexicalBinding({ editor, replica, onError });
+
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(binding.replica).toBe(replica);
+    binding.destroy();
+  });
+
   it("broadcasts one local batch per update and applies a remote update without echo", () => {
     const firstReplica = createBlockReplica("first");
     const secondReplica = createBlockReplica("second");
@@ -204,19 +220,17 @@ describe("createLexicalBinding", () => {
     root.remove();
   });
 
-  it("flushes composition state when the editor root is replaced", () => {
+  it("flushes composition state when the editor root is removed", () => {
     const replica = createBlockReplica("ime-root-replacement");
     const editor = createTestEditor();
     const firstRoot = document.createElement("div");
-    const secondRoot = document.createElement("div");
     firstRoot.contentEditable = "true";
-    secondRoot.contentEditable = "true";
-    document.body.append(firstRoot, secondRoot);
+    document.body.append(firstRoot);
     editor.setRootElement(firstRoot);
     const binding = createLexicalBinding({ editor, replica });
 
     firstRoot.dispatchEvent(new CompositionEvent("compositionstart"));
-    editor.setRootElement(secondRoot);
+    editor.setRootElement(null);
     editor.update(
       () => {
         const block = $getRoot().getFirstChild();
@@ -229,9 +243,35 @@ describe("createLexicalBinding", () => {
     expect(replica.getDocument().blocks[0]?.text).toBe("committed");
 
     binding.destroy();
-    editor.setRootElement(null);
     firstRoot.remove();
-    secondRoot.remove();
+  });
+
+  it("materializes direct remote changes after composition ends", async () => {
+    const replica = createBlockReplica("ime-direct-local");
+    const remote = createBlockReplica("ime-direct-remote");
+    const editor = createTestEditor();
+    const root = document.createElement("div");
+    root.contentEditable = "true";
+    document.body.append(root);
+    editor.setRootElement(root);
+    const binding = createLexicalBinding({ editor, replica });
+    const batch = remote.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "remote");
+    });
+    if (batch === null) throw new Error("Expected a remote batch");
+
+    root.dispatchEvent(new CompositionEvent("compositionstart"));
+    replica.applyRemoteEvents(batch);
+    expect(getProjectedText(editor)).toBe("");
+
+    root.dispatchEvent(new CompositionEvent("compositionend"));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(getProjectedText(editor)).toBe("remote");
+    binding.destroy();
+    editor.setRootElement(null);
+    root.remove();
   });
 
   it("restores read-only state only when the binding enabled editing", () => {

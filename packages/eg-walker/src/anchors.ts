@@ -96,6 +96,13 @@ interface SequenceProjection {
   readonly text: string;
 }
 
+interface CachedProjection {
+  readonly frontierKey: string;
+  readonly projection: SequenceProjection;
+}
+
+const projectionCache = new WeakMap<EgWalkerReplica, CachedProjection>();
+
 /**
  * Bind the anchor helpers to one replica while keeping Lexical/editor state
  * outside the EG-walker package.
@@ -287,7 +294,21 @@ const atomAnchor = (
   affinity,
 });
 
+const frontierKey = (replica: EgWalkerReplica): string =>
+  JSON.stringify([...replica.getFrontier()].sort());
+
 const createProjection = (replica: EgWalkerReplica): SequenceProjection => {
+  const key = frontierKey(replica);
+  const cached = projectionCache.get(replica);
+  if (cached?.frontierKey === key) {
+    return cached.projection;
+  }
+  const projection = buildProjection(replica);
+  projectionCache.set(replica, { frontierKey: key, projection });
+  return projection;
+};
+
+const buildProjection = (replica: EgWalkerReplica): SequenceProjection => {
   assertStableBootstrap(replica);
   const graph = graphFromEvents(replica.exportEventGraph());
   const eventOrder = graph.getBranchPreservingTopologicalOrder();
@@ -377,12 +398,11 @@ const atomsFromRecord = (
   }
 
   if (record.run !== null) {
+    const run = record.run;
     const atoms = Array.from(
       { length: record.content.length },
       (_, offsetInRecord) => ({
-        eventId: `${record.run!.replicaId}:${
-          record.run!.startSequence + offsetInRecord
-        }`,
+        eventId: `${run.replicaId}:${run.startSequence + offsetInRecord}`,
         offset: 0,
         deleted: record.everDeleted,
         codeUnit: record.content[offsetInRecord]!,

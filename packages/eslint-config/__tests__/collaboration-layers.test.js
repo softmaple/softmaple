@@ -185,10 +185,12 @@ test("block-model patterns allow EG-walker but forbid awareness, bindings, and e
   assert.equal(findRestrictedImportMessages(allowed).length, 0);
 });
 
-test("block-model binding patterns prevent bypassing the model API", () => {
+test("block-model binding patterns prevent model and awareness bypasses", () => {
   for (const specifier of [
     "@softmaple/eg-walker",
     "@softmaple/eg-walker/anchors",
+    "@softmaple/awareness",
+    "@softmaple/awareness/components/live-cursor",
   ]) {
     const messages = lintWithPatterns(
       blockModelBindingCollaborationPatterns,

@@ -35,16 +35,14 @@ interface InlineLeaf {
   readonly type: "text" | "linebreak" | "tab";
 }
 
-const inlineChildren = (node: ElementNode): ReadonlyArray<LexicalNode> =>
-  node.getChildren().filter((child) => !$isListNode(child));
-
 const collectLeaves = (
   node: ElementNode,
   leaves: InlineLeaf[],
   initialOffset = 0,
 ): number => {
   let offset = initialOffset;
-  for (const [childIndex, child] of inlineChildren(node).entries()) {
+  for (const [childIndex, child] of node.getChildren().entries()) {
+    if ($isListNode(child)) continue;
     if ($isTextNode(child)) {
       const end = offset + child.getTextContentSize();
       leaves.push({
@@ -110,7 +108,7 @@ const pointOffset = (block: ElementNode, point: PointType): number | null => {
   const pointNode = $getNodeByKey(point.key);
   if (pointNode === null || !$isElementNode(pointNode)) return null;
   if (pointNode.getKey() === block.getKey()) {
-    const child = inlineChildren(block)[point.offset];
+    const child = block.getChildren()[point.offset];
     if (child === undefined) return documentLength;
     const leaf = leaves.find((candidate) => candidate.key === child.getKey());
     if (leaf !== undefined) return leaf.start;
@@ -125,7 +123,7 @@ const pointOffset = (block: ElementNode, point: PointType): number | null => {
     return descendant?.start ?? documentLength;
   }
 
-  const child = inlineChildren(pointNode)[point.offset];
+  const child = pointNode.getChildren()[point.offset];
   if (child !== undefined) {
     const direct = leaves.find((candidate) => candidate.key === child.getKey());
     if (direct !== undefined) return direct.start;
@@ -187,7 +185,7 @@ const setPointAtOffset = (
     point.set(next.parentKey, next.childIndex, "element");
     return;
   }
-  point.set(block.getKey(), inlineChildren(block).length, "element");
+  point.set(block.getKey(), block.getChildrenSize(), "element");
 };
 
 /** Restore anchor/focus without normalizing backwards selections. */
@@ -202,7 +200,12 @@ export const restoreLogicalSelection = (
   const focusBlock = $getNodeByKey(focusKey);
   if (!$isElementNode(anchorBlock) || !$isElementNode(focusBlock)) return false;
 
+  const currentSelection = $getSelection();
   const range = $createRangeSelection();
+  if ($isRangeSelection(currentSelection)) {
+    range.format = currentSelection.format;
+    range.style = currentSelection.style;
+  }
   setPointAtOffset(range.anchor, anchorBlock, selection.anchor.offset);
   setPointAtOffset(range.focus, focusBlock, selection.focus.offset);
   $setSelection(range);

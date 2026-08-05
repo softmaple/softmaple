@@ -1,27 +1,13 @@
 import type { SequenceAnchor } from "@softmaple/eg-walker/anchors";
 
 import type { BLOCK_MODEL_SCHEMA_VERSION } from "./constants";
+import type { BLOCK_TYPES, MARK_KINDS } from "./schema-values";
 
 export type BlockId = string;
 
-export type BlockType =
-  | "paragraph"
-  | "h1"
-  | "h2"
-  | "h3"
-  | "quote"
-  | "code"
-  | "bullet-list"
-  | "number-list"
-  | "check-list";
+export type BlockType = (typeof BLOCK_TYPES)[number];
 
-export type MarkKind =
-  | "bold"
-  | "italic"
-  | "underline"
-  | "strike"
-  | "inline-code"
-  | "link";
+export type MarkKind = (typeof MARK_KINDS)[number];
 
 export interface LinkAttributes {
   readonly url: string;
@@ -193,6 +179,7 @@ export interface ApplyRichTextEventsResult {
 export interface BlockTransaction {
   insertText(blockId: BlockId, offset: number, text: string): void;
   deleteText(blockId: BlockId, from: number, to: number): void;
+  /** Insert after a projected block; null anchors after the first block. */
   insertBlock(afterBlockId: BlockId | null, block: BlockInput): BlockId;
   splitBlock(
     blockId: BlockId,

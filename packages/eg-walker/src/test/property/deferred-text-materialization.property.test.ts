@@ -25,6 +25,8 @@ describe("property: deferred cold-replay text materialization", () => {
           edits: [
             { kind: "insert" as const, offsetSeed: 0, text: " " },
             { kind: "insert" as const, offsetSeed: 0, text: "\uE000" },
+            // This seed places the insert beside the reserved-marker run,
+            // exercising the non-null origin-right boundary.
             { kind: "insert" as const, offsetSeed: 0.0625, text: " " },
           ],
         },
@@ -37,18 +39,20 @@ describe("property: deferred cold-replay text materialization", () => {
 
     // Act
     const eagerEngine = new EgWalkerEngine();
-    eagerEngine.generate(eventOrder, params.initialText, {
+    const eager = eagerEngine.generate(eventOrder, params.initialText, {
       eventGraph: graph,
       eventOrder,
     });
     const deferredEngine = new EgWalkerEngine();
-    deferredEngine.generate(eventOrder, params.initialText, {
+    const deferred = deferredEngine.generate(eventOrder, params.initialText, {
       eventGraph: graph,
       eventOrder,
       collectTransformedOperations: false,
     });
 
     // Assert
+    expect(deferred.text).toBe(eager.text);
+    expect(deferred.text).toBe(trace.canonicalText);
     expect(deferredEngine.getSequenceRecords()).toEqual(
       eagerEngine.getSequenceRecords(),
     );

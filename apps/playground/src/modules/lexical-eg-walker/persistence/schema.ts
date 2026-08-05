@@ -43,7 +43,12 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 
-const NonEmptyIdSchema = z.string().trim().min(1);
+const NonEmptyIdSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim() === value, {
+    message: "identifier must not contain surrounding whitespace",
+  });
 const ParentVersionSchema = z
   .array(NonEmptyIdSchema)
   .refine((parents) => new Set(parents).size === parents.length, {

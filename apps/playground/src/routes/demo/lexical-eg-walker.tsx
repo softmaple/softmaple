@@ -15,6 +15,7 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/demo/lexical-eg-walker")({
   ssr: false,
+  staticData: { hideHeader: true },
   validateSearch: searchSchema,
   component: LexicalEgWalkerRoute,
 });

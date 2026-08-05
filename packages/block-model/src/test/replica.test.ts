@@ -163,10 +163,15 @@ describe("BlockReplica", () => {
     });
 
     // Assert
-    expect(replica.getDocument().blocks).toMatchObject([
-      { id: BOOTSTRAP_BLOCK_ID, marks: [{ kind: "bold", from: 0, to: 1 }] },
-      { id: "plain-block", text: "B", marks: [] },
+    const blocks = replica.getDocument().blocks;
+    expect(blocks).toMatchObject([
+      { id: BOOTSTRAP_BLOCK_ID },
+      { id: "plain-block", text: "B" },
     ]);
+    expect(blocks[0]?.marks).toEqual([
+      { kind: "bold", from: 0, to: 1, value: true },
+    ]);
+    expect(blocks[1]?.marks).toEqual([]);
   });
 
   it("should keep a block-end mark out of a block inserted before its successor", () => {
@@ -620,6 +625,78 @@ describe("BlockReplica", () => {
     expect(receiver.getDocument()).toEqual(source.getDocument());
   });
 
+  it("should isolate listener failures while preserving notification order", () => {
+    const replica = new BlockReplica("listener-isolation");
+    const delivered: string[] = [];
+    replica.subscribe(() => {
+      delivered.push("first");
+      throw new Error("listener failed");
+    });
+    replica.subscribe(() => delivered.push("second"));
+
+    expect(() =>
+      replica.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "x");
+      }),
+    ).not.toThrow();
+    expect(delivered).toEqual(["first", "second"]);
+  });
+
+  it("should keep state atomic for invalid remote materialization and pending parents", () => {
+    const base = new BlockReplica("atomic-base");
+    base.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "second",
+        type: "paragraph",
+        text: "B",
+      });
+    });
+    const remote = BlockReplica.deserialize(base.serialize(), "atomic-remote");
+    const deleteBatch = remote.transact((transaction) => {
+      transaction.deleteText(BOOTSTRAP_BLOCK_ID, 0, 1);
+    })!;
+    const firstDelete = deleteBatch.events[0];
+    if (firstDelete?.operation.type !== "delete") {
+      throw new Error("Expected a delete event");
+    }
+    const spanningDelete = parseRichTextEventBatch({
+      ...deleteBatch,
+      events: [
+        {
+          ...firstDelete,
+          operation: { ...firstDelete.operation, length: 2 },
+        },
+        ...deleteBatch.events.slice(1),
+      ],
+    });
+    const receiver = BlockReplica.deserialize(
+      base.serialize(),
+      "atomic-receiver",
+    );
+    const documentBefore = receiver.getDocument();
+    const serializedBefore = receiver.serialize();
+
+    expect(() => receiver.applyRemoteEvents(spanningDelete)).toThrow();
+    expect(receiver.getDocument()).toEqual(documentBefore);
+    expect(receiver.serialize()).toEqual(serializedBefore);
+
+    const pendingSource = new BlockReplica("pending-source");
+    const pendingBatch = pendingSource.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "pending");
+    })!;
+    const pending = parseRichTextEventBatch({
+      ...pendingBatch,
+      parentVersion: ["missing-parent"],
+      events: pendingBatch.events.map((event, index) =>
+        index === 0 ? { ...event, parentVersion: ["missing-parent"] } : event,
+      ),
+    });
+    const result = receiver.applyRemoteEvents(pending);
+    expect(result.pendingBatchIds).toContain(pending.batchId);
+    expect(receiver.getDocument()).toEqual(documentBefore);
+  });
+
   it("should replace a document with transaction-local nested parent IDs", () => {
     // Arrange
     const replica = new BlockReplica("alice");
@@ -836,6 +913,8 @@ describe("BlockReplica", () => {
     }
     const receiver = new BlockReplica("receiver");
     receiver.applyRemoteEvents(wire);
+    const documentBeforeMutation = receiver.getDocument();
+    const eventsBeforeMutation = receiver.serialize();
 
     // Act
     const mutableStart = wireMark.effect.range.start as { offset: number };
@@ -843,11 +922,50 @@ describe("BlockReplica", () => {
 
     // Assert
     expect(Object.isFrozen(parsedMark.effect.range.start)).toBe(true);
+    expect(receiver.getDocument()).toEqual(documentBeforeMutation);
+    expect(receiver.serialize()).toEqual(eventsBeforeMutation);
     expect(() =>
       receiver.transact((transaction) => {
         transaction.insertText(BOOTSTRAP_BLOCK_ID, 2, "x");
       }),
     ).not.toThrow();
+  });
+
+  it("should reject unsafe links and non-deterministic bootstrap effects", () => {
+    const source = new BlockReplica("wire-validation");
+    const marked = source.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "AB");
+      transaction.setMark(BOOTSTRAP_BLOCK_ID, 0, 2, "link", {
+        url: "https://example.com",
+      });
+    })!;
+    const unsafe = JSON.parse(JSON.stringify(marked)) as {
+      events: Array<{
+        effect: {
+          type: string;
+          value?: { url?: string };
+        };
+      }>;
+    };
+    const link = unsafe.events.find(({ effect }) => effect.type === "mark-set");
+    if (link?.effect.value === undefined) {
+      throw new Error("Expected link attributes");
+    }
+    link.effect.value.url = "javascript:alert(1)";
+
+    expect(() => parseRichTextEventBatch(unsafe)).toThrow(/link attributes/);
+
+    const bootstrap = JSON.parse(
+      JSON.stringify(new BlockReplica("bootstrap-wire").exportEvents()[0]),
+    ) as {
+      batchId: string;
+      events: Array<{ id: string }>;
+    };
+    bootstrap.batchId = "attacker:0";
+    bootstrap.events[0]!.id = "attacker:0";
+    expect(() => parseRichTextEventBatch(bootstrap)).toThrow(
+      /deterministic identities/,
+    );
   });
 
   it("should replay the sequence once when materializing many anchors", () => {

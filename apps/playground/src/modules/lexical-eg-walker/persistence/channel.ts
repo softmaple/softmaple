@@ -138,19 +138,21 @@ export const createPersistenceChannel = ({
     for (const listener of errorListeners) listener(error);
   };
 
-  const acceptBatch = (
-    candidate: unknown,
-    source: BatchDeliverySource,
-  ): WireBatch | null => {
-    let batch: WireBatch;
+  const validateBatch = (candidate: unknown): WireBatch | null => {
     try {
-      batch = parseBatch(candidate);
+      return parseBatch(candidate);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown validation error";
       notifyError(new Error(`Invalid persistence batch: ${message}`));
       return null;
     }
+  };
+
+  const acceptBatch = (
+    batch: WireBatch,
+    source: BatchDeliverySource,
+  ): WireBatch | null => {
     const existing = knownBatches.get(batch.batchId);
     if (existing) {
       if (serializeBatch(existing) !== serializeBatch(batch)) {
@@ -209,7 +211,10 @@ export const createPersistenceChannel = ({
 
     switch (message.type) {
       case PERSISTENCE_CHANNEL_MESSAGE_TYPE.Event:
-        acceptBatch(message.batch, "remote");
+        {
+          const batch = validateBatch(message.batch);
+          if (batch !== null) acceptBatch(batch, "remote");
+        }
         return;
       case PERSISTENCE_CHANNEL_MESSAGE_TYPE.RepairRequest: {
         const requesterKnown = new Set(message.knownBatchIds);
@@ -230,7 +235,10 @@ export const createPersistenceChannel = ({
       }
       case PERSISTENCE_CHANNEL_MESSAGE_TYPE.RepairResponse:
         if (message.recipientId !== peerId) return;
-        for (const batch of message.batches) acceptBatch(batch, "repair");
+        for (const candidate of message.batches) {
+          const batch = validateBatch(candidate);
+          if (batch !== null) acceptBatch(batch, "repair");
+        }
         return;
       case PERSISTENCE_CHANNEL_MESSAGE_TYPE.DurableAck:
         markDurable(message.batchIds);
@@ -240,7 +248,9 @@ export const createPersistenceChannel = ({
 
   return {
     publishBatch: (candidate) => {
-      const batch = acceptBatch(candidate, "local");
+      const validated = validateBatch(candidate);
+      if (validated === null) return false;
+      const batch = acceptBatch(validated, "local");
       if (batch === null) return false;
       postMessage({
         protocolVersion: PERSISTENCE_CHANNEL_PROTOCOL_VERSION,

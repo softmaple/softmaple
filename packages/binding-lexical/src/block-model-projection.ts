@@ -31,9 +31,6 @@ const inputMark = (mark: ProjectedMark): MarkSpan => {
   if (mark.kind !== "link") {
     return { kind: mark.kind, from: mark.from, to: mark.to, value: true };
   }
-  if (mark.value === undefined) {
-    throw new Error("A projected link mark must include link attributes");
-  }
   return {
     kind: mark.kind,
     from: mark.from,
@@ -60,6 +57,21 @@ const blockInput = (block: ProjectedBlock): BlockInput => ({
   marks: block.marks.map(inputMark),
 });
 
+const projectedMark = (mark: MarkSpan): ProjectedMark => {
+  if (mark.kind === "link") {
+    if (mark.value === true) {
+      throw new Error("A materialized link mark must include link attributes");
+    }
+    return {
+      kind: "link",
+      from: mark.from,
+      to: mark.to,
+      value: mark.value,
+    };
+  }
+  return { kind: mark.kind, from: mark.from, to: mark.to };
+};
+
 export const toBlockDocumentInput = (
   projection: ProjectedDocument,
 ): BlockDocumentInput => ({
@@ -74,14 +86,7 @@ export const toMaterializedDocument = (
     parentId: block.attrs.parentId,
     type: block.type,
     text: block.text,
-    marks: block.marks.map((mark) => ({
-      kind: mark.kind,
-      from: mark.from,
-      to: mark.to,
-      ...(mark.kind === "link" && mark.value !== true
-        ? { value: mark.value }
-        : {}),
-    })),
+    marks: block.marks.map(projectedMark),
     attributes: {
       checked: block.attrs.checked ?? undefined,
       language: block.attrs.language,

@@ -15,9 +15,9 @@ interface RoomPage {
 }
 
 const roomFor = (testInfo: TestInfo): string =>
-  `pw-${testInfo.workerIndex}-${testInfo.retry}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  `pw-${testInfo.workerIndex}-${testInfo.retry}-${Date.now()}-${crypto
+    .randomUUID()
+    .slice(0, 6)}`;
 
 const openRoom = async (page: Page, roomId: string): Promise<RoomPage> => {
   await page.goto(`/demo/lexical-eg-walker?room=${roomId}`);
@@ -261,9 +261,9 @@ test.describe("Lexical EG-walker cross-tab collaboration", () => {
     await expectDurableAfter(follower, bytesBeforeTakeover);
 
     await follower.page.reload();
-    const reloaded = await openRoom(follower.page, roomId);
-    await expectDocument(reloaded, "Before takeover + after takeover");
-    await expect(reloaded.demo).toHaveAttribute(
+    await expect(follower.page.getByTestId("lexical-room-ready")).toBeVisible();
+    await expectDocument(follower, "Before takeover + after takeover");
+    await expect(follower.demo).toHaveAttribute(
       "data-persistence-leader",
       "leader",
     );

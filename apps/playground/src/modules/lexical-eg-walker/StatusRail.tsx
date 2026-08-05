@@ -139,6 +139,11 @@ export function StatusRail({
             {user.name.slice(0, 2).toUpperCase()}
           </span>
         ))}
+        {users.length > 5 ? (
+          <span className="-ml-[5px] grid size-6 place-items-center rounded-full border-2 border-white bg-[#526078] text-[9px] font-bold text-white shadow-sm">
+            +{users.length - 5}
+          </span>
+        ) : null}
         <span className="ml-2 whitespace-nowrap text-[#526078]">
           {users.length} online
         </span>

@@ -14,6 +14,7 @@ import {
 } from "@lexical/rich-text";
 import {
   $getRoot,
+  $isElementNode,
   $isLineBreakNode,
   $isParagraphNode,
   $isTabNode,
@@ -59,7 +60,13 @@ interface InlineAccumulator {
 const sameLinkValue = (
   left: ProjectedLinkValue | undefined,
   right: ProjectedLinkValue | undefined,
-): boolean => JSON.stringify(left) === JSON.stringify(right);
+): boolean =>
+  left === undefined || right === undefined
+    ? left === right
+    : left.url === right.url &&
+      left.target === right.target &&
+      left.rel === right.rel &&
+      left.title === right.title;
 
 const compareMarkKinds = (
   left: ProjectedMarkKind,
@@ -150,7 +157,9 @@ const appendTextNode = (
   const from = accumulator.text.length;
   accumulator.text += node.getTextContent();
   const to = accumulator.text.length;
-  const formats: ReadonlyArray<readonly [ProjectedMarkKind, boolean]> = [
+  const formats: ReadonlyArray<
+    readonly [Exclude<ProjectedMarkKind, "link">, boolean]
+  > = [
     ["bold", node.hasFormat("bold")],
     ["italic", node.hasFormat("italic")],
     ["underline", node.hasFormat("underline")],
@@ -368,6 +377,8 @@ export const projectLexicalDocument = (
   const blocks: ProjectedBlock[] = [];
   for (const child of $getRoot().getChildren()) {
     if ($isListNode(child)) {
+      assertNoUnsupportedIndent(child);
+      assertNoUnsupportedAlignment(child);
       projectList(child, stableIds, blocks);
       continue;
     }
@@ -377,10 +388,10 @@ export const projectLexicalDocument = (
         "list items must be owned by a list",
       );
     }
-    if (!child.isAttached() || !("getChildren" in child)) {
+    if (!$isElementNode(child)) {
       throw new UnsupportedLexicalNodeError(child.getType());
     }
-    blocks.push(projectTopLevelBlock(child as ElementNode, stableIds));
+    blocks.push(projectTopLevelBlock(child, stableIds));
   }
   return { blocks };
 };

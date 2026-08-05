@@ -17,11 +17,12 @@ export default function Header() {
   const [groupedExpanded, setGroupedExpanded] = useState<
     Record<string, boolean>
   >({});
-  const isLexicalCollaborationCanvas = useRouterState({
-    select: (state) => state.location.pathname === "/demo/lexical-eg-walker",
+  const isHeaderHidden = useRouterState({
+    select: (state) =>
+      state.matches.some((match) => match.staticData?.hideHeader === true),
   });
 
-  if (isLexicalCollaborationCanvas) return null;
+  if (isHeaderHidden) return null;
 
   return (
     <>

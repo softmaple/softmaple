@@ -30,14 +30,18 @@ describe("room presence", () => {
     );
   });
 
-  it("uses an isolated presence channel for each room", () => {
+  it("uses an isolated presence channel for each room", async () => {
     const identity = createRoomIdentity("peer-a");
     const first = createRoomPresenceAdapter("room-a", identity);
     const second = createRoomPresenceAdapter("room-b", identity);
 
-    expect(first).not.toBe(second);
-    expect(first.getConnectionState()).toBe("disconnected");
-    expect(second.getConnectionState()).toBe("disconnected");
+    try {
+      expect(first).not.toBe(second);
+      expect(first.getConnectionState()).toBe("disconnected");
+      expect(second.getConnectionState()).toBe("disconnected");
+    } finally {
+      await Promise.all([first.disconnect(), second.disconnect()]);
+    }
   });
 
   it("does not expose users from the previous room during a room switch", async () => {

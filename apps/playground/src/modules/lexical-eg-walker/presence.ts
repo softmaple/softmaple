@@ -36,17 +36,12 @@ interface AdapterValue<T> {
   readonly value: T;
 }
 
-const randomId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-};
+const randomId = (): string => crypto.randomUUID();
 
 const hashString = (value: string): number => {
   let hash = 2166136261;
   for (const character of value) {
-    hash ^= character.charCodeAt(0);
+    hash ^= character.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;

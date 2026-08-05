@@ -301,7 +301,6 @@ export const createPersistenceCoordinator = async (
       (row) => row.kind === PERSISTENCE_ROW_KIND.Event,
     );
     persistedBatchIds.clear();
-    durableBatchIds.clear();
     for (const row of eventRows) {
       persistedBatchIds.add(row.batch.batchId);
       durableBatchIds.add(row.batch.batchId);
@@ -502,14 +501,14 @@ export const createPersistenceCoordinator = async (
     },
     close: async () => {
       if (closed) return;
-      closed = true;
       if (repairTimer) clearTimeout(repairTimer);
+      await flushPending();
+      closed = true;
       unsubscribeLeader();
       unsubscribeBatches();
       unsubscribeAcks();
       unsubscribeChannelErrors();
       sourceEventApi?.removeEventListener("storage", handleStorageEvent);
-      await flushPromise;
       await election.stop();
       leaderSnapshot = election.getSnapshot();
       await collection?.cleanup();

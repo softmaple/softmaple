@@ -12,6 +12,7 @@ import {
   METADATA_MARKER,
   TEXT_ESCAPE,
 } from "./constants";
+import { MARK_KINDS } from "./schema-values";
 import type {
   Block,
   BlockAttributes,
@@ -101,6 +102,11 @@ interface ResolvedMarkEvent {
   readonly end: number;
 }
 
+interface AncestorResolver {
+  collect(eventId: string): ReadonlySet<string>;
+  isAncestor(ancestorId: string, descendantId: string): boolean;
+}
+
 export const materializeBlockState = (
   replica: EgWalkerReplica,
   events: ReadonlyArray<RichTextEvent>,
@@ -110,6 +116,7 @@ export const materializeBlockState = (
   const parents = new Map(
     events.map((event) => [event.id, new Set(event.parentVersion)]),
   );
+  const ancestors = createAncestorResolver(parents);
   const assignments = collectFieldAssignments(events);
   const removalCauses = new Map<BlockId, Set<string>>();
   const joined = new Set<BlockId>();
@@ -169,7 +176,7 @@ export const materializeBlockState = (
         removalCauses.get(marker.blockId) ?? new Set<string>();
       for (const removeEventId of sourceCauses) {
         if (
-          !isAncestor(marker.eventId, removeEventId, parents) &&
+          !ancestors.isAncestor(marker.eventId, removeEventId) &&
           !childCauses.has(removeEventId)
         ) {
           childCauses.add(removeEventId);
@@ -228,7 +235,7 @@ export const materializeBlockState = (
     const fields = resolveBlockFields(
       marker.blockId,
       assignments.get(marker.blockId),
-      parents,
+      ancestors,
       eventsById,
     );
     mutableBlocks.push({
@@ -258,7 +265,7 @@ export const materializeBlockState = (
     sequenceProjection,
     events,
     markers,
-    parents,
+    ancestors,
     removalCauses,
     joinEvents,
   );
@@ -272,7 +279,7 @@ export const materializeBlockState = (
     const marks = materializeMarks(
       mutable.units,
       resolvedMarks,
-      parents,
+      ancestors,
       splitLineages,
     );
     const block: Block = Object.freeze({
@@ -314,16 +321,28 @@ const buildSplitLineages = (
   const lineages = new Map<BlockId, ReadonlySet<BlockId>>();
 
   for (const { blockId } of markers) {
-    const lineage = new Set<BlockId>();
+    const path: BlockId[] = [];
+    const visited = new Set<BlockId>();
     let current: BlockId | null = blockId;
+    let inherited: ReadonlySet<BlockId> = new Set();
     while (current !== null) {
-      if (lineage.has(current)) {
+      if (visited.has(current)) {
         throw new Error(`Cyclic split lineage at block ${current}`);
       }
-      lineage.add(current);
+      visited.add(current);
+      const cached = lineages.get(current);
+      if (cached !== undefined) {
+        inherited = cached;
+        break;
+      }
+      path.push(current);
       current = sourceByBlock.get(current) ?? null;
     }
-    lineages.set(blockId, lineage);
+    for (let index = path.length - 1; index >= 0; index--) {
+      const id = path[index]!;
+      inherited = new Set([...inherited, id]);
+      lineages.set(id, inherited);
+    }
   }
 
   return lineages;
@@ -378,7 +397,7 @@ const addFields = (
 const resolveBlockFields = (
   blockId: BlockId,
   assignments: ReadonlyMap<BlockFieldName, FieldAssignment[]> | undefined,
-  parents: ReadonlyMap<string, ReadonlySet<string>>,
+  ancestors: AncestorResolver,
   eventsById: ReadonlyMap<string, RichTextEvent>,
 ): CompleteBlockFields => {
   if (assignments === undefined) {
@@ -389,7 +408,7 @@ const resolveBlockFields = (
     if (candidates === undefined || candidates.length === 0) {
       return DEFAULT_BLOCK_FIELDS[field];
     }
-    return selectCausalMaximal(candidates, parents, eventsById).value;
+    return selectCausalMaximal(candidates, ancestors, eventsById).value;
   };
   return {
     type: winner("type") as BlockType,
@@ -404,7 +423,7 @@ const resolveBlockFields = (
 
 const selectCausalMaximal = <T extends { readonly eventId: string }>(
   candidates: ReadonlyArray<T>,
-  parents: ReadonlyMap<string, ReadonlySet<string>>,
+  ancestors: AncestorResolver,
   eventsById?: ReadonlyMap<string, RichTextEvent>,
 ): T => {
   const maxima = candidates.filter(
@@ -412,7 +431,7 @@ const selectCausalMaximal = <T extends { readonly eventId: string }>(
       !candidates.some(
         (other) =>
           candidate.eventId !== other.eventId &&
-          isAncestor(candidate.eventId, other.eventId, parents),
+          ancestors.isAncestor(candidate.eventId, other.eventId),
       ),
   );
   const winner = maxima.reduce<T | null>(
@@ -428,25 +447,34 @@ const selectCausalMaximal = <T extends { readonly eventId: string }>(
   return winner;
 };
 
-const isAncestor = (
-  ancestorId: string,
-  descendantId: string,
+const createAncestorResolver = (
   parents: ReadonlyMap<string, ReadonlySet<string>>,
-): boolean => {
-  const stack = [...(parents.get(descendantId) ?? [])];
-  const visited = new Set<string>();
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === ancestorId) {
-      return true;
+): AncestorResolver => {
+  const cache = new Map<string, ReadonlySet<string>>();
+  const collect = (eventId: string): ReadonlySet<string> => {
+    const cached = cache.get(eventId);
+    if (cached !== undefined) return cached;
+    const result = new Set<string>();
+    const stack = [...(parents.get(eventId) ?? [])];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (result.has(current)) continue;
+      result.add(current);
+      const currentCached = cache.get(current);
+      if (currentCached !== undefined) {
+        for (const ancestor of currentCached) result.add(ancestor);
+      } else {
+        stack.push(...(parents.get(current) ?? []));
+      }
     }
-    if (visited.has(current)) {
-      continue;
-    }
-    visited.add(current);
-    stack.push(...(parents.get(current) ?? []));
-  }
-  return false;
+    cache.set(eventId, result);
+    return result;
+  };
+  return {
+    collect,
+    isAncestor: (ancestorId, descendantId) =>
+      collect(descendantId).has(ancestorId),
+  };
 };
 
 const decodeSegment = (
@@ -528,7 +556,7 @@ const resolveMarkEvents = (
   projection: SequenceAnchorProjection,
   events: ReadonlyArray<RichTextEvent>,
   markers: ReadonlyArray<MarkerRecord>,
-  parents: ReadonlyMap<string, ReadonlySet<string>>,
+  ancestors: AncestorResolver,
   removalCauses: ReadonlyMap<BlockId, ReadonlySet<string>>,
   joinEvents: ReadonlyMap<BlockId, ReadonlyArray<string>>,
 ): ReadonlyArray<ResolvedMarkEvent> =>
@@ -549,7 +577,7 @@ const resolveMarkEvents = (
             ? new Set([event.effect.blockId])
             : resolveMarkOwnership(
                 event.effect.blockId,
-                collectAncestors(event.id, parents),
+                ancestors.collect(event.id),
                 markers,
                 removalCauses,
                 joinEvents,
@@ -561,23 +589,6 @@ const resolveMarkEvents = (
       },
     ];
   });
-
-const collectAncestors = (
-  eventId: string,
-  parents: ReadonlyMap<string, ReadonlySet<string>>,
-): ReadonlySet<string> => {
-  const ancestors = new Set<string>();
-  const stack = [...(parents.get(eventId) ?? [])];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (ancestors.has(current)) {
-      continue;
-    }
-    ancestors.add(current);
-    stack.push(...(parents.get(current) ?? []));
-  }
-  return ancestors;
-};
 
 /**
  * Recover the visible block group that owned a mark range when it was set.
@@ -627,33 +638,43 @@ const resolveMarkOwnership = (
 const materializeMarks = (
   units: ReadonlyArray<DecodedUnit>,
   markEvents: ReadonlyArray<ResolvedMarkEvent>,
-  parents: ReadonlyMap<string, ReadonlySet<string>>,
+  ancestors: AncestorResolver,
   splitLineages: ReadonlyMap<BlockId, ReadonlySet<BlockId>>,
 ): MarkSpan[] => {
   const spans: MarkSpan[] = [];
-  for (const kind of [
-    "bold",
-    "italic",
-    "underline",
-    "strike",
-    "inline-code",
-    "link",
-  ] as const) {
+  const eventsByKind = new Map<MarkKind, ReadonlyArray<ResolvedMarkEvent>>();
+  for (const kind of MARK_KINDS) {
+    eventsByKind.set(
+      kind,
+      markEvents
+        .filter((event) => event.kind === kind)
+        .sort(
+          (left, right) =>
+            left.start - right.start ||
+            left.end - right.end ||
+            compareIds(left.eventId, right.eventId),
+        ),
+    );
+  }
+  for (const kind of MARK_KINDS) {
+    const kindEvents = eventsByKind.get(kind) ?? [];
     for (const unit of units) {
-      const candidates = markEvents.filter((event) => {
-        const lineage = splitLineages.get(unit.blockId);
-        return (
-          event.kind === kind &&
-          lineage !== undefined &&
+      const lineage = splitLineages.get(unit.blockId);
+      if (lineage === undefined) continue;
+      const candidates: ResolvedMarkEvent[] = [];
+      for (const event of kindEvents) {
+        if (event.start > unit.rawFrom) break;
+        if (
           setsIntersect(lineage, event.ownedBlockIds) &&
-          event.start <= unit.rawFrom &&
           unit.rawTo <= event.end
-        );
-      });
+        ) {
+          candidates.push(event);
+        }
+      }
       if (candidates.length === 0) {
         continue;
       }
-      const winner = selectCausalMaximal(candidates, parents);
+      const winner = selectCausalMaximal(candidates, ancestors);
       if (winner.value === null) {
         continue;
       }
@@ -700,7 +721,13 @@ const setsIntersect = <T>(
 const sameMarkValue = (
   left: true | LinkAttributes,
   right: true | LinkAttributes,
-): boolean => JSON.stringify(left) === JSON.stringify(right);
+): boolean =>
+  left === true || right === true
+    ? left === right
+    : left.url === right.url &&
+      left.target === right.target &&
+      left.rel === right.rel &&
+      left.title === right.title;
 
 const normalizeOutputAttributes = (
   type: BlockType,

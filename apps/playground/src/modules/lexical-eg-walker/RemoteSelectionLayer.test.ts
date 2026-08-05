@@ -80,7 +80,6 @@ describe("remote selection resolution", () => {
       getBlockIndex: () => ({
         blockIdToNodeKey: new Map(),
         nodeKeyToBlockId: new Map(),
-        numberedListOverrides: new Map(),
       }),
     } as unknown as LexicalBinding;
     const host = document.createElement("div");

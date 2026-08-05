@@ -31,18 +31,22 @@ spatial concepts it does not need, and canvas would pay for sequence
 concepts that do not fit. Keeping the models distinct lets each engine
 ship the algorithm that is actually correct for its data shape.
 
+## Abstract sequence model
+
+In the abstract, a sequence collaboration model can operate on any ordered
+unit type as long as its engine defines stable boundaries for those units.
+Concrete engines must document their unit and position contract explicitly.
+
 ## 1. Sequence model
 
-The collaborative document is a **flat UTF-16 sequence**. This is the model
-implemented today by `@softmaple/eg-walker`.
+The collaborative document is a **flat UTF-16 code-unit sequence**. This is
+the concrete string model implemented today by `@softmaple/eg-walker`.
 
 ### State shape
 
 ```ts
 type SequenceState = string;
 ```
-
-(Or any sequence-shaped data; the engine does not interpret the unit.)
 
 ### Op shape
 
@@ -52,8 +56,9 @@ type SequenceOp =
   | { type: "delete"; index: number; length: number };
 ```
 
-Indices are UTF-16 code-unit boundaries. Public operations and anchors reject
-a position that splits a surrogate pair.
+The current `@softmaple/eg-walker` string API measures indices and lengths in
+UTF-16 code units. Public operations and anchors reject a boundary that splits
+a surrogate pair.
 
 ### Position shape
 

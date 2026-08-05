@@ -93,11 +93,8 @@ const connectionLabel = (
   }
 };
 
-const isDegradedConnection = (state: AdapterConnectionState): boolean =>
-  state === "disconnected" ||
-  state === "reconnecting" ||
-  state === "connecting" ||
-  state === "error";
+const isReconnectWarningState = (state: AdapterConnectionState): boolean =>
+  state === "disconnected" || state === "reconnecting" || state === "error";
 
 const StatusItem = ({
   icon,
@@ -196,7 +193,7 @@ export function StatusRail({
       <StatusItem icon={connectionIcon} tone={connectionTone}>
         {connectionLabel(connectionState, transportMode)}
       </StatusItem>
-      {isDegradedConnection(connectionState) &&
+      {isReconnectWarningState(connectionState) &&
       transportMode === "websocket" ? (
         <span className="rounded-md border border-[#FEDF89] bg-[#FFFAEB] px-2 py-0.5 text-[10px] font-semibold text-[#B54708]">
           Sync paused until reconnect

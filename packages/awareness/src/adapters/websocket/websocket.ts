@@ -238,6 +238,7 @@ export const createWebSocketAdapter = (
 
   const handleClose = (): void => {
     stopHeartbeat(internal);
+    clearConnectionTimeout(internal);
     beginReconnect();
   };
 

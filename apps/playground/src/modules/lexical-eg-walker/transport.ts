@@ -16,7 +16,7 @@ import {
   type CollabEndpoints,
   resolveBrowserCollabEndpoints,
 } from "@/modules/collab-transport/urls";
-import { createWebSocketBroadcastChannelFactory } from "@/modules/collab-transport/websocket-broadcast-channel";
+import { createWebSocketBroadcastChannelFactory } from "@/modules/collab-transport/websocketBroadcastChannel";
 import type { BroadcastChannelFactory } from "@/modules/lexical-eg-walker/persistence/channel";
 import type { RoomIdentity } from "./presence";
 

@@ -9,7 +9,7 @@ import {
 import {
   buildDocWebSocketUrl,
   createWebSocketBroadcastChannel,
-} from "./websocket-broadcast-channel";
+} from "./websocketBroadcastChannel";
 
 type FakeSocket = {
   readyState: number;

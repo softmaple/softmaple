@@ -13,6 +13,7 @@ import type {
   TransportConnectionListener,
   TransportConnectionState,
 } from "@/modules/lexical-eg-walker/persistence/channel";
+import { createWebSocketLifecycle } from "./websocketBroadcastChannelLifecycle";
 
 export interface WebSocketBroadcastChannelOptions {
   readonly url: string;
@@ -26,7 +27,6 @@ export interface WebSocketBroadcastChannelOptions {
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10;
 const DEFAULT_MAX_OUTBOUND_QUEUE = 100;
-const MAX_RECONNECT_DELAY_MS = 30_000;
 
 export const buildDocWebSocketUrl = (
   baseUrl: string,
@@ -55,8 +55,6 @@ export const createWebSocketBroadcastChannel = (
   let connectionHandler: TransportConnectionListener | null = null;
   let socket: WebSocket | null = null;
   let closed = false;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let reconnectAttempts = 0;
   let connectionState: TransportConnectionState = "connecting";
   const outboundQueue: unknown[] = [];
 
@@ -66,92 +64,23 @@ export const createWebSocketBroadcastChannel = (
     connectionHandler?.(next);
   };
 
-  const clearReconnect = (): void => {
-    if (reconnectTimer === null) return;
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  };
+  const lifecycle = createWebSocketLifecycle({
+    wsUrl,
+    reconnectDelayMs,
+    maxReconnectAttempts,
+    webSocketFactory,
+    isClosed: () => closed,
+    getConnectionState: () => connectionState,
+    setConnectionState,
+    getMessageHandler: () => messageHandler,
+    getOpenHandler: () => openHandler,
+    outboundQueue,
+    onSocket: (next) => {
+      socket = next;
+    },
+  });
 
-  const flushQueue = (): void => {
-    if (socket === null || socket.readyState !== WebSocket.OPEN) return;
-    while (outboundQueue.length > 0) {
-      const next = outboundQueue.shift();
-      socket.send(JSON.stringify(next));
-    }
-  };
-
-  const scheduleReconnect = (): void => {
-    if (closed || reconnectTimer !== null) return;
-    if (reconnectAttempts >= maxReconnectAttempts) {
-      setConnectionState("error");
-      return;
-    }
-
-    setConnectionState("reconnecting");
-    const attempt = reconnectAttempts;
-    reconnectAttempts += 1;
-    const exponential = Math.min(
-      MAX_RECONNECT_DELAY_MS,
-      reconnectDelayMs * 2 ** attempt,
-    );
-    const jitter = Math.floor(
-      Math.random() * Math.min(250, Math.max(1, exponential * 0.2)),
-    );
-    const delay = exponential + jitter;
-
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connect();
-    }, delay);
-  };
-
-  const connect = (): void => {
-    if (closed) return;
-    clearReconnect();
-    if (connectionState !== "reconnecting") {
-      setConnectionState("connecting");
-    }
-    let currentSocket: WebSocket;
-    try {
-      currentSocket = webSocketFactory(wsUrl);
-    } catch {
-      scheduleReconnect();
-      return;
-    }
-    socket = currentSocket;
-
-    currentSocket.addEventListener("open", () => {
-      if (socket !== currentSocket) return;
-      reconnectAttempts = 0;
-      setConnectionState("connected");
-      flushQueue();
-      openHandler?.();
-    });
-
-    currentSocket.addEventListener("message", (event) => {
-      if (messageHandler === null || socket !== currentSocket) return;
-      try {
-        const data =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        messageHandler({ data });
-      } catch {
-        // Ignore malformed frames; the persistence channel validates payloads.
-      }
-    });
-
-    currentSocket.addEventListener("close", () => {
-      if (closed) return;
-      if (socket !== currentSocket) return;
-      socket = null;
-      scheduleReconnect();
-    });
-
-    currentSocket.addEventListener("error", () => {
-      // `close` follows and triggers reconnect.
-    });
-  };
-
-  connect();
+  lifecycle.connect();
 
   return {
     get onmessage() {
@@ -188,7 +117,7 @@ export const createWebSocketBroadcastChannel = (
     close: () => {
       if (closed) return;
       closed = true;
-      clearReconnect();
+      lifecycle.clearReconnect();
       outboundQueue.length = 0;
       setConnectionState("disconnected");
       messageHandler = null;

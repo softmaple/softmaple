@@ -233,13 +233,14 @@ describe("persistence BroadcastChannel protocol", () => {
 
     const sent: unknown[] = [];
     expect(transport).toBeDefined();
-    const originalPost = transport?.postMessage.bind(transport);
-    transport!.postMessage = (message: unknown) => {
+    if (transport === undefined) throw new Error("expected transport channel");
+    const originalPost = transport.postMessage.bind(transport);
+    transport.postMessage = (message: unknown) => {
       sent.push(message);
       originalPost(message);
     };
 
-    transport?.onopen?.();
+    transport.onopen?.();
 
     expect(sent).toContainEqual({
       protocolVersion: PERSISTENCE_CHANNEL_PROTOCOL_VERSION,

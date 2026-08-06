@@ -1,0 +1,41 @@
+{
+  "skills": ["git-workflow"],
+  "evaluations": [
+    {
+      "query": "I'm on the next branch and need to start implementing a fix for duplicate event handling. Set up the git branch correctly before I edit files.",
+      "expected_behavior": [
+        "Checks current branch with git branch --show-current",
+        "Refuses to commit or edit while planning to stay on next",
+        "Creates a feature branch using type/description-$(date +%s), e.g. fix/duplicate-event-handling-<timestamp>",
+        "Does not use --no-verify"
+      ]
+    },
+    {
+      "query": "Pre-commit hooks failed after my commit because Biome formatting changed files. Finish the commit.",
+      "expected_behavior": [
+        "Does not suggest or use --no-verify",
+        "Runs formatting/fixes (e.g. pnpm format) and stages the fixes",
+        "Retries the commit without bypassing hooks",
+        "Requests user approval before committing or pushing if not already granted"
+      ]
+    },
+    {
+      "query": "Write a commit message and open a PR for adding JWT auth to apps/web. Include what the PR body should contain.",
+      "expected_behavior": [
+        "Uses conventional commit form type(scope): summary, e.g. feat(apps/web): ...",
+        "PR guidance includes summary, test commands, and screenshots note for UI changes",
+        "Targets next as the base branch",
+        "Does not commit directly to next",
+        "Requests user approval before committing or pushing"
+      ]
+    },
+    {
+      "query": "I'm done with my feature branch and want to switch back to next to start something else.",
+      "expected_behavior": [
+        "Runs git checkout next",
+        "Runs git pull",
+        "Runs pnpm i"
+      ]
+    }
+  ]
+}

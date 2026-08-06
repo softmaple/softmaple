@@ -89,19 +89,12 @@ const withLogging =
 - Run tests before merging
 - Regenerate Prisma after schema changes
 
-## Pre-commit Hooks and Code Quality
+## Git Workflow
 
-**CRITICAL: Never use `--no-verify` flag when committing code.** Pre-commit hooks run essential quality checks including:
-- Code formatting with Biome
-- Linting with ESLint
-- Type checking
-
-If pre-commit hooks fail, you must:
-1. Fix the issues (run `pnpm format`)
-2. Stage the fixes
-3. Retry the commit WITHOUT `--no-verify`
-
-Bypassing these checks undermines code quality safeguards and is unacceptable.
+Use the `git-workflow` skill when creating branches, committing, pushing, opening
+or updating PRs, fixing pre-commit hook failures, or returning to the `next`
+branch. That skill owns branch naming, commit messages, hook policy, and PR
+requirements for this repo.
 
 ## Adding shadcn UI Components
 
@@ -109,20 +102,6 @@ To add shadcn UI components in the turbo repo, run the `add` command in the path
 ```bash
 pnpm dlx shadcn@latest add [COMPONENT]
 ```
-
-## Commit & Pull Request Guidelines
-
-**Commits:** `type(scope): summary`
-
-- Types: `fix`, `feat`, `build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`
-- Scopes: `apps/web`, `packages/<name>`, or empty for root
-- **Branch naming:** `feature-name-$(date +%s)`
-- **IMPORTANT: Never commit directly to the `next` branch.** Always create a new feature branch before making changes if you are on the default `next` branch.
-- **When switching back to `next` from a feature branch:** Always run `git pull` and `pnpm i` to sync with remote and update dependencies
-- **NEVER use `--no-verify` flag when committing** - Pre-commit hooks are critical for code quality and must not be bypassed. Work through any formatting or linting issues instead.
-- **Always request user approval before commits/pushes**
-
-**PRs:** Include summary, test commands, screenshots for UI changes
 
 ## Documentation
 

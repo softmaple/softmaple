@@ -4,9 +4,12 @@ This file contains specific instructions for Claude AI when working on the Softm
 
 ## CRITICAL RULES - NEVER VIOLATE
 
-1. **NEVER use `--no-verify` flag when committing** - Pre-commit hooks are essential for code quality. If hooks fail, fix the issues and retry without bypassing.
-2. **NEVER commit directly to `next` branch** - Always create a feature branch first.
-3. **ALWAYS request user approval before commits/pushes** - No exceptions.
+Git branching, commits, hooks, and PRs are owned by the `git-workflow` skill.
+Load it before any git write operation. Hard rules (also in the skill):
+
+1. **NEVER use `--no-verify` flag when committing**
+2. **NEVER commit directly to `next` branch**
+3. **ALWAYS request user approval before commits/pushes**
 
 ## Project Overview
 
@@ -192,68 +195,10 @@ pnpm test
 
 ## Development Workflow
 
-### Branch Naming
+### Git
 
-```bash
-# Format: type/description-timestamp
-feature/add-user-auth-1737154800
-refactor/cleanup-event-graph-1737154800
-fix/duplicate-event-handling-1737154800
-docs/update-readme-1737154800
-```
-
-### Branch Protection Rule
-
-**CRITICAL: Never commit directly to the `next` branch.**
-
-Before making any changes:
-
-1. Check current branch: `git branch --show-current`
-2. If on `next`, create a new feature branch: `git checkout -b type/description-$(date +%s)`
-3. Make your changes on the feature branch
-4. Push the feature branch and create a PR
-
-```bash
-# Example workflow
-git branch --show-current  # Check if on 'next'
-git checkout -b refactor/cleanup-types-1737154800
-# Now safe to make changes
-```
-
-### Returning to `next` Branch
-
-**IMPORTANT: When switching back to `next` from a feature branch, always sync with remote and update dependencies:**
-
-```bash
-git checkout next
-git pull              # Sync with remote changes
-pnpm i                # Update dependencies
-```
-
-This ensures:
-
-- You have the latest merged changes from other PRs
-- Dependencies are up to date with lockfile changes
-- No conflicts or outdated packages
-
-### Commit Messages
-
-```bash
-# Format: type(scope): summary
-feat(packages/eg-walker): add incremental CRDT integration
-refactor(packages/eg-walker): consolidate event tracking
-fix(apps/web): resolve duplicate event crash
-docs: update functional programming guidelines
-```
-
-### Before Committing
-
-1. Run type checks: \`pnpm --filter <package> typecheck\`
-2. Run tests: \`pnpm --filter <package> test\`
-3. Run linter: \`pnpm lint\`
-4. Format code: \`pnpm format\`
-5. **NEVER use `--no-verify` flag** - Pre-commit hooks ensure code quality and must not be bypassed
-6. **Request user approval before pushing**
+Use the `git-workflow` skill for branching, commits, pre-commit hooks, returning
+to `next`, and pull requests. Do not duplicate those rules here.
 
 ### Adding shadcn UI Components
 

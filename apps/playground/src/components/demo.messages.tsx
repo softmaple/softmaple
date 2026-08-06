@@ -3,13 +3,13 @@ import type { Message } from "@/db-collections";
 export const getAvatarColor = (username: string) => {
   const colors = [
     "bg-[var(--pg-accent)]",
-    "bg-teal-500",
-    "bg-orange-400",
-    "bg-indigo-400",
-    "bg-sky-500",
-    "bg-rose-400",
-    "bg-amber-400",
-    "bg-emerald-500",
+    "bg-teal-700",
+    "bg-orange-700",
+    "bg-indigo-700",
+    "bg-sky-700",
+    "bg-rose-700",
+    "bg-amber-700",
+    "bg-emerald-700",
   ];
   const index = username
     .split("")

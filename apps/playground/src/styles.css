@@ -16,7 +16,7 @@
 
   /*
    * SoftMaple Playground — dark-first palette mixed from Motion / Linear / Vercel:
-   * near-black canvas, cool elevated surfaces, quiet hairlines, indigo accent.
+   * near-black canvas, cool elevated surfaces, quiet hairlines, rose accent.
    */
   --pg-paper: #050505;
   --pg-surface: #121216;
@@ -25,7 +25,6 @@
   --pg-ink-muted: #8b8b96;
   --pg-line: #2a2a32;
   --pg-accent: #e11d48;
-  --pg-accent-soft: color-mix(in srgb, var(--pg-accent) 18%, transparent);
   --pg-glow-teal: rgba(45, 212, 191, 0.16);
   --pg-glow-orange: rgba(251, 146, 60, 0.12);
   --pg-glow-accent: rgba(225, 29, 72, 0.18);
@@ -148,6 +147,7 @@ code {
 /* Dark-first shadcn tokens (playground is always dark) */
 :root,
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0.005 286);
   --foreground: oklch(0.96 0.002 286);
   --card: oklch(0.18 0.006 286);
@@ -232,7 +232,6 @@ code {
     background-image:
       radial-gradient(ellipse 80% 50% at 50% -20%, var(--pg-glow-accent), transparent 55%),
       radial-gradient(ellipse 40% 30% at 100% 0%, var(--pg-glow-teal), transparent 50%);
-    background-attachment: fixed;
   }
   ::selection {
     background: color-mix(in srgb, var(--pg-accent) 40%, transparent);

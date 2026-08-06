@@ -92,7 +92,7 @@ export function RoomHeader({
             size="sm"
             variant="ghost"
             onClick={onLeaveRoom}
-            className="border border-rose-400/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500 hover:text-white"
+            className="border border-rose-400/30 bg-rose-500/10 text-rose-300 hover:bg-rose-700 hover:text-white"
           >
             <LogOut className="mr-1 h-4 w-4" aria-hidden="true" />
             Leave

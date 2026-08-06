@@ -69,7 +69,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body className="bg-[var(--pg-paper)] text-[var(--pg-ink)] antialiased">
         <Header />
         {children}
-        <Toaster position="bottom-right" />
+        <Toaster theme="dark" position="bottom-right" />
         <TanStackDevtools
           config={{
             position: "bottom-right",

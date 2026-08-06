@@ -29,7 +29,7 @@ function CollaborativeEditor() {
       labelId: "replica-2-label",
       testId: "replica-2",
       placeholder: "Start typing in Replica 2...",
-      focusRingClassName: "focus-visible:ring-teal-600",
+      focusRingClassName: "focus-visible:ring-teal-400",
     },
   ];
 

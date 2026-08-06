@@ -33,7 +33,7 @@ export function DemoList() {
               to={demo.link}
               className="group relative flex flex-col gap-4 py-7 transition-colors md:flex-row md:items-start md:gap-8 md:py-9"
             >
-              <span className="absolute inset-x-[-1rem] inset-y-0 -z-10 rounded-sm bg-[var(--pg-surface)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 md:inset-x-[-1.5rem]" />
+              <span className="absolute inset-x-[-1rem] inset-y-0 -z-10 rounded-sm bg-[var(--pg-elevated)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 md:inset-x-[-1.5rem]" />
 
               <span className="font-[family-name:var(--font-mono)] text-sm text-[var(--pg-ink-muted)] tabular-nums">
                 {demo.id}

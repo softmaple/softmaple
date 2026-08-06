@@ -2,14 +2,14 @@ import type { Message } from "@/db-collections";
 
 export const getAvatarColor = (username: string) => {
   const colors = [
-    "bg-blue-500",
-    "bg-green-500",
-    "bg-purple-500",
-    "bg-pink-500",
-    "bg-indigo-500",
-    "bg-red-500",
-    "bg-yellow-500",
-    "bg-teal-500",
+    "bg-[var(--pg-accent)]",
+    "bg-teal-700",
+    "bg-orange-700",
+    "bg-indigo-700",
+    "bg-sky-700",
+    "bg-rose-700",
+    "bg-amber-700",
+    "bg-emerald-700",
   ];
   const index = username
     .split("")
@@ -39,7 +39,7 @@ export default function Messages({
             }`}
           >
             <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium ${getAvatarColor(
+              className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium text-white ${getAvatarColor(
                 msg.user,
               )}`}
             >
@@ -47,14 +47,14 @@ export default function Messages({
             </div>
 
             <div
-              className={`px-4 py-2 rounded-2xl ${
+              className={`rounded-2xl px-4 py-2 ${
                 msg.user === user
-                  ? "bg-blue-500 text-white rounded-br-md"
-                  : "bg-white text-gray-800 border border-gray-200 rounded-bl-md"
+                  ? "rounded-br-md bg-[var(--pg-accent)] text-white"
+                  : "rounded-bl-md border border-[var(--pg-line)] bg-[var(--pg-elevated)] text-[var(--pg-ink)]"
               }`}
             >
               {msg.user !== user && (
-                <p className="text-xs text-gray-500 mb-1 font-medium">
+                <p className="mb-1 text-xs font-medium text-[var(--pg-ink-muted)]">
                   {msg.user}
                 </p>
               )}

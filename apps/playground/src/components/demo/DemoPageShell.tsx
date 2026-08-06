@@ -49,7 +49,7 @@ export function DemoPageShell({
             {showBackLink ? (
               <Link
                 to="/"
-                className="inline-flex items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-surface)] px-3 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] transition-colors hover:border-[var(--pg-ink)] hover:text-[var(--pg-ink)]"
+                className="inline-flex items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-elevated)] px-3 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] transition-colors hover:border-[var(--pg-ink-muted)] hover:text-[var(--pg-ink)]"
               >
                 <ArrowLeft className="size-3.5" aria-hidden />
                 Playground

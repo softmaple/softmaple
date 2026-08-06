@@ -168,7 +168,7 @@ export function LexicalEgWalkerDemo({
         </div>
         <a
           href="/"
-          className="inline-flex shrink-0 items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-surface)] px-2.5 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] outline-none transition-colors hover:border-[var(--pg-ink)] hover:text-[var(--pg-ink)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
+          className="inline-flex shrink-0 items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-elevated)] px-2.5 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] outline-none transition-colors hover:border-[var(--pg-ink-muted)] hover:text-[var(--pg-ink)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
         >
           <ArrowLeft className="size-3.5" />
           <span className="hidden sm:inline">Playground</span>
@@ -179,7 +179,7 @@ export function LexicalEgWalkerDemo({
         <div className="pg-panel relative flex min-h-[540px] w-full flex-col overflow-hidden">
           <div className="pg-panel-header flex items-center justify-between px-4 py-2 font-[family-name:var(--font-mono)] text-[10px] font-medium tracking-[0.14em] text-[var(--pg-ink-muted)] uppercase">
             <span>Collaborative manuscript</span>
-            <span className="inline-flex items-center gap-1.5 text-teal-700">
+            <span className="inline-flex items-center gap-1.5 text-teal-400">
               <ShieldCheck className="size-3.5" />
               v1 schema
             </span>
@@ -233,7 +233,7 @@ export function LexicalEgWalkerDemo({
           {visibleError !== null ? (
             <div
               role="alert"
-              className="border-t border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-800"
+              className="border-t border-rose-400/25 bg-rose-500/10 px-4 py-2 text-xs text-rose-300"
             >
               {visibleError.message}
             </div>

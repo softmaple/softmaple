@@ -27,10 +27,10 @@ export default function Header() {
 
   return (
     <header
-      className={`sticky top-0 z-40 border-b backdrop-blur-md ${
+      className={`sticky top-0 z-40 border-b backdrop-blur-xl ${
         isHome
-          ? "border-transparent bg-[var(--pg-paper)]/70"
-          : "border-[var(--pg-line)] bg-[var(--pg-paper)]/90"
+          ? "border-transparent bg-[var(--pg-paper)]/55"
+          : "border-[var(--pg-line)] bg-[var(--pg-paper)]/80"
       }`}
     >
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
@@ -88,7 +88,7 @@ export default function Header() {
           <SheetTrigger asChild>
             <button
               type="button"
-              className="rounded-sm p-2 text-[var(--pg-ink)] transition-colors hover:bg-[var(--pg-ink)]/5 md:hidden"
+              className="rounded-sm p-2 text-[var(--pg-ink)] transition-colors hover:bg-[var(--pg-elevated)] md:hidden"
               aria-label="Open menu"
             >
               <Menu size={22} />
@@ -96,7 +96,7 @@ export default function Header() {
           </SheetTrigger>
           <SheetContent
             side="right"
-            className="w-[min(100%,20rem)] gap-0 border-[var(--pg-line)] bg-[var(--pg-paper)] p-0 text-[var(--pg-ink)] sm:max-w-xs"
+            className="w-[min(100%,20rem)] gap-0 border-[var(--pg-line)] bg-[var(--pg-surface)] p-0 text-[var(--pg-ink)] sm:max-w-xs"
           >
             <SheetHeader className="border-b border-[var(--pg-line)] px-4 py-3">
               <SheetTitle className="font-[family-name:var(--font-display)] font-semibold tracking-[-0.02em] text-[var(--pg-ink)]">
@@ -124,7 +124,7 @@ export default function Header() {
                   <SheetClose asChild>
                     <Link
                       to="/"
-                      className="mb-1 block rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-[var(--pg-ink)]/5"
+                      className="mb-1 block rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-[var(--pg-elevated)]"
                     >
                       Home
                     </Link>
@@ -141,7 +141,7 @@ export default function Header() {
                     <SheetClose asChild>
                       <Link
                         to={demo.link}
-                        className="mb-1 block rounded-sm px-3 py-2.5 text-sm hover:bg-[var(--pg-ink)]/5"
+                        className="mb-1 block rounded-sm px-3 py-2.5 text-sm hover:bg-[var(--pg-elevated)]"
                       >
                         <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--pg-ink-muted)]">
                           {demo.id}

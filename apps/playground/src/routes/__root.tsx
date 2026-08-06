@@ -36,7 +36,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       },
       {
         name: "theme-color",
-        content: "#f4f4f5",
+        content: "#050505",
       },
     ],
     links: [
@@ -62,14 +62,14 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>
       <body className="bg-[var(--pg-paper)] text-[var(--pg-ink)] antialiased">
         <Header />
         {children}
-        <Toaster position="bottom-right" />
+        <Toaster theme="dark" position="bottom-right" />
         <TanStackDevtools
           config={{
             position: "bottom-right",

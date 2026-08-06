@@ -8,7 +8,7 @@ export const Route = createFileRoute("/demo/db-chat")({
 
 function App() {
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex h-screen flex-col bg-[var(--pg-paper)] text-[var(--pg-ink)]">
       <ChatArea />
     </div>
   );

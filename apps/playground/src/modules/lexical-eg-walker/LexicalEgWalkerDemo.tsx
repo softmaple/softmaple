@@ -6,7 +6,6 @@ import { LexicalEgWalkerPlugin } from "@softmaple/binding-lexical/react";
 import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
 import { LEXICAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
 import type { LexicalEditor } from "lexical";
-import { ArrowLeft, GitFork, ShieldCheck } from "lucide-react";
 import {
   type SetStateAction,
   useCallback,
@@ -15,9 +14,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { CollaborationLab } from "./CollaborationLab";
 import { useRoomPresence } from "./presence";
 import { RemoteSelectionLayer } from "./RemoteSelectionLayer";
 import { createRoomId, resolveRoomId } from "./room";
+import { SoloCollabHint } from "./SoloCollabHint";
 import {
   mergeConnectionStates,
   type PersistenceDisplayState,
@@ -49,6 +50,8 @@ export function LexicalEgWalkerDemo({
     useState<RoomSessionValue<LexicalBinding | null> | null>(null);
   const [bindingErrorState, setBindingErrorState] =
     useState<RoomSessionValue<Error> | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [labOpen, setLabOpen] = useState(false);
   const activeEditor =
     activeEditorState?.sessionKey === sessionKey
       ? activeEditorState.value
@@ -76,11 +79,6 @@ export function LexicalEgWalkerDemo({
     window.history.replaceState(null, "", url);
   }, [requestedRoom, roomId]);
 
-  const copyRoomLink = useCallback(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("room", roomId);
-    void navigator.clipboard?.writeText(url.toString()).catch(() => undefined);
-  }, [roomId]);
   const updatePresenceSelection = useCallback(
     (selection: StableBlockSelection | null) => {
       presence.updateSelection(toPresenceSelection(selection));
@@ -122,6 +120,16 @@ export function LexicalEgWalkerDemo({
   const persistenceState: PersistenceDisplayState =
     room.persistence?.durability ?? "loading";
   const visibleError = bindingError ?? room.error;
+  const documentSyncState = room.persistence?.syncConnectionState ?? null;
+  const connectionState = mergeConnectionStates(
+    presence.connectionState,
+    documentSyncState,
+  );
+  const pendingCount = room.persistence?.pendingBatchIds.length ?? 0;
+  const storageBytes = room.persistence?.storageBytes ?? 0;
+  const durableBatchCount = room.persistence?.durableBatchIds.length ?? 0;
+  const showSoloHint =
+    room.replica !== null && presence.users.length <= 1 && !labOpen;
 
   return (
     <main
@@ -132,65 +140,34 @@ export function LexicalEgWalkerDemo({
       data-persistence-mode={room.persistence?.mode ?? "initializing"}
       data-persistence-durability={room.persistence?.durability ?? "loading"}
       data-persistence-leader={room.persistence?.leader.status ?? "stopped"}
-      data-storage-bytes={room.persistence?.storageBytes ?? 0}
+      data-storage-bytes={storageBytes}
     >
       <StatusRail
         roomId={roomId}
-        connectionState={mergeConnectionStates(
-          presence.connectionState,
-          room.persistence?.syncConnectionState,
-        )}
+        replicaId={presence.identity.userId}
+        connectionState={connectionState}
+        presenceState={presence.connectionState}
+        documentSyncState={documentSyncState}
         transportMode={presence.transportMode}
         persistenceState={persistenceState}
-        pendingCount={room.persistence?.pendingBatchIds.length ?? 0}
-        storageBytes={room.persistence?.storageBytes ?? 0}
+        pendingCount={pendingCount}
+        storageBytes={storageBytes}
         users={presence.users}
-        onCopyRoomLink={copyRoomLink}
+        shareOpen={shareOpen}
+        onShareOpenChange={setShareOpen}
+        labOpen={labOpen}
+        onLabOpenChange={setLabOpen}
       />
 
-      <header className="flex items-start justify-between gap-4 px-4 pt-4 pb-3 md:px-8 md:pt-6 md:pb-4">
-        <div className="min-w-0">
-          <div className="mb-1.5 flex items-center gap-2 font-[family-name:var(--font-mono)] text-[10px] font-semibold tracking-[0.18em] text-[var(--pg-accent)] uppercase">
-            <GitFork className="size-3.5" />
-            Causal canvas ·{" "}
-            {presence.transportMode === "websocket"
-              ? "WebSocket"
-              : "local first"}
-          </div>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl leading-tight font-bold tracking-[-0.03em] md:text-3xl">
-            EG-walker × Lexical
-          </h1>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-[var(--pg-ink-muted)] md:text-sm">
-            {presence.transportMode === "websocket"
-              ? "One document across browsers. Document events and presence sync over WebSocket; a local copy remains on this device."
-              : "One document, any number of tabs. Changes converge through stable sequence anchors and remain on this device after every tab closes. Add ?transport=websocket for cross-browser sync."}
-          </p>
-        </div>
-        <a
-          href="/"
-          className="inline-flex shrink-0 items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-surface)] px-2.5 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] outline-none transition-colors hover:border-[var(--pg-ink)] hover:text-[var(--pg-ink)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
-        >
-          <ArrowLeft className="size-3.5" />
-          <span className="hidden sm:inline">Playground</span>
-        </a>
-      </header>
-
-      <section className="relative mx-auto flex w-full max-w-[1120px] flex-1 px-3 pb-3 md:px-8 md:pb-8">
-        <div className="pg-panel relative flex min-h-[540px] w-full flex-col overflow-hidden">
-          <div className="pg-panel-header flex items-center justify-between px-4 py-2 font-[family-name:var(--font-mono)] text-[10px] font-medium tracking-[0.14em] text-[var(--pg-ink-muted)] uppercase">
-            <span>Collaborative manuscript</span>
-            <span className="inline-flex items-center gap-1.5 text-teal-700">
-              <ShieldCheck className="size-3.5" />
-              v1 schema
-            </span>
-          </div>
+      <section className="relative flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {room.replica === null ? (
             <div
               className="grid flex-1 place-items-center p-8 text-center"
               data-testid="lexical-room-loading"
             >
               <div>
-                <div className="mx-auto mb-4 flex size-10 items-center justify-center border border-[var(--pg-line)] bg-[var(--pg-paper)]">
+                <div className="mx-auto mb-4 flex size-10 items-center justify-center border border-[var(--pg-line)] bg-[var(--pg-surface)]">
                   <span className="size-2 bg-[var(--pg-accent)] motion-safe:animate-pulse" />
                 </div>
                 <p className="font-[family-name:var(--font-display)] text-lg font-semibold">
@@ -204,7 +181,7 @@ export function LexicalEgWalkerDemo({
           ) : (
             <div
               ref={editorHostRef}
-              className="relative flex-1"
+              className="relative min-h-0 flex-1 overflow-auto"
               data-testid="lexical-room-ready"
             >
               <CoreEditor
@@ -213,7 +190,7 @@ export function LexicalEgWalkerDemo({
                 setActiveEditor={setActiveEditor}
                 historyMode="disabled"
                 lexicalConfig={lexicalConfig}
-                layoutClassName="mx-0 my-0 max-w-none min-h-full font-normal leading-[1.7] [&_.flex-auto]:w-full [&_.flex-auto]:flex-1 [&_[contenteditable=true]]:min-h-[440px] [&_[contenteditable=true]]:w-full [&_[contenteditable=true]]:px-6 [&_[contenteditable=true]]:py-8 [&_[aria-hidden=true]>div]:left-6 [&_[aria-hidden=true]>div]:right-6 [&_[aria-hidden=true]>div]:top-8 md:[&_[contenteditable=true]]:px-14 md:[&_[contenteditable=true]]:py-12 md:[&_[aria-hidden=true]>div]:left-14 md:[&_[aria-hidden=true]>div]:right-14 md:[&_[aria-hidden=true]>div]:top-12"
+                layoutClassName="mx-0 my-0 max-w-none min-h-full font-normal leading-[1.7] [&_.flex-auto]:w-full [&_.flex-auto]:flex-1 [&_[contenteditable=true]]:min-h-[min(70svh,640px)] [&_[contenteditable=true]]:w-full [&_[contenteditable=true]]:px-6 [&_[contenteditable=true]]:py-8 [&_[aria-hidden=true]>div]:left-6 [&_[aria-hidden=true]>div]:right-6 [&_[aria-hidden=true]>div]:top-8 md:[&_[contenteditable=true]]:px-14 md:[&_[contenteditable=true]]:py-12 md:[&_[aria-hidden=true]>div]:left-14 md:[&_[aria-hidden=true]>div]:right-14 md:[&_[aria-hidden=true]>div]:top-12"
               >
                 <LexicalEgWalkerPlugin
                   replica={room.replica}
@@ -228,6 +205,12 @@ export function LexicalEgWalkerDemo({
                 selfId={presence.identity.userId}
                 users={presence.users}
               />
+              {showSoloHint ? (
+                <SoloCollabHint
+                  roomId={roomId}
+                  onShare={() => setShareOpen(true)}
+                />
+              ) : null}
             </div>
           )}
           {visibleError !== null ? (
@@ -239,6 +222,19 @@ export function LexicalEgWalkerDemo({
             </div>
           ) : null}
         </div>
+
+        <CollaborationLab
+          open={labOpen}
+          onOpenChange={setLabOpen}
+          roomId={roomId}
+          replicaId={presence.identity.userId}
+          connectionState={connectionState}
+          transportMode={presence.transportMode}
+          persistenceState={persistenceState}
+          pendingCount={pendingCount}
+          durableBatchCount={durableBatchCount}
+          storageBytes={storageBytes}
+        />
       </section>
     </main>
   );

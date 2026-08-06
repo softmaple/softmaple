@@ -6,14 +6,16 @@ test.describe("Home Page", () => {
 
     await expect(page).toHaveTitle(/SoftMaple Playground/);
     await expect(
-      page.getByRole("heading", { name: /SOFTMAPLE PLAYGROUND/i }),
+      page.getByRole("heading", { name: /^SoftMaple$/i }),
     ).toBeVisible();
+    await expect(page.getByTestId("home-sync-preview")).toBeVisible();
   });
 
   test("should display SoftMaple demo cards", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "Demos" })).toBeVisible();
+    await expect(page.getByTestId("featured-demo-card")).toBeVisible();
     await expect(
       page.getByRole("link", { name: /Lexical × EG-walker/i }),
     ).toBeVisible();
@@ -36,7 +38,7 @@ test.describe("Home Page", () => {
   test("should navigate to Lexical EG-walker demo", async ({ page }) => {
     await page.goto("/");
 
-    await page.getByRole("link", { name: /Open Lexical demo/i }).click();
+    await page.getByRole("link", { name: /Open playground/i }).click();
     await expect(page).toHaveURL(/\/demo\/lexical-eg-walker/);
   });
 

@@ -7,18 +7,23 @@ export interface DemoItem {
   readonly link: FileRouteTypes["to"];
   readonly badge?: string;
   readonly accent: string;
+  readonly tags?: ReadonlyArray<string>;
+  readonly featured?: boolean;
 }
 
-export const demos: ReadonlyArray<DemoItem> = [
-  {
-    id: "01",
-    title: "Lexical × EG-walker",
-    description:
-      "Rich-text collaboration with Lexical, block-model CRDT, WebSocket document sync, and live presence. Open the same room in two browsers to verify.",
-    link: "/demo/lexical-eg-walker",
-    badge: "WebSocket",
-    accent: "#0D9488",
-  },
+export const featuredDemo: DemoItem = {
+  id: "01",
+  title: "Lexical × EG-walker",
+  description:
+    "Rich-text collaboration with Lexical, block-model CRDT, WebSocket document sync, and live presence. Open the same room in two browsers to verify.",
+  link: "/demo/lexical-eg-walker",
+  badge: "Recommended",
+  accent: "#0D9488",
+  tags: ["Cross-browser", "WebSocket", "Rich text"],
+  featured: true,
+};
+
+export const experimentDemos: ReadonlyArray<DemoItem> = [
   {
     id: "02",
     title: "Online Collaborative Editor",
@@ -52,4 +57,10 @@ export const demos: ReadonlyArray<DemoItem> = [
     link: "/demo/two-panel-editor",
     accent: "#7C3AED",
   },
+];
+
+/** Flat list for nav / legacy consumers. */
+export const demos: ReadonlyArray<DemoItem> = [
+  featuredDemo,
+  ...experimentDemos,
 ];

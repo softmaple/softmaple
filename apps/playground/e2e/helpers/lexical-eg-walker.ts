@@ -37,7 +37,7 @@ export const openRoom = async (
   await expect(demo).toHaveAttribute("data-transport", transport);
   await expect(status).toHaveAttribute("data-transport", transport);
   await expect(demo).toHaveAttribute("data-persistence-mode", "persistent");
-  await expect(status).not.toContainText("Unsaved · memory only");
+  await expect(status).not.toContainText("Changes are only stored in memory");
   await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Redo" })).toHaveCount(0);
 

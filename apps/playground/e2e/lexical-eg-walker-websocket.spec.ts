@@ -20,8 +20,8 @@ test.describe("Lexical EG-walker WebSocket cross-browser", () => {
       const first = await openRoom(pageA, roomId, "websocket");
       const second = await openRoom(pageB, roomId, "websocket");
 
-      await expect(first.status).toContainText("WebSocket connected");
-      await expect(second.status).toContainText("WebSocket connected");
+      await expect(first.status).toContainText("Synced");
+      await expect(second.status).toContainText("Synced");
 
       await appendText(first, "Hello across browsers");
       await expectDocument(second, "Hello across browsers");

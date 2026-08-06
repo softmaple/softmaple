@@ -16,7 +16,7 @@ test.describe("Lexical EG-walker BroadcastChannel transport", () => {
     const first = await openRoom(page, roomId, "broadcast");
     const second = await openSecondTab(context, roomId, "broadcast");
 
-    await expect(first.status).toContainText("Tabs connected");
+    await expect(first.status).toContainText("Synced");
     await appendText(first, "Broadcast only");
     await expectDocument(second, "Broadcast only");
   });

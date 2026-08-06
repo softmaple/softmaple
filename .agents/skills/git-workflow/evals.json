@@ -25,7 +25,16 @@
         "Uses conventional commit form type(scope): summary, e.g. feat(apps/web): ...",
         "PR guidance includes summary, test commands, and screenshots note for UI changes",
         "Targets next as the base branch",
-        "Does not commit directly to next"
+        "Does not commit directly to next",
+        "Requests user approval before committing or pushing"
+      ]
+    },
+    {
+      "query": "I'm done with my feature branch and want to switch back to next to start something else.",
+      "expected_behavior": [
+        "Runs git checkout next",
+        "Runs git pull",
+        "Runs pnpm i"
       ]
     }
   ]

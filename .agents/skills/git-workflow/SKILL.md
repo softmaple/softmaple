@@ -1,6 +1,7 @@
 ---
 name: git-workflow
 description: Softmaple Git branching, commits, pre-commit hooks, and pull requests. Use when creating branches, committing, pushing, opening or updating PRs, fixing pre-commit hook failures, returning to the next branch, or when the user mentions git workflow, --no-verify, branch naming, or commit messages.
+license: Complete terms in LICENSE.txt
 ---
 
 # Git Workflow
@@ -15,7 +16,7 @@ Softmaple Git conventions. Default branch is `next`. Follow the critical rules e
 
 ## When to use which path
 
-```
+```text
 Git task?
 ├─ Starting work on next? → Branch workflow
 ├─ Committing changes? → Commit workflow
@@ -28,16 +29,18 @@ Git task?
 
 Copy and track:
 
-```
+```text
 Branch Progress:
 - [ ] Check current branch
-- [ ] Create feature branch if on next
+- [ ] Create feature branch if on next or detached HEAD
 - [ ] Make changes on the feature branch only
 ```
 
 1. `git branch --show-current`
-2. If on `next`: `git checkout -b type/description-$(date +%s)`
-3. Work only on that branch
+2. If the result is empty (detached HEAD) or `next`: create a feature branch
+   with `git checkout -b type/description-$(date +%s)` before any edits.
+   Do not edit while detached or on `next`.
+3. Work only on that feature branch
 
 **Branch name format:** `type/description-$(date +%s)`
 
@@ -56,7 +59,7 @@ Types: `feature`, `fix`, `refactor`, `docs`, `chore`, `test`, `ci`, `build`, `pe
 
 Copy and track:
 
-```
+```text
 Commit Progress:
 - [ ] Confirm not on next
 - [ ] pnpm --filter <package> typecheck (as needed)
@@ -77,7 +80,7 @@ Commit Progress:
 
 Examples:
 
-```
+```text
 feat(packages/eg-walker): add incremental CRDT integration
 fix(apps/web): resolve duplicate event crash
 docs: update functional programming guidelines

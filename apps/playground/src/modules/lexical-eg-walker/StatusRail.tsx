@@ -107,16 +107,16 @@ const StatusItem = ({
 }) => {
   const toneClass =
     tone === "danger"
-      ? "text-[#B42318]"
+      ? "text-rose-700"
       : tone === "warn"
-        ? "text-[#B54708]"
-        : "text-[#526078]";
+        ? "text-amber-700"
+        : "text-[var(--pg-ink-muted)]";
   const iconClass =
     tone === "danger"
-      ? "text-[#E45D6F]"
+      ? "text-rose-500"
       : tone === "warn"
-        ? "text-[#F79009]"
-        : "text-[#475BD8]";
+        ? "text-amber-500"
+        : "text-[var(--pg-accent)]";
 
   return (
     <span
@@ -144,7 +144,7 @@ export function StatusRail({
     persistenceState === "saved" ? (
       <Check className="size-3.5" />
     ) : persistenceState === "unsaved" ? (
-      <CloudOff className="size-3.5 text-[#E45D6F]" />
+      <CloudOff className="size-3.5 text-rose-500" />
     ) : (
       <LoaderCircle className="size-3.5 motion-safe:animate-spin" />
     );
@@ -169,7 +169,7 @@ export function StatusRail({
   return (
     // biome-ignore lint/a11y/useSemanticElements: transport status live region; <output> is for form-calculated values.
     <div
-      className="relative z-20 flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[#CBD6E2] bg-white/92 px-3 py-2 text-[11px] font-medium tracking-[0.02em] text-[#526078] backdrop-blur md:px-5"
+      className="relative z-20 flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--pg-line)] bg-[var(--pg-surface)]/92 px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] font-medium tracking-[0.02em] text-[var(--pg-ink-muted)] backdrop-blur md:px-5"
       data-testid="collaboration-status"
       data-transport={transportMode}
       data-connection-state={connectionState}
@@ -178,11 +178,11 @@ export function StatusRail({
     >
       <span
         aria-hidden
-        className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[#475BD8] via-[#38BDF8] to-[#FF6B6B]"
+        className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[var(--pg-accent)] via-teal-500 to-orange-500"
       />
       <button
         type="button"
-        className="group inline-flex max-w-48 items-center gap-1.5 rounded-md px-1.5 py-1 text-[#17253D] outline-none transition-colors hover:bg-[#EEF3F7] focus-visible:ring-2 focus-visible:ring-[#475BD8]"
+        className="group inline-flex max-w-48 items-center gap-1.5 px-1.5 py-1 text-[var(--pg-ink)] outline-none transition-colors hover:bg-[var(--pg-paper)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
         onClick={onCopyRoomLink}
         aria-label={`Copy link for room ${roomId}`}
       >
@@ -195,7 +195,7 @@ export function StatusRail({
       </StatusItem>
       {isReconnectWarningState(connectionState) &&
       transportMode === "websocket" ? (
-        <span className="rounded-md border border-[#FEDF89] bg-[#FFFAEB] px-2 py-0.5 text-[10px] font-semibold text-[#B54708]">
+        <span className="border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
           Sync paused until reconnect
         </span>
       ) : null}
@@ -210,7 +210,7 @@ export function StatusRail({
         {users.slice(0, 5).map((user, index) => (
           <span
             key={user.userId}
-            className="grid size-6 place-items-center rounded-full border-2 border-white text-[9px] font-bold text-white shadow-sm"
+            className="grid size-6 place-items-center border-2 border-[var(--pg-surface)] text-[9px] font-bold text-white shadow-sm"
             style={{
               backgroundColor: user.color,
               marginLeft: index === 0 ? 0 : -5,
@@ -220,7 +220,7 @@ export function StatusRail({
             {user.name.slice(0, 2).toUpperCase()}
           </span>
         ))}
-        <span className="ml-2 whitespace-nowrap text-[#526078]">
+        <span className="ml-2 whitespace-nowrap text-[var(--pg-ink-muted)]">
           {users.length} online
         </span>
       </div>

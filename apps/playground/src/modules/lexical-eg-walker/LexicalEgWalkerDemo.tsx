@@ -125,7 +125,7 @@ export function LexicalEgWalkerDemo({
 
   return (
     <main
-      className="flex min-h-[100svh] flex-col overflow-hidden bg-[#EEF3F7] text-[#17253D]"
+      className="flex min-h-[100svh] flex-col overflow-hidden bg-[var(--pg-paper)] text-[var(--pg-ink)]"
       data-testid="lexical-eg-walker-demo"
       data-room-id={roomId}
       data-transport={presence.transportMode}
@@ -148,19 +148,19 @@ export function LexicalEgWalkerDemo({
         onCopyRoomLink={copyRoomLink}
       />
 
-      <header className="flex items-start justify-between gap-4 px-4 pb-3 pt-4 md:px-8 md:pb-4 md:pt-6">
+      <header className="flex items-start justify-between gap-4 px-4 pt-4 pb-3 md:px-8 md:pt-6 md:pb-4">
         <div className="min-w-0">
-          <div className="mb-1.5 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#475BD8]">
+          <div className="mb-1.5 flex items-center gap-2 font-[family-name:var(--font-mono)] text-[10px] font-semibold tracking-[0.18em] text-[var(--pg-accent)] uppercase">
             <GitFork className="size-3.5" />
             Causal canvas ·{" "}
             {presence.transportMode === "websocket"
               ? "WebSocket"
               : "local first"}
           </div>
-          <h1 className="font-serif text-2xl leading-tight tracking-[-0.025em] md:text-3xl">
+          <h1 className="font-[family-name:var(--font-display)] text-2xl leading-tight font-bold tracking-[-0.03em] md:text-3xl">
             EG-walker × Lexical
           </h1>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-[#67758B] md:text-sm">
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-[var(--pg-ink-muted)] md:text-sm">
             {presence.transportMode === "websocket"
               ? "One document across browsers. Document events and presence sync over WebSocket; a local copy remains on this device."
               : "One document, any number of tabs. Changes converge through stable sequence anchors and remain on this device after every tab closes. Add ?transport=websocket for cross-browser sync."}
@@ -168,7 +168,7 @@ export function LexicalEgWalkerDemo({
         </div>
         <a
           href="/"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#CBD6E2] bg-white px-2.5 py-2 text-xs font-semibold text-[#526078] shadow-sm outline-none transition-colors hover:border-[#9BAAC0] hover:text-[#17253D] focus-visible:ring-2 focus-visible:ring-[#475BD8]"
+          className="inline-flex shrink-0 items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-surface)] px-2.5 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] outline-none transition-colors hover:border-[var(--pg-ink)] hover:text-[var(--pg-ink)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
         >
           <ArrowLeft className="size-3.5" />
           <span className="hidden sm:inline">Playground</span>
@@ -176,11 +176,10 @@ export function LexicalEgWalkerDemo({
       </header>
 
       <section className="relative mx-auto flex w-full max-w-[1120px] flex-1 px-3 pb-3 md:px-8 md:pb-8">
-        <div className="pointer-events-none absolute inset-x-10 bottom-2 top-4 rounded-[28px] bg-[#475BD8]/8 blur-2xl" />
-        <div className="relative flex min-h-[540px] w-full flex-col overflow-hidden rounded-xl border border-[#CBD6E2] bg-white shadow-[0_18px_55px_rgba(23,37,61,0.12)] md:rounded-2xl">
-          <div className="flex items-center justify-between border-b border-[#E1E7EF] bg-[#FAFCFE] px-4 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[#7A879A]">
+        <div className="pg-panel relative flex min-h-[540px] w-full flex-col overflow-hidden">
+          <div className="pg-panel-header flex items-center justify-between px-4 py-2 font-[family-name:var(--font-mono)] text-[10px] font-medium tracking-[0.14em] text-[var(--pg-ink-muted)] uppercase">
             <span>Collaborative manuscript</span>
-            <span className="inline-flex items-center gap-1.5 text-[#168D91]">
+            <span className="inline-flex items-center gap-1.5 text-teal-700">
               <ShieldCheck className="size-3.5" />
               v1 schema
             </span>
@@ -191,13 +190,13 @@ export function LexicalEgWalkerDemo({
               data-testid="lexical-room-loading"
             >
               <div>
-                <div className="mx-auto mb-4 flex size-10 items-center justify-center rounded-full border border-[#BCC8D8] bg-[#EEF3F7]">
-                  <span className="size-2 rounded-full bg-[#475BD8] motion-safe:animate-pulse" />
+                <div className="mx-auto mb-4 flex size-10 items-center justify-center border border-[var(--pg-line)] bg-[var(--pg-paper)]">
+                  <span className="size-2 bg-[var(--pg-accent)] motion-safe:animate-pulse" />
                 </div>
-                <p className="font-serif text-lg">
+                <p className="font-[family-name:var(--font-display)] text-lg font-semibold">
                   Replaying the room history…
                 </p>
-                <p className="mt-1 text-xs text-[#7A879A]">
+                <p className="mt-1 text-xs text-[var(--pg-ink-muted)]">
                   Editing opens after the first converged document is ready.
                 </p>
               </div>
@@ -234,7 +233,7 @@ export function LexicalEgWalkerDemo({
           {visibleError !== null ? (
             <div
               role="alert"
-              className="border-t border-[#F1C4CB] bg-[#FFF6F7] px-4 py-2 text-xs text-[#A13B4C]"
+              className="border-t border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-800"
             >
               {visibleError.message}
             </div>

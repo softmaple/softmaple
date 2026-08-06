@@ -6,13 +6,14 @@ import { JoinRoomForm } from "@/components/collab-editor/JoinRoomForm";
 import { RecentRoomsList } from "@/components/collab-editor/RecentRoomsList";
 import { RoomCreationForm } from "@/components/collab-editor/RoomCreationForm";
 import { RoomHeader } from "@/components/collab-editor/RoomHeader";
+import { DemoPageShell } from "@/components/demo/DemoPageShell";
 import { useCollabEditor } from "@/modules/collab-editor/hooks/use-collab-editor";
 import { useRecentRooms } from "@/modules/collab-editor/hooks/use-recent-rooms";
 import { useTextChange } from "@/modules/collab-editor/hooks/use-text-change";
 import { resolveBrowserCollabEndpoints } from "@/modules/collab-transport/urls";
-import "@/styles/guofeng.css";
 
 export const Route = createFileRoute("/demo/online-collab-editor")({
+  ssr: false,
   component: OnlineCollabEditor,
 });
 
@@ -44,7 +45,6 @@ function OnlineCollabEditor() {
   } = useCollabEditor(syncWsUrl);
 
   const { recentRooms, isLoadingRooms } = useRecentRooms();
-  // No need for a callback here - useCollabEditor already handles text updates
   const { handleTextChange } = useTextChange(roomManager);
 
   const writeRoomToUrl = useCallback((roomId: string) => {
@@ -53,7 +53,6 @@ function OnlineCollabEditor() {
     window.history.replaceState(null, "", `${url.pathname}${url.search}`);
   }, []);
 
-  // Check URL params for room ID
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get("room");
@@ -97,13 +96,8 @@ function OnlineCollabEditor() {
   const handleTextAreaChange = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value;
-
-      // Save cursor position
       const cursorPos = e.target.selectionStart;
-
       handleTextChange(newText);
-
-      // Restore cursor position
       setTimeout(() => {
         if (textareaRef.current) {
           const safePos = Math.min(cursorPos, newText.length);
@@ -114,67 +108,57 @@ function OnlineCollabEditor() {
     [handleTextChange],
   );
 
-  // Show error toast
   useEffect(() => {
     if (error) {
       toast.error(error);
     }
   }, [error]);
 
-  // Room creation/joining view
   if (!hasJoined) {
     return (
-      <div className="min-h-screen guofeng-paper guofeng-ink-wash relative flex items-center justify-center p-4">
-        <div className="max-w-4xl w-full relative z-10">
-          <h1 className="text-4xl font-bold guofeng-heading text-center mb-2 flex items-center justify-center gap-3">
-            <span className="guofeng-seal transform-none text-base">墨</span>
-            Online Collaborative Editor
-          </h1>
-          <p className="guofeng-text text-center mb-8">
-            Create a room to start collaborating or join an existing one
-          </p>
-          <div className="guofeng-divider"></div>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <RoomCreationForm
-              userName={userName}
-              roomName={roomName}
-              onUserNameChange={setUserName}
-              onRoomNameChange={setRoomName}
-              onSubmit={handleCreateRoom}
-              isLoading={isLoading}
-            />
-
-            <JoinRoomForm
-              userName={userName}
-              joinRoomId={joinRoomId}
-              onUserNameChange={setUserName}
-              onRoomIdChange={setJoinRoomId}
-              onSubmit={handleJoinRoom}
-              isLoading={isLoading}
-            />
-          </div>
-
+      <DemoPageShell
+        eyebrow="02 · WebSocket rooms"
+        title="Online Collaborative Editor"
+        description="Create a room to start collaborating or join an existing one."
+        contentClassName="max-w-5xl"
+      >
+        <div className="grid gap-6 md:grid-cols-2">
+          <RoomCreationForm
+            userName={userName}
+            roomName={roomName}
+            onUserNameChange={setUserName}
+            onRoomNameChange={setRoomName}
+            onSubmit={handleCreateRoom}
+            isLoading={isLoading}
+          />
+          <JoinRoomForm
+            userName={userName}
+            joinRoomId={joinRoomId}
+            onUserNameChange={setUserName}
+            onRoomIdChange={setJoinRoomId}
+            onSubmit={handleJoinRoom}
+            isLoading={isLoading}
+          />
+        </div>
+        <div className="mt-6 flex justify-center">
           <RecentRoomsList
             rooms={recentRooms}
             isLoading={isLoadingRooms}
             onJoinRoom={setJoinRoomId}
           />
         </div>
-      </div>
+      </DemoPageShell>
     );
   }
 
-  // Collaboration view
   return (
-    <div className="flex flex-col min-h-screen guofeng-paper guofeng-ink-wash relative">
-      <div className="container mx-auto p-4 flex-1 flex flex-col">
+    <div className="flex min-h-screen flex-col bg-[var(--pg-paper)] text-[var(--pg-ink)]">
+      <div className="container mx-auto flex flex-1 flex-col p-4 md:p-6">
         <RoomHeader
           currentRoom={currentRoom}
           participants={participants}
           onLeaveRoom={handleLeaveRoom}
         />
-
         <CollabTextEditor
           text={text}
           participants={participants}

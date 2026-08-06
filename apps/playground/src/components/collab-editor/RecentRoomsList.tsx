@@ -26,7 +26,6 @@ export function RecentRoomsList({
 }: RecentRoomsListProps) {
   const listRef = useRef<HTMLUListElement>(null);
 
-  // Handle keyboard navigation in the list
   const handleKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
     const target = e.target as HTMLElement;
     const buttons = listRef.current?.querySelectorAll("button");
@@ -69,16 +68,16 @@ export function RecentRoomsList({
 
   return (
     <Card
-      className="w-full max-w-md guofeng-card guofeng-shadow-hover"
+      className="pg-panel w-full max-w-md rounded-none border-[var(--pg-line)] bg-[var(--pg-surface)] shadow-none"
       role="region"
       aria-label="Recent rooms"
     >
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 guofeng-text-ink">
+        <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-xl font-semibold tracking-[-0.02em] text-[var(--pg-ink)]">
           <Clock className="h-5 w-5" aria-hidden="true" />
           Recent Rooms
         </CardTitle>
-        <CardDescription className="guofeng-text-muted">
+        <CardDescription className="text-[var(--pg-ink-muted)]">
           Quick access to your previous sessions
         </CardDescription>
       </CardHeader>
@@ -86,17 +85,16 @@ export function RecentRoomsList({
         {isLoading ? (
           <div className="space-y-2">
             <span className="sr-only">Loading recent rooms...</span>
-            <div className="h-10 w-full guofeng-skeleton rounded" />
-            <div className="h-10 w-full guofeng-skeleton rounded" />
-            <div className="h-10 w-full guofeng-skeleton rounded" />
+            <div className="pg-skeleton h-10 w-full" />
+            <div className="pg-skeleton h-10 w-full" />
+            <div className="pg-skeleton h-10 w-full" />
           </div>
         ) : rooms.length === 0 ? (
-          <p className="text-sm guofeng-text-muted text-center py-4">
+          <p className="py-4 text-center text-sm text-[var(--pg-ink-muted)]">
             No recent rooms found
           </p>
         ) : (
           <ScrollArea className="max-h-[200px]">
-            <div className="guofeng-brush-divider-horizontal mb-2 opacity-30"></div>
             <ul
               ref={listRef}
               className="space-y-2"
@@ -107,15 +105,15 @@ export function RecentRoomsList({
                 <li key={room.id}>
                   <Button
                     variant="ghost"
-                    className="w-full justify-between text-left guofeng-button-ghost guofeng-hover-deepen"
+                    className="pg-btn-ghost w-full justify-between text-left"
                     onClick={() => onJoinRoom(room.id)}
                     aria-label={`Join room ${room.name}`}
                     tabIndex={0}
                   >
-                    <span className="truncate guofeng-text-ink">
+                    <span className="truncate text-[var(--pg-ink)]">
                       {room.name}
                     </span>
-                    <span className="text-xs guofeng-text-muted guofeng-badge-minimal">
+                    <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--pg-ink-muted)]">
                       {room.id && room.id.length > ROOM_ID_PREVIEW_LENGTH
                         ? `${room.id.slice(0, ROOM_ID_PREVIEW_LENGTH)}...`
                         : room.id || ""}

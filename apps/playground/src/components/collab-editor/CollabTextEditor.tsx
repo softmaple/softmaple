@@ -18,18 +18,18 @@ export function CollabTextEditor({
   onChange,
 }: CollabTextEditorProps) {
   return (
-    <Card className="flex-1 guofeng-editor-card guofeng-shadow-hover">
-      <CardContent className="flex flex-col h-full p-0">
-        <div className="p-4 guofeng-editor-header">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm guofeng-text-muted">
+    <Card className="pg-panel flex-1 overflow-hidden rounded-none border-[var(--pg-line)] bg-[var(--pg-surface)] shadow-none">
+      <CardContent className="flex h-full flex-col p-0">
+        <div className="pg-panel-header p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-[var(--pg-ink-muted)]">
               Active participants:
             </span>
             {participants.map((user) => (
               <Badge
                 key={user.id}
                 variant="secondary"
-                className="text-xs guofeng-participant-badge"
+                className="border text-xs"
                 style={{
                   backgroundColor: `${user.color}15`,
                   borderColor: user.color,
@@ -41,19 +41,19 @@ export function CollabTextEditor({
               </Badge>
             ))}
             {participants.length === 0 && (
-              <span className="text-xs guofeng-text-muted">
+              <span className="text-xs text-[var(--pg-ink-muted)]">
                 No other participants yet
               </span>
             )}
           </div>
         </div>
-        <div className="flex-1 relative guofeng-editor-area">
+        <div className="relative flex-1">
           <Textarea
             ref={textareaRef}
             value={text}
             onChange={onChange}
             placeholder="Start typing collaboratively..."
-            className="h-full w-full min-h-[400px] resize-none guofeng-textarea"
+            className="h-full min-h-[400px] w-full resize-none rounded-none border-0 bg-transparent p-4 text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
             aria-label="Collaborative text editor"
             aria-describedby="editor-description"
           />
@@ -62,8 +62,8 @@ export function CollabTextEditor({
             synchronized with other participants in real-time.
           </span>
         </div>
-        <div className="p-2 guofeng-editor-footer">
-          <p className="text-xs guofeng-text-muted text-center">
+        <div className="pg-panel-footer p-2">
+          <p className="text-center font-[family-name:var(--font-mono)] text-xs text-[var(--pg-ink-muted)]">
             <span aria-live="polite" aria-atomic="true">
               {text.length} characters •{" "}
               {text.split(/\s+/).filter(Boolean).length} words

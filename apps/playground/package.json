@@ -17,6 +17,9 @@
     "check": "biome check"
   },
   "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/syne": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@lexical/code": "^0.44.0",
     "@lexical/link": "^0.44.0",
     "@lexical/list": "^0.44.0",

@@ -32,15 +32,12 @@ export function JoinRoomForm({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    // Only submit if both fields have values
     if (userName.trim() && joinRoomId.trim()) {
       onSubmit(e);
     }
   };
 
-  // Focus first input on mount
   useEffect(() => {
-    // Only focus if the RoomCreationForm isn't visible (to avoid competing focus)
     const roomCreationForm = document.querySelector(
       '[aria-label="Room creation form"]',
     );
@@ -49,11 +46,9 @@ export function JoinRoomForm({
     }
   }, []);
 
-  // Handle Enter key globally for the form
   const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       const target = e.target as HTMLElement;
-      // If we're in an input field and the form is valid, submit
       if (target.tagName === "INPUT" && userName.trim() && joinRoomId.trim()) {
         e.preventDefault();
         handleSubmit(e as unknown as FormEvent);
@@ -63,16 +58,15 @@ export function JoinRoomForm({
 
   return (
     <Card
-      className="w-full max-w-md guofeng-scroll guofeng-corner"
+      className="pg-panel w-full max-w-md rounded-none border-[var(--pg-line)] bg-[var(--pg-surface)] shadow-none"
       role="region"
       aria-label="Join existing room"
     >
       <CardHeader>
-        <CardTitle className="guofeng-heading flex items-center gap-2">
-          <span className="text-sm guofeng-seal inline-block">入</span>
+        <CardTitle className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-[-0.02em] text-[var(--pg-ink)]">
           Join a Room
         </CardTitle>
-        <CardDescription className="guofeng-text">
+        <CardDescription className="text-[var(--pg-ink-muted)]">
           Enter a room ID to join an existing session
         </CardDescription>
       </CardHeader>
@@ -84,7 +78,10 @@ export function JoinRoomForm({
           aria-label="Join room form"
         >
           <div className="space-y-2">
-            <Label htmlFor="join-username" className="guofeng-text font-medium">
+            <Label
+              htmlFor="join-username"
+              className="font-medium text-[var(--pg-ink)]"
+            >
               Your Name
             </Label>
             <Input
@@ -98,7 +95,7 @@ export function JoinRoomForm({
               aria-required="true"
               aria-describedby="join-username-desc"
               aria-invalid={userName.length > 0 && !userName.trim()}
-              className="guofeng-input guofeng-hover guofeng-focus"
+              className="pg-input"
               autoComplete="name"
             />
             <span id="join-username-desc" className="sr-only">
@@ -106,7 +103,10 @@ export function JoinRoomForm({
             </span>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="room-id" className="guofeng-text font-medium">
+            <Label
+              htmlFor="room-id"
+              className="font-medium text-[var(--pg-ink)]"
+            >
               Room ID
             </Label>
             <Input
@@ -119,7 +119,7 @@ export function JoinRoomForm({
               aria-required="true"
               aria-describedby="room-id-desc"
               aria-invalid={joinRoomId.length > 0 && !joinRoomId.trim()}
-              className="guofeng-input guofeng-hover guofeng-focus"
+              className="pg-input"
               autoComplete="off"
             />
             <span id="room-id-desc" className="sr-only">
@@ -128,7 +128,7 @@ export function JoinRoomForm({
           </div>
           <Button
             type="submit"
-            className="w-full guofeng-btn-primary guofeng-btn"
+            className="pg-btn-primary w-full"
             disabled={isLoading || !userName.trim() || !joinRoomId.trim()}
             aria-busy={isLoading}
             aria-disabled={isLoading || !userName.trim() || !joinRoomId.trim()}

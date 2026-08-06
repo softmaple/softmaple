@@ -161,7 +161,7 @@ export function EditorSurface({
     <div className="relative">
       <div
         ref={editorBoxRef}
-        className="relative rounded-xl border border-slate-700 bg-slate-900/60 overflow-hidden shadow-lg"
+        className="pg-panel relative overflow-hidden"
         // The testid uses the bare `trainerId`, not the per-tab
         // `userInfo.userId` (which has a tabTag suffix). Safe because
         // one tab mounts one EditorSurface, but the e2e tests should
@@ -169,9 +169,9 @@ export function EditorSurface({
         // inspecting two surfaces with the same testid in one DOM.
         data-testid={`editor-surface-${trainerId}`}
       >
-        <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-slate-800 bg-slate-900/80">
-          <p className="text-xs uppercase tracking-widest text-cyan-400 font-semibold">
-            Pokédex · Shared Field Notes
+        <div className="pg-panel-header flex items-center justify-between gap-2 px-4 py-2">
+          <p className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.18em] text-[var(--pg-ink-muted)] uppercase">
+            Shared field notes
           </p>
           <BlockActivityBadge blockId={blockId} />
         </div>
@@ -189,7 +189,7 @@ export function EditorSurface({
             updateTyping(false);
           }}
           placeholder="Type field notes here. Open another tab as a different trainer to collaborate."
-          className="w-full min-h-[280px] sm:min-h-[360px] resize-y p-4 bg-transparent text-gray-100 placeholder:text-slate-400 focus:outline-none font-mono text-sm leading-relaxed"
+          className="min-h-[280px] w-full resize-y bg-transparent p-4 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] focus:outline-none sm:min-h-[360px]"
           spellCheck={false}
         />
       </div>

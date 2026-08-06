@@ -1,77 +1,65 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@softmaple/ui/components/card";
 import { Textarea } from "@softmaple/ui/components/textarea";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { DemoPageShell } from "@/components/demo/DemoPageShell";
 
 function TwoPanelEditor() {
   const [editorAContent, setEditorAContent] = useState("");
   const [editorBContent, setEditorBContent] = useState("");
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-800 to-black p-4">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-white mb-6 text-center">
-          Two-Panel Text Editor
-        </h1>
-
-        {/* Two-panel layout: side-by-side on desktop, stacked on mobile */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Editor A */}
-          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
-            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <CardTitle id="editor-a-label" className="text-xl text-white">
-                Editor A
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 p-0">
-              <Textarea
-                value={editorAContent}
-                onChange={(e) => setEditorAContent(e.target.value)}
-                placeholder="Start typing in Editor A..."
-                aria-labelledby="editor-a-label"
-                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-blue-400 border-0 rounded-none p-4"
-              />
-            </CardContent>
-          </Card>
-
-          {/* Editor B */}
-          <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
-            <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
-              <CardTitle id="editor-b-label" className="text-xl text-white">
-                Editor B
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 p-0">
-              <Textarea
-                value={editorBContent}
-                onChange={(e) => setEditorBContent(e.target.value)}
-                placeholder="Start typing in Editor B..."
-                aria-labelledby="editor-b-label"
-                className="h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 focus-visible:ring-green-400 border-0 rounded-none p-4"
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Character count info */}
-        <div className="mt-4 flex flex-col lg:flex-row gap-4 text-white/60 text-sm">
-          <div className="flex-1 text-center lg:text-left">
-            Editor A: {editorAContent.length} characters
+    <DemoPageShell
+      eyebrow="05 · Local editors"
+      title="Two-Panel Text Editor"
+      description="Independent text editors side-by-side. Useful for comparing drafts, note-taking, or dual-language editing."
+    >
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <section className="pg-panel flex h-full flex-col overflow-hidden">
+          <div className="pg-panel-header px-4 py-3">
+            <h2
+              id="editor-a-label"
+              className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-[-0.02em]"
+            >
+              Editor A
+            </h2>
           </div>
-          <div className="flex-1 text-center lg:text-right">
-            Editor B: {editorBContent.length} characters
+          <Textarea
+            value={editorAContent}
+            onChange={(e) => setEditorAContent(e.target.value)}
+            placeholder="Start typing in Editor A..."
+            aria-labelledby="editor-a-label"
+            className="h-full min-h-[400px] w-full resize-none rounded-none border-0 bg-transparent p-4 text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)] lg:min-h-[600px]"
+          />
+        </section>
+
+        <section className="pg-panel flex h-full flex-col overflow-hidden">
+          <div className="pg-panel-header px-4 py-3">
+            <h2
+              id="editor-b-label"
+              className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-[-0.02em]"
+            >
+              Editor B
+            </h2>
           </div>
-        </div>
+          <Textarea
+            value={editorBContent}
+            onChange={(e) => setEditorBContent(e.target.value)}
+            placeholder="Start typing in Editor B..."
+            aria-labelledby="editor-b-label"
+            className="h-full min-h-[400px] w-full resize-none rounded-none border-0 bg-transparent p-4 text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)] lg:min-h-[600px]"
+          />
+        </section>
       </div>
-    </div>
+
+      <div className="mt-4 flex flex-col gap-2 font-[family-name:var(--font-mono)] text-xs text-[var(--pg-ink-muted)] lg:flex-row lg:justify-between">
+        <p>Editor A: {editorAContent.length} characters</p>
+        <p>Editor B: {editorBContent.length} characters</p>
+      </div>
+    </DemoPageShell>
   );
 }
 
 export const Route = createFileRoute("/demo/two-panel-editor")({
+  ssr: false,
   component: TwoPanelEditor,
 });

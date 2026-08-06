@@ -1,14 +1,21 @@
 import { Link } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
+import { useEffect, useState } from "react";
 import { SyncField } from "@/components/home/SyncField";
 
 const spring = { type: "spring" as const, stiffness: 280, damping: 28 };
 
 export function HomeHero() {
   const reduceMotion = useReducedMotion();
+  // Defer hidden initial state until after mount so SSR / no-JS / null
+  // reduced-motion preference still shows hero content.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    setReady(true);
+  }, []);
 
   const reveal = (delay: number) =>
-    reduceMotion
+    !ready || reduceMotion
       ? {}
       : {
           initial: { opacity: 0, y: 28 },

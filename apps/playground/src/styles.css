@@ -2,17 +2,12 @@
 
 @import 'tw-animate-css';
 
-@import '@fontsource-variable/syne';
-@import '@fontsource-variable/dm-sans';
-@import '@fontsource/jetbrains-mono/400.css';
-@import '@fontsource/jetbrains-mono/500.css';
-
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-display: 'Syne Variable', 'Syne', sans-serif;
-  --font-body: 'DM Sans Variable', 'DM Sans', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: "Syne", sans-serif;
+  --font-body: "DM Sans", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* Playground Motion-inspired tokens */
   --pg-paper: #f4f4f5;

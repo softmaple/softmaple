@@ -12,7 +12,7 @@ export const Route = createFileRoute("/demo/collaborative-editor")({
 });
 
 function CollaborativeEditor() {
-  const { replica1Ref, replica2Ref } = useCollaborativeEditor();
+  const { replica1Ref, replica2Ref, bindingsReady } = useCollaborativeEditor();
 
   const replicaEditors: readonly ReplicaEditorPanelProps[] = [
     {
@@ -47,7 +47,10 @@ function CollaborativeEditor() {
         </>
       }
     >
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div
+        className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+        data-bindings-ready={bindingsReady ? "true" : "false"}
+      >
         {replicaEditors.map((editor) => (
           <ReplicaEditorPanel key={editor.testId} {...editor} />
         ))}

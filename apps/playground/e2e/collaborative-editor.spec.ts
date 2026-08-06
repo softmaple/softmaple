@@ -19,7 +19,7 @@ test.describe("Collaborative Text Editor", () => {
     await page.waitForLoadState("domcontentloaded");
     await page.locator('textarea[data-testid="replica-1"]').waitFor();
     await page.locator('textarea[data-testid="replica-2"]').waitFor();
-    await page.waitForTimeout(100);
+    await page.locator('[data-bindings-ready="true"]').waitFor();
   });
 
   test("should display two replica editors", async ({ page }) => {

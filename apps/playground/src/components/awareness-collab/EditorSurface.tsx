@@ -189,7 +189,7 @@ export function EditorSurface({
             updateTyping(false);
           }}
           placeholder="Type field notes here. Open another tab as a different trainer to collaborate."
-          className="min-h-[280px] w-full resize-y bg-transparent p-4 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] focus:outline-none sm:min-h-[360px]"
+          className="min-h-[280px] w-full resize-y bg-transparent p-4 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)] sm:min-h-[360px]"
           spellCheck={false}
         />
       </div>

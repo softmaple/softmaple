@@ -1,8 +1,10 @@
+import type { FileRouteTypes } from "@/routeTree.gen";
+
 export interface DemoItem {
   readonly id: string;
   readonly title: string;
   readonly description: string;
-  readonly link: string;
+  readonly link: FileRouteTypes["to"];
   readonly badge?: string;
   readonly accent: string;
 }

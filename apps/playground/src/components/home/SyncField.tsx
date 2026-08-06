@@ -52,9 +52,9 @@ export function SyncField() {
           className="absolute inset-0 h-full w-full"
           viewBox="0 0 100 100"
           preserveAspectRatio="xMidYMid slice"
-          role="presentation"
+          aria-hidden="true"
+          focusable="false"
         >
-          <title>Collaboration sync paths</title>
           {lines.map((line) => (
             <motion.line
               key={`${line.x1}-${line.y1}-${line.x2}-${line.y2}`}
@@ -81,60 +81,62 @@ export function SyncField() {
           ))}
         </svg>
 
-        {cursors.map((cursor) => (
-          <motion.div
-            key={cursor.id}
-            className={`absolute ${cursor.mobileHide ? "max-md:hidden" : ""}`}
-            style={{ left: 0, top: 0 }}
-            initial={false}
-            animate={
-              reduceMotion
-                ? {
-                    left: `${cursor.path.x[0]}%`,
-                    top: `${cursor.path.y[0]}%`,
-                  }
-                : {
-                    left: cursor.path.x.map((v) => `${v}%`),
-                    top: cursor.path.y.map((v) => `${v}%`),
-                  }
-            }
-            transition={
-              reduceMotion
-                ? undefined
-                : {
-                    duration: cursor.duration,
-                    repeat: Number.POSITIVE_INFINITY,
-                    ease: "easeInOut",
-                  }
-            }
-          >
-            <div className="relative -translate-x-1 -translate-y-1">
-              <svg
-                width="18"
-                height="22"
-                viewBox="0 0 18 22"
-                fill="none"
-                role="img"
-                aria-label={`${cursor.label} cursor`}
-              >
-                <title>{`${cursor.label} cursor`}</title>
-                <path
-                  d="M1 1L16.5 10.2L9.2 12.1L6.8 20.5L1 1Z"
-                  fill={cursor.color}
-                  stroke="white"
-                  strokeWidth="1.2"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span
-                className="absolute left-4 top-4 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-white"
-                style={{ backgroundColor: cursor.color }}
-              >
-                {cursor.label}
-              </span>
-            </div>
-          </motion.div>
-        ))}
+        {cursors.map((cursor) => {
+          const x0 = cursor.path.x[0];
+          const y0 = cursor.path.y[0];
+          // Size to the parent so % x/y transforms stay parent-relative
+          // (matching the previous left/top % keyframes).
+          return (
+            <motion.div
+              key={cursor.id}
+              className={`absolute h-full w-full ${cursor.mobileHide ? "max-md:hidden" : ""}`}
+              style={{ left: `${x0}%`, top: `${y0}%` }}
+              initial={false}
+              animate={
+                reduceMotion
+                  ? undefined
+                  : {
+                      x: cursor.path.x.map((v) => `${v - x0}%`),
+                      y: cursor.path.y.map((v) => `${v - y0}%`),
+                    }
+              }
+              transition={
+                reduceMotion
+                  ? undefined
+                  : {
+                      duration: cursor.duration,
+                      repeat: Number.POSITIVE_INFINITY,
+                      ease: "easeInOut",
+                    }
+              }
+            >
+              <div className="relative -translate-x-1 -translate-y-1">
+                <svg
+                  width="18"
+                  height="22"
+                  viewBox="0 0 18 22"
+                  fill="none"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d="M1 1L16.5 10.2L9.2 12.1L6.8 20.5L1 1Z"
+                    fill={cursor.color}
+                    stroke="white"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span
+                  className="absolute left-4 top-4 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-white"
+                  style={{ backgroundColor: cursor.color }}
+                >
+                  {cursor.label}
+                </span>
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
 
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[var(--pg-paper)] to-transparent" />

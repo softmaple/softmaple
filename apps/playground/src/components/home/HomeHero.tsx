@@ -58,7 +58,7 @@ export function HomeHero() {
         >
           <Link
             to="/demo/lexical-eg-walker"
-            className="inline-flex items-center justify-center bg-[var(--pg-ink)] px-7 py-3.5 text-sm font-semibold text-[var(--pg-paper)] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pg-accent)]"
+            className="inline-flex items-center justify-center bg-[var(--pg-ink)] px-7 py-3.5 text-sm font-semibold text-[var(--pg-paper)] transition-[transform,opacity] hover:-translate-y-0.5 hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pg-accent)]"
           >
             Open Lexical demo
           </Link>
@@ -66,7 +66,7 @@ export function HomeHero() {
             href="https://docs.softmaple.ink"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center border border-[var(--pg-ink)]/20 bg-transparent px-7 py-3.5 text-sm font-semibold text-[var(--pg-ink)] transition-colors hover:border-[var(--pg-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pg-accent)]"
+            className="inline-flex items-center justify-center border border-[var(--pg-line)] bg-transparent px-7 py-3.5 text-sm font-semibold text-[var(--pg-ink)] transition-colors hover:border-[var(--pg-ink-muted)] hover:bg-[var(--pg-elevated)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pg-accent)]"
           >
             Documentation
           </a>

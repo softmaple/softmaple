@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "motion/react";
 const cursors = [
   {
     id: "a",
-    color: "#0D9488",
+    color: "#2DD4BF",
     label: "You",
     path: { x: [58, 72, 80, 64, 58], y: [18, 28, 22, 34, 18] },
     duration: 14,
@@ -11,7 +11,7 @@ const cursors = [
   },
   {
     id: "b",
-    color: "#EA580C",
+    color: "#FB923C",
     label: "Alex",
     path: { x: [78, 86, 74, 82, 78], y: [42, 52, 60, 48, 42] },
     duration: 16,
@@ -19,7 +19,7 @@ const cursors = [
   },
   {
     id: "c",
-    color: "#DB2777",
+    color: "#818CF8",
     label: "Sam",
     path: { x: [66, 74, 88, 70, 66], y: [68, 58, 72, 80, 68] },
     duration: 18,
@@ -45,7 +45,19 @@ export function SyncField() {
       className="pointer-events-none absolute inset-0 overflow-hidden"
       aria-hidden
     >
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_78%_32%,rgba(13,148,136,0.16),transparent_50%),radial-gradient(ellipse_at_88%_68%,rgba(234,88,12,0.12),transparent_48%),radial-gradient(ellipse_at_70%_85%,rgba(225,29,72,0.1),transparent_42%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_78%_32%,var(--pg-glow-teal),transparent_52%),radial-gradient(ellipse_at_88%_68%,var(--pg-glow-orange),transparent_48%),radial-gradient(ellipse_at_70%_85%,var(--pg-glow-accent),transparent_42%)]" />
+
+      {/* Soft grid — Motion/Linear product-canvas cue */}
+      <div
+        className="absolute inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, color-mix(in srgb, var(--pg-line) 80%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--pg-line) 80%, transparent) 1px, transparent 1px)",
+          backgroundSize: "64px 64px",
+          maskImage:
+            "radial-gradient(ellipse 70% 80% at 78% 45%, black 20%, transparent 75%)",
+        }}
+      />
 
       <div className="absolute inset-y-0 right-0 w-[58%] max-md:opacity-70">
         <svg
@@ -64,13 +76,13 @@ export function SyncField() {
               y2={line.y2}
               stroke="currentColor"
               strokeWidth="0.2"
-              className="text-[var(--pg-ink)]/20"
+              className="text-[var(--pg-ink)]/25"
               strokeDasharray="1.4 1.1"
               initial={false}
               animate={
                 reduceMotion
                   ? undefined
-                  : { strokeDashoffset: [0, -4], opacity: [0.3, 0.65, 0.3] }
+                  : { strokeDashoffset: [0, -4], opacity: [0.25, 0.7, 0.25] }
               }
               transition={{
                 duration: 6,
@@ -122,13 +134,13 @@ export function SyncField() {
                   <path
                     d="M1 1L16.5 10.2L9.2 12.1L6.8 20.5L1 1Z"
                     fill={cursor.color}
-                    stroke="white"
+                    stroke="#050505"
                     strokeWidth="1.2"
                     strokeLinejoin="round"
                   />
                 </svg>
                 <span
-                  className="absolute left-4 top-4 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-white"
+                  className="absolute left-4 top-4 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[#050505]"
                   style={{ backgroundColor: cursor.color }}
                 >
                   {cursor.label}
@@ -140,7 +152,7 @@ export function SyncField() {
       </div>
 
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[var(--pg-paper)] to-transparent" />
-      <div className="absolute inset-y-0 left-0 w-[42%] bg-gradient-to-r from-[var(--pg-paper)] via-[var(--pg-paper)]/80 to-transparent max-md:w-[55%]" />
+      <div className="absolute inset-y-0 left-0 w-[42%] bg-gradient-to-r from-[var(--pg-paper)] via-[var(--pg-paper)]/85 to-transparent max-md:w-[55%]" />
     </div>
   );
 }

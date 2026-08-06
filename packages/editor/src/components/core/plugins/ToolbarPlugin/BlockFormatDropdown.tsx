@@ -29,7 +29,7 @@ import {
   formatQuote,
   formatCode,
 } from "@softmaple/editor/components/core/plugins/ToolbarPlugin/utils";
-import type { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
+import { blockTypeToBlockName } from "@softmaple/editor/constants/toolbar";
 
 type BlockFormatType = {
   key: string;
@@ -155,22 +155,20 @@ export const BlockFormatDropdown: FC<BlockFormatDropdownProps> = (props) => {
           className="h-8 min-w-[130px] gap-1"
         >
           <Type className="size-4 md:size-4.5" />
-          <SelectValue placeholder="Format" />
+          <SelectValue placeholder="Format">
+            {ITEMS.find((item) => item.value === blockType)?.label ??
+              blockTypeToBlockName[blockType]}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {ITEMS.map(({ key, value, label, shortcut, icon }) => (
-            <div
-              key={key}
-              className="flex gap-1 md:gap-2 items-center justify-between"
-            >
+            <SelectItem key={key} value={value}>
               <span className="text-muted-foreground">{icon}</span>
-              <SelectItem key={key} value={value}>
-                <span>{label}</span>
-              </SelectItem>
-              <span className="text-sm text-muted-foreground hidden md:inline">
+              <span>{label}</span>
+              <span className="text-muted-foreground ml-auto hidden text-xs md:inline">
                 {shortcut}
               </span>
-            </div>
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>

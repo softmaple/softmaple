@@ -2,6 +2,11 @@
 
 @import 'tw-animate-css';
 
+/* Scan workspace UI/editor sources so shadcn utilities (bg-popover, etc.)
+   used only inside those packages are generated for the playground. */
+@source '../../../packages/ui/src/**/*.{js,jsx,ts,tsx}';
+@source '../../../packages/editor/src/**/*.{js,jsx,ts,tsx}';
+
 @custom-variant dark (&:is(.dark *));
 
 :root {

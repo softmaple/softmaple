@@ -32,22 +32,18 @@ export function RoomCreationForm({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    // Only submit if both fields have values
     if (userName.trim() && roomName.trim()) {
       onSubmit(e);
     }
   };
 
-  // Focus first input on mount
   useEffect(() => {
     userNameInputRef.current?.focus();
   }, []);
 
-  // Handle Enter key globally for the form
   const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       const target = e.target as HTMLElement;
-      // If we're in an input field and the form is valid, submit
       if (target.tagName === "INPUT" && userName.trim() && roomName.trim()) {
         e.preventDefault();
         handleSubmit(e as unknown as FormEvent);
@@ -57,16 +53,15 @@ export function RoomCreationForm({
 
   return (
     <Card
-      className="w-full max-w-md guofeng-scroll guofeng-corner"
+      className="pg-panel w-full max-w-md rounded-none border-[var(--pg-line)] bg-[var(--pg-surface)] shadow-none"
       role="region"
       aria-label="Create a new room"
     >
       <CardHeader>
-        <CardTitle className="guofeng-heading flex items-center gap-2">
-          <span className="text-sm guofeng-seal inline-block">创</span>
+        <CardTitle className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-[-0.02em] text-[var(--pg-ink)]">
           Create a Room
         </CardTitle>
-        <CardDescription className="guofeng-text">
+        <CardDescription className="text-[var(--pg-ink-muted)]">
           Start a new collaborative editing session
         </CardDescription>
       </CardHeader>
@@ -80,7 +75,7 @@ export function RoomCreationForm({
           <div className="space-y-2">
             <Label
               htmlFor="create-username"
-              className="guofeng-text font-medium"
+              className="font-medium text-[var(--pg-ink)]"
             >
               Your Name
             </Label>
@@ -95,7 +90,7 @@ export function RoomCreationForm({
               aria-required="true"
               aria-describedby="create-username-desc"
               aria-invalid={userName.length > 0 && !userName.trim()}
-              className="guofeng-input guofeng-hover guofeng-focus"
+              className="pg-input"
               autoComplete="name"
             />
             <span id="create-username-desc" className="sr-only">
@@ -103,7 +98,10 @@ export function RoomCreationForm({
             </span>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="room-name" className="guofeng-text font-medium">
+            <Label
+              htmlFor="room-name"
+              className="font-medium text-[var(--pg-ink)]"
+            >
               Room Name
             </Label>
             <Input
@@ -116,7 +114,7 @@ export function RoomCreationForm({
               aria-required="true"
               aria-describedby="room-name-desc"
               aria-invalid={roomName.length > 0 && !roomName.trim()}
-              className="guofeng-input guofeng-hover guofeng-focus"
+              className="pg-input"
               autoComplete="off"
             />
             <span id="room-name-desc" className="sr-only">
@@ -125,7 +123,7 @@ export function RoomCreationForm({
           </div>
           <Button
             type="submit"
-            className="w-full guofeng-btn-primary guofeng-btn"
+            className="pg-btn-primary w-full"
             disabled={isLoading || !userName.trim() || !roomName.trim()}
             aria-busy={isLoading}
             aria-disabled={isLoading || !userName.trim() || !roomName.trim()}

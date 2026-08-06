@@ -1,10 +1,3 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@softmaple/ui/components/card";
-import { Textarea } from "@softmaple/ui/components/textarea";
 import type { RefObject } from "react";
 
 export type ReplicaEditorPanelProps = {
@@ -25,24 +18,25 @@ export function ReplicaEditorPanel({
   focusRingClassName,
 }: ReplicaEditorPanelProps) {
   return (
-    <Card className="flex flex-col h-full bg-white/10 backdrop-blur-md border-white/20 shadow-xl gap-0 py-0">
-      <CardHeader className="bg-white/5 border-b border-white/20 px-4 py-3">
-        <CardTitle id={labelId} className="text-xl text-white">
+    <section className="pg-panel flex h-full flex-col overflow-hidden">
+      <div className="pg-panel-header px-4 py-3">
+        <h2
+          id={labelId}
+          className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-[-0.02em] text-[var(--pg-ink)]"
+        >
           {label}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 p-0">
-        {/* Uncontrolled: the textarea adapter owns `value` imperatively
-         *  via the ref so React doesn't re-write the DOM on every commit
-         *  and reset the caret. */}
-        <Textarea
-          ref={editorRef}
-          data-testid={testId}
-          placeholder={placeholder}
-          aria-labelledby={labelId}
-          className={`h-full w-full min-h-[400px] lg:min-h-[600px] resize-none bg-transparent text-white placeholder-white/40 focus-visible:ring-2 border-0 rounded-none p-4 ${focusRingClassName}`}
-        />
-      </CardContent>
-    </Card>
+        </h2>
+      </div>
+      {/* Native textarea: the collaboration adapter attaches listeners to
+       *  this ref and owns `value` imperatively. Avoid controlled wrappers
+       *  that can remount or swallow input events. */}
+      <textarea
+        ref={editorRef}
+        data-testid={testId}
+        placeholder={placeholder}
+        aria-labelledby={labelId}
+        className={`h-full min-h-[400px] w-full flex-1 resize-none bg-transparent p-4 text-[var(--pg-ink)] placeholder:text-[var(--pg-ink-muted)] outline-none focus-visible:ring-2 lg:min-h-[600px] ${focusRingClassName}`}
+      />
+    </section>
   );
 }

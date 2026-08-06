@@ -29,8 +29,27 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       {
         title: "SoftMaple Playground",
       },
+      {
+        name: "description",
+        content:
+          "Live SoftMaple collaboration demos — CRDT sync, Lexical rich text, presence, and WebSocket rooms.",
+      },
+      {
+        name: "theme-color",
+        content: "#f4f4f5",
+      },
     ],
     links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      {
+        rel: "preconnect",
+        href: "https://fonts.gstatic.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500&family=Syne:wght@400..800&display=swap",
+      },
       {
         rel: "stylesheet",
         href: appCss,
@@ -47,7 +66,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="bg-[var(--pg-paper)] text-[var(--pg-ink)] antialiased">
         <Header />
         {children}
         <Toaster position="bottom-right" />

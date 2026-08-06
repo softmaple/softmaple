@@ -110,11 +110,14 @@ export const syncLocalOperationsToRemote = async (
 export type UseCollaborativeEditorResult = {
   readonly replica1Ref: RefObject<HTMLTextAreaElement | null>;
   readonly replica2Ref: RefObject<HTMLTextAreaElement | null>;
+  /** True once both textarea collaboration bindings have attached. */
+  readonly bindingsReady: boolean;
 };
 
 export const useCollaborativeEditor = (): UseCollaborativeEditorResult => {
   const [api1] = useState(() => new EgWalkerReplica("replica-1"));
   const [api2] = useState(() => new EgWalkerReplica("replica-2"));
+  const [bindingsReady, setBindingsReady] = useState(false);
   const replica1Ref = useRef<HTMLTextAreaElement>(null);
   const replica2Ref = useRef<HTMLTextAreaElement>(null);
   // Cross-reference via refs because each adapter's `onLocalOperations`
@@ -183,7 +186,13 @@ export const useCollaborativeEditor = (): UseCollaborativeEditorResult => {
   useEffect(() => {
     collab1Ref.current = collab1;
     collab2Ref.current = collab2;
+    // `useTextareaCollaboration` attach effects run earlier in this
+    // component's effect list (hooks declared above). When both textarea
+    // refs are set, both bindings have initialized.
+    if (replica1Ref.current && replica2Ref.current) {
+      setBindingsReady(true);
+    }
   }, [collab1, collab2]);
 
-  return { replica1Ref, replica2Ref };
+  return { replica1Ref, replica2Ref, bindingsReady };
 };

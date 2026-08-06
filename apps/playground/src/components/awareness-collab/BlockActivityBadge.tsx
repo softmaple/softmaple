@@ -15,7 +15,9 @@ export function BlockActivityBadge({ blockId }: BlockActivityBadgeProps) {
 
   if (peers.length === 0) {
     return (
-      <span className="text-xs text-gray-500 italic">Just you in here</span>
+      <span className="text-xs text-[var(--pg-ink-muted)] italic">
+        Just you in here
+      </span>
     );
   }
 
@@ -24,12 +26,12 @@ export function BlockActivityBadge({ blockId }: BlockActivityBadgeProps) {
   const firstPeer = peers[0];
 
   return (
-    <span className="inline-flex items-center gap-2 text-xs text-gray-300">
+    <span className="inline-flex items-center gap-2 text-xs text-[var(--pg-ink-muted)]">
       <span className="flex -space-x-2">
         {peers.slice(0, 3).map((peer) => (
           <span
             key={peer.userId}
-            className="w-5 h-5 rounded-full ring-2 ring-slate-900 flex items-center justify-center text-[10px] font-semibold text-white"
+            className="flex h-5 w-5 items-center justify-center text-[10px] font-semibold text-white ring-2 ring-[var(--pg-surface)]"
             style={{
               background: peer.color,
             }}

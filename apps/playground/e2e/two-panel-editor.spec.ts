@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 test.describe("Two-Panel Text Editor", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/demo/two-panel-editor");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page.getByRole("textbox", { name: "Editor A" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Editor B" })).toBeVisible();
   });
 
   test("should display two editor panels", async ({ page }) => {

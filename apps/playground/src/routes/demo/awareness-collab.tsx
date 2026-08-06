@@ -1,7 +1,7 @@
 import { useTextareaCollaboration } from "@softmaple/awareness/bindings/textarea";
 import { POSITION_OPERATION_TYPE } from "@softmaple/awareness/mapping";
 import { EgWalkerReplica } from "@softmaple/eg-walker";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { AwarenessOverlay } from "@/components/awareness-collab/AwarenessOverlay";
 import {
@@ -9,11 +9,13 @@ import {
   EditorSurface,
 } from "@/components/awareness-collab/EditorSurface";
 import { TrainerPicker } from "@/components/awareness-collab/TrainerPicker";
+import { DemoPageShell } from "@/components/demo/DemoPageShell";
 import { getTrainer } from "@/modules/awareness-collab/trainers";
 import { useAwarenessAdapter } from "@/modules/awareness-collab/use-awareness-adapter";
 import { useBroadcastCollabSession } from "@/modules/awareness-collab/use-broadcast-collab-session";
 
 export const Route = createFileRoute("/demo/awareness-collab")({
+  ssr: false,
   component: AwarenessCollabDemo,
 });
 
@@ -75,9 +77,6 @@ function CollabSession({
     onCompositionChange: (composing) => {
       isComposingRef.current = composing;
       if (!composing) {
-        // Defer the flush one microtask so the composition's own ops
-        // (emitted synchronously in compositionend, after this callback)
-        // reach the replica before we apply the buffered peer events.
         queueMicrotask(flushDuringCompositionEvents);
       }
     },
@@ -87,70 +86,51 @@ function CollabSession({
   }, [collaboration, collaborationRef]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 p-4 md:p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-cyan-400 font-semibold">
-              Pokédex · Awareness Lab
-            </p>
-            <h1 className="text-2xl md:text-3xl font-bold text-white mt-1">
-              Awareness + Eg-Walker Demo
-            </h1>
-            <p className="text-gray-400 text-sm mt-2 max-w-xl">
-              Open this URL in multiple tabs to see real-time CRDT text sync
-              alongside live cursors, selection highlights, and per-block
-              presence — all powered by{" "}
-              <code className="text-cyan-400">@softmaple/awareness</code> and{" "}
-              <code className="text-cyan-400">@softmaple/eg-walker</code>.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <Link
-              to="/"
-              className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 text-sm transition-colors"
-            >
-              Home
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                // Mid-edit accidental clicks here drop the local
-                // presence and re-mount the adapter — annoying but
-                // recoverable. `window.confirm` is the lightweight
-                // middle ground: enough friction to catch a misclick
-                // without building a real modal for a demo button.
-                // The muted text styling (vs. the chunkier "Home"
-                // link) signals it as a secondary action.
-                if (window.confirm("Leave this trainer and pick a new one?")) {
-                  onLeave();
-                }
-              }}
-              className="px-3 py-2 text-gray-400 hover:text-gray-200 text-sm transition-colors underline-offset-4 hover:underline"
-            >
-              Change trainer →
-            </button>
-          </div>
-        </header>
-
-        <AwarenessOverlay
-          adapter={adapter}
-          userInfo={userInfo}
-          accentColor={trainer?.color}
+    <DemoPageShell
+      eyebrow="03 · Awareness lab"
+      title="Awareness + Eg-Walker Demo"
+      description={
+        <>
+          Open this URL in multiple tabs to see real-time CRDT text sync
+          alongside live cursors, selection highlights, and per-block presence —
+          powered by{" "}
+          <code className="text-[var(--pg-accent)]">@softmaple/awareness</code>{" "}
+          and{" "}
+          <code className="text-[var(--pg-accent)]">@softmaple/eg-walker</code>.
+        </>
+      }
+      contentClassName="max-w-4xl"
+      actions={
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm("Leave this trainer and pick a new one?")) {
+              onLeave();
+            }
+          }}
+          className="px-3 py-2 text-sm text-[var(--pg-ink-muted)] underline-offset-4 transition-colors hover:text-[var(--pg-ink)] hover:underline"
         >
-          <EditorSurface
-            blockId={COLLAB_BLOCK_ID}
-            text={text}
-            textareaRef={textareaRef}
-            trainerId={trainerId}
-            isComposing={collaboration.isComposing}
-          />
-        </AwarenessOverlay>
+          Change trainer →
+        </button>
+      }
+    >
+      <AwarenessOverlay
+        adapter={adapter}
+        userInfo={userInfo}
+        accentColor={trainer?.color}
+      >
+        <EditorSurface
+          blockId={COLLAB_BLOCK_ID}
+          text={text}
+          textareaRef={textareaRef}
+          trainerId={trainerId}
+          isComposing={collaboration.isComposing}
+        />
+      </AwarenessOverlay>
 
-        <footer className="text-xs text-gray-500 text-center pt-4">
-          BroadcastChannel transport · Eg-Walker CRDT · No server required
-        </footer>
-      </div>
-    </div>
+      <footer className="pt-6 text-center font-[family-name:var(--font-mono)] text-xs text-[var(--pg-ink-muted)]">
+        BroadcastChannel transport · Eg-Walker CRDT · No server required
+      </footer>
+    </DemoPageShell>
   );
 }

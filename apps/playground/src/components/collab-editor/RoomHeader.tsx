@@ -31,7 +31,6 @@ export function RoomHeader({
         duration: 5000,
       });
     } catch (_error) {
-      // Fallback for browsers that don't support clipboard API
       const textarea = document.createElement("textarea");
       textarea.value = roomLink;
       textarea.style.position = "fixed";
@@ -57,19 +56,19 @@ export function RoomHeader({
   if (!currentRoom) return null;
 
   return (
-    <header className="guofeng-header px-4 py-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+    <header className="mb-4 border-b border-[var(--pg-line)] pb-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
           <div>
-            <h1 className="text-xl font-semibold guofeng-text-ink">
+            <h1 className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-[-0.02em] text-[var(--pg-ink)]">
               {currentRoom.name}
             </h1>
-            <p className="text-xs guofeng-text-muted">
+            <p className="font-[family-name:var(--font-mono)] text-xs text-[var(--pg-ink-muted)]">
               Room ID: {currentRoom.id.slice(0, 8)}...
             </p>
           </div>
           <div
-            className="flex items-center gap-2 text-sm guofeng-text-muted"
+            className="flex items-center gap-2 text-sm text-[var(--pg-ink-muted)]"
             aria-live="polite"
           >
             <Users className="h-4 w-4" aria-hidden="true" />
@@ -84,23 +83,22 @@ export function RoomHeader({
             size="sm"
             variant="ghost"
             onClick={copyRoomLink}
-            className="guofeng-button-ghost guofeng-hover-deepen"
+            className="pg-btn-ghost"
           >
-            <Copy className="h-4 w-4 mr-1" aria-hidden="true" />
+            <Copy className="mr-1 h-4 w-4" aria-hidden="true" />
             {copied ? "Copied!" : "Share Link"}
           </Button>
           <Button
             size="sm"
             variant="ghost"
             onClick={onLeaveRoom}
-            className="guofeng-button-seal guofeng-hover-deepen"
+            className="border border-[var(--pg-accent)]/30 bg-[var(--pg-accent)]/10 text-[var(--pg-accent)] hover:bg-[var(--pg-accent)] hover:text-white"
           >
-            <LogOut className="h-4 w-4 mr-1" aria-hidden="true" />
+            <LogOut className="mr-1 h-4 w-4" aria-hidden="true" />
             Leave
           </Button>
         </div>
       </div>
-      <div className="guofeng-brush-divider-horizontal mt-3 opacity-20"></div>
     </header>
   );
 }

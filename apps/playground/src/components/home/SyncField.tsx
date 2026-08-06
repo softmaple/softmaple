@@ -19,7 +19,7 @@ const cursors = [
   },
   {
     id: "c",
-    color: "#818CF8",
+    color: "#FB7185",
     label: "Sam",
     path: { x: [66, 74, 88, 70, 66], y: [68, 58, 72, 80, 68] },
     duration: 18,

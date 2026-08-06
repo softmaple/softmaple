@@ -34,7 +34,7 @@ export const demos: ReadonlyArray<DemoItem> = [
     description:
       "Pick a Pokémon trainer and collaborate with live cursors, selection highlights, and presence indicators from @softmaple/awareness.",
     link: "/demo/awareness-collab",
-    accent: "#818CF8",
+    accent: "#FB7185",
   },
   {
     id: "04",

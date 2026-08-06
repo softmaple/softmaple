@@ -19,16 +19,16 @@
    * near-black canvas, cool elevated surfaces, quiet hairlines, indigo accent.
    */
   --pg-paper: #050505;
-  --pg-surface: #0e0e11;
-  --pg-elevated: #16161a;
+  --pg-surface: #121216;
+  --pg-elevated: #1a1a20;
   --pg-ink: #ededed;
   --pg-ink-muted: #8b8b96;
-  --pg-line: #222228;
+  --pg-line: #2a2a32;
   --pg-accent: #5e6ad2;
   --pg-accent-soft: color-mix(in srgb, var(--pg-accent) 18%, transparent);
-  --pg-glow-teal: rgba(45, 212, 191, 0.14);
-  --pg-glow-orange: rgba(251, 146, 60, 0.11);
-  --pg-glow-accent: rgba(94, 106, 210, 0.16);
+  --pg-glow-teal: rgba(45, 212, 191, 0.16);
+  --pg-glow-orange: rgba(251, 146, 60, 0.12);
+  --pg-glow-accent: rgba(94, 106, 210, 0.2);
 }
 
 body {
@@ -52,6 +52,9 @@ code {
 .pg-panel {
   background: var(--pg-surface);
   border: 1px solid var(--pg-line);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--pg-ink) 2%, transparent),
+    0 24px 48px -24px rgba(0, 0, 0, 0.55);
 }
 
 .pg-panel-header {

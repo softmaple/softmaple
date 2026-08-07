@@ -2,8 +2,10 @@
  * WebSocket message handling utilities
  */
 
-import type { PresenceUser } from "../../types/presence";
-import { updatePresenceUser } from "../../types/presence";
+import {
+  applyClockedPresenceUpdate,
+  type PresenceUser,
+} from "../../types/presence";
 import type { AdapterState } from "../adapter-state";
 import {
   removePresenceUser,
@@ -21,6 +23,7 @@ import {
 } from "./types";
 import {
   isErrorPayload,
+  isHeartbeatPayload,
   isJoinPayload,
   isLeavePayload,
   isPresenceSyncPayload,
@@ -35,11 +38,16 @@ export interface MessageProcessResult {
   readonly state: AdapterState;
   readonly shouldNotifyPresence: boolean;
   readonly error?: Error;
+  /** True when this frame completes the initial presence sync */
+  readonly syncCompleted?: boolean;
+  /** True when auth succeeded */
+  readonly authOk?: boolean;
+  /** Heartbeat ack pingId when applicable */
+  readonly heartbeatAckPingId?: string;
 }
 
 /**
  * Create a WebSocket message
- * Accepts WebSocketMessageType or custom string types (e.g., 'auth')
  */
 export const createMessage = (
   type: string,
@@ -58,10 +66,8 @@ export const createMessage = (
  * Serialize message for sending.
  *
  * For `PRESENCE_UPDATE`, JSON would silently drop `cursor: undefined` /
- * `selection: undefined` keys, which makes a "clear cursor" update
- * indistinguishable from "no change to cursor" on peers. We rewrite those
- * fields to `null` so the intent survives the wire. The receiver
- * (`processPresenceUpdate`) normalizes `null` back to `undefined`.
+ * `selection: undefined` keys. Rewrite those fields to `null` so clear intent
+ * survives the wire.
  */
 export const serializeMessage = (message: WebSocketMessage): string => {
   if (
@@ -102,18 +108,9 @@ export const parseMessage = (data: string): WebSocketMessage | null => {
   }
 };
 
-/**
- * Map `null` cursor/selection (wire-level clear) back to `undefined` so
- * downstream state code, which treats `undefined` as "field absent", stays
- * the source of truth.
- */
 const normalizeReceivedUpdates = (
   updates: PresenceUpdatePayload["updates"],
 ): PresenceUpdatePayload["updates"] => {
-  // The wire shape may contain explicit `null` for cursor/selection; in the
-  // in-memory model these are `undefined`. `PresenceUpdatePayload["updates"]`
-  // has readonly fields, so we rebuild a fresh mutable object and then return
-  // it as the readonly type.
   const wireUpdates = updates as Record<string, unknown>;
   const out: Record<string, unknown> = { ...wireUpdates };
   if (wireUpdates.cursor === null) {
@@ -125,9 +122,6 @@ const normalizeReceivedUpdates = (
   return out as unknown as PresenceUpdatePayload["updates"];
 };
 
-/**
- * Process join message
- */
 const processJoin = (
   state: AdapterState,
   payload: JoinPayload,
@@ -139,34 +133,37 @@ const processJoin = (
   };
 };
 
-/**
- * Process leave message
- */
 const processLeave = (
   state: AdapterState,
   payload: LeavePayload,
 ): MessageProcessResult => {
-  const newPresence = removePresenceUser(state.presence, payload.userId);
+  const newPresence = removePresenceUser(
+    state.presence,
+    payload.connectionId,
+  );
   return {
     state: updateState(state, { presence: newPresence }),
     shouldNotifyPresence: true,
   };
 };
 
-/**
- * Process presence update message
- */
 const processPresenceUpdate = (
   state: AdapterState,
   payload: PresenceUpdatePayload,
+  seenAt: number = Date.now(),
 ): MessageProcessResult => {
-  const existingUser = state.presence.get(payload.userId);
+  const existingUser = state.presence.get(payload.connectionId);
   if (existingUser === undefined) {
     return { state, shouldNotifyPresence: false };
   }
 
   const normalizedUpdates = normalizeReceivedUpdates(payload.updates);
-  const updatedUser = updatePresenceUser(existingUser, normalizedUpdates);
+  const updatedUser = applyClockedPresenceUpdate(
+    existingUser,
+    payload.clock,
+    normalizedUpdates,
+    seenAt,
+  );
   const newPresence = setPresenceUser(state.presence, updatedUser);
   return {
     state: updateState(state, { presence: newPresence }),
@@ -174,30 +171,25 @@ const processPresenceUpdate = (
   };
 };
 
-/**
- * Process presence sync message (full state from server)
- */
 const processPresenceSync = (
   state: AdapterState,
   payload: PresenceSyncPayload,
+  syncCompleted: boolean,
 ): MessageProcessResult => {
   const newPresence = new Map<string, PresenceUser>();
   for (const user of payload.users) {
-    newPresence.set(user.userId, user);
+    newPresence.set(user.connectionId, user);
   }
-  // Preserve self in presence map
   if (state.self !== null) {
-    newPresence.set(state.self.userId, state.self);
+    newPresence.set(state.self.connectionId, state.self);
   }
   return {
     state: updateState(state, { presence: newPresence }),
     shouldNotifyPresence: true,
+    syncCompleted,
   };
 };
 
-/**
- * Process error message
- */
 const processError = (
   state: AdapterState,
   payload: ErrorPayload,
@@ -210,17 +202,26 @@ const processError = (
 /**
  * Process incoming WebSocket message.
  *
- * Every payload is validated against a runtime type guard. If validation
- * fails, the state is returned unchanged and an `error` is surfaced so
- * subscribers can log/telemetry-record the bad frame without crashing.
+ * Self-suppression uses connectionId (`senderId`), not userId, so multiple
+ * tabs of the same account do not drop each other's frames.
  */
 export const processMessage = (
   state: AdapterState,
   message: WebSocketMessage,
-  selfId: string,
+  selfConnectionId: string,
 ): MessageProcessResult => {
-  // Ignore own messages
-  if (message.senderId === selfId) {
+  if (message.senderId === selfConnectionId) {
+    // Own heartbeat acks still need to be observed by the connection layer.
+    if (message.type === WS_MESSAGE.HEARTBEAT_ACK) {
+      const pingId = isHeartbeatPayload(message.payload)
+        ? message.payload.pingId
+        : undefined;
+      return {
+        state,
+        shouldNotifyPresence: false,
+        heartbeatAckPingId: pingId,
+      };
+    }
     return { state, shouldNotifyPresence: false };
   }
 
@@ -255,10 +256,22 @@ export const processMessage = (
           error: new Error("Invalid PRESENCE_UPDATE payload"),
         };
       }
-      return processPresenceUpdate(state, message.payload);
+      // Liveness uses the receiver clock; message.timestamp remains for events.
+      return processPresenceUpdate(state, message.payload, Date.now());
     }
 
-    case WS_MESSAGE.PRESENCE_SYNC:
+    case WS_MESSAGE.PRESENCE_SYNC: {
+      if (!isPresenceSyncPayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid PRESENCE_SYNC payload"),
+        };
+      }
+      // Inbound sync requests must not mark the local connection ready.
+      return processPresenceSync(state, message.payload, false);
+    }
+
     case WS_MESSAGE.PRESENCE_SYNC_RESPONSE: {
       if (!isPresenceSyncPayload(message.payload)) {
         return {
@@ -267,7 +280,29 @@ export const processMessage = (
           error: new Error("Invalid PRESENCE_SYNC payload"),
         };
       }
-      return processPresenceSync(state, message.payload);
+      return processPresenceSync(state, message.payload, true);
+    }
+
+    case WS_MESSAGE.AUTH_OK: {
+      if (
+        state.connectionState !== "authenticating" ||
+        message.senderId !== "server"
+      ) {
+        return { state, shouldNotifyPresence: false };
+      }
+      return { state, shouldNotifyPresence: false, authOk: true };
+    }
+
+    case WS_MESSAGE.AUTH_ERROR: {
+      const messageText =
+        isRecord(message.payload) && typeof message.payload.message === "string"
+          ? message.payload.message
+          : "Authentication failed";
+      return {
+        state,
+        shouldNotifyPresence: false,
+        error: new Error(messageText),
+      };
     }
 
     case WS_MESSAGE.ERROR: {
@@ -281,9 +316,16 @@ export const processMessage = (
       return processError(state, message.payload);
     }
 
-    case WS_MESSAGE.HEARTBEAT_ACK:
-      // Heartbeat ack is handled separately
-      return { state, shouldNotifyPresence: false };
+    case WS_MESSAGE.HEARTBEAT_ACK: {
+      const pingId = isHeartbeatPayload(message.payload)
+        ? message.payload.pingId
+        : undefined;
+      return {
+        state,
+        shouldNotifyPresence: false,
+        heartbeatAckPingId: pingId,
+      };
+    }
 
     default:
       return { state, shouldNotifyPresence: false };

@@ -22,11 +22,19 @@ export const isConnected = (state: PresenceState): boolean =>
   state.connectionStatus === "connected";
 
 /**
- * Check if currently connecting or reconnecting (pure function)
+ * Check if currently connecting, authenticating, syncing, or reconnecting
  */
 export const isConnecting = (state: PresenceState): boolean =>
   state.connectionStatus === "connecting" ||
+  state.connectionStatus === "authenticating" ||
+  state.connectionStatus === "syncing" ||
   state.connectionStatus === "reconnecting";
+
+/**
+ * Presence session is fully ready (auth + sync complete)
+ */
+export const isPresenceReady = (state: PresenceState): boolean =>
+  state.connectionStatus === "connected";
 
 /**
  * Check if in error state (pure function)

@@ -102,7 +102,9 @@ describe("createNoopAdapter", () => {
 
     adapter.broadcast({
       type: PRESENCE_EVENT.UPDATE,
+      connectionId: "user-1",
       userId: "user-1",
+      clock: 1,
       updates: { cursor: { blockId: "block-1", offset: 0 } },
     });
 
@@ -121,7 +123,7 @@ describe("createNoopAdapter", () => {
       string,
       PresenceUser
     >;
-    expect(replayed.get("user-1")?.userId).toBe("user-1");
+    expect([...replayed.values()][0]?.userId).toBe("user-1");
   });
 
   it("onConnectionChange immediately replays current state", async () => {

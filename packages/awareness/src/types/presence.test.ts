@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   createPresenceUser,
   type DirectionalSelectionRange,
+  getCursorOffset,
+  isCursorPosition,
   isDirectionalSelectionRange,
   isLegacySelectionRange,
+  isOffsetCursorPosition,
   isPresenceSelection,
   isSequenceAnchor,
+  isStableCursor,
+  isStableCursorPosition,
+  normalizeCursorPosition,
   normalizePresenceSelection,
   selectionReferencesBlock,
 } from "./presence";
@@ -116,5 +122,80 @@ describe("presence selections", () => {
       false,
     );
     expect(selectionReferencesBlock("invalid", "paragraph-1")).toBe(false);
+  });
+});
+
+describe("presence cursors", () => {
+  const boundaryAnchor = {
+    type: "boundary" as const,
+    edge: "start" as const,
+    affinity: "after" as const,
+  };
+  const atomAnchor = {
+    type: "atom" as const,
+    eventId: "e1",
+    offset: 2,
+    affinity: "before" as const,
+  };
+
+  it("distinguishes offset and stable cursor forms", () => {
+    const offset = { blockId: "b", offset: 3 };
+    const stable = { blockId: "b", anchor: boundaryAnchor };
+    const stableWithOffset = {
+      blockId: "b",
+      anchor: atomAnchor,
+      offset: 4,
+    };
+
+    expect(isOffsetCursorPosition(offset)).toBe(true);
+    expect(isStableCursorPosition(stable)).toBe(true);
+    expect(isStableCursorPosition(stableWithOffset)).toBe(true);
+    expect(isCursorPosition(offset)).toBe(true);
+    expect(isCursorPosition(stable)).toBe(true);
+    expect(isOffsetCursorPosition(stable)).toBe(false);
+    expect(isStableCursor(offset)).toBe(false);
+    expect(isStableCursor(stable)).toBe(true);
+    expect(getCursorOffset(offset)).toBe(3);
+    expect(getCursorOffset(stable)).toBeUndefined();
+    expect(getCursorOffset(stableWithOffset)).toBe(4);
+  });
+
+  it("normalizes cursor JSON into detached copies", () => {
+    const wireStable = JSON.parse(
+      JSON.stringify({
+        blockId: "b",
+        anchor: atomAnchor,
+        offset: 1,
+        ignored: true,
+      }),
+    );
+    const normalizedStable = normalizeCursorPosition(wireStable);
+    expect(normalizedStable).toEqual({
+      blockId: "b",
+      anchor: atomAnchor,
+      offset: 1,
+    });
+    expect(normalizedStable).not.toBe(wireStable);
+
+    const wireOffset = { blockId: "b", offset: 9 };
+    expect(normalizeCursorPosition(wireOffset)).toEqual(wireOffset);
+    expect(normalizeCursorPosition({ blockId: "b" })).toBeNull();
+    expect(
+      normalizeCursorPosition({
+        blockId: "b",
+        anchor: { type: "boundary", edge: "start" },
+      }),
+    ).toBeNull();
+  });
+
+  it("normalizes boundary end anchors on stable cursors", () => {
+    const end = normalizeCursorPosition({
+      blockId: "b",
+      anchor: { type: "boundary", edge: "end", affinity: "before" },
+    });
+    expect(end).toEqual({
+      blockId: "b",
+      anchor: { type: "boundary", edge: "end", affinity: "before" },
+    });
   });
 });

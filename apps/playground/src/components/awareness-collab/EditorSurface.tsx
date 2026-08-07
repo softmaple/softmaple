@@ -13,6 +13,7 @@
  */
 
 import {
+  getCursorOffset,
   getTextareaCaretRect,
   getTextareaSelectionRects,
   type HighlightRect,
@@ -140,9 +141,11 @@ export function EditorSurface({
     if (!el) return { cursorPoints: cursors, selectionRects: selections };
     for (const peer of others) {
       if (peer.cursor?.blockId === blockId) {
+        const offset = getCursorOffset(peer.cursor);
+        if (offset === undefined) continue;
         const local = getTextareaCaretRect(
           el,
-          Math.min(peer.cursor.offset, text.length),
+          Math.min(offset, text.length),
         );
         cursors.set(peer.userId, { x: local.left, y: local.top });
       }

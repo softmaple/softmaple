@@ -117,10 +117,13 @@ export const OfflineWithoutStatus: Story = {
 // Covers the initials fallback path when a user has no avatarUrl.
 const trainerWithoutSprite: PresenceUser = {
   userId: "professor-oak",
+  connectionId: "professor-oak",
   name: "Professor Oak",
   color: "#7c3aed",
   status: "active",
-  lastActiveAt: Date.UTC(2026, 4, 10, 9, 30, 5),
+  lastActivityAt: Date.UTC(2026, 4, 10, 9, 30, 5),
+  lastSeenAt: Date.UTC(2026, 4, 10, 9, 30, 5),
+  clock: 0,
 };
 
 export const InitialsFallback: Story = {

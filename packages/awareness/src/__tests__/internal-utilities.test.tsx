@@ -145,10 +145,13 @@ describe("components/internal-utils", () => {
   it("formatPresenceSummary varies copy by status and typing meta", () => {
     const base = (overrides: Partial<PresenceUser> = {}): PresenceUser => ({
       userId: "u",
+      connectionId: "u",
       name: "User",
       color: "#000",
       status: "active",
-      lastActiveAt: 0,
+      lastActivityAt: 0,
+      lastSeenAt: 0,
+      clock: 0,
       ...overrides,
     });
     const now = 10_000_000;
@@ -158,23 +161,34 @@ describe("components/internal-utils", () => {
     );
     expect(
       formatPresenceSummary(
-        base({ status: "idle", lastActiveAt: now - 120_000 }),
+        base({ status: "idle", lastActivityAt: now - 120_000 }),
         now,
       ),
     ).toBe("Idle · last active 2m ago");
     expect(
       formatPresenceSummary(
-        base({ status: "offline", lastActiveAt: now - 3 * 60 * 60_000 }),
+        base({
+          status: "offline",
+          lastActivityAt: now - 60_000,
+          lastSeenAt: now - 3 * 60 * 60_000,
+        }),
         now,
       ),
     ).toBe("Offline · last seen 3h ago");
   });
 
-  it("sortPresenceUsers ranks active before idle before offline, then by lastActiveAt desc", () => {
+  it("sortPresenceUsers ranks active before idle before offline, then by lastActivityAt desc", () => {
     const make = (id: string, status: PresenceUser["status"], ts: number) => ({
-      ...createPresenceUser({ userId: id, name: id, color: "#000" }),
+      ...createPresenceUser({
+        userId: id,
+        connectionId: id,
+        name: id,
+        color: "#000",
+      }),
       status,
-      lastActiveAt: ts,
+      lastActivityAt: ts,
+      lastSeenAt: ts,
+      clock: 0,
     });
     const sorted = sortPresenceUsers([
       make("c", "offline", 5),
@@ -216,10 +230,13 @@ describe("ActivityIndicator label coverage", () => {
                 "a",
                 {
                   userId: "a",
+      connectionId: "a",
                   name: "Ada",
                   color: "#000",
                   status: "active",
-                  lastActiveAt: 0,
+                  lastActivityAt: 0,
+                  lastSeenAt: 0,
+      clock: 0,
                 },
               ],
             ])
@@ -256,10 +273,13 @@ describe("ActivityIndicator label coverage", () => {
               "a",
               {
                 userId: "a",
+      connectionId: "a",
                 name: "Ada",
                 color: "#000",
                 status: "active",
-                lastActiveAt: 0,
+                lastActivityAt: 0,
+                lastSeenAt: 0,
+      clock: 0,
               },
             ],
           ])
@@ -289,10 +309,13 @@ describe("PresenceBar without context", () => {
   it("wraps the avatar in a focusable button and adds a tooltip when interactive", () => {
     const ada: PresenceUser = {
       userId: "ada",
+      connectionId: "ada",
       name: "Ada",
       color: "#000",
       status: "active",
-      lastActiveAt: 0,
+      lastActivityAt: 0,
+      lastSeenAt: 0,
+      clock: 0,
     };
     const html = renderToStaticMarkup(<PresenceBar users={[ada]} />);
     expect(html).toContain("awareness-presence-bar__button");
@@ -305,10 +328,13 @@ describe("PresenceBar without context", () => {
   it("omits the button + tooltip when interactive=false", () => {
     const ada: PresenceUser = {
       userId: "ada",
+      connectionId: "ada",
       name: "Ada",
       color: "#000",
       status: "active",
-      lastActiveAt: 0,
+      lastActivityAt: 0,
+      lastSeenAt: 0,
+      clock: 0,
     };
     const html = renderToStaticMarkup(
       <PresenceBar interactive={false} users={[ada]} />,
@@ -385,10 +411,13 @@ describe("PresenceBar with PresenceContext fallback", () => {
   it("uses context.presence when users prop is omitted", () => {
     const ada: PresenceUser = {
       userId: "ada",
+      connectionId: "ada",
       name: "Ada",
       color: "#000",
       status: "active",
-      lastActiveAt: 0,
+      lastActivityAt: 0,
+      lastSeenAt: 0,
+      clock: 0,
     };
     const ctx: PresenceContextValue = {
       connectionState: "connected",
@@ -413,10 +442,13 @@ describe("PresenceBar with PresenceContext fallback", () => {
 describe("ActivityIndicator with PresenceContext fallback", () => {
   const ada: PresenceUser = {
     userId: "ada",
+      connectionId: "ada",
     name: "Ada",
     color: "#000",
     status: "active",
-    lastActiveAt: 0,
+    lastActivityAt: 0,
+    lastSeenAt: 0,
+      clock: 0,
   };
 
   const ctx = (
@@ -536,7 +568,9 @@ describe("PresenceProvider activity branches", () => {
         type: PRESENCE_EVENT.UPDATE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "peer",
           userId: "peer",
+          clock: 1,
           updates: { status: "idle" },
         },
         timestamp: 1,
@@ -549,7 +583,9 @@ describe("PresenceProvider activity branches", () => {
         type: PRESENCE_EVENT.UPDATE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "peer",
           userId: "peer",
+          clock: 1,
           updates: { selection: { blockId: "b", from: 1, to: 5 } },
         },
         timestamp: 2,
@@ -563,7 +599,9 @@ describe("PresenceProvider activity branches", () => {
         type: PRESENCE_EVENT.UPDATE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "peer",
           userId: "peer",
+          clock: 1,
           updates: { cursor: { blockId: "b", offset: 0 } },
         },
         timestamp: 3,
@@ -574,7 +612,11 @@ describe("PresenceProvider activity branches", () => {
     act(() => {
       adapter.emitEvent({
         type: PRESENCE_EVENT.LEAVE,
-        payload: { type: PRESENCE_EVENT.LEAVE, userId: "peer" },
+        payload: {
+          type: PRESENCE_EVENT.LEAVE,
+          connectionId: "peer",
+          userId: "peer",
+        },
         timestamp: 4,
       });
     });
@@ -586,7 +628,9 @@ describe("PresenceProvider activity branches", () => {
         type: "presence:weird" as never,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "peer",
           userId: "peer",
+          clock: 1,
           updates: {},
         },
         timestamp: 5,
@@ -601,7 +645,9 @@ describe("PresenceProvider activity branches", () => {
         type: PRESENCE_EVENT.JOIN,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "peer",
           userId: "peer",
+          clock: 1,
           updates: {},
         } as never,
         timestamp: 6,
@@ -610,7 +656,9 @@ describe("PresenceProvider activity branches", () => {
         type: PRESENCE_EVENT.LEAVE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "peer",
           userId: "peer",
+          clock: 1,
           updates: {},
         } as never,
         timestamp: 7,
@@ -621,6 +669,7 @@ describe("PresenceProvider activity branches", () => {
           type: PRESENCE_EVENT.JOIN,
           user: createPresenceUser({
             userId: "peer",
+      connectionId: "peer",
             name: "Peer",
             color: "#000",
           }),

@@ -1,15 +1,29 @@
 /**
  * WebSocket adapter for presence system
- * Main adapter factory using modular connection management
+ *
+ * Ready handshake:
+ *   disconnected → connecting → authenticating → syncing → connected
+ *
+ * `connect()` resolves only when presence is ready (`connected`), not merely
+ * when the TCP/WebSocket socket opens.
  */
 
+import {
+  PRESENCE_CAPABILITIES,
+  PRESENCE_PROTOCOL_VERSION,
+} from "../../core/protocol";
 import {
   PRESENCE_EVENT,
   type PresenceEvent,
   type PresenceEventPayload,
 } from "../../types/events";
-import type { PresenceUser } from "../../types/presence";
-import { createPresenceUser, updatePresenceUser } from "../../types/presence";
+import {
+  createConnectionId,
+  createPresenceUser,
+  markUserActivity,
+  type PresenceUser,
+  type PresenceUserPatch,
+} from "../../types/presence";
 import { setPresenceUser, updateState } from "../adapter-state";
 import { createSubscriptionManager } from "../subscription-manager";
 import type {
@@ -22,6 +36,7 @@ import {
   cancelReconnect,
   cleanupWebSocket,
   clearConnectionTimeout,
+  handleHeartbeatAck,
   resetReconnectState,
   scheduleReconnect,
   sendWebSocketMessage,
@@ -43,30 +58,14 @@ import {
   isPresenceUpdatePayload,
 } from "./validation";
 
-/**
- * Authentication message type for secure token handshake
- */
-const AUTH_MESSAGE_TYPE = "auth" as const;
-
-/**
- * Default timeout for waiting for LEAVE message to flush (ms)
- */
 const LEAVE_FLUSH_TIMEOUT_MS = 100;
 
-/**
- * Build WebSocket URL with roomId only (no auth token in URL for security)
- * Security Note: Auth tokens should never be passed in URLs as they may be
- * logged in server access logs, browser history, and proxy logs.
- */
 const buildUrl = (baseUrl: string, roomId: string): string => {
   const url = new URL(baseUrl);
   url.searchParams.set("roomId", roomId);
   return url.toString();
 };
 
-/**
- * Wait for WebSocket buffer to flush with timeout
- */
 const waitForBufferFlush = (
   socket: WebSocket | null,
   timeoutMs: number,
@@ -108,7 +107,11 @@ const presenceEventFromMessage = (
       if (!isLeavePayload(message.payload)) return null;
       return {
         type: PRESENCE_EVENT.LEAVE,
-        payload: { type: PRESENCE_EVENT.LEAVE, userId: message.payload.userId },
+        payload: {
+          type: PRESENCE_EVENT.LEAVE,
+          connectionId: message.payload.connectionId,
+          userId: message.payload.userId,
+        },
         timestamp: message.timestamp,
       };
     }
@@ -118,7 +121,9 @@ const presenceEventFromMessage = (
         type: PRESENCE_EVENT.UPDATE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: message.payload.connectionId,
           userId: message.payload.userId,
+          clock: message.payload.clock,
           updates: message.payload.updates,
         },
         timestamp: message.timestamp,
@@ -138,6 +143,10 @@ const presenceEventFromMessage = (
   }
 };
 
+const READY_STATES: ReadonlySet<AdapterConnectionState> = new Set([
+  "connected",
+]);
+
 /**
  * Create a WebSocket presence adapter
  */
@@ -148,6 +157,10 @@ export const createWebSocketAdapter = (
   const reconnectConfig = config.reconnect ?? DEFAULT_RECONNECT_CONFIG;
   const connectionTimeoutMs =
     config.connectionTimeoutMs ?? DEFAULT_WS_CONFIG.connectionTimeoutMs;
+  const connectionId =
+    config.connectionId ?? createConnectionId(config.userInfo.userId);
+  const requireAuthAck =
+    config.requireAuthAck ?? config.authToken !== undefined;
 
   const internal = createInternalState(reconnectConfig);
 
@@ -165,48 +178,93 @@ export const createWebSocketAdapter = (
   };
 
   const sendMessage = (type: string, payload?: unknown): void => {
-    sendWebSocketMessage(internal, config, type, payload);
+    sendWebSocketMessage(internal, config, type, payload, connectionId);
   };
 
-  const handleOpen = (): void => {
+  const forceReconnectFromHeartbeat = (): void => {
+    subscriptions.notifyError(
+      new Error("Heartbeat ACK deadline exceeded; forcing reconnect"),
+    );
+    if (internal.socket !== null) {
+      try {
+        internal.socket.close();
+      } catch {
+        // close() may throw if already closing
+      }
+    }
+  };
+
+  const beginPresenceSync = (self: PresenceUser): void => {
+    setState({ connectionState: "syncing" });
+    sendMessage(WS_MESSAGE.JOIN, { user: self });
+    sendMessage(WS_MESSAGE.PRESENCE_SYNC);
+  };
+
+  const markConnected = (self: PresenceUser): void => {
+    if (internal.handshakeComplete) return;
+    internal.handshakeComplete = true;
     clearConnectionTimeout(internal);
     resetReconnectState(internal);
-
-    // Send auth token as first message after connection opens (secure handshake)
-    // This is more secure than passing token in URL query string
-    if (config.authToken !== undefined) {
-      sendMessage(AUTH_MESSAGE_TYPE, { token: config.authToken });
-    }
-
-    const self = createPresenceUser({
-      userId: config.userInfo.userId,
-      name: config.userInfo.name,
-      color: config.userInfo.color,
-      avatarUrl: config.userInfo.avatarUrl,
-    });
 
     const newPresence = setPresenceUser(internal.state.presence, self);
     setState(
       { connectionState: "connected", self, presence: newPresence },
       true,
     );
+    startHeartbeat(
+      internal,
+      config,
+      sendMessage,
+      forceReconnectFromHeartbeat,
+    );
+  };
 
-    sendMessage(WS_MESSAGE.JOIN, { user: self });
-    sendMessage(WS_MESSAGE.PRESENCE_SYNC);
-    startHeartbeat(internal, config, sendMessage);
+  const handleOpen = (): void => {
+    const self = createPresenceUser({
+      connectionId,
+      userId: config.userInfo.userId,
+      name: config.userInfo.name,
+      color: config.userInfo.color,
+      avatarUrl: config.userInfo.avatarUrl,
+    });
+    const newPresence = setPresenceUser(internal.state.presence, self);
+    setState({ self, presence: newPresence }, true);
+
+    if (requireAuthAck) {
+      setState({ connectionState: "authenticating" });
+      sendMessage(WS_MESSAGE.AUTH, {
+        token: config.authToken ?? "",
+        protocolVersion: PRESENCE_PROTOCOL_VERSION,
+        capabilities: PRESENCE_CAPABILITIES,
+        connectionId,
+        userId: config.userInfo.userId,
+      });
+      return;
+    }
+
+    beginPresenceSync(self);
   };
 
   const handleMessage = (event: MessageEvent): void => {
     const message = parseMessage(event.data as string);
     if (message === null) return;
 
-    const result = processMessage(
-      internal.state,
-      message,
-      config.userInfo.userId,
-    );
+    const result = processMessage(internal.state, message, connectionId);
 
     internal.state = result.state;
+
+    if (message.type === WS_MESSAGE.HEARTBEAT_ACK) {
+      handleHeartbeatAck(internal, result.heartbeatAckPingId);
+    }
+
+    if (result.authOk === true && internal.state.self !== null) {
+      beginPresenceSync(internal.state.self);
+    }
+
+    if (result.syncCompleted === true && internal.state.self !== null) {
+      markConnected(internal.state.self);
+    }
+
     if (result.shouldNotifyPresence) {
       subscriptions.notifyPresenceChange(result.state.presence);
     }
@@ -216,6 +274,10 @@ export const createWebSocketAdapter = (
     }
     if (result.error !== undefined) {
       subscriptions.notifyError(result.error);
+      if (message.type === WS_MESSAGE.AUTH_ERROR) {
+        setState({ connectionState: "error" });
+        cleanupWebSocket(internal, handlers);
+      }
     }
   };
 
@@ -239,6 +301,7 @@ export const createWebSocketAdapter = (
   const handleClose = (): void => {
     stopHeartbeat(internal);
     clearConnectionTimeout(internal);
+    internal.handshakeComplete = false;
     beginReconnect();
   };
 
@@ -255,6 +318,7 @@ export const createWebSocketAdapter = (
 
   const connectInternal = (): void => {
     cleanupWebSocket(internal, handlers);
+    internal.handshakeComplete = false;
     setState({
       connectionState:
         internal.reconnect.isReconnecting || internal.reconnect.attempts > 0
@@ -262,7 +326,6 @@ export const createWebSocketAdapter = (
           : "connecting",
     });
 
-    // Build URL with roomId only (auth handled via message after connect)
     const wsUrl = buildUrl(config.url, config.roomId);
     internal.socket = new WebSocket(wsUrl);
     internal.socket.addEventListener("open", handleOpen);
@@ -271,10 +334,7 @@ export const createWebSocketAdapter = (
     internal.socket.addEventListener("error", handleError);
 
     internal.connectionTimeoutId = setTimeout(() => {
-      if (
-        internal.state.connectionState === "connecting" ||
-        internal.state.connectionState === "reconnecting"
-      ) {
+      if (!READY_STATES.has(internal.state.connectionState)) {
         subscriptions.notifyError(new Error("Connection timeout"));
         cleanupWebSocket(internal, handlers);
         beginReconnect();
@@ -287,14 +347,13 @@ export const createWebSocketAdapter = (
       new Promise((resolve, reject) => {
         if (
           internal.socket !== null &&
-          internal.socket.readyState === WebSocket.OPEN
+          internal.socket.readyState === WebSocket.OPEN &&
+          internal.state.connectionState === "connected"
         ) {
           resolve();
           return;
         }
 
-        // Declare variables first to avoid TDZ (Temporal Dead Zone) issues
-        // Both callbacks reference each other for cleanup
         let unsubscribeConnected: Unsubscribe;
         let unsubscribeError: Unsubscribe;
 
@@ -307,9 +366,17 @@ export const createWebSocketAdapter = (
         });
 
         unsubscribeError = subscriptions.onError((error) => {
-          unsubscribeConnected();
-          unsubscribeError();
-          reject(error);
+          // Heartbeat / transient errors should not reject an in-flight connect
+          // once we are past ready — only fail connect on hard errors while
+          // handshake is incomplete.
+          if (
+            internal.state.connectionState === "error" ||
+            !internal.handshakeComplete
+          ) {
+            unsubscribeConnected();
+            unsubscribeError();
+            reject(error);
+          }
         });
 
         connectInternal();
@@ -330,11 +397,11 @@ export const createWebSocketAdapter = (
         return;
       }
 
-      // Send LEAVE message
-      sendMessage(WS_MESSAGE.LEAVE, { userId: config.userInfo.userId });
+      sendMessage(WS_MESSAGE.LEAVE, {
+        connectionId,
+        userId: config.userInfo.userId,
+      });
 
-      // Wait for the message to be flushed before cleanup
-      // This ensures the LEAVE message is sent before socket closes
       await waitForBufferFlush(internal.socket, LEAVE_FLUSH_TIMEOUT_MS);
 
       cleanupWebSocket(internal, handlers);
@@ -347,19 +414,36 @@ export const createWebSocketAdapter = (
     getConnectionState: (): AdapterConnectionState =>
       internal.state.connectionState,
 
-    updatePresence: (updates): void => {
+    updatePresence: (updates: PresenceUserPatch): void => {
       if (internal.state.self === null) return;
 
-      const updatedSelf = updatePresenceUser(internal.state.self, {
-        ...updates,
-        lastActiveAt: Date.now(),
-      });
+      // Drop stale cursor frames when the socket buffer is backed up —
+      // cursor is latest-value-wins.
+      if (
+        updates.cursor !== undefined &&
+        internal.socket !== null &&
+        internal.socket.bufferedAmount > DEFAULT_WS_CONFIG.cursorBackpressureBytes
+      ) {
+        return;
+      }
+
+      const updatedSelf = markUserActivity(
+        internal.state.self,
+        Date.now(),
+        updates,
+      );
 
       const newPresence = setPresenceUser(internal.state.presence, updatedSelf);
       setState({ self: updatedSelf, presence: newPresence }, true);
       sendMessage(WS_MESSAGE.PRESENCE_UPDATE, {
+        connectionId: updatedSelf.connectionId,
         userId: updatedSelf.userId,
-        updates: { ...updates, lastActiveAt: updatedSelf.lastActiveAt },
+        clock: updatedSelf.clock,
+        updates: {
+          ...updates,
+          lastActivityAt: updatedSelf.lastActivityAt,
+          lastSeenAt: updatedSelf.lastSeenAt,
+        },
       });
     },
 

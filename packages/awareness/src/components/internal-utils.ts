@@ -37,7 +37,7 @@ export const sortPresenceUsers = (
   return [...users].sort((a, b) => {
     const statusDelta = statusRank[a.status] - statusRank[b.status];
     if (statusDelta !== 0) return statusDelta;
-    return b.lastActiveAt - a.lastActiveAt;
+    return b.lastActivityAt - a.lastActivityAt;
   });
 };
 
@@ -83,15 +83,14 @@ export const formatPresenceSummary = (
   user: PresenceUser,
   now: number = Date.now(),
 ): string => {
-  const relative = formatRelativeTime(user.lastActiveAt, now);
   switch (user.status) {
     case "active":
       return user.meta?.isTyping === true ? "Typing now" : "Active now";
     case "idle":
-      return `Idle · last active ${relative}`;
+      return `Idle · last active ${formatRelativeTime(user.lastActivityAt, now)}`;
     case "offline":
-      return `Offline · last seen ${relative}`;
+      return `Offline · last seen ${formatRelativeTime(user.lastSeenAt, now)}`;
     default:
-      return relative;
+      return formatRelativeTime(user.lastActivityAt, now);
   }
 };

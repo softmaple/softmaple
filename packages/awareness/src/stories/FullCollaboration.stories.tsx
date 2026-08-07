@@ -17,7 +17,7 @@ import {
   pikachu,
   recentActivities,
   squirtle,
-  usersById,
+  usersByConnectionId,
 } from "./awareness-fixtures";
 import { CollaborationSurface, FIRST_LINE_Y } from "./story-layout";
 
@@ -150,7 +150,7 @@ export const TrainerHuddle: Story = {
             <ActivityIndicator
               activities={recentActivities}
               maxItems={3}
-              users={usersById}
+              users={usersByConnectionId}
             />
           </div>
         </>

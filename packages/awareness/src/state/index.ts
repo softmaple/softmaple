@@ -12,6 +12,7 @@ export {
   isConnected,
   isConnecting,
   isDisconnected,
+  isPresenceReady,
   setConnectionStatus,
 } from "./connection-operations";
 export {
@@ -30,6 +31,7 @@ export {
   getOnlineUsers,
   getOtherUsers,
   getSelfUser,
+  getSessionsByUserId,
   getUserById,
   getUsersArray,
 } from "./selectors";
@@ -39,6 +41,7 @@ export {
   getUsersByStatus,
   markUserActive,
   removeOfflineUsers,
+  setUserStatus,
   updateAllUserStatuses,
 } from "./status-operations";
 export {

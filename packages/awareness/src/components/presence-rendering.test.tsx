@@ -23,10 +23,13 @@ const createUser = (
   overrides: Partial<Omit<PresenceUser, "userId">> = {},
 ): PresenceUser => ({
   userId,
+  connectionId: overrides.connectionId ?? userId,
   name: `User ${userId}`,
-  color: "#2563eb",
+  color: "#000",
   status: "active",
-  lastActiveAt: 1000,
+  lastActivityAt: 1000,
+  lastSeenAt: 1000,
+  clock: 0,
   ...overrides,
 });
 
@@ -57,12 +60,16 @@ describe("presence components", () => {
       createUser("idle", {
         name: "Idle",
         status: "idle",
-        lastActiveAt: 3000,
+        lastActivityAt: 3000,
+        lastSeenAt: 3000,
+  clock: 0,
       }),
       createUser("active", {
         name: "Active",
         status: "active",
-        lastActiveAt: 2000,
+        lastActivityAt: 2000,
+        lastSeenAt: 2000,
+  clock: 0,
       }),
     ] as const;
 
@@ -89,7 +96,7 @@ describe("presence components", () => {
     const html = renderToStaticMarkup(
       <ActivityIndicator
         activities={activities}
-        users={new Map([[user.userId, user]])}
+        users={new Map([[user.connectionId, user]])}
       />,
     );
 
@@ -679,7 +686,7 @@ describe("presence components", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
 
-    // Idle peer whose `lastActiveAt` is 5 minutes behind the anchor.
+    // Idle peer whose `lastActivityAt` is 5 minutes behind the anchor.
     // `formatPresenceSummary` for idle status reads
     // "Idle · last active <relative>", and the relative phrase falls
     // into the "Xm ago" bucket here. Active peers say "Active now" /
@@ -687,7 +694,9 @@ describe("presence components", () => {
     const idleUser = createUser("1", {
       name: "Slacker",
       status: "idle",
-      lastActiveAt: Date.now() - 5 * 60_000,
+      lastActivityAt: Date.now() - 5 * 60_000,
+      lastSeenAt: Date.now() - 5 * 60_000,
+  clock: 0,
     });
 
     await act(async () => {

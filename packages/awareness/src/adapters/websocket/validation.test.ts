@@ -8,7 +8,9 @@ import {
 } from "./message";
 import { WS_MESSAGE } from "./types";
 import {
+  isAuthPayload,
   isErrorPayload,
+  isHeartbeatPayload,
   isJoinPayload,
   isLeavePayload,
   isPresenceSyncPayload,
@@ -17,11 +19,14 @@ import {
 
 const validUser = () =>
   ({
+    connectionId: "c-1",
     userId: "u-1",
     name: "Ada",
     color: "#2563eb",
     status: "active" as const,
-    lastActiveAt: 1700000000000,
+    lastActivityAt: 1700000000000,
+    lastSeenAt: 1700000000000,
+    clock: 0,
   }) satisfies Record<string, unknown>;
 
 describe("websocket validation", () => {
@@ -67,7 +72,9 @@ describe("websocket validation", () => {
 
   describe("isLeavePayload", () => {
     it("accepts a userId string", () => {
-      expect(isLeavePayload({ userId: "u-1" })).toBe(true);
+      expect(isLeavePayload({ connectionId: "c-1", userId: "u-1" })).toBe(
+        true,
+      );
     });
 
     it("rejects non-string userId", () => {
@@ -78,7 +85,7 @@ describe("websocket validation", () => {
 
   describe("isPresenceUpdatePayload", () => {
     it("accepts a minimal valid update", () => {
-      expect(isPresenceUpdatePayload({ userId: "u-1", updates: {} })).toBe(
+      expect(isPresenceUpdatePayload({ connectionId: "c-1", userId: "u-1", clock: 1, updates: {} })).toBe(
         true,
       );
     });
@@ -86,7 +93,9 @@ describe("websocket validation", () => {
     it("accepts null cursor / selection (explicit clear on wire)", () => {
       expect(
         isPresenceUpdatePayload({
+          connectionId: "c-1",
           userId: "u-1",
+          clock: 1,
           updates: { cursor: null, selection: null },
         }),
       ).toBe(true);
@@ -95,7 +104,9 @@ describe("websocket validation", () => {
     it("accepts directional cross-block selection anchors", () => {
       expect(
         isPresenceUpdatePayload({
+          connectionId: "c-1",
           userId: "u-1",
+          clock: 1,
           updates: {
             selection: {
               anchor: {
@@ -142,6 +153,30 @@ describe("websocket validation", () => {
       );
     });
 
+    it("rejects non-finite clock / timestamps", () => {
+      expect(
+        isJoinPayload({
+          user: { ...validUser(), clock: Number.NaN },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: Number.POSITIVE_INFINITY,
+          updates: {},
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 1,
+          updates: { lastSeenAt: Number.NaN },
+        }),
+      ).toBe(false);
+    });
+
     it("rejects bad status / name / color types", () => {
       expect(
         isPresenceUpdatePayload({ userId: "u-1", updates: { name: 42 } }),
@@ -172,6 +207,146 @@ describe("websocket validation", () => {
       expect(isErrorPayload({ code: "A", message: "B" })).toBe(true);
       expect(isErrorPayload({ code: "A" })).toBe(false);
       expect(isErrorPayload({ code: 1, message: "B" })).toBe(false);
+    });
+  });
+
+  describe("isHeartbeatPayload", () => {
+    it("requires a string pingId", () => {
+      expect(isHeartbeatPayload({ pingId: "ping-1" })).toBe(true);
+      expect(isHeartbeatPayload({})).toBe(false);
+      expect(isHeartbeatPayload({ pingId: 1 })).toBe(false);
+      expect(isHeartbeatPayload(null)).toBe(false);
+    });
+  });
+
+  describe("isAuthPayload", () => {
+    it("requires token, connectionId, userId, protocolVersion, and capabilities", () => {
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 2,
+          capabilities: { connectionId: true },
+        }),
+      ).toBe(true);
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+        }),
+      ).toBe(false);
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 1,
+          capabilities: {},
+        }),
+      ).toBe(false);
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 2,
+        }),
+      ).toBe(false);
+      expect(
+        isAuthPayload({
+          token: 1,
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 2,
+          capabilities: {},
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("isPresenceUser optional fields", () => {
+    it("accepts avatarUrl / null cursor and rejects bad avatarUrl", () => {
+      expect(
+        isJoinPayload({
+          user: { ...validUser(), avatarUrl: "https://x", cursor: null },
+        }),
+      ).toBe(true);
+      expect(
+        isJoinPayload({ user: { ...validUser(), avatarUrl: 12 } }),
+      ).toBe(false);
+    });
+
+    it("accepts stable cursor anchors on join", () => {
+      expect(
+        isJoinPayload({
+          user: {
+            ...validUser(),
+            cursor: {
+              blockId: "b",
+              anchor: {
+                type: "boundary",
+                edge: "start",
+                affinity: "after",
+              },
+            },
+          },
+        }),
+      ).toBe(true);
+    });
+  });
+
+  describe("isPresenceUpdatePayload optional fields", () => {
+    it("accepts lastActivityAt / lastSeenAt / avatarUrl / meta patches", () => {
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: {
+            lastActivityAt: 1,
+            lastSeenAt: 2,
+            avatarUrl: "https://x",
+            meta: { isTyping: true },
+          },
+        }),
+      ).toBe(true);
+    });
+
+    it("rejects bad lastActivityAt / lastSeenAt / avatarUrl / meta", () => {
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { lastActivityAt: "no" },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { lastSeenAt: "no" },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { avatarUrl: 9 },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { meta: "no" },
+        }),
+      ).toBe(false);
     });
   });
 });
@@ -271,17 +446,25 @@ describe("WebSocket clear-cursor wire semantics", () => {
       name: "Peer",
       color: "#000",
       status: "active" as const,
-      lastActiveAt: 1,
+      connectionId: "c-peer",
+      lastActivityAt: 1,
+      lastSeenAt: 1,
+      clock: 0,
       cursor: { blockId: "b", offset: 3 },
     };
-    state = { ...state, presence: new Map([[peer.userId, peer]]) };
+    state = { ...state, presence: new Map([[peer.connectionId, peer]]) };
 
     // Sender emits a "clear cursor" update.
     const message = createMessage(
       WS_MESSAGE.PRESENCE_UPDATE,
       "room-1",
       "peer",
-      { userId: "peer", updates: { cursor: undefined } },
+      {
+        connectionId: "c-peer",
+        userId: "peer",
+        clock: 1,
+        updates: { cursor: undefined },
+      },
     );
     const wire = serializeMessage(message);
     const parsed = parseMessage(wire);
@@ -291,6 +474,6 @@ describe("WebSocket clear-cursor wire semantics", () => {
 
     const result = processMessage(state, parsed, "self");
     expect(result.shouldNotifyPresence).toBe(true);
-    expect(result.state.presence.get("peer")?.cursor).toBeUndefined();
+    expect(result.state.presence.get("c-peer")?.cursor).toBeUndefined();
   });
 });

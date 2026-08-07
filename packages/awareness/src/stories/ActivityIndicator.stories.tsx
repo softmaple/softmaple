@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 
 import { ActivityIndicator } from "../components/activity-indicator";
-import { recentActivities, usersById } from "./awareness-fixtures";
+import { recentActivities, usersByConnectionId } from "./awareness-fixtures";
 import { StoryShowcase } from "./story-layout";
 
 const meta = {
@@ -14,7 +14,7 @@ const meta = {
   },
   args: {
     activities: recentActivities,
-    users: usersById,
+    users: usersByConnectionId,
   },
   render: (args) => (
     <StoryShowcase

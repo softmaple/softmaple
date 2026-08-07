@@ -25,7 +25,9 @@ const CONNECTION_RANK = {
   disconnected: 1,
   reconnecting: 2,
   connecting: 3,
-  connected: 4,
+  authenticating: 4,
+  syncing: 5,
+  connected: 6,
 } as const satisfies Record<AdapterConnectionState, number>;
 
 /** Prefer the more degraded of presence + document sync states. */
@@ -82,6 +84,10 @@ const connectionLabel = (
         : "Tabs connected";
     case "connecting":
       return `Connecting via ${channel}…`;
+    case "authenticating":
+      return `Authenticating via ${channel}…`;
+    case "syncing":
+      return `Syncing presence via ${channel}…`;
     case "reconnecting":
       return `Reconnecting via ${channel}…`;
     case "error":

@@ -56,6 +56,7 @@ class MockBroadcastChannel {
 describe("BroadcastChannelAdapter", () => {
   const defaultConfig: BroadcastChannelAdapterConfig = {
     roomId: "test-room",
+    connectionId: "user-1",
     userInfo: {
       userId: "user-1",
       name: "Test User",
@@ -179,6 +180,7 @@ describe("BroadcastChannelAdapter", () => {
       const adapter1 = createBroadcastChannelAdapter(defaultConfig);
       const adapter2 = createBroadcastChannelAdapter({
         ...defaultConfig,
+        connectionId: "user-2",
         userInfo: {
           userId: "user-2",
           name: "User Two",
@@ -219,6 +221,7 @@ describe("BroadcastChannelAdapter", () => {
       const adapter1 = createBroadcastChannelAdapter(defaultConfig);
       const adapter2 = createBroadcastChannelAdapter({
         ...defaultConfig,
+        connectionId: "user-2",
         userInfo: {
           userId: "user-2",
           name: "User Two",
@@ -247,6 +250,7 @@ describe("BroadcastChannelAdapter", () => {
       const adapter1 = createBroadcastChannelAdapter(defaultConfig);
       const adapter2 = createBroadcastChannelAdapter({
         ...defaultConfig,
+        connectionId: "user-2",
         userInfo: {
           userId: "user-2",
           name: "User Two",
@@ -259,8 +263,10 @@ describe("BroadcastChannelAdapter", () => {
 
       adapter1.broadcast({
         type: PRESENCE_EVENT.UPDATE,
-        userId: "user-1",
-        updates: { cursor: { blockId: "block-2", offset: 8 } },
+      connectionId: "user-1",
+      userId: "user-1",
+      clock: 1,
+      updates: { cursor: { blockId: "block-2", offset: 8 } },
       });
 
       expect(adapter2.getPresence().get("user-1")?.cursor).toEqual({
@@ -271,17 +277,18 @@ describe("BroadcastChannelAdapter", () => {
   });
 
   describe("heartbeat", () => {
-    it("should send heartbeat at configured interval", async () => {
+    it("should send heartbeat that advances lastSeenAt only", async () => {
       const adapter = createBroadcastChannelAdapter(defaultConfig);
 
       await adapter.connect();
 
-      const initialLastActiveAt = adapter.getSelf()?.lastActiveAt;
+      const initialActivity = adapter.getSelf()?.lastActivityAt;
+      const initialSeen = adapter.getSelf()?.lastSeenAt ?? 0;
 
       vi.advanceTimersByTime(1000);
 
-      const updatedLastActiveAt = adapter.getSelf()?.lastActiveAt;
-      expect(updatedLastActiveAt).toBeGreaterThan(initialLastActiveAt ?? 0);
+      expect(adapter.getSelf()?.lastActivityAt).toBe(initialActivity);
+      expect(adapter.getSelf()?.lastSeenAt ?? 0).toBeGreaterThan(initialSeen);
     });
   });
 
@@ -290,6 +297,7 @@ describe("BroadcastChannelAdapter", () => {
       const adapter1 = createBroadcastChannelAdapter(defaultConfig);
       const adapter2 = createBroadcastChannelAdapter({
         ...defaultConfig,
+        connectionId: "user-2",
         userInfo: {
           userId: "user-2",
           name: "User Two",
@@ -319,11 +327,14 @@ describe("BroadcastChannelAdapter", () => {
       const presence = adapter.getPresence();
 
       (presence as Map<string, PresenceUser>).set("new-user", {
+        connectionId: "new-user",
         userId: "new-user",
         name: "New User",
         color: "#0000FF",
         status: "active",
-        lastActiveAt: Date.now(),
+        lastActivityAt: Date.now(),
+        lastSeenAt: Date.now(),
+        clock: 0,
       });
 
       expect(adapter.getPresence().has("new-user")).toBe(false);

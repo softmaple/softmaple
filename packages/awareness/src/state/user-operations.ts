@@ -2,55 +2,56 @@
  * Pure functions for user presence operations
  */
 
-import type { PresenceUser } from "../types/presence";
-import { updatePresenceUser } from "../types/presence";
+import type { PresenceUser, PresenceUserPatch } from "../types/presence";
+import { patchPresenceUser } from "../types/presence";
 import type { PresenceState } from "../types/state";
 
 /**
- * Add or update a user in state (pure function)
+ * Add or update a session in state (pure function).
+ * Keyed by connectionId.
  */
 export const setUser = (
   state: PresenceState,
   user: PresenceUser,
 ): PresenceState => {
   const newUsers = new Map(state.users);
-  newUsers.set(user.userId, user);
+  newUsers.set(user.connectionId, user);
   return { ...state, users: newUsers };
 };
 
 /**
- * Remove a user from state (pure function)
+ * Remove a session from state by connectionId (pure function)
  */
 export const removeUser = (
   state: PresenceState,
-  userId: string,
+  connectionId: string,
 ): PresenceState => {
-  if (!state.users.has(userId)) {
+  if (!state.users.has(connectionId)) {
     return state;
   }
   const newUsers = new Map(state.users);
-  newUsers.delete(userId);
+  newUsers.delete(connectionId);
   return { ...state, users: newUsers };
 };
 
 /**
- * Update a specific user's properties (pure function)
+ * Patch a specific session's properties without implying activity (pure)
  */
 export const updateUser = (
   state: PresenceState,
-  userId: string,
-  updates: Partial<Omit<PresenceUser, "userId">>,
+  connectionId: string,
+  updates: PresenceUserPatch,
 ): PresenceState => {
-  const existingUser = state.users.get(userId);
+  const existingUser = state.users.get(connectionId);
   if (existingUser === undefined) {
     return state;
   }
-  const updatedUser = updatePresenceUser(existingUser, updates);
+  const updatedUser = patchPresenceUser(existingUser, updates);
   return setUser(state, updatedUser);
 };
 
 /**
- * Set the self user ID (pure function)
+ * Set the self connectionId (pure function)
  */
 export const setSelfId = (
   state: PresenceState,
@@ -61,7 +62,7 @@ export const setSelfId = (
 });
 
 /**
- * Batch update multiple users (pure function)
+ * Batch upsert multiple sessions (pure function)
  */
 export const setUsers = (
   state: PresenceState,
@@ -69,7 +70,7 @@ export const setUsers = (
 ): PresenceState => {
   const newUsers = new Map(state.users);
   for (const user of users) {
-    newUsers.set(user.userId, user);
+    newUsers.set(user.connectionId, user);
   }
   return { ...state, users: newUsers };
 };

@@ -95,6 +95,29 @@ class FakeWebSocket {
 const fakeSockets: FakeWebSocket[] = [];
 const originalWebSocket = globalThis.WebSocket;
 
+
+const completeReadyHandshake = (
+  socket: FakeWebSocket,
+  roomId = "room-1",
+  options: { authOk?: boolean } = {},
+): void => {
+  socket.emitOpen();
+  if (options.authOk) {
+    socket.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.AUTH_OK, roomId, "server", {}),
+      ),
+    );
+  }
+  socket.emitMessage(
+    serializeMessage(
+      createMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, roomId, "server", {
+        users: [],
+      }),
+    ),
+  );
+};
+
 describe("WebSocket Message Utilities", () => {
   describe("createMessage", () => {
     it("should create a message with correct fields", () => {
@@ -154,6 +177,7 @@ describe("WebSocket Message Utilities", () => {
 
     it("should process JOIN message and add user", () => {
       const newUser = createPresenceUser({
+        connectionId: "conn-2",
         userId: "user-2",
         name: "User 2",
         color: "#00FF00",
@@ -165,11 +189,12 @@ describe("WebSocket Message Utilities", () => {
 
       const result = processMessage(state, message, selfId);
       expect(result.shouldNotifyPresence).toBe(true);
-      expect(result.state.presence.has("user-2")).toBe(true);
+      expect(result.state.presence.has("conn-2")).toBe(true);
     });
 
     it("should process LEAVE message and remove user", () => {
       const user = createPresenceUser({
+        connectionId: "conn-2",
         userId: "user-2",
         name: "User 2",
         color: "#00FF00",
@@ -183,16 +208,17 @@ describe("WebSocket Message Utilities", () => {
         WS_MESSAGE.LEAVE,
         "room-1",
         "other-sender",
-        { userId: "user-2" },
+        { connectionId: "conn-2", userId: "user-2" },
       );
 
       const result = processMessage(state, message, selfId);
       expect(result.shouldNotifyPresence).toBe(true);
-      expect(result.state.presence.has("user-2")).toBe(false);
+      expect(result.state.presence.has("conn-2")).toBe(false);
     });
 
     it("should process PRESENCE_UPDATE message", () => {
       const user = createPresenceUser({
+        connectionId: "conn-2",
         userId: "user-2",
         name: "User 2",
         color: "#00FF00",
@@ -206,12 +232,12 @@ describe("WebSocket Message Utilities", () => {
         WS_MESSAGE.PRESENCE_UPDATE,
         "room-1",
         "other-sender",
-        { userId: "user-2", updates: { name: "Updated Name" } },
+        { connectionId: "conn-2", userId: "user-2", clock: 1, updates: { name: "Updated Name" } },
       );
 
       const result = processMessage(state, message, selfId);
       expect(result.shouldNotifyPresence).toBe(true);
-      expect(result.state.presence.get("user-2")?.name).toBe("Updated Name");
+      expect(result.state.presence.get("conn-2")?.name).toBe("Updated Name");
     });
 
     it("should process PRESENCE_SYNC message", () => {
@@ -230,6 +256,48 @@ describe("WebSocket Message Utilities", () => {
       const result = processMessage(state, message, selfId);
       expect(result.shouldNotifyPresence).toBe(true);
       expect(result.state.presence.size).toBe(2);
+      expect(result.syncCompleted).toBe(false);
+    });
+
+    it("marks syncCompleted only for PRESENCE_SYNC_RESPONSE", () => {
+      const users = [
+        createPresenceUser({ userId: "u1", name: "U1", color: "#111" }),
+      ];
+      const result = processMessage(
+        state,
+        createMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, "room-1", "server", {
+          users,
+        }),
+        selfId,
+      );
+      expect(result.syncCompleted).toBe(true);
+    });
+
+    it("ignores peer AUTH_OK even when authenticating", () => {
+      const result = processMessage(
+        { ...state, connectionState: "authenticating" },
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "peer", {}),
+        selfId,
+      );
+      expect(result.authOk).toBeUndefined();
+    });
+
+    it("accepts server AUTH_OK when authenticating", () => {
+      const result = processMessage(
+        { ...state, connectionState: "authenticating" },
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "server", {}),
+        selfId,
+      );
+      expect(result.authOk).toBe(true);
+    });
+
+    it("ignores server AUTH_OK when not authenticating", () => {
+      const result = processMessage(
+        { ...state, connectionState: "connected" },
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "server", {}),
+        selfId,
+      );
+      expect(result.authOk).toBeUndefined();
     });
 
     it("should process ERROR message", () => {
@@ -258,6 +326,7 @@ describe("WebSocket adapter events", () => {
     const adapter = createWebSocketAdapter({
       roomId: "room-1",
       url: "ws://localhost:1234",
+      connectionId: "self-user",
       userInfo: {
         userId: "self-user",
         name: "Self User",
@@ -276,12 +345,15 @@ describe("WebSocket adapter events", () => {
 
     adapter.onEvent(events);
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
+    events.mockClear();
 
     const echoedTyping = serializeMessage(
       createMessage(WS_MESSAGE.PRESENCE_UPDATE, "room-1", "self-user", {
+        connectionId: "self-user",
         userId: "self-user",
+        clock: 1,
         updates: { meta: { isTyping: true } },
       }),
     );
@@ -298,6 +370,7 @@ describe("WebSocket adapter public API", () => {
   const baseConfig = {
     roomId: "room-1",
     url: "ws://localhost:1234",
+    connectionId: "self-user",
     userInfo: { userId: "self-user", name: "Self User", color: "#2563eb" },
     connectionTimeoutMs: 1000,
     heartbeatIntervalMs: 60_000,
@@ -326,7 +399,7 @@ describe("WebSocket adapter public API", () => {
     });
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
 
     // PRESENCE_UPDATE with a malformed cursor shape — `blockId` present but
@@ -356,7 +429,7 @@ describe("WebSocket adapter public API", () => {
     adapter.onConnectionChange(connection);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
 
     const sent = fakeSockets[0]?.sentMessages.map(
@@ -380,7 +453,7 @@ describe("WebSocket adapter public API", () => {
     adapter.onPresenceChange(presence);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
     presence.mockClear();
     if (fakeSockets[0]) {
@@ -415,7 +488,7 @@ describe("WebSocket adapter public API", () => {
     adapter.onEvent(events);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
     if (fakeSockets[0]) {
       fakeSockets[0].sentMessages.length = 0;
@@ -423,7 +496,9 @@ describe("WebSocket adapter public API", () => {
 
     adapter.broadcast({
       type: PRESENCE_EVENT.UPDATE,
+      connectionId: "self-user",
       userId: "self-user",
+      clock: 1,
       updates: { meta: { isTyping: true } },
     });
 
@@ -441,8 +516,10 @@ describe("WebSocket adapter public API", () => {
     expect(() =>
       adapter.broadcast({
         type: PRESENCE_EVENT.UPDATE,
-        userId: "self-user",
-        updates: {},
+      connectionId: "self-user",
+      userId: "self-user",
+      clock: 1,
+      updates: {},
       }),
     ).not.toThrow();
   });
@@ -455,12 +532,13 @@ describe("WebSocket adapter public API", () => {
     adapter.onPresenceChange(presence);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
     events.mockClear();
     presence.mockClear();
 
     const joiningUser = createPresenceUser({
+      connectionId: "peer",
       userId: "peer",
       name: "Peer",
       color: "#fff",
@@ -488,7 +566,7 @@ describe("WebSocket adapter public API", () => {
     adapter.onConnectionChange(connection);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
 
     await adapter.disconnect();
@@ -503,7 +581,7 @@ describe("WebSocket adapter public API", () => {
     adapter.onError(errors);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
 
     fakeSockets[0]?.emitMessage(
@@ -541,7 +619,7 @@ describe("WebSocket adapter public API", () => {
     adapter.onConnectionChange(connection);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    completeReadyHandshake(fakeSockets[0]!);
     await connectPromise;
     expect(adapter.getConnectionState()).toBe("connected");
 
@@ -551,7 +629,7 @@ describe("WebSocket adapter public API", () => {
 
     await vi.advanceTimersByTimeAsync(150);
     expect(fakeSockets.length).toBeGreaterThanOrEqual(2);
-    fakeSockets[1]?.emitOpen();
+    completeReadyHandshake(fakeSockets[1]!);
     expect(adapter.getConnectionState()).toBe("connected");
 
     await adapter.disconnect();

@@ -4,14 +4,22 @@
  */
 
 import type { PresenceEvent, PresenceEventPayload } from "../types/events";
-import type { PresenceUser } from "../types/presence";
+import type { PresenceUser, PresenceUserPatch } from "../types/presence";
 
 /**
- * Adapter connection state
+ * Adapter connection state.
+ *
+ * Ready handshake (WebSocket):
+ *   disconnected → connecting → authenticating → syncing → connected
+ *
+ * `connect()` resolves only when state reaches `connected` (presence ready),
+ * not merely when the socket opens.
  */
 export type AdapterConnectionState =
   | "disconnected"
   | "connecting"
+  | "authenticating"
+  | "syncing"
   | "connected"
   | "reconnecting"
   | "error";
@@ -100,10 +108,10 @@ export interface PresenceAdapter {
   getConnectionState(): AdapterConnectionState;
 
   /**
-   * Update local user's presence
+   * Update local user's presence (marks activity + bumps clock)
    * @param updates Partial presence data to update
    */
-  updatePresence(updates: Partial<Omit<PresenceUser, "userId">>): void;
+  updatePresence(updates: PresenceUserPatch): void;
 
   /**
    * Broadcast an event to all users in the room

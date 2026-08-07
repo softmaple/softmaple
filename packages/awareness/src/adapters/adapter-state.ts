@@ -7,6 +7,8 @@ import type { AdapterConnectionState } from "./types";
 
 /**
  * Immutable state container for adapters
+ *
+ * `presence` is keyed by `connectionId`.
  */
 export interface AdapterState {
   readonly connectionState: AdapterConnectionState;
@@ -35,39 +37,30 @@ export const updateState = (
 });
 
 /**
- * Add or update user in presence map immutably
+ * Add or update session in presence map immutably (keyed by connectionId)
  */
 export const setPresenceUser = (
   presence: ReadonlyMap<string, PresenceUser>,
   user: PresenceUser,
 ): ReadonlyMap<string, PresenceUser> => {
   const newMap = new Map(presence);
-  newMap.set(user.userId, user);
+  newMap.set(user.connectionId, user);
   return newMap;
 };
 
 /**
- * Remove user from presence map immutably
+ * Remove session from presence map by connectionId
  */
 export const removePresenceUser = (
   presence: ReadonlyMap<string, PresenceUser>,
-  userId: string,
+  connectionId: string,
 ): ReadonlyMap<string, PresenceUser> => {
   const newMap = new Map(presence);
-  newMap.delete(userId);
+  newMap.delete(connectionId);
   return newMap;
 };
 
-/**
- * Check if user should be considered offline based on last activity
- */
-export const isUserOffline = (user: PresenceUser, timeoutMs: number): boolean =>
-  Date.now() - user.lastActiveAt > timeoutMs;
-
-/**
- * Check if user should be considered idle
- */
-export const isUserIdle = (
-  user: PresenceUser,
-  idleTimeoutMs: number,
-): boolean => Date.now() - user.lastActiveAt > idleTimeoutMs;
+export {
+  isUserIdle,
+  isUserOffline,
+} from "../core/status";

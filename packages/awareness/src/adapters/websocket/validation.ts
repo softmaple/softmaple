@@ -1,20 +1,14 @@
 /**
  * Runtime type guards for WebSocket payloads.
- *
- * The WebSocket adapter receives untrusted JSON from a remote server. Casting
- * `message.payload` directly to a typed shape is unsafe — a malformed frame
- * (server bug, downgraded proxy, or a malicious actor on a same-origin WS
- * proxy) can otherwise crash consumers when downstream code accesses
- * properties that aren't there.
- *
- * These guards validate every inbound payload before it is forwarded to
- * presence-state update functions or surfaced as a `PresenceEvent`.
  */
 
-import type { CursorPosition, PresenceUser } from "../../types/presence";
-import { isPresenceSelection } from "../../types/presence";
+import { PRESENCE_PROTOCOL_VERSION } from "../../core/protocol";
+import type { PresenceUser } from "../../types/presence";
+import { isCursorPosition, isPresenceSelection } from "../../types/presence";
 import type {
+  AuthPayload,
   ErrorPayload,
+  HeartbeatPayload,
   JoinPayload,
   LeavePayload,
   PresenceSyncPayload,
@@ -24,18 +18,15 @@ import type {
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isCursorPosition = (value: unknown): value is CursorPosition =>
-  isRecord(value) &&
-  typeof value.blockId === "string" &&
-  typeof value.offset === "number";
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
 
 /**
- * `PresenceUser` requires `userId`, `name`, `color`, `status`, `lastActiveAt`.
- * Optional fields (`avatarUrl`, `cursor`, `selection`, `meta`) are validated
- * when present.
+ * `PresenceUser` requires identity, status, activity/liveness clocks, and clock.
  */
 export const isPresenceUser = (value: unknown): value is PresenceUser => {
   if (!isRecord(value)) return false;
+  if (typeof value.connectionId !== "string") return false;
   if (typeof value.userId !== "string") return false;
   if (typeof value.name !== "string") return false;
   if (typeof value.color !== "string") return false;
@@ -46,7 +37,9 @@ export const isPresenceUser = (value: unknown): value is PresenceUser => {
   ) {
     return false;
   }
-  if (typeof value.lastActiveAt !== "number") return false;
+  if (!isFiniteNumber(value.lastActivityAt)) return false;
+  if (!isFiniteNumber(value.lastSeenAt)) return false;
+  if (!isFiniteNumber(value.clock)) return false;
   if (value.avatarUrl !== undefined && typeof value.avatarUrl !== "string") {
     return false;
   }
@@ -78,19 +71,17 @@ export const isJoinPayload = (payload: unknown): payload is JoinPayload =>
   isRecord(payload) && isPresenceUser(payload.user);
 
 export const isLeavePayload = (payload: unknown): payload is LeavePayload =>
-  isRecord(payload) && typeof payload.userId === "string";
+  isRecord(payload) &&
+  typeof payload.connectionId === "string" &&
+  typeof payload.userId === "string";
 
-/**
- * `updates` is a partial `PresenceUser` (without `userId`). We only verify
- * each provided field has the right shape; absent fields are fine. `cursor`
- * and `selection` may be `null` on the wire (explicit clear) — we accept
- * both `null` and a valid shape.
- */
 export const isPresenceUpdatePayload = (
   payload: unknown,
 ): payload is PresenceUpdatePayload => {
   if (!isRecord(payload)) return false;
+  if (typeof payload.connectionId !== "string") return false;
   if (typeof payload.userId !== "string") return false;
+  if (!isFiniteNumber(payload.clock)) return false;
   if (!isRecord(payload.updates)) return false;
 
   const updates = payload.updates;
@@ -115,8 +106,14 @@ export const isPresenceUpdatePayload = (
     return false;
   }
   if (
-    updates.lastActiveAt !== undefined &&
-    typeof updates.lastActiveAt !== "number"
+    updates.lastActivityAt !== undefined &&
+    !isFiniteNumber(updates.lastActivityAt)
+  ) {
+    return false;
+  }
+  if (
+    updates.lastSeenAt !== undefined &&
+    !isFiniteNumber(updates.lastSeenAt)
   ) {
     return false;
   }
@@ -155,3 +152,16 @@ export const isErrorPayload = (payload: unknown): payload is ErrorPayload =>
   isRecord(payload) &&
   typeof payload.code === "string" &&
   typeof payload.message === "string";
+
+export const isHeartbeatPayload = (
+  payload: unknown,
+): payload is HeartbeatPayload =>
+  isRecord(payload) && typeof payload.pingId === "string";
+
+export const isAuthPayload = (payload: unknown): payload is AuthPayload =>
+  isRecord(payload) &&
+  typeof payload.token === "string" &&
+  typeof payload.connectionId === "string" &&
+  typeof payload.userId === "string" &&
+  payload.protocolVersion === PRESENCE_PROTOCOL_VERSION &&
+  isRecord(payload.capabilities);

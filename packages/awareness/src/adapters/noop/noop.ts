@@ -1,27 +1,16 @@
 /**
  * No-op presence adapter.
  *
- * Useful for:
- * - SSR rendering (Next.js, React Server Components) where `BroadcastChannel`
- *   and `WebSocket` are not available.
- * - Unit / Storybook tests that mount `PresenceProvider` without a real
- *   transport.
- *
- * The adapter satisfies the full `PresenceAdapter` contract:
- * - `connect()` / `disconnect()` resolve immediately and transition through
- *   the standard connection states so consumers' `useConnectionState` /
- *   `useIsConnected` continue to work.
- * - `getSelf()` returns `null` until `connect()` resolves, after which it
- *   returns the local user only. No other users are ever present.
- * - `updatePresence` / `broadcast` mutate only the local self and notify
- *   subscribers — they never touch the network.
+ * Useful for SSR, unit tests, and Storybook. Maintains the full state machine
+ * without touching the network.
  */
 
 import type { PresenceEvent, PresenceEventPayload } from "../../types/events";
 import {
   createPresenceUser,
+  markUserActivity,
   type PresenceUser,
-  updatePresenceUser,
+  type PresenceUserPatch,
 } from "../../types/presence";
 import {
   createInitialState,
@@ -35,15 +24,8 @@ import type {
   PresenceAdapter,
 } from "../types";
 
-/**
- * Configuration for the no-op adapter. Identical to `AdapterConfig`; named so
- * downstream code can reference a stable type even if extras are added later.
- */
 export type NoopAdapterConfig = AdapterConfig;
 
-/**
- * Create a no-op `PresenceAdapter`. Safe to instantiate during SSR.
- */
 export const createNoopAdapter = (
   config: NoopAdapterConfig,
 ): PresenceAdapter => {
@@ -86,12 +68,9 @@ export const createNoopAdapter = (
 
     getConnectionState: (): AdapterConnectionState => state.connectionState,
 
-    updatePresence: (updates): void => {
+    updatePresence: (updates: PresenceUserPatch): void => {
       if (state.self === null) return;
-      const updatedSelf = updatePresenceUser(state.self, {
-        ...updates,
-        lastActiveAt: Date.now(),
-      });
+      const updatedSelf = markUserActivity(state.self, Date.now(), updates);
       state = updateState(state, {
         self: updatedSelf,
         presence: setPresenceUser(state.presence, updatedSelf),
@@ -133,9 +112,6 @@ export const createNoopAdapter = (
   return adapter;
 };
 
-/**
- * Factory function variant matching `AdapterFactory`.
- */
 export const noopAdapterFactory = (
   config: NoopAdapterConfig,
 ): PresenceAdapter => createNoopAdapter(config);

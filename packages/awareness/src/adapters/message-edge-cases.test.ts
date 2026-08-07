@@ -129,23 +129,26 @@ describe("broadcast-message handlers - invalid payloads", () => {
         name: "x",
         color: "#000",
         status: "active",
-        lastActiveAt: 0,
+        lastActivityAt: 0,
+        lastSeenAt: 0,
       },
       {
         userId: "u",
         name: 5,
         color: "#000",
         status: "active",
-        lastActiveAt: 0,
+        lastActivityAt: 0,
+        lastSeenAt: 0,
       },
-      { userId: "u", name: "n", color: 0, status: "active", lastActiveAt: 0 },
-      { userId: "u", name: "n", color: "#000", status: "wat", lastActiveAt: 0 },
+      { userId: "u", name: "n", color: 0, status: "active", lastActivityAt: 0 },
+      { userId: "u", name: "n", color: "#000", status: "wat", lastActivityAt: 0 },
       {
         userId: "u",
         name: "n",
         color: "#000",
         status: "active",
-        lastActiveAt: "now",
+        lastActivityAt: "now",
+        lastSeenAt: "now",
       },
     ];
     for (const payload of variants) {
@@ -163,6 +166,7 @@ describe("broadcast-message handlers - invalid payloads", () => {
     const state = createInitialState();
     const sendResponse = vi.fn();
     const user = createPresenceUser({
+      connectionId: "peer",
       userId: "peer",
       name: "Peer",
       color: "#111",
@@ -281,12 +285,14 @@ describe("websocket-message processMessage edge cases", () => {
 
   it("preserves self when handling PRESENCE_SYNC", () => {
     const self = createPresenceUser({
+      connectionId: "self",
       userId: "self",
       name: "S",
       color: "#000",
     });
     const state = { ...createInitialState(), self };
     const peer = createPresenceUser({
+      connectionId: "peer",
       userId: "peer",
       name: "P",
       color: "#111",
@@ -309,6 +315,7 @@ describe("websocket-message processMessage edge cases", () => {
   it("handles PRESENCE_SYNC_RESPONSE the same as PRESENCE_SYNC", () => {
     const state = createInitialState();
     const peer = createPresenceUser({
+      connectionId: "peer",
       userId: "peer",
       name: "P",
       color: "#111",
@@ -378,6 +385,7 @@ describe("websocket-message processMessage edge cases", () => {
 
   it("processes LEAVE messages", () => {
     const peer = createPresenceUser({
+      connectionId: "peer",
       userId: "peer",
       name: "P",
       color: "#111",
@@ -393,7 +401,7 @@ describe("websocket-message processMessage edge cases", () => {
         roomId: "r",
         senderId: "peer",
         timestamp: 1,
-        payload: { userId: "peer" },
+        payload: { connectionId: "peer", userId: "peer" },
       },
       "self",
     );
@@ -417,7 +425,7 @@ describe("websocket-connection edge cases", () => {
   it("sendWebSocketMessage no-ops when socket is null", () => {
     const internal = createInternalState(DEFAULT_RECONNECT_CONFIG);
     expect(() =>
-      sendWebSocketMessage(internal, wsConfig, "noop"),
+      sendWebSocketMessage(internal, wsConfig, "noop", undefined, "c1"),
     ).not.toThrow();
   });
 
@@ -427,7 +435,7 @@ describe("websocket-connection edge cases", () => {
       readyState: WebSocket.CLOSED,
       send: vi.fn(),
     } as unknown as WebSocket;
-    sendWebSocketMessage(internal, wsConfig, "noop");
+    sendWebSocketMessage(internal, wsConfig, "noop", undefined, "c1");
     expect(
       (internal.socket as WebSocket & { send: ReturnType<typeof vi.fn> }).send,
     ).not.toHaveBeenCalled();
@@ -440,7 +448,7 @@ describe("websocket-connection edge cases", () => {
       readyState: WebSocket.OPEN,
       send,
     } as unknown as WebSocket;
-    sendWebSocketMessage(internal, wsConfig, "ping", { hello: 1 });
+    sendWebSocketMessage(internal, wsConfig, "ping", { hello: 1 }, "c1");
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -453,7 +461,8 @@ describe("websocket-connection edge cases", () => {
       sendMessage,
     );
     vi.advanceTimersByTime(2500);
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    // Immediate ping on start + interval ticks
+    expect(sendMessage.mock.calls.length).toBeGreaterThanOrEqual(2);
     stopHeartbeat(internal);
     sendMessage.mockClear();
     vi.advanceTimersByTime(2000);
@@ -551,6 +560,7 @@ describe("websocket-connection edge cases", () => {
     const removeEventListener = vi.fn();
     const close = vi.fn();
     internal.socket = {
+      readyState: WebSocket.OPEN,
       removeEventListener,
       close,
     } as unknown as WebSocket;
@@ -580,6 +590,7 @@ describe("websocket-state updateInternalState - extra branches", () => {
 });
 
 describe("WebSocket adapter extra branches", () => {
+
   type FakeWebSocketEventType = "open" | "message" | "close" | "error";
   type FakeWebSocketListener = (event: Event | MessageEvent<string>) => void;
 
@@ -594,7 +605,7 @@ describe("WebSocket adapter extra branches", () => {
     bufferedAmount = 0;
     readyState = FakeWebSocket.CONNECTING;
 
-    private readonly listeners = new Map<
+    readonly listeners = new Map<
       FakeWebSocketEventType,
       Set<FakeWebSocketListener>
     >();
@@ -637,10 +648,48 @@ describe("WebSocket adapter extra branches", () => {
       this.readyState = FakeWebSocket.CLOSED;
       for (const l of this.listeners.get("close") ?? []) l(new Event("close"));
     };
+
+    emitMessage = (data: string): void => {
+      for (const l of this.listeners.get("message") ?? []) {
+        l(new MessageEvent("message", { data }));
+      }
+    };
   }
 
   const fakeSockets: FakeWebSocket[] = [];
   const originalWS = globalThis.WebSocket;
+
+  const finishHandshake = (
+    socket: FakeWebSocket | undefined,
+    roomId = "room-x",
+    opts: { authOk?: boolean; skipOpen?: boolean } = {},
+  ): void => {
+    if (!socket) return;
+    if (!opts.skipOpen) {
+      socket.emitOpen();
+    }
+    if (opts.authOk) {
+      socket.emitMessage(
+        JSON.stringify({
+          type: "auth_ok",
+          roomId,
+          senderId: "server",
+          timestamp: Date.now(),
+          payload: {},
+        }),
+      );
+    }
+    socket.emitMessage(
+      JSON.stringify({
+        type: "presence:sync-response",
+        roomId,
+        senderId: "server",
+        timestamp: Date.now(),
+        payload: { users: [] },
+      }),
+    );
+  };
+
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -708,7 +757,7 @@ describe("WebSocket adapter extra branches", () => {
     adapter.onConnectionChange(connection);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await connectPromise;
 
     fakeSockets[0]?.emitClose();
@@ -731,7 +780,7 @@ describe("WebSocket adapter extra branches", () => {
     adapter.onError(errorCb);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await connectPromise;
 
     // emit underlying socket error
@@ -756,7 +805,7 @@ describe("WebSocket adapter extra branches", () => {
     });
 
     const firstConnect = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await firstConnect;
 
     // Now socket is OPEN. A second connect() should hit the early-resolve path.
@@ -778,12 +827,12 @@ describe("WebSocket adapter extra branches", () => {
 
     const connectPromise = adapter.connect();
     fakeSockets[0]?.emitOpen();
-    await connectPromise;
-
     const types = fakeSockets[0]?.sentMessages.map(
       (m) => JSON.parse(m).type as string,
     );
     expect(types?.[0]).toBe("auth");
+    finishHandshake(fakeSockets[0], "room-x", { authOk: true, skipOpen: true });
+    await connectPromise;
   });
 
   it("waits for the socket buffer to drain before disconnect cleanup", async () => {
@@ -799,7 +848,7 @@ describe("WebSocket adapter extra branches", () => {
     });
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await connectPromise;
 
     const socket = fakeSockets[0];
@@ -829,7 +878,7 @@ describe("WebSocket adapter extra branches", () => {
     });
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await connectPromise;
 
     const socket = fakeSockets[0];
@@ -859,7 +908,7 @@ describe("WebSocket adapter extra branches", () => {
     adapter.onEvent(events);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await connectPromise;
     events.mockClear();
 
@@ -873,6 +922,7 @@ describe("WebSocket adapter extra branches", () => {
     };
 
     const peer = createPresenceUser({
+      connectionId: "peer",
       userId: "peer",
       name: "Peer",
       color: "#111",
@@ -889,7 +939,7 @@ describe("WebSocket adapter extra branches", () => {
       roomId: "room-1",
       senderId: "peer",
       timestamp: 2,
-      payload: { userId: "peer" },
+      payload: { connectionId: "peer", userId: "peer" },
     });
     send({
       type: WS_MESSAGE.PRESENCE_SYNC,
@@ -924,7 +974,7 @@ describe("WebSocket adapter extra branches", () => {
     adapter.onEvent(events);
 
     const connectPromise = adapter.connect();
-    fakeSockets[0]?.emitOpen();
+    finishHandshake(fakeSockets[0]);
     await connectPromise;
     events.mockClear();
 
@@ -1016,6 +1066,7 @@ describe("BroadcastChannel adapter - offline cleanup", () => {
   it("removes peer that has gone silent past offlineTimeoutMs (timeout-based cleanup)", async () => {
     const config: BroadcastChannelAdapterConfig = {
       roomId: "room-y",
+      connectionId: "self",
       userInfo: { userId: "self", name: "Self", color: "#000" },
       heartbeatIntervalMs: 100_000,
       offlineTimeoutMs: 200,
@@ -1025,6 +1076,7 @@ describe("BroadcastChannel adapter - offline cleanup", () => {
     const a = createBroadcastChannelAdapter(config);
     const b = createBroadcastChannelAdapter({
       ...config,
+      connectionId: "peer",
       userInfo: { userId: "peer", name: "Peer", color: "#111" },
     });
 
@@ -1160,8 +1212,10 @@ describe("BroadcastChannel adapter - extra branches", () => {
     expect(() =>
       adapter.broadcast({
         type: PRESENCE_EVENT.UPDATE,
-        userId: "self",
-        updates: { status: "idle" },
+      connectionId: "self",
+      userId: "self",
+      clock: 1,
+      updates: { status: "idle" },
       }),
     ).not.toThrow();
   });
@@ -1178,10 +1232,16 @@ describe("BroadcastChannel adapter - extra branches", () => {
     });
 
     adapter.broadcast({ type: PRESENCE_EVENT.JOIN, user: peer });
-    adapter.broadcast({ type: PRESENCE_EVENT.LEAVE, userId: "peer" });
+    adapter.broadcast({
+      type: PRESENCE_EVENT.LEAVE,
+      connectionId: "peer",
+      userId: "peer",
+    });
     adapter.broadcast({
       type: PRESENCE_EVENT.UPDATE,
+      connectionId: "self",
       userId: "self",
+      clock: 1,
       updates: { status: "idle" },
     });
     adapter.broadcast({ type: PRESENCE_EVENT.SYNC, users: [peer] });
@@ -1194,9 +1254,10 @@ describe("BroadcastChannel adapter - extra branches", () => {
   });
 
   it("transitions active user to idle after idle timeout", async () => {
-    const a = createBroadcastChannelAdapter(config);
+    const a = createBroadcastChannelAdapter({ ...config, connectionId: "self" });
     const b = createBroadcastChannelAdapter({
       ...config,
+      connectionId: "peer",
       userInfo: { userId: "peer", name: "Peer", color: "#111" },
       heartbeatIntervalMs: 100_000,
     });
@@ -1221,8 +1282,13 @@ describe("BroadcastChannel adapter - extra branches", () => {
       new MessageEvent("message", {
         data: createBroadcastMessage(
           BROADCAST_MESSAGE.ANNOUNCE,
-          "self",
-          createPresenceUser({ userId: "self", name: "Self", color: "#000" }),
+          adapter.getSelf()?.connectionId ?? "self",
+          createPresenceUser({
+            connectionId: adapter.getSelf()?.connectionId ?? "self",
+            userId: "self",
+            name: "Self",
+            color: "#000",
+          }),
         ),
       }),
     );

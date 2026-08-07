@@ -2,6 +2,7 @@
  * Runtime type guards for WebSocket payloads.
  */
 
+import { PRESENCE_PROTOCOL_VERSION } from "../../core/protocol";
 import type { PresenceUser } from "../../types/presence";
 import { isCursorPosition, isPresenceSelection } from "../../types/presence";
 import type {
@@ -16,6 +17,9 @@ import type {
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
 
 /**
  * `PresenceUser` requires identity, status, activity/liveness clocks, and clock.
@@ -33,9 +37,9 @@ export const isPresenceUser = (value: unknown): value is PresenceUser => {
   ) {
     return false;
   }
-  if (typeof value.lastActivityAt !== "number") return false;
-  if (typeof value.lastSeenAt !== "number") return false;
-  if (typeof value.clock !== "number") return false;
+  if (!isFiniteNumber(value.lastActivityAt)) return false;
+  if (!isFiniteNumber(value.lastSeenAt)) return false;
+  if (!isFiniteNumber(value.clock)) return false;
   if (value.avatarUrl !== undefined && typeof value.avatarUrl !== "string") {
     return false;
   }
@@ -77,7 +81,7 @@ export const isPresenceUpdatePayload = (
   if (!isRecord(payload)) return false;
   if (typeof payload.connectionId !== "string") return false;
   if (typeof payload.userId !== "string") return false;
-  if (typeof payload.clock !== "number") return false;
+  if (!isFiniteNumber(payload.clock)) return false;
   if (!isRecord(payload.updates)) return false;
 
   const updates = payload.updates;
@@ -103,13 +107,13 @@ export const isPresenceUpdatePayload = (
   }
   if (
     updates.lastActivityAt !== undefined &&
-    typeof updates.lastActivityAt !== "number"
+    !isFiniteNumber(updates.lastActivityAt)
   ) {
     return false;
   }
   if (
     updates.lastSeenAt !== undefined &&
-    typeof updates.lastSeenAt !== "number"
+    !isFiniteNumber(updates.lastSeenAt)
   ) {
     return false;
   }
@@ -158,4 +162,6 @@ export const isAuthPayload = (payload: unknown): payload is AuthPayload =>
   isRecord(payload) &&
   typeof payload.token === "string" &&
   typeof payload.connectionId === "string" &&
-  typeof payload.userId === "string";
+  typeof payload.userId === "string" &&
+  payload.protocolVersion === PRESENCE_PROTOCOL_VERSION &&
+  isRecord(payload.capabilities);

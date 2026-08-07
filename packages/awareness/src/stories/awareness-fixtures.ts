@@ -113,7 +113,7 @@ export const collaborators = [
   psyduck,
 ] satisfies ReadonlyArray<PresenceUser>;
 
-export const usersById = new Map(
+export const usersByConnectionId = new Map(
   collaborators.map((user) => [user.connectionId, user]),
 ) satisfies ReadonlyMap<string, PresenceUser>;
 

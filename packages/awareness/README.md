@@ -158,7 +158,7 @@ indistinguishable from "no change". To preserve intent on the wire, the
 WebSocket adapter:
 
 - **On send:** rewrites `cursor: undefined` / `selection: undefined` to
-  `cursor: null` / `selection: null` inside `presence_update` payloads.
+  `cursor: null` / `selection: null` inside `presence:update` payloads.
 - **On receive:** normalizes `cursor: null` / `selection: null` back to
   `undefined` before applying to local state.
 

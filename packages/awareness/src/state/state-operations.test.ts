@@ -384,6 +384,7 @@ describe("status-operations", () => {
       determineUserStatus(
         makeUser("a", { lastActivityAt: NOW - 100, lastSeenAt: NOW - 100 }),
         config,
+        NOW,
       ),
     ).toBe("active");
     expect(
@@ -393,6 +394,7 @@ describe("status-operations", () => {
           lastSeenAt: NOW - 100,
         }),
         config,
+        NOW,
       ),
     ).toBe("idle");
     expect(
@@ -402,6 +404,17 @@ describe("status-operations", () => {
           lastSeenAt: NOW - 10_000,
         }),
         config,
+        NOW,
+      ),
+    ).toBe("offline");
+    expect(
+      determineUserStatus(
+        makeUser("a", {
+          lastActivityAt: NOW - 100,
+          lastSeenAt: NOW - 10_000,
+        }),
+        config,
+        NOW,
       ),
     ).toBe("offline");
   });
@@ -410,6 +423,8 @@ describe("status-operations", () => {
     expect(
       determineUserStatus(
         makeUser("a", { lastActivityAt: NOW, lastSeenAt: NOW }),
+        undefined,
+        NOW,
       ),
     ).toBe("active");
   });
@@ -419,7 +434,7 @@ describe("status-operations", () => {
       makeState(),
       makeUser("a", { lastActivityAt: NOW, lastSeenAt: NOW }),
     );
-    const next = updateAllUserStatuses(state, config);
+    const next = updateAllUserStatuses(state, config, NOW);
     expect(next).toBe(state);
   });
 
@@ -440,7 +455,7 @@ describe("status-operations", () => {
       state,
       makeUser("c", { lastActivityAt: NOW, lastSeenAt: NOW }),
     );
-    const next = updateAllUserStatuses(state, config);
+    const next = updateAllUserStatuses(state, config, NOW);
     expect(next.users.get("a")?.status).toBe("idle");
     expect(next.users.get("b")?.status).toBe("offline");
     expect(next.users.get("c")?.status).toBe("active");
@@ -469,9 +484,10 @@ describe("status-operations", () => {
         lastSeenAt: NOW - 100,
       }),
     );
-    const next = markUserActive(state, "a");
+    const next = markUserActive(state, "a", NOW);
     expect(next.users.get("a")?.status).toBe("active");
     expect(next.users.get("a")?.lastActivityAt).toBe(NOW);
+    expect(next.users.get("a")?.lastSeenAt).toBe(NOW);
   });
 
   it("markUserActive is a no-op for missing user", () => {

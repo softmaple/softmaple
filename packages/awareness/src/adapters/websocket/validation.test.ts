@@ -153,6 +153,30 @@ describe("websocket validation", () => {
       );
     });
 
+    it("rejects non-finite clock / timestamps", () => {
+      expect(
+        isJoinPayload({
+          user: { ...validUser(), clock: Number.NaN },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: Number.POSITIVE_INFINITY,
+          updates: {},
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 1,
+          updates: { lastSeenAt: Number.NaN },
+        }),
+      ).toBe(false);
+    });
+
     it("rejects bad status / name / color types", () => {
       expect(
         isPresenceUpdatePayload({ userId: "u-1", updates: { name: 42 } }),
@@ -196,22 +220,47 @@ describe("websocket validation", () => {
   });
 
   describe("isAuthPayload", () => {
-    it("requires token, connectionId, and userId strings", () => {
+    it("requires token, connectionId, userId, protocolVersion, and capabilities", () => {
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 2,
+          capabilities: { connectionId: true },
+        }),
+      ).toBe(true);
       expect(
         isAuthPayload({
           token: "t",
           connectionId: "c",
           userId: "u",
         }),
-      ).toBe(true);
+      ).toBe(false);
       expect(
-        isAuthPayload({ token: "t", connectionId: "c" }),
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 1,
+          capabilities: {},
+        }),
+      ).toBe(false);
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+          protocolVersion: 2,
+        }),
       ).toBe(false);
       expect(
         isAuthPayload({
           token: 1,
           connectionId: "c",
           userId: "u",
+          protocolVersion: 2,
+          capabilities: {},
         }),
       ).toBe(false);
     });

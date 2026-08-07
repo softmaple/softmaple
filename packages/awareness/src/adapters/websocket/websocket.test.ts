@@ -256,6 +256,30 @@ describe("WebSocket Message Utilities", () => {
       const result = processMessage(state, message, selfId);
       expect(result.shouldNotifyPresence).toBe(true);
       expect(result.state.presence.size).toBe(2);
+      expect(result.syncCompleted).toBe(false);
+    });
+
+    it("marks syncCompleted only for PRESENCE_SYNC_RESPONSE", () => {
+      const users = [
+        createPresenceUser({ userId: "u1", name: "U1", color: "#111" }),
+      ];
+      const result = processMessage(
+        state,
+        createMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, "room-1", "server", {
+          users,
+        }),
+        selfId,
+      );
+      expect(result.syncCompleted).toBe(true);
+    });
+
+    it("ignores peer AUTH_OK when not authenticating", () => {
+      const result = processMessage(
+        { ...state, connectionState: "connected" },
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "peer", {}),
+        selfId,
+      );
+      expect(result.authOk).toBeUndefined();
     });
 
     it("should process ERROR message", () => {

@@ -167,7 +167,11 @@ describe("components/internal-utils", () => {
     ).toBe("Idle · last active 2m ago");
     expect(
       formatPresenceSummary(
-        base({ status: "offline", lastActivityAt: now - 3 * 60 * 60_000 }),
+        base({
+          status: "offline",
+          lastActivityAt: now - 60_000,
+          lastSeenAt: now - 3 * 60 * 60_000,
+        }),
         now,
       ),
     ).toBe("Offline · last seen 3h ago");

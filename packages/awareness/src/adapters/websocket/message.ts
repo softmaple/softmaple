@@ -23,6 +23,7 @@ import {
 } from "./types";
 import {
   isErrorPayload,
+  isHeartbeatPayload,
   isJoinPayload,
   isLeavePayload,
   isPresenceSyncPayload,
@@ -163,9 +164,6 @@ const processPresenceUpdate = (
     normalizedUpdates,
     seenAt,
   );
-  if (updatedUser === null) {
-    return { state, shouldNotifyPresence: false };
-  }
   const newPresence = setPresenceUser(state.presence, updatedUser);
   return {
     state: updateState(state, { presence: newPresence }),
@@ -176,6 +174,7 @@ const processPresenceUpdate = (
 const processPresenceSync = (
   state: AdapterState,
   payload: PresenceSyncPayload,
+  syncCompleted: boolean,
 ): MessageProcessResult => {
   const newPresence = new Map<string, PresenceUser>();
   for (const user of payload.users) {
@@ -187,7 +186,7 @@ const processPresenceSync = (
   return {
     state: updateState(state, { presence: newPresence }),
     shouldNotifyPresence: true,
-    syncCompleted: true,
+    syncCompleted,
   };
 };
 
@@ -214,10 +213,9 @@ export const processMessage = (
   if (message.senderId === selfConnectionId) {
     // Own heartbeat acks still need to be observed by the connection layer.
     if (message.type === WS_MESSAGE.HEARTBEAT_ACK) {
-      const pingId =
-        isRecord(message.payload) && typeof message.payload.pingId === "string"
-          ? message.payload.pingId
-          : undefined;
+      const pingId = isHeartbeatPayload(message.payload)
+        ? message.payload.pingId
+        : undefined;
       return {
         state,
         shouldNotifyPresence: false,
@@ -258,10 +256,22 @@ export const processMessage = (
           error: new Error("Invalid PRESENCE_UPDATE payload"),
         };
       }
-      return processPresenceUpdate(state, message.payload, message.timestamp);
+      // Liveness uses the receiver clock; message.timestamp remains for events.
+      return processPresenceUpdate(state, message.payload, Date.now());
     }
 
-    case WS_MESSAGE.PRESENCE_SYNC:
+    case WS_MESSAGE.PRESENCE_SYNC: {
+      if (!isPresenceSyncPayload(message.payload)) {
+        return {
+          state,
+          shouldNotifyPresence: false,
+          error: new Error("Invalid PRESENCE_SYNC payload"),
+        };
+      }
+      // Inbound sync requests must not mark the local connection ready.
+      return processPresenceSync(state, message.payload, false);
+    }
+
     case WS_MESSAGE.PRESENCE_SYNC_RESPONSE: {
       if (!isPresenceSyncPayload(message.payload)) {
         return {
@@ -270,11 +280,17 @@ export const processMessage = (
           error: new Error("Invalid PRESENCE_SYNC payload"),
         };
       }
-      return processPresenceSync(state, message.payload);
+      return processPresenceSync(state, message.payload, true);
     }
 
-    case WS_MESSAGE.AUTH_OK:
+    case WS_MESSAGE.AUTH_OK: {
+      const fromServer = message.senderId === "server";
+      const authenticating = state.connectionState === "authenticating";
+      if (!fromServer && !authenticating) {
+        return { state, shouldNotifyPresence: false };
+      }
       return { state, shouldNotifyPresence: false, authOk: true };
+    }
 
     case WS_MESSAGE.AUTH_ERROR: {
       const messageText =
@@ -300,10 +316,9 @@ export const processMessage = (
     }
 
     case WS_MESSAGE.HEARTBEAT_ACK: {
-      const pingId =
-        isRecord(message.payload) && typeof message.payload.pingId === "string"
-          ? message.payload.pingId
-          : undefined;
+      const pingId = isHeartbeatPayload(message.payload)
+        ? message.payload.pingId
+        : undefined;
       return {
         state,
         shouldNotifyPresence: false,

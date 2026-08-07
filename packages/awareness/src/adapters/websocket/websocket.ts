@@ -373,12 +373,9 @@ export const createWebSocketAdapter = (
             internal.state.connectionState === "error" ||
             !internal.handshakeComplete
           ) {
-            // Only reject if we never reached connected
-            if (internal.state.connectionState !== "connected") {
-              unsubscribeConnected();
-              unsubscribeError();
-              reject(error);
-            }
+            unsubscribeConnected();
+            unsubscribeError();
+            reject(error);
           }
         });
 
@@ -425,7 +422,7 @@ export const createWebSocketAdapter = (
       if (
         updates.cursor !== undefined &&
         internal.socket !== null &&
-        internal.socket.bufferedAmount > 64_000
+        internal.socket.bufferedAmount > DEFAULT_WS_CONFIG.cursorBackpressureBytes
       ) {
         return;
       }

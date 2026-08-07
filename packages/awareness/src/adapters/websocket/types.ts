@@ -56,7 +56,7 @@ export interface WebSocketAdapterConfig extends AdapterConfig {
  * WebSocket message structure
  */
 export interface WebSocketMessage {
-  readonly type: WebSocketMessageType | string;
+  readonly type: WebSocketMessageType | (string & {});
   readonly roomId: string;
   /** connectionId of the sender */
   readonly senderId: string;
@@ -133,6 +133,8 @@ export const DEFAULT_WS_CONFIG = {
   heartbeatAckTimeoutMs: 20_000,
   heartbeatMissedAckLimit: 2,
   connectionTimeoutMs: 10_000,
+  /** Drop cursor updates when the socket send buffer exceeds this many bytes. */
+  cursorBackpressureBytes: 64_000,
 } as const;
 
 /**

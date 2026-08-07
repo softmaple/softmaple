@@ -425,7 +425,7 @@ describe("websocket-connection edge cases", () => {
   it("sendWebSocketMessage no-ops when socket is null", () => {
     const internal = createInternalState(DEFAULT_RECONNECT_CONFIG);
     expect(() =>
-      sendWebSocketMessage(internal, wsConfig, "noop"),
+      sendWebSocketMessage(internal, wsConfig, "noop", undefined, "c1"),
     ).not.toThrow();
   });
 
@@ -435,7 +435,7 @@ describe("websocket-connection edge cases", () => {
       readyState: WebSocket.CLOSED,
       send: vi.fn(),
     } as unknown as WebSocket;
-    sendWebSocketMessage(internal, wsConfig, "noop");
+    sendWebSocketMessage(internal, wsConfig, "noop", undefined, "c1");
     expect(
       (internal.socket as WebSocket & { send: ReturnType<typeof vi.fn> }).send,
     ).not.toHaveBeenCalled();
@@ -448,7 +448,7 @@ describe("websocket-connection edge cases", () => {
       readyState: WebSocket.OPEN,
       send,
     } as unknown as WebSocket;
-    sendWebSocketMessage(internal, wsConfig, "ping", { hello: 1 });
+    sendWebSocketMessage(internal, wsConfig, "ping", { hello: 1 }, "c1");
     expect(send).toHaveBeenCalledTimes(1);
   });
 

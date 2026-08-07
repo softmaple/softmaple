@@ -4,7 +4,10 @@
  */
 
 import { createContext } from "react";
-import type { PresenceAdapter } from "../adapters/types";
+import type {
+  AdapterConnectionState,
+  PresenceAdapter,
+} from "../adapters/types";
 import type { ActivityEvent } from "../types/events";
 import type { PresenceUser, PresenceUserPatch } from "../types/presence";
 
@@ -13,14 +16,7 @@ import type { PresenceUser, PresenceUserPatch } from "../types/presence";
  */
 export interface PresenceContextValue {
   /** Current connection state */
-  readonly connectionState:
-    | "disconnected"
-    | "connecting"
-    | "authenticating"
-    | "syncing"
-    | "connected"
-    | "reconnecting"
-    | "error";
+  readonly connectionState: AdapterConnectionState;
   /** Current user's presence (null if not connected) */
   readonly self: PresenceUser | null;
   /** Map of all sessions' presence keyed by connectionId (including self) */

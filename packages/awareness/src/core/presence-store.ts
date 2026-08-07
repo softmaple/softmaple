@@ -142,7 +142,7 @@ export const createPresenceStore = (
         seenAt,
       );
       // applyClockedPresenceUpdate always returns a user (stale → touchSeen)
-      return put(applied ?? existing);
+      return put(applied);
     },
 
     markActivity: (connectionId, extras, at = Date.now()) => {

@@ -159,9 +159,7 @@ export const createBroadcastChannelAdapter = (
         if (derived !== user) {
           newPresence = setPresenceUser(newPresence, derived);
           hasChanges = true;
-          if (state.self?.connectionId === sessionId) {
-            state = updateState(state, { self: derived });
-          }
+          state = updateState(state, { self: derived });
         }
         continue;
       }
@@ -234,10 +232,11 @@ export const createBroadcastChannelAdapter = (
         sendMessage(BROADCAST_MESSAGE.SYNC_REQUEST, null);
 
         heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
-        cleanupTimer = setInterval(
-          cleanupStaleUsers,
+        const cleanupIntervalMs = Math.max(
+          1,
           Math.min(offlineTimeoutMs, idleTimeoutMs) / 2,
         );
+        cleanupTimer = setInterval(cleanupStaleUsers, cleanupIntervalMs);
 
         if (typeof window !== "undefined") {
           window.addEventListener("beforeunload", handleBeforeUnload);

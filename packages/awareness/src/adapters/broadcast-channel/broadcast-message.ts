@@ -71,13 +71,24 @@ interface WireUpdatePayload {
 const isUpdatePayload = (value: unknown): value is WireUpdatePayload => {
   if (value === null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.connectionId === "string" &&
-    typeof obj.userId === "string" &&
-    typeof obj.clock === "number" &&
-    typeof obj.updates === "object" &&
-    obj.updates !== null
-  );
+  if (
+    typeof obj.connectionId !== "string" ||
+    typeof obj.userId !== "string" ||
+    typeof obj.clock !== "number" ||
+    typeof obj.updates !== "object" ||
+    obj.updates === null
+  ) {
+    return false;
+  }
+  const updates = obj.updates as Record<string, unknown>;
+  if (
+    updates.lastSeenAt !== undefined &&
+    (typeof updates.lastSeenAt !== "number" ||
+      !Number.isFinite(updates.lastSeenAt))
+  ) {
+    return false;
+  }
+  return true;
 };
 
 const isLeavePayload = (
@@ -196,23 +207,30 @@ const handleUpdate = (
 
   let updatedUser: PresenceUser;
   if (isLivenessOnly) {
+    const receiveTime = Date.now();
+    const lastSeenAt = wire.updates.lastSeenAt;
+    // Reject non-finite or future sender clocks for liveness.
+    if (
+      typeof lastSeenAt !== "number" ||
+      !Number.isFinite(lastSeenAt) ||
+      lastSeenAt > receiveTime
+    ) {
+      return state;
+    }
     updatedUser = withDerivedStatus(
-      touchUserSeen(existingUser, wire.updates.lastSeenAt),
+      touchUserSeen(existingUser, lastSeenAt),
       statusTimeouts,
-      message.timestamp,
+      receiveTime,
     );
   } else {
+    const receiveTime = Date.now();
     const applied = applyClockedPresenceUpdate(
       existingUser,
       wire.clock,
       wire.updates,
-      message.timestamp,
+      receiveTime,
     );
-    updatedUser = withDerivedStatus(
-      applied ?? existingUser,
-      statusTimeouts,
-      message.timestamp,
-    );
+    updatedUser = withDerivedStatus(applied, statusTimeouts, receiveTime);
   }
 
   const newState = updateState(state, {

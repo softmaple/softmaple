@@ -378,18 +378,20 @@ export const markUserActivity = (
  * Record a liveness signal (heartbeat / any transport frame).
  * Updates `lastSeenAt` only — never touches `lastActivityAt`.
  * Does not bump clock (heartbeat is not presence state).
+ * `lastSeenAt` is monotonic (never decreases).
  */
 export const touchUserSeen = (
   user: PresenceUser,
   at: number = Date.now(),
 ): PresenceUser => ({
   ...user,
-  lastSeenAt: at,
+  lastSeenAt: Math.max(user.lastSeenAt, at),
 });
 
 /**
  * Apply a remote presence update only when `incomingClock` is newer.
- * Returns `null` when the update is stale.
+ * Stale clocks still refresh liveness via `touchUserSeen`.
+ * `lastSeenAt` is the max of the prior value, any wire timestamp, and local receipt.
  */
 export const applyClockedPresenceUpdate = (
   user: PresenceUser,
@@ -399,14 +401,18 @@ export const applyClockedPresenceUpdate = (
     readonly lastSeenAt?: number;
   },
   seenAt: number = Date.now(),
-): PresenceUser | null => {
+): PresenceUser => {
   if (incomingClock <= user.clock) {
     // Still refresh liveness so a stale-but-alive peer is not offline'd.
     return touchUserSeen(user, seenAt);
   }
 
   const nextActivityAt = updates.lastActivityAt ?? user.lastActivityAt;
-  const nextSeenAt = updates.lastSeenAt ?? seenAt;
+  const nextSeenAt = Math.max(
+    user.lastSeenAt,
+    updates.lastSeenAt ?? seenAt,
+    seenAt,
+  );
 
   const { lastActivityAt: _a, lastSeenAt: _s, ...patch } = updates;
 
@@ -445,10 +451,20 @@ let connectionIdCounter = 0;
 /** Generate an ephemeral connection id for a local presence session. */
 export const createConnectionId = (userId?: string): string => {
   connectionIdCounter += 1;
-  const rand =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${connectionIdCounter.toString(36)}`;
+  let rand: string;
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi !== undefined && typeof cryptoApi.randomUUID === "function") {
+    rand = cryptoApi.randomUUID();
+  } else if (
+    cryptoApi !== undefined &&
+    typeof cryptoApi.getRandomValues === "function"
+  ) {
+    const bytes = new Uint8Array(8);
+    cryptoApi.getRandomValues(bytes);
+    rand = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  } else {
+    rand = `${Date.now().toString(36)}-${connectionIdCounter.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
   return userId !== undefined ? `${userId}:${rand}` : rand;
 };
 

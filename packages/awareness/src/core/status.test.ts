@@ -124,19 +124,32 @@ describe("activity vs liveness APIs", () => {
       lastSeenAt: 2,
     });
     const stale = applyClockedPresenceUpdate(user, 9, { name: "stale" }, NOW);
-    expect(stale?.name).toBe("A");
-    expect(stale?.lastSeenAt).toBe(NOW);
-    expect(stale?.clock).toBe(10);
+    expect(stale.name).toBe("A");
+    expect(stale.lastSeenAt).toBe(NOW);
+    expect(stale.clock).toBe(10);
 
     const fresh = applyClockedPresenceUpdate(
       user,
       11,
-      { name: "fresh", lastActivityAt: NOW },
+      { name: "fresh", lastActivityAt: NOW, lastSeenAt: NOW - 50 },
       NOW,
     );
-    expect(fresh?.name).toBe("fresh");
-    expect(fresh?.clock).toBe(11);
-    expect(fresh?.lastActivityAt).toBe(NOW);
+    expect(fresh.name).toBe("fresh");
+    expect(fresh.clock).toBe(11);
+    expect(fresh.lastActivityAt).toBe(NOW);
+    // lastSeenAt is monotonic vs prior value, wire stamp, and receipt time.
+    expect(fresh.lastSeenAt).toBe(NOW);
+  });
+
+  it("touchUserSeen never decreases lastSeenAt", () => {
+    const user = createPresenceUser({
+      userId: "a",
+      name: "A",
+      color: "#000",
+      lastSeenAt: 500,
+    });
+    expect(touchUserSeen(user, 100).lastSeenAt).toBe(500);
+    expect(touchUserSeen(user, 800).lastSeenAt).toBe(800);
   });
 });
 

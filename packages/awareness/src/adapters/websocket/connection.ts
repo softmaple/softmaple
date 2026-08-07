@@ -98,7 +98,7 @@ export const startHeartbeat = (
       if (!internal.heartbeatAckTimeouts.has(pingId)) return;
       internal.heartbeatAckTimeouts.delete(pingId);
       internal.missedHeartbeatAcks += 1;
-      if (internal.missedHeartbeatAcks >= missedLimit) {
+      if (internal.missedHeartbeatAcks === missedLimit) {
         onMissedAcks();
       }
     }, ackTimeoutMs);

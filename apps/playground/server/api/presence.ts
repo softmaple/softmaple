@@ -13,11 +13,21 @@ import {
   handlePresenceFrame,
   parsePresenceMessage,
   type PeerSession,
+  startPresenceRoomMaintenance,
 } from "./presence-room";
 
 const ROOM_TOPIC = "presence";
 
 const store = createPresenceRoomStore();
+const stopMaintenance = startPresenceRoomMaintenance(store);
+
+if (typeof process !== "undefined" && typeof process.on === "function") {
+  const shutdown = (): void => {
+    stopMaintenance();
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+}
 
 const roomIdFromPeer = (peer: {
   context: PeerSession;
@@ -61,7 +71,7 @@ const handler: EventHandler = defineWebSocketHandler({
     const parsed = parsePresenceMessage(message.text());
     if (parsed === null) return;
 
-    const result = handlePresenceFrame(store, roomId, parsed);
+    const result = handlePresenceFrame(store, roomId, parsed, peer.context);
     if (result.session !== undefined) {
       if (result.session.connectionId !== undefined) {
         peer.context.connectionId = result.session.connectionId;
@@ -71,7 +81,11 @@ const handler: EventHandler = defineWebSocketHandler({
       }
     }
     for (const outbound of result.outbound) {
-      peer.send(outbound);
+      try {
+        peer.send(outbound);
+      } catch {
+        // Do not block publish when a direct reply fails.
+      }
     }
     if (result.publish !== null) {
       peer.publish(ROOM_TOPIC, result.publish);

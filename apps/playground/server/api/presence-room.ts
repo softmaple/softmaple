@@ -1,9 +1,28 @@
 /**
  * Protocol v2 presence room logic for the playground WebSocket server.
  * Pure / testable — keyed by connectionId with clock ordering.
+ *
+ * **Auth is non-authoritative:** the `auth` handshake accepts any non-empty
+ * token and must not be used as a real authentication model in production.
  */
 
 export const PRESENCE_PROTOCOL_VERSION = 2 as const;
+
+const MAX_ROOMS = 256;
+const MAX_USERS_PER_ROOM = 64;
+const MAX_UPDATE_BYTES = 8_192;
+
+const ALLOWED_UPDATE_KEYS = new Set([
+  "name",
+  "color",
+  "status",
+  "avatarUrl",
+  "cursor",
+  "selection",
+  "meta",
+  "lastActivityAt",
+  "lastSeenAt",
+]);
 
 export type PresenceUser = {
   readonly connectionId: string;
@@ -30,6 +49,12 @@ export type PeerSession = {
   roomId?: string;
   connectionId?: string;
   userId?: string;
+};
+
+export type PresenceRoomStoreOptions = {
+  readonly maxRooms?: number;
+  readonly maxUsersPerRoom?: number;
+  readonly maxUpdateBytes?: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -63,26 +88,50 @@ const isPresenceUser = (value: unknown): value is PresenceUser => {
   );
 };
 
+const boundUpdates = (
+  updates: Record<string, unknown>,
+  maxBytes: number,
+): Record<string, unknown> | null => {
+  const bounded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (ALLOWED_UPDATE_KEYS.has(key)) {
+      bounded[key] = value;
+    }
+  }
+  if (JSON.stringify(bounded).length > maxBytes) {
+    return null;
+  }
+  return bounded;
+};
+
 export type PresenceRoomStore = {
   getUsers: (roomId: string) => ReadonlyMap<string, PresenceUser>;
   listUsers: (roomId: string) => ReadonlyArray<PresenceUser>;
-  join: (roomId: string, user: PresenceUser) => PresenceUser;
+  join: (roomId: string, user: PresenceUser) => PresenceUser | null;
   leave: (roomId: string, connectionId: string) => boolean;
   update: (
     roomId: string,
     connectionId: string,
     clock: number,
     updates: Record<string, unknown>,
+    receiveAt?: number,
   ) => PresenceUser | null;
   deleteRoomIfEmpty: (roomId: string) => void;
+  sweepEmptyRooms: () => void;
 };
 
-export const createPresenceRoomStore = (): PresenceRoomStore => {
+export const createPresenceRoomStore = (
+  options: PresenceRoomStoreOptions = {},
+): PresenceRoomStore => {
+  const maxRooms = options.maxRooms ?? MAX_ROOMS;
+  const maxUsersPerRoom = options.maxUsersPerRoom ?? MAX_USERS_PER_ROOM;
+  const maxUpdateBytes = options.maxUpdateBytes ?? MAX_UPDATE_BYTES;
   const rooms = new Map<string, Map<string, PresenceUser>>();
 
-  const getOrCreate = (roomId: string): Map<string, PresenceUser> => {
+  const getOrCreate = (roomId: string): Map<string, PresenceUser> | null => {
     const existing = rooms.get(roomId);
     if (existing) return existing;
+    if (rooms.size >= maxRooms) return null;
     const created = new Map<string, PresenceUser>();
     rooms.set(roomId, created);
     return created;
@@ -95,6 +144,10 @@ export const createPresenceRoomStore = (): PresenceRoomStore => {
 
     join: (roomId, user) => {
       const users = getOrCreate(roomId);
+      if (users === null) return null;
+      if (users.size >= maxUsersPerRoom && !users.has(user.connectionId)) {
+        return null;
+      }
       users.set(user.connectionId, user);
       return user;
     },
@@ -106,28 +159,29 @@ export const createPresenceRoomStore = (): PresenceRoomStore => {
       return true;
     },
 
-    update: (roomId, connectionId, clock, updates) => {
+    update: (roomId, connectionId, clock, updates, receiveAt = Date.now()) => {
       const users = rooms.get(roomId);
       const existing = users?.get(connectionId);
       if (!users || existing === undefined) return null;
+
+      const safeUpdates = boundUpdates(updates, maxUpdateBytes);
+      if (safeUpdates === null) return null;
+
       if (clock <= existing.clock) {
-        // Stale clock: refresh lastSeenAt only when provided and valid.
-        if (isFiniteNumber(updates.lastSeenAt)) {
-          const touched: PresenceUser = {
-            ...existing,
-            lastSeenAt: Math.max(
-              existing.lastSeenAt ?? 0,
-              updates.lastSeenAt,
-            ),
-          };
-          users.set(connectionId, touched);
-          return touched;
-        }
-        return existing;
+        const wireSeen = isFiniteNumber(safeUpdates.lastSeenAt)
+          ? safeUpdates.lastSeenAt
+          : receiveAt;
+        const touched: PresenceUser = {
+          ...existing,
+          lastSeenAt: Math.max(existing.lastSeenAt ?? 0, wireSeen, receiveAt),
+        };
+        users.set(connectionId, touched);
+        return touched;
       }
+
       const next: PresenceUser = {
         ...existing,
-        ...updates,
+        ...safeUpdates,
         connectionId: existing.connectionId,
         userId: existing.userId,
         clock,
@@ -140,6 +194,14 @@ export const createPresenceRoomStore = (): PresenceRoomStore => {
       const users = rooms.get(roomId);
       if (users && users.size === 0) {
         rooms.delete(roomId);
+      }
+    },
+
+    sweepEmptyRooms: () => {
+      for (const [roomId, users] of rooms) {
+        if (users.size === 0) {
+          rooms.delete(roomId);
+        }
       }
     },
   };
@@ -163,6 +225,11 @@ const serverMessage = (
   ...(payload !== undefined ? { payload } : {}),
 });
 
+const sessionConnectionId = (session: PeerSession): string | undefined =>
+  typeof session.connectionId === "string" && session.connectionId.length > 0
+    ? session.connectionId
+    : undefined;
+
 /**
  * Handle one inbound presence frame. Pure aside from Date.now() timestamps.
  */
@@ -170,16 +237,27 @@ export const handlePresenceFrame = (
   store: PresenceRoomStore,
   roomId: string,
   parsed: PresenceMessage,
+  session: PeerSession = {},
 ): FrameHandlerResult => {
   if (parsed.type === "auth") {
     if (!isRecord(parsed.payload)) {
       return { outbound: [], publish: null };
     }
-    const tokenOk = typeof parsed.payload.token === "string";
+    const token =
+      typeof parsed.payload.token === "string" ? parsed.payload.token : "";
     const versionOk = parsed.payload.protocolVersion === PRESENCE_PROTOCOL_VERSION;
-    const connectionOk = typeof parsed.payload.connectionId === "string";
-    const userOk = typeof parsed.payload.userId === "string";
-    if (!tokenOk || !versionOk || !connectionOk || !userOk) {
+    const connectionId =
+      typeof parsed.payload.connectionId === "string"
+        ? parsed.payload.connectionId
+        : "";
+    const userId =
+      typeof parsed.payload.userId === "string" ? parsed.payload.userId : "";
+    if (
+      token.length === 0 ||
+      !versionOk ||
+      connectionId.length === 0 ||
+      userId.length === 0
+    ) {
       return {
         outbound: [
           serverMessage("auth_error", roomId, {
@@ -189,8 +267,6 @@ export const handlePresenceFrame = (
         publish: null,
       };
     }
-    const connectionId = parsed.payload.connectionId as string;
-    const userId = parsed.payload.userId as string;
     return {
       outbound: [serverMessage("auth_ok", roomId, { ok: true })],
       publish: null,
@@ -211,7 +287,17 @@ export const handlePresenceFrame = (
         return { outbound: [], publish: null };
       }
       const user = parsed.payload.user;
-      store.join(roomId, user);
+      const boundConnectionId = sessionConnectionId(session);
+      if (boundConnectionId !== undefined && user.connectionId !== boundConnectionId) {
+        return { outbound: [], publish: null };
+      }
+      if (boundConnectionId === undefined && user.connectionId !== parsed.senderId) {
+        return { outbound: [], publish: null };
+      }
+      const joined = store.join(roomId, user);
+      if (joined === null) {
+        return { outbound: [], publish: null };
+      }
       return {
         outbound: [
           serverMessage("presence:sync-response", roomId, {
@@ -227,24 +313,26 @@ export const handlePresenceFrame = (
     }
 
     case "leave": {
-      const connectionId =
-        isRecord(parsed.payload) &&
-        typeof parsed.payload.connectionId === "string"
-          ? parsed.payload.connectionId
-          : parsed.senderId;
+      const connectionId = sessionConnectionId(session);
+      if (connectionId === undefined) {
+        return { outbound: [], publish: null };
+      }
       store.leave(roomId, connectionId);
       store.deleteRoomIfEmpty(roomId);
-      return { outbound: [], publish: parsed };
+      return {
+        outbound: [],
+        publish: {
+          ...parsed,
+          payload: { connectionId, userId: session.userId ?? parsed.senderId },
+        },
+      };
     }
 
     case "presence:update": {
-      if (!isRecord(parsed.payload)) {
+      const connectionId = sessionConnectionId(session);
+      if (connectionId === undefined || !isRecord(parsed.payload)) {
         return { outbound: [], publish: null };
       }
-      const connectionId =
-        typeof parsed.payload.connectionId === "string"
-          ? parsed.payload.connectionId
-          : parsed.senderId;
       if (
         !isFiniteNumber(parsed.payload.clock) ||
         !isRecord(parsed.payload.updates)
@@ -260,7 +348,16 @@ export const handlePresenceFrame = (
       if (applied === null) {
         return { outbound: [], publish: null };
       }
-      return { outbound: [], publish: parsed };
+      return {
+        outbound: [],
+        publish: {
+          ...parsed,
+          payload: {
+            ...parsed.payload,
+            connectionId,
+          },
+        },
+      };
     }
 
     case "presence:sync":
@@ -306,3 +403,15 @@ export const buildCloseLeaveMessage = (
   timestamp: Date.now(),
   payload: { connectionId, userId },
 });
+
+export const startPresenceRoomMaintenance = (
+  store: PresenceRoomStore,
+  intervalMs = 60_000,
+): (() => void) => {
+  const timer = setInterval(() => {
+    store.sweepEmptyRooms();
+  }, intervalMs);
+  return () => {
+    clearInterval(timer);
+  };
+};

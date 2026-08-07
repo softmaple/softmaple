@@ -58,6 +58,12 @@ describe("websocket heartbeat ACK", () => {
     expect(internal.missedHeartbeatAcks).toBe(2);
     expect(onMissedAcks).toHaveBeenCalledTimes(1);
 
+    // Third expired deadline must not invoke onMissedAcks again.
+    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(50);
+    expect(internal.missedHeartbeatAcks).toBe(3);
+    expect(onMissedAcks).toHaveBeenCalledTimes(1);
+
     stopHeartbeat(internal);
   });
 

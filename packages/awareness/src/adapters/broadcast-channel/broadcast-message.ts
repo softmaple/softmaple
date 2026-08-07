@@ -75,6 +75,7 @@ const isUpdatePayload = (value: unknown): value is WireUpdatePayload => {
     typeof obj.connectionId !== "string" ||
     typeof obj.userId !== "string" ||
     typeof obj.clock !== "number" ||
+    !Number.isFinite(obj.clock) ||
     typeof obj.updates !== "object" ||
     obj.updates === null
   ) {
@@ -85,6 +86,13 @@ const isUpdatePayload = (value: unknown): value is WireUpdatePayload => {
     updates.lastSeenAt !== undefined &&
     (typeof updates.lastSeenAt !== "number" ||
       !Number.isFinite(updates.lastSeenAt))
+  ) {
+    return false;
+  }
+  if (
+    updates.lastActivityAt !== undefined &&
+    (typeof updates.lastActivityAt !== "number" ||
+      !Number.isFinite(updates.lastActivityAt))
   ) {
     return false;
   }
@@ -218,7 +226,7 @@ const handleUpdate = (
       return state;
     }
     updatedUser = withDerivedStatus(
-      touchUserSeen(existingUser, lastSeenAt),
+      touchUserSeen(existingUser, receiveTime),
       statusTimeouts,
       receiveTime,
     );

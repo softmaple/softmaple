@@ -284,9 +284,10 @@ export const processMessage = (
     }
 
     case WS_MESSAGE.AUTH_OK: {
-      const fromServer = message.senderId === "server";
-      const authenticating = state.connectionState === "authenticating";
-      if (!fromServer && !authenticating) {
+      if (
+        state.connectionState !== "authenticating" ||
+        message.senderId !== "server"
+      ) {
         return { state, shouldNotifyPresence: false };
       }
       return { state, shouldNotifyPresence: false, authOk: true };

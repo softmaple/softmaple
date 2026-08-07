@@ -273,10 +273,28 @@ describe("WebSocket Message Utilities", () => {
       expect(result.syncCompleted).toBe(true);
     });
 
-    it("ignores peer AUTH_OK when not authenticating", () => {
+    it("ignores peer AUTH_OK even when authenticating", () => {
+      const result = processMessage(
+        { ...state, connectionState: "authenticating" },
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "peer", {}),
+        selfId,
+      );
+      expect(result.authOk).toBeUndefined();
+    });
+
+    it("accepts server AUTH_OK when authenticating", () => {
+      const result = processMessage(
+        { ...state, connectionState: "authenticating" },
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "server", {}),
+        selfId,
+      );
+      expect(result.authOk).toBe(true);
+    });
+
+    it("ignores server AUTH_OK when not authenticating", () => {
       const result = processMessage(
         { ...state, connectionState: "connected" },
-        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "peer", {}),
+        createMessage(WS_MESSAGE.AUTH_OK, "room-1", "server", {}),
         selfId,
       );
       expect(result.authOk).toBeUndefined();

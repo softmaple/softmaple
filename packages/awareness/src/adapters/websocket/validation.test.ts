@@ -8,7 +8,9 @@ import {
 } from "./message";
 import { WS_MESSAGE } from "./types";
 import {
+  isAuthPayload,
   isErrorPayload,
+  isHeartbeatPayload,
   isJoinPayload,
   isLeavePayload,
   isPresenceSyncPayload,
@@ -181,6 +183,121 @@ describe("websocket validation", () => {
       expect(isErrorPayload({ code: "A", message: "B" })).toBe(true);
       expect(isErrorPayload({ code: "A" })).toBe(false);
       expect(isErrorPayload({ code: 1, message: "B" })).toBe(false);
+    });
+  });
+
+  describe("isHeartbeatPayload", () => {
+    it("requires a string pingId", () => {
+      expect(isHeartbeatPayload({ pingId: "ping-1" })).toBe(true);
+      expect(isHeartbeatPayload({})).toBe(false);
+      expect(isHeartbeatPayload({ pingId: 1 })).toBe(false);
+      expect(isHeartbeatPayload(null)).toBe(false);
+    });
+  });
+
+  describe("isAuthPayload", () => {
+    it("requires token, connectionId, and userId strings", () => {
+      expect(
+        isAuthPayload({
+          token: "t",
+          connectionId: "c",
+          userId: "u",
+        }),
+      ).toBe(true);
+      expect(
+        isAuthPayload({ token: "t", connectionId: "c" }),
+      ).toBe(false);
+      expect(
+        isAuthPayload({
+          token: 1,
+          connectionId: "c",
+          userId: "u",
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("isPresenceUser optional fields", () => {
+    it("accepts avatarUrl / null cursor and rejects bad avatarUrl", () => {
+      expect(
+        isJoinPayload({
+          user: { ...validUser(), avatarUrl: "https://x", cursor: null },
+        }),
+      ).toBe(true);
+      expect(
+        isJoinPayload({ user: { ...validUser(), avatarUrl: 12 } }),
+      ).toBe(false);
+    });
+
+    it("accepts stable cursor anchors on join", () => {
+      expect(
+        isJoinPayload({
+          user: {
+            ...validUser(),
+            cursor: {
+              blockId: "b",
+              anchor: {
+                type: "boundary",
+                edge: "start",
+                affinity: "after",
+              },
+            },
+          },
+        }),
+      ).toBe(true);
+    });
+  });
+
+  describe("isPresenceUpdatePayload optional fields", () => {
+    it("accepts lastActivityAt / lastSeenAt / avatarUrl / meta patches", () => {
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: {
+            lastActivityAt: 1,
+            lastSeenAt: 2,
+            avatarUrl: "https://x",
+            meta: { isTyping: true },
+          },
+        }),
+      ).toBe(true);
+    });
+
+    it("rejects bad lastActivityAt / lastSeenAt / avatarUrl / meta", () => {
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { lastActivityAt: "no" },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { lastSeenAt: "no" },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { avatarUrl: 9 },
+        }),
+      ).toBe(false);
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 2,
+          updates: { meta: "no" },
+        }),
+      ).toBe(false);
     });
   });
 });

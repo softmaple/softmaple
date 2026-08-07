@@ -8,7 +8,10 @@ import {
 } from "../types/presence";
 import {
   createPresenceStore,
+  createSelfSession,
   derivePresenceStatus,
+  isUserIdle,
+  isUserOffline,
   PRESENCE_PROTOCOL_VERSION,
 } from "./index";
 
@@ -180,6 +183,220 @@ describe("createPresenceStore", () => {
     const transitions = store.sweepStatuses(NOW);
     expect(transitions).toHaveLength(1);
     expect(store.getSession("c1")?.status).toBe("idle");
+  });
+
+  it("setSelf upserts into the map and keeps self in sync on later writes", () => {
+    const store = createPresenceStore();
+    const self = createPresenceUser({
+      connectionId: "self",
+      userId: "me",
+      name: "Me",
+      color: "#111",
+      clock: 1,
+    });
+    store.setSelf(self);
+    expect(store.getSelf()?.connectionId).toBe("self");
+    expect(store.getSession("self")?.name).toBe("Me");
+
+    store.markActivity("self", { name: "Updated" }, NOW);
+    expect(store.getSelf()?.name).toBe("Updated");
+    expect(store.getSelf()?.clock).toBe(2);
+
+    store.setSelf(null);
+    expect(store.getSelf()).toBeNull();
+    // Presence map retains the session; only the self pointer clears.
+    expect(store.getSession("self")).toBeDefined();
+  });
+
+  it("removeSession clears self when removing the local session", () => {
+    const store = createPresenceStore();
+    const self = createPresenceUser({
+      connectionId: "self",
+      userId: "me",
+      name: "Me",
+      color: "#111",
+    });
+    store.setSelf(self);
+    expect(store.removeSession("missing")).toBe(false);
+    expect(store.removeSession("self")).toBe(true);
+    expect(store.getSelf()).toBeNull();
+    expect(store.getSession("self")).toBeUndefined();
+  });
+
+  it("applyRemoteUpdate rejects unknown sessions and applies clocked patches", () => {
+    const store = createPresenceStore();
+    expect(store.applyRemoteUpdate("missing", 1, { name: "x" })).toBeNull();
+
+    store.upsertSession(
+      createPresenceUser({
+        connectionId: "c1",
+        userId: "a",
+        name: "A",
+        color: "#000",
+        clock: 5,
+        lastActivityAt: 1,
+        lastSeenAt: 2,
+      }),
+    );
+
+    const stale = store.applyRemoteUpdate("c1", 4, { name: "stale" }, NOW);
+    expect(stale?.name).toBe("A");
+    expect(stale?.lastSeenAt).toBe(NOW);
+    expect(stale?.clock).toBe(5);
+
+    const fresh = store.applyRemoteUpdate(
+      "c1",
+      6,
+      { name: "fresh", lastActivityAt: NOW },
+      NOW,
+    );
+    expect(fresh?.name).toBe("fresh");
+    expect(fresh?.clock).toBe(6);
+    expect(fresh?.lastActivityAt).toBe(NOW);
+  });
+
+  it("markActivity and touchSeen no-op for unknown sessions", () => {
+    const store = createPresenceStore();
+    expect(store.markActivity("missing")).toBeNull();
+    expect(store.touchSeen("missing")).toBeNull();
+
+    store.upsertSession(
+      createPresenceUser({
+        connectionId: "c1",
+        userId: "a",
+        name: "A",
+        color: "#000",
+        lastActivityAt: 1,
+        lastSeenAt: 2,
+        status: "idle",
+      }),
+    );
+    const seen = store.touchSeen("c1", NOW);
+    expect(seen?.lastSeenAt).toBe(NOW);
+    expect(seen?.lastActivityAt).toBe(1);
+    expect(seen?.status).toBe("idle");
+  });
+
+  it("sweepStatuses is a no-op when nothing transitions", () => {
+    const store = createPresenceStore({
+      timeouts: { idleTimeoutMs: 1_000, offlineTimeoutMs: 5_000 },
+    });
+    store.upsertSession(
+      createPresenceUser({
+        connectionId: "c1",
+        userId: "a",
+        name: "A",
+        color: "#000",
+        lastActivityAt: NOW,
+        lastSeenAt: NOW,
+        status: "active",
+      }),
+    );
+    expect(store.sweepStatuses(NOW)).toEqual([]);
+    expect(store.getSession("c1")?.status).toBe("active");
+  });
+
+  it("sweepStatuses updates self when the local session transitions", () => {
+    const store = createPresenceStore({
+      timeouts: { idleTimeoutMs: 1_000, offlineTimeoutMs: 5_000 },
+    });
+    const self = createPresenceUser({
+      connectionId: "self",
+      userId: "me",
+      name: "Me",
+      color: "#111",
+      lastActivityAt: NOW - 2_000,
+      lastSeenAt: NOW - 100,
+      status: "active",
+    });
+    store.setSelf(self);
+    store.sweepStatuses(NOW);
+    expect(store.getSelf()?.status).toBe("idle");
+  });
+
+  it("replaceAll swaps the map while preserving self", () => {
+    const store = createPresenceStore();
+    const self = createPresenceUser({
+      connectionId: "self",
+      userId: "me",
+      name: "Me",
+      color: "#111",
+    });
+    store.setSelf(self);
+    store.replaceAll([
+      createPresenceUser({
+        connectionId: "peer",
+        userId: "peer",
+        name: "Peer",
+        color: "#222",
+      }),
+    ]);
+    expect(store.getPresence().size).toBe(2);
+    expect(store.getSession("peer")?.name).toBe("Peer");
+    expect(store.getSession("self")?.name).toBe("Me");
+  });
+
+  it("subscribe notifies on mutations and unsubscribe stops delivery", () => {
+    const store = createPresenceStore();
+    const seen: number[] = [];
+    const unsubscribe = store.subscribe((presence) => {
+      seen.push(presence.size);
+    });
+    store.upsertSession(
+      createPresenceUser({
+        connectionId: "c1",
+        userId: "a",
+        name: "A",
+        color: "#000",
+      }),
+    );
+    unsubscribe();
+    store.upsertSession(
+      createPresenceUser({
+        connectionId: "c2",
+        userId: "b",
+        name: "B",
+        color: "#000",
+      }),
+    );
+    expect(seen).toEqual([1]);
+  });
+});
+
+describe("isUserIdle / isUserOffline", () => {
+  const config = { idleTimeoutMs: 1_000, offlineTimeoutMs: 5_000 };
+
+  it("reports idle and offline independently", () => {
+    expect(
+      isUserOffline({ lastSeenAt: NOW - 6_000 }, config.offlineTimeoutMs, NOW),
+    ).toBe(true);
+    expect(
+      isUserIdle(
+        { lastActivityAt: NOW - 2_000, lastSeenAt: NOW - 100 },
+        config,
+        NOW,
+      ),
+    ).toBe(true);
+    expect(
+      isUserIdle(
+        { lastActivityAt: NOW - 100, lastSeenAt: NOW - 100 },
+        config,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("createSelfSession", () => {
+  it("builds a local session from user info", () => {
+    const session = createSelfSession({
+      connectionId: "c-local",
+      userId: "u",
+      name: "Local",
+      color: "#abc",
+    });
+    expect(session.connectionId).toBe("c-local");
+    expect(session.userId).toBe("u");
   });
 });
 

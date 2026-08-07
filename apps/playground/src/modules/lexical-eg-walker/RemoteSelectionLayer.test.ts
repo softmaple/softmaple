@@ -22,11 +22,14 @@ afterEach(() => {
 });
 
 const peer: PresenceUser = {
+  connectionId: "conn-peer-b",
   userId: "peer-b",
   name: "Peer B",
   color: "#475BD8",
   status: "active",
-  lastActiveAt: 1,
+  lastActivityAt: 1,
+  lastSeenAt: 1,
+  clock: 0,
   selection: {
     anchor: {
       blockId: "block-a",

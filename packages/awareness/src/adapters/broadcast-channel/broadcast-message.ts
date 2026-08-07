@@ -2,6 +2,8 @@
  * BroadcastChannel message types and handlers
  */
 
+import type { StatusTimeouts } from "../../core/status";
+import { withDerivedStatus } from "../../core/status";
 import {
   PRESENCE_EVENT,
   type PresenceEvent,
@@ -10,7 +12,11 @@ import {
   type PresenceUpdatePayload,
   type PresenceUserUpdates,
 } from "../../types/events";
-import { type PresenceUser, updatePresenceUser } from "../../types/presence";
+import {
+  applyClockedPresenceUpdate,
+  type PresenceUser,
+  touchUserSeen,
+} from "../../types/presence";
 import {
   type AdapterState,
   removePresenceUser,
@@ -32,52 +38,58 @@ export type BroadcastMessageType =
 
 export interface BroadcastMessage {
   readonly type: BroadcastMessageType;
+  /** connectionId of the sender */
   readonly senderId: string;
   readonly timestamp: number;
   readonly payload: unknown;
 }
 
-/**
- * Type guard for PresenceUser payload
- */
 const isPresenceUser = (value: unknown): value is PresenceUser => {
   if (value === null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
   return (
+    typeof obj.connectionId === "string" &&
     typeof obj.userId === "string" &&
     typeof obj.name === "string" &&
     typeof obj.color === "string" &&
     (obj.status === "active" ||
       obj.status === "idle" ||
       obj.status === "offline") &&
-    typeof obj.lastActiveAt === "number"
+    typeof obj.lastActivityAt === "number" &&
+    typeof obj.lastSeenAt === "number" &&
+    typeof obj.clock === "number"
   );
 };
 
-/**
- * Type guard for update payload shape
- */
-const isUpdatePayload = (
-  value: unknown,
-): value is { userId: string; updates: PresenceUserUpdates } => {
+interface WireUpdatePayload {
+  readonly connectionId: string;
+  readonly userId: string;
+  readonly clock: number;
+  readonly updates: PresenceUserUpdates;
+}
+
+const isUpdatePayload = (value: unknown): value is WireUpdatePayload => {
   if (value === null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
   return (
+    typeof obj.connectionId === "string" &&
     typeof obj.userId === "string" &&
+    typeof obj.clock === "number" &&
     typeof obj.updates === "object" &&
     obj.updates !== null
   );
 };
 
-/**
- * Type guard for leave payload (userId string)
- */
-const isLeavePayload = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0;
+const isLeavePayload = (
+  value: unknown,
+): value is { connectionId: string; userId: string } => {
+  if (value === null || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.connectionId === "string" && typeof obj.userId === "string"
+  );
+};
 
-/**
- * Create a broadcast message
- */
 export const createBroadcastMessage = (
   type: BroadcastMessageType,
   senderId: string,
@@ -89,9 +101,6 @@ export const createBroadcastMessage = (
   payload,
 });
 
-/**
- * Send a message through a BroadcastChannel
- */
 export const sendBroadcastMessage = (
   channel: BroadcastChannel | null,
   message: BroadcastMessage,
@@ -110,9 +119,6 @@ export const sendBroadcastMessage = (
   }
 };
 
-/**
- * Handle presence:announce message
- */
 const handleAnnounce = (
   message: BroadcastMessage,
   state: AdapterState,
@@ -148,9 +154,6 @@ const handleAnnounce = (
   return newState;
 };
 
-/**
- * Handle presence:sync-response message
- */
 const handleSyncResponse = (
   message: BroadcastMessage,
   state: AdapterState,
@@ -168,26 +171,50 @@ const handleSyncResponse = (
   return newState;
 };
 
-/**
- * Handle presence:update message
- */
 const handleUpdate = (
   message: BroadcastMessage,
   state: AdapterState,
   subscriptions: SubscriptionManager,
+  statusTimeouts: StatusTimeouts,
 ): AdapterState => {
   if (!isUpdatePayload(message.payload)) {
     return state;
   }
 
-  const updates = message.payload;
-  const existingUser = state.presence.get(updates.userId);
+  const wire = message.payload;
+  const existingUser = state.presence.get(wire.connectionId);
 
   if (existingUser === undefined) {
     return state;
   }
 
-  const updatedUser = updatePresenceUser(existingUser, updates.updates);
+  // Liveness-only updates (heartbeat) may omit activity fields and keep clock
+  const isLivenessOnly =
+    wire.updates.lastSeenAt !== undefined &&
+    wire.updates.lastActivityAt === undefined &&
+    wire.clock === existingUser.clock;
+
+  let updatedUser: PresenceUser;
+  if (isLivenessOnly) {
+    updatedUser = withDerivedStatus(
+      touchUserSeen(existingUser, wire.updates.lastSeenAt),
+      statusTimeouts,
+      message.timestamp,
+    );
+  } else {
+    const applied = applyClockedPresenceUpdate(
+      existingUser,
+      wire.clock,
+      wire.updates,
+      message.timestamp,
+    );
+    updatedUser = withDerivedStatus(
+      applied ?? existingUser,
+      statusTimeouts,
+      message.timestamp,
+    );
+  }
+
   const newState = updateState(state, {
     presence: setPresenceUser(state.presence, updatedUser),
   });
@@ -196,8 +223,10 @@ const handleUpdate = (
 
   const updatePayload: PresenceUpdatePayload = {
     type: PRESENCE_EVENT.UPDATE,
-    userId: updates.userId,
-    updates: updates.updates,
+    connectionId: wire.connectionId,
+    userId: wire.userId,
+    clock: updatedUser.clock,
+    updates: wire.updates,
   };
   const event: PresenceEvent = {
     type: PRESENCE_EVENT.UPDATE,
@@ -209,9 +238,6 @@ const handleUpdate = (
   return newState;
 };
 
-/**
- * Handle presence:leave message
- */
 const handleLeave = (
   message: BroadcastMessage,
   state: AdapterState,
@@ -221,20 +247,21 @@ const handleLeave = (
     return state;
   }
 
-  const userId = message.payload;
+  const { connectionId, userId } = message.payload;
 
-  if (!state.presence.has(userId)) {
+  if (!state.presence.has(connectionId)) {
     return state;
   }
 
   const newState = updateState(state, {
-    presence: removePresenceUser(state.presence, userId),
+    presence: removePresenceUser(state.presence, connectionId),
   });
 
   subscriptions.notifyPresenceChange(newState.presence);
 
   const leavePayload: PresenceLeavePayload = {
     type: PRESENCE_EVENT.LEAVE,
+    connectionId,
     userId,
   };
   const event: PresenceEvent = {
@@ -249,13 +276,16 @@ const handleLeave = (
 
 /**
  * Process an incoming broadcast message
- * Returns the updated state
  */
 export const processBroadcastMessage = (
   message: BroadcastMessage,
   state: AdapterState,
   subscriptions: SubscriptionManager,
   sendSyncResponse: (self: PresenceUser) => void,
+  statusTimeouts: StatusTimeouts = {
+    idleTimeoutMs: 30_000,
+    offlineTimeoutMs: 15_000,
+  },
 ): AdapterState => {
   switch (message.type) {
     case BROADCAST_MESSAGE.ANNOUNCE:
@@ -271,7 +301,7 @@ export const processBroadcastMessage = (
       return handleSyncResponse(message, state, subscriptions);
 
     case BROADCAST_MESSAGE.UPDATE:
-      return handleUpdate(message, state, subscriptions);
+      return handleUpdate(message, state, subscriptions, statusTimeouts);
 
     case BROADCAST_MESSAGE.LEAVE:
       return handleLeave(message, state, subscriptions);

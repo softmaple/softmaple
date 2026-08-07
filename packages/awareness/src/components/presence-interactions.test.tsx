@@ -38,10 +38,13 @@ const user = (
   overrides: Partial<Omit<PresenceUser, "userId">> = {},
 ): PresenceUser => ({
   userId: id,
+  connectionId: id,
   name: `User ${id}`,
   color: "#2563eb",
   status: "active",
-  lastActiveAt: 1000,
+  lastActivityAt: 1000,
+  lastSeenAt: 1000,
+  clock: 0,
   ...overrides,
 });
 
@@ -494,12 +497,14 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
 
     const stale = user("stale", {
       name: "Stale",
-      lastActiveAt: Date.now() - 1_500, // older than idle threshold
+      lastActivityAt: Date.now() - 1_500, // older than idle threshold,
+      lastSeenAt: Date.now() - 1_500,
+  clock: 0, // older than idle threshold
       status: "active",
     });
 
     act(() => {
-      adapter.pushPresence(new Map([[stale.userId, stale]]));
+      adapter.pushPresence(new Map([[stale.connectionId, stale]]));
     });
     expect(observedStatus).toBe("active");
 
@@ -527,7 +532,9 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
 
     const selfUser = user("self", {
       name: "Self",
-      lastActiveAt: Date.now() - 1_500,
+      lastActivityAt: Date.now() - 1_500,
+      lastSeenAt: Date.now() - 1_500,
+  clock: 0,
       status: "active",
     });
     adapter.self = selfUser;
@@ -560,7 +567,7 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
     });
 
     act(() => {
-      adapter.pushPresence(new Map([[selfUser.userId, selfUser]]));
+      adapter.pushPresence(new Map([[selfUser.connectionId, selfUser]]));
     });
     expect(observedSelfStatus).toBe("active");
 
@@ -608,12 +615,14 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
 
     const stale = user("stale", {
       name: "Stale",
-      lastActiveAt: Date.now() - 10_000,
+      lastActivityAt: Date.now() - 10_000,
+      lastSeenAt: Date.now() - 10_000,
+  clock: 0,
       status: "active",
     });
 
     act(() => {
-      adapter.pushPresence(new Map([[stale.userId, stale]]));
+      adapter.pushPresence(new Map([[stale.connectionId, stale]]));
     });
 
     // Advance well past both thresholds — without a sweep timer, the

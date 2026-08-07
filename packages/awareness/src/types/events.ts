@@ -63,6 +63,7 @@ export interface JoinEventData {
 export interface LeaveEventData {
   readonly type: typeof ACTIVITY_TYPE.LEAVE;
   readonly userId: string;
+  readonly connectionId?: string;
 }
 
 export interface CursorEventData {
@@ -112,19 +113,34 @@ export interface PresenceJoinPayload {
 
 export interface PresenceLeavePayload {
   readonly type: typeof PRESENCE_EVENT.LEAVE;
+  /** Ephemeral session being removed */
+  readonly connectionId: string;
+  /** Persistent user id (convenience for UI) */
   readonly userId: string;
 }
 
 /**
- * Updates for presence - excludes userId to prevent patching the authoritative ID
+ * Updates for presence - excludes identity and clock-owned fields
  */
-export type PresenceUserUpdates = Partial<Omit<PresenceUser, "userId">>;
+export type PresenceUserUpdates = Partial<
+  Omit<
+    PresenceUser,
+    "connectionId" | "userId" | "clock" | "lastActivityAt" | "lastSeenAt"
+  >
+> & {
+  readonly lastActivityAt?: number;
+  readonly lastSeenAt?: number;
+};
 
 export interface PresenceUpdatePayload {
   readonly type: typeof PRESENCE_EVENT.UPDATE;
-  /** Authoritative user ID - cannot be changed via updates */
+  /** Ephemeral session id */
+  readonly connectionId: string;
+  /** Persistent user id */
   readonly userId: string;
-  /** Partial updates excluding userId */
+  /** Monotonic per-connection revision */
+  readonly clock: number;
+  /** Partial updates excluding identity */
   readonly updates: PresenceUserUpdates;
 }
 

@@ -2,48 +2,41 @@
  * Pure functions for user status management (active/idle/offline)
  */
 
+import {
+  derivePresenceStatus,
+  withDerivedStatus,
+} from "../core/status";
 import type { PresenceStatus, PresenceUser } from "../types/presence";
-import { updatePresenceUser } from "../types/presence";
+import { markUserActivity, patchPresenceUser } from "../types/presence";
 import type { PresenceState, PresenceStateConfig } from "../types/state";
 import { DEFAULT_PRESENCE_CONFIG } from "./selectors";
 
 /**
- * Determine user status based on last activity time (pure function)
+ * Determine user status from lastSeenAt / lastActivityAt (pure function)
  */
 export const determineUserStatus = (
   user: PresenceUser,
   config: PresenceStateConfig = DEFAULT_PRESENCE_CONFIG,
-): PresenceStatus => {
-  const now = Date.now();
-  const elapsed = now - user.lastActiveAt;
-
-  if (elapsed > config.offlineTimeoutMs) {
-    return "offline";
-  }
-  if (elapsed > config.idleTimeoutMs) {
-    return "idle";
-  }
-  return "active";
-};
+  now: number = Date.now(),
+): PresenceStatus => derivePresenceStatus(user, config, now);
 
 /**
- * Update all users' statuses based on their last activity (pure function)
+ * Update all users' statuses based on activity vs liveness clocks (pure)
  */
 export const updateAllUserStatuses = (
   state: PresenceState,
   config: PresenceStateConfig = DEFAULT_PRESENCE_CONFIG,
+  now: number = Date.now(),
 ): PresenceState => {
   let hasChanges = false;
   const newUsers = new Map<string, PresenceUser>();
 
-  for (const [userId, user] of state.users) {
-    const newStatus = determineUserStatus(user, config);
-    if (newStatus !== user.status) {
+  for (const [connectionId, user] of state.users) {
+    const updated = withDerivedStatus(user, config, now);
+    if (updated !== user) {
       hasChanges = true;
-      newUsers.set(userId, updatePresenceUser(user, { status: newStatus }));
-    } else {
-      newUsers.set(userId, user);
     }
+    newUsers.set(connectionId, updated);
   }
 
   return hasChanges ? { ...state, users: newUsers } : state;
@@ -55,9 +48,9 @@ export const updateAllUserStatuses = (
 export const removeOfflineUsers = (state: PresenceState): PresenceState => {
   const onlineUsers = new Map<string, PresenceUser>();
 
-  for (const [userId, user] of state.users) {
+  for (const [connectionId, user] of state.users) {
     if (user.status !== "offline") {
-      onlineUsers.set(userId, user);
+      onlineUsers.set(connectionId, user);
     }
   }
 
@@ -69,25 +62,39 @@ export const removeOfflineUsers = (state: PresenceState): PresenceState => {
 };
 
 /**
- * Mark a user as active (pure function)
+ * Mark a user as active via the activity API (pure function)
  */
 export const markUserActive = (
   state: PresenceState,
-  userId: string,
+  connectionId: string,
+  at: number = Date.now(),
 ): PresenceState => {
-  const user = state.users.get(userId);
+  const user = state.users.get(connectionId);
   if (user === undefined) {
     return state;
   }
 
-  const updatedUser = updatePresenceUser(user, {
-    status: "active",
-    lastActiveAt: Date.now(),
-  });
-
+  const updatedUser = markUserActivity(user, at);
   const newUsers = new Map(state.users);
-  newUsers.set(userId, updatedUser);
+  newUsers.set(connectionId, updatedUser);
 
+  return { ...state, users: newUsers };
+};
+
+/**
+ * Patch status without touching timestamps (for tests / explicit overrides)
+ */
+export const setUserStatus = (
+  state: PresenceState,
+  connectionId: string,
+  status: PresenceStatus,
+): PresenceState => {
+  const user = state.users.get(connectionId);
+  if (user === undefined) {
+    return state;
+  }
+  const newUsers = new Map(state.users);
+  newUsers.set(connectionId, patchPresenceUser(user, { status }));
   return { ...state, users: newUsers };
 };
 

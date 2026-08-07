@@ -17,7 +17,15 @@ export interface InternalState {
   state: AdapterState;
   reconnect: ReconnectState;
   heartbeatIntervalId: ReturnType<typeof setInterval> | null;
+  heartbeatAckTimeoutId: ReturnType<typeof setTimeout> | null;
   connectionTimeoutId: ReturnType<typeof setTimeout> | null;
+  /** Last heartbeat ping id awaiting ACK */
+  pendingPingId: string | null;
+  /** Consecutive missed heartbeat ACKs */
+  missedHeartbeatAcks: number;
+  lastHeartbeatAckAt: number | null;
+  /** Whether the ready handshake has completed */
+  handshakeComplete: boolean;
 }
 
 /**
@@ -30,7 +38,12 @@ export const createInternalState = (
   state: createInitialState(),
   reconnect: createReconnectState(reconnectConfig),
   heartbeatIntervalId: null,
+  heartbeatAckTimeoutId: null,
   connectionTimeoutId: null,
+  pendingPingId: null,
+  missedHeartbeatAcks: 0,
+  lastHeartbeatAckAt: null,
+  handshakeComplete: false,
 });
 
 /**
@@ -66,4 +79,8 @@ export const resetInternalState = (
   socket: null,
   state: createInitialState(),
   reconnect: createReconnectState(reconnectConfig),
+  pendingPingId: null,
+  missedHeartbeatAcks: 0,
+  lastHeartbeatAckAt: null,
+  handshakeComplete: false,
 });

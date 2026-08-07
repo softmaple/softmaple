@@ -14,11 +14,10 @@ const PROVIDER_ERROR_MSG =
   "Wrap your component tree with <PresenceProvider adapter={adapter}>.";
 
 /**
- * Default cursor throttle window. ~60fps — matches the design doc's "Cursor
- * updates throttled (50-100ms)" budget while staying snappy for fast-moving
- * pointers.
+ * Default network cursor throttle. Local rendering may still run at 60fps;
+ * presence frames coalesce to ~20 updates/s (design doc: 50–100ms).
  */
-const DEFAULT_CURSOR_THROTTLE_MS = 16;
+const DEFAULT_CURSOR_THROTTLE_MS = 50;
 
 /**
  * Default selection throttle window. Per design doc §7 ("Cursor updates

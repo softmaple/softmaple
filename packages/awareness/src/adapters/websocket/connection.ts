@@ -12,15 +12,22 @@ import {
   WS_MESSAGE,
 } from "./types";
 
+let pingCounter = 0;
+
+const nextPingId = (): string => {
+  pingCounter += 1;
+  return `ping-${Date.now()}-${pingCounter}`;
+};
+
 /**
  * Send a message through WebSocket
- * Accepts any string type for flexibility (e.g., 'auth' for custom auth handshake)
  */
 export const sendWebSocketMessage = (
   internal: InternalState,
   config: WebSocketAdapterConfig,
   type: string,
   payload?: unknown,
+  senderId: string = config.connectionId ?? config.userInfo.userId,
 ): void => {
   if (
     internal.socket === null ||
@@ -28,39 +35,98 @@ export const sendWebSocketMessage = (
   ) {
     return;
   }
-  const message = createMessage(
-    type,
-    config.roomId,
-    config.userInfo.userId,
-    payload,
-  );
+  const message = createMessage(type, config.roomId, senderId, payload);
   internal.socket.send(serializeMessage(message));
 };
 
 /**
- * Start heartbeat interval
+ * Clear pending heartbeat ACK timeout
  */
-export const startHeartbeat = (
-  internal: InternalState,
-  config: WebSocketAdapterConfig,
-  sendMessage: (type: string, payload?: unknown) => void,
-): void => {
-  stopHeartbeat(internal);
-  const heartbeatIntervalMs =
-    config.heartbeatIntervalMs ?? DEFAULT_WS_CONFIG.heartbeatIntervalMs;
-  internal.heartbeatIntervalId = setInterval(() => {
-    sendMessage(WS_MESSAGE.HEARTBEAT);
-  }, heartbeatIntervalMs);
+export const clearHeartbeatAckTimeout = (internal: InternalState): void => {
+  if (internal.heartbeatAckTimeoutId !== null) {
+    clearTimeout(internal.heartbeatAckTimeoutId);
+    internal.heartbeatAckTimeoutId = null;
+  }
 };
 
 /**
- * Stop heartbeat interval
+ * Stop heartbeat interval and ACK timeout
  */
 export const stopHeartbeat = (internal: InternalState): void => {
   if (internal.heartbeatIntervalId !== null) {
     clearInterval(internal.heartbeatIntervalId);
     internal.heartbeatIntervalId = null;
   }
+  clearHeartbeatAckTimeout(internal);
+  internal.pendingPingId = null;
+};
+
+/**
+ * Start heartbeat with ACK deadline. On repeated missed ACKs, force-close
+ * the socket so reconnect can heal half-open NAT/proxy connections.
+ */
+export const startHeartbeat = (
+  internal: InternalState,
+  config: WebSocketAdapterConfig,
+  sendMessage: (type: string, payload?: unknown) => void,
+  onMissedAcks: () => void = () => {
+    if (internal.socket !== null) {
+      try {
+        internal.socket.close();
+      } catch {
+        // ignore
+      }
+    }
+  },
+): void => {
+  stopHeartbeat(internal);
+
+  const heartbeatIntervalMs =
+    config.heartbeatIntervalMs ?? DEFAULT_WS_CONFIG.heartbeatIntervalMs;
+  const ackTimeoutMs =
+    config.heartbeatAckTimeoutMs ?? DEFAULT_WS_CONFIG.heartbeatAckTimeoutMs;
+  const missedLimit =
+    config.heartbeatMissedAckLimit ?? DEFAULT_WS_CONFIG.heartbeatMissedAckLimit;
+
+  const sendPing = (): void => {
+    const pingId = nextPingId();
+    internal.pendingPingId = pingId;
+    sendMessage(WS_MESSAGE.HEARTBEAT, { pingId });
+
+    clearHeartbeatAckTimeout(internal);
+    internal.heartbeatAckTimeoutId = setTimeout(() => {
+      if (internal.pendingPingId !== pingId) return;
+      internal.missedHeartbeatAcks += 1;
+      internal.pendingPingId = null;
+      if (internal.missedHeartbeatAcks >= missedLimit) {
+        onMissedAcks();
+      }
+    }, ackTimeoutMs);
+  };
+
+  // Immediate ping so we detect half-open sockets quickly after connect
+  sendPing();
+  internal.heartbeatIntervalId = setInterval(sendPing, heartbeatIntervalMs);
+};
+
+/**
+ * Record a heartbeat ACK. Clears the pending timeout when pingId matches.
+ */
+export const handleHeartbeatAck = (
+  internal: InternalState,
+  pingId: string | undefined,
+): void => {
+  if (
+    pingId !== undefined &&
+    internal.pendingPingId !== null &&
+    pingId !== internal.pendingPingId
+  ) {
+    return;
+  }
+  internal.missedHeartbeatAcks = 0;
+  internal.lastHeartbeatAckAt = Date.now();
+  internal.pendingPingId = null;
+  clearHeartbeatAckTimeout(internal);
 };
 
 /**
@@ -141,13 +207,22 @@ export const cleanupWebSocket = (
   stopHeartbeat(internal);
   clearConnectionTimeout(internal);
   cancelReconnect(internal);
+  internal.handshakeComplete = false;
+  internal.missedHeartbeatAcks = 0;
+  internal.pendingPingId = null;
+  internal.lastHeartbeatAckAt = null;
 
   if (internal.socket !== null) {
     internal.socket.removeEventListener("open", handlers.onOpen);
     internal.socket.removeEventListener("message", handlers.onMessage);
     internal.socket.removeEventListener("close", handlers.onClose);
     internal.socket.removeEventListener("error", handlers.onError);
-    internal.socket.close();
+    if (
+      internal.socket.readyState === WebSocket.OPEN ||
+      internal.socket.readyState === WebSocket.CONNECTING
+    ) {
+      internal.socket.close();
+    }
     internal.socket = null;
   }
 };

@@ -17,11 +17,14 @@ import {
 
 const validUser = () =>
   ({
+    connectionId: "c-1",
     userId: "u-1",
     name: "Ada",
     color: "#2563eb",
     status: "active" as const,
-    lastActiveAt: 1700000000000,
+    lastActivityAt: 1700000000000,
+    lastSeenAt: 1700000000000,
+    clock: 0,
   }) satisfies Record<string, unknown>;
 
 describe("websocket validation", () => {
@@ -67,7 +70,9 @@ describe("websocket validation", () => {
 
   describe("isLeavePayload", () => {
     it("accepts a userId string", () => {
-      expect(isLeavePayload({ userId: "u-1" })).toBe(true);
+      expect(isLeavePayload({ connectionId: "c-1", userId: "u-1" })).toBe(
+        true,
+      );
     });
 
     it("rejects non-string userId", () => {
@@ -78,7 +83,7 @@ describe("websocket validation", () => {
 
   describe("isPresenceUpdatePayload", () => {
     it("accepts a minimal valid update", () => {
-      expect(isPresenceUpdatePayload({ userId: "u-1", updates: {} })).toBe(
+      expect(isPresenceUpdatePayload({ connectionId: "c-1", userId: "u-1", clock: 1, updates: {} })).toBe(
         true,
       );
     });
@@ -86,7 +91,9 @@ describe("websocket validation", () => {
     it("accepts null cursor / selection (explicit clear on wire)", () => {
       expect(
         isPresenceUpdatePayload({
+          connectionId: "c-1",
           userId: "u-1",
+          clock: 1,
           updates: { cursor: null, selection: null },
         }),
       ).toBe(true);
@@ -95,7 +102,9 @@ describe("websocket validation", () => {
     it("accepts directional cross-block selection anchors", () => {
       expect(
         isPresenceUpdatePayload({
+          connectionId: "c-1",
           userId: "u-1",
+          clock: 1,
           updates: {
             selection: {
               anchor: {
@@ -271,17 +280,25 @@ describe("WebSocket clear-cursor wire semantics", () => {
       name: "Peer",
       color: "#000",
       status: "active" as const,
-      lastActiveAt: 1,
+      connectionId: "c-peer",
+      lastActivityAt: 1,
+      lastSeenAt: 1,
+      clock: 0,
       cursor: { blockId: "b", offset: 3 },
     };
-    state = { ...state, presence: new Map([[peer.userId, peer]]) };
+    state = { ...state, presence: new Map([[peer.connectionId, peer]]) };
 
     // Sender emits a "clear cursor" update.
     const message = createMessage(
       WS_MESSAGE.PRESENCE_UPDATE,
       "room-1",
       "peer",
-      { userId: "peer", updates: { cursor: undefined } },
+      {
+        connectionId: "c-peer",
+        userId: "peer",
+        clock: 1,
+        updates: { cursor: undefined },
+      },
     );
     const wire = serializeMessage(message);
     const parsed = parseMessage(wire);
@@ -291,6 +308,6 @@ describe("WebSocket clear-cursor wire semantics", () => {
 
     const result = processMessage(state, parsed, "self");
     expect(result.shouldNotifyPresence).toBe(true);
-    expect(result.state.presence.get("peer")?.cursor).toBeUndefined();
+    expect(result.state.presence.get("c-peer")?.cursor).toBeUndefined();
   });
 });

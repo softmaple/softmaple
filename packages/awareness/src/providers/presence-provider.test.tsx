@@ -66,7 +66,9 @@ class MockPresenceAdapter implements PresenceAdapter {
         type: PRESENCE_EVENT.UPDATE,
         payload: {
           type: PRESENCE_EVENT.UPDATE,
+          connectionId: "remote-user",
           userId: "remote-user",
+          clock: 1,
           updates: { meta: { isTyping } },
         },
         timestamp: 123,
@@ -131,14 +133,14 @@ class FullMockAdapter implements PresenceAdapter {
 
   emitConnected = (self: PresenceUser): void => {
     this.self = self;
-    this.presence = new Map([[self.userId, self]]);
+    this.presence = new Map([[self.connectionId, self]]);
     this.state = "connected";
     for (const cb of this.connectionCallbacks) cb("connected");
     for (const cb of this.presenceCallbacks) cb(this.presence);
   };
 
   emitJoin = (user: PresenceUser): void => {
-    this.presence = new Map(this.presence).set(user.userId, user);
+    this.presence = new Map(this.presence).set(user.connectionId, user);
     for (const cb of this.presenceCallbacks) cb(this.presence);
     for (const cb of this.eventCallbacks) {
       cb({
@@ -250,10 +252,13 @@ describe("PresenceProvider", () => {
 
     const self: PresenceUser = {
       userId: "self",
+      connectionId: "self",
       name: "Self",
       color: "#000",
       status: "active",
-      lastActiveAt: 0,
+      lastActivityAt: 0,
+      lastSeenAt: 0,
+      clock: 0,
     };
 
     act(() => {
@@ -265,10 +270,13 @@ describe("PresenceProvider", () => {
 
     const peer: PresenceUser = {
       userId: "peer",
+      connectionId: "peer",
       name: "Peer",
       color: "#111",
       status: "active",
-      lastActiveAt: 100,
+      lastActivityAt: 100,
+      lastSeenAt: 100,
+      clock: 0,
     };
     act(() => {
       adapter.emitJoin(peer);
@@ -359,10 +367,13 @@ describe("PresenceProvider", () => {
 
     const self: PresenceUser = {
       userId: "self",
+      connectionId: "self",
       name: "Self",
       color: "#000",
       status: "active",
-      lastActiveAt: 0,
+      lastActivityAt: 0,
+      lastSeenAt: 0,
+      clock: 0,
     };
     act(() => {
       adapter.emitConnected(self);
@@ -372,10 +383,13 @@ describe("PresenceProvider", () => {
     for (let i = 0; i < 5; i++) {
       const peer: PresenceUser = {
         userId: `peer-${i}`,
+    connectionId: `peer-${i}`,
         name: `Peer ${i}`,
         color: "#111",
         status: "active",
-        lastActiveAt: i,
+        lastActivityAt: i,
+        lastSeenAt: i,
+      clock: 0,
       };
       act(() => {
         adapter.emitJoin(peer);
@@ -479,17 +493,23 @@ describe("PresenceProvider", () => {
 
     const self: PresenceUser = {
       userId: "self",
+      connectionId: "self",
       name: "Self",
       color: "#000",
       status: "active",
-      lastActiveAt: Date.now(),
+      lastActivityAt: Date.now(),
+      lastSeenAt: Date.now(),
+      clock: 0,
     };
     const peer: PresenceUser = {
       userId: "peer-idle",
+      connectionId: "peer-idle",
       name: "Peer",
       color: "#111",
       status: "active",
-      lastActiveAt: Date.now(),
+      lastActivityAt: Date.now(),
+      lastSeenAt: Date.now(),
+      clock: 0,
     };
     act(() => {
       adapter.emitConnected(self);
@@ -505,7 +525,7 @@ describe("PresenceProvider", () => {
     const idleEvents = (contextRef.current?.recentActivity ?? []).filter(
       (e) => e.type === "idle",
     );
-    // Both self and peer have stale lastActiveAt by t=1500, so both should
+    // Both self and peer have stale lastActivityAt by t=1500, so both should
     // be demoted exactly once.
     expect(idleEvents).toHaveLength(2);
     expect(idleEvents.map((e) => e.userId).sort()).toEqual([

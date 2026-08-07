@@ -91,32 +91,63 @@ components.
 
 ## WebSocket server contract
 
+Protocol version: **2**. Capability bits are advertised in the `auth` handshake
+(`protocolVersion`, `capabilities`, `connectionId`, `userId`).
+
 `createWebSocketAdapter` exchanges JSON frames of shape:
 
 ```ts
 {
-  type: "join" | "leave" | "presence_update" | "presence_sync"
-      | "presence_sync_response" | "heartbeat" | "heartbeat_ack" | "error",
+  type: "auth" | "auth_ok" | "auth_error"
+      | "join" | "leave" | "presence:update" | "presence:sync"
+      | "presence:sync-response" | "heartbeat" | "heartbeat:ack" | "error",
   roomId: string,
-  senderId: string,
+  senderId: string, // connectionId of the sender
   timestamp: number,
   payload?: unknown,
 }
 ```
 
-Payload shapes per message type:
+### Ready handshake
+
+```text
+disconnected → connecting → authenticating → syncing → connected
+```
+
+`adapter.connect()` resolves only at `connected` (presence ready), not on
+socket `open`.
 
 | Type | Payload |
 | --- | --- |
+| `auth` | `{ token, protocolVersion, capabilities, connectionId, userId }` |
+| `auth_ok` | `{}` |
+| `auth_error` | `{ message: string }` |
 | `join` | `{ user: PresenceUser }` |
-| `leave` | `{ userId: string }` |
-| `presence_update` | `{ userId: string, updates: Partial<Omit<PresenceUser, "userId">> }` |
-| `presence_sync` / `presence_sync_response` | `{ users: PresenceUser[] }` |
+| `leave` | `{ connectionId: string, userId: string }` |
+| `presence:update` | `{ connectionId, userId, clock, updates }` |
+| `presence:sync` / `presence:sync-response` | `{ users: PresenceUser[] }` |
+| `heartbeat` / `heartbeat:ack` | `{ pingId: string }` |
 | `error` | `{ code: string, message: string }` |
+
+`PresenceUser` includes `connectionId`, `userId`, `lastActivityAt`,
+`lastSeenAt`, and `clock`. Heartbeats must only advance `lastSeenAt`.
+
+Status is derived:
+
+```text
+lastSeenAt past offlineTimeout → offline
+lastActivityAt past idleTimeout → idle
+otherwise → active
+```
+
+Updates are accepted only when `incoming.clock > known.clock`.
 
 Every inbound payload is validated by a runtime type guard
 (`src/adapters/websocket/validation.ts`). Malformed frames are dropped and
 surfaced via `adapter.onError` instead of crashing consumers.
+
+Heartbeat ACK deadline (default interval 10s, ACK timeout 20s, 2 misses)
+force-closes the socket so half-open NAT/proxy links reconnect.
 
 ### Clear-cursor wire semantics
 

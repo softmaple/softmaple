@@ -29,11 +29,14 @@ export const pokemonFlavor = {
 
 export const pikachu = {
   userId: "pikachu",
+  connectionId: "pikachu",
   name: "Pikachu",
   avatarUrl: pikachuSprite,
   color: pokemonFlavor.pikachu.userColor,
   status: "active",
-  lastActiveAt: baseTime + 4000,
+  lastActivityAt: baseTime + 4000,
+  lastSeenAt: baseTime + 4000,
+  clock: 0,
   cursor: { blockId: "abstract", offset: 42 },
   selection: { blockId: "abstract", from: 12, to: 56 },
   meta: { isTyping: true },
@@ -41,49 +44,64 @@ export const pikachu = {
 
 export const bulbasaur = {
   userId: "bulbasaur",
+  connectionId: "bulbasaur",
   name: "Bulbasaur",
   avatarUrl: bulbasaurSprite,
   color: pokemonFlavor.bulbasaur.userColor,
   status: "active",
-  lastActiveAt: baseTime + 3000,
+  lastActivityAt: baseTime + 3000,
+  lastSeenAt: baseTime + 3000,
+  clock: 0,
   cursor: { blockId: "methods", offset: 18 },
 } satisfies PresenceUser;
 
 export const charmander = {
   userId: "charmander",
+  connectionId: "charmander",
   name: "Charmander",
   avatarUrl: charmanderSprite,
   color: pokemonFlavor.charmander.userColor,
   status: "idle",
-  lastActiveAt: baseTime + 2000,
+  lastActivityAt: baseTime + 2000,
+  lastSeenAt: baseTime + 2000,
+  clock: 0,
   selection: { blockId: "results", from: 4, to: 27 },
 } satisfies PresenceUser;
 
 export const squirtle = {
   userId: "squirtle",
+  connectionId: "squirtle",
   name: "Squirtle",
   avatarUrl: squirtleSprite,
   color: pokemonFlavor.squirtle.userColor,
   status: "idle",
-  lastActiveAt: baseTime + 1000,
+  lastActivityAt: baseTime + 1000,
+  lastSeenAt: baseTime + 1000,
+  clock: 0,
 } satisfies PresenceUser;
 
 export const eevee = {
   userId: "eevee",
+  connectionId: "eevee",
   name: "Eevee",
   avatarUrl: eeveeSprite,
   color: pokemonFlavor.eevee.userColor,
   status: "offline",
-  lastActiveAt: baseTime,
+  lastActivityAt: baseTime,
+  lastSeenAt: baseTime,
+  clock: 0,
 } satisfies PresenceUser;
 
 export const psyduck = {
   userId: "psyduck",
+  connectionId: "psyduck",
   name: "Psyduck",
   avatarUrl: psyduckSprite,
   color: pokemonFlavor.psyduck.userColor,
   status: "active",
-  lastActiveAt: baseTime + 5000,
+  lastActivityAt: baseTime + 5000,
+  lastSeenAt: baseTime + 5000,
+  clock: 0,
 } satisfies PresenceUser;
 
 export const collaborators = [
@@ -96,7 +114,7 @@ export const collaborators = [
 ] satisfies ReadonlyArray<PresenceUser>;
 
 export const usersById = new Map(
-  collaborators.map((user) => [user.userId, user]),
+  collaborators.map((user) => [user.connectionId, user]),
 ) satisfies ReadonlyMap<string, PresenceUser>;
 
 export const recentActivities = [

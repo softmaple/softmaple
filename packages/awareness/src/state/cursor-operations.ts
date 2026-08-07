@@ -8,55 +8,55 @@ import type {
   PresenceUser,
 } from "../types/presence";
 import {
+  markUserActivity,
   selectionReferencesBlock,
-  updatePresenceUser,
 } from "../types/presence";
 import type { PresenceState } from "../types/state";
 
 /**
- * Update a user's cursor position (pure function)
+ * Update a user's cursor position (pure function) — marks activity
  */
 export const updateUserCursor = (
   state: PresenceState,
-  userId: string,
+  connectionId: string,
   cursor: CursorPosition | null,
+  at: number = Date.now(),
 ): PresenceState => {
-  const user = state.users.get(userId);
+  const user = state.users.get(connectionId);
   if (user === undefined) {
     return state;
   }
 
-  const updatedUser = updatePresenceUser(user, {
+  const updatedUser = markUserActivity(user, at, {
     cursor: cursor ?? undefined,
-    lastActiveAt: Date.now(),
   });
 
   const newUsers = new Map(state.users);
-  newUsers.set(userId, updatedUser);
+  newUsers.set(connectionId, updatedUser);
 
   return { ...state, users: newUsers };
 };
 
 /**
- * Update a user's selection range (pure function)
+ * Update a user's selection range (pure function) — marks activity
  */
 export const updateUserSelection = (
   state: PresenceState,
-  userId: string,
+  connectionId: string,
   selection: PresenceSelection | null,
+  at: number = Date.now(),
 ): PresenceState => {
-  const user = state.users.get(userId);
+  const user = state.users.get(connectionId);
   if (user === undefined) {
     return state;
   }
 
-  const updatedUser = updatePresenceUser(user, {
+  const updatedUser = markUserActivity(user, at, {
     selection: selection ?? undefined,
-    lastActiveAt: Date.now(),
   });
 
   const newUsers = new Map(state.users);
-  newUsers.set(userId, updatedUser);
+  newUsers.set(connectionId, updatedUser);
 
   return { ...state, users: newUsers };
 };
@@ -107,12 +107,13 @@ export const getCursorsByBlock = (
 export const hasOtherCursorsInBlock = (
   state: PresenceState,
   blockId: string,
-  excludeUserId?: string,
+  excludeConnectionId?: string,
 ): boolean =>
   Array.from(state.users.values()).some(
     (user) =>
       user.cursor?.blockId === blockId &&
-      (excludeUserId === undefined || user.userId !== excludeUserId),
+      (excludeConnectionId === undefined ||
+        user.connectionId !== excludeConnectionId),
   );
 
 /**
@@ -120,13 +121,13 @@ export const hasOtherCursorsInBlock = (
  */
 export const clearUserCursor = (
   state: PresenceState,
-  userId: string,
-): PresenceState => updateUserCursor(state, userId, null);
+  connectionId: string,
+): PresenceState => updateUserCursor(state, connectionId, null);
 
 /**
  * Clear selection for a user (pure function)
  */
 export const clearUserSelection = (
   state: PresenceState,
-  userId: string,
-): PresenceState => updateUserSelection(state, userId, null);
+  connectionId: string,
+): PresenceState => updateUserSelection(state, connectionId, null);

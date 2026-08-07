@@ -32,10 +32,13 @@ const createUser = (
   overrides: Partial<Omit<PresenceUser, "userId">> = {},
 ): PresenceUser => ({
   userId,
+  connectionId: overrides.connectionId ?? userId,
   name: `User ${userId}`,
   color: "#000",
   status: "active",
-  lastActiveAt: 1000,
+  lastActivityAt: 1000,
+  lastSeenAt: 1000,
+  clock: 0,
   ...overrides,
 });
 

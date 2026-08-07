@@ -62,16 +62,16 @@ export interface PresenceProviderProps {
 }
 
 /**
- * Derive others list from presence map (excluding self)
+ * Derive others list from presence map (excluding self connection)
  */
 const deriveOthers = (
   presence: ReadonlyMap<string, PresenceUser>,
-  selfId: string | null,
+  selfConnectionId: string | null,
 ): ReadonlyArray<PresenceUser> => {
-  if (selfId === null) return [];
+  if (selfConnectionId === null) return [];
   const others: PresenceUser[] = [];
-  for (const [userId, user] of presence) {
-    if (userId !== selfId) {
+  for (const [connectionId, user] of presence) {
+    if (connectionId !== selfConnectionId) {
       others.push(user);
     }
   }
@@ -102,7 +102,11 @@ const presenceEventToActivity = (
           userId: payload.userId,
           timestamp,
           type: "leave",
-          data: { type: "leave", userId: payload.userId },
+          data: {
+            type: "leave",
+            userId: payload.userId,
+            connectionId: payload.connectionId,
+          },
         };
       }
       return null;
@@ -194,8 +198,11 @@ interface StatusSweepResult {
 
 /**
  * Apply local status demotion (active → idle → offline) based on
- * `lastActiveAt`. Returns the same map reference when no user transitioned
- * so React can short-circuit downstream memoization.
+ * `lastSeenAt` / `lastActivityAt`. Returns the same map reference when no
+ * user transitioned so React can short-circuit downstream memoization.
+ *
+ * Prefer adapter-owned sweeps when the transport already derives status
+ * (pass `statusSweepMs={0}`). This remains as a display-side safety net.
  */
 const applyStatusSweep = (
   presence: ReadonlyMap<string, PresenceUser>,
@@ -203,12 +210,12 @@ const applyStatusSweep = (
 ): StatusSweepResult => {
   let next: Map<string, PresenceUser> | null = null;
   const transitions: PresenceUser[] = [];
-  for (const [userId, user] of presence) {
+  for (const [connectionId, user] of presence) {
     const newStatus = determineUserStatus(user, config);
     if (newStatus !== user.status) {
       if (next === null) next = new Map(presence);
       const updated = { ...user, status: newStatus };
-      next.set(userId, updated);
+      next.set(connectionId, updated);
       transitions.push(updated);
     }
   }
@@ -319,9 +326,9 @@ export const PresenceProvider = ({
   }, [adapter, autoConnect]);
 
   // Local status sweep — demotes stale users to `idle`/`offline` so the
-  // displayed status reflects time since `lastActiveAt` even if the adapter
-  // hasn't pushed a status update. Stays a no-op if every user's status
-  // already matches the threshold-derived value.
+  // displayed status reflects activity vs liveness clocks even if the
+  // adapter hasn't pushed a status update. Prefer adapter-owned sweeps
+  // (statusSweepMs=0) when using BroadcastChannel / PresenceStore.
   const presenceRef = useRef(presence);
   // Sync the ref in an effect (not during render) so concurrent-mode
   // discarded renders cannot leave the ref pointing at unmounted state.
@@ -356,9 +363,9 @@ export const PresenceProvider = ({
         // re-emit the same idle transition.
         presenceRef.current = swept;
         setPresence(swept);
-        const selfId = adapter.getSelf()?.userId;
-        if (selfId !== undefined) {
-          const updated = swept.get(selfId);
+        const selfConnectionId = adapter.getSelf()?.connectionId;
+        if (selfConnectionId !== undefined) {
+          const updated = swept.get(selfConnectionId);
           if (updated !== undefined) setSelf(updated);
         }
         const newActivities = sweepTransitionsToActivities(transitions);
@@ -395,8 +402,8 @@ export const PresenceProvider = ({
   );
 
   const others = useMemo(
-    () => deriveOthers(presence, self?.userId ?? null),
-    [presence, self?.userId],
+    () => deriveOthers(presence, self?.connectionId ?? null),
+    [presence, self?.connectionId],
   );
 
   const contextValue: PresenceContextValue = useMemo(

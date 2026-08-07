@@ -3,14 +3,14 @@
  */
 
 import type { PresenceUser } from "../types/presence";
-import type { PresenceState, PresenceStateConfig } from "../types/state";
+import {
+  DEFAULT_PRESENCE_CONFIG,
+  type PresenceState,
+  type PresenceStateConfig,
+} from "../types/state";
 
-export const DEFAULT_PRESENCE_CONFIG: PresenceStateConfig = {
-  maxActivities: 100,
-  idleTimeoutMs: 60_000,
-  offlineTimeoutMs: 120_000,
-  cursorThrottleMs: 50,
-} as const;
+export { DEFAULT_PRESENCE_CONFIG };
+export type { PresenceStateConfig };
 
 export const createInitialPresenceState = (): PresenceState => ({
   users: new Map(),
@@ -28,10 +28,18 @@ export const getOnlineUsers = (
 ): ReadonlyArray<PresenceUser> =>
   getUsersArray(state).filter((user) => user.status !== "offline");
 
+/** Look up a session by connectionId. */
 export const getUserById = (
   state: PresenceState,
+  connectionId: string,
+): PresenceUser | undefined => state.users.get(connectionId);
+
+/** All sessions belonging to a persistent userId. */
+export const getSessionsByUserId = (
+  state: PresenceState,
   userId: string,
-): PresenceUser | undefined => state.users.get(userId);
+): ReadonlyArray<PresenceUser> =>
+  getUsersArray(state).filter((user) => user.userId === userId);
 
 export const getSelfUser = (state: PresenceState): PresenceUser | undefined =>
   state.selfId ? state.users.get(state.selfId) : undefined;
@@ -39,4 +47,4 @@ export const getSelfUser = (state: PresenceState): PresenceUser | undefined =>
 export const getOtherUsers = (
   state: PresenceState,
 ): ReadonlyArray<PresenceUser> =>
-  getUsersArray(state).filter((user) => user.userId !== state.selfId);
+  getUsersArray(state).filter((user) => user.connectionId !== state.selfId);

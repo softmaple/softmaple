@@ -1,6 +1,10 @@
 /**
  * BroadcastChannel adapter for local tab communication
  * Enables presence awareness between tabs in the same browser
+ *
+ * Heartbeats only advance `lastSeenAt`. Status is derived:
+ *   lastSeenAt past offlineTimeout  → remove (offline)
+ *   lastActivityAt past idleTimeout → idle
  */
 
 import {
@@ -11,18 +15,21 @@ import {
   type PresenceSyncPayload,
 } from "../../types/events";
 import {
+  createConnectionId,
   createPresenceUser,
+  markUserActivity,
   type PresenceUser,
-  updatePresenceUser,
+  type PresenceUserPatch,
+  touchUserSeen,
 } from "../../types/presence";
 import {
   createInitialState,
-  isUserIdle,
   isUserOffline,
   removePresenceUser,
   setPresenceUser,
   updateState,
 } from "../adapter-state";
+import { withDerivedStatus } from "../../core/status";
 import { createSubscriptionManager } from "../subscription-manager";
 import type {
   AdapterConfig,
@@ -47,17 +54,24 @@ const createChannelName = (roomId: string): string =>
  * Configuration specific to BroadcastChannel adapter
  */
 export interface BroadcastChannelAdapterConfig extends AdapterConfig {
-  /** Heartbeat interval in ms (default: 5000) */
+  /** Heartbeat interval in ms (default: 5000) — updates lastSeenAt only */
   readonly heartbeatIntervalMs?: number;
-  /** Timeout before considering user offline (default: 15000) */
+  /**
+   * Timeout before considering a peer offline based on lastSeenAt (default: 15000)
+   */
   readonly offlineTimeoutMs?: number;
-  /** Idle timeout in ms (default: 30000) */
+  /**
+   * Idle timeout based on lastActivityAt (default: 30000).
+   * Independent of offlineTimeout — idle is reachable while heartbeats continue.
+   */
   readonly idleTimeoutMs?: number;
+  /** Stable connection id for this tab; generated when omitted */
+  readonly connectionId?: string;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5000;
-const DEFAULT_OFFLINE_TIMEOUT_MS = 15000;
-const DEFAULT_IDLE_TIMEOUT_MS = 30000;
+const DEFAULT_OFFLINE_TIMEOUT_MS = 15_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 
 /**
  * Create a BroadcastChannel adapter instance
@@ -72,6 +86,10 @@ export const createBroadcastChannelAdapter = (
     offlineTimeoutMs = DEFAULT_OFFLINE_TIMEOUT_MS,
     idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
   } = config;
+
+  const connectionId =
+    config.connectionId ?? createConnectionId(userInfo.userId);
+  const statusTimeouts = { idleTimeoutMs, offlineTimeoutMs };
 
   let state = createInitialState();
   let channel: BroadcastChannel | null = null;
@@ -89,58 +107,85 @@ export const createBroadcastChannelAdapter = (
 
   const sendMessage = (type: BroadcastMessageType, payload: unknown): void => {
     if (state.self === null) return;
-    const message = createBroadcastMessage(type, state.self.userId, payload);
+    const message = createBroadcastMessage(
+      type,
+      state.self.connectionId,
+      payload,
+    );
     sendBroadcastMessage(channel, message, subscriptions.notifyError);
   };
 
   const handleMessage = (event: MessageEvent<BroadcastMessage>): void => {
     const message = event.data;
-    if (message.senderId === state.self?.userId) return;
+    // Suppress only this connection's echoes — other tabs of the same userId
+    // must still be visible.
+    if (message.senderId === state.self?.connectionId) return;
 
-    state = processBroadcastMessage(message, state, subscriptions, (self) =>
-      sendMessage(BROADCAST_MESSAGE.SYNC_RESPONSE, self),
+    state = processBroadcastMessage(
+      message,
+      state,
+      subscriptions,
+      (self) => sendMessage(BROADCAST_MESSAGE.SYNC_RESPONSE, self),
+      statusTimeouts,
     );
   };
 
   const sendHeartbeat = (): void => {
     if (state.self === null) return;
 
-    const updatedSelf = updatePresenceUser(state.self, {
-      status: "active",
-      lastActiveAt: Date.now(),
-    });
+    const updatedSelf = touchUserSeen(state.self);
+    const withStatus = withDerivedStatus(updatedSelf, statusTimeouts);
     state = updateState(state, {
-      self: updatedSelf,
-      presence: setPresenceUser(state.presence, updatedSelf),
+      self: withStatus,
+      presence: setPresenceUser(state.presence, withStatus),
     });
+    // Heartbeat is a liveness-only update: lastSeenAt, no activity, no forced active
     sendMessage(BROADCAST_MESSAGE.UPDATE, {
-      userId: updatedSelf.userId,
-      updates: { status: "active", lastActiveAt: updatedSelf.lastActiveAt },
+      connectionId: withStatus.connectionId,
+      userId: withStatus.userId,
+      clock: withStatus.clock,
+      updates: { lastSeenAt: withStatus.lastSeenAt },
     });
   };
 
   const cleanupStaleUsers = (): void => {
     let hasChanges = false;
     let newPresence = state.presence;
+    const now = Date.now();
 
-    for (const [userId, user] of state.presence) {
-      if (isUserOffline(user, offlineTimeoutMs)) {
-        newPresence = removePresenceUser(newPresence, userId);
+    for (const [sessionId, user] of state.presence) {
+      if (sessionId === state.self?.connectionId) {
+        const derived = withDerivedStatus(user, statusTimeouts, now);
+        if (derived !== user) {
+          newPresence = setPresenceUser(newPresence, derived);
+          hasChanges = true;
+          if (state.self?.connectionId === sessionId) {
+            state = updateState(state, { self: derived });
+          }
+        }
+        continue;
+      }
+
+      if (isUserOffline(user, offlineTimeoutMs, now)) {
+        newPresence = removePresenceUser(newPresence, sessionId);
         hasChanges = true;
 
         const leavePayload: PresenceLeavePayload = {
           type: PRESENCE_EVENT.LEAVE,
-          userId,
+          connectionId: sessionId,
+          userId: user.userId,
         };
         subscriptions.notifyEvent({
           type: PRESENCE_EVENT.LEAVE,
           payload: leavePayload,
-          timestamp: Date.now(),
+          timestamp: now,
         });
-      } else if (isUserIdle(user, idleTimeoutMs) && user.status === "active") {
-        const idleUser = updatePresenceUser(user, { status: "idle" });
-        newPresence = setPresenceUser(newPresence, idleUser);
-        hasChanges = true;
+      } else {
+        const derived = withDerivedStatus(user, statusTimeouts, now);
+        if (derived !== user) {
+          newPresence = setPresenceUser(newPresence, derived);
+          hasChanges = true;
+        }
       }
     }
 
@@ -152,7 +197,10 @@ export const createBroadcastChannelAdapter = (
 
   const handleBeforeUnload = (): void => {
     if (state.self === null) return;
-    sendMessage(BROADCAST_MESSAGE.LEAVE, state.self.userId);
+    sendMessage(BROADCAST_MESSAGE.LEAVE, {
+      connectionId: state.self.connectionId,
+      userId: state.self.userId,
+    });
   };
 
   const adapter: PresenceAdapter = {
@@ -171,6 +219,7 @@ export const createBroadcastChannelAdapter = (
         channel.onmessage = handleMessage;
 
         const self = createPresenceUser({
+          connectionId,
           userId: userInfo.userId,
           name: userInfo.name,
           color: userInfo.color,
@@ -185,7 +234,10 @@ export const createBroadcastChannelAdapter = (
         sendMessage(BROADCAST_MESSAGE.SYNC_REQUEST, null);
 
         heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
-        cleanupTimer = setInterval(cleanupStaleUsers, offlineTimeoutMs / 2);
+        cleanupTimer = setInterval(
+          cleanupStaleUsers,
+          Math.min(offlineTimeoutMs, idleTimeoutMs) / 2,
+        );
 
         if (typeof window !== "undefined") {
           window.addEventListener("beforeunload", handleBeforeUnload);
@@ -236,21 +288,24 @@ export const createBroadcastChannelAdapter = (
 
     getConnectionState: (): AdapterConnectionState => state.connectionState,
 
-    updatePresence: (updates: Partial<Omit<PresenceUser, "userId">>): void => {
+    updatePresence: (updates: PresenceUserPatch): void => {
       if (state.self === null) return;
 
-      const updatedSelf = updatePresenceUser(state.self, {
-        ...updates,
-        lastActiveAt: Date.now(),
-      });
+      const updatedSelf = markUserActivity(state.self, Date.now(), updates);
       state = updateState(state, {
         self: updatedSelf,
         presence: setPresenceUser(state.presence, updatedSelf),
       });
 
       sendMessage(BROADCAST_MESSAGE.UPDATE, {
+        connectionId: updatedSelf.connectionId,
         userId: updatedSelf.userId,
-        updates: { ...updates, lastActiveAt: updatedSelf.lastActiveAt },
+        clock: updatedSelf.clock,
+        updates: {
+          ...updates,
+          lastActivityAt: updatedSelf.lastActivityAt,
+          lastSeenAt: updatedSelf.lastSeenAt,
+        },
       });
 
       subscriptions.notifyPresenceChange(state.presence);
@@ -270,11 +325,16 @@ export const createBroadcastChannelAdapter = (
           sendMessage(BROADCAST_MESSAGE.ANNOUNCE, payload.user);
           break;
         case PRESENCE_EVENT.LEAVE:
-          sendMessage(BROADCAST_MESSAGE.LEAVE, payload.userId);
+          sendMessage(BROADCAST_MESSAGE.LEAVE, {
+            connectionId: payload.connectionId,
+            userId: payload.userId,
+          });
           break;
         case PRESENCE_EVENT.UPDATE:
           sendMessage(BROADCAST_MESSAGE.UPDATE, {
+            connectionId: payload.connectionId,
             userId: payload.userId,
+            clock: payload.clock,
             updates: payload.updates,
           });
           break;

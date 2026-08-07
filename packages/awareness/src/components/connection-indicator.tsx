@@ -6,6 +6,8 @@ import { cx } from "./internal-utils";
 export interface ConnectionIndicatorLabels {
   readonly disconnected: string;
   readonly connecting: string;
+  readonly authenticating: string;
+  readonly syncing: string;
   readonly connected: string;
   readonly reconnecting: string;
   readonly error: string;
@@ -14,6 +16,8 @@ export interface ConnectionIndicatorLabels {
 const DEFAULT_LABELS: ConnectionIndicatorLabels = {
   disconnected: "Offline",
   connecting: "Connecting…",
+  authenticating: "Signing in…",
+  syncing: "Syncing…",
   connected: "Live",
   reconnecting: "Reconnecting…",
   error: "Can't reach the server",

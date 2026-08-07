@@ -74,8 +74,15 @@ const makeUser = (
   id: string,
   overrides: Partial<ReturnType<typeof createPresenceUser>> = {},
 ) => ({
-  ...createPresenceUser({ userId: id, name: `User ${id}`, color: "#000" }),
+  ...createPresenceUser({
+    connectionId: id,
+    userId: id,
+    name: `User ${id}`,
+    color: "#000",
+  }),
   ...overrides,
+  // Keep lookup key stable when overrides omit connectionId
+  connectionId: overrides.connectionId ?? id,
 });
 
 const makeState = (init: Partial<PresenceState> = {}): PresenceState => ({
@@ -372,38 +379,67 @@ describe("status-operations", () => {
     offlineTimeoutMs: 5_000,
   };
 
-  it("determineUserStatus returns active/idle/offline based on lastActiveAt", () => {
+  it("determineUserStatus derives from lastSeenAt / lastActivityAt", () => {
     expect(
-      determineUserStatus(makeUser("a", { lastActiveAt: NOW - 100 }), config),
+      determineUserStatus(
+        makeUser("a", { lastActivityAt: NOW - 100, lastSeenAt: NOW - 100 }),
+        config,
+      ),
     ).toBe("active");
     expect(
-      determineUserStatus(makeUser("a", { lastActiveAt: NOW - 2_000 }), config),
+      determineUserStatus(
+        makeUser("a", {
+          lastActivityAt: NOW - 2_000,
+          lastSeenAt: NOW - 100,
+        }),
+        config,
+      ),
     ).toBe("idle");
     expect(
       determineUserStatus(
-        makeUser("a", { lastActiveAt: NOW - 10_000 }),
+        makeUser("a", {
+          lastActivityAt: NOW - 10_000,
+          lastSeenAt: NOW - 10_000,
+        }),
         config,
       ),
     ).toBe("offline");
   });
 
   it("determineUserStatus uses default config when omitted", () => {
-    expect(determineUserStatus(makeUser("a", { lastActiveAt: NOW }))).toBe(
-      "active",
-    );
+    expect(
+      determineUserStatus(
+        makeUser("a", { lastActivityAt: NOW, lastSeenAt: NOW }),
+      ),
+    ).toBe("active");
   });
 
   it("updateAllUserStatuses returns same reference when no changes", () => {
-    const state = setUser(makeState(), makeUser("a", { lastActiveAt: NOW }));
+    const state = setUser(
+      makeState(),
+      makeUser("a", { lastActivityAt: NOW, lastSeenAt: NOW }),
+    );
     const next = updateAllUserStatuses(state, config);
     expect(next).toBe(state);
   });
 
   it("updateAllUserStatuses transitions stale users to idle/offline", () => {
     let state = makeState();
-    state = setUser(state, makeUser("a", { lastActiveAt: NOW - 2_000 }));
-    state = setUser(state, makeUser("b", { lastActiveAt: NOW - 10_000 }));
-    state = setUser(state, makeUser("c", { lastActiveAt: NOW }));
+    state = setUser(
+      state,
+      makeUser("a", { lastActivityAt: NOW - 2_000, lastSeenAt: NOW - 100 }),
+    );
+    state = setUser(
+      state,
+      makeUser("b", {
+        lastActivityAt: NOW - 10_000,
+        lastSeenAt: NOW - 10_000,
+      }),
+    );
+    state = setUser(
+      state,
+      makeUser("c", { lastActivityAt: NOW, lastSeenAt: NOW }),
+    );
     const next = updateAllUserStatuses(state, config);
     expect(next.users.get("a")?.status).toBe("idle");
     expect(next.users.get("b")?.status).toBe("offline");
@@ -424,14 +460,18 @@ describe("status-operations", () => {
     expect(removeOfflineUsers(state)).toBe(state);
   });
 
-  it("markUserActive resets status and lastActiveAt", () => {
+  it("markUserActive resets status and lastActivityAt", () => {
     const state = setUser(
       makeState(),
-      makeUser("a", { status: "idle", lastActiveAt: NOW - 5_000 }),
+      makeUser("a", {
+        status: "idle",
+        lastActivityAt: NOW - 5_000,
+        lastSeenAt: NOW - 100,
+      }),
     );
     const next = markUserActive(state, "a");
     expect(next.users.get("a")?.status).toBe("active");
-    expect(next.users.get("a")?.lastActiveAt).toBe(NOW);
+    expect(next.users.get("a")?.lastActivityAt).toBe(NOW);
   });
 
   it("markUserActive is a no-op for missing user", () => {

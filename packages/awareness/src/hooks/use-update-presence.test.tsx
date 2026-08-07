@@ -25,10 +25,13 @@ reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
 
 const createSelf = (overrides: Partial<PresenceUser> = {}): PresenceUser => ({
   userId: "self",
+  connectionId: "self",
   name: "Self",
   color: "#2563eb",
   status: "active",
-  lastActiveAt: 1000,
+  lastActivityAt: 1000,
+  lastSeenAt: 1000,
+  clock: 0,
   ...overrides,
 });
 

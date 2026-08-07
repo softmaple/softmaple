@@ -6,7 +6,7 @@
 import { createContext } from "react";
 import type { PresenceAdapter } from "../adapters/types";
 import type { ActivityEvent } from "../types/events";
-import type { PresenceUser } from "../types/presence";
+import type { PresenceUser, PresenceUserPatch } from "../types/presence";
 
 /**
  * Presence context value type
@@ -16,22 +16,22 @@ export interface PresenceContextValue {
   readonly connectionState:
     | "disconnected"
     | "connecting"
+    | "authenticating"
+    | "syncing"
     | "connected"
     | "reconnecting"
     | "error";
   /** Current user's presence (null if not connected) */
   readonly self: PresenceUser | null;
-  /** Map of all users' presence (including self) */
+  /** Map of all sessions' presence keyed by connectionId (including self) */
   readonly presence: ReadonlyMap<string, PresenceUser>;
-  /** List of other users (excluding self) */
+  /** List of other sessions (excluding self connection) */
   readonly others: ReadonlyArray<PresenceUser>;
   /** Recent activity events (bounded list, most recent first) */
   readonly recentActivity: ReadonlyArray<ActivityEvent>;
-  /** Update current user's presence */
-  readonly updatePresence: (
-    updates: Partial<Omit<PresenceUser, "userId">>,
-  ) => void;
-  /** Connect to the presence channel */
+  /** Update current user's presence (marks activity) */
+  readonly updatePresence: (updates: PresenceUserPatch) => void;
+  /** Connect to the presence channel (resolves when presence-ready) */
   readonly connect: () => Promise<void>;
   /** Disconnect from the presence channel */
   readonly disconnect: () => Promise<void>;

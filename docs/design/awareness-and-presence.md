@@ -13,6 +13,8 @@ This document describes the design of **Awareness & Presence** in a real-time co
 
 The system is designed to be **low-noise, non-blocking, and progressively disclosed**.
 
+**Protocol version:** `2` (`PRESENCE_PROTOCOL_VERSION` in `@softmaple/awareness`).
+
 ---
 
 ## 2. Design Principles
@@ -53,50 +55,101 @@ The following are explicitly out of scope for the first iteration:
 
 ## 4. Presence Model
 
-### 4.1 User Presence State
+### 4.1 Session Identity
 
 ```ts
-type PresenceStatus = "active" | "idle" | "offline";
-
 interface PresenceUser {
-  userId: string;
+  connectionId: string; // ephemeral per tab / device / socket
+  userId: string;       // persistent account identity
   name: string;
   avatarUrl?: string;
   color: string;
 
-  status: PresenceStatus;
-  lastActiveAt: number;
+  status: PresenceStatus; // derived
+  lastActivityAt: number; // real user activity
+  lastSeenAt: number;     // heartbeat / any transport frame
+  clock: number;          // monotonic per-connection revision
 
-  cursor?: {
-    blockId?: string;
-    offset?: number;
-  };
-
-  selection?: {
-    blockId: string;
-    from: number;
-    to: number;
-  };
-
-  meta?: {
-    isTyping?: boolean;
-  };
+  cursor?: CursorPosition; // offset and/or stable SequenceAnchor
+  selection?: PresenceSelection;
+  meta?: { isTyping?: boolean };
 }
 ```
 
-### 4.2 Status Rules
+The presence map is keyed by `connectionId`. The same `userId` may appear as
+multiple sessions (multiple tabs). UI may aggregate by `userId` later.
+
+### 4.2 Status Rules (derived)
+
+Status is **never** set by heartbeats. It is derived:
+
+```text
+now - lastSeenAt > offlineTimeout  → offline
+now - lastActivityAt > idleTimeout → idle
+otherwise                          → active
+```
 
 | Status | Definition |
 |---|---|
-| `active` | User performed an action in last N seconds |
-| `idle` | Connected but no recent activity |
-| `offline` | Disconnected or heartbeat expired |
+| `active` | Recent user activity (`lastActivityAt`) |
+| `idle` | Connected (seen) but no recent activity |
+| `offline` | Heartbeat / transport liveness expired (`lastSeenAt`) |
+
+Heartbeat may only update `lastSeenAt`. Cursor / selection / typing /
+`markUserActivity` update `lastActivityAt` (and usually `lastSeenAt`).
+
+`patchPresenceUser` never implicitly bumps timestamps.
+
+### 4.3 Clocked Updates
+
+Ephemeral presence is a per-connection versioned register:
+
+```ts
+{ connectionId, clock, updates }
+```
+
+Only `incoming.clock > known.clock` overwrites state. Stale frames may still
+refresh `lastSeenAt`.
+
+### 4.4 Cursor Positions
+
+```ts
+type CursorPosition =
+  | { blockId: string; offset: number }                 // legacy / textarea
+  | { blockId: string; anchor: SequenceAnchor; offset?: number }; // stable
+```
+
+Selections already use stable anchors; cursors should prefer the stable form
+in EG-walker surfaces.
 
 ---
 
-## 5. UI Components
+## 5. Transport Readiness
 
-### 5.1 Presence Bar (Global Awareness)
+WebSocket `connect()` resolves only when presence is **ready**, not merely
+when the socket opens:
+
+```text
+disconnected
+  → connecting
+  → authenticating   (auth → auth_ok; skipped if no authToken)
+  → syncing          (join + presence:sync → sync-response)
+  → connected        // presence session ready
+```
+
+Heartbeat:
+
+```text
+heartbeat { pingId } every ~10s
+heartbeat:ack { pingId }
+missed ACK deadline (default 20s, 2 misses) → force close → reconnect
+```
+
+---
+
+## 6. UI Components
+
+### 6.1 Presence Bar (Global Awareness)
 
 **Purpose**  
 Shows who is currently in the room.
@@ -105,11 +158,9 @@ Shows who is currently in the room.
 - Displays up to N avatars
 - Overflow shown as `+X`
 - Tooltip reveals name and status
-- Sorted by recent activity
+- Sorted by recent activity (`lastActivityAt`)
 
----
-
-### 5.2 Live Cursor (Local Awareness)
+### 6.2 Live Cursor (Local Awareness)
 
 **Purpose**  
 Indicates where another user is editing.
@@ -120,44 +171,24 @@ Indicates where another user is editing.
 - Label fades out after 2-3 seconds
 - Cursor movement is interpolated (no jitter)
 
----
-
-### 5.3 Selection Highlight (Block Awareness)
+### 6.3 Selection Highlight (Block Awareness)
 
 **Purpose**  
 Shows which block or range is being edited by others.
 
-**Behavior**
-- Semi-transparent background highlight
-- Same color as user
-- Optional border
-- Hover reveals user badge
-
----
-
-### 5.4 Activity Indicator (Action Awareness)
+### 6.4 Activity Indicator (Action Awareness)
 
 **Purpose**  
 Communicates recent activity without distraction.
-
-**Examples**
-- "Adam is editing this paragraph"
-- "2 people editing here"
-
----
-
-## 6. Interaction Rules
-
-- Cursor labels fade after 3 seconds
-- Typing indicators timeout after inactivity
-- Hover reveals details
-- No persistent animation
 
 ---
 
 ## 7. Performance Considerations
 
-- Cursor updates throttled (50-100ms)
+- **Network** cursor updates coalesced at **50ms** (~20 updates/s/user)
+- Local rendering may still run at 60fps independently
+- When WebSocket `bufferedAmount` is high, stale cursor frames are dropped
+  (latest-value-wins)
 - Off-screen cursors not rendered
 - Presence is eventually consistent
 
@@ -171,26 +202,26 @@ Communicates recent activity without distraction.
 
 ---
 
-## 9. Progressive Rollout Plan
+## 9. Architecture
 
-### Phase 1
-- Presence bar
-- Online count
+```text
+                 PresenceStore / core
+                /                    \
+        Transport Adapter              React Provider
+        (WS / BroadcastChannel)        (hooks / UI)
+```
 
-### Phase 2
-- Live cursors
-- Selection highlights
-
-### Phase 3
-- Minimap / scrollbar indicators
+Adapters own connect / send / receive / reconnect.
+Status derivation and clocked merges live in `packages/awareness/src/core/`.
 
 ---
 
 ## 10. Success Criteria
 
 - Users feel confident editing together
-- Rare confusion about collaborators
-- Minimal performance impact
+- Idle is reachable while heartbeats continue
+- Multi-tab same account does not self-suppress
+- Minimal performance impact under multi-user cursor load
 
 ---
 

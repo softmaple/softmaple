@@ -88,20 +88,50 @@ const isPresenceUser = (value: unknown): value is PresenceUser => {
   );
 };
 
+const utf8ByteLength = (value: string): number =>
+  new TextEncoder().encode(value).length;
+
 const boundUpdates = (
   updates: Record<string, unknown>,
   maxBytes: number,
 ): Record<string, unknown> | null => {
+  if (utf8ByteLength(JSON.stringify(updates)) > maxBytes) {
+    return null;
+  }
   const bounded: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {
     if (ALLOWED_UPDATE_KEYS.has(key)) {
       bounded[key] = value;
     }
   }
-  if (JSON.stringify(bounded).length > maxBytes) {
-    return null;
-  }
   return bounded;
+};
+
+/** Resolve wire lastSeenAt; reject future sender clocks. */
+const resolveWireLastSeenAt = (
+  wireSeen: unknown,
+  receiveAt: number,
+): number => {
+  if (isFiniteNumber(wireSeen) && wireSeen <= receiveAt) {
+    return wireSeen;
+  }
+  return receiveAt;
+};
+
+const mergeLastSeenAt = (
+  existing: number | undefined,
+  wireSeen: unknown,
+  receiveAt: number,
+): number =>
+  Math.max(
+    existing ?? 0,
+    resolveWireLastSeenAt(wireSeen, receiveAt),
+    receiveAt,
+  );
+
+export type PresenceUpdateResult = {
+  readonly user: PresenceUser;
+  readonly normalizedUpdates: Record<string, unknown>;
 };
 
 export type PresenceRoomStore = {
@@ -115,7 +145,7 @@ export type PresenceRoomStore = {
     clock: number,
     updates: Record<string, unknown>,
     receiveAt?: number,
-  ) => PresenceUser | null;
+  ) => PresenceUpdateResult | null;
   deleteRoomIfEmpty: (roomId: string) => void;
   sweepEmptyRooms: () => void;
 };
@@ -168,26 +198,33 @@ export const createPresenceRoomStore = (
       if (safeUpdates === null) return null;
 
       if (clock <= existing.clock) {
-        const wireSeen = isFiniteNumber(safeUpdates.lastSeenAt)
-          ? safeUpdates.lastSeenAt
-          : receiveAt;
         const touched: PresenceUser = {
           ...existing,
-          lastSeenAt: Math.max(existing.lastSeenAt ?? 0, wireSeen, receiveAt),
+          lastSeenAt: mergeLastSeenAt(
+            existing.lastSeenAt,
+            safeUpdates.lastSeenAt,
+            receiveAt,
+          ),
         };
         users.set(connectionId, touched);
-        return touched;
+        return { user: touched, normalizedUpdates: safeUpdates };
       }
 
+      const { lastSeenAt: wireSeen, ...patch } = safeUpdates;
       const next: PresenceUser = {
         ...existing,
-        ...safeUpdates,
+        ...patch,
         connectionId: existing.connectionId,
         userId: existing.userId,
         clock,
+        lastSeenAt: mergeLastSeenAt(existing.lastSeenAt, wireSeen, receiveAt),
       };
       users.set(connectionId, next);
-      return next;
+      const normalizedUpdates = {
+        ...patch,
+        ...(wireSeen !== undefined ? { lastSeenAt: next.lastSeenAt } : {}),
+      };
+      return { user: next, normalizedUpdates };
     },
 
     deleteRoomIfEmpty: (roomId) => {
@@ -348,13 +385,19 @@ export const handlePresenceFrame = (
       if (applied === null) {
         return { outbound: [], publish: null };
       }
+      const userId =
+        typeof parsed.payload.userId === "string"
+          ? parsed.payload.userId
+          : session.userId ?? parsed.senderId;
       return {
         outbound: [],
         publish: {
           ...parsed,
           payload: {
-            ...parsed.payload,
             connectionId,
+            userId,
+            clock: applied.user.clock,
+            updates: applied.normalizedUpdates,
           },
         },
       };

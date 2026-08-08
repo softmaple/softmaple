@@ -1,0 +1,15 @@
+{
+  "extends": "@softmaple/typescript-config/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2023",
+    "strict": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "prisma.config.ts"],
+  "exclude": ["node_modules", "generated"]
+}

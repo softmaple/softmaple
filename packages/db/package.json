@@ -9,20 +9,30 @@
     "url": "https://github.com/zhyd1997"
   },
   "license": "Apache-2.0",
+  "type": "module",
   "scripts": {
     "build": "prisma generate",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev --skip-generate",
+    "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:clean": "prisma db execute --file ./supabase/scripts/cleanup-test-data.sql --schema ./prisma/schema.prisma"
- },
- "exports": {
+    "db:clean": "prisma db execute --file ./supabase/scripts/cleanup-test-data.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
     ".": "./src/index.ts"
   },
-  "devDependencies": {
-    "prisma": "^6.13.0"
-  },
   "dependencies": {
-    "@prisma/client": "^6.13.0"
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "@types/pg": "^8.20.4",
+    "dotenv": "^17.4.2",
+    "prisma": "^7.9.1",
+    "tsx": "^4.23.10",
+    "typescript": "^5.9.3"
   }
 }

@@ -32,7 +32,7 @@ jobs:
 
       - name: Apply all pending migrations to the database
         working-directory: packages/db
-        run: pnpm run db:migrate
+        run: pnpm run db:deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}

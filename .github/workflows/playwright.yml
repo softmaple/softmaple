@@ -76,7 +76,7 @@ jobs:
 
       - name: Run database migrations for E2E tests
         working-directory: packages/db
-        run: pnpm run db:migrate
+        run: pnpm run db:deploy
         env:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}

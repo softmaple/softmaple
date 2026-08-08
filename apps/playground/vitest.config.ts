@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { defineConfig } from "vitest/config";
-import { workspaceAlias } from "./workspace-aliases";
+import { workspaceAlias } from "./workspace-aliases.ts";
 
 export default defineConfig({
   test: {
@@ -19,7 +19,7 @@ export default defineConfig({
   resolve: {
     alias: {
       ...workspaceAlias,
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 });

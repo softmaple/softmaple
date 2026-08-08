@@ -4,11 +4,10 @@ import { playwright } from "@vitest/browser-playwright";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const dirname = path.dirname(fileURLToPath(import.meta.url));
+import viteConfig from "./vite.config.ts";
 
-import viteConfig from "./vite.config.js";
+const dirname = import.meta.dirname;
 
 export default mergeConfig(
   viteConfig,

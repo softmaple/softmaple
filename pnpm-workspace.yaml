@@ -10,9 +10,23 @@ allowBuilds:
   prisma: true
   sharp: true
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@tanstack/react-router@1.170.23'
+  - '@tanstack/react-start-client@1.168.21'
+  - '@tanstack/react-start-rsc@0.1.39'
+  - '@tanstack/react-start-server@1.167.28'
+  - '@tanstack/react-start@1.168.40'
+  - '@tanstack/router-core@1.171.19'
+  - '@tanstack/router-generator@1.167.25'
+  - '@tanstack/router-plugin@1.168.27'
+  - '@tanstack/start-client-core@1.170.19'
+  - '@tanstack/start-plugin-core@1.171.31'
+  - '@tanstack/start-server-core@1.169.23'
+  - '@tanstack/start-storage-context@1.167.21'
 overrides:
   "@types/react": 19.2.18
   "@types/react-dom": 19.2.4
+  vitefu: 1.1.3
 peerDependencyRules:
   allowedVersions:
     "eslint-plugin-react@7.37.5>eslint": "10"

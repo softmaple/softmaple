@@ -43,28 +43,40 @@ pnpm install
 
 ### 2. Environment Configuration
 
-Create your `.env` file from the example:
+Create separate environment files for the web app, database tooling, and
+collaboration service:
 
 ```bash
 cp apps/web/.env.example apps/web/.env
+cp packages/db/.env.example packages/db/.env
+cp apps/collab/.env.example apps/collab/.env.local
 ```
 
-Required environment variables:
+Configure the web app in `apps/web/.env`:
 
 ```env
-# Database URLs
-DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
-DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
-
 # Supabase Authentication
 NEXT_PUBLIC_SUPABASE_URL="your-supabase-project-url"
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
 NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:3002/document"
+```
 
-# Collaboration service
+Configure Prisma in `packages/db/.env`:
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
+DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
+```
+
+Configure the collaboration service in `apps/collab/.env.local` using the
+variables defined by `apps/collab/.env.example`:
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
 SUPABASE_URL="your-supabase-project-url"
 SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
 COLLAB_ALLOWED_ORIGINS="http://localhost:3000"
+COLLAB_ALLOW_MISSING_ORIGIN="false"
 ```
 
 ### 3. Database Setup

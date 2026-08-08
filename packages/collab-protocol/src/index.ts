@@ -111,6 +111,15 @@ const parseBatches = (value: unknown): ReadonlyArray<RichTextEventBatch> => {
   return value.map(parseRichTextEventBatch);
 };
 
+// Live event messages are always non-empty and intentionally small. Repair
+// pages may be empty at the end of history and use the store's 100-row page.
+const parseRepairPage = (value: unknown): ReadonlyArray<RichTextEventBatch> => {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new Error("repair batches must contain between 0 and 100 batches");
+  }
+  return value.map(parseRichTextEventBatch);
+};
+
 export const parseClientCollabMessage = (
   input: unknown,
 ): ClientCollabMessage => {
@@ -204,8 +213,7 @@ export const parseServerCollabMessage = (
         !isNonEmptyString(input.requestId) ||
         typeof input.nextCursor !== "string" ||
         !/^\d+$/.test(input.nextCursor) ||
-        typeof input.complete !== "boolean" ||
-        !Array.isArray(input.batches)
+        typeof input.complete !== "boolean"
       ) {
         throw new Error("invalid repair response");
       }
@@ -213,7 +221,7 @@ export const parseServerCollabMessage = (
         protocolVersion: COLLAB_PROTOCOL_VERSION,
         type: COLLAB_MESSAGE_TYPE.RepairResponse,
         requestId: input.requestId,
-        batches: input.batches.map(parseRichTextEventBatch),
+        batches: parseRepairPage(input.batches),
         nextCursor: input.nextCursor,
         complete: input.complete,
       };

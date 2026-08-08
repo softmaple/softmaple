@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@softmaple/db", "@softmaple/editor", "@softmaple/ui"],
+  transpilePackages: ["@softmaple/editor", "@softmaple/ui"],
 }
 
 export default nextConfig

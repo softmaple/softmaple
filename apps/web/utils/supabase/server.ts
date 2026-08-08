@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import type { Database } from "@/types/model";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveSupabasePublicConfig } from "./config";
 import { createMockSupabaseClient } from "./mockClient";
 
 export const createClient = async (
@@ -25,28 +26,24 @@ export const createClient = async (
 
   const cookieStore_ = cookieStore ?? cookies();
   const { getAll, set } = await cookieStore_;
+  const { publishableKey, url } = resolveSupabasePublicConfig();
 
-  return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)!,
-    {
-      cookies: {
-        getAll() {
-          return getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              set(name, value, options),
-            );
-          } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
-          }
-        },
+  return createServerClient<Database>(url, publishableKey, {
+    cookies: {
+      getAll() {
+        return getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            set(name, value, options),
+          );
+        } catch {
+          // The `setAll` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing
+          // user sessions.
+        }
       },
     },
-  );
+  });
 };

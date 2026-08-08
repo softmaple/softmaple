@@ -39,10 +39,11 @@ Before you begin, make sure you have the following installed:
     This will install dependencies for all workspaces in the monorepo.
   </Accordion>
   <Accordion icon="gear" title="3. Set up environment variables">
-    Copy the example environment file and configure it:
+    Copy the web and database environment files and configure them:
 
     ```bash
     cp apps/web/.env.example apps/web/.env
+    cp packages/db/.env.example packages/db/.env
     ```
 
     Edit `apps/web/.env` with your configuration:
@@ -59,9 +60,13 @@ Before you begin, make sure you have the following installed:
     ```
   </Accordion>
   <Accordion icon="server" title="4. Configure collaboration">
-    Create `apps/collab/.env.local` from its example, then provide the pooled
-    `DATABASE_URL`, Supabase URL and publishable key. Start it with
-    `pnpm --filter @softmaple/collab dev`.
+    Create `apps/collab/.env.local` from its example, then provide
+    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and
+    `COLLAB_ALLOWED_ORIGINS`:
+
+    ```bash
+    cp apps/collab/.env.example apps/collab/.env.local
+    ```
   </Accordion>
   <Accordion icon="database" title="5. Set up the database">
     Generate Prisma client and run migrations:
@@ -72,10 +77,15 @@ Before you begin, make sure you have the following installed:
     ```
   </Accordion>
   <Accordion icon="rocket" title="6. Start the development servers">
-    Run the development server:
+    Keep both commands running in separate terminals. The first starts the
+    root development task without duplicating the collaboration service; the
+    second starts collaboration exactly once:
 
-    ```bash
-    pnpm dev
+    ```bash Terminal 1 — web and workspace packages
+    pnpm dev --filter='!@softmaple/collab'
+    ```
+
+    ```bash Terminal 2 — collaboration service
     pnpm --filter @softmaple/collab dev
     ```
 

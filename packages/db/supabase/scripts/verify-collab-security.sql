@@ -1,14 +1,16 @@
 -- Read-only post-deploy assertions for collaboration persistence and RLS.
 -- Any failed invariant raises an exception and makes `prisma db execute` fail.
 DO $$
+DECLARE
+    missing_private_policies TEXT;
 BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM public._prisma_migrations
-        WHERE migration_name = '20260808220000_harden_rls_helpers'
+        WHERE migration_name = '20260808230000_harden_collab_persistence'
           AND finished_at IS NOT NULL
     ) THEN
-        RAISE EXCEPTION 'collaboration RLS migration is not applied';
+        RAISE EXCEPTION 'collaboration hardening migration is not applied';
     END IF;
 
     IF to_regprocedure('public.is_workspace_member(uuid,integer)') IS NOT NULL
@@ -36,30 +38,68 @@ BEGIN
         RAISE EXCEPTION 'an RLS policy still uses a public authorization helper';
     END IF;
 
-    IF (
-        SELECT COUNT(*)
-        FROM pg_policies
-        WHERE schemaname = 'public'
-          AND (
-              COALESCE(qual, '') || COALESCE(with_check, '')
-          ) LIKE '%private.%'
-    ) < 13 THEN
-        RAISE EXCEPTION 'RLS policies do not consistently use private helpers';
+    WITH expected(table_name, policy_name) AS (
+        VALUES
+            ('workspaces', 'workspaces_select_member'),
+            ('workspaces', 'workspaces_update_owner'),
+            ('workspaces', 'workspaces_delete_owner'),
+            ('workspace_members', 'workspace_members_select_member'),
+            ('workspace_members', 'workspace_members_insert_owner'),
+            ('workspace_members', 'workspace_members_update_owner'),
+            ('workspace_members', 'workspace_members_delete_owner'),
+            ('documents', 'documents_select_visible'),
+            ('documents', 'documents_insert_editor'),
+            ('documents', 'documents_update_editor'),
+            ('documents', 'documents_delete_author_or_owner'),
+            ('document_versions', 'document_versions_select_member'),
+            ('document_versions', 'document_versions_insert_editor')
+    )
+    SELECT string_agg(
+        expected.table_name || '.' || expected.policy_name,
+        ', ' ORDER BY expected.table_name, expected.policy_name
+    )
+    INTO missing_private_policies
+    FROM expected
+    LEFT JOIN pg_policies AS policy
+      ON policy.schemaname = 'public'
+     AND policy.tablename = expected.table_name
+     AND policy.policyname = expected.policy_name
+     AND (
+         COALESCE(policy.qual, '') || COALESCE(policy.with_check, '')
+     ) LIKE '%private.%'
+    WHERE policy.policyname IS NULL;
+
+    IF missing_private_policies IS NOT NULL THEN
+        RAISE EXCEPTION
+            'RLS policies missing private helpers: %',
+            missing_private_policies;
     END IF;
 
-    IF has_table_privilege('anon', 'public.document_event_batches', 'SELECT')
-       OR has_table_privilege(
-           'authenticated',
-           'public.document_event_batches',
-           'INSERT'
-       )
-       OR has_table_privilege('anon', 'public.document_event_ids', 'SELECT')
-       OR has_table_privilege(
-           'authenticated',
-           'public.document_event_ids',
-           'INSERT'
-       )
-    THEN
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES ('anon'), ('authenticated')
+        ) AS api_roles(role_name)
+        CROSS JOIN (
+            VALUES
+                ('public.document_event_batches'),
+                ('public.document_event_ids')
+        ) AS event_tables(table_name)
+        CROSS JOIN (
+            VALUES
+                ('SELECT'),
+                ('INSERT'),
+                ('UPDATE'),
+                ('DELETE'),
+                ('REFERENCES'),
+                ('TRUNCATE')
+        ) AS privileges(privilege_name)
+        WHERE has_table_privilege(
+            api_roles.role_name::name,
+            event_tables.table_name,
+            privileges.privilege_name
+        )
+    ) THEN
         RAISE EXCEPTION 'collaboration event tables are exposed to Data API roles';
     END IF;
 

@@ -11,17 +11,22 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "prisma generate",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:verify:collab-security": "prisma db execute --file ./supabase/scripts/verify-collab-security.sql",
     "db:clean": "prisma db execute --file ./supabase/scripts/cleanup-test-data.sql",
+    "prepare": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
   },
+  "files": ["dist"],
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",

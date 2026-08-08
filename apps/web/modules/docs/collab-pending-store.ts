@@ -4,7 +4,7 @@ import {
 } from "@softmaple/block-model";
 
 const STORAGE_VERSION = 2 as const;
-const STORAGE_KEY_PREFIX = "softmaple:collab-pending:v2:";
+const STORAGE_KEY_PREFIX = `softmaple:collab-pending:v${STORAGE_VERSION}:`;
 
 interface PendingBatchEnvelope {
   readonly version: typeof STORAGE_VERSION;
@@ -14,27 +14,41 @@ interface PendingBatchEnvelope {
 const storageKey = (documentId: string, userId: string): string =>
   `${STORAGE_KEY_PREFIX}${encodeURIComponent(userId)}:${encodeURIComponent(documentId)}`;
 
-const parseEnvelope = (value: string | null): PendingBatchEnvelope => {
+const parseEnvelope = (storage: Storage, key: string): PendingBatchEnvelope => {
+  const value = storage.getItem(key);
   if (value === null) {
     return { version: STORAGE_VERSION, batches: [] };
   }
 
-  const parsed: unknown = JSON.parse(value);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("Pending collaboration data must be an object");
-  }
-  const envelope = parsed as Record<string, unknown>;
-  if (
-    envelope.version !== STORAGE_VERSION ||
-    !Array.isArray(envelope.batches)
-  ) {
-    throw new Error("Unsupported pending collaboration data version");
-  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      throw new Error("Pending collaboration data must be an object");
+    }
+    const envelope = parsed as Record<string, unknown>;
+    if (
+      envelope.version !== STORAGE_VERSION ||
+      !Array.isArray(envelope.batches)
+    ) {
+      throw new Error("Unsupported pending collaboration data version");
+    }
 
-  return {
-    version: STORAGE_VERSION,
-    batches: envelope.batches.map(parseRichTextEventBatch),
-  };
+    return {
+      version: STORAGE_VERSION,
+      batches: envelope.batches.map(parseRichTextEventBatch),
+    };
+  } catch (error) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Preserve the parse or validation error that made the entry unusable.
+    }
+    throw error;
+  }
 };
 
 const writeEnvelope = (
@@ -61,8 +75,10 @@ export const loadPendingBatches = (
   storage: Storage,
   documentId: string,
   userId: string,
-): ReadonlyArray<RichTextEventBatch> =>
-  parseEnvelope(storage.getItem(storageKey(documentId, userId))).batches;
+): ReadonlyArray<RichTextEventBatch> => {
+  const key = storageKey(documentId, userId);
+  return parseEnvelope(storage, key).batches;
+};
 
 export const addPendingBatches = (
   storage: Storage,

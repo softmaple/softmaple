@@ -33,7 +33,7 @@
   - [web](apps/web) - Main web application
     - **Next.js** v16 with `app` folder
     - **EG-walker + WebSocket** for real-time collaboration
-    - **Supabase Postgres** for durable history and authentication
+    - **Supabase Postgres** for durable history and **Supabase Auth** for authentication
 
 - packages
   - [config](packages/config) - Site configuration

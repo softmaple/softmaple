@@ -74,6 +74,8 @@ const HOST_RUNTIME_PATTERNS = [
     group: [
       "@softmaple/db",
       "@softmaple/db/*",
+      "@prisma/*",
+      "@prisma/*/**",
       "@supabase/*",
       "@supabase/*/**",
       "next",

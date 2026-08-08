@@ -2,7 +2,7 @@
   "$schema": "https://v2-9-12.turborepo.dev/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build", "^db:generate"],
+      "dependsOn": ["^build"],
       "env": [
         "COLLAB_ALLOWED_ORIGINS",
         "DATABASE_URL",
@@ -37,7 +37,7 @@
       "env": ["EG_WALKER_PROPERTY_RUNS", "EG_WALKER_REFERENCE_ROOT"]
     },
     "dev": {
-      "dependsOn": ["^db:generate"],
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },

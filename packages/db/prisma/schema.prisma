@@ -2,8 +2,11 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
 }
 
 datasource db {
@@ -125,6 +128,7 @@ model DocumentEventBatch {
   event_ids DocumentEventId[]
 
   @@unique([document_id, batch_id])
+  @@unique([id, document_id])
   @@index([document_id, id])
   @@map("document_event_batches")
 }
@@ -132,11 +136,11 @@ model DocumentEventBatch {
 /// A document-wide uniqueness guard for EG-walker event IDs. This catches a
 /// replica/session ID collision before conflicting history reaches clients.
 model DocumentEventId {
-  document_id  String
+  document_id  String @db.Uuid
   event_id     String
   batch_row_id BigInt
 
-  batch DocumentEventBatch @relation(fields: [batch_row_id], references: [id], onDelete: Cascade)
+  batch DocumentEventBatch @relation(fields: [batch_row_id, document_id], references: [id, document_id], onDelete: Cascade)
 
   @@id([document_id, event_id])
   @@index([batch_row_id])

@@ -97,6 +97,7 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
     let fatalConnectionError = false;
     let storageUserId: string | null = null;
     let activeRepairRequestId: string | null = null;
+    let repairCursor: string | null = null;
 
     const applyBatches = (batches: ReadonlyArray<RichTextEventBatch>): void => {
       for (const batch of batches) {
@@ -112,14 +113,16 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
 
     const publishPending = (): void => {
       if (!synced || pendingBatches.size === 0) return;
+      let sentAtLeastOneBatch = false;
       for (const batches of batchChunks([...pendingBatches.values()])) {
-        sendJson(socket, {
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.Event,
-          batches,
-        });
+        sentAtLeastOneBatch =
+          sendJson(socket, {
+            protocolVersion: COLLAB_PROTOCOL_VERSION,
+            type: COLLAB_MESSAGE_TYPE.Event,
+            batches,
+          }) || sentAtLeastOneBatch;
       }
-      if (!localPersistenceFailed) setStatus("saving");
+      if (sentAtLeastOneBatch && !localPersistenceFailed) setStatus("saving");
     };
 
     const requestRepair = (afterCursor: string): void => {
@@ -185,9 +188,14 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
 
       const { data, error: sessionError } = await supabase.auth.getSession();
       if (cancelled) return;
+      if (sessionError) {
+        if (!localPersistenceFailed) setStatus("offline");
+        scheduleReconnect();
+        return;
+      }
       const accessToken = data.session?.access_token;
       const userId = data.session?.user.id;
-      if (sessionError || !accessToken || !userId) {
+      if (!accessToken || !userId) {
         fatalConnectionError = true;
         setError(new Error("A signed-in Supabase session is required"));
         setStatus("error");
@@ -242,10 +250,19 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
 
       nextSocket.addEventListener("message", (event) => {
         if (cancelled || socket !== nextSocket) return;
+        let message;
         try {
-          const message = parseServerCollabMessage(
-            JSON.parse(String(event.data)),
-          );
+          message = parseServerCollabMessage(JSON.parse(String(event.data)));
+        } catch {
+          fatalConnectionError = true;
+          setError(new Error("The collaboration server returned invalid data"));
+          setStatus("error");
+          setCanWrite(false);
+          nextSocket.close(1008, "Invalid collaboration response");
+          return;
+        }
+
+        try {
           switch (message.type) {
             case COLLAB_MESSAGE_TYPE.Ready:
               reconnectAttempt = 0;
@@ -254,11 +271,17 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
               setCanWrite(message.canWrite && !localPersistenceFailed);
               if (!localPersistenceFailed) setStatus("syncing");
               synced = false;
-              requestRepair("0");
+              requestRepair(repairCursor ?? "0");
               return;
             case COLLAB_MESSAGE_TYPE.RepairResponse:
               if (message.requestId !== activeRepairRequestId) return;
               applyBatches(message.batches);
+              if (
+                repairCursor === null ||
+                BigInt(message.nextCursor) > BigInt(repairCursor)
+              ) {
+                repairCursor = message.nextCursor;
+              }
               if (!message.complete) {
                 requestRepair(message.nextCursor);
                 return;
@@ -312,12 +335,13 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
               );
               return;
           }
-        } catch {
-          fatalConnectionError = true;
-          setError(new Error("The collaboration server returned invalid data"));
-          setStatus("error");
-          setCanWrite(false);
-          nextSocket.close(1008, "Invalid collaboration response");
+        } catch (handlerError) {
+          setError(
+            handlerError instanceof Error
+              ? handlerError
+              : new Error("The collaboration response could not be applied"),
+          );
+          nextSocket.close(1011, "Collaboration response could not be applied");
         }
       });
 

@@ -1,12 +1,14 @@
 "use client";
 
-import type { FC } from "react";
+import { type FC, useEffect } from "react";
 import { LexicalEgWalkerPlugin } from "@softmaple/binding-lexical/react";
 import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
 import { LEXICAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import type { InitialConfigType } from "@lexical/react/LexicalComposer";
 import type { EditorProps } from "@softmaple/editor/components/core/Editor";
 import { useCollabDocument } from "@/modules/docs/use-collab-document";
+import type { CollabDocumentState } from "@/modules/docs/use-collab-document";
 
 export type CollabDocEditorProps = Pick<
   EditorProps,
@@ -14,6 +16,27 @@ export type CollabDocEditorProps = Pick<
 > & {
   documentId: string;
   commonEditorConfig?: InitialConfigType;
+};
+
+const CollabBindingPlugin: FC<{
+  canWrite: CollabDocumentState["canWrite"];
+  onBindingChange: CollabDocumentState["onBindingChange"];
+  replica: NonNullable<CollabDocumentState["replica"]>;
+}> = ({ canWrite, onBindingChange, replica }) => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    editor.setEditable(canWrite);
+  }, [canWrite, editor]);
+
+  return (
+    <LexicalEgWalkerPlugin
+      replica={replica}
+      enableEditingOnReady={false}
+      onBindingChange={onBindingChange}
+      onError={(error) => console.error("Collaboration binding failed", error)}
+    />
+  );
 };
 
 export const CollabDocEditor: FC<CollabDocEditorProps> = (props) => {
@@ -37,7 +60,12 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = (props) => {
 
   return (
     <div className="relative h-full">
-      <div className="absolute right-6 top-3 z-20 rounded-full border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm">
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className="absolute right-6 top-3 z-20 rounded-full border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm"
+        role="status"
+      >
         {collaboration.status === "saved"
           ? "Saved"
           : collaboration.status === "saving"
@@ -54,13 +82,10 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = (props) => {
         historyMode="disabled"
         lexicalConfig={lexicalConfig}
       >
-        <LexicalEgWalkerPlugin
-          replica={collaboration.replica}
-          enableEditingOnReady={collaboration.canWrite}
+        <CollabBindingPlugin
+          canWrite={collaboration.canWrite}
           onBindingChange={collaboration.onBindingChange}
-          onError={(error) =>
-            console.error("Collaboration binding failed", error)
-          }
+          replica={collaboration.replica}
         />
       </CoreEditor>
     </div>

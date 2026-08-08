@@ -8,6 +8,8 @@ import { Prisma } from "@softmaple/db";
 import { prisma } from "./prisma";
 
 const REPAIR_PAGE_SIZE = 100;
+const CONFLICT_VERIFY_ATTEMPTS = 3;
+const CONFLICT_VERIFY_DELAY_MS = 20;
 
 export class EventConflictError extends Error {
   constructor(message: string) {
@@ -51,23 +53,48 @@ const hashBatch = (batch: RichTextEventBatch): string =>
 const toPrismaJson = (batch: RichTextEventBatch): Prisma.InputJsonValue =>
   batch as unknown as Prisma.InputJsonValue;
 
-const verifyExistingBatches = async (
+type BatchLookupClient = Pick<Prisma.TransactionClient, "documentEventBatch">;
+
+const existingBatchHashes = async (
+  client: BatchLookupClient,
   documentId: string,
   batches: ReadonlyArray<RichTextEventBatch>,
-): Promise<boolean> => {
-  const existing = await prisma.documentEventBatch.findMany({
+): Promise<ReadonlyMap<string, string>> => {
+  const existing = await client.documentEventBatch.findMany({
     where: {
       document_id: documentId,
       batch_id: { in: batches.map((batch) => batch.batchId) },
     },
     select: { batch_id: true, payload_hash: true },
   });
-  const hashes = new Map(
+  return new Map(
     existing.map((row) => [row.batch_id, row.payload_hash] as const),
   );
+};
+
+const verifyExistingBatches = async (
+  documentId: string,
+  batches: ReadonlyArray<RichTextEventBatch>,
+): Promise<boolean> => {
+  const hashes = await existingBatchHashes(prisma, documentId, batches);
   return batches.every(
     (batch) => hashes.get(batch.batchId) === hashBatch(batch),
   );
+};
+
+const verifyExistingBatchesWithRetry = async (
+  documentId: string,
+  batches: ReadonlyArray<RichTextEventBatch>,
+): Promise<boolean> => {
+  for (let attempt = 0; attempt < CONFLICT_VERIFY_ATTEMPTS; attempt += 1) {
+    if (await verifyExistingBatches(documentId, batches)) return true;
+    if (attempt + 1 < CONFLICT_VERIFY_ATTEMPTS) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, CONFLICT_VERIFY_DELAY_MS * (attempt + 1)),
+      );
+    }
+  }
+  return false;
 };
 
 export const appendEventBatches = async (
@@ -132,19 +159,16 @@ export const appendEventBatches = async (
         }
       }
 
+      const existingHashes = await existingBatchHashes(
+        transaction,
+        documentId,
+        batches,
+      );
       for (const batch of batches) {
         const payloadHash = hashBatch(batch);
-        const existing = await transaction.documentEventBatch.findUnique({
-          where: {
-            document_id_batch_id: {
-              document_id: documentId,
-              batch_id: batch.batchId,
-            },
-          },
-          select: { payload_hash: true },
-        });
-        if (existing !== null) {
-          if (existing.payload_hash !== payloadHash) {
+        const existingHash = existingHashes.get(batch.batchId);
+        if (existingHash !== undefined) {
+          if (existingHash !== payloadHash) {
             throw new EventConflictError(
               `conflicting payload for batch ${batch.batchId}`,
             );
@@ -184,7 +208,7 @@ export const appendEventBatches = async (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
-      if (await verifyExistingBatches(documentId, batches)) {
+      if (await verifyExistingBatchesWithRetry(documentId, batches)) {
         return batches.map((batch) => batch.batchId);
       }
       throw new EventConflictError(

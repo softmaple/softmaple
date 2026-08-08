@@ -1,3 +1,3 @@
-export { createPrismaClient } from "./client";
-export type { PrismaClient } from "./client";
-export * from "../generated/prisma/client";
+export { createPrismaClient } from "./client.js";
+export type { PrismaClient } from "./client.js";
+export * from "../generated/prisma/client.js";

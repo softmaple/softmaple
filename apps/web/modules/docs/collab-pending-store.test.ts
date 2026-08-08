@@ -53,14 +53,26 @@ describe("collaboration pending store", () => {
   });
 
   it("rejects corrupt persisted data instead of applying it to a replica", () => {
+    const key = "softmaple:collab-pending:v2:user-1:document-1";
     window.localStorage.setItem(
-      "softmaple:collab-pending:v2:user-1:document-1",
+      key,
       JSON.stringify({ version: 2, batches: [{ batchId: "broken" }] }),
     );
 
     expect(() =>
       loadPendingBatches(window.localStorage, "document-1", "user-1"),
     ).toThrow();
+    expect(window.localStorage.getItem(key)).toBeNull();
+  });
+
+  it("removes invalid JSON before rethrowing its parse error", () => {
+    const key = "softmaple:collab-pending:v2:user-1:document-1";
+    window.localStorage.setItem(key, "not-json");
+
+    expect(() =>
+      loadPendingBatches(window.localStorage, "document-1", "user-1"),
+    ).toThrow(SyntaxError);
+    expect(window.localStorage.getItem(key)).toBeNull();
   });
 
   it("isolates pending edits by signed-in user", () => {

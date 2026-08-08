@@ -10,7 +10,7 @@ writer of `document_event_batches`.
 
 ## Role in the stack
 
-```
+```text
 apps/web  ──WebSocket──►  apps/collab  ──Prisma──►  Supabase Postgres
                 ▲
                 │
@@ -117,7 +117,7 @@ pnpm --filter @softmaple/collab preview
 
 ## Layout
 
-```
+```text
 apps/collab/
 ├── nitro.config.ts          # Nitro + websocket + env loading
 ├── server/

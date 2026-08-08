@@ -81,27 +81,6 @@ apps/web/
 └── e2e/                 # Playwright specs
 ```
 
-## Auth / login troubleshooting
-
-Login calls Supabase Auth via a server action
-(`app/actions/auth.ts` → `signInWithPassword`).
-
-| Symptom | Likely cause |
-| --- | --- |
-| `AuthApiError: Invalid API key` (401) | Wrong, truncated, or mismatched key; publishable key set to a bad value (it wins over `ANON_KEY`); legacy `anon` key disabled in the dashboard while still configured; host env not updated after key rename |
-| Missing-config throw from `resolveSupabasePublicConfig` | Neither publishable nor anon key is set |
-| Collab connects fail after login | `NEXT_PUBLIC_COLLAB_WS_URL` / `apps/collab` env mismatch — see [`apps/collab/README.md`](../collab/README.md) |
-
-Fix checklist for `Invalid API key`:
-
-1. In Supabase **Settings → API Keys**, copy the **Publishable** key
-   (`sb_publishable_…`) or a still-enabled legacy **anon** JWT.
-2. Set `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (and matching
-   `NEXT_PUBLIC_SUPABASE_URL`) in the deployment environment.
-3. If a stale/wrong publishable value is present, remove it or replace it —
-   an invalid publishable key is preferred over a valid anon fallback.
-4. Redeploy so Next.js rebuilds with the new `NEXT_PUBLIC_*` values.
-
 ## Related docs
 
 - [Development setup](../../docs/development.mdx)

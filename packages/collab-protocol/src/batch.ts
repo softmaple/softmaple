@@ -40,6 +40,9 @@ export interface WireBatch {
 
 export type WireBatchParser = (input: unknown) => WireBatch;
 
+export const BOOTSTRAP_BATCH_ID = "softmaple:block-model:bootstrap:v1";
+export const BOOTSTRAP_EVENT_ID = "softmaple:block-model:bootstrap:event:v1";
+
 export const WireGraphEventSchema: z.ZodType<WireGraphEvent> = z
   .object({
     schemaVersion: z.number().int().positive(),
@@ -67,13 +70,25 @@ export const WireBatchSchema: z.ZodType<WireBatch> = z
     }
     const first = batch.events[0];
     if (!first) return;
-    if (
-      batch.batchId !== first.id &&
-      batch.batchId !== "softmaple:block-model:bootstrap:v1"
-    ) {
+
+    const isCanonicalBootstrap =
+      batch.batchId === BOOTSTRAP_BATCH_ID &&
+      first.id === BOOTSTRAP_EVENT_ID &&
+      batch.parentVersion.length === 0 &&
+      first.parentVersion.length === 0;
+
+    if (batch.batchId !== first.id && !isCanonicalBootstrap) {
       context.addIssue({
         code: "custom",
         message: "batchId must equal the first event ID",
+        path: ["batchId"],
+      });
+    }
+    if (batch.batchId === BOOTSTRAP_BATCH_ID && !isCanonicalBootstrap) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "bootstrap batchId requires bootstrap event ID and empty parentVersion",
         path: ["batchId"],
       });
     }

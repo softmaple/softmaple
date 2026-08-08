@@ -19,18 +19,28 @@ describe("createCollabStorage", () => {
     const storage = createCollabStorage(`test-${crypto.randomUUID()}`);
     const documentId = "11111111-1111-4111-8111-111111111111";
 
-    await storage.putBatch(documentId, batch, false);
-    await storage.setRepairCursor(documentId, "42");
+    try {
+      await storage.putBatch(documentId, batch, false);
+      await storage.setRepairCursor(documentId, "42");
 
-    const loaded = await storage.loadBatches(documentId);
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0]?.durable).toBe(false);
-    expect(await storage.getPendingBatchIds(documentId)).toEqual(["r:1"]);
+      const loaded = await storage.loadBatches(documentId);
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0]?.durable).toBe(false);
+      expect(await storage.getPendingBatchIds(documentId)).toEqual(["r:1"]);
 
-    await storage.markDurable(documentId, ["r:1"]);
-    expect(await storage.getPendingBatchIds(documentId)).toEqual([]);
-    expect(await storage.getRepairCursor(documentId)).toBe("42");
+      await storage.markDurable(documentId, ["r:1"]);
+      expect(await storage.getPendingBatchIds(documentId)).toEqual([]);
+      expect(await storage.getRepairCursor(documentId)).toBe("42");
 
-    storage.close();
+      await storage.putBatch(documentId, batch, false);
+      const afterReput = await storage.loadBatches(documentId);
+      expect(afterReput[0]?.durable).toBe(true);
+
+      await storage.clearDocument(documentId);
+      expect(await storage.loadBatches(documentId)).toEqual([]);
+      expect(await storage.getRepairCursor(documentId)).toBeNull();
+    } finally {
+      storage.close();
+    }
   });
 });

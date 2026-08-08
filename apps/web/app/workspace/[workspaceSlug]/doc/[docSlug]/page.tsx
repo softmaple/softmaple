@@ -1,9 +1,6 @@
 import { DocumentEditor } from "@/modules/docs/document-editor";
 import type { Metadata, ResolvingMetadata } from "next";
-import {
-  cachedGetDocumentBySlug,
-  createDocument,
-} from "@/app/actions/documents/documents";
+import { cachedGetDocumentBySlug } from "@/app/actions/documents/documents";
 import { notFound, redirect } from "next/navigation";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
@@ -14,15 +11,6 @@ const DEFAULT_TITLE = "Untitled Document";
 type Props = {
   params: Promise<{ docSlug: string; workspaceSlug: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-};
-
-const createSlug = (title: string): string => {
-  const base = title
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  return `${base || "document"}-${Date.now()}`;
 };
 
 export async function generateMetadata(
@@ -47,7 +35,11 @@ export async function generateMetadata(
 
 export default async function DocumentPage({ params }: Props) {
   const { docSlug, workspaceSlug } = await params;
-  const isNewDoc = docSlug === "new";
+
+  // Document creation is a server action (POST). Keep GET side-effect free.
+  if (docSlug === "new") {
+    redirect(`/workspace/${workspaceSlug}`);
+  }
 
   const { data: workspace, error: workspaceError } =
     await cachedGetWorkspaceBySlug(workspaceSlug);
@@ -82,25 +74,6 @@ export default async function DocumentPage({ params }: Props) {
 
   if (!workspaceMember) {
     notFound();
-  }
-
-  // Create the Document row first so the collab editor always has a UUID room key.
-  if (isNewDoc) {
-    const slug = createSlug(DEFAULT_TITLE);
-    const { data: created, error: createError } = await createDocument({
-      title: DEFAULT_TITLE,
-      slug,
-      workspace_id: workspace.id,
-      author_id: user.id,
-      markdown_content: null,
-    });
-
-    if (createError || !created) {
-      console.error("Error creating document:", createError);
-      throw createError ?? new Error("Failed to create document");
-    }
-
-    redirect(`/workspace/${workspaceSlug}/doc/${created.slug}`);
   }
 
   const { data: currentDoc, error } = await cachedGetDocumentBySlug(docSlug);

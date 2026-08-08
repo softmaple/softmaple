@@ -1,4 +1,6 @@
 export {
+  BOOTSTRAP_BATCH_ID,
+  BOOTSTRAP_EVENT_ID,
   JsonValueSchema,
   WireBatchSchema,
   WireGraphEventSchema,

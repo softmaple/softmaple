@@ -56,7 +56,7 @@ importers:
         specifier: ^2.89.0
         version: 2.112.2
       nitro:
-        specifier: latest
+        specifier: 3.0.260610-beta
         version: 3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
       zod:
         specifier: ^4.3.5
@@ -104,12 +104,6 @@ importers:
       '@softmaple/block-model':
         specifier: workspace:*
         version: link:../../packages/block-model
-      '@softmaple/collab-client':
-        specifier: workspace:*
-        version: link:../../packages/collab-client
-      '@softmaple/collab-protocol':
-        specifier: workspace:*
-        version: link:../../packages/collab-protocol
       '@softmaple/editor':
         specifier: workspace:*
         version: link:../../packages/editor

@@ -1,7 +1,7 @@
 "use client";
 
 import type { FC } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Code, Edit3, Eye, FileText } from "lucide-react";
 import {
   Tabs,
@@ -39,11 +39,20 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 
   const [title, setTitle] = useState<string>(initialTitle);
   const [content, setContent] = useState<string>(initialContent);
+  const [liveHtml, setLiveHtml] = useState<string>(initialContent);
   const { activeEditor } = useEditorState();
 
-  const liveHtml = useMemo(() => {
-    if (!activeEditor) return content;
-    return activeEditor.getRootElement()?.innerHTML ?? content;
+  useEffect(() => {
+    if (!activeEditor) {
+      setLiveHtml(content);
+      return;
+    }
+
+    const readHtml = (): void => {
+      setLiveHtml(activeEditor.getRootElement()?.innerHTML ?? content);
+    };
+    readHtml();
+    return activeEditor.registerUpdateListener(readHtml);
   }, [activeEditor, content]);
 
   const sanitizedPreview = useMemo(() => sanitizeHtml(liveHtml), [liveHtml]);

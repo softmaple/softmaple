@@ -24,6 +24,7 @@ import Link from "next/link";
 import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getAll } from "@/app/actions/getAll";
+import { createNewDocumentAction } from "@/app/actions/documents/create-new-document";
 
 import dayjs from "@/utils/dayjs";
 import { getUserFullname } from "@/utils/getUserFullname";
@@ -119,12 +120,12 @@ export default async function WorkspacePage({ params, searchParams }: Props) {
               <p className="text-muted-foreground">{description}</p>
             </div>
             <div className="flex items-center space-x-2">
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                <Link href={`/workspace/${workspaceSlug}/doc/new`}>
+              <form action={createNewDocumentAction.bind(null, workspaceSlug)}>
+                <Button type="submit">
+                  <Plus className="mr-2 h-4 w-4" />
                   New Document
-                </Link>
-              </Button>
+                </Button>
+              </form>
               <Button variant="outline">
                 <Users className="mr-2 h-4 w-4" />
                 Invite

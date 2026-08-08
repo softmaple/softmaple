@@ -12,7 +12,11 @@ Standalone Nitro WebSocket service for Softmaple document sync and presence.
 
 ## Environment
 
-See `.env.example`. Set `COLLAB_DEV_AUTH_BYPASS=true` only for local playground testing with tokens shaped like `dev:<userId>:<OWNER|EDITOR|VIEWER>`.
+See `.env.example`. Dev auth bypass (`COLLAB_DEV_AUTH_BYPASS=true`) is honored only when `NODE_ENV=development`. Tokens may be `dev:<userId>` (or legacy `dev:<userId>:<ROLE>`); the role is always loaded from `workspaceMember`, never from the token.
+
+## Deployment (v1)
+
+Realtime fan-out is in-process (no CrossWS sync backplane yet). Run a **single instance** or sticky-session routing so document/presence peers share one process. Multi-replica broadcast requires a supported CrossWS backplane.
 
 ## Development
 

@@ -26,7 +26,8 @@ class CollabDatabase extends Dexie {
   constructor(databaseName: string) {
     super(databaseName);
     this.version(1).stores({
-      batches: "key, documentId, batchId, durable",
+      // durable is filtered in memory; indexing booleans is unreliable in Dexie.
+      batches: "key, documentId, batchId",
       meta: "documentId",
     });
   }
@@ -60,14 +61,17 @@ export const createCollabStorage = (
       db.batches.where("documentId").equals(documentId).toArray(),
 
     putBatch: async (documentId, batch, durable) => {
-      const existing = await db.batches.get(rowKey(documentId, batch.batchId));
-      await db.batches.put({
-        key: rowKey(documentId, batch.batchId),
-        documentId,
-        batchId: batch.batchId,
-        batch,
-        durable: existing?.durable === true ? true : durable,
-        createdAt: existing?.createdAt ?? Date.now(),
+      await db.transaction("rw", db.batches, async () => {
+        const key = rowKey(documentId, batch.batchId);
+        const existing = await db.batches.get(key);
+        await db.batches.put({
+          key,
+          documentId,
+          batchId: batch.batchId,
+          batch,
+          durable: existing?.durable === true ? true : durable,
+          createdAt: existing?.createdAt ?? Date.now(),
+        });
       });
     },
 

@@ -26,13 +26,8 @@ export interface UseCollabDocumentResult {
 
 const wireBatch = (batch: RichTextEventBatch): WireBatch => batch;
 
-const resolveCollabWsUrl = (documentId: string): string => {
-  const base =
-    process.env.NEXT_PUBLIC_COLLAB_WS_URL ?? "ws://localhost:4001/ws/document";
-  // documentId is carried in the auth frame, not the URL.
-  void documentId;
-  return base;
-};
+const resolveCollabWsUrl = (): string =>
+  process.env.NEXT_PUBLIC_COLLAB_WS_URL ?? "ws://localhost:4001/ws/document";
 
 export const useCollabDocument = (
   documentId: string,
@@ -55,7 +50,7 @@ export const useCollabDocument = (
     const nextSession = createCollabSession({
       documentId,
       replicaId,
-      wsUrl: resolveCollabWsUrl(documentId),
+      wsUrl: resolveCollabWsUrl(),
       getAccessToken: async () => {
         const supabase = createClient();
         const { data, error: sessionError } = await supabase.auth.getSession();
@@ -101,7 +96,12 @@ export const useCollabDocument = (
         if (batch !== undefined) nextSession.publishBatch(wireBatch(batch));
       }
     });
-    const unsubSnapshot = nextSession.subscribeSnapshot(setSnapshot);
+    const unsubSnapshot = nextSession.subscribeSnapshot((value) => {
+      setSnapshot(value);
+      if (value.connectionState === "ready" || value.ready) {
+        setError(null);
+      }
+    });
     const unsubErrors = nextSession.subscribeErrors(setError);
 
     setReplica(nextReplica);

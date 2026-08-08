@@ -139,16 +139,27 @@ const handler: EventHandler = defineWebSocketHandler({
               "Authenticate before reauth",
             );
           }
+          const documentId = context.documentId;
+          const topic = context.topic;
+          // Drop authorization until reauth succeeds.
+          context.auth = undefined;
+          if (topic) {
+            peer.unsubscribe(topic);
+            context.topic = undefined;
+          }
           const auth = await authenticateDocumentAccess(
             prisma,
             msg.accessToken,
-            context.documentId,
+            documentId,
           );
           context.auth = auth;
+          const restoredTopic = documentTopic(documentId);
+          context.topic = restoredTopic;
+          peer.subscribe(restoredTopic);
           sendJson(peer, {
             protocolVersion: COLLAB_PROTOCOL_VERSION,
             type: CollabMessageType.AuthOk,
-            documentId: context.documentId,
+            documentId,
             senderId: "server",
             userId: auth.userId,
             role: auth.role,

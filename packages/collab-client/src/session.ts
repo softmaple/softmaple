@@ -92,7 +92,24 @@ type RepairPage = {
   hasMore: boolean;
 };
 
-const serializeBatch = (batch: WireBatch): string => JSON.stringify(batch);
+const WS_OPEN = 1;
+
+const stableSerialize = (value: unknown): string => {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = [...Object.keys(record)].sort();
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`)
+    .join(",")}}`;
+};
+
+const sameBatchPayload = (left: WireBatch, right: WireBatch): boolean =>
+  stableSerialize(left) === stableSerialize(right);
 
 export const createCollabSession = (
   options: CreateCollabSessionOptions,
@@ -188,7 +205,7 @@ export const createCollabSession = (
     }
     const existing = knownBatches.get(batch.batchId);
     if (existing) {
-      if (serializeBatch(existing) !== serializeBatch(batch)) {
+      if (!sameBatchPayload(existing, batch)) {
         notifyError(
           new Error(`Conflicting payloads for batch ${batch.batchId}`),
         );
@@ -196,11 +213,15 @@ export const createCollabSession = (
       return null;
     }
     knownBatches.set(batch.batchId, batch);
-    void storage.putBatch(
-      options.documentId,
-      batch,
-      durableBatchIds.has(batch.batchId),
-    );
+    void storage
+      .putBatch(options.documentId, batch, durableBatchIds.has(batch.batchId))
+      .catch((cause: unknown) => {
+        notifyError(
+          cause instanceof Error
+            ? cause
+            : new Error("Failed to persist collab batch"),
+        );
+      });
     for (const listener of batchListeners) listener(batch, source);
     return batch;
   };
@@ -215,13 +236,22 @@ export const createCollabSession = (
       if (pendingPublish.delete(batchId)) changed = true;
     }
     if (!changed) return;
-    void storage.markDurable(options.documentId, batchIds);
+    void storage
+      .markDurable(options.documentId, batchIds)
+      .catch((cause: unknown) => {
+        notifyError(
+          cause instanceof Error
+            ? cause
+            : new Error("Failed to mark batches durable"),
+        );
+      });
     emitSnapshot();
   };
 
-  const send = (message: CollabMessage): void => {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  const send = (message: CollabMessage): boolean => {
+    if (!socket || socket.readyState !== WS_OPEN) return false;
     socket.send(JSON.stringify(message));
+    return true;
   };
 
   const flushPending = (): void => {
@@ -238,13 +268,34 @@ export const createCollabSession = (
     }
   };
 
+  const rejectPendingRepair = (error: Error): void => {
+    for (const [, pending] of pendingRepair) pending.reject(error);
+    pendingRepair.clear();
+  };
+
   const requestRepairPage = (
     requestId: string,
     afterCursor: string | null,
   ): Promise<RepairPage> =>
     new Promise((resolve, reject) => {
-      pendingRepair.set(requestId, { resolve, reject });
-      send({
+      const timer = setTimeout(() => {
+        if (!pendingRepair.has(requestId)) return;
+        pendingRepair.delete(requestId);
+        reject(new Error(`Repair request timed out: ${requestId}`));
+      }, authTimeoutMs);
+
+      pendingRepair.set(requestId, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+
+      const sent = send({
         protocolVersion: COLLAB_PROTOCOL_VERSION,
         type: CollabMessageType.RepairRequest,
         documentId: options.documentId,
@@ -253,6 +304,11 @@ export const createCollabSession = (
         afterCursor,
         limit: repairPageSize,
       });
+      if (!sent) {
+        pendingRepair.delete(requestId);
+        clearTimeout(timer);
+        reject(new Error("Cannot send repair request while disconnected"));
+      }
     });
 
   const runRepair = async (): Promise<void> => {
@@ -261,15 +317,20 @@ export const createCollabSession = (
     let hasMore = true;
     while (hasMore && !closed) {
       const requestId = crypto.randomUUID();
+      const previousCursor = afterCursor;
       const response = await requestRepairPage(requestId, afterCursor);
       for (const envelope of response.batches) {
         acceptBatch(envelope.batch, "repair");
         markDurable([envelope.batch.batchId]);
-        afterCursor = envelope.cursor;
       }
+      afterCursor = response.hasMore
+        ? response.nextCursor
+        : (response.batches.at(-1)?.cursor ?? afterCursor);
       await storage.setRepairCursor(options.documentId, afterCursor);
       hasMore = response.hasMore;
-      if (hasMore) afterCursor = response.nextCursor;
+      if (hasMore && (afterCursor === null || afterCursor === previousCursor)) {
+        break;
+      }
     }
   };
 
@@ -348,8 +409,7 @@ export const createCollabSession = (
           setConnectionState(CollabConnectionState.Error);
         }
         notifyError(err);
-        for (const [, pending] of pendingRepair) pending.reject(err);
-        pendingRepair.clear();
+        rejectPendingRepair(err);
         return;
       }
       default:
@@ -373,10 +433,11 @@ export const createCollabSession = (
 
   const scheduleReconnect = (): void => {
     if (closed || reconnectTimer) return;
-    const delay = Math.min(
+    const base = Math.min(
       reconnectMaxDelayMs,
       reconnectBaseDelayMs * 2 ** reconnectAttempt,
     );
+    const delay = Math.floor(base * (0.5 + Math.random() * 0.5));
     reconnectAttempt += 1;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -429,6 +490,7 @@ export const createCollabSession = (
       socket = null;
       ready = false;
       authenticated = false;
+      rejectPendingRepair(new Error("Socket closed during repair"));
       if (closed) {
         setConnectionState(CollabConnectionState.Closed);
         return;
@@ -514,10 +576,7 @@ export const createCollabSession = (
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       settleAuthWaiters(new Error("Session closed"));
-      for (const [, pending] of pendingRepair) {
-        pending.reject(new Error("Session closed"));
-      }
-      pendingRepair.clear();
+      rejectPendingRepair(new Error("Session closed"));
       socket?.close();
       socket = null;
       if (ownsStorage) storage.close();

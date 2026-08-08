@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { parseWireBatch } from "@softmaple/collab-protocol";
+import { useEffect, useRef, useState } from "react";
 import {
   createCollabSession,
   type CollabSession,
@@ -22,16 +23,34 @@ export const useCollabSession = (
   const documentId = options?.documentId ?? null;
   const replicaId = options?.replicaId ?? null;
   const wsUrl = options?.wsUrl ?? null;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
-    if (!options || !documentId || !replicaId || !wsUrl) {
+    setError(null);
+    const current = optionsRef.current;
+    if (!current || !documentId || !replicaId || !wsUrl) {
       setSession(null);
       setSnapshot(null);
       return;
     }
 
     let cancelled = false;
-    const next = createCollabSession(options);
+    const next = createCollabSession({
+      ...current,
+      documentId,
+      replicaId,
+      wsUrl,
+      getAccessToken: () => {
+        const fn = optionsRef.current?.getAccessToken;
+        if (!fn) return Promise.reject(new Error("Missing getAccessToken"));
+        return fn();
+      },
+      parseBatch: (input) => {
+        const parseBatch = optionsRef.current?.parseBatch ?? parseWireBatch;
+        return parseBatch(input);
+      },
+    });
     const unsubSnapshot = next.subscribeSnapshot((value) => {
       if (!cancelled) setSnapshot(value);
     });
@@ -51,8 +70,6 @@ export const useCollabSession = (
       unsubErrors();
       next.close();
     };
-    // options.getAccessToken / parseBatch are expected to be stable by callers.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity by room keys
   }, [documentId, replicaId, wsUrl]);
 
   return { session, snapshot, error };

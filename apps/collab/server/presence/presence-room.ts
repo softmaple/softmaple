@@ -1,9 +1,9 @@
 /**
- * Protocol v2 presence room logic for the playground WebSocket server.
+ * Protocol v2 presence room logic for the Collab WebSocket server.
  * Pure / testable — keyed by connectionId with clock ordering.
  *
- * **Auth is non-authoritative:** the `auth` handshake accepts any non-empty
- * token and must not be used as a real authentication model in production.
+ * Auth verifies tokens through `verifyToken` (Supabase JWT / isolated dev
+ * bypass). State-changing frames require an authenticated session.
  */
 
 export const PRESENCE_PROTOCOL_VERSION = 2 as const;
@@ -91,6 +91,31 @@ const isPresenceUser = (value: unknown): value is PresenceUser => {
 const utf8ByteLength = (value: string): number =>
   new TextEncoder().encode(value).length;
 
+const isOptionalFiniteNumber = (value: unknown): boolean =>
+  value === undefined || isFiniteNumber(value);
+
+const isOptionalString = (value: unknown): boolean =>
+  value === undefined || typeof value === "string";
+
+const isValidUpdateValue = (key: string, value: unknown): boolean => {
+  switch (key) {
+    case "name":
+    case "color":
+    case "status":
+    case "avatarUrl":
+      return typeof value === "string";
+    case "lastActivityAt":
+    case "lastSeenAt":
+      return isFiniteNumber(value);
+    case "cursor":
+    case "selection":
+    case "meta":
+      return value === null || typeof value === "object";
+    default:
+      return false;
+  }
+};
+
 const boundUpdates = (
   updates: Record<string, unknown>,
   maxBytes: number,
@@ -100,9 +125,19 @@ const boundUpdates = (
   }
   const bounded: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {
-    if (ALLOWED_UPDATE_KEYS.has(key)) {
-      bounded[key] = value;
-    }
+    if (!ALLOWED_UPDATE_KEYS.has(key)) continue;
+    if (!isValidUpdateValue(key, value)) return null;
+    bounded[key] = value;
+  }
+  // Ensure optional typed fields on PresenceUser stay well-typed after merge.
+  if (!isOptionalString(bounded.name) || !isOptionalString(bounded.color)) {
+    return null;
+  }
+  if (
+    !isOptionalFiniteNumber(bounded.lastActivityAt) ||
+    !isOptionalFiniteNumber(bounded.lastSeenAt)
+  ) {
+    return null;
   }
   return bounded;
 };
@@ -132,6 +167,7 @@ const mergeLastSeenAt = (
 export type PresenceUpdateResult = {
   readonly user: PresenceUser;
   readonly normalizedUpdates: Record<string, unknown>;
+  readonly stale?: boolean;
 };
 
 export type PresenceRoomStore = {
@@ -207,7 +243,8 @@ export const createPresenceRoomStore = (
           ),
         };
         users.set(connectionId, touched);
-        return { user: touched, normalizedUpdates: safeUpdates };
+        // Stale clocks must not republish caller patches as canonical changes.
+        return { user: touched, normalizedUpdates: {}, stale: true };
       }
 
       const { lastSeenAt: wireSeen, ...patch } = safeUpdates;
@@ -224,7 +261,7 @@ export const createPresenceRoomStore = (
         ...patch,
         ...(wireSeen !== undefined ? { lastSeenAt: next.lastSeenAt } : {}),
       };
-      return { user: next, normalizedUpdates };
+      return { user: next, normalizedUpdates, stale: false };
     },
 
     deleteRoomIfEmpty: (roomId) => {
@@ -267,15 +304,41 @@ const sessionConnectionId = (session: PeerSession): string | undefined =>
     ? session.connectionId
     : undefined;
 
+export type PresenceTokenVerifier = (
+  token: string,
+) => Promise<{ userId: string } | null>;
+
+export type HandlePresenceFrameOptions = {
+  readonly verifyToken: PresenceTokenVerifier;
+};
+
+export const buildCloseLeaveMessage = (
+  roomId: string,
+  connectionId: string,
+  userId: string,
+): PresenceMessage => ({
+  type: "leave",
+  roomId,
+  senderId: "server",
+  timestamp: Date.now(),
+  payload: { connectionId, userId },
+});
+
+const isAuthenticatedSession = (session: PeerSession): boolean =>
+  sessionConnectionId(session) !== undefined &&
+  typeof session.userId === "string" &&
+  session.userId.length > 0;
+
 /**
- * Handle one inbound presence frame. Pure aside from Date.now() timestamps.
+ * Handle one inbound presence frame. Auth verifies tokens via `verifyToken`.
  */
-export const handlePresenceFrame = (
+export const handlePresenceFrame = async (
   store: PresenceRoomStore,
   roomId: string,
   parsed: PresenceMessage,
   session: PeerSession = {},
-): FrameHandlerResult => {
+  options: HandlePresenceFrameOptions,
+): Promise<FrameHandlerResult> => {
   if (parsed.type === "auth") {
     if (!isRecord(parsed.payload)) {
       return { outbound: [], publish: null };
@@ -288,14 +351,7 @@ export const handlePresenceFrame = (
       typeof parsed.payload.connectionId === "string"
         ? parsed.payload.connectionId
         : "";
-    const userId =
-      typeof parsed.payload.userId === "string" ? parsed.payload.userId : "";
-    if (
-      token.length === 0 ||
-      !versionOk ||
-      connectionId.length === 0 ||
-      userId.length === 0
-    ) {
+    if (token.length === 0 || !versionOk || connectionId.length === 0) {
       return {
         outbound: [
           serverMessage("auth_error", roomId, {
@@ -305,12 +361,47 @@ export const handlePresenceFrame = (
         publish: null,
       };
     }
+
+    let verified: { userId: string } | null;
+    try {
+      verified = await options.verifyToken(token);
+    } catch {
+      verified = null;
+    }
+    if (verified === null) {
+      return {
+        outbound: [
+          serverMessage("auth_error", roomId, {
+            message: "Invalid or unverifiable credentials",
+          }),
+        ],
+        publish: null,
+      };
+    }
+
+    let publish: PresenceMessage | null = null;
+    const previousConnectionId = sessionConnectionId(session);
+    if (
+      previousConnectionId !== undefined &&
+      previousConnectionId !== connectionId &&
+      typeof session.userId === "string"
+    ) {
+      if (store.leave(roomId, previousConnectionId)) {
+        publish = buildCloseLeaveMessage(
+          roomId,
+          previousConnectionId,
+          session.userId,
+        );
+        store.deleteRoomIfEmpty(roomId);
+      }
+    }
+
     return {
       outbound: [serverMessage("auth_ok", roomId, { ok: true })],
-      publish: null,
+      publish,
       session: {
         connectionId,
-        userId,
+        userId: verified.userId,
       },
     };
   }
@@ -321,21 +412,18 @@ export const handlePresenceFrame = (
 
   switch (parsed.type) {
     case "join": {
+      if (!isAuthenticatedSession(session)) {
+        return { outbound: [], publish: null };
+      }
       if (!isRecord(parsed.payload) || !isPresenceUser(parsed.payload.user)) {
         return { outbound: [], publish: null };
       }
       const user = parsed.payload.user;
-      const boundConnectionId = sessionConnectionId(session);
-      if (
-        boundConnectionId !== undefined &&
-        user.connectionId !== boundConnectionId
-      ) {
+      const boundConnectionId = sessionConnectionId(session)!;
+      if (user.connectionId !== boundConnectionId) {
         return { outbound: [], publish: null };
       }
-      if (
-        boundConnectionId === undefined &&
-        user.connectionId !== parsed.senderId
-      ) {
+      if (user.userId !== session.userId) {
         return { outbound: [], publish: null };
       }
       const joined = store.join(roomId, user);
@@ -357,24 +445,27 @@ export const handlePresenceFrame = (
     }
 
     case "leave": {
-      const connectionId = sessionConnectionId(session);
-      if (connectionId === undefined) {
+      if (!isAuthenticatedSession(session)) {
         return { outbound: [], publish: null };
       }
+      const connectionId = sessionConnectionId(session)!;
       store.leave(roomId, connectionId);
       store.deleteRoomIfEmpty(roomId);
       return {
         outbound: [],
         publish: {
           ...parsed,
-          payload: { connectionId, userId: session.userId ?? parsed.senderId },
+          payload: { connectionId, userId: session.userId },
         },
       };
     }
 
     case "presence:update": {
-      const connectionId = sessionConnectionId(session);
-      if (connectionId === undefined || !isRecord(parsed.payload)) {
+      if (!isAuthenticatedSession(session)) {
+        return { outbound: [], publish: null };
+      }
+      const connectionId = sessionConnectionId(session)!;
+      if (!isRecord(parsed.payload)) {
         return { outbound: [], publish: null };
       }
       if (
@@ -389,20 +480,16 @@ export const handlePresenceFrame = (
         parsed.payload.clock,
         parsed.payload.updates,
       );
-      if (applied === null) {
+      if (applied === null || applied.stale) {
         return { outbound: [], publish: null };
       }
-      const userId =
-        typeof parsed.payload.userId === "string"
-          ? parsed.payload.userId
-          : (session.userId ?? parsed.senderId);
       return {
         outbound: [],
         publish: {
           ...parsed,
           payload: {
             connectionId,
-            userId,
+            userId: session.userId,
             clock: applied.user.clock,
             updates: applied.normalizedUpdates,
           },
@@ -441,18 +528,6 @@ export const handlePresenceFrame = (
       return { outbound: [], publish: null };
   }
 };
-
-export const buildCloseLeaveMessage = (
-  roomId: string,
-  connectionId: string,
-  userId: string,
-): PresenceMessage => ({
-  type: "leave",
-  roomId,
-  senderId: "server",
-  timestamp: Date.now(),
-  payload: { connectionId, userId },
-});
 
 export const startPresenceRoomMaintenance = (
   store: PresenceRoomStore,

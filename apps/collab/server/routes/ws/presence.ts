@@ -1,10 +1,15 @@
 /**
  * Ephemeral presence WebSocket. Never persisted.
  * Speaks @softmaple/awareness protocol v2 frames.
+ *
+ * Single-instance deployment only for v1: CrossWS topic publish stays
+ * in-process. Multi-instance requires a shared sync backplane.
  */
 
 import { defineWebSocketHandler } from "nitro";
 import type { EventHandler } from "nitro/h3";
+import { CollabProtocolError } from "@softmaple/collab-protocol";
+import { resolveAccessTokenUserId } from "../../auth/verify";
 import {
   buildCloseLeaveMessage,
   createPresenceRoomStore,
@@ -42,6 +47,18 @@ const roomIdFromPeer = (peer: {
   return new URL(url).searchParams.get("roomId");
 };
 
+const verifyPresenceToken = async (
+  token: string,
+): Promise<{ userId: string } | null> => {
+  try {
+    const userId = await resolveAccessTokenUserId(token);
+    return { userId };
+  } catch (error) {
+    if (error instanceof CollabProtocolError) return null;
+    return null;
+  }
+};
+
 const handler: EventHandler = defineWebSocketHandler({
   upgrade(request) {
     const url = new URL(request.url);
@@ -65,14 +82,20 @@ const handler: EventHandler = defineWebSocketHandler({
     peer.subscribe(ROOM_TOPIC);
   },
 
-  message(peer, message) {
+  async message(peer, message) {
     const roomId = roomIdFromPeer(peer);
     if (!roomId) return;
 
     const parsed = parsePresenceMessage(message.text());
     if (parsed === null) return;
 
-    const result = handlePresenceFrame(store, roomId, parsed, peer.context);
+    const result = await handlePresenceFrame(
+      store,
+      roomId,
+      parsed,
+      peer.context,
+      { verifyToken: verifyPresenceToken },
+    );
     if (result.session !== undefined) {
       if (result.session.connectionId !== undefined) {
         peer.context.connectionId = result.session.connectionId;

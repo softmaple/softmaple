@@ -2,7 +2,6 @@ import { createClient } from "@supabase/supabase-js";
 import {
   CollabErrorCode,
   CollabProtocolError,
-  WorkspaceRole,
   canWriteRole,
   type WorkspaceRole as WorkspaceRoleValue,
 } from "@softmaple/collab-protocol";
@@ -16,27 +15,27 @@ export interface AuthContext {
   readonly canWrite: boolean;
 }
 
-const parseDevToken = (
-  accessToken: string,
-): { userId: string; role: WorkspaceRoleValue } | null => {
-  if (process.env.COLLAB_DEV_AUTH_BYPASS !== "true") return null;
+const isIsolatedDevBypassEnabled = (): boolean =>
+  process.env.COLLAB_DEV_AUTH_BYPASS === "true" &&
+  process.env.NODE_ENV === "development";
+
+/** Dev tokens only supply userId (`dev:<userId>` or legacy `dev:<userId>:<ROLE>`). */
+const parseDevUserId = (accessToken: string): string | null => {
+  if (!isIsolatedDevBypassEnabled()) return null;
   if (!accessToken.startsWith("dev:")) return null;
   const parts = accessToken.split(":");
-  if (parts.length !== 3) return null;
+  if (parts.length < 2 || parts.length > 3) return null;
   const userId = parts[1];
-  const role = parts[2];
   if (!userId || userId.length === 0) return null;
-  if (
-    role !== WorkspaceRole.Owner &&
-    role !== WorkspaceRole.Editor &&
-    role !== WorkspaceRole.Viewer
-  ) {
-    return null;
-  }
-  return { userId, role };
+  return userId;
 };
 
-const resolveSupabaseUserId = async (accessToken: string): Promise<string> => {
+export const resolveAccessTokenUserId = async (
+  accessToken: string,
+): Promise<string> => {
+  const devUserId = parseDevUserId(accessToken);
+  if (devUserId) return devUserId;
+
   const url = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
@@ -63,8 +62,7 @@ export const authenticateDocumentAccess = async (
   accessToken: string,
   documentId: string,
 ): Promise<AuthContext> => {
-  const dev = parseDevToken(accessToken);
-  const userId = dev ? dev.userId : await resolveSupabaseUserId(accessToken);
+  const userId = await resolveAccessTokenUserId(accessToken);
 
   const document = await prisma.document.findUnique({
     where: { id: documentId },
@@ -76,16 +74,6 @@ export const authenticateDocumentAccess = async (
       "Document not found",
       { documentId },
     );
-  }
-
-  if (dev) {
-    return {
-      userId,
-      documentId,
-      workspaceId: document.workspace_id,
-      role: dev.role,
-      canWrite: canWriteRole(dev.role),
-    };
   }
 
   const membership = await prisma.workspaceMember.findUnique({

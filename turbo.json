@@ -3,7 +3,16 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build", "^db:generate"],
-      "env": ["LIVEBLOCKS_SECRET_KEY"],
+      "env": [
+        "COLLAB_ALLOWED_ORIGINS",
+        "DATABASE_URL",
+        "NEXT_PUBLIC_COLLAB_WS_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_URL"
+      ],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [
         ".next/**",

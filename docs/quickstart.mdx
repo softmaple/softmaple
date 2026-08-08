@@ -54,14 +54,16 @@ Before you begin, make sure you have the following installed:
 
     # Supabase Auth
     NEXT_PUBLIC_SUPABASE_URL="your-supabase-url"
-    NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
-
-    # Liveblocks (for real-time collaboration)
-    NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY="your-public-key"
-    LIVEBLOCKS_SECRET_KEY="your-secret-key"
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
+    NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:3002/document"
     ```
   </Accordion>
-  <Accordion icon="database" title="4. Set up the database">
+  <Accordion icon="server" title="4. Configure collaboration">
+    Create `apps/collab/.env.local` from its example, then provide the pooled
+    `DATABASE_URL`, Supabase URL and publishable key. Start it with
+    `pnpm --filter @softmaple/collab dev`.
+  </Accordion>
+  <Accordion icon="database" title="5. Set up the database">
     Generate Prisma client and run migrations:
 
     ```bash
@@ -69,11 +71,12 @@ Before you begin, make sure you have the following installed:
     pnpm --filter @softmaple/db db:migrate
     ```
   </Accordion>
-  <Accordion icon="rocket" title="5. Start the development server">
+  <Accordion icon="rocket" title="6. Start the development servers">
     Run the development server:
 
     ```bash
     pnpm dev
+    pnpm --filter @softmaple/collab dev
     ```
 
     The application will be available at [http://localhost:3000](http://localhost:3000)

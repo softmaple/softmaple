@@ -58,11 +58,13 @@ DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
 
 # Supabase Authentication
 NEXT_PUBLIC_SUPABASE_URL="your-supabase-project-url"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your-supabase-anon-key"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
+NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:3002/document"
 
-# Liveblocks (Real-time collaboration)
-NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY="your-liveblocks-public-key"
-LIVEBLOCKS_SECRET_KEY="your-liveblocks-secret-key"
+# Collaboration service
+SUPABASE_URL="your-supabase-project-url"
+SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
+COLLAB_ALLOWED_ORIGINS="http://localhost:3000"
 ```
 
 ### 3. Database Setup
@@ -234,4 +236,4 @@ Common issues and solutions:
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Turborepo Documentation](https://turbo.build/repo/docs)
 - [Prisma Documentation](https://www.prisma.io/docs)
-- [Liveblocks Documentation](https://liveblocks.io/docs)
+- [Supabase Postgres Documentation](https://supabase.com/docs/guides/database/overview)

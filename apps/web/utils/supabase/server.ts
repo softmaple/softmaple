@@ -1,5 +1,4 @@
 import { createServerClient } from "@supabase/ssr";
-import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import type { Database } from "@/types/model";
@@ -18,7 +17,7 @@ export const createClient = async (
         const userData = JSON.parse(testUser);
         // Return a properly typed mock Supabase client
         return createMockSupabaseClient(userData);
-      } catch (e) {
+      } catch {
         // Fall through to normal client creation
       }
     }
@@ -29,7 +28,8 @@ export const createClient = async (
 
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)!,
     {
       cookies: {
         getAll() {

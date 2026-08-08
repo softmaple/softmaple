@@ -43,7 +43,7 @@ export const createClient = (): SupabaseClient<Database> => {
 
           // Return a properly typed mock Supabase client
           return createMockSupabaseClient(userData);
-        } catch (e) {
+        } catch {
           // Fall through to normal client
         }
       }
@@ -52,6 +52,7 @@ export const createClient = (): SupabaseClient<Database> => {
 
   return createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)!,
   );
 };

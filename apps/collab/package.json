@@ -1,0 +1,26 @@
+{
+  "name": "@softmaple/collab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nitro dev --port 3002",
+    "build": "nitro build",
+    "preview": "nitro preview",
+    "prepare": "nitro prepare",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@softmaple/block-model": "workspace:*",
+    "@softmaple/collab-protocol": "workspace:*",
+    "@softmaple/db": "workspace:*",
+    "@supabase/supabase-js": "^2.89.0",
+    "dotenv": "^17.4.2",
+    "nitro": "latest"
+  },
+  "devDependencies": {
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "typescript": "^5.9.3"
+  }
+}

@@ -45,31 +45,6 @@ export async function mockExternalServices(page: Page) {
     }
   });
 
-  // Mock Liveblocks real-time API
-  await page.route("**/liveblocks.io/**", (route) => {
-    if (route.request().url().includes("/rooms")) {
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          room: { id: "mock-room" },
-          users: [],
-          presence: {},
-        }),
-      });
-    } else if (route.request().url().includes("/auth")) {
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          token: "mock-liveblocks-token",
-        }),
-      });
-    } else {
-      route.continue();
-    }
-  });
-
   // Mock any analytics or tracking
   await page.route("**/google-analytics.com/**", (route) => route.abort());
   await page.route("**/googletagmanager.com/**", (route) => route.abort());
@@ -186,7 +161,7 @@ export async function mockFastNetwork(page: Page) {
       const urlString = args[0]?.toString() || "";
 
       // Safely parse URL for hostname validation
-      let isAllowedEndpoint = false;
+      let isAllowedEndpoint: boolean;
       try {
         const parsedUrl = new URL(urlString, window.location.origin);
         const hostname = parsedUrl.hostname;
@@ -199,11 +174,8 @@ export async function mockFastNetwork(page: Page) {
         const isSupabaseAuth =
           (hostname.endsWith(".supabase.co") || hostname === "supabase.co") &&
           pathname.includes("/auth/");
-        const isLiveblocks =
-          hostname === "liveblocks.io" || hostname.endsWith(".liveblocks.io");
-
-        isAllowedEndpoint = isSupabaseAPI || isSupabaseAuth || isLiveblocks;
-      } catch (e) {
+        isAllowedEndpoint = isSupabaseAPI || isSupabaseAuth;
+      } catch {
         // Invalid URL, treat as local/relative
         isAllowedEndpoint = urlString.includes("/rest/v1/");
       }

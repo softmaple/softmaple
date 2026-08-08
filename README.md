@@ -32,8 +32,8 @@
 - apps
   - [web](apps/web) - Main web application
     - **Next.js** v16 with `app` folder
-    - **Liveblocks** for real-time collaboration
-    - **Supabase** for database and authentication
+    - **EG-walker + WebSocket** for real-time collaboration
+    - **Supabase Postgres** for durable history and authentication
 
 - packages
   - [config](packages/config) - Site configuration

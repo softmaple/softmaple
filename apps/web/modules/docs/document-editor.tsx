@@ -9,7 +9,6 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
-import { Room } from "@/modules/docs/room";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import type { DocHeaderProps } from "@/modules/docs/doc-header";
@@ -19,18 +18,17 @@ export type DocumentEditorProps = Omit<
   DocHeaderProps,
   "setTitle" | "setContent"
 > & {
-  isPublic?: boolean;
+  documentId?: string;
 };
 
 export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
   const {
     title: initialTitle,
     content: initialContent,
-    docSlug,
     workspaceId,
     userId,
     isNewDoc,
-    isPublic = false,
+    documentId,
   } = props;
 
   const [title, setTitle] = useState<string>(initialTitle);
@@ -73,13 +71,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
           </TabsList>
 
           <TabsContent value="editor" className="flex-1 m-0">
-            {docSlug && isPublic ? (
-              <Room roomId={docSlug} workspaceId={workspaceId}>
-                <DocEditor isPublic />
-              </Room>
-            ) : (
-              <DocEditor />
-            )}
+            <DocEditor documentId={documentId} />
           </TabsContent>
 
           <TabsContent value="preview" className="flex-1 m-0">

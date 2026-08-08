@@ -54,7 +54,7 @@ importers:
         version: link:../../packages/db
       '@supabase/supabase-js':
         specifier: ^2.89.0
-        version: 2.89.0
+        version: 2.112.2
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -442,7 +442,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   packages/binding-lexical:
     dependencies:
@@ -772,7 +772,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   packages/eslint-config:
     devDependencies:
@@ -7892,7 +7892,7 @@ snapshots:
   '@fast-check/vitest@0.4.1(vitest@4.1.10)':
     dependencies:
       fast-check: 4.8.0
-      vitest: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+      vitest: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   '@floating-ui/core@1.7.3':
     dependencies:

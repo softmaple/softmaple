@@ -200,8 +200,18 @@ BEGIN
         RAISE EXCEPTION 'an application trigger is missing';
     END IF;
 
-    IF to_regprocedure('private.create_owner_workspace_member()') IS NULL THEN
-        RAISE EXCEPTION 'workspace owner membership trigger function is missing';
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE NOT tgisinternal
+          AND tgname = 'trg_workspaces_create_owner_member'
+          AND tgrelid = 'public.workspaces'::regclass
+          AND tgfoid = to_regprocedure(
+              'private.create_owner_workspace_member()'
+          )
+    ) THEN
+        RAISE EXCEPTION
+            'trg_workspaces_create_owner_member is missing or miswired on public.workspaces';
     END IF;
 
     IF NOT EXISTS (
@@ -210,7 +220,8 @@ BEGIN
         WHERE schemaname = 'public'
           AND tablename = 'workspace_members'
           AND policyname = 'workspace_members_select_member'
-          AND COALESCE(qual, '') LIKE '%user_id%'
+          AND COALESCE(qual, '') ~
+              'user_id[[:space:]]*=[[:space:]]*\([[:space:]]*SELECT[[:space:]]+auth\.uid\(\)'
     ) THEN
         RAISE EXCEPTION
             'workspace_members SELECT policy does not allow self-read';

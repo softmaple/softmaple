@@ -60,9 +60,8 @@ DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
 NEXT_PUBLIC_SUPABASE_URL="your-supabase-project-url"
 NEXT_PUBLIC_SUPABASE_ANON_KEY="your-supabase-anon-key"
 
-# Liveblocks (Real-time collaboration)
-NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY="your-liveblocks-public-key"
-LIVEBLOCKS_SECRET_KEY="your-liveblocks-secret-key"
+# Collab WebSocket service (EG-walker persistence)
+NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:4001/ws/document"
 ```
 
 ### 3. Database Setup
@@ -234,4 +233,4 @@ Common issues and solutions:
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Turborepo Documentation](https://turbo.build/repo/docs)
 - [Prisma Documentation](https://www.prisma.io/docs)
-- [Liveblocks Documentation](https://liveblocks.io/docs)
+- [Collaboration architecture](/design/collaboration-layers)

@@ -26,7 +26,7 @@ export const Features = () => {
               </h3>
               <p className="text-muted-foreground leading-relaxed">
                 Work together seamlessly with your team. See changes instantly,
-                leave comments, and track revisions in real-time.
+                and track revisions in real-time.
               </p>
             </CardContent>
           </Card>

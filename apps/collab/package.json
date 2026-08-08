@@ -1,0 +1,30 @@
+{
+  "name": "@softmaple/collab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nitro dev --port 4001",
+    "build": "nitro build",
+    "preview": "node .output/server/index.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@softmaple/block-model": "workspace:*",
+    "@softmaple/collab-protocol": "workspace:*",
+    "@softmaple/db": "workspace:*",
+    "@supabase/supabase-js": "^2.89.0",
+    "nitro": "latest",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

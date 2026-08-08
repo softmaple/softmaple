@@ -26,6 +26,9 @@ coverage
 out/
 build
 dist
+.output
+.nitro
+.vinxi
 
 .idea
 

@@ -25,6 +25,8 @@
     "@softmaple/awareness": "workspace:*",
     "@softmaple/binding-lexical": "workspace:*",
     "@softmaple/block-model": "workspace:*",
+    "@softmaple/collab-client": "workspace:*",
+    "@softmaple/collab-protocol": "workspace:*",
     "@softmaple/editor": "workspace:*",
     "@softmaple/eg-walker": "workspace:*",
     "@softmaple/ui": "workspace:*",

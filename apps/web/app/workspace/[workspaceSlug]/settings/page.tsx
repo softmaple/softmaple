@@ -47,7 +47,6 @@ export default function WorkspaceSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(false);
-  const [allowComments, setAllowComments] = useState(true);
   const [autoSave, setAutoSave] = useState(true);
 
   useEffect(() => {
@@ -113,7 +112,6 @@ export default function WorkspaceSettingsPage() {
       name: workspaceName,
       description: workspaceDescription,
       isPublic,
-      allowComments,
       autoSave,
     });
   };
@@ -227,18 +225,6 @@ export default function WorkspaceSettingsPage() {
                       </p>
                     </div>
                     <Switch checked={isPublic} onCheckedChange={setIsPublic} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Allow Comments</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Enable commenting on documents
-                      </p>
-                    </div>
-                    <Switch
-                      checked={allowComments}
-                      onCheckedChange={setAllowComments}
-                    />
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">

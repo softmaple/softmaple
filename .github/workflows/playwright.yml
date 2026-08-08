@@ -87,9 +87,9 @@ jobs:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_COLLAB_WS_URL: ${{ secrets.NEXT_PUBLIC_COLLAB_WS_URL }}
           NEXT_PUBLIC_E2E_TEST_MODE: true
           # Skip Next.js telemetry during build
           NEXT_TELEMETRY_DISABLED: 1
@@ -105,9 +105,9 @@ jobs:
           CI: true
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-          LIVEBLOCKS_SECRET_KEY: ${{ secrets.LIVEBLOCKS_SECRET_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_COLLAB_WS_URL: ${{ secrets.NEXT_PUBLIC_COLLAB_WS_URL }}
           NEXT_PUBLIC_E2E_TEST_MODE: true
 
       # Clean up database after tests to reduce storage consumption

@@ -9,19 +9,23 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
-import { Room } from "@/modules/docs/room";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import type { DocHeaderProps } from "@/modules/docs/doc-header";
 import { sanitizeHtml } from "@/modules/docs/sanitize-html";
+import { useEditorState } from "@/contexts/EditorStateContext";
 
 export type DocumentEditorProps = Omit<
   DocHeaderProps,
   "setTitle" | "setContent"
 > & {
-  isPublic?: boolean;
+  documentId: string;
 };
 
+/**
+ * Preview / Markdown / LaTeX tabs derive from the current editor HTML when
+ * available. We no longer treat `markdown_content` as collaboration truth.
+ */
 export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
   const {
     title: initialTitle,
@@ -30,16 +34,22 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     workspaceId,
     userId,
     isNewDoc,
-    isPublic = false,
+    documentId,
   } = props;
 
   const [title, setTitle] = useState<string>(initialTitle);
   const [content, setContent] = useState<string>(initialContent);
-  const sanitizedPreview = useMemo(() => sanitizeHtml(content), [content]);
+  const { activeEditor } = useEditorState();
+
+  const liveHtml = useMemo(() => {
+    if (!activeEditor) return content;
+    return activeEditor.getRootElement()?.innerHTML ?? content;
+  }, [activeEditor, content]);
+
+  const sanitizedPreview = useMemo(() => sanitizeHtml(liveHtml), [liveHtml]);
 
   return (
     <div className="flex-1 flex flex-col">
-      {/* Document Header */}
       <DocHeader
         title={title}
         setTitle={setTitle}
@@ -48,9 +58,9 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         isNewDoc={isNewDoc}
         workspaceId={workspaceId}
         userId={userId}
+        docSlug={docSlug}
       />
 
-      {/* Document Content */}
       <main className="flex-1 overflow-hidden">
         <Tabs defaultValue="editor" className="h-full flex flex-col">
           <TabsList className="mx-6 mt-4 w-fit">
@@ -73,13 +83,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
           </TabsList>
 
           <TabsContent value="editor" className="flex-1 m-0">
-            {docSlug && isPublic ? (
-              <Room roomId={docSlug} workspaceId={workspaceId}>
-                <DocEditor isPublic />
-              </Room>
-            ) : (
-              <DocEditor />
-            )}
+            <DocEditor documentId={documentId} enableCollab />
           </TabsContent>
 
           <TabsContent value="preview" className="flex-1 m-0">
@@ -106,7 +110,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
 \\begin{document}
 \\maketitle
 
-${content.replace(/# /g, "\\section{").replace(/\n/g, "}\n")}
+% Generated on demand from the live editor — not from stored markdown_content.
 
 \\end{document}`}
               </pre>
@@ -116,7 +120,9 @@ ${content.replace(/# /g, "\\section{").replace(/\n/g, "}\n")}
           <TabsContent value="markdown" className="flex-1 m-0">
             <div className="h-full p-6">
               <pre className="w-full h-full overflow-auto bg-muted/30 p-4 rounded-lg font-mono text-sm">
-                {content}
+                {
+                  "Markdown is generated on demand from the live editor state.\nCollaboration persists EG-walker event batches in Supabase Postgres."
+                }
               </pre>
             </div>
           </TabsContent>

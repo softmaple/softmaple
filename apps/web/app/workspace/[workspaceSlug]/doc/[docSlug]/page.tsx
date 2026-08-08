@@ -1,15 +1,13 @@
 import { DocumentEditor } from "@/modules/docs/document-editor";
 import type { Metadata, ResolvingMetadata } from "next";
-import { cachedGetDocumentBySlug } from "@/app/actions/documents/documents";
-import { notFound } from "next/navigation";
+import {
+  cachedGetDocumentBySlug,
+  createDocument,
+} from "@/app/actions/documents/documents";
+import { notFound, redirect } from "next/navigation";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import { getCurrentUser } from "@/app/actions/auth";
-import { WorkspaceMemberRole } from "@softmaple/db";
-import {
-  createLiveblocksRoom,
-  getOrCreateLiveblocksRoom,
-} from "@/app/actions/documents/liveblocks";
 
 const DEFAULT_TITLE = "Untitled Document";
 
@@ -18,35 +16,37 @@ type Props = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
+const createSlug = (title: string): string => {
+  const base = title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${base || "document"}-${Date.now()}`;
+};
+
 export async function generateMetadata(
-  { params, searchParams }: Props,
-  parent: ResolvingMetadata,
+  { params }: Props,
+  _parent: ResolvingMetadata,
 ): Promise<Metadata> {
   const { docSlug } = await params;
 
-  const isNewDoc = docSlug === "new";
-
-  if (isNewDoc) {
+  if (docSlug === "new") {
     return {
       title: DEFAULT_TITLE,
       description: "Creating a new document",
     };
   }
 
-  // fetch current doc information
   const { data: currentDoc } = await cachedGetDocumentBySlug(docSlug);
-
-  const { title, markdown_content } = currentDoc || {};
-
   return {
-    title,
-    description: markdown_content?.substring(0, 150) || "Document content",
+    title: currentDoc?.title ?? DEFAULT_TITLE,
+    description: "Softmaple collaborative document",
   };
 }
 
-export default async function DocumentPage({ params, searchParams }: Props) {
+export default async function DocumentPage({ params }: Props) {
   const { docSlug, workspaceSlug } = await params;
-
   const isNewDoc = docSlug === "new";
 
   const { data: workspace, error: workspaceError } =
@@ -62,7 +62,6 @@ export default async function DocumentPage({ params, searchParams }: Props) {
   }
 
   const { data: userData, error: userError } = await getCurrentUser();
-
   const { user } = userData || {};
 
   if (userError) {
@@ -74,17 +73,34 @@ export default async function DocumentPage({ params, searchParams }: Props) {
     notFound();
   }
 
+  const { data: workspaceMember, error: workspaceMemberError } =
+    await getWorkspaceMemberByUserId(workspace.id);
+
+  if (workspaceMemberError) {
+    throw workspaceMemberError;
+  }
+
+  if (!workspaceMember) {
+    notFound();
+  }
+
+  // Create the Document row first so the collab editor always has a UUID room key.
   if (isNewDoc) {
-    // Redirect to create a new document
-    return (
-      <DocumentEditor
-        isNewDoc
-        title={DEFAULT_TITLE}
-        content=""
-        workspaceId={workspace.id}
-        userId={user.id}
-      />
-    );
+    const slug = createSlug(DEFAULT_TITLE);
+    const { data: created, error: createError } = await createDocument({
+      title: DEFAULT_TITLE,
+      slug,
+      workspace_id: workspace.id,
+      author_id: user.id,
+      markdown_content: null,
+    });
+
+    if (createError || !created) {
+      console.error("Error creating document:", createError);
+      throw createError ?? new Error("Failed to create document");
+    }
+
+    redirect(`/workspace/${workspaceSlug}/doc/${created.slug}`);
   }
 
   const { data: currentDoc, error } = await cachedGetDocumentBySlug(docSlug);
@@ -98,36 +114,14 @@ export default async function DocumentPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  const {
-    title = DEFAULT_TITLE,
-    markdown_content,
-    is_public = false,
-  } = currentDoc || {};
-
-  const { data: workspaceMember, error: workspaceMemberError } =
-    await getWorkspaceMemberByUserId(workspace.id);
-
-  if (workspaceMemberError) {
-    throw workspaceMemberError;
-  }
-
-  if (!workspaceMember) {
-    notFound();
-  }
-
-  // TODO: it would be readonly if the user is the `viewer` role.
-  const { role: userRole } = workspaceMember;
-
-  if (userRole === WorkspaceMemberRole["OWNER"]) {
-    await getOrCreateLiveblocksRoom(docSlug);
-  }
+  const { title = DEFAULT_TITLE, id: documentId } = currentDoc;
 
   return (
     <DocumentEditor
       title={title}
-      content={markdown_content || ""}
+      content=""
       docSlug={docSlug}
-      isPublic={is_public || false}
+      documentId={documentId}
       isNewDoc={false}
       workspaceId={workspace.id}
       userId={user.id}

@@ -25,8 +25,12 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
 @softmaple/binding-lexical
     - Lexical ↔ block-model projection
                  ↓
-              apps/*
-    - persistence, transport, identity, UI composition
+@softmaple/collab-protocol / @softmaple/collab-client
+    - wire protocol v2, IndexedDB cache, repair, React hook
+                 ↓
+apps/collab + apps/*
+    - Nitro WebSocket service, Prisma → Supabase Postgres,
+      identity, UI composition
 
 @softmaple/awareness
     - ephemeral presence, transport adapters, rendering helpers

@@ -89,8 +89,11 @@ model Document {
   author_id        String    @db.Uuid
   title            String
   slug             String    @unique
-  markdown_content String? // Markdown content of the document
-  // content      Json // Yjs JSON snapshot
+  /// Legacy Markdown blob. Not the collaboration source of truth; prefer
+  /// deriving preview/export from the live editor / EG-walker event log.
+  markdown_content String?
+  /// Reserved for a future compacted collaboration snapshot (not Yjs).
+  // content      Json
   created_at       DateTime  @default(now()) @db.Timestamptz(3)
   updated_at       DateTime? @updatedAt @db.Timestamptz(3)
   created_by       String?   @db.Uuid
@@ -98,9 +101,11 @@ model Document {
 
   is_public Boolean? @default(false)
 
-  workspace Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  author    User              @relation("DocumentAuthor", fields: [author_id], references: [id], onDelete: Cascade)
-  versions  DocumentVersion[]
+  workspace     Workspace              @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  author        User                   @relation("DocumentAuthor", fields: [author_id], references: [id], onDelete: Cascade)
+  versions      DocumentVersion[]
+  event_batches DocumentEventBatch[]
+  event_ids     DocumentEventId[]
 
   @@index([workspace_id])
   @@index([author_id])
@@ -110,8 +115,8 @@ model Document {
 model DocumentVersion {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   doc_id     String    @db.Uuid
-  // snapshot   String? // history snapshot of the raw document
-  // history snapshot of Yjs document
+  /// Reserved for a future compacted collaboration history snapshot.
+  // snapshot   String?
   created_at DateTime  @default(now()) @db.Timestamptz(3)
   updated_at DateTime? @updatedAt @db.Timestamptz(3)
   created_by String?   @db.Uuid
@@ -123,4 +128,38 @@ model DocumentVersion {
 
   @@index([doc_id])
   @@map("document_versions")
+}
+
+/// Append-only durable log of rich-text event batches (EG-walker / block-model).
+model DocumentEventBatch {
+  id             BigInt   @id @default(autoincrement())
+  document_id    String   @db.Uuid
+  batch_id       String
+  schema_version Int
+  parent_version String[]
+  payload        Json
+  payload_hash   String   @db.Char(64)
+  created_by     String   @db.Uuid
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+
+  document Document          @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  events   DocumentEventId[]
+
+  @@unique([document_id, batch_id])
+  @@index([document_id, id])
+  @@map("document_event_batches")
+}
+
+/// Ensures event IDs are unique per document across all batches.
+model DocumentEventId {
+  document_id String @db.Uuid
+  event_id    String
+  batch_id    String
+
+  document Document           @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  batch    DocumentEventBatch @relation(fields: [document_id, batch_id], references: [document_id, batch_id], onDelete: Cascade)
+
+  @@id([document_id, event_id])
+  @@index([document_id, batch_id])
+  @@map("document_event_ids")
 }

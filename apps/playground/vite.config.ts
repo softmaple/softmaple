@@ -5,7 +5,7 @@ import viteReact from "@vitejs/plugin-react";
 import viteTsConfigPaths from "vite-tsconfig-paths";
 import tailwindcss from "@tailwindcss/vite";
 import { nitro } from "nitro/vite";
-import { workspaceAlias } from "./workspace-aliases";
+import { workspaceAlias } from "./workspace-aliases.ts";
 
 const config = defineConfig(({ mode }) => ({
   resolve: {

@@ -8,44 +8,26 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@softmaple/editor": path.resolve(__dirname, "./src"),
+      "@softmaple/editor": path.resolve(import.meta.dirname, "./src"),
     },
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        compact: true,
-        manualChunks: {
-          // Split React and React DOM into a separate chunk
-          "vendor-react": ["react", "react-dom"],
-          // Split Lexical editor related packages (submodules only)
-          lexical: [
-            "lexical",
-            "@lexical/rich-text",
-            "@lexical/list",
-            "@lexical/code",
-            "@lexical/link",
-            "@lexical/markdown",
-            "@lexical/selection",
-            "@lexical/table",
-            "@lexical/utils",
-            // Submodules used from @lexical/react
-            "@lexical/react/LexicalComposer",
-            "@lexical/react/LexicalRichTextPlugin",
-            "@lexical/react/LexicalErrorBoundary",
-            "@lexical/react/LexicalContentEditable",
-            "@lexical/react/LexicalListPlugin",
-            "@lexical/react/LexicalCheckListPlugin",
-            "@lexical/react/LexicalHistoryPlugin",
-            "@lexical/react/LexicalComposerContext",
-            "@lexical/react/LexicalMarkdownShortcutPlugin",
-          ],
-          // Split utility libraries
-          utils: [
-            "clsx",
-            "tailwind-merge",
-            "class-variance-authority",
-            "lucide-react",
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor-react",
+              test: /node_modules\/(?:react|react-dom)\//,
+            },
+            {
+              name: "lexical",
+              test: /node_modules\/(?:lexical|@lexical)\//,
+            },
+            {
+              name: "utils",
+              test: /node_modules\/(?:clsx|tailwind-merge|class-variance-authority|lucide-react)\//,
+            },
           ],
         },
       },

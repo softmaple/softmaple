@@ -8,6 +8,7 @@
     "build": "nitro build",
     "preview": "nitro preview",
     "prepare": "nitro prepare",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@softmaple/typescript-config": "workspace:*",
     "@types/node": "^24.10.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }

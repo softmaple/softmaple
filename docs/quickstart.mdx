@@ -58,6 +58,14 @@ Before you begin, make sure you have the following installed:
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
     NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:3002/document"
     ```
+
+    Add the same database connection values to `packages/db/.env` so Prisma
+    commands can connect when run from the database package:
+
+    ```env
+    DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
+    DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
+    ```
   </Accordion>
   <Accordion icon="server" title="4. Configure collaboration">
     Create `apps/collab/.env.local` from its example, then provide

@@ -2,15 +2,65 @@
 -- Any failed invariant raises an exception and makes `prisma db execute` fail.
 DO $$
 DECLARE
+    missing_migrations TEXT;
     missing_private_policies TEXT;
 BEGIN
+    WITH expected(migration_name) AS (
+        VALUES
+            ('20260808230000_create_collab_composite_unique_index'),
+            ('20260808230100_add_collab_composite_fk_not_valid'),
+            ('20260808230200_validate_collab_composite_fk'),
+            ('20260808230300_harden_auth_profile_trigger')
+    )
+    SELECT string_agg(expected.migration_name, ', ' ORDER BY migration_name)
+    INTO missing_migrations
+    FROM expected
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM public._prisma_migrations AS migration
+        WHERE migration.migration_name = expected.migration_name
+          AND migration.finished_at IS NOT NULL
+          AND migration.rolled_back_at IS NULL
+    );
+
+    IF missing_migrations IS NOT NULL THEN
+        RAISE EXCEPTION
+            'collaboration migrations are not applied: %',
+            missing_migrations;
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1
-        FROM public._prisma_migrations
-        WHERE migration_name = '20260808230000_harden_collab_persistence'
-          AND finished_at IS NOT NULL
+        FROM pg_index AS index_state
+        WHERE index_state.indexrelid = to_regclass(
+                  'public.document_event_batches_id_document_id_key'
+              )
+          AND index_state.indrelid =
+              'public.document_event_batches'::regclass
+          AND index_state.indisunique
+          AND index_state.indisready
+          AND index_state.indisvalid
     ) THEN
-        RAISE EXCEPTION 'collaboration hardening migration is not applied';
+        RAISE EXCEPTION
+            'collaboration composite unique index is missing or invalid';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint AS constraint_state
+        WHERE constraint_state.conname =
+              'document_event_ids_batch_row_id_document_id_fkey'
+          AND constraint_state.conrelid =
+              'public.document_event_ids'::regclass
+          AND constraint_state.confrelid =
+              'public.document_event_batches'::regclass
+          AND constraint_state.contype = 'f'
+          AND constraint_state.convalidated
+          AND constraint_state.confdeltype = 'c'
+          AND constraint_state.confupdtype = 'c'
+    ) THEN
+        RAISE EXCEPTION
+            'collaboration composite foreign key is missing or invalid';
     END IF;
 
     IF to_regprocedure('public.is_workspace_member(uuid,integer)') IS NOT NULL

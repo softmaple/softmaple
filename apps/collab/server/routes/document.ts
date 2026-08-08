@@ -74,6 +74,10 @@ const authorizationExpiresAtFromContext = (
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 };
 
+const authenticationPendingFromContext = (
+  context: Record<string, unknown>,
+): boolean => context.authenticationPending === true;
+
 const cacheDocumentAccess = (
   context: Record<string, unknown>,
   access: DocumentAccess,
@@ -180,10 +184,20 @@ export default defineWebSocketHandler({
     }
 
     if (message.type === COLLAB_MESSAGE_TYPE.Auth) {
-      if (accessFromContext(peer.context) !== null) {
-        peer.close(1008, "Already authenticated");
+      const alreadyAuthenticated = accessFromContext(peer.context) !== null;
+      if (
+        alreadyAuthenticated ||
+        authenticationPendingFromContext(peer.context)
+      ) {
+        peer.close(
+          1008,
+          alreadyAuthenticated
+            ? "Already authenticated"
+            : "Authentication already in progress",
+        );
         return;
       }
+      peer.context.authenticationPending = true;
       try {
         const access = await authorizeDocument(
           message.accessToken,
@@ -222,6 +236,8 @@ export default defineWebSocketHandler({
             true,
           ),
         );
+      } finally {
+        delete peer.context.authenticationPending;
       }
       return;
     }

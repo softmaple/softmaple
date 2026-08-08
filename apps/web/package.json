@@ -22,7 +22,7 @@
     "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
-    "@lexical/react": "^0.44.0",
+    "@lexical/react": "^0.49.0",
     "@softmaple/binding-lexical": "workspace:*",
     "@softmaple/block-model": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
@@ -34,7 +34,7 @@
     "@supabase/supabase-js": "^2.112.2",
     "dayjs": "^1.11.19",
     "dompurify": "^3.4.12",
-    "lexical": "^0.44.0",
+    "lexical": "^0.49.0",
     "lodash": "^4.18.1",
     "lucide-react": "^0.562.0",
     "next": "16.3.0",

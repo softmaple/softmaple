@@ -909,6 +909,12 @@ export class EgWalkerEngine {
    * the shared record once. EventItemIndex resolves every skipped canonical
    * ID through the run interval and RecordSplitter materializes interior
    * anchors only if a later branch or delete needs them.
+   *
+   * The batch path must mirror {@link applyInsert}'s empty-conflict-region
+   * gate: a concurrent retreated sibling can sit after the tail without
+   * becoming `tail.originRight`, and scalar coalescing refuses to extend in
+   * that case. Requiring {@link IndexedSequence.isLast} keeps deferred
+   * typed-run spans identical to eager per-event records.
    */
   private extendObjectInsertRun(
     events: ReadonlyArray<GraphEvent>,
@@ -920,7 +926,8 @@ export class EgWalkerEngine {
       tail === null ||
       typeof tail.content !== "string" ||
       tail.run === null ||
-      tail.originRight !== null
+      tail.originRight !== null ||
+      !this.sequence.isLast(tail)
     ) {
       return startEventIndex;
     }
@@ -1583,7 +1590,8 @@ export class EgWalkerEngine {
       tail === null ||
       typeof tail.content !== "string" ||
       tail.run === null ||
-      tail.originRight !== null
+      tail.originRight !== null ||
+      !this.sequence.isLast(tail)
     ) {
       return startOrderIndex;
     }

@@ -96,11 +96,16 @@ export const useCollabDocument = (
         if (batch !== undefined) nextSession.publishBatch(wireBatch(batch));
       }
     });
+    let wasReady = false;
     const unsubSnapshot = nextSession.subscribeSnapshot((value) => {
       setSnapshot(value);
-      if (value.connectionState === "ready" || value.ready) {
+      const isReady = value.connectionState === "ready" || value.ready;
+      // Clear startup errors only on the false→true readiness transition so
+      // later notifyError results remain visible in CollabDocEditor.
+      if (isReady && !wasReady) {
         setError(null);
       }
+      wasReady = isReady;
     });
     const unsubErrors = nextSession.subscribeErrors(setError);
 

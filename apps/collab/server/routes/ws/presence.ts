@@ -9,7 +9,7 @@
 import { defineWebSocketHandler } from "nitro";
 import type { EventHandler } from "nitro/h3";
 import { CollabProtocolError } from "@softmaple/collab-protocol";
-import { resolveAccessTokenUserId } from "../../auth/verify";
+import { authenticateDocumentAccess } from "../../auth/verify";
 import {
   buildCloseLeaveMessage,
   createPresenceRoomStore,
@@ -18,6 +18,7 @@ import {
   type PeerSession,
   startPresenceRoomMaintenance,
 } from "../../presence/presence-room";
+import { getPrisma } from "../../utils/prisma";
 
 const ROOM_TOPIC = "presence";
 
@@ -47,12 +48,14 @@ const roomIdFromPeer = (peer: {
   return new URL(url).searchParams.get("roomId");
 };
 
+/** Verify token and authorize document/room membership before session creation. */
 const verifyPresenceToken = async (
   token: string,
+  roomId: string,
 ): Promise<{ userId: string } | null> => {
   try {
-    const userId = await resolveAccessTokenUserId(token);
-    return { userId };
+    const auth = await authenticateDocumentAccess(getPrisma(), token, roomId);
+    return { userId: auth.userId };
   } catch (error) {
     if (error instanceof CollabProtocolError) return null;
     return null;

@@ -12,6 +12,11 @@ import {
   parseServerCollabMessage,
 } from "@softmaple/collab-protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  acknowledgePendingBatches,
+  addPendingBatches,
+  loadPendingBatches,
+} from "@/modules/docs/collab-pending-store";
 import { createClient } from "@/utils/supabase/client";
 
 export type CollabDocumentStatus =
@@ -69,9 +74,15 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
   }, []);
 
   useEffect(() => {
+    setReplica(null);
+    setCanWrite(false);
+    setError(null);
+    setStatus("connecting");
+
     const supabase = createClient();
     const sessionId = crypto.randomUUID();
     const nextReplica = createBlockReplica(sessionId);
+    let localPersistenceFailed = false;
     const knownBatches = new Map(
       nextReplica
         .exportEvents()
@@ -81,9 +92,10 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempt = 0;
-    let retryPendingTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
     let synced = false;
+    let fatalConnectionError = false;
+    let storageUserId: string | null = null;
     let activeRepairRequestId: string | null = null;
 
     const applyBatches = (batches: ReadonlyArray<RichTextEventBatch>): void => {
@@ -107,7 +119,7 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
           batches,
         });
       }
-      setStatus("saving");
+      if (!localPersistenceFailed) setStatus("saving");
     };
 
     const requestRepair = (afterCursor: string): void => {
@@ -126,9 +138,31 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
       for (const batch of nextReplica.exportEvents()) {
         knownBatches.set(batch.batchId, batch);
       }
+      const newPendingBatches: RichTextEventBatch[] = [];
       for (const batchId of change.batchIds) {
         const batch = knownBatches.get(batchId);
-        if (batch !== undefined) pendingBatches.set(batchId, batch);
+        if (batch !== undefined) {
+          pendingBatches.set(batchId, batch);
+          newPendingBatches.push(batch);
+        }
+      }
+      try {
+        if (storageUserId === null) {
+          throw new Error("Collaboration storage is not initialized");
+        }
+        addPendingBatches(
+          window.localStorage,
+          documentId,
+          storageUserId,
+          newPendingBatches,
+        );
+      } catch {
+        localPersistenceFailed = true;
+        setCanWrite(false);
+        setError(
+          new Error("Offline changes could not be saved in this browser"),
+        );
+        setStatus("error");
       }
       publishPending();
     });
@@ -145,14 +179,51 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
 
     const connect = async (): Promise<void> => {
       if (cancelled) return;
-      setStatus(reconnectAttempt === 0 ? "connecting" : "offline");
+      if (!localPersistenceFailed) {
+        setStatus(reconnectAttempt === 0 ? "connecting" : "offline");
+      }
 
       const { data, error: sessionError } = await supabase.auth.getSession();
+      if (cancelled) return;
       const accessToken = data.session?.access_token;
-      if (sessionError || !accessToken) {
+      const userId = data.session?.user.id;
+      if (sessionError || !accessToken || !userId) {
+        fatalConnectionError = true;
         setError(new Error("A signed-in Supabase session is required"));
         setStatus("error");
         return;
+      }
+
+      if (storageUserId !== null && storageUserId !== userId) {
+        fatalConnectionError = true;
+        setCanWrite(false);
+        setError(new Error("The signed-in user changed; reload this document"));
+        setStatus("error");
+        return;
+      }
+      if (storageUserId === null) {
+        storageUserId = userId;
+        try {
+          const restoredBatches = loadPendingBatches(
+            window.localStorage,
+            documentId,
+            storageUserId,
+          );
+          if (restoredBatches.length > 0) {
+            nextReplica.applyRemoteEvents(restoredBatches);
+            for (const batch of restoredBatches) {
+              knownBatches.set(batch.batchId, batch);
+              pendingBatches.set(batch.batchId, batch);
+            }
+          }
+        } catch {
+          localPersistenceFailed = true;
+          setCanWrite(false);
+          setError(
+            new Error("Offline changes cannot be restored in this browser"),
+          );
+          setStatus("error");
+        }
       }
 
       const nextSocket = new WebSocket(resolveCollabUrl());
@@ -160,7 +231,6 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
 
       nextSocket.addEventListener("open", () => {
         if (cancelled || socket !== nextSocket) return;
-        reconnectAttempt = 0;
         sendJson(nextSocket, {
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.Auth,
@@ -178,8 +248,11 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
           );
           switch (message.type) {
             case COLLAB_MESSAGE_TYPE.Ready:
-              setCanWrite(message.canWrite);
-              setStatus("syncing");
+              reconnectAttempt = 0;
+              fatalConnectionError = false;
+              if (!localPersistenceFailed) setError(null);
+              setCanWrite(message.canWrite && !localPersistenceFailed);
+              if (!localPersistenceFailed) setStatus("syncing");
               synced = false;
               requestRepair("0");
               return;
@@ -194,7 +267,9 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
               synced = true;
               setReplica(nextReplica);
               publishPending();
-              if (pendingBatches.size === 0) setStatus("saved");
+              if (pendingBatches.size === 0 && !localPersistenceFailed) {
+                setStatus("saved");
+              }
               return;
             case COLLAB_MESSAGE_TYPE.Event:
               applyBatches(message.batches);
@@ -203,23 +278,46 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
               for (const batchId of message.batchIds) {
                 pendingBatches.delete(batchId);
               }
-              if (synced && pendingBatches.size === 0) setStatus("saved");
+              if (storageUserId !== null) {
+                try {
+                  acknowledgePendingBatches(
+                    window.localStorage,
+                    documentId,
+                    storageUserId,
+                    message.batchIds,
+                  );
+                } catch {
+                  // A stale durable batch may be retried after a reload; the
+                  // server's idempotent append makes that safe.
+                }
+              }
+              if (
+                synced &&
+                pendingBatches.size === 0 &&
+                !localPersistenceFailed
+              ) {
+                setStatus("saved");
+              }
               return;
             case COLLAB_MESSAGE_TYPE.Error:
               setError(new Error(message.message));
               if (!message.retryable) {
+                fatalConnectionError = true;
                 setStatus("error");
-              } else if (retryPendingTimer === null) {
-                retryPendingTimer = setTimeout(() => {
-                  retryPendingTimer = null;
-                  publishPending();
-                }, 1_000);
+                setCanWrite(false);
               }
+              nextSocket.close(
+                message.retryable ? 1011 : 1008,
+                message.retryable ? "Retry collaboration sync" : "Fatal error",
+              );
               return;
           }
         } catch {
+          fatalConnectionError = true;
           setError(new Error("The collaboration server returned invalid data"));
           setStatus("error");
+          setCanWrite(false);
+          nextSocket.close(1008, "Invalid collaboration response");
         }
       });
 
@@ -227,8 +325,11 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
         if (cancelled || socket !== nextSocket) return;
         socket = null;
         synced = false;
-        setStatus("offline");
-        scheduleReconnect();
+        setCanWrite(false);
+        if (!fatalConnectionError) {
+          if (!localPersistenceFailed) setStatus("offline");
+          scheduleReconnect();
+        }
       });
 
       nextSocket.addEventListener("error", () => {
@@ -243,7 +344,6 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
       unsubscribeReplica();
       bindingRef.current = null;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      if (retryPendingTimer !== null) clearTimeout(retryPendingTimer);
       socket?.close();
     };
   }, [documentId]);

@@ -9,6 +9,7 @@ import { defineWebSocketHandler } from "nitro";
 import { authorizeDocument, type DocumentAccess } from "../utils/auth";
 import {
   appendEventBatches,
+  EventAuthorizationError,
   EventConflictError,
   readEventPage,
 } from "../utils/event-store";
@@ -46,6 +47,13 @@ const accessFromContext = (
     return null;
   }
   return access as DocumentAccess;
+};
+
+const accessTokenFromContext = (
+  context: Record<string, unknown>,
+): string | null => {
+  const value = context.accessToken;
+  return typeof value === "string" && value.length > 0 ? value : null;
 };
 
 const errorMessage = (
@@ -106,6 +114,7 @@ export default defineWebSocketHandler({
           return;
         }
         peer.context.documentAccess = access;
+        peer.context.accessToken = message.accessToken;
         peer.context.sessionId = message.sessionId;
         peer.subscribe(topicForDocument(access.documentId));
         peer.send({
@@ -140,10 +149,54 @@ export default defineWebSocketHandler({
       return;
     }
 
+    const accessToken = accessTokenFromContext(peer.context);
+    if (accessToken === null) {
+      peer.send(
+        errorMessage(
+          COLLAB_ERROR_CODE.AuthenticationFailed,
+          "The collaboration session is invalid",
+          false,
+        ),
+      );
+      peer.close(1008, "Unauthorized");
+      return;
+    }
+
+    let currentAccess: DocumentAccess;
+    try {
+      const reauthorized = await authorizeDocument(
+        accessToken,
+        access.documentId,
+      );
+      if (reauthorized === null || reauthorized.userId !== access.userId) {
+        peer.send(
+          errorMessage(
+            COLLAB_ERROR_CODE.AuthenticationFailed,
+            "Authentication or document membership failed",
+            false,
+          ),
+        );
+        peer.close(1008, "Unauthorized");
+        return;
+      }
+      currentAccess = reauthorized;
+      peer.context.documentAccess = currentAccess;
+    } catch {
+      peer.send(
+        errorMessage(
+          COLLAB_ERROR_CODE.AuthenticationFailed,
+          "Authentication is temporarily unavailable",
+          true,
+        ),
+      );
+      peer.close(1011, "Authentication unavailable");
+      return;
+    }
+
     if (message.type === COLLAB_MESSAGE_TYPE.RepairRequest) {
       try {
         const page = await readEventPage(
-          access.documentId,
+          currentAccess.documentId,
           message.afterCursor,
         );
         peer.send({
@@ -165,7 +218,7 @@ export default defineWebSocketHandler({
     }
 
     if (message.type === COLLAB_MESSAGE_TYPE.Event) {
-      if (!access.canWrite) {
+      if (!currentAccess.canWrite) {
         peer.send(
           errorMessage(
             COLLAB_ERROR_CODE.Forbidden,
@@ -177,8 +230,8 @@ export default defineWebSocketHandler({
       }
       try {
         const batchIds = await appendEventBatches(
-          access.documentId,
-          access.userId,
+          currentAccess.documentId,
+          currentAccess.userId,
           message.batches,
         );
         peer.send({
@@ -186,22 +239,27 @@ export default defineWebSocketHandler({
           type: COLLAB_MESSAGE_TYPE.DurableAck,
           batchIds,
         });
-        peer.publish(topicForDocument(access.documentId), {
+        peer.publish(topicForDocument(currentAccess.documentId), {
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.Event,
           batches: message.batches,
         });
       } catch (error) {
         const conflict = error instanceof EventConflictError;
+        const forbidden = error instanceof EventAuthorizationError;
         peer.send(
           errorMessage(
-            conflict
-              ? COLLAB_ERROR_CODE.Conflict
-              : COLLAB_ERROR_CODE.PersistenceFailed,
-            conflict
-              ? "The event batch conflicts with stored document history"
-              : "The event batch was not saved",
-            !conflict,
+            forbidden
+              ? COLLAB_ERROR_CODE.Forbidden
+              : conflict
+                ? COLLAB_ERROR_CODE.Conflict
+                : COLLAB_ERROR_CODE.PersistenceFailed,
+            forbidden
+              ? "This workspace role cannot edit documents"
+              : conflict
+                ? "The event batch conflicts with stored document history"
+                : "The event batch was not saved",
+            !conflict && !forbidden,
           ),
         );
       }

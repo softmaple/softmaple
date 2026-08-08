@@ -10,6 +10,8 @@
  *   import awareness, surface bindings, or editor frameworks.
  * - `@softmaple/binding-lexical` may import the block model and Lexical, but
  *   MUST NOT bypass the block model to import EG-walker directly.
+ * - `@softmaple/collab-protocol` may import the block model, but MUST NOT
+ *   depend on a binding, awareness, editor framework, or host runtime.
  * - `@softmaple/awareness` MUST NOT import a document model, surface binding,
  *   or editor framework. Awareness enforces this via Biome's
  *   `style/noRestrictedImports` in `packages/awareness/biome.jsonc`.
@@ -54,6 +56,37 @@ const SURFACE_BINDING_PATTERNS = [
     message:
       "Reverse-layer import: see docs/design/collaboration-layers.md. " +
       "Document model packages must not depend on surface bindings.",
+  },
+];
+
+const COLLAB_PROTOCOL_PATTERNS = [
+  {
+    group: ["@softmaple/collab-protocol", "@softmaple/collab-protocol/*"],
+    message:
+      "Cross-layer import: see docs/design/collaboration-layers.md. " +
+      "Model, awareness, and binding packages must not depend on the " +
+      "application wire protocol.",
+  },
+];
+
+const HOST_RUNTIME_PATTERNS = [
+  {
+    group: [
+      "@softmaple/db",
+      "@softmaple/db/*",
+      "@supabase/*",
+      "@supabase/*/**",
+      "next",
+      "next/**",
+      "nitro",
+      "nitro/**",
+      "react",
+      "react/**",
+    ],
+    message:
+      "Host-runtime import: see docs/design/collaboration-layers.md. " +
+      "The collaboration protocol contains only wire contracts and parsers; " +
+      "database, auth, server, and UI integrations belong in apps/*.",
   },
 ];
 
@@ -102,6 +135,7 @@ export const egWalkerCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
   ...BLOCK_MODEL_PATTERNS,
   ...SURFACE_BINDING_PATTERNS,
+  ...COLLAB_PROTOCOL_PATTERNS,
   ...EDITOR_FRAMEWORK_PATTERNS,
 ];
 
@@ -112,6 +146,7 @@ export const egWalkerCollaborationPatterns = [
 export const blockModelCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
   ...SURFACE_BINDING_PATTERNS,
+  ...COLLAB_PROTOCOL_PATTERNS,
   ...EDITOR_FRAMEWORK_PATTERNS,
 ];
 
@@ -122,6 +157,19 @@ export const blockModelCollaborationPatterns = [
 export const blockModelBindingCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
   ...EG_WALKER_PATTERNS,
+  ...COLLAB_PROTOCOL_PATTERNS,
+];
+
+/**
+ * Patterns for the shared collaboration wire protocol. It serializes
+ * block-model batches, while concrete transports and auth remain app-owned.
+ */
+export const collabProtocolCollaborationPatterns = [
+  ...AWARENESS_PATTERNS,
+  ...EG_WALKER_PATTERNS,
+  ...SURFACE_BINDING_PATTERNS,
+  ...EDITOR_FRAMEWORK_PATTERNS,
+  ...HOST_RUNTIME_PATTERNS,
 ];
 
 /**

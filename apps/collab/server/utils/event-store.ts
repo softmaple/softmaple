@@ -16,6 +16,13 @@ export class EventConflictError extends Error {
   }
 }
 
+export class EventAuthorizationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EventAuthorizationError";
+  }
+}
+
 const canonicalJson = (value: unknown): string => {
   if (
     value === null ||
@@ -77,6 +84,26 @@ export const appendEventBatches = async (
 
   try {
     await prisma.$transaction(async (transaction) => {
+      const writeAccess = await transaction.$queryRaw<
+        ReadonlyArray<{ readonly role: string }>
+      >(Prisma.sql`
+        SELECT member.role::text AS role
+        FROM public.workspace_members AS member
+        INNER JOIN public.documents AS document
+          ON document.workspace_id = member.workspace_id
+        WHERE document.id = ${documentId}::uuid
+          AND member.user_id = ${actorId}::uuid
+        FOR SHARE OF member
+      `);
+      if (
+        writeAccess.length !== 1 ||
+        (writeAccess[0]?.role !== "OWNER" && writeAccess[0]?.role !== "EDITOR")
+      ) {
+        throw new EventAuthorizationError(
+          "actor no longer has document write access",
+        );
+      }
+
       const incomingEventIdSet = new Set(incomingEventIds);
       const requiredParentIds = new Set(
         batches
@@ -147,7 +174,12 @@ export const appendEventBatches = async (
       }
     });
   } catch (error) {
-    if (error instanceof EventConflictError) throw error;
+    if (
+      error instanceof EventConflictError ||
+      error instanceof EventAuthorizationError
+    ) {
+      throw error;
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

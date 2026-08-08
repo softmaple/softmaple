@@ -15,6 +15,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:verify:collab-security": "prisma db execute --file ./supabase/scripts/verify-collab-security.sql",
     "db:clean": "prisma db execute --file ./supabase/scripts/cleanup-test-data.sql",
     "typecheck": "tsc --noEmit"
   },

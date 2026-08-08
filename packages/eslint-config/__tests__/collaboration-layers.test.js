@@ -6,6 +6,7 @@ import { Linter } from "eslint";
 import {
   blockModelBindingCollaborationPatterns,
   blockModelCollaborationPatterns,
+  collabProtocolCollaborationPatterns,
   egWalkerCollaborationConfig,
   egWalkerCollaborationPatterns,
 } from "../collaboration-layers.js";
@@ -76,6 +77,7 @@ test("eg-walker patterns forbid reverse imports from block models and bindings",
     "@softmaple/block-model/testing",
     "@softmaple/binding-lexical",
     "@softmaple/binding-lexical/react",
+    "@softmaple/collab-protocol",
   ]) {
     const messages = lintWithPatterns(
       egWalkerCollaborationPatterns,
@@ -165,6 +167,7 @@ test("block-model patterns allow EG-walker but forbid awareness, bindings, and e
     "@softmaple/awareness",
     "@softmaple/binding-lexical",
     "@softmaple/binding-lexical/react",
+    "@softmaple/collab-protocol",
     "lexical",
     "@lexical/react/LexicalComposer",
   ]) {
@@ -191,6 +194,7 @@ test("block-model binding patterns prevent bypassing the model API", () => {
     "@softmaple/awareness/components/live-cursor",
     "@softmaple/eg-walker",
     "@softmaple/eg-walker/anchors",
+    "@softmaple/collab-protocol",
   ]) {
     const messages = lintWithPatterns(
       blockModelBindingCollaborationPatterns,
@@ -201,6 +205,35 @@ test("block-model binding patterns prevent bypassing the model API", () => {
   const allowed = lintWithPatterns(
     blockModelBindingCollaborationPatterns,
     'import { BlockReplica } from "@softmaple/block-model";\nimport { createEditor } from "lexical";\n',
+  );
+  assert.equal(findRestrictedImportMessages(allowed).length, 0);
+});
+
+test("collab-protocol allows block-model but forbids host and higher layers", () => {
+  for (const specifier of [
+    "@softmaple/awareness",
+    "@softmaple/eg-walker",
+    "@softmaple/binding-lexical",
+    "@softmaple/db",
+    "@supabase/supabase-js",
+    "nitro",
+    "next/server",
+    "react",
+    "lexical",
+  ]) {
+    const messages = lintWithPatterns(
+      collabProtocolCollaborationPatterns,
+      `import x from "${specifier}";\n`,
+    );
+    assert.equal(
+      findRestrictedImportMessages(messages).length,
+      1,
+      `expected ${specifier} to be restricted`,
+    );
+  }
+  const allowed = lintWithPatterns(
+    collabProtocolCollaborationPatterns,
+    'import { parseRichTextEventBatch } from "@softmaple/block-model";\n',
   );
   assert.equal(findRestrictedImportMessages(allowed).length, 0);
 });

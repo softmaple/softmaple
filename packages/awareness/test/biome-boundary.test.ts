@@ -131,6 +131,8 @@ describe("biome collaboration-layers boundary", () => {
     "@softmaple/block-model/testing",
     "@softmaple/binding-lexical",
     "@softmaple/binding-lexical/react",
+    "@softmaple/collab-protocol",
+    "@softmaple/collab-protocol/internal",
     "lexical",
     "lexical/LexicalEditor",
     "@lexical/react",

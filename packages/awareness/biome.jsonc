@@ -67,6 +67,7 @@
               "@softmaple/eg-walker": "Cross-layer import: see docs/design/collaboration-layers.md. @softmaple/awareness must not depend on @softmaple/eg-walker.",
               "@softmaple/block-model": "Cross-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a convergent document model.",
               "@softmaple/binding-lexical": "Reverse-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a surface binding.",
+              "@softmaple/collab-protocol": "Cross-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on the application wire protocol.",
               "lexical": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; Lexical integration belongs in @softmaple/binding-lexical.",
               "slate": "Editor-framework import: see docs/design/collaboration-layers.md. Awareness is surface-agnostic; Slate integration belongs in a binding package or app staging."
             },
@@ -82,6 +83,10 @@
               {
                 "group": ["@softmaple/binding-lexical/**"],
                 "message": "Reverse-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on a surface binding."
+              },
+              {
+                "group": ["@softmaple/collab-protocol/**"],
+                "message": "Cross-layer import: see docs/design/collaboration-layers.md. Awareness must not depend on the application wire protocol."
               },
               {
                 "group": ["lexical/**", "@lexical/*", "@lexical/*/**"],

@@ -7,9 +7,11 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    // Supabase: Prisma CLI (migrate/db execute) needs the direct TCP URL.
-    // Runtime PrismaClient should use DATABASE_URL (pooled) via the adapter.
-    // Fall back so `prisma generate` can run without a live database URL.
-    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "",
+    // Supabase: Prisma CLI (migrate/db execute) requires direct TCP.
+    // Do not fall back to DATABASE_URL (pooled) — migrations need DIRECT_URL.
+    // Empty string keeps `prisma generate` working when no DB URL is set;
+    // migrate/db execute fail at connection time if DIRECT_URL is missing.
+    // Runtime PrismaClient uses DATABASE_URL via the adapter in src/client.ts.
+    url: process.env.DIRECT_URL ?? "",
   },
 });

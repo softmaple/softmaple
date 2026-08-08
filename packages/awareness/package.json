@@ -178,7 +178,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@biomejs/biome": "2.3.11",
+    "@biomejs/biome": "2.3.15",
     "@chromatic-com/storybook": "^5.2.1",
     "@softmaple/typescript-config": "workspace:*",
     "@storybook/addon-a11y": "^10.5.5",
@@ -198,7 +198,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "storybook": "^10.5.5",
-    "tailwindcss": "^4.1.18",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^8.2.1",
     "vite-plugin-dts": "^5.0.3",

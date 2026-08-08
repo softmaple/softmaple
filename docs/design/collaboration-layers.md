@@ -21,10 +21,12 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
                  ↓
 @softmaple/block-model
     - blocks, structure, marks, rich-text event batches
-                 ↓
+        ↙                 ↘
 @softmaple/binding-lexical
     - Lexical ↔ block-model projection
-                 ↓
+                            @softmaple/collab-protocol
+                            - versioned wire messages and validation
+        ↘                 ↙
               apps/*
     - persistence, transport, identity, UI composition
 
@@ -68,6 +70,7 @@ The CRDT runtime. Implements the Eg-walker paper directly.
   transport adapters).
 - Depend on `@softmaple/block-model` or any `@softmaple/binding-*`
   package; those are higher layers.
+- Depend on `@softmaple/collab-protocol`; wire contracts are host-facing.
 - Depend on any editor framework — `lexical`, `prosemirror-*`,
   `slate` / `slate-*`, or equivalent.
 - Expose block IDs, DOM types, or editor selections. Stable sequence
@@ -103,6 +106,8 @@ sequence and causal DAG supplied by EG-walker.
 
 - Depend on `@softmaple/awareness` or any transport/presence state.
 - Depend on a surface binding or editor framework.
+- Depend on `@softmaple/collab-protocol`; the protocol depends on model
+  batches, never the reverse.
 - Expose Lexical node keys, DOM types, React components, or awareness users.
 
 It may depend on `@softmaple/eg-walker` and its `./anchors` entry; that is
@@ -132,6 +137,8 @@ The presence and cursor layer. Editor-class-agnostic.
 - Depend on `@softmaple/eg-walker`, `@softmaple/block-model`, or a
   `@softmaple/binding-*` package. Presence and convergence are independent;
   structurally mirrored JSON anchor types do not require a runtime import.
+- Depend on `@softmaple/collab-protocol`; presence and durable document sync
+  remain independent channels.
 - Depend on any editor framework — `lexical`, `prosemirror-*`, or
   `slate` / `slate-*`.
 
@@ -164,12 +171,34 @@ entry supplies lifecycle wiring with peer dependencies.
 
 - Import `@softmaple/eg-walker` directly; the block-model API is its model
   boundary.
+- Import `@softmaple/collab-protocol`; the binding owns projection, not wire
+  transport.
 - Own network transport, durable persistence, user identity, awareness
   state, or remote-cursor rendering.
 
 Lexical and React imports are expected here and are peer dependencies.
 
-## Layer 5: `apps/*`
+## Layer 5: `@softmaple/collab-protocol`
+
+The transport-independent wire contract shared by browser and collaboration
+server hosts.
+
+### Responsibilities
+
+- Define versioned auth, event, repair, durable-ack, ready, and error messages.
+- Parse untrusted messages into validated `RichTextEventBatch` values.
+- Cap per-message batch counts and reject unsupported protocol versions.
+
+### Forbidden
+
+`@softmaple/collab-protocol` **MUST NOT**:
+
+- Import EG-walker directly, a surface binding, awareness, or an editor
+  framework. Rich-text payloads enter through `@softmaple/block-model`.
+- Own WebSocket connections, Supabase clients, database access, JWT checks,
+  React components, or any other host runtime.
+
+## Layer 6: `apps/*`
 
 The integration layer. Today that is `apps/web` (Next.js + Lexical)
 and `apps/playground` (CRDT experiments).
@@ -211,6 +240,10 @@ awareness expresses the same independence boundary in Biome:
 - **`@softmaple/binding-lexical`** (ESLint) — uses
   `blockModelBindingCollaborationPatterns`. It allows block-model,
   Lexical, and React, while forbidding a direct EG-walker import.
+- **`@softmaple/collab-protocol`** (ESLint) — uses
+  `collabProtocolCollaborationPatterns`. It allows block-model wire values,
+  while forbidding lower-layer bypasses, bindings, awareness, editors, and
+  app-owned database/auth/server/UI runtimes.
 - **`@softmaple/awareness`** (Biome) — wired in via the
   `style/noRestrictedImports` rule in `packages/awareness/biome.jsonc`.
   Forbids EG-walker, block-model, binding-lexical, and editor frameworks

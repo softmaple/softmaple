@@ -13,11 +13,11 @@ import { CollabDocEditor } from "@/modules/docs/collab-doc-editor";
 import type { CollabDocEditorProps } from "@/modules/docs/collab-doc-editor";
 
 export type DocEditorProps = {
-  isPublic?: boolean;
+  documentId?: string;
 };
 
 const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
-  const { isPublic = false } = props;
+  const { documentId } = props;
 
   const [isMounted, setIsMounted] = useState<boolean>(false);
   const { activeEditor, setActiveEditor } = useEditorState();
@@ -46,9 +46,10 @@ const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
     },
   };
 
-  if (isPublic) {
+  if (documentId) {
     return (
       <CollabDocEditor
+        documentId={documentId}
         activeEditor={activeEditor}
         setActiveEditor={setActiveEditor}
         commonEditorConfig={commonConfig}

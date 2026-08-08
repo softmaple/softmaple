@@ -141,13 +141,6 @@
       "schedule": ["before 10am on monday"]
     },
     {
-      "description": "Group Liveblocks updates",
-      "groupName": "Liveblocks",
-      "matchPackageNames": ["/^@liveblocks\\//"],
-      "automerge": false,
-      "schedule": ["before 10am on monday"]
-    },
-    {
       "description": "Group Prisma updates",
       "groupName": "Prisma",
       "matchPackageNames": ["prisma", "/^@prisma\\//"],

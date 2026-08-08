@@ -3,6 +3,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/types/model";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveSupabasePublicConfig } from "./config";
 import { createMockSupabaseClient } from "./mockClient";
 
 export const createClient = (): SupabaseClient<Database> => {
@@ -43,15 +44,13 @@ export const createClient = (): SupabaseClient<Database> => {
 
           // Return a properly typed mock Supabase client
           return createMockSupabaseClient(userData);
-        } catch (e) {
+        } catch {
           // Fall through to normal client
         }
       }
     }
   }
 
-  return createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  );
+  const { publishableKey, url } = resolveSupabasePublicConfig();
+  return createBrowserClient<Database>(url, publishableKey);
 };

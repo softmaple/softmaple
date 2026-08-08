@@ -2,8 +2,11 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
 }
 
 datasource db {
@@ -98,13 +101,50 @@ model Document {
 
   is_public Boolean? @default(false)
 
-  workspace Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  author    User              @relation("DocumentAuthor", fields: [author_id], references: [id], onDelete: Cascade)
-  versions  DocumentVersion[]
+  workspace     Workspace            @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  author        User                 @relation("DocumentAuthor", fields: [author_id], references: [id], onDelete: Cascade)
+  versions      DocumentVersion[]
+  event_batches DocumentEventBatch[]
 
   @@index([workspace_id])
   @@index([author_id])
   @@map("documents")
+}
+
+/// Immutable EG-walker event batches. The collaboration service is the only
+/// writer; browser clients never write this table through the Data API.
+model DocumentEventBatch {
+  id             BigInt   @id @default(autoincrement())
+  document_id    String   @db.Uuid
+  batch_id       String
+  schema_version Int
+  parent_version String[]
+  payload        Json
+  payload_hash   String   @db.VarChar(64)
+  actor_id       String   @db.Uuid
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+
+  document  Document          @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  event_ids DocumentEventId[]
+
+  @@unique([document_id, batch_id])
+  @@unique([id, document_id])
+  @@index([document_id, id])
+  @@map("document_event_batches")
+}
+
+/// A document-wide uniqueness guard for EG-walker event IDs. This catches a
+/// replica/session ID collision before conflicting history reaches clients.
+model DocumentEventId {
+  document_id  String @db.Uuid
+  event_id     String
+  batch_row_id BigInt
+
+  batch DocumentEventBatch @relation(fields: [batch_row_id, document_id], references: [id, document_id], onDelete: Cascade)
+
+  @@id([document_id, event_id])
+  @@index([batch_row_id])
+  @@map("document_event_ids")
 }
 
 model DocumentVersion {

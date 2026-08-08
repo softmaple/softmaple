@@ -2,8 +2,17 @@
   "$schema": "https://v2-9-12.turborepo.dev/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build", "^db:generate"],
-      "env": ["LIVEBLOCKS_SECRET_KEY"],
+      "dependsOn": ["^build"],
+      "env": [
+        "COLLAB_ALLOWED_ORIGINS",
+        "DATABASE_URL",
+        "NEXT_PUBLIC_COLLAB_WS_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_URL"
+      ],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [
         ".next/**",
@@ -28,7 +37,7 @@
       "env": ["EG_WALKER_PROPERTY_RUNS", "EG_WALKER_REFERENCE_ROOT"]
     },
     "dev": {
-      "dependsOn": ["^db:generate"],
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },

@@ -85,9 +85,8 @@ The package supports multiple transport adapters:
   contracts but never touches the network, so a `PresenceProvider` wrapped
   around it renders deterministically and never throws.
 
-The adapter contract is transport-agnostic, so additional providers such as
-Supabase Realtime or Liveblocks can be implemented without changing the React
-components.
+The adapter contract is transport-agnostic, so additional WebSocket or
+broadcast providers can be implemented without changing the React components.
 
 ## WebSocket server contract
 

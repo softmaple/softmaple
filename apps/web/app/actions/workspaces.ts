@@ -4,11 +4,9 @@ import { createClient } from "@/utils/supabase/server";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import kebabCase from "lodash/kebabCase";
-import { createWorkspaceMember } from "@/app/actions/workspaceMembers";
 import { getUserBy } from "@/app/actions/users";
-import { WorkspaceMemberRole } from "@softmaple/db";
 import type { Workspace } from "@softmaple/db";
-import { WorkspaceMembersType, WorkspacesType } from "@/types/model";
+import { WorkspacesType } from "@/types/model";
 
 export const getWorkspaces = async () => {
   const supabase = await createClient();
@@ -87,20 +85,6 @@ export const handleCreateWorkspaceFormData = async (formData: FormData) => {
     throw new Error(`Failed to create workspace: ${workspaceError.message}`);
   }
 
-  const newWorkspaceMember: WorkspaceMembersType["Insert"] = {
-    workspace_id: newWorkspace.id,
-    user_id: userId,
-    role: WorkspaceMemberRole["OWNER"],
-  };
-
-  const { data: memberData, error: memberError } =
-    await createWorkspaceMember(newWorkspaceMember);
-
-  if (memberError) {
-    throw new Error(
-      `Failed to create workspace member: ${memberError.message}`,
-    );
-  }
-
+  // Owner membership is created by trg_workspaces_create_owner_member.
   redirect(`/workspace/${newWorkspace.slug}`);
 };

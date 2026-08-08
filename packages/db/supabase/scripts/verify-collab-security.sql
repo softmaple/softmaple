@@ -10,7 +10,8 @@ BEGIN
             ('20260808230000_create_collab_composite_unique_index'),
             ('20260808230100_add_collab_composite_fk_not_valid'),
             ('20260808230200_validate_collab_composite_fk'),
-            ('20260808230300_harden_auth_profile_trigger')
+            ('20260808230300_harden_auth_profile_trigger'),
+            ('20260808230400_fix_workspace_owner_membership_rls')
     )
     SELECT string_agg(expected.migration_name, ', ' ORDER BY migration_name)
     INTO missing_migrations
@@ -187,6 +188,7 @@ BEGIN
               'trg_documents_update',
               'trg_workspaces_insert',
               'trg_workspaces_update',
+              'trg_workspaces_create_owner_member',
               'trg_workspace_members_insert',
               'trg_workspace_members_update',
               'trg_document_versions_insert',
@@ -194,8 +196,35 @@ BEGIN
               'trg_users_insert',
               'trg_users_update'
           )
-    ) <> 11 THEN
+    ) <> 12 THEN
         RAISE EXCEPTION 'an application trigger is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE NOT tgisinternal
+          AND tgname = 'trg_workspaces_create_owner_member'
+          AND tgrelid = 'public.workspaces'::regclass
+          AND tgfoid = to_regprocedure(
+              'private.create_owner_workspace_member()'
+          )
+    ) THEN
+        RAISE EXCEPTION
+            'trg_workspaces_create_owner_member is missing or miswired on public.workspaces';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'workspace_members'
+          AND policyname = 'workspace_members_select_member'
+          AND COALESCE(qual, '') ~
+              'user_id[[:space:]]*=[[:space:]]*\([[:space:]]*SELECT[[:space:]]+auth\.uid\(\)'
+    ) THEN
+        RAISE EXCEPTION
+            'workspace_members SELECT policy does not allow self-read';
     END IF;
 END;
 $$;

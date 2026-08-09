@@ -4,7 +4,7 @@ import {
   resolveRedisUrl,
 } from "./env";
 import { MemoryRealtimeBus } from "./memoryBus";
-import { MemoryConnectionLeaseStore } from "./memory-leases";
+import { MemoryConnectionLeaseStore } from "./memoryLeases";
 import { MemoryPresenceRoomStore } from "./memoryPresence";
 import { createRedisClient } from "./redisClient";
 import { RedisRealtimeBus } from "./redisBus";

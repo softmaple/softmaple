@@ -297,7 +297,10 @@ describe("redis realtime bus", () => {
       second,
     ]);
     await unsubscribeFirst();
+    expect(subscriber.unsubscribe).not.toHaveBeenCalled();
     await unsubscribeSecond();
+    expect(subscriber.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscriber.unsubscribe).toHaveBeenCalledWith("pending-channel");
     await bus.close();
   });
 
@@ -314,10 +317,16 @@ describe("redis realtime bus", () => {
       ownsSubscriber: false,
     });
 
+    const seenFirst: unknown[] = [];
+    const seenSecond: unknown[] = [];
     await expect(
       Promise.all([
-        bus.subscribe("fail-channel", () => undefined),
-        bus.subscribe("fail-channel", () => undefined),
+        bus.subscribe("fail-channel", (payload) => {
+          seenFirst.push(payload);
+        }),
+        bus.subscribe("fail-channel", (payload) => {
+          seenSecond.push(payload);
+        }),
       ]),
     ).rejects.toThrow("subscribe failed");
 
@@ -327,7 +336,11 @@ describe("redis realtime bus", () => {
       "fail-channel",
       JSON.stringify({ leaked: true }),
     );
-    // No handlers should remain after rollback.
+    // Flush async dispatch so a leaked handler would have run.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seenFirst).toEqual([]);
+    expect(seenSecond).toEqual([]);
     await bus.close();
   });
 });

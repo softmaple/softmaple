@@ -2,7 +2,8 @@ export const requirePresenceConnectionId = (user: unknown): string => {
   if (
     typeof user !== "object" ||
     user === null ||
-    typeof (user as { connectionId?: unknown }).connectionId !== "string"
+    typeof (user as { connectionId?: unknown }).connectionId !== "string" ||
+    (user as { connectionId: string }).connectionId.length === 0
   ) {
     throw new Error("Presence user requires a connectionId");
   }

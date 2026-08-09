@@ -14,11 +14,11 @@
   "dependencies": {
     "@softmaple/awareness": "workspace:*",
     "@softmaple/block-model": "workspace:*",
-    "@softmaple/collab-gateway-auth": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
     "@softmaple/db": "workspace:*",
     "@supabase/supabase-js": "^2.89.0",
     "dotenv": "^17.4.2",
+    "ioredis": "^6.0.0",
     "nitro": "3.0.260610-beta"
   },
   "devDependencies": {

@@ -5,11 +5,10 @@
     "build": {
       "dependsOn": ["^build"],
       "env": [
-        "COLLAB_BACKEND_ORIGIN",
-        "COLLAB_GATEWAY_HMAC_KEY_ID",
-        "COLLAB_GATEWAY_HMAC_KEYS",
-        "COLLAB_GATEWAY_HMAC_SECRET",
+        "COLLAB_ALLOWED_ORIGINS",
+        "COLLAB_REALTIME_DRIVER",
         "DATABASE_URL",
+        "REDIS_URL",
         "E2E_ALLOW_REMOTE_SEED",
         "E2E_SEED_SECRET",
         "E2E_SUPABASE_PROJECT_REF",

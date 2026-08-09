@@ -49,9 +49,6 @@ importers:
       '@softmaple/block-model':
         specifier: workspace:*
         version: link:../../packages/block-model
-      '@softmaple/collab-gateway-auth':
-        specifier: workspace:*
-        version: link:../../packages/collab-gateway-auth
       '@softmaple/collab-protocol':
         specifier: workspace:*
         version: link:../../packages/collab-protocol
@@ -64,9 +61,12 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
       nitro:
         specifier: 3.0.260610-beta
-        version: 3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(ioredis@6.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
     devDependencies:
       '@softmaple/typescript-config':
         specifier: workspace:*
@@ -178,7 +178,7 @@ importers:
         version: 12.43.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       nitro:
         specifier: latest
-        version: 3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(ioredis@6.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
       react:
         specifier: ^19.2.6
         version: 19.2.8
@@ -264,9 +264,6 @@ importers:
       '@softmaple/block-model':
         specifier: workspace:*
         version: link:../../packages/block-model
-      '@softmaple/collab-gateway-auth':
-        specifier: workspace:*
-        version: link:../../packages/collab-gateway-auth
       '@softmaple/collab-protocol':
         specifier: workspace:*
         version: link:../../packages/collab-protocol
@@ -469,7 +466,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   packages/binding-lexical:
     dependencies:
@@ -553,27 +550,6 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
-
-  packages/collab-gateway-auth:
-    devDependencies:
-      '@softmaple/eslint-config':
-        specifier: workspace:*
-        version: link:../eslint-config
-      '@softmaple/typescript-config':
-        specifier: workspace:*
-        version: link:../typescript-config
-      '@types/node':
-        specifier: ^24.10.4
-        version: 24.10.4
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@24.10.4))(jiti@2.7.0)(postcss@8.5.26)(tsx@4.23.10)(typescript@5.9.3)(yaml@2.8.1)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   packages/collab-protocol:
     dependencies:
@@ -1936,6 +1912,9 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
+
+  '@ioredis/commands@2.0.0':
+    resolution: {integrity: sha512-vrx0AE/T0h7cRZwfo1M39Cr+ZhZrkf0V8mQN75wucKCxCLD9l/VX6no3gFvrLqD1IlG/1LtzWovqEw3t0Vr9zg==}
 
   '@isaacs/balanced-match@4.0.1':
     resolution: {integrity: sha512-yzMTt9lEb8Gv7zRioUilSglI0c0smZ9k5D65677DLWLtWJaXIS3CqcGyUFByYKlnUj6TkjLVs54fBl6+TiGQDQ==}
@@ -4775,6 +4754,10 @@ packages:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
 
+  cluster-key-slot@1.1.1:
+    resolution: {integrity: sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw==}
+    engines: {node: '>=0.10.0'}
+
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
     engines: {node: '>=7.0.0'}
@@ -5582,6 +5565,10 @@ packages:
   internmap@2.0.3:
     resolution: {integrity: sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==}
     engines: {node: '>=12'}
+
+  ioredis@6.0.0:
+    resolution: {integrity: sha512-f+Dtubxfpf6KYFq7WVXJoOLn0bk4TJrMrN9SzeE+jrWrCWj7XX3fA6vkryafhADX+GMymRxgDJDOI33COkJc0w==}
+    engines: {node: '>=20.0.0'}
 
   is-alphabetical@2.0.1:
     resolution: {integrity: sha512-FWyyY60MeTNyeSRpkM2Iry0G9hpr7/9kD40mD/cGQEuilcZYS4okz8SN2Q6rLCJ8gbCt6fN+rC+6tMGS99LaxQ==}
@@ -6829,6 +6816,10 @@ packages:
     resolution: {integrity: sha512-6tDA8g98We0zd0GvVeMT9arEOnTw9qM03L9cJXaCjrip1OO764RDBLBfrB4cwzNGDj5OA5ioymC9GkizgWJDUg==}
     engines: {node: '>=8'}
 
+  redis-errors@1.2.0:
+    resolution: {integrity: sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==}
+    engines: {node: '>=4'}
+
   reflect.getprototypeof@1.0.10:
     resolution: {integrity: sha512-00o4I+DVrefhv+nX0ulyi3biSHCPDe+yLv5o/p6d/UVlirijB8E16FtfwSAi4g3tcqrQ4lRAqQSoFEZJehYEcw==}
     engines: {node: '>= 0.4'}
@@ -7089,6 +7080,9 @@ packages:
 
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
+
+  standard-as-callback@2.1.0:
+    resolution: {integrity: sha512-qoRRSyROncaz1z0mvYqIE4lCd9p2R90i6GxW3uZv5ucSu8tU7B5HXUP1gG8pVZsYNVaXjk8ClXHPttLyxAL48A==}
 
   std-env@3.10.0:
     resolution: {integrity: sha512-5GS12FdOZNliM5mAOxFRg7Ir0pWz8MdpYm6AY6VPkGpbA7ZzmbzNcBJQ0GPvvyWgcY7QAhCgf9Uy89I03faLkg==}
@@ -8588,6 +8582,8 @@ snapshots:
   '@inquirer/type@3.0.10(@types/node@24.10.4)':
     optionalDependencies:
       '@types/node': 24.10.4
+
+  '@ioredis/commands@2.0.0': {}
 
   '@isaacs/balanced-match@4.0.1':
     optional: true
@@ -11444,6 +11440,8 @@ snapshots:
 
   clsx@2.1.1: {}
 
+  cluster-key-slot@1.1.1: {}
+
   color-convert@2.0.1:
     dependencies:
       color-name: 1.1.4
@@ -12309,6 +12307,17 @@ snapshots:
       side-channel: 1.1.0
 
   internmap@2.0.3: {}
+
+  ioredis@6.0.0:
+    dependencies:
+      '@ioredis/commands': 2.0.0
+      cluster-key-slot: 1.1.1
+      debug: 4.4.3
+      denque: 2.1.0
+      redis-errors: 1.2.0
+      standard-as-callback: 2.1.0
+    transitivePeerDependencies:
+      - supports-color
 
   is-alphabetical@2.0.1: {}
 
@@ -13280,7 +13289,7 @@ snapshots:
 
   nf3@0.3.17: {}
 
-  nitro@3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1)):
+  nitro@3.0.260610-beta(@electric-sql/pglite@0.4.3)(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.3.1)(ioredis@6.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(mysql2@3.15.3)(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1)):
     dependencies:
       consola: 3.4.2
       crossws: 0.4.9(srvx@0.11.21)
@@ -13295,7 +13304,7 @@ snapshots:
       rolldown: 1.2.3
       srvx: 0.11.21
       unenv: 2.0.0-rc.24
-      unstorage: 2.0.0-alpha.7(chokidar@5.0.0)(db0@0.3.4(@electric-sql/pglite@0.4.3)(mysql2@3.15.3))(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3)
+      unstorage: 2.0.0-alpha.7(chokidar@5.0.0)(db0@0.3.4(@electric-sql/pglite@0.4.3)(mysql2@3.15.3))(ioredis@6.0.0)(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3)
     optionalDependencies:
       dotenv: 17.4.2
       giget: 3.3.1
@@ -13784,6 +13793,8 @@ snapshots:
       indent-string: 4.0.0
       strip-indent: 3.0.0
 
+  redis-errors@1.2.0: {}
+
   reflect.getprototypeof@1.0.10:
     dependencies:
       call-bind: 1.0.8
@@ -14125,6 +14136,8 @@ snapshots:
   srvx@0.11.21: {}
 
   stackback@0.0.2: {}
+
+  standard-as-callback@2.1.0: {}
 
   std-env@3.10.0: {}
 
@@ -14580,10 +14593,11 @@ snapshots:
       picomatch: 4.0.5
       webpack-virtual-modules: 0.6.2
 
-  unstorage@2.0.0-alpha.7(chokidar@5.0.0)(db0@0.3.4(@electric-sql/pglite@0.4.3)(mysql2@3.15.3))(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3):
+  unstorage@2.0.0-alpha.7(chokidar@5.0.0)(db0@0.3.4(@electric-sql/pglite@0.4.3)(mysql2@3.15.3))(ioredis@6.0.0)(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3):
     optionalDependencies:
       chokidar: 5.0.0
       db0: 0.3.4(@electric-sql/pglite@0.4.3)(mysql2@3.15.3)
+      ioredis: 6.0.0
       lru-cache: 11.5.2
       ofetch: 2.0.0-alpha.3
 

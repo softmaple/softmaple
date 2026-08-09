@@ -10,18 +10,26 @@ description: 'Run and verify the Softmaple v1 stack'
 
 ## Architecture
 
-The monorepo contains a Next.js 16 web app, a single-instance Nitro WebSocket
-service, Prisma/Supabase migrations, the Lexical editor, and the EG-walker
-collaboration packages.
+The monorepo contains a Next.js 16 web app, a horizontally scalable Nitro
+WebSocket service, Prisma/Supabase migrations, the Lexical editor, and the
+EG-walker collaboration packages.
 
 ```text
-Browser → apps/web → HMAC WebSocket gateway → apps/collab → Supabase Postgres
-             └──────────────────────────────→ Supabase Auth / Data API / Storage
+Browser → /collab/* → apps/collab → Redis (realtime) + Supabase Postgres (history)
+       ↘ apps/web → Supabase Auth / Data API / Storage
 ```
 
 Document metadata lives in `public.documents`. Document bodies exist only as
 immutable EG-walker event batches; no Markdown or editor JSON shadow column is
 stored. Markdown, preview, and LaTeX are derived from the current Lexical state.
+
+### Storage roles
+
+| Store | Use |
+| --- | --- |
+| Postgres | Durable EG-walker event history |
+| Redis | Distributed realtime fan-out, presence TTLs, connection leases |
+| Process memory | Socket objects and local peer lookup only |
 
 ## Local setup
 
@@ -38,18 +46,24 @@ Configure `apps/web/.env`:
 NEXT_PUBLIC_SUPABASE_URL="https://PROJECT_REF.supabase.co"
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
-COLLAB_BACKEND_ORIGIN="http://localhost:3002"
-COLLAB_GATEWAY_HMAC_KEY_ID="local-dev"
-COLLAB_GATEWAY_HMAC_SECRET="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 ```
 
-Configure the collab service with the same project and HMAC secret:
+Configure the collab service:
 
 ```env
 DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@POOLER:6543/postgres?pgbouncer=true"
 SUPABASE_URL="https://PROJECT_REF.supabase.co"
 SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
-COLLAB_GATEWAY_HMAC_KEYS='{"local-dev":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
+COLLAB_ALLOWED_ORIGINS="http://localhost:3000"
+COLLAB_REALTIME_DRIVER="memory"
+```
+
+For multi-instance local experiments, provision Redis (for example Upstash) and
+set:
+
+```env
+COLLAB_REALTIME_DRIVER="redis"
+REDIS_URL="rediss://default:TOKEN@HOST:6379"
 ```
 
 Use a direct connection in `packages/db/.env` for migrations:
@@ -59,9 +73,8 @@ DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@POOLER:6543/postgres?pg
 DIRECT_URL="postgresql://postgres:PASSWORD@DIRECT_HOST:5432/postgres"
 ```
 
-The checked-in HMAC value is local-only. Preview and production need a unique
-32-byte unpadded base64url secret. Never expose it through a `NEXT_PUBLIC_`
-variable.
+Never expose Redis credentials or Supabase service-role keys through
+`NEXT_PUBLIC_*` variables.
 
 ## Database
 
@@ -92,13 +105,20 @@ pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
 
 `pnpm dev` starts Web and Collab through Turborepo. Browser WebSockets always
 use the web origin at `/collab/document` and `/collab/presence`; the browser
-must never receive a direct backend URL.
+must never receive a direct backend URL or Redis credentials.
+
+Stock `next dev` does not forward `/collab/*` WebSocket upgrades. For local
+same-origin sockets use either:
+
+- Playwright's `apps/web/scripts/e2e-collab-router.mjs`, or
+- `vercel dev` with the root `vercel.json` Services routing.
 
 ## Real E2E
 
-Playwright uses dynamic ports, starts both services, and refuses to reuse an
-existing server. Core E2E never uses a mock Supabase client or a forged cookie.
-It requires a dedicated, non-production Supabase project:
+Playwright uses dynamic ports, starts both services plus the local collab
+router, and refuses to reuse an existing server. Core E2E never uses a mock
+Supabase client or a forged cookie. It requires a dedicated, non-production
+Supabase project:
 
 ```env
 DATABASE_URL="isolated pooled database URL"
@@ -124,21 +144,31 @@ pnpm --filter @softmaple/web test:e2e
 The `Isolated Supabase E2E` GitHub environment stores these secrets and requires
 approval. The regular Chromium smoke suite needs no production credentials.
 
-## Deployment gates
+## Deployment
 
-The v1 collab service must run as exactly one Nitro replica because document
-fan-out and Presence rooms are process-local. Do not enable horizontal scaling
-until shared pub/sub exists.
+1. Set the Vercel project framework to **Services** and use the repository root
+   (so root `vercel.json` is applied).
+2. Provision **Upstash Redis** from the Vercel Marketplace and connect it so
+   `REDIS_URL` is available to the collab service.
+3. Set collab env vars: `DATABASE_URL`, `SUPABASE_URL`,
+   `SUPABASE_PUBLISHABLE_KEY`, `COLLAB_ALLOWED_ORIGINS`, and `REDIS_URL`.
+4. Confirm root routing:
+
+```text
+/collab/** → apps/collab
+/**        → apps/web
+```
 
 Before promotion, verify in a real Preview environment:
 
-- HMAC-protected WebSocket upgrades for document and Presence paths;
-- direct unsigned backend rejection and reconnect/repair behavior;
+- Origin-checked WebSocket upgrades for document and Presence paths;
+- unknown-origin rejection and reconnect/repair behavior;
 - public read-only access and immediate revocation;
 - avatar upload, public delivery, replacement, and removal;
-- a single Collab replica is configured.
+- two browser contexts editing the same document through `/collab/document`
+  with presence on `/collab/presence` across Fluid instances.
 
-Playwright's local Upgrade-capable gateway covers signed document and Presence
-handshakes through that gateway (not against `next dev` directly), but it is
-not a release-equivalent test of the Vercel external WebSocket rewrite, so
-Preview validation remains a required release gate.
+Playwright's local Upgrade-capable router covers same-origin document and
+Presence handshakes locally, but it is not a release-equivalent test of Vercel
+Services WebSocket routing, so Preview validation remains a required release
+gate.

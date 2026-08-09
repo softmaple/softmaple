@@ -49,18 +49,10 @@ Before you begin, make sure you have the following installed:
     Edit `apps/web/.env` with your configuration:
 
     ```env
-    # Database
-    DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
-    DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
-
     # Supabase Auth
     NEXT_PUBLIC_SUPABASE_URL="your-supabase-url"
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
-
-    # Collaboration gateway (server-only)
-    COLLAB_BACKEND_ORIGIN="http://localhost:3002"
-    COLLAB_GATEWAY_HMAC_KEY_ID="local-dev"
-    COLLAB_GATEWAY_HMAC_SECRET="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    NEXT_PUBLIC_APP_URL="http://localhost:3000"
     ```
 
     Add the same database connection values to `packages/db/.env` so Prisma
@@ -73,15 +65,21 @@ Before you begin, make sure you have the following installed:
   </Accordion>
   <Accordion icon="server" title="4. Configure collaboration">
     Create `apps/collab/.env.local` from its example, then provide
-    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the
-    matching HMAC keyring:
+    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and
+    `COLLAB_ALLOWED_ORIGINS`. Local development defaults to the in-memory
+    realtime adapter; Vercel deployments require `REDIS_URL`.
 
     ```bash
     cp apps/collab/.env.example apps/collab/.env.local
     ```
 
-    The example files use the same local-only HMAC key. Generate a new 32-byte
-    unpadded base64url secret for every deployed environment.
+    ```env
+    DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
+    SUPABASE_URL="your-supabase-url"
+    SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
+    COLLAB_ALLOWED_ORIGINS="http://localhost:3000"
+    COLLAB_REALTIME_DRIVER="memory"
+    ```
   </Accordion>
   <Accordion icon="database" title="5. Set up the database">
     Generate Prisma client and run migrations:

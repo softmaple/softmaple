@@ -9,9 +9,9 @@ import {
 } from "@softmaple/awareness/adapters/websocket";
 import { defineWebSocketHandler } from "nitro";
 import { COLLAB_ACCESS_MODE } from "@softmaple/collab-protocol";
-import { authorizeDocument } from "../utils/auth";
-import { authenticateGatewayUpgrade } from "../utils/gateway-auth";
-import { prisma } from "../utils/prisma";
+import { authorizeDocument } from "../../utils/auth";
+import { authenticateBrowserOrigin } from "../../utils/origin-auth";
+import { prisma } from "../../utils/prisma";
 import {
   consumePresenceQuota,
   deterministicPresenceColor,
@@ -19,18 +19,23 @@ import {
   parsePresenceEnvelope,
   parsePresencePatch,
   type PresenceRateLimit,
-} from "../utils/presence";
+} from "../../utils/presence";
+import {
+  getPresenceTopicBridge,
+  getRealtime,
+  LeaseAcquireResult,
+  presenceLeaseScope,
+  presenceRealtimeChannel,
+  presenceTopicHub,
+} from "../../utils/realtime";
 
 const MAX_FRAME_BYTES = 64 * 1024;
 const MAX_ROOM_CONNECTIONS = 100;
 const AUTHORIZATION_TTL_MS = 8_000;
 const HEARTBEAT_EXPIRY_MS = 30_000;
+const PRESENCE_LEASE_TTL_MS = 30_000;
 const DOCUMENT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const rooms = new Map<string, Map<string, PresenceUser>>();
-const roomConnections = new Map<string, Set<string>>();
-
-const topicForRoom = (roomId: string): string => `presence:v2:${roomId}`;
 
 const serverMessage = (
   type: string,
@@ -117,16 +122,99 @@ const withoutSelection = (user: PresenceUser): PresenceUser => {
   return rest;
 };
 
+const isPresenceUser = (value: unknown): value is PresenceUser =>
+  isRecord(value) &&
+  typeof value.connectionId === "string" &&
+  typeof value.userId === "string" &&
+  typeof value.name === "string" &&
+  typeof value.color === "string" &&
+  typeof value.clock === "number";
+
+const publishPresence = async (
+  roomId: string,
+  message: WebSocketMessage,
+): Promise<void> => {
+  await getRealtime().bus.publish(presenceRealtimeChannel(roomId), message);
+};
+
+const releasePresenceResources = async (
+  context: Record<string, unknown>,
+  options: { readonly publishLeave: boolean },
+): Promise<void> => {
+  const roomId = contextString(context, "roomId");
+  const connectionId = contextString(context, "connectionId");
+  const userId = contextString(context, "userId");
+  const unsubscribeLocal = context.unsubscribeLocal;
+  if (typeof unsubscribeLocal === "function") {
+    (unsubscribeLocal as () => void)();
+    delete context.unsubscribeLocal;
+  }
+  const channel = contextString(context, "realtimeChannel");
+  if (channel !== null) {
+    try {
+      await getPresenceTopicBridge().release(channel);
+    } catch {
+      // Best-effort cleanup on teardown.
+    }
+    delete context.realtimeChannel;
+  }
+
+  let wasJoined = context.joined === true;
+  if (roomId !== null && connectionId !== null) {
+    if (context.connectionCounted === true) {
+      try {
+        await getRealtime().leases.release(
+          presenceLeaseScope(roomId),
+          connectionId,
+        );
+      } catch {
+        // Lease TTLs recover abandoned slots if release fails.
+      }
+      delete context.connectionCounted;
+    }
+    try {
+      const removed = await getRealtime().presence.removeUser(
+        roomId,
+        connectionId,
+      );
+      wasJoined = wasJoined || removed !== null;
+    } catch {
+      // Presence TTLs recover abandoned members if remove fails.
+    }
+  }
+  delete context.joined;
+
+  if (
+    options.publishLeave &&
+    wasJoined &&
+    roomId !== null &&
+    connectionId !== null &&
+    userId !== null
+  ) {
+    try {
+      await publishPresence(
+        roomId,
+        serverMessage(WS_MESSAGE.LEAVE, roomId, connectionId, {
+          connectionId,
+          userId,
+        }),
+      );
+    } catch {
+      // Peers recover via TTL expiry + presence sync.
+    }
+  }
+};
+
 export default defineWebSocketHandler({
   upgrade(request) {
-    const gatewayContext = authenticateGatewayUpgrade(request);
+    const originContext = authenticateBrowserOrigin(request);
     const roomId = new URL(request.url).searchParams.get("roomId");
     if (roomId === null || !DOCUMENT_ID_PATTERN.test(roomId)) {
       throw new Response("Invalid presence room", { status: 400 });
     }
     return {
       namespace: "softmaple-presence-v2",
-      context: { ...gatewayContext, roomId },
+      context: { ...originContext, roomId },
     };
   },
 
@@ -193,16 +281,17 @@ export default defineWebSocketHandler({
         });
         if (profile === null) throw new Error("presence profile missing");
 
-        const connections = roomConnections.get(roomId) ?? new Set<string>();
-        if (
-          connections.size >= MAX_ROOM_CONNECTIONS ||
-          connections.has(auth.connectionId)
-        ) {
+        const leaseResult = await getRealtime().leases.tryAcquire(
+          presenceLeaseScope(roomId),
+          auth.connectionId,
+          MAX_ROOM_CONNECTIONS,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        if (leaseResult !== LeaseAcquireResult.Acquired) {
           peer.close(1013, "Presence room is full or duplicated");
           return;
         }
-        connections.add(auth.connectionId);
-        roomConnections.set(roomId, connections);
+        peer.context.connectionCounted = true;
         peer.context.userId = access.userId;
         peer.context.connectionId = auth.connectionId;
         peer.context.accessToken = auth.token;
@@ -212,6 +301,7 @@ export default defineWebSocketHandler({
         peer.context.profileAvatar = profile.avatar_src;
         peer.send(serverMessage(WS_MESSAGE.AUTH_OK, roomId, "server", {}));
       } catch {
+        await releasePresenceResources(peer.context, { publishLeave: false });
         peer.send(
           serverMessage(WS_MESSAGE.AUTH_ERROR, roomId, "server", {
             message: "Authentication or document membership failed",
@@ -282,23 +372,39 @@ export default defineWebSocketHandler({
                 contextString(peer.context, "profileAvatar") ?? undefined,
             }),
       };
-      const room = rooms.get(roomId) ?? new Map<string, PresenceUser>();
-      room.set(connectionId, user);
-      rooms.set(roomId, room);
+      await getRealtime().presence.setUser(roomId, user, PRESENCE_LEASE_TTL_MS);
+      await getRealtime().leases.refresh(
+        presenceLeaseScope(roomId),
+        connectionId,
+        PRESENCE_LEASE_TTL_MS,
+      );
+      const channel = presenceRealtimeChannel(roomId);
       peer.context.joined = true;
-      peer.subscribe(topicForRoom(roomId));
-      peer.publish(
-        topicForRoom(roomId),
+      peer.context.realtimeChannel = channel;
+      peer.context.unsubscribeLocal = presenceTopicHub.subscribe(channel, peer);
+      await getPresenceTopicBridge().retain(channel);
+      await publishPresence(
+        roomId,
         serverMessage(WS_MESSAGE.JOIN, roomId, connectionId, { user }),
       );
       return;
     }
 
     if (message.type === WS_MESSAGE.PRESENCE_SYNC) {
-      const users = [...(rooms.get(roomId)?.values() ?? [])];
+      const { users, expiredConnectionIds } =
+        await getRealtime().presence.listUsers(roomId);
+      for (const expiredConnectionId of expiredConnectionIds) {
+        await publishPresence(
+          roomId,
+          serverMessage(WS_MESSAGE.LEAVE, roomId, expiredConnectionId, {
+            connectionId: expiredConnectionId,
+            userId: "unknown",
+          }),
+        );
+      }
       peer.send(
         serverMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, roomId, "server", {
-          users,
+          users: users.filter(isPresenceUser),
         }),
       );
       return;
@@ -310,6 +416,20 @@ export default defineWebSocketHandler({
         peer.close(1008, "Invalid presence heartbeat");
         return;
       }
+      const leaseAlive = await getRealtime().leases.refresh(
+        presenceLeaseScope(roomId),
+        connectionId,
+        PRESENCE_LEASE_TTL_MS,
+      );
+      const presenceAlive = await getRealtime().presence.refresh(
+        roomId,
+        connectionId,
+        PRESENCE_LEASE_TTL_MS,
+      );
+      if (!leaseAlive || (peer.context.joined === true && !presenceAlive)) {
+        peer.close(1008, "Presence lease expired");
+        return;
+      }
       peer.send(
         serverMessage(WS_MESSAGE.HEARTBEAT_ACK, roomId, connectionId, {
           pingId,
@@ -319,9 +439,11 @@ export default defineWebSocketHandler({
     }
 
     if (message.type === WS_MESSAGE.PRESENCE_UPDATE) {
-      const room = rooms.get(roomId);
-      const current = room?.get(connectionId);
-      if (room === undefined || current === undefined) {
+      const currentRaw = await getRealtime().presence.getUser(
+        roomId,
+        connectionId,
+      );
+      if (!isPresenceUser(currentRaw)) {
         peer.close(1008, "Join presence before updating");
         return;
       }
@@ -333,15 +455,15 @@ export default defineWebSocketHandler({
         ) {
           throw new Error("presence identity mismatch");
         }
-        if (patch.clock <= current.clock) return;
-        if (patch.clock > current.clock + 1_000) {
+        if (patch.clock <= currentRaw.clock) return;
+        if (patch.clock > currentRaw.clock + 1_000) {
           throw new Error("presence clock jump is too large");
         }
         const now = Date.now();
         const cursorBase =
           patch.hasCursor && patch.cursor === null
-            ? withoutCursor(current)
-            : current;
+            ? withoutCursor(currentRaw)
+            : currentRaw;
         const selectionBase =
           patch.hasSelection && patch.selection === null
             ? withoutSelection(cursorBase)
@@ -362,9 +484,18 @@ export default defineWebSocketHandler({
           lastActivityAt: now,
           lastSeenAt: now,
         };
-        room.set(connectionId, nextUser);
-        peer.publish(
-          topicForRoom(roomId),
+        await getRealtime().presence.setUser(
+          roomId,
+          nextUser,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        await getRealtime().leases.refresh(
+          presenceLeaseScope(roomId),
+          connectionId,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        await publishPresence(
+          roomId,
           serverMessage(WS_MESSAGE.PRESENCE_UPDATE, roomId, connectionId, {
             connectionId,
             userId: authenticatedUserId,
@@ -397,32 +528,11 @@ export default defineWebSocketHandler({
     peer.close(1008, "Unsupported presence message");
   },
 
-  close(peer) {
-    const roomId = contextString(peer.context, "roomId");
-    const connectionId = contextString(peer.context, "connectionId");
-    const userId = contextString(peer.context, "userId");
+  async close(peer) {
     const timer = peer.context.heartbeatExpiryTimer;
     if (timer !== undefined) {
       clearTimeout(timer as ReturnType<typeof setTimeout>);
     }
-    if (roomId === null || connectionId === null) return;
-
-    const connections = roomConnections.get(roomId);
-    connections?.delete(connectionId);
-    if (connections?.size === 0) roomConnections.delete(roomId);
-
-    const room = rooms.get(roomId);
-    const wasJoined = room?.delete(connectionId) ?? false;
-    if (room?.size === 0) rooms.delete(roomId);
-    peer.unsubscribe(topicForRoom(roomId));
-    if (wasJoined && userId !== null) {
-      peer.publish(
-        topicForRoom(roomId),
-        serverMessage(WS_MESSAGE.LEAVE, roomId, connectionId, {
-          connectionId,
-          userId,
-        }),
-      );
-    }
+    await releasePresenceResources(peer.context, { publishLeave: true });
   },
 });

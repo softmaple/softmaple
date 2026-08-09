@@ -2,12 +2,12 @@ import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
-import {
-  COLLAB_GATEWAY_AUTH_HEADERS,
-  createCollabGatewayAuthHeaders,
-  parseCollabGatewaySignerConfig,
-} from "@softmaple/collab-gateway-auth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createMemoryRealtime,
+  resetTopicBridgesForTests,
+  setRealtimeForTests,
+} from "../server/utils/realtime";
 
 const mocks = vi.hoisted(() => ({
   authorizeDocument: vi.fn(),
@@ -28,15 +28,12 @@ vi.mock("../server/utils/event-store", () => ({
   readEventPage: vi.fn(),
 }));
 
-import documentRoute from "../server/routes/document";
+import documentRoute from "../server/routes/collab/document";
 
 interface TestPeer {
   readonly context: Record<string, unknown>;
   readonly close: ReturnType<typeof vi.fn>;
-  readonly publish: ReturnType<typeof vi.fn>;
   readonly send: ReturnType<typeof vi.fn>;
-  readonly subscribe: ReturnType<typeof vi.fn>;
-  readonly unsubscribe: ReturnType<typeof vi.fn>;
 }
 
 interface TestRawMessage {
@@ -49,37 +46,22 @@ interface TestDocumentRoute {
     readonly context: Record<string, unknown>;
   }>;
   readonly message: (peer: TestPeer, message: TestRawMessage) => Promise<void>;
-  readonly close: (peer: TestPeer) => void;
+  readonly close: (peer: TestPeer) => Promise<void>;
 }
 
 const route = documentRoute as unknown as TestDocumentRoute;
-const GATEWAY_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
-const GATEWAY_KEY_ID = "2026-08";
-const WEB_SOCKET_KEY = "dGhlIHNhbXBsZSBub25jZQ==";
+const ALLOWED_ORIGIN = "http://localhost:3000";
 
-const signedUpgradeRequest = (
-  nowSeconds = Math.floor(Date.now() / 1000),
-): Request => {
-  const headers = createCollabGatewayAuthHeaders({
-    config: parseCollabGatewaySignerConfig(GATEWAY_KEY_ID, GATEWAY_SECRET),
-    webSocketKey: WEB_SOCKET_KEY,
-    nowSeconds,
-    nonce: Buffer.from([...Array(16).keys()]),
-  });
-  headers.set("sec-websocket-key", WEB_SOCKET_KEY);
-  return new Request("http://localhost:3002/document", {
+const browserUpgradeRequest = (): Request =>
+  new Request("http://localhost:3002/collab/document", {
     method: "GET",
-    headers,
+    headers: { origin: ALLOWED_ORIGIN },
   });
-};
 
 const createPeer = (): TestPeer => ({
   context: {},
   close: vi.fn(),
-  publish: vi.fn(),
   send: vi.fn(),
-  subscribe: vi.fn(),
-  unsubscribe: vi.fn(),
 });
 
 const authMessage = (
@@ -105,44 +87,41 @@ const deferred = <T>() => {
 };
 
 describe("collaboration document authentication", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    vi.stubEnv(
-      "COLLAB_GATEWAY_HMAC_KEYS",
-      JSON.stringify({ [GATEWAY_KEY_ID]: GATEWAY_SECRET }),
-    );
-    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", undefined);
+    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    setRealtimeForTests(createMemoryRealtime());
+    await resetTopicBridgesForTests();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await resetTopicBridgesForTests();
+    setRealtimeForTests(null);
     vi.unstubAllEnvs();
   });
 
-  it("accepts a valid gateway signature before creating peer context", async () => {
-    const upgrade = await route.upgrade(signedUpgradeRequest());
+  it("accepts a same-origin browser upgrade before creating peer context", async () => {
+    const upgrade = await route.upgrade(browserUpgradeRequest());
 
     expect(upgrade).toEqual({
       namespace: "softmaple-collab-v3",
       context: {
-        gatewayAuthMode: "hmac",
-        gatewayAuthKeyId: GATEWAY_KEY_ID,
+        browserOrigin: ALLOWED_ORIGIN,
       },
     });
   });
 
   it.each([
-    ["direct", () => new Request("http://localhost:3002/document")],
-    ["expired", () => signedUpgradeRequest(Math.floor(Date.now() / 1000) - 31)],
     [
-      "tampered",
-      () => {
-        const request = signedUpgradeRequest();
-        request.headers.set(
-          COLLAB_GATEWAY_AUTH_HEADERS.signature,
-          "A".repeat(43),
-        );
-        return request;
-      },
+      "missing origin",
+      () => new Request("http://localhost:3002/collab/document"),
+    ],
+    [
+      "disallowed origin",
+      () =>
+        new Request("http://localhost:3002/collab/document", {
+          headers: { origin: "https://evil.example" },
+        }),
     ],
   ])("rejects a %s upgrade with a generic 403", async (_case, request) => {
     await expect(route.upgrade(request())).rejects.toMatchObject({
@@ -150,41 +129,15 @@ describe("collaboration document authentication", () => {
     });
   });
 
-  it("never downgrades a malformed HMAC request to legacy Origin", async () => {
-    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", "https://softmaple.ink");
-    const request = new Request("http://localhost:3002/document", {
-      headers: {
-        origin: "https://softmaple.ink",
-        [COLLAB_GATEWAY_AUTH_HEADERS.version]: "1",
-      },
+  it("fails closed when no allowed origins are configured", async () => {
+    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", undefined);
+    await expect(route.upgrade(browserUpgradeRequest())).rejects.toMatchObject({
+      status: 403,
     });
-
-    await expect(route.upgrade(request)).rejects.toMatchObject({ status: 403 });
   });
 
-  it("allows explicit legacy origins during the rollout window", async () => {
-    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", "https://softmaple.ink");
-    const upgrade = await route.upgrade(
-      new Request("http://localhost:3002/document", {
-        headers: { origin: "https://softmaple.ink" },
-      }),
-    );
-
-    expect(upgrade.context).toEqual({ gatewayAuthMode: "legacy" });
-  });
-
-  it("fails closed on malformed backend keyring configuration", async () => {
-    vi.stubEnv("COLLAB_GATEWAY_HMAC_KEYS", "not-json");
-    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", "https://softmaple.ink");
-    const request = new Request("http://localhost:3002/document", {
-      headers: { origin: "https://softmaple.ink" },
-    });
-
-    await expect(route.upgrade(request)).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("still rejects an invalid Supabase token after HMAC succeeds", async () => {
-    const upgrade = await route.upgrade(signedUpgradeRequest());
+  it("still rejects an invalid Supabase token after Origin succeeds", async () => {
+    const upgrade = await route.upgrade(browserUpgradeRequest());
     mocks.authorizeDocument.mockResolvedValueOnce(null);
     const peer = { ...createPeer(), context: { ...upgrade.context } };
 
@@ -269,7 +222,7 @@ describe("collaboration document authentication", () => {
     // Match the revocation path: clear cached access, then close.
     delete peers[0]?.context.documentAccess;
     delete peers[0]?.context.authorizationExpiresAt;
-    route.close(peers[0]!);
+    await route.close(peers[0]!);
 
     mocks.authorizeDocument.mockResolvedValueOnce(access);
     const replacement = createPeer();
@@ -280,7 +233,7 @@ describe("collaboration document authentication", () => {
     expect(replacement.context.connectionCounted).toBe(true);
     expect(replacement.close).not.toHaveBeenCalled();
 
-    for (const peer of peers.slice(1)) route.close(peer);
-    route.close(replacement);
+    for (const peer of peers.slice(1)) await route.close(peer);
+    await route.close(replacement);
   });
 });

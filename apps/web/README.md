@@ -1,18 +1,17 @@
 # `@softmaple/web`
 
 Next.js 16 app router host for Softmaple: auth, workspaces, document UI, and
-the Lexical editor. Real-time collaboration goes over WebSocket to
-[`apps/collab`](../collab/README.md); this app does not write
-`document_event_batches` itself.
+the Lexical editor. Real-time collaboration goes over same-origin WebSocket
+paths to [`apps/collab`](../collab/README.md); this app does not write
+`document_event_batches` itself and does not proxy WebSocket upgrades.
 
 ## Role in the stack
 
 ```text
 Browser ──► apps/web (Next.js)
               ├── Supabase Auth / Data API (anon / publishable key)
-              ├── same-origin /collab/document (durable EG-walker history)
-              └── same-origin /collab/presence (ephemeral awareness)
-                    └── HMAC rewrite ──► apps/collab ──► Supabase Postgres
+              └── same-origin /collab/* (routed by Vercel Services)
+                    └── apps/collab ──► Redis + Supabase Postgres
 ```
 
 | Concern | Owner |
@@ -21,7 +20,7 @@ Browser ──► apps/web (Next.js)
 | Lexical UI + editor shell | `@softmaple/editor` + `modules/docs` |
 | Lexical ↔ EG-walker binding | `@softmaple/binding-lexical` |
 | Collab wire protocol | `@softmaple/collab-protocol` |
-| Durable event store / fan-out | [`apps/collab`](../collab/README.md) |
+| Durable event store / Redis fan-out | [`apps/collab`](../collab/README.md) |
 | Schema, RLS, Prisma | [`packages/db`](../../packages/db) |
 
 Layer boundaries:
@@ -49,9 +48,6 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Project URL (`https://<ref>.supabase.co`) |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes* | Prefer `sb_publishable_…` from **Settings → API Keys** |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no | Legacy JWT `anon` key; used only if publishable key is unset |
-| `COLLAB_BACKEND_ORIGIN` | yes | Private collab service origin, for example `http://localhost:3002` |
-| `COLLAB_GATEWAY_HMAC_KEY_ID` | yes | Active key ID installed in the collab keyring |
-| `COLLAB_GATEWAY_HMAC_SECRET` | yes | Active 32-byte, unpadded base64url HMAC secret |
 | `NEXT_PUBLIC_APP_URL` | production | Canonical origin used in auth redirects |
 
 \*Required unless `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set.
@@ -59,32 +55,36 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 `NEXT_PUBLIC_*` values are inlined at **build** time. After changing them in
 Vercel (or any host), redeploy — restarting the running server is not enough.
 
-The collaboration gateway variables are server-only. Never prefix the HMAC
-secret with `NEXT_PUBLIC_` or expose the collab backend directly to browsers.
-The browser always connects to the current web origin at `/collab/document`
-and `/collab/presence`.
+Collaboration Redis credentials and collab private hosts must never be exposed
+through `NEXT_PUBLIC_*` variables. The browser always connects to the current
+web origin at `/collab/document` and `/collab/presence`.
 
 The server-only E2E seed endpoint is disabled by default. It activates only
 when `E2E_ALLOW_REMOTE_SEED=true`, the supplied project ref exactly matches the
 Supabase URL, a distinct production ref is configured, and a service-role key
 plus bearer secret are present. Never enable it against production.
 
-### WebSocket release gate
+### WebSocket routing
 
-The stock Next.js 16.3 local server does not provide a release-equivalent
-external WebSocket rewrite path for `proxy.ts`: local HTTP Proxy tests pass,
-but an Upgrade request does not reach the rewrite destination. Do not work
-around this by exposing an unsigned backend URL to the browser.
+Production routing is owned by the root [`vercel.json`](../../vercel.json)
+Services configuration:
 
-Playwright starts an Upgrade-capable reverse proxy
-(`scripts/e2e-collab-gateway.mjs`) in front of `next dev` so core E2E can exercise
-HMAC-signed `/collab/document` and `/collab/presence` handshakes locally.
-That proxy is still not a Vercel Preview substitute.
+```text
+/collab/** → apps/collab
+/**        → apps/web
+```
+
+Stock Next.js 16.3 local `next dev` does not provide a release-equivalent
+external WebSocket path for `/collab/*`. Playwright starts
+`scripts/e2e-collab-router.mjs` in front of `next dev` so core E2E can exercise
+same-origin `/collab/document` and `/collab/presence` locally. That router is
+still not a Vercel Preview substitute.
 
 Before promoting a deployment, verify a real Vercel Preview handshake through
-`/collab/document`, direct-backend rejection, reconnect, and repair/resync.
-Also configure a Vercel Firewall rate limit for the public gateway path. See
-[Vercel WebSockets](https://vercel.com/docs/functions/websockets).
+`/collab/document`, Origin rejection for unknown sites, reconnect, and
+repair/resync. Also configure a Vercel Firewall rate limit for `/collab/*`.
+See [Vercel WebSockets](https://vercel.com/docs/functions/websockets) and
+[Vercel Services](https://vercel.com/docs/services).
 
 Keys and URL must belong to the **same** Supabase project. Never put a
 `sb_secret_…` / `service_role` key in these `NEXT_PUBLIC_*` variables.
@@ -115,12 +115,6 @@ apps/web/
 ├── modules/             # Feature UI (auth, docs, workspaces, settings)
 ├── components/          # Shared UI
 ├── utils/supabase/      # Browser / server / middleware clients + config
+├── scripts/             # Local E2E collab router
 └── e2e/                 # Playwright specs
 ```
-
-## Related docs
-
-- [Development setup](../../docs/development.mdx)
-- [Quickstart](../../docs/quickstart.mdx)
-- [Collaboration service](../collab/README.md)
-- [Supabase DB / security](../../packages/db/supabase/README.md)

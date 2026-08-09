@@ -35,9 +35,7 @@ type SessionResult = {
 };
 
 let authListener: AuthListener | null = null;
-let resolveGetSession:
-  | ((value: SessionResult) => void)
-  | null = null;
+let resolveGetSession: ((value: SessionResult) => void) | null = null;
 
 vi.mock("@softmaple/awareness", () => ({
   PresenceProvider: ({ children }: { children: ReactNode }) => children,

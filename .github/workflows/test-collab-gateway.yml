@@ -82,6 +82,7 @@ jobs:
 
       - name: Check Next.js gateway
         run: |
+          pnpm exec turbo run build --filter=@softmaple/web... --filter=!@softmaple/web
           pnpm --filter @softmaple/web typecheck
           pnpm --filter @softmaple/web exec vitest run proxy.test.ts
           pnpm --filter @softmaple/web build

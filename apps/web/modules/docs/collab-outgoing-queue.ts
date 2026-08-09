@@ -22,6 +22,12 @@ export const createOutgoingBatchQueue = <T extends OutgoingBatchLike>({
   const pending = new Map<string, T>();
   const inFlight = new Set<string>();
 
+  const addAll = (batches: ReadonlyArray<T>): void => {
+    for (const batch of batches) {
+      pending.set(batch.batchId, batch);
+    }
+  };
+
   const flush = (): boolean => {
     if (inFlight.size > 0 || pending.size === 0) return false;
     // Map insertion order matches local creation order, so parents precede
@@ -38,16 +44,12 @@ export const createOutgoingBatchQueue = <T extends OutgoingBatchLike>({
   return {
     /** Record batches as pending without opening a durable write. */
     add(batches: ReadonlyArray<T>): void {
-      for (const batch of batches) {
-        pending.set(batch.batchId, batch);
-      }
+      addAll(batches);
     },
 
     /** Add batches and immediately attempt one in-flight durable write. */
     enqueue(batches: ReadonlyArray<T>): boolean {
-      for (const batch of batches) {
-        pending.set(batch.batchId, batch);
-      }
+      addAll(batches);
       return flush();
     },
 

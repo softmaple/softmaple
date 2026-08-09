@@ -5,39 +5,26 @@ import {
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import { Prisma } from "@softmaple/db";
+import { EVENT_CONFLICT_TYPE, EventConflictError } from "./event-conflict";
 import { prisma } from "./prisma";
+
+export {
+  EVENT_CONFLICT_TYPE,
+  EventConflictError,
+  type EventConflictDetails,
+  type EventConflictType,
+} from "./event-conflict";
 
 const REPAIR_PAGE_SIZE = 100;
 const CONFLICT_VERIFY_ATTEMPTS = 3;
 const CONFLICT_VERIFY_DELAY_MS = 20;
-
-export const EVENT_CONFLICT_TYPE = {
-  DuplicateIncomingEventId: "duplicate-incoming-event-id",
-  MissingParentHistory: "missing-parent-history",
-  BatchPayloadConflict: "batch-payload-conflict",
-  StoredEventIdConflict: "stored-event-id-conflict",
-} as const;
-
-export type EventConflictType =
-  (typeof EVENT_CONFLICT_TYPE)[keyof typeof EVENT_CONFLICT_TYPE];
-
-export interface EventConflictDetails {
-  readonly conflictType: EventConflictType;
-  readonly documentId?: string;
-  readonly batchIds?: ReadonlyArray<string>;
-  readonly eventIds?: ReadonlyArray<string>;
-  readonly missingParentIds?: ReadonlyArray<string>;
-}
-
-export class EventConflictError extends Error {
-  readonly details: EventConflictDetails;
-
-  constructor(message: string, details: EventConflictDetails) {
-    super(message);
-    this.name = "EventConflictError";
-    this.details = details;
-  }
-}
+/** Wait to start an interactive transaction when the pool is busy. */
+const APPEND_TRANSACTION_MAX_WAIT_MS = 10_000;
+/**
+ * Bound for the whole append transaction, including time spent waiting on the
+ * per-document advisory lock under concurrent writers.
+ */
+const APPEND_TRANSACTION_TIMEOUT_MS = 30_000;
 
 export class EventAuthorizationError extends Error {
   constructor(message: string) {
@@ -45,10 +32,6 @@ export class EventAuthorizationError extends Error {
     this.name = "EventAuthorizationError";
   }
 }
-
-/** Missing parent history can clear after repair/resync; payload/ID clashes cannot. */
-export const isRetryableEventConflict = (error: EventConflictError): boolean =>
-  error.details.conflictType === EVENT_CONFLICT_TYPE.MissingParentHistory;
 
 const canonicalJson = (value: unknown): string => {
   if (
@@ -153,12 +136,13 @@ export const appendEventBatches = async (
   }
 
   try {
-    await prisma.$transaction(async (transaction) => {
-      await lockDocumentEventLog(transaction, documentId);
+    await prisma.$transaction(
+      async (transaction) => {
+        await lockDocumentEventLog(transaction, documentId);
 
-      const writeAccess = await transaction.$queryRaw<
-        ReadonlyArray<{ readonly role: string }>
-      >(Prisma.sql`
+        const writeAccess = await transaction.$queryRaw<
+          ReadonlyArray<{ readonly role: string }>
+        >(Prisma.sql`
         SELECT member.role::text AS role
         FROM public.workspace_members AS member
         INNER JOIN public.documents AS document
@@ -167,96 +151,102 @@ export const appendEventBatches = async (
           AND member.user_id = ${actorId}::uuid
         FOR SHARE OF member
       `);
-      if (
-        writeAccess.length !== 1 ||
-        (writeAccess[0]?.role !== "OWNER" && writeAccess[0]?.role !== "EDITOR")
-      ) {
-        throw new EventAuthorizationError(
-          "actor no longer has document write access",
-        );
-      }
-
-      const incomingEventIdSet = new Set(incomingEventIds);
-      const requiredParentIds = new Set(
-        batches
-          .flatMap((batch) => [
-            ...batch.parentVersion,
-            ...batch.events.flatMap((event) => event.parentVersion),
-          ])
-          .filter(
-            (eventId) =>
-              eventId !== BOOTSTRAP_EVENT_ID &&
-              !incomingEventIdSet.has(eventId),
-          ),
-      );
-      if (requiredParentIds.size > 0) {
-        const storedParents = await transaction.documentEventId.findMany({
-          where: {
-            document_id: documentId,
-            event_id: { in: [...requiredParentIds] },
-          },
-          select: { event_id: true },
-        });
-        if (storedParents.length !== requiredParentIds.size) {
-          const stored = new Set(storedParents.map((row) => row.event_id));
-          const missingParentIds = [...requiredParentIds]
-            .filter((eventId) => !stored.has(eventId))
-            .sort();
-          throw new EventConflictError(
-            "event batch references document history that has not been stored",
-            {
-              conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
-              documentId,
-              batchIds: batches.map((batch) => batch.batchId),
-              missingParentIds,
-            },
+        if (
+          writeAccess.length !== 1 ||
+          (writeAccess[0]?.role !== "OWNER" &&
+            writeAccess[0]?.role !== "EDITOR")
+        ) {
+          throw new EventAuthorizationError(
+            "actor no longer has document write access",
           );
         }
-      }
 
-      const existingHashes = await existingBatchHashes(
-        transaction,
-        documentId,
-        batches,
-      );
-      for (const batch of batches) {
-        const payloadHash = hashBatch(batch);
-        const existingHash = existingHashes.get(batch.batchId);
-        if (existingHash !== undefined) {
-          if (existingHash !== payloadHash) {
+        const incomingEventIdSet = new Set(incomingEventIds);
+        const requiredParentIds = new Set(
+          batches
+            .flatMap((batch) => [
+              ...batch.parentVersion,
+              ...batch.events.flatMap((event) => event.parentVersion),
+            ])
+            .filter(
+              (eventId) =>
+                eventId !== BOOTSTRAP_EVENT_ID &&
+                !incomingEventIdSet.has(eventId),
+            ),
+        );
+        if (requiredParentIds.size > 0) {
+          const storedParents = await transaction.documentEventId.findMany({
+            where: {
+              document_id: documentId,
+              event_id: { in: [...requiredParentIds] },
+            },
+            select: { event_id: true },
+          });
+          if (storedParents.length !== requiredParentIds.size) {
+            const stored = new Set(storedParents.map((row) => row.event_id));
+            const missingParentIds = [...requiredParentIds]
+              .filter((eventId) => !stored.has(eventId))
+              .sort();
             throw new EventConflictError(
-              `conflicting payload for batch ${batch.batchId}`,
+              "event batch references document history that has not been stored",
               {
-                conflictType: EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+                conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
                 documentId,
-                batchIds: [batch.batchId],
+                batchIds: batches.map((batch) => batch.batchId),
+                missingParentIds,
               },
             );
           }
-          continue;
         }
 
-        const created = await transaction.documentEventBatch.create({
-          data: {
-            document_id: documentId,
-            batch_id: batch.batchId,
-            schema_version: batch.schemaVersion,
-            parent_version: [...batch.parentVersion],
-            payload: toPrismaJson(batch),
-            payload_hash: payloadHash,
-            actor_id: actorId,
-          },
-          select: { id: true },
-        });
-        await transaction.documentEventId.createMany({
-          data: batch.events.map((event) => ({
-            document_id: documentId,
-            event_id: event.id,
-            batch_row_id: created.id,
-          })),
-        });
-      }
-    });
+        const existingHashes = await existingBatchHashes(
+          transaction,
+          documentId,
+          batches,
+        );
+        for (const batch of batches) {
+          const payloadHash = hashBatch(batch);
+          const existingHash = existingHashes.get(batch.batchId);
+          if (existingHash !== undefined) {
+            if (existingHash !== payloadHash) {
+              throw new EventConflictError(
+                `conflicting payload for batch ${batch.batchId}`,
+                {
+                  conflictType: EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+                  documentId,
+                  batchIds: [batch.batchId],
+                },
+              );
+            }
+            continue;
+          }
+
+          const created = await transaction.documentEventBatch.create({
+            data: {
+              document_id: documentId,
+              batch_id: batch.batchId,
+              schema_version: batch.schemaVersion,
+              parent_version: [...batch.parentVersion],
+              payload: toPrismaJson(batch),
+              payload_hash: payloadHash,
+              actor_id: actorId,
+            },
+            select: { id: true },
+          });
+          await transaction.documentEventId.createMany({
+            data: batch.events.map((event) => ({
+              document_id: documentId,
+              event_id: event.id,
+              batch_row_id: created.id,
+            })),
+          });
+        }
+      },
+      {
+        maxWait: APPEND_TRANSACTION_MAX_WAIT_MS,
+        timeout: APPEND_TRANSACTION_TIMEOUT_MS,
+      },
+    );
   } catch (error) {
     if (
       error instanceof EventConflictError ||

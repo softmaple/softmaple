@@ -1,15 +1,13 @@
 import {
-  BLOCK_MARKER,
-  BLOCK_MODEL_SCHEMA_VERSION,
   BOOTSTRAP_BATCH_ID,
   BOOTSTRAP_BLOCK_ID,
   BOOTSTRAP_EVENT_ID,
-  BOOTSTRAP_TIMESTAMP,
   createBlockReplica,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import { Prisma } from "@softmaple/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrap-batch";
 
 type StoredBatch = {
   readonly batch_id: string;
@@ -50,13 +48,17 @@ const mocks = vi.hoisted(() => {
     await new Promise<void>((resolve) => {
       state.lockWaiters.push(resolve);
     });
-    state.lockHolders = 1;
+    // Ownership was transferred by releaseLock; do not toggle holders here.
   };
 
   const releaseLock = (): void => {
-    state.lockHolders = 0;
     const next = state.lockWaiters.shift();
-    if (next) next();
+    if (next) {
+      // Keep the lock held while transferring ownership to the next waiter.
+      next();
+      return;
+    }
+    state.lockHolders = 0;
   };
 
   const transactionClient = {
@@ -164,7 +166,10 @@ const mocks = vi.hoisted(() => {
     releaseLock,
     prisma: {
       $transaction: vi.fn(
-        async (fn: (tx: typeof transactionClient) => unknown) => {
+        async (
+          fn: (tx: typeof transactionClient) => unknown,
+          _options?: { readonly maxWait?: number; readonly timeout?: number },
+        ) => {
           try {
             return await fn(transactionClient);
           } finally {
@@ -211,39 +216,12 @@ import {
   appendEventBatches,
   EVENT_CONFLICT_TYPE,
   EventConflictError,
-  isRetryableEventConflict,
 } from "../server/utils/event-store";
 
 const DOCUMENT_ID = "00000000-0000-4000-8000-000000000001";
 const ACTOR_ID = "00000000-0000-4000-8000-000000000002";
 
-const BOOTSTRAP_BATCH = {
-  schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
-  batchId: BOOTSTRAP_BATCH_ID,
-  parentVersion: [],
-  events: [
-    {
-      schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
-      id: BOOTSTRAP_EVENT_ID,
-      parentVersion: [],
-      timestamp: BOOTSTRAP_TIMESTAMP,
-      operation: { type: "insert" as const, index: 0, text: BLOCK_MARKER },
-      effect: {
-        type: "bootstrap" as const,
-        blockId: BOOTSTRAP_BLOCK_ID,
-        fields: {
-          type: "paragraph",
-          parentId: null,
-          language: null,
-          theme: null,
-          start: null,
-          value: null,
-          checked: null,
-        },
-      },
-    },
-  ],
-} as const;
+const BOOTSTRAP_BATCH = TEST_BOOTSTRAP_BATCH;
 
 const createCausalBatches = (): {
   readonly first: RichTextEventBatch;
@@ -378,7 +356,7 @@ describe("appendEventBatches conflict paths", () => {
     ).resolves.toEqual([second.batchId]);
   });
 
-  it("classifies missing-parent conflicts as retryable and payload clashes as fatal", () => {
+  it("exposes structured conflict details for diagnostics", () => {
     const missing = new EventConflictError("missing", {
       conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
       documentId: DOCUMENT_ID,
@@ -389,13 +367,20 @@ describe("appendEventBatches conflict paths", () => {
       documentId: DOCUMENT_ID,
       batchIds: ["b"],
     });
-    expect(isRetryableEventConflict(missing)).toBe(true);
-    expect(isRetryableEventConflict(payload)).toBe(false);
+    expect(missing.details.conflictType).toBe(
+      EVENT_CONFLICT_TYPE.MissingParentHistory,
+    );
+    expect(payload.details.conflictType).toBe(
+      EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+    );
   });
 
   it("seeds bootstrap history without requiring a prior stored parent", async () => {
+    mocks.state.eventIds.delete(BOOTSTRAP_EVENT_ID);
     await expect(
       appendEventBatches(DOCUMENT_ID, ACTOR_ID, [BOOTSTRAP_BATCH]),
     ).resolves.toEqual([BOOTSTRAP_BATCH_ID]);
+    expect(mocks.state.batches.has(BOOTSTRAP_BATCH_ID)).toBe(true);
+    expect(mocks.state.eventIds.has(BOOTSTRAP_EVENT_ID)).toBe(true);
   });
 });

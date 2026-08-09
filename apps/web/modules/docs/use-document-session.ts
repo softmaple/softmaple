@@ -172,15 +172,17 @@ const createSessionController = ({
   };
 
   const rememberPending = (batches: ReadonlyArray<RichTextEventBatch>) => {
+    if (storageUserId === null) {
+      throw new Error("Document storage is not initialized");
+    }
+    // Persist offline first so a storage failure leaves the outgoing queue
+    // unchanged and cannot flip flush/saved state for unsent batches.
+    addPendingBatches(window.localStorage, documentId, storageUserId, batches);
     for (const batch of batches) {
       knownBatches.set(batch.batchId, batch);
     }
     // Track only; transport code decides when to open a durable write.
     outgoing.add(batches);
-    if (storageUserId === null) {
-      throw new Error("Document storage is not initialized");
-    }
-    addPendingBatches(window.localStorage, documentId, storageUserId, batches);
   };
 
   const acknowledgePending = (batchIds: ReadonlyArray<string>) => {
@@ -585,6 +587,11 @@ const createSessionController = ({
     }
     if (socket === null || socket.readyState !== WebSocket.OPEN) {
       throw new Error("Could not save the latest edits before sharing");
+    }
+    if (!synced) {
+      throw new Error(
+        "Could not save the latest edits while collaboration sync is in progress",
+      );
     }
     // One-shot publish; DurableAck resolves flush. Re-publish only on reconnect.
     publishWsPending();

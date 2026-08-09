@@ -16,7 +16,6 @@ import {
   appendEventBatches,
   EventAuthorizationError,
   EventConflictError,
-  isRetryableEventConflict,
   readEventPage,
 } from "../../utils/event-store";
 import { authenticateBrowserOrigin } from "../../utils/origin-auth";
@@ -190,31 +189,42 @@ const consumeMessageQuota = (context: Record<string, unknown>): boolean => {
   return true;
 };
 
+const LOG_ID_SAMPLE_LIMIT = 8;
+
+const boundedIdSample = (
+  ids: ReadonlyArray<string> | undefined,
+):
+  | {
+      readonly count: number;
+      readonly sample: ReadonlyArray<string>;
+    }
+  | undefined => {
+  if (ids === undefined) return undefined;
+  return {
+    count: ids.length,
+    sample: ids.slice(0, LOG_ID_SAMPLE_LIMIT),
+  };
+};
+
 const logRouteError = (
   error: unknown,
   documentId: string | null,
   messageType: string,
 ): void => {
-  const base = {
+  console.error("Collaboration request failed", {
     documentId,
     messageType,
     errorName: error instanceof Error ? error.name : "UnknownError",
     errorMessage: error instanceof Error ? error.message : String(error),
-  };
-  if (error instanceof EventConflictError) {
-    console.error("Collaboration request failed", {
-      ...base,
-      conflictType: error.details.conflictType,
-      batchIds: error.details.batchIds,
-      eventIds: error.details.eventIds,
-      missingParentIds: error.details.missingParentIds,
-      stack: error.stack,
-    });
-    return;
-  }
-  console.error("Collaboration request failed", {
-    ...base,
     stack: error instanceof Error ? error.stack : undefined,
+    ...(error instanceof EventConflictError
+      ? {
+          conflictType: error.details.conflictType,
+          batchIds: error.details.batchIds,
+          eventIds: boundedIdSample(error.details.eventIds),
+          missingParentIds: error.details.missingParentIds,
+        }
+      : {}),
   });
 };
 
@@ -556,25 +566,25 @@ export default defineWebSocketHandler({
         );
       } catch (error) {
         logRouteError(error, currentAccess.documentId, message.type);
-        const conflict = error instanceof EventConflictError ? error : null;
+        const conflict = error instanceof EventConflictError;
         const forbidden = error instanceof EventAuthorizationError;
-        const retryableConflict =
-          conflict !== null && isRetryableEventConflict(conflict);
         peer.send(
           errorMessage(
             forbidden
               ? COLLAB_ERROR_CODE.Forbidden
-              : conflict !== null
+              : conflict
                 ? COLLAB_ERROR_CODE.Conflict
                 : COLLAB_ERROR_CODE.PersistenceFailed,
             forbidden
               ? "This workspace role cannot edit documents"
-              : conflict !== null
+              : conflict
                 ? "The event batch conflicts with stored document history"
                 : "The event batch was not saved",
-            // Missing-parent conflicts are recoverable via reconnect/repair.
-            // Payload and stored-ID clashes remain non-retryable.
-            (conflict === null && !forbidden) || retryableConflict,
+            // All event conflicts are non-retryable: advisory locking plus the
+            // client in-flight queue remove the transient race, and missing
+            // parents after that are repaired on the next intentional sync
+            // rather than via conflict-driven reconnect loops.
+            !conflict && !forbidden,
             protocolVersionFromContext(peer.context),
           ),
         );

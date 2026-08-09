@@ -44,7 +44,7 @@ describe("createOutgoingBatchQueue", () => {
     });
 
     const first = { batchId: "batch-1", payload: "one" };
-    queue.enqueue([first]);
+    expect(queue.enqueue([first])).toBe(true);
     expect(sent).toEqual([["batch-1"]]);
 
     // Disconnect before DurableAck: clear in-flight, keep pending payload.
@@ -55,6 +55,35 @@ describe("createOutgoingBatchQueue", () => {
     expect(queue.flush()).toBe(true);
     expect(sent).toEqual([["batch-1"], ["batch-1"]]);
     expect(queue.peekPending()[0]).toBe(first);
+  });
+
+  it("recovers from partial acknowledgment without stalling", () => {
+    const sent: string[][] = [];
+    const queue = createOutgoingBatchQueue({
+      maxBatchesPerSend: 2,
+      send: (batches) => {
+        sent.push(batches.map((batch) => batch.batchId));
+        return true;
+      },
+    });
+
+    expect(
+      queue.enqueue([{ batchId: "a" }, { batchId: "b" }, { batchId: "c" }]),
+    ).toBe(true);
+    expect(sent).toEqual([["a", "b"]]);
+    expect(queue.inFlightSize()).toBe(2);
+
+    // Ack only one of the in-flight ids; the sibling must stay in-flight so a
+    // second concurrent durable write is not opened.
+    expect(queue.acknowledge(["a"])).toBe(false);
+    expect(queue.inFlightSize()).toBe(1);
+    expect(sent).toEqual([["a", "b"]]);
+
+    expect(queue.acknowledge(["b"])).toBe(true);
+    expect(sent).toEqual([["a", "b"], ["c"]]);
+    expect(queue.inFlightSize()).toBe(1);
+    expect(queue.acknowledge(["c"])).toBe(false);
+    expect(queue.hasPending()).toBe(false);
   });
 
   it("does not mark batches in-flight when send fails", () => {

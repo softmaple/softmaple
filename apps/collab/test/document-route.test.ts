@@ -1,12 +1,4 @@
 import {
-  BLOCK_MARKER,
-  BLOCK_MODEL_SCHEMA_VERSION,
-  BOOTSTRAP_BATCH_ID,
-  BOOTSTRAP_BLOCK_ID,
-  BOOTSTRAP_EVENT_ID,
-  BOOTSTRAP_TIMESTAMP,
-} from "@softmaple/block-model";
-import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
@@ -16,37 +8,15 @@ import {
   resetTopicBridgesForTests,
   setRealtimeForTests,
 } from "../server/utils/realtime";
+import { EVENT_CONFLICT_TYPE } from "../server/utils/event-conflict";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrap-batch";
+import { MockEventConflictError } from "./helpers/event-store-mocks";
 
-const VALID_BATCH = {
-  schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
-  batchId: BOOTSTRAP_BATCH_ID,
-  parentVersion: [],
-  events: [
-    {
-      schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
-      id: BOOTSTRAP_EVENT_ID,
-      parentVersion: [],
-      timestamp: BOOTSTRAP_TIMESTAMP,
-      operation: { type: "insert", index: 0, text: BLOCK_MARKER },
-      effect: {
-        type: "bootstrap",
-        blockId: BOOTSTRAP_BLOCK_ID,
-        fields: {
-          type: "paragraph",
-          parentId: null,
-          language: null,
-          theme: null,
-          start: null,
-          value: null,
-          checked: null,
-        },
-      },
-    },
-  ],
-} as const;
+const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
 const mocks = vi.hoisted(() => ({
   authorizeDocument: vi.fn(),
+  appendEventBatches: vi.fn(),
 }));
 
 vi.mock("nitro", () => ({
@@ -57,35 +27,18 @@ vi.mock("../server/utils/auth", () => ({
   authorizeDocument: mocks.authorizeDocument,
 }));
 
-vi.mock("../server/utils/event-store", () => ({
-  appendEventBatches: vi.fn(),
-  EventAuthorizationError: class EventAuthorizationError extends Error {},
-  EventConflictError: class EventConflictError extends Error {
-    readonly details: { readonly conflictType: string };
-    constructor(
-      message: string,
-      details: { readonly conflictType: string } = {
-        conflictType: "stored-event-id-conflict",
-      },
-    ) {
-      super(message);
-      this.name = "EventConflictError";
-      this.details = details;
-    }
-  },
-  isRetryableEventConflict: (error: {
-    readonly details: { readonly conflictType: string };
-  }) => error.details.conflictType === "missing-parent-history",
-  readEventPage: vi.fn(),
-}));
+vi.mock("../server/utils/event-store", async () => {
+  const { eventStoreRouteMocks } = await import("./helpers/event-store-mocks");
+  return {
+    appendEventBatches: mocks.appendEventBatches,
+    ...eventStoreRouteMocks,
+    readEventPage: vi.fn(),
+  };
+});
 
 import documentRoute from "../server/routes/collab/document";
-import {
-  appendEventBatches,
-  EventConflictError,
-} from "../server/utils/event-store";
 
-const mockedAppendEventBatches = vi.mocked(appendEventBatches);
+const mockedAppendEventBatches = vi.mocked(mocks.appendEventBatches);
 
 interface TestPeer {
   readonly context: Record<string, unknown>;
@@ -304,8 +257,11 @@ describe("collaboration document authentication", () => {
 });
 
 describe("collaboration document event conflicts", () => {
+  const authenticatedPeers: TestPeer[] = [];
+
   beforeEach(async () => {
     vi.clearAllMocks();
+    authenticatedPeers.length = 0;
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
@@ -319,24 +275,30 @@ describe("collaboration document event conflicts", () => {
   });
 
   afterEach(async () => {
+    for (const peer of authenticatedPeers) {
+      await route.close(peer);
+    }
+    authenticatedPeers.length = 0;
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   const authedPeer = async (): Promise<TestPeer> => {
     const peer = createPeer();
     await route.message(peer, authMessage("session-writer"));
     peer.send.mockClear();
+    authenticatedPeers.push(peer);
     return peer;
   };
 
-  it("marks missing-parent conflicts retryable for reconnect/repair", async () => {
+  it("marks missing-parent conflicts non-retryable to avoid reconnect loops", async () => {
     mockedAppendEventBatches.mockRejectedValueOnce(
-      new EventConflictError(
+      new MockEventConflictError(
         "event batch references document history that has not been stored",
         {
-          conflictType: "missing-parent-history",
+          conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
         },
       ),
     );
@@ -356,7 +318,7 @@ describe("collaboration document event conflicts", () => {
       expect.objectContaining({
         type: COLLAB_MESSAGE_TYPE.Error,
         code: "conflict",
-        retryable: true,
+        retryable: false,
       }),
     );
     expect(errorSpy).toHaveBeenCalledWith(
@@ -364,16 +326,15 @@ describe("collaboration document event conflicts", () => {
       expect.objectContaining({
         errorName: "EventConflictError",
         errorMessage: expect.stringContaining("has not been stored"),
-        conflictType: "missing-parent-history",
+        conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
       }),
     );
-    errorSpy.mockRestore();
   });
 
   it("keeps payload conflicts non-retryable", async () => {
     mockedAppendEventBatches.mockRejectedValueOnce(
-      new EventConflictError("conflicting payload for batch batch-1", {
-        conflictType: "batch-payload-conflict",
+      new MockEventConflictError("conflicting payload for batch batch-1", {
+        conflictType: EVENT_CONFLICT_TYPE.BatchPayloadConflict,
         batchIds: ["batch-1"],
       }),
     );

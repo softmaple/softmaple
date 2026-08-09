@@ -1,12 +1,4 @@
 import {
-  BLOCK_MARKER,
-  BLOCK_MODEL_SCHEMA_VERSION,
-  BOOTSTRAP_BATCH_ID,
-  BOOTSTRAP_BLOCK_ID,
-  BOOTSTRAP_EVENT_ID,
-  BOOTSTRAP_TIMESTAMP,
-} from "@softmaple/block-model";
-import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
@@ -19,34 +11,9 @@ import {
   resetTopicBridgesForTests,
   setRealtimeForTests,
 } from "../server/utils/realtime";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrap-batch";
 
-const VALID_BATCH = {
-  schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
-  batchId: BOOTSTRAP_BATCH_ID,
-  parentVersion: [],
-  events: [
-    {
-      schemaVersion: BLOCK_MODEL_SCHEMA_VERSION,
-      id: BOOTSTRAP_EVENT_ID,
-      parentVersion: [],
-      timestamp: BOOTSTRAP_TIMESTAMP,
-      operation: { type: "insert", index: 0, text: BLOCK_MARKER },
-      effect: {
-        type: "bootstrap",
-        blockId: BOOTSTRAP_BLOCK_ID,
-        fields: {
-          type: "paragraph",
-          parentId: null,
-          language: null,
-          theme: null,
-          start: null,
-          value: null,
-          checked: null,
-        },
-      },
-    },
-  ],
-} as const;
+const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
 const mocks = vi.hoisted(() => ({
   authorizeDocument: vi.fn(),
@@ -61,27 +28,14 @@ vi.mock("../server/utils/auth", () => ({
   authorizeDocument: mocks.authorizeDocument,
 }));
 
-vi.mock("../server/utils/event-store", () => ({
-  appendEventBatches: mocks.appendEventBatches,
-  EventAuthorizationError: class EventAuthorizationError extends Error {},
-  EventConflictError: class EventConflictError extends Error {
-    readonly details: { readonly conflictType: string };
-    constructor(
-      message: string,
-      details: { readonly conflictType: string } = {
-        conflictType: "stored-event-id-conflict",
-      },
-    ) {
-      super(message);
-      this.name = "EventConflictError";
-      this.details = details;
-    }
-  },
-  isRetryableEventConflict: (error: {
-    readonly details: { readonly conflictType: string };
-  }) => error.details.conflictType === "missing-parent-history",
-  readEventPage: vi.fn(),
-}));
+vi.mock("../server/utils/event-store", async () => {
+  const { eventStoreRouteMocks } = await import("./helpers/event-store-mocks");
+  return {
+    appendEventBatches: mocks.appendEventBatches,
+    ...eventStoreRouteMocks,
+    readEventPage: vi.fn(),
+  };
+});
 
 import documentRoute from "../server/routes/collab/document";
 

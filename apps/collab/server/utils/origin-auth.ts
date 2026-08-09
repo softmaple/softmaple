@@ -4,6 +4,14 @@
  * membership checks inside each session.
  */
 
+const tryOrigin = (value: string): string | null => {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
 const configuredOrigins = (
   env: NodeJS.ProcessEnv = process.env,
 ): ReadonlySet<string> => {
@@ -12,7 +20,9 @@ const configuredOrigins = (
   if (configured) {
     for (const origin of configured.split(",")) {
       const trimmed = origin.trim();
-      if (trimmed.length > 0) origins.add(trimmed);
+      if (trimmed.length === 0) continue;
+      const normalized = tryOrigin(trimmed);
+      if (normalized !== null) origins.add(normalized);
     }
   }
   for (const key of [
@@ -22,17 +32,15 @@ const configuredOrigins = (
   ] as const) {
     const host = env[key]?.trim();
     if (host === undefined || host.length === 0) continue;
-    origins.add(
-      host.startsWith("http") ? new URL(host).origin : `https://${host}`,
+    const normalized = tryOrigin(
+      host.startsWith("http") ? host : `https://${host}`,
     );
+    if (normalized !== null) origins.add(normalized);
   }
   const appUrl = env.NEXT_PUBLIC_APP_URL?.trim() || env.APP_ORIGIN?.trim();
   if (appUrl) {
-    try {
-      origins.add(new URL(appUrl).origin);
-    } catch {
-      // Ignore malformed optional app origin hints.
-    }
+    const normalized = tryOrigin(appUrl);
+    if (normalized !== null) origins.add(normalized);
   }
   return origins;
 };

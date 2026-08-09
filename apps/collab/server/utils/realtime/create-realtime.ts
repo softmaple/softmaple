@@ -6,6 +6,7 @@ import {
 import { MemoryRealtimeBus } from "./memory-bus";
 import { MemoryConnectionLeaseStore } from "./memory-leases";
 import { MemoryPresenceRoomStore } from "./memory-presence";
+import { createRedisClient } from "./redis-client";
 import { RedisRealtimeBus } from "./redis-bus";
 import { RedisConnectionLeaseStore } from "./redis-leases";
 import { RedisPresenceRoomStore } from "./redis-presence";
@@ -26,15 +27,23 @@ export const createMemoryRealtime = (): CollabRealtime => {
 };
 
 export const createRedisRealtime = (redisUrl: string): CollabRealtime => {
-  const bus = new RedisRealtimeBus(redisUrl);
-  const leases = new RedisConnectionLeaseStore(redisUrl);
-  const presence = new RedisPresenceRoomStore(redisUrl);
+  // One shared command connection (pub + leases + presence) plus one subscriber.
+  const commandClient = createRedisClient(redisUrl);
+  const subscriberClient = createRedisClient(redisUrl);
+  const bus = new RedisRealtimeBus({
+    publisher: commandClient,
+    subscriber: subscriberClient,
+    ownsSubscriber: true,
+  });
+  const leases = new RedisConnectionLeaseStore(commandClient);
+  const presence = new RedisPresenceRoomStore(commandClient);
   return {
     bus,
     leases,
     presence,
     async close() {
       await Promise.all([bus.close(), leases.close(), presence.close()]);
+      await commandClient.quit().catch(() => undefined);
     },
   };
 };
@@ -58,6 +67,18 @@ export const getRealtime = (): CollabRealtime => {
   return realtimeSingleton;
 };
 
-export const setRealtimeForTests = (realtime: CollabRealtime | null): void => {
+export const closeRealtime = async (): Promise<void> => {
+  if (realtimeSingleton === null) return;
+  const current = realtimeSingleton;
+  realtimeSingleton = null;
+  await current.close();
+};
+
+export const setRealtimeForTests = async (
+  realtime: CollabRealtime | null,
+): Promise<void> => {
+  if (realtimeSingleton !== null && realtimeSingleton !== realtime) {
+    await realtimeSingleton.close().catch(() => undefined);
+  }
   realtimeSingleton = realtime;
 };

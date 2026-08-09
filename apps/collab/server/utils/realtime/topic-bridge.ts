@@ -19,10 +19,17 @@ export class TopicBridge {
     const current = this.refCounts.get(channel) ?? 0;
     this.refCounts.set(channel, current + 1);
     if (current > 0) return;
-    const unsubscribe = await this.bus.subscribe(channel, (payload) => {
-      this.hub.publishLocal(channel, payload);
-    });
-    this.unsubscribers.set(channel, unsubscribe);
+    try {
+      const unsubscribe = await this.bus.subscribe(channel, (payload) => {
+        this.hub.publishLocal(channel, payload);
+      });
+      this.unsubscribers.set(channel, unsubscribe);
+    } catch (error) {
+      const next = this.refCounts.get(channel) ?? 1;
+      if (next <= 1) this.refCounts.delete(channel);
+      else this.refCounts.set(channel, next - 1);
+      throw error;
+    }
   }
 
   async release(channel: string): Promise<void> {

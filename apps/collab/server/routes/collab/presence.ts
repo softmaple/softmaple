@@ -122,12 +122,20 @@ const withoutSelection = (user: PresenceUser): PresenceUser => {
   return rest;
 };
 
+const isPresenceStatus = (value: unknown): value is PresenceUser["status"] =>
+  value === "active" || value === "idle" || value === "offline";
+
 const isPresenceUser = (value: unknown): value is PresenceUser =>
   isRecord(value) &&
   typeof value.connectionId === "string" &&
   typeof value.userId === "string" &&
   typeof value.name === "string" &&
   typeof value.color === "string" &&
+  isPresenceStatus(value.status) &&
+  typeof value.lastActivityAt === "number" &&
+  Number.isFinite(value.lastActivityAt) &&
+  typeof value.lastSeenAt === "number" &&
+  Number.isFinite(value.lastSeenAt) &&
   typeof value.clock === "number";
 
 const publishPresence = async (
@@ -281,6 +289,9 @@ export default defineWebSocketHandler({
         });
         if (profile === null) throw new Error("presence profile missing");
 
+        // Set connectionId before acquire so cleanup can identify the peer,
+        // but keep connectionCounted false until the lease succeeds.
+        peer.context.connectionId = auth.connectionId;
         const leaseResult = await getRealtime().leases.tryAcquire(
           presenceLeaseScope(roomId),
           auth.connectionId,
@@ -293,7 +304,6 @@ export default defineWebSocketHandler({
         }
         peer.context.connectionCounted = true;
         peer.context.userId = access.userId;
-        peer.context.connectionId = auth.connectionId;
         peer.context.accessToken = auth.token;
         peer.context.authorizationExpiresAt = Date.now() + AUTHORIZATION_TTL_MS;
         peer.context.profileName =
@@ -372,41 +382,59 @@ export default defineWebSocketHandler({
                 contextString(peer.context, "profileAvatar") ?? undefined,
             }),
       };
-      await getRealtime().presence.setUser(roomId, user, PRESENCE_LEASE_TTL_MS);
-      await getRealtime().leases.refresh(
-        presenceLeaseScope(roomId),
-        connectionId,
-        PRESENCE_LEASE_TTL_MS,
-      );
-      const channel = presenceRealtimeChannel(roomId);
-      peer.context.joined = true;
-      peer.context.realtimeChannel = channel;
-      peer.context.unsubscribeLocal = presenceTopicHub.subscribe(channel, peer);
-      await getPresenceTopicBridge().retain(channel);
-      await publishPresence(
-        roomId,
-        serverMessage(WS_MESSAGE.JOIN, roomId, connectionId, { user }),
-      );
+      try {
+        await getRealtime().presence.setUser(
+          roomId,
+          user,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        await getRealtime().leases.refresh(
+          presenceLeaseScope(roomId),
+          connectionId,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        const channel = presenceRealtimeChannel(roomId);
+        peer.context.joined = true;
+        peer.context.realtimeChannel = channel;
+        peer.context.unsubscribeLocal = presenceTopicHub.subscribe(
+          channel,
+          peer,
+        );
+        await getPresenceTopicBridge().retain(channel);
+        await publishPresence(
+          roomId,
+          serverMessage(WS_MESSAGE.JOIN, roomId, connectionId, { user }),
+        );
+      } catch {
+        await releasePresenceResources(peer.context, {
+          publishLeave: peer.context.joined === true,
+        });
+        peer.close(1011, "Presence join failed");
+      }
       return;
     }
 
     if (message.type === WS_MESSAGE.PRESENCE_SYNC) {
-      const { users, expiredConnectionIds } =
-        await getRealtime().presence.listUsers(roomId);
-      for (const expiredConnectionId of expiredConnectionIds) {
-        await publishPresence(
-          roomId,
-          serverMessage(WS_MESSAGE.LEAVE, roomId, expiredConnectionId, {
-            connectionId: expiredConnectionId,
-            userId: "unknown",
+      try {
+        const { users, expired } =
+          await getRealtime().presence.listUsers(roomId);
+        for (const member of expired) {
+          await publishPresence(
+            roomId,
+            serverMessage(WS_MESSAGE.LEAVE, roomId, member.connectionId, {
+              connectionId: member.connectionId,
+              userId: member.userId,
+            }),
+          );
+        }
+        peer.send(
+          serverMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, roomId, "server", {
+            users: users.filter(isPresenceUser),
           }),
         );
+      } catch {
+        peer.close(1011, "Presence sync failed");
       }
-      peer.send(
-        serverMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, roomId, "server", {
-          users: users.filter(isPresenceUser),
-        }),
-      );
       return;
     }
 
@@ -416,25 +444,29 @@ export default defineWebSocketHandler({
         peer.close(1008, "Invalid presence heartbeat");
         return;
       }
-      const leaseAlive = await getRealtime().leases.refresh(
-        presenceLeaseScope(roomId),
-        connectionId,
-        PRESENCE_LEASE_TTL_MS,
-      );
-      const presenceAlive = await getRealtime().presence.refresh(
-        roomId,
-        connectionId,
-        PRESENCE_LEASE_TTL_MS,
-      );
-      if (!leaseAlive || (peer.context.joined === true && !presenceAlive)) {
-        peer.close(1008, "Presence lease expired");
-        return;
+      try {
+        const leaseAlive = await getRealtime().leases.refresh(
+          presenceLeaseScope(roomId),
+          connectionId,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        const presenceAlive = await getRealtime().presence.refresh(
+          roomId,
+          connectionId,
+          PRESENCE_LEASE_TTL_MS,
+        );
+        if (!leaseAlive || (peer.context.joined === true && !presenceAlive)) {
+          peer.close(1008, "Presence lease expired");
+          return;
+        }
+        peer.send(
+          serverMessage(WS_MESSAGE.HEARTBEAT_ACK, roomId, connectionId, {
+            pingId,
+          }),
+        );
+      } catch {
+        peer.close(1011, "Presence heartbeat failed");
       }
-      peer.send(
-        serverMessage(WS_MESSAGE.HEARTBEAT_ACK, roomId, connectionId, {
-          pingId,
-        }),
-      );
       return;
     }
 

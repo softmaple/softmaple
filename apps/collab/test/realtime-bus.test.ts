@@ -90,7 +90,10 @@ describe("memory realtime bus", () => {
     const shared = createMemoryRealtime();
     const hub = new LocalTopicHub();
     const bridge = new TopicBridge(shared.bus, hub);
-    const channel = "softmaple:collab:document:v3:doc";
+    const channel = documentRealtimeChannel(
+      "00000000-0000-4000-8000-000000000099",
+      COLLAB_PROTOCOL_VERSION,
+    );
     let activeHandlers = 0;
     const originalSubscribe = shared.bus.subscribe.bind(shared.bus);
     vi.spyOn(shared.bus, "subscribe").mockImplementation(
@@ -167,45 +170,42 @@ describe("presence room store", () => {
   it("shares presence state across instances and expires stale members", async () => {
     const shared = createMemoryRealtime();
     const roomId = "00000000-0000-4000-8000-000000000010";
-    await shared.presence.setUser(
-      roomId,
-      {
-        connectionId: "alice",
-        userId: "user-a",
-        name: "Alice",
-        color: "#111111",
-        status: "active",
-        clock: 0,
-        lastActivityAt: 1,
-        lastSeenAt: 1,
-      },
-      1_000,
-    );
-    await shared.presence.setUser(
-      roomId,
-      {
-        connectionId: "bob",
-        userId: "user-b",
-        name: "Bob",
-        color: "#222222",
-        status: "active",
-        clock: 0,
-        lastActivityAt: 1,
-        lastSeenAt: 1,
-      },
-      1_000,
-    );
+    const alice = {
+      connectionId: "alice",
+      userId: "user-a",
+      name: "Alice",
+      color: "#111111",
+      status: "active",
+      clock: 0,
+      lastActivityAt: 1,
+      lastSeenAt: 1,
+    };
+    const bob = {
+      connectionId: "bob",
+      userId: "user-b",
+      name: "Bob",
+      color: "#222222",
+      status: "active",
+      clock: 0,
+      lastActivityAt: 1,
+      lastSeenAt: 1,
+    };
+    await shared.presence.setUser(roomId, alice, 1_000);
+    await shared.presence.setUser(roomId, bob, 1_000);
 
     const listed = await shared.presence.listUsers(roomId);
     expect(listed.users).toHaveLength(2);
-    expect(listed.expiredConnectionIds).toEqual([]);
+    expect(listed.expired).toEqual([]);
 
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 1_001);
     const expired = await shared.presence.listUsers(roomId);
     expect(expired.users).toEqual([]);
-    expect(expired.expiredConnectionIds).toEqual(
-      expect.arrayContaining(["alice", "bob"]),
+    expect(expired.expired).toEqual(
+      expect.arrayContaining([
+        { connectionId: "alice", userId: "user-a" },
+        { connectionId: "bob", userId: "user-b" },
+      ]),
     );
     vi.useRealTimers();
     await shared.close();
@@ -213,10 +213,20 @@ describe("presence room store", () => {
 });
 
 describe("realtime environment validation", () => {
-  it("defaults to memory locally and redis on Vercel", () => {
+  it("defaults to memory locally and redis on Vercel preview/production", () => {
     expect(resolveCollabRealtimeDriver({})).toBe("memory");
-    expect(resolveCollabRealtimeDriver({ VERCEL: "1" })).toBe("redis");
+    // Vercel CLI local runs set VERCEL=1 with VERCEL_ENV=development.
+    expect(resolveCollabRealtimeDriver({ VERCEL: "1" })).toBe("memory");
+    expect(
+      resolveCollabRealtimeDriver({
+        VERCEL: "1",
+        VERCEL_ENV: "development",
+      }),
+    ).toBe("memory");
     expect(resolveCollabRealtimeDriver({ VERCEL_ENV: "preview" })).toBe(
+      "redis",
+    );
+    expect(resolveCollabRealtimeDriver({ VERCEL_ENV: "production" })).toBe(
       "redis",
     );
   });
@@ -227,10 +237,10 @@ describe("realtime environment validation", () => {
     ).toThrowError(CollabRealtimeConfigError);
   });
 
-  it("rejects memory driver on Vercel deployments", () => {
+  it("rejects memory driver on Vercel preview/production", () => {
     expect(() =>
       resolveCollabRealtimeDriver({
-        VERCEL: "1",
+        VERCEL_ENV: "production",
         COLLAB_REALTIME_DRIVER: "memory",
       }),
     ).toThrowError(CollabRealtimeConfigError);

@@ -14,9 +14,7 @@ export class CollabRealtimeConfigError extends Error {
 }
 
 const isVercelDeployedRuntime = (env: NodeJS.ProcessEnv): boolean =>
-  env.VERCEL === "1" ||
-  env.VERCEL_ENV === "production" ||
-  env.VERCEL_ENV === "preview";
+  env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview";
 
 export const resolveCollabRealtimeDriver = (
   env: NodeJS.ProcessEnv = process.env,
@@ -43,8 +41,8 @@ export const resolveCollabRealtimeDriver = (
     );
   }
 
-  // Deployed Vercel runtimes must coordinate through Redis. Local development
-  // and unit tests default to the in-memory adapter.
+  // Preview/production must coordinate through Redis. Local development,
+  // unit tests, and `vercel dev` (VERCEL_ENV=development) default to memory.
   if (onVercel) return CollabRealtimeDriver.Redis;
   return CollabRealtimeDriver.Memory;
 };

@@ -216,7 +216,9 @@ const errorMessage = (
 
 export default defineWebSocketHandler({
   async upgrade(request) {
-    const context = authenticateBrowserOrigin(request);
+    // Shallow mutable copy: Origin auth returns a frozen object, but peer
+    // handlers need to attach timers and delete authorizationRecheckPending.
+    const context = { ...authenticateBrowserOrigin(request) };
     return { namespace: "softmaple-collab-v3", context };
   },
 
@@ -564,11 +566,11 @@ export default defineWebSocketHandler({
         type: COLLAB_MESSAGE_TYPE.DurableAck,
         batchIds,
       });
-      try {
-        for (const protocolVersion of [
-          LEGACY_COLLAB_PROTOCOL_VERSION,
-          COLLAB_PROTOCOL_VERSION,
-        ] as const) {
+      for (const protocolVersion of [
+        LEGACY_COLLAB_PROTOCOL_VERSION,
+        COLLAB_PROTOCOL_VERSION,
+      ] as const) {
+        try {
           await getRealtime().bus.publish(
             documentRealtimeChannel(currentAccess.documentId, protocolVersion),
             {
@@ -577,10 +579,10 @@ export default defineWebSocketHandler({
               batches: message.batches,
             },
           );
+        } catch (error) {
+          // Durable write already succeeded; peers recover via repair/resync.
+          logRouteError(error, currentAccess.documentId, "realtime-publish");
         }
-      } catch (error) {
-        // Durable write already succeeded; peers recover via repair/resync.
-        logRouteError(error, currentAccess.documentId, "realtime-publish");
       }
     }
   },

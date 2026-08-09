@@ -1,4 +1,4 @@
-import Redis from "ioredis";
+import type Redis from "ioredis";
 import type { RealtimeBus, RealtimeHandler } from "./types";
 
 const encodePayload = (payload: unknown): string => JSON.stringify(payload);
@@ -11,6 +11,13 @@ const decodePayload = (raw: string): unknown => {
   }
 };
 
+export interface RedisRealtimeBusOptions {
+  readonly publisher: Redis;
+  readonly subscriber: Redis;
+  /** When true, close() quits the subscriber connection. */
+  readonly ownsSubscriber: boolean;
+}
+
 /**
  * Redis Pub/Sub bus with publisher/subscriber connection reuse and per-channel
  * local reference counting. Duplicate deliveries are tolerated by callers.
@@ -18,21 +25,15 @@ const decodePayload = (raw: string): unknown => {
 export class RedisRealtimeBus implements RealtimeBus {
   private readonly publisher: Redis;
   private readonly subscriber: Redis;
+  private readonly ownsSubscriber: boolean;
   private readonly handlers = new Map<string, Set<RealtimeHandler>>();
   private readonly pendingSubscribe = new Map<string, Promise<void>>();
   private closed = false;
 
-  constructor(redisUrl: string) {
-    this.publisher = new Redis(redisUrl, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: true,
-      lazyConnect: false,
-    });
-    this.subscriber = new Redis(redisUrl, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: true,
-      lazyConnect: false,
-    });
+  constructor(options: RedisRealtimeBusOptions) {
+    this.publisher = options.publisher;
+    this.subscriber = options.subscriber;
+    this.ownsSubscriber = options.ownsSubscriber;
     this.subscriber.on("message", (channel, message) => {
       void this.dispatch(channel, message);
     });
@@ -79,6 +80,10 @@ export class RedisRealtimeBus implements RealtimeBus {
       this.pendingSubscribe.set(channel, pending);
       try {
         await pending;
+      } catch (error) {
+        existing.delete(handler);
+        if (existing.size === 0) this.handlers.delete(channel);
+        throw error;
       } finally {
         this.pendingSubscribe.delete(channel);
       }
@@ -108,9 +113,8 @@ export class RedisRealtimeBus implements RealtimeBus {
     this.handlers.clear();
     this.pendingSubscribe.clear();
     this.subscriber.removeAllListeners("message");
-    await Promise.all([
-      this.publisher.quit().catch(() => undefined),
-      this.subscriber.quit().catch(() => undefined),
-    ]);
+    if (this.ownsSubscriber) {
+      await this.subscriber.quit().catch(() => undefined);
+    }
   }
 }

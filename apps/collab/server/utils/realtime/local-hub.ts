@@ -22,7 +22,14 @@ export class LocalTopicHub {
     const peers = this.topics.get(topic);
     if (peers === undefined) return;
     for (const peer of peers) {
-      peer.send(payload);
+      try {
+        peer.send(payload);
+      } catch (error) {
+        console.error("Local topic hub peer send failed", {
+          topic,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
     }
   }
 

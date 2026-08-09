@@ -30,8 +30,22 @@ export interface ConnectionLeaseStore {
   close(): Promise<void>;
 }
 
+/** Minimal presence payload; adapters require `connectionId` and accept extra fields. */
+export type PresenceUserRecord = {
+  readonly connectionId: string;
+};
+
+export interface ExpiredPresenceMember {
+  readonly connectionId: string;
+  readonly userId: string;
+}
+
 export interface PresenceRoomStore {
-  setUser(roomId: string, user: unknown, ttlMs: number): Promise<void>;
+  setUser(
+    roomId: string,
+    user: PresenceUserRecord,
+    ttlMs: number,
+  ): Promise<void>;
   refresh(
     roomId: string,
     connectionId: string,
@@ -40,9 +54,9 @@ export interface PresenceRoomStore {
   getUser(roomId: string, connectionId: string): Promise<unknown | null>;
   listUsers(roomId: string): Promise<{
     readonly users: unknown[];
-    readonly expiredConnectionIds: readonly string[];
+    readonly expired: ReadonlyArray<ExpiredPresenceMember>;
   }>;
-  removeUser(roomId: string, connectionId: string): Promise<unknown | null>;
+  removeUser(roomId: string, connectionId: string): Promise<unknown>;
   close(): Promise<void>;
 }
 

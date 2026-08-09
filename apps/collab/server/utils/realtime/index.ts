@@ -4,6 +4,7 @@ export {
   resetTopicBridgesForTests,
 } from "./bridges";
 export {
+  closeRealtime,
   createMemoryRealtime,
   createRealtimeFromEnv,
   createRedisRealtime,
@@ -32,7 +33,9 @@ export {
   LeaseAcquireResult,
   type CollabRealtime,
   type ConnectionLeaseStore,
+  type ExpiredPresenceMember,
   type PresenceRoomStore,
+  type PresenceUserRecord,
   type RealtimeBus,
   type RealtimePeer,
 } from "./types";

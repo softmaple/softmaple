@@ -90,13 +90,13 @@ describe("collaboration document authentication", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
-    setRealtimeForTests(createMemoryRealtime());
+    await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
   });
 
   afterEach(async () => {
     await resetTopicBridgesForTests();
-    setRealtimeForTests(null);
+    await setRealtimeForTests(null);
     vi.unstubAllEnvs();
   });
 
@@ -124,16 +124,24 @@ describe("collaboration document authentication", () => {
         }),
     ],
   ])("rejects a %s upgrade with a generic 403", async (_case, request) => {
-    await expect(route.upgrade(request())).rejects.toMatchObject({
-      status: 403,
-    });
+    const rejection = await route.upgrade(request()).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(rejection).toBeInstanceOf(Response);
+    expect((rejection as Response).status).toBe(403);
+    expect(await (rejection as Response).text()).toBe("Forbidden");
   });
 
   it("fails closed when no allowed origins are configured", async () => {
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", undefined);
-    await expect(route.upgrade(browserUpgradeRequest())).rejects.toMatchObject({
-      status: 403,
-    });
+    const rejection = await route.upgrade(browserUpgradeRequest()).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(rejection).toBeInstanceOf(Response);
+    expect((rejection as Response).status).toBe(403);
+    expect(await (rejection as Response).text()).toBe("Forbidden");
   });
 
   it("still rejects an invalid Supabase token after Origin succeeds", async () => {

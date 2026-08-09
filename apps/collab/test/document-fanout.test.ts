@@ -109,7 +109,7 @@ describe("document event fan-out across instances", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
-    setRealtimeForTests(createMemoryRealtime());
+    await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
     mocks.authorizeDocument.mockResolvedValue({
       accessMode: "authenticated",
@@ -123,7 +123,7 @@ describe("document event fan-out across instances", () => {
 
   afterEach(async () => {
     await resetTopicBridgesForTests();
-    setRealtimeForTests(null);
+    await setRealtimeForTests(null);
     vi.unstubAllEnvs();
   });
 
@@ -158,6 +158,13 @@ describe("document event fan-out across instances", () => {
       expect.objectContaining({
         type: COLLAB_MESSAGE_TYPE.DurableAck,
         batchIds: ["batch-1"],
+      }),
+    );
+    // Local topic hub also echoes the Event to the writing peer.
+    expect(writer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Event,
+        batches,
       }),
     );
     expect(remotePeer.send).toHaveBeenCalledWith(

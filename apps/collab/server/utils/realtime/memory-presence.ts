@@ -1,4 +1,12 @@
-import type { PresenceRoomStore } from "./types";
+import {
+  presenceUserIdFromUnknown,
+  requirePresenceConnectionId,
+} from "./presence-user";
+import type {
+  ExpiredPresenceMember,
+  PresenceRoomStore,
+  PresenceUserRecord,
+} from "./types";
 
 interface PresenceEntry {
   user: unknown;
@@ -13,30 +21,30 @@ export class MemoryPresenceRoomStore implements PresenceRoomStore {
     now: number,
   ): {
     readonly entries: Map<string, PresenceEntry>;
-    readonly expiredConnectionIds: string[];
+    readonly expired: ExpiredPresenceMember[];
   } {
     const entries = this.rooms.get(roomId) ?? new Map<string, PresenceEntry>();
-    const expiredConnectionIds: string[] = [];
+    const expired: ExpiredPresenceMember[] = [];
     for (const [connectionId, entry] of entries) {
       if (entry.expiresAt <= now) {
         entries.delete(connectionId);
-        expiredConnectionIds.push(connectionId);
+        expired.push({
+          connectionId,
+          userId: presenceUserIdFromUnknown(entry.user),
+        });
       }
     }
     if (entries.size === 0) this.rooms.delete(roomId);
     else this.rooms.set(roomId, entries);
-    return { entries, expiredConnectionIds };
+    return { entries, expired };
   }
 
-  async setUser(roomId: string, user: unknown, ttlMs: number): Promise<void> {
-    if (
-      typeof user !== "object" ||
-      user === null ||
-      typeof (user as { connectionId?: unknown }).connectionId !== "string"
-    ) {
-      throw new Error("Presence user requires a connectionId");
-    }
-    const connectionId = (user as { connectionId: string }).connectionId;
+  async setUser(
+    roomId: string,
+    user: PresenceUserRecord,
+    ttlMs: number,
+  ): Promise<void> {
+    const connectionId = requirePresenceConnectionId(user);
     const now = Date.now();
     const { entries } = this.purgeExpired(roomId, now);
     entries.set(connectionId, { user, expiresAt: now + ttlMs });
@@ -68,20 +76,17 @@ export class MemoryPresenceRoomStore implements PresenceRoomStore {
 
   async listUsers(roomId: string): Promise<{
     readonly users: unknown[];
-    readonly expiredConnectionIds: readonly string[];
+    readonly expired: ReadonlyArray<ExpiredPresenceMember>;
   }> {
     const now = Date.now();
-    const { entries, expiredConnectionIds } = this.purgeExpired(roomId, now);
+    const { entries, expired } = this.purgeExpired(roomId, now);
     return {
       users: [...entries.values()].map((entry) => entry.user),
-      expiredConnectionIds,
+      expired,
     };
   }
 
-  async removeUser(
-    roomId: string,
-    connectionId: string,
-  ): Promise<unknown | null> {
+  async removeUser(roomId: string, connectionId: string): Promise<unknown> {
     const entries = this.rooms.get(roomId);
     if (entries === undefined) return null;
     const current = entries.get(connectionId)?.user ?? null;

@@ -143,10 +143,7 @@ export function EditorSurface({
       if (peer.cursor?.blockId === blockId) {
         const offset = getCursorOffset(peer.cursor);
         if (offset === undefined) continue;
-        const local = getTextareaCaretRect(
-          el,
-          Math.min(offset, text.length),
-        );
+        const local = getTextareaCaretRect(el, Math.min(offset, text.length));
         cursors.set(peer.userId, { x: local.left, y: local.top });
       }
       if (

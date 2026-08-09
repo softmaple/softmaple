@@ -95,7 +95,6 @@ class FakeWebSocket {
 const fakeSockets: FakeWebSocket[] = [];
 const originalWebSocket = globalThis.WebSocket;
 
-
 const completeReadyHandshake = (
   socket: FakeWebSocket,
   roomId = "room-1",
@@ -104,9 +103,7 @@ const completeReadyHandshake = (
   socket.emitOpen();
   if (options.authOk) {
     socket.emitMessage(
-      serializeMessage(
-        createMessage(WS_MESSAGE.AUTH_OK, roomId, "server", {}),
-      ),
+      serializeMessage(createMessage(WS_MESSAGE.AUTH_OK, roomId, "server", {})),
     );
   }
   socket.emitMessage(
@@ -232,7 +229,12 @@ describe("WebSocket Message Utilities", () => {
         WS_MESSAGE.PRESENCE_UPDATE,
         "room-1",
         "other-sender",
-        { connectionId: "conn-2", userId: "user-2", clock: 1, updates: { name: "Updated Name" } },
+        {
+          connectionId: "conn-2",
+          userId: "user-2",
+          clock: 1,
+          updates: { name: "Updated Name" },
+        },
       );
 
       const result = processMessage(state, message, selfId);
@@ -516,10 +518,10 @@ describe("WebSocket adapter public API", () => {
     expect(() =>
       adapter.broadcast({
         type: PRESENCE_EVENT.UPDATE,
-      connectionId: "self-user",
-      userId: "self-user",
-      clock: 1,
-      updates: {},
+        connectionId: "self-user",
+        userId: "self-user",
+        clock: 1,
+        updates: {},
       }),
     ).not.toThrow();
   });

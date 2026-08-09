@@ -1,75 +1,59 @@
 "use client";
 
-import { useState, type FC } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { updatePassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
 
-export type UpdatePasswordFormProps = {};
-
-export const UpdatePasswordForm: FC<UpdatePasswordFormProps> = (props) => {
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
-
-  const validatePasswords = (
-    pwd: string = password,
-    confirmPwd: string = confirmPassword,
-  ) => {
-    if (pwd && confirmPwd && pwd !== confirmPwd) {
-      setError("Passwords do not match");
-      return false;
+export const UpdatePasswordForm = () => {
+  const [state, action] = useActionState(updatePassword, null);
+  const router = useRouter();
+  useEffect(() => {
+    if (state?.ok && state.data.redirectTo !== undefined) {
+      router.replace(state.data.redirectTo);
     }
-    if (pwd && pwd.length < 6) {
-      setError("Password must be at least 6 characters");
-      return false;
-    }
-    setError("");
-    return true;
-  };
+  }, [router, state]);
 
   return (
-    <form action={updatePassword} className="space-y-4">
+    <form action={action} className="space-y-4">
+      {state !== null && !state.ok ? (
+        <p className="text-sm text-destructive" role="alert">
+          {state.message}
+        </p>
+      ) : null}
       <div className="space-y-2">
-        <Label htmlFor="password">New Password</Label>
+        <Label htmlFor="password">New password</Label>
         <Input
+          autoComplete="new-password"
           id="password"
           name="password"
           type="password"
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            validatePasswords(e.target.value, confirmPassword);
-          }}
-          placeholder="Enter new password"
           required
-          minLength={6}
         />
+        <p className="text-xs text-destructive">
+          {state !== null && !state.ok
+            ? state.fieldErrors?.password?.[0]
+            : null}
+        </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="confirmPassword">Confirm New Password</Label>
+        <Label htmlFor="confirmPassword">Confirm new password</Label>
         <Input
+          autoComplete="new-password"
           id="confirmPassword"
           name="confirmPassword"
           type="password"
-          value={confirmPassword}
-          onChange={(e) => {
-            setConfirmPassword(e.target.value);
-            validatePasswords(password, e.target.value);
-          }}
-          placeholder="Confirm new password"
           required
-          minLength={6}
         />
+        <p className="text-xs text-destructive">
+          {state !== null && !state.ok
+            ? state.fieldErrors?.confirmPassword?.[0]
+            : null}
+        </p>
       </div>
-
-      {error && <div className="text-sm text-red-600">{error}</div>}
-
-      <SubmitButton
-        text="Update password"
-        disabled={!!error || !password || !confirmPassword}
-      />
+      <SubmitButton text="Update password" />
     </form>
   );
 };

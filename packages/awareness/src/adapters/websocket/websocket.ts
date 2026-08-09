@@ -211,12 +211,7 @@ export const createWebSocketAdapter = (
       { connectionState: "connected", self, presence: newPresence },
       true,
     );
-    startHeartbeat(
-      internal,
-      config,
-      sendMessage,
-      forceReconnectFromHeartbeat,
-    );
+    startHeartbeat(internal, config, sendMessage, forceReconnectFromHeartbeat);
   };
 
   const handleOpen = (): void => {
@@ -422,7 +417,8 @@ export const createWebSocketAdapter = (
       if (
         updates.cursor !== undefined &&
         internal.socket !== null &&
-        internal.socket.bufferedAmount > DEFAULT_WS_CONFIG.cursorBackpressureBytes
+        internal.socket.bufferedAmount >
+          DEFAULT_WS_CONFIG.cursorBackpressureBytes
       ) {
         return;
       }

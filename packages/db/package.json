@@ -15,7 +15,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:types": "supabase gen types typescript --db-url \"$DATABASE_URL\" --schema public > src/database.types.ts",
     "db:verify:collab-security": "prisma db execute --file ./supabase/scripts/verify-collab-security.sql",
+    "db:verify:core-behavior": "prisma db execute --file ./supabase/scripts/verify-core-v1-behavior.sql",
     "db:clean": "prisma db execute --file ./supabase/scripts/cleanup-test-data.sql",
     "prepare": "pnpm run build",
     "typecheck": "tsc --noEmit"
@@ -26,7 +28,9 @@
       "import": "./dist/src/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
@@ -38,6 +42,7 @@
     "@types/pg": "^8.20.4",
     "dotenv": "^17.4.2",
     "prisma": "^7.9.1",
+    "supabase": "2.110.0",
     "tsx": "^4.23.10",
     "typescript": "^5.9.3"
   }

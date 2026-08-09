@@ -3,8 +3,16 @@
   "type": "module",
   "version": "0.1.0",
   "description": "A Markdown Transformer for LaTeX",
-  "main": "index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/md2latex.d.ts",
+      "import": "./dist/md2latex.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
+    "build": "tsup src/md2latex.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest",
     "coverage": "vitest run --coverage"
@@ -25,6 +33,7 @@
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "@vitest/coverage-v8": "^4.1.10",
+    "tsup": "8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   }

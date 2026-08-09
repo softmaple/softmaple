@@ -12,7 +12,7 @@ import {
 
 export type CoreEditorProps = Pick<
   EditorProps,
-  "activeEditor" | "historyMode" | "setActiveEditor"
+  "activeEditor" | "historyMode" | "setActiveEditor" | "showToolbar"
 > & {
   lexicalConfig?: InitialConfigType;
   children?: ReactNode;
@@ -28,6 +28,7 @@ export const CoreEditor: FC<CoreEditorProps> = (props) => {
     historyMode = DEFAULT_EDITOR_HISTORY_MODE,
     layoutClassName,
     setActiveEditor,
+    showToolbar,
   } = props;
 
   return (
@@ -38,6 +39,7 @@ export const CoreEditor: FC<CoreEditorProps> = (props) => {
             activeEditor={activeEditor}
             historyMode={historyMode}
             setActiveEditor={setActiveEditor}
+            showToolbar={showToolbar}
           >
             {children}
           </Editor>

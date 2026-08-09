@@ -137,10 +137,7 @@ const processLeave = (
   state: AdapterState,
   payload: LeavePayload,
 ): MessageProcessResult => {
-  const newPresence = removePresenceUser(
-    state.presence,
-    payload.connectionId,
-  );
+  const newPresence = removePresenceUser(state.presence, payload.connectionId);
   return {
     state: updateState(state, { presence: newPresence }),
     shouldNotifyPresence: true,

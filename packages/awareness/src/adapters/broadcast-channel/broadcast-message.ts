@@ -104,9 +104,7 @@ const isLeavePayload = (
 ): value is { connectionId: string; userId: string } => {
   if (value === null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.connectionId === "string" && typeof obj.userId === "string"
-  );
+  return typeof obj.connectionId === "string" && typeof obj.userId === "string";
 };
 
 export const createBroadcastMessage = (

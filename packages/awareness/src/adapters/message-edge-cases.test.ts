@@ -141,7 +141,13 @@ describe("broadcast-message handlers - invalid payloads", () => {
         lastSeenAt: 0,
       },
       { userId: "u", name: "n", color: 0, status: "active", lastActivityAt: 0 },
-      { userId: "u", name: "n", color: "#000", status: "wat", lastActivityAt: 0 },
+      {
+        userId: "u",
+        name: "n",
+        color: "#000",
+        status: "wat",
+        lastActivityAt: 0,
+      },
       {
         userId: "u",
         name: "n",
@@ -590,7 +596,6 @@ describe("websocket-state updateInternalState - extra branches", () => {
 });
 
 describe("WebSocket adapter extra branches", () => {
-
   type FakeWebSocketEventType = "open" | "message" | "close" | "error";
   type FakeWebSocketListener = (event: Event | MessageEvent<string>) => void;
 
@@ -689,7 +694,6 @@ describe("WebSocket adapter extra branches", () => {
       }),
     );
   };
-
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1212,10 +1216,10 @@ describe("BroadcastChannel adapter - extra branches", () => {
     expect(() =>
       adapter.broadcast({
         type: PRESENCE_EVENT.UPDATE,
-      connectionId: "self",
-      userId: "self",
-      clock: 1,
-      updates: { status: "idle" },
+        connectionId: "self",
+        userId: "self",
+        clock: 1,
+        updates: { status: "idle" },
       }),
     ).not.toThrow();
   });
@@ -1254,7 +1258,10 @@ describe("BroadcastChannel adapter - extra branches", () => {
   });
 
   it("transitions active user to idle after idle timeout", async () => {
-    const a = createBroadcastChannelAdapter({ ...config, connectionId: "self" });
+    const a = createBroadcastChannelAdapter({
+      ...config,
+      connectionId: "self",
+    });
     const b = createBroadcastChannelAdapter({
       ...config,
       connectionId: "peer",

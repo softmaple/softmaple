@@ -5,7 +5,8 @@ and the Nitro collaboration service. It authenticates a WebSocket upgrade as
 having passed through the trusted web gateway; it does not authenticate the
 user or authorize access to a document.
 
-The canonical payload is UTF-8 with LF separators and no trailing newline:
+The canonical payload is UTF-8 with LF separators and no trailing newline.
+The sixth field is the backend upgrade target (pathname plus query):
 
 ```text
 softmaple-collab-upgrade-v1
@@ -13,9 +14,13 @@ ${keyId}
 ${timestamp}
 ${nonce}
 GET
-/document
+${pathname}${search}
 ${secWebSocketKey}
 ```
+
+Document upgrades use `/document`. Presence upgrades use
+`/presence?roomId=<document-uuid>`. The verifier rejects a signature whose
+bound target does not exactly match the request URL.
 
 Secrets are exactly 32 bytes encoded as unpadded base64url. Signatures use
 HMAC-SHA-256, nonces contain 16 random bytes, and verification accepts a

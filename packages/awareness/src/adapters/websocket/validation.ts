@@ -111,10 +111,7 @@ export const isPresenceUpdatePayload = (
   ) {
     return false;
   }
-  if (
-    updates.lastSeenAt !== undefined &&
-    !isFiniteNumber(updates.lastSeenAt)
-  ) {
+  if (updates.lastSeenAt !== undefined && !isFiniteNumber(updates.lastSeenAt)) {
     return false;
   }
   if (

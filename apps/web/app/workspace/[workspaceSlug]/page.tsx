@@ -1,300 +1,203 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { FileText, Plus, Settings2, Users } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@softmaple/ui/components/card";
 import { Badge } from "@softmaple/ui/components/badge";
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
 } from "@softmaple/ui/components/avatar";
-import {
-  FileText,
-  Plus,
-  Users,
-  Clock,
-  TrendingUp,
-  MoreHorizontal,
-} from "lucide-react";
-import Link from "next/link";
-
-import type { Metadata, ResolvingMetadata } from "next";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
-import { getAll } from "@/app/actions/getAll";
+import {
+  countWorkspaceDocuments,
+  listWorkspaceDocuments,
+} from "@/app/actions/documents/documents";
+import {
+  getWorkspaceMemberByUserId,
+  listWorkspaceMembers,
+} from "@/app/actions/workspaceMembers";
+import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 
-import dayjs from "@/utils/dayjs";
-import { getUserFullname } from "@/utils/getUserFullname";
-import { notFound } from "next/navigation";
+type Props = { params: Promise<{ workspaceSlug: string }> };
 
-type Props = {
-  params: Promise<{ workspaceSlug: string }>;
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-};
+const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter((part): part is string => part !== undefined)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
-export async function generateMetadata(
-  { params, searchParams }: Props,
-  parent: ResolvingMetadata,
-): Promise<Metadata> {
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { workspaceSlug } = await params;
-
-  // fetch workspace information
-  const { data: workspace } = await cachedGetWorkspaceBySlug(workspaceSlug);
-
-  const { title, description } = workspace || {};
-
+  const result = await cachedGetWorkspaceBySlug(workspaceSlug);
+  if (!result.ok) return { title: "Workspace" };
   return {
-    title,
-    description,
+    title: result.data.title,
+    description: result.data.description || "Softmaple workspace",
   };
 }
 
-export default async function WorkspacePage({ params, searchParams }: Props) {
+export default async function WorkspacePage({ params }: Props) {
   const { workspaceSlug } = await params;
-
-  // FIXME: only query data for the current workspace
-  const [{ data: documents, error: err1 }, { data: members, error: err2 }] =
+  const workspaceResult = await cachedGetWorkspaceBySlug(workspaceSlug);
+  if (!workspaceResult.ok) {
+    if (workspaceResult.code === "NOT_FOUND") notFound();
+    throw new Error(workspaceResult.message);
+  }
+  const workspace = workspaceResult.data;
+  const [documentsResult, documentCountResult, membersResult, roleResult] =
     await Promise.all([
-      getAll("documents", undefined, 5, "users"),
-      getAll("workspace_members", undefined, undefined, "users"),
+      listWorkspaceDocuments(workspace.id, 5),
+      countWorkspaceDocuments(workspace.id),
+      listWorkspaceMembers(workspace.id),
+      getWorkspaceMemberByUserId(workspace.id),
     ]);
+  if (!documentsResult.ok) throw new Error(documentsResult.message);
+  if (!documentCountResult.ok) throw new Error(documentCountResult.message);
+  if (!membersResult.ok) throw new Error(membersResult.message);
+  if (!roleResult.ok) throw new Error(roleResult.message);
 
-  const recentDocuments = (documents || []).map((doc) => {
-    const updatedBy = getUserFullname(doc.users);
-
-    return {
-      ...doc,
-      key: doc.id,
-      updated_by: updatedBy,
-    };
-  });
-  const allWorkspaceMembers = (members || []).map((member) => ({
-    ...member,
-    user: member?.users,
-    key: member.id,
-  }));
-
-  const error = err1 || err2;
-
-  if (error) {
-    console.error(error);
-
-    throw error;
-  }
-
-  const { data: currentWorkspace, error: workspaceError } =
-    await cachedGetWorkspaceBySlug(workspaceSlug);
-
-  if (workspaceError) {
-    console.error(workspaceError);
-    throw workspaceError;
-  }
-
-  if (!currentWorkspace) {
-    notFound();
-  }
-
-  const { title, description } = currentWorkspace;
-
-  const recentActivity = [
-    { action: "John Doe edited Research Proposal", time: "2 hours ago" },
-    {
-      action: "Jane Smith commented on Literature Review",
-      time: "4 hours ago",
-    },
-    { action: "John Doe created Methodology", time: "3 days ago" },
-    { action: "Jane Smith joined the workspace", time: "1 week ago" },
-  ];
+  const canEdit =
+    roleResult.data.role === WORKSPACE_ROLE.Owner ||
+    roleResult.data.role === WORKSPACE_ROLE.Editor;
+  const isOwner = roleResult.data.role === WORKSPACE_ROLE.Owner;
 
   return (
-    <div className="flex-1 overflow-auto">
-      {/* Header */}
-      <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">{title}</h1>
-              <p className="text-muted-foreground">{description}</p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
+    <div className="min-w-0 flex-1 overflow-y-auto">
+      <header className="border-b px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+              Workspace / {roleResult.data.role.toLowerCase()}
+            </p>
+            <h1 className="font-display mt-2 truncate text-3xl font-semibold">
+              {workspace.title}
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              {workspace.description || "A shared space for focused writing."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href={`/workspace/${workspaceSlug}/settings`}>
+                <Settings2 className="mr-2 h-4 w-4" />
+                Settings
+              </Link>
+            </Button>
+            {canEdit ? (
+              <Button asChild>
                 <Link href={`/workspace/${workspaceSlug}/doc/new`}>
-                  New Document
+                  <Plus className="mr-2 h-4 w-4" />
+                  New document
                 </Link>
               </Button>
-              <Button variant="outline">
-                <Users className="mr-2 h-4 w-4" />
-                Invite
-              </Button>
-            </div>
+            ) : null}
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="p-6 space-y-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Total Documents
-              </CardTitle>
-              <FileText className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {recentDocuments?.length || 0}
-              </div>
-              <p className="text-xs text-muted-foreground">+2 from last week</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Team Members
-              </CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{members?.length || 0}</div>
-              <p className="text-xs text-muted-foreground">All active</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">This Week</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">8</div>
-              <p className="text-xs text-muted-foreground">Documents edited</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Last Activity
-              </CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">2h</div>
-              <p className="text-xs text-muted-foreground">ago</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Documents */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Recent Documents</CardTitle>
-
-                {recentDocuments.length ? (
-                  <Button variant="ghost" size="sm">
-                    View all
-                  </Button>
-                ) : null}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {recentDocuments.map((doc: any) => (
+      <main className="mx-auto grid max-w-6xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:px-8">
+        <section className="min-w-0">
+          <div className="mb-4 flex items-end justify-between border-b pb-3">
+            <div>
+              <h2 className="text-lg font-semibold">Recent documents</h2>
+              <p className="text-sm text-muted-foreground">
+                {documentCountResult.data} total
+              </p>
+            </div>
+          </div>
+          {documentsResult.data.length === 0 ? (
+            <div className="rounded-sm border border-dashed p-10 text-center">
+              <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
+              <h3 className="mt-4 font-medium">No documents yet</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Create one and the first character will be saved to
+                collaborative history.
+              </p>
+              {canEdit ? (
+                <Button asChild className="mt-5" size="sm">
+                  <Link href={`/workspace/${workspaceSlug}/doc/new`}>
+                    Create document
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="divide-y rounded-sm border bg-card">
+              {documentsResult.data.map((document) => (
                 <Link
-                  key={doc.id}
-                  href={`/workspace/${workspaceSlug}/doc/${doc.slug}`}
+                  className="flex min-w-0 items-center gap-4 p-4 transition-colors hover:bg-accent"
+                  href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
+                  key={document.id}
                 >
-                  <div className="flex items-center space-x-4 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
-                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-medium">{doc.title}</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Edited by {doc.updated_by} •{" "}
-                        {dayjs(doc.updated_at).fromNow()}
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="icon">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-sm border bg-background text-primary">
+                    <FileText className="h-4 w-4" />
                   </div>
-                </Link>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Recent Activity */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {recentActivity.map((activity, index) => (
-                <div key={index} className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-primary rounded-full mt-2"></div>
-                  <div className="flex-1">
-                    <p className="text-sm">{activity.action}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {activity.time}
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate font-medium">{document.title}</h3>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {document.updated_at === null
+                        ? "Created just now"
+                        : `Edited ${new Date(document.updated_at).toLocaleString()}`}
                     </p>
                   </div>
-                </div>
+                  {document.is_public ? (
+                    <Badge variant="secondary">Public</Badge>
+                  ) : null}
+                </Link>
               ))}
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          )}
+        </section>
 
-        {/* Team Members */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Team Members</CardTitle>
-              <Button variant="outline" size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Invite Member
-              </Button>
+        <aside>
+          <div className="mb-4 flex items-center justify-between border-b pb-3">
+            <div>
+              <h2 className="text-lg font-semibold">Members</h2>
+              <p className="text-sm text-muted-foreground">
+                {membersResult.data.length} people
+              </p>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {(allWorkspaceMembers || []).map((member) => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Avatar>
-                      <AvatarImage
-                        src={member?.user?.avatar_src || "/placeholder.svg"}
-                      />
-                      <AvatarFallback>
-                        {member?.user?.full_name
-                          .split(" ")
-                          .map((n: string) => n[0])
-                          .join("")}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium">{member?.user?.full_name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {member?.user?.email}
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant="secondary">{member.role}</Badge>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <div className="space-y-1">
+            {membersResult.data.slice(0, 8).map((member) => (
+              <div
+                className="flex items-center gap-3 rounded-sm px-2 py-2"
+                key={member.member_id}
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarImage alt="" src={member.avatar_src ?? undefined} />
+                  <AvatarFallback className="text-[10px]">
+                    {initials(member.full_name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {member.full_name}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {member.email ?? member.role.toLowerCase()}
+                  </p>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                {member.role === WORKSPACE_ROLE.Owner ? (
+                  <Badge>Owner</Badge>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {isOwner ? (
+            <Button asChild className="mt-4 w-full" size="sm" variant="outline">
+              <Link href={`/workspace/${workspaceSlug}/settings?tab=members`}>
+                Manage members
+              </Link>
+            </Button>
+          ) : null}
+        </aside>
       </main>
     </div>
   );

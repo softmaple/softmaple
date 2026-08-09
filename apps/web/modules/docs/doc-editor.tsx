@@ -1,67 +1,60 @@
 "use client";
 
-import type { FC } from "react";
-
-import { memo, useState, useEffect } from "react";
-
+import { memo, type FC, useEffect, useState } from "react";
 import { LEXICAL_PLAYGROUND_CONFIG } from "@softmaple/editor/config/lexical";
 import { useEditorState } from "@/contexts/EditorStateContext";
+import {
+  CollabDocEditor,
+  type CollabDocEditorProps,
+} from "@/modules/docs/collab-doc-editor";
 
-import { CoreEditor } from "@softmaple/editor/components/core/CoreEditor";
+export type DocEditorProps = Pick<
+  CollabDocEditorProps,
+  | "documentId"
+  | "onCollaborationChange"
+  | "onExternalBindingChange"
+  | "onMarkdownChange"
+  | "onSelectionChange"
+  | "sessionMode"
+>;
 
-import { CollabDocEditor } from "@/modules/docs/collab-doc-editor";
-import type { CollabDocEditorProps } from "@/modules/docs/collab-doc-editor";
-
-export type DocEditorProps = {
-  documentId?: string;
-};
-
-const UnMemoizedDocEditor: FC<DocEditorProps> = (props) => {
-  const { documentId } = props;
-
-  const [isMounted, setIsMounted] = useState<boolean>(false);
+const UnMemoizedDocEditor: FC<DocEditorProps> = ({
+  documentId,
+  onCollaborationChange,
+  onExternalBindingChange,
+  onMarkdownChange,
+  onSelectionChange,
+  sessionMode,
+}) => {
+  const [isMounted, setIsMounted] = useState(false);
   const { activeEditor, setActiveEditor } = useEditorState();
 
   useEffect(() => {
-    // This effect runs only once when the component mounts
     setIsMounted(true);
-
-    return () => {
-      // Cleanup if necessary when the component unmounts
-      setIsMounted(false);
-    };
+    return () => setIsMounted(false);
   }, []);
 
-  if (!isMounted) {
-    // If the component is not mounted yet, return null or a loading state
-    return null;
-  }
+  if (!isMounted) return null;
 
   const commonConfig: CollabDocEditorProps["commonEditorConfig"] = {
     ...LEXICAL_PLAYGROUND_CONFIG,
-    namespace: "DocEditor",
-    onError: (error: unknown) => {
-      console.error(error);
-      throw error;
+    namespace: "SoftmapleDocumentEditor",
+    onError: (error: Error) => {
+      console.error("Document editor failed", error);
     },
   };
 
-  if (documentId) {
-    return (
-      <CollabDocEditor
-        documentId={documentId}
-        activeEditor={activeEditor}
-        setActiveEditor={setActiveEditor}
-        commonEditorConfig={commonConfig}
-      />
-    );
-  }
-
   return (
-    <CoreEditor
+    <CollabDocEditor
+      documentId={documentId}
       activeEditor={activeEditor}
       setActiveEditor={setActiveEditor}
-      lexicalConfig={commonConfig}
+      commonEditorConfig={commonConfig}
+      onCollaborationChange={onCollaborationChange}
+      onExternalBindingChange={onExternalBindingChange}
+      onMarkdownChange={onMarkdownChange}
+      onSelectionChange={onSelectionChange}
+      sessionMode={sessionMode}
     />
   );
 };

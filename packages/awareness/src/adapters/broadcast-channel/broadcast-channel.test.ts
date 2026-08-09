@@ -263,10 +263,10 @@ describe("BroadcastChannelAdapter", () => {
 
       adapter1.broadcast({
         type: PRESENCE_EVENT.UPDATE,
-      connectionId: "user-1",
-      userId: "user-1",
-      clock: 1,
-      updates: { cursor: { blockId: "block-2", offset: 8 } },
+        connectionId: "user-1",
+        userId: "user-1",
+        clock: 1,
+        updates: { cursor: { blockId: "block-2", offset: 8 } },
       });
 
       expect(adapter2.getPresence().get("user-1")?.cursor).toEqual({

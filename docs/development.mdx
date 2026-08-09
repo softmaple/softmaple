@@ -1,265 +1,144 @@
 ---
 title: 'Development'
-description: 'Set up the Softmaple development environment'
+description: 'Run and verify the Softmaple v1 stack'
 ---
 
 <Info>
-  **Prerequisites** Node.js 20+, pnpm 9.0+, PostgreSQL, and Git
+  Softmaple requires Node.js 24.12 or newer, pnpm 11, a Supabase project, and
+  PostgreSQL credentials for that project.
 </Info>
 
-## Monorepo Structure
+## Architecture
 
-Softmaple is organized as a Turborepo monorepo with the following structure:
+The monorepo contains a Next.js 16 web app, a single-instance Nitro WebSocket
+service, Prisma/Supabase migrations, the Lexical editor, and the EG-walker
+collaboration packages.
 
-```
-softmaple/
-├── apps/
-│   └── web/           # Next.js 16 application
-├── packages/
-│   ├── db/            # Prisma database client
-│   ├── collab-gateway-auth/ # Server-to-server WebSocket HMAC
-│   ├── ui/            # Shared UI components
-│   ├── editor/        # Lexical editor extensions
-│   ├── md2latex/      # Markdown to LaTeX converter
-│   ├── eslint-config/ # Shared ESLint configuration
-│   ├── typescript-config/ # Shared TypeScript configuration
-│   └── config/        # Shared configuration utilities
-├── docs/              # Documentation (this site)
-├── turbo.json         # Turborepo configuration
-└── package.json       # Root workspace configuration
+```text
+Browser → apps/web → HMAC WebSocket gateway → apps/collab → Supabase Postgres
+             └──────────────────────────────→ Supabase Auth / Data API / Storage
 ```
 
-## Getting Started
+Document metadata lives in `public.documents`. Document bodies exist only as
+immutable EG-walker event batches; no Markdown or editor JSON shadow column is
+stored. Markdown, preview, and LaTeX are derived from the current Lexical state.
 
-### 1. Clone and Install
+## Local setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/softmaple/softmaple.git
-cd softmaple
-
-# Install dependencies
 pnpm install
-```
-
-### 2. Environment Configuration
-
-Create separate environment files for the web app, database tooling, and
-collaboration service:
-
-```bash
 cp apps/web/.env.example apps/web/.env
-cp packages/db/.env.example packages/db/.env
 cp apps/collab/.env.example apps/collab/.env.local
+cp packages/db/.env.example packages/db/.env
 ```
 
-Configure the web app in `apps/web/.env`:
+Configure `apps/web/.env`:
 
 ```env
-# Supabase Authentication
-NEXT_PUBLIC_SUPABASE_URL="your-supabase-project-url"
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
+NEXT_PUBLIC_SUPABASE_URL="https://PROJECT_REF.supabase.co"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
 COLLAB_BACKEND_ORIGIN="http://localhost:3002"
 COLLAB_GATEWAY_HMAC_KEY_ID="local-dev"
 COLLAB_GATEWAY_HMAC_SECRET="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 ```
 
-Configure Prisma in `packages/db/.env`:
+Configure the collab service with the same project and HMAC secret:
 
 ```env
-DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
-DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
-```
-
-Configure the collaboration service in `apps/collab/.env.local` using the
-variables defined by `apps/collab/.env.example`:
-
-```env
-DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
-SUPABASE_URL="your-supabase-project-url"
-SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
+DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@POOLER:6543/postgres?pgbouncer=true"
+SUPABASE_URL="https://PROJECT_REF.supabase.co"
+SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
 COLLAB_GATEWAY_HMAC_KEYS='{"local-dev":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
 ```
 
-The checked-in secret is for local development only. Production and Preview
-environments must use their own 32-byte unpadded base64url secret. The browser
-always connects to the web app's same-origin `/collab/document` gateway.
+Use a direct connection in `packages/db/.env` for migrations:
 
-<Warning>
-  The stock Next.js 16.3 local server does not exercise the release-equivalent
-  external WebSocket rewrite for `proxy.ts`. Keep the HMAC unit and Nitro
-  upgrade tests green, then use a Vercel Preview to gate the real handshake,
-  reconnect, and repair/resync flow. The collab backend must not be exposed as
-  a browser fallback.
-</Warning>
-
-### 3. Database Setup
-
-Initialize the database with Prisma:
-
-```bash
-# Generate Prisma client
-pnpm --filter @softmaple/db db:generate
-
-# Run migrations
-pnpm --filter @softmaple/db db:migrate
-
-# (Optional) Seed the database
-pnpm --filter @softmaple/db db:seed
+```env
+DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@POOLER:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres:PASSWORD@DIRECT_HOST:5432/postgres"
 ```
 
-## Development Commands
+The checked-in HMAC value is local-only. Preview and production need a unique
+32-byte unpadded base64url secret. Never expose it through a `NEXT_PUBLIC_`
+variable.
 
-All commands should be run from the repository root:
+## Database
 
-### Core Commands
+Prisma migrations are the single schema source of truth.
 
 ```bash
-# Start development server (all apps)
+pnpm --filter @softmaple/db db:generate
+pnpm --filter @softmaple/db db:migrate
+pnpm --filter @softmaple/db db:verify:collab-security
+pnpm --filter @softmaple/db db:types
+```
+
+Commit the regenerated `packages/db/src/database.types.ts` whenever the public
+schema or RPC surface changes. The avatars bucket accepts JPEG, PNG, and WebP
+up to 2 MB; the web action also rejects images above 2048 × 2048.
+
+## Run and verify
+
+```bash
 pnpm dev
-
-# Build all packages and apps
-pnpm build
-
-# Run linting
-pnpm lint
-
-# Format code with Biome
-pnpm format
+pnpm format:check
+pnpm --filter @softmaple/web lint
+pnpm typecheck
+pnpm --filter @softmaple/web test -- --run
+pnpm --filter @softmaple/collab test
+pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
 ```
 
-### Package-Specific Commands
+`pnpm dev` starts Web and Collab through Turborepo. Browser WebSockets always
+use the web origin at `/collab/document` and `/collab/presence`; the browser
+must never receive a direct backend URL.
 
-Use the `--filter` flag to run commands for specific packages:
+## Real E2E
 
-<CodeGroup>
+Playwright uses dynamic ports, starts both services, and refuses to reuse an
+existing server. Core E2E never uses a mock Supabase client or a forged cookie.
+It requires a dedicated, non-production Supabase project:
 
-```bash Web App
-# Type checking
-pnpm --filter @softmaple/web typecheck
+```env
+DATABASE_URL="isolated pooled database URL"
+DIRECT_URL="isolated direct database URL"
+NEXT_PUBLIC_SUPABASE_URL="https://E2E_PROJECT_REF.supabase.co"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="isolated publishable key"
+SUPABASE_SERVICE_ROLE_KEY="isolated service-role key"
+E2E_ALLOW_REMOTE_SEED="true"
+E2E_SEED_SECRET="a long random bearer secret"
+E2E_SUPABASE_PROJECT_REF="E2E_PROJECT_REF"
+SUPABASE_PRODUCTION_PROJECT_REF="PRODUCTION_PROJECT_REF"
+```
 
-# Run E2E tests
+The seed route returns 404 unless all guards pass. Cleanup deletes only the
+exact run-scoped test users, whose cascades remove their workspaces; it never
+uses broad truncation.
+
+```bash
+pnpm --filter @softmaple/db db:deploy
 pnpm --filter @softmaple/web test:e2e
-
-# Build production
-pnpm --filter @softmaple/web build
 ```
 
-```bash Database
-# Generate Prisma client
-pnpm --filter @softmaple/db db:generate
+The `Isolated Supabase E2E` GitHub environment stores these secrets and requires
+approval. The regular Chromium smoke suite needs no production credentials.
 
-# Run migrations
-pnpm --filter @softmaple/db db:migrate
+## Deployment gates
 
-# Open Prisma Studio
-pnpm --filter @softmaple/db db:studio
-```
+The v1 collab service must run as exactly one Nitro replica because document
+fan-out and Presence rooms are process-local. Do not enable horizontal scaling
+until shared pub/sub exists.
 
-```bash Tests
-# Run md2latex tests
-pnpm --filter @softmaple/md2latex test
+Before promotion, verify in a real Preview environment:
 
-# Run with coverage
-pnpm --filter @softmaple/md2latex test:coverage
-```
+- HMAC-protected WebSocket upgrades for document and Presence paths;
+- direct unsigned backend rejection and reconnect/repair behavior;
+- public read-only access and immediate revocation;
+- avatar upload, public delivery, replacement, and removal;
+- a single Collab replica is configured.
 
-</CodeGroup>
-
-## Git Workflow
-
-### Branch Naming
-
-Create branches with timestamp suffix:
-
-```bash
-git checkout -b feature/my-feature-$(date +%s)
-```
-
-### Commit Convention
-
-Use conventional commits:
-
-```
-type(scope): summary
-
-Types: fix, feat, build, chore, ci, docs, style, refactor, perf, test
-Scope: apps/web, packages/<name>, or empty for root changes
-```
-
-Examples:
-- `feat(apps/web): add document sharing`
-- `fix(packages/db): resolve migration issue`
-- `chore: update dependencies`
-
-## Testing
-
-### Unit Tests
-
-Unit tests use Vitest and are located in `packages/md2latex/tests/`:
-
-```bash
-pnpm --filter @softmaple/md2latex test
-```
-
-### E2E Tests
-
-End-to-end tests use Playwright and test the full application:
-
-```bash
-# Run E2E tests
-NEXT_PUBLIC_E2E_TEST_MODE=true pnpm --filter @softmaple/web test:e2e
-
-# Run smoke tests only
-pnpm --filter @softmaple/web test:e2e:smoke
-```
-
-## Troubleshooting
-
-Common issues and solutions:
-
-<AccordionGroup>
-  <Accordion title="pnpm: command not found">
-    Install pnpm globally:
-    
-    ```bash
-    npm install -g pnpm
-    ```
-  </Accordion>
-  <Accordion title="Database connection failed">
-    Ensure PostgreSQL is running and the DATABASE_URL is correct:
-    
-    ```bash
-    # Check PostgreSQL status
-    psql -U postgres -c "\l"
-    ```
-  </Accordion>
-  <Accordion title="Husky hooks failing">
-    If pre-commit hooks fail, you can bypass them temporarily:
-    
-    ```bash
-    HUSKY=0 git commit -m "your message"
-    ```
-    
-    But make sure to fix any issues before pushing.
-  </Accordion>
-  <Accordion title="Module not found errors">
-    Regenerate Prisma client after schema changes:
-    
-    ```bash
-    pnpm --filter @softmaple/db db:generate
-    ```
-  </Accordion>
-</AccordionGroup>
-
-## Resources
-
-- [GitHub Repository](https://github.com/softmaple/softmaple)
-- [Live Demo](https://softmaple.ink)
-- [Discord Community](https://discord.gg/Vwsuqq7dQD)
-- [Blog](https://blog.softmaple.ink)
-- [Insights Dashboard](https://insights.softmaple.ink)
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Turborepo Documentation](https://turbo.build/repo/docs)
-- [Prisma Documentation](https://www.prisma.io/docs)
-- [Supabase Postgres Documentation](https://supabase.com/docs/guides/database/overview)
+Playwright's local Upgrade-capable gateway covers signed document and Presence
+handshakes through that gateway (not against `next dev` directly), but it is
+not a release-equivalent test of the Vercel external WebSocket rewrite, so
+Preview validation remains a required release gate.

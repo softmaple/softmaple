@@ -44,7 +44,7 @@ export const nextJsConfig = [
     plugins: {
       "react-hooks": pluginReactHooks,
     },
-    settings: { react: { version: "detect" }, next: { rootDir: "apps/web" } },
+    settings: { react: { version: "detect" }, next: { rootDir: "." } },
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",

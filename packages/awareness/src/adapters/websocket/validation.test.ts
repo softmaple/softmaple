@@ -72,9 +72,7 @@ describe("websocket validation", () => {
 
   describe("isLeavePayload", () => {
     it("accepts a userId string", () => {
-      expect(isLeavePayload({ connectionId: "c-1", userId: "u-1" })).toBe(
-        true,
-      );
+      expect(isLeavePayload({ connectionId: "c-1", userId: "u-1" })).toBe(true);
     });
 
     it("rejects non-string userId", () => {
@@ -85,9 +83,14 @@ describe("websocket validation", () => {
 
   describe("isPresenceUpdatePayload", () => {
     it("accepts a minimal valid update", () => {
-      expect(isPresenceUpdatePayload({ connectionId: "c-1", userId: "u-1", clock: 1, updates: {} })).toBe(
-        true,
-      );
+      expect(
+        isPresenceUpdatePayload({
+          connectionId: "c-1",
+          userId: "u-1",
+          clock: 1,
+          updates: {},
+        }),
+      ).toBe(true);
     });
 
     it("accepts null cursor / selection (explicit clear on wire)", () => {
@@ -273,9 +276,9 @@ describe("websocket validation", () => {
           user: { ...validUser(), avatarUrl: "https://x", cursor: null },
         }),
       ).toBe(true);
-      expect(
-        isJoinPayload({ user: { ...validUser(), avatarUrl: 12 } }),
-      ).toBe(false);
+      expect(isJoinPayload({ user: { ...validUser(), avatarUrl: 12 } })).toBe(
+        false,
+      );
     });
 
     it("accepts stable cursor anchors on join", () => {

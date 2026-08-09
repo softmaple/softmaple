@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings, User, Users } from "lucide-react";
+import { Settings, User } from "lucide-react";
 
 import { Button } from "@softmaple/ui/components/button";
 import {
@@ -17,12 +17,6 @@ const settingsItems = [
     href: "/settings/account",
     icon: User,
     label: "Account",
-  },
-  {
-    key: "team",
-    href: "/settings/team",
-    icon: Users,
-    label: "Team",
   },
 ];
 

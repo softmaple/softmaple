@@ -1,8 +1,8 @@
 # `@softmaple/collab`
 
 Nitro WebSocket service that authenticates document sessions, persists
-EG-walker event batches to Supabase Postgres, and fans committed batches out
-to other peers in the same document room.
+EG-walker event batches to Supabase Postgres, fans committed batches out to
+document peers, and hosts ephemeral awareness rooms.
 
 This replaces Liveblocks for durable document collaboration. The browser host
 (`apps/web`) connects with a Supabase access token; this service is the only
@@ -29,8 +29,8 @@ presence.
 | Wire messages / validation | `@softmaple/collab-protocol` |
 | Rich-text batches / CRDT model | `@softmaple/block-model` / `@softmaple/eg-walker` |
 | Lexical projection | `@softmaple/binding-lexical` + `apps/web` |
-| Presence / cursors | `@softmaple/awareness` (separate channel) |
-| Auth, durable store, fan-out | **this service** |
+| Presence protocol / client state | `@softmaple/awareness` |
+| Auth, durable store, fan-out, presence rooms | **this service** |
 
 ## Endpoints
 
@@ -38,11 +38,12 @@ presence.
 | --- | --- | --- |
 | `/health` | HTTP | Liveness probe (`{ service, status }`) |
 | `/document` | WebSocket | Authenticated collaboration session |
+| `/presence` | WebSocket | Authenticated, ephemeral awareness session |
 
 The supported browser entry point is the same-origin
 `ws(s)://<web>/collab/document` gateway. `apps/web/proxy.ts` validates the
 browser Origin, adds an HMAC signature, and rewrites the upgrade to this
-service's `/document` endpoint. Direct unsigned upgrades are normally rejected
+service. Direct unsigned upgrades are normally rejected
 before peer context is created. During the rollback window, an unsigned direct
 upgrade is temporarily accepted in legacy mode when its Origin is listed in
 the deprecated `COLLAB_ALLOWED_ORIGINS`; that path is not HMAC-protected.
@@ -53,8 +54,8 @@ upgrades.
 
 1. Client opens the web gateway. The collab service verifies the server HMAC
    during WebSocket upgrade.
-2. Client sends an `auth` message with
-   `accessToken`, `documentId`, and `sessionId`.
+2. Client sends a v3 `auth` message with a credential (`access-token` or
+   `public`), `documentId`, and `sessionId`.
 3. Server validates the JWT via Supabase Auth, loads workspace membership,
    and replies with `ready` (`role`, `canWrite`).
 4. Client sends `repair-request` pages (`afterCursor`) until `complete` to
@@ -70,8 +71,22 @@ The HMAC authenticates the web gateway, not the user. Supabase access-token
 verification and workspace membership remain the document authorization
 boundary.
 
-Message shapes and error codes live in `@softmaple/collab-protocol`
-(protocol version `2`).
+Public credentials are accepted only for documents already marked public.
+Those sessions replay and subscribe to history but cannot send events and do
+not join Presence. Protocol v3 is current; v2 authenticated clients remain
+accepted during rollout.
+
+Presence uses its own awareness v2 messages, a 64 KiB frame ceiling, per-peer
+rate and clock checks, heartbeat expiry, database-authoritative profiles, and
+periodic membership reauthorization. Presence never writes Postgres.
+
+## Deployment topology
+
+Version 1 must run exactly **one Nitro replica**. Document fan-out and Presence
+rooms use process-local pub/sub; multiple replicas would partition live peers
+even though durable document history remains safe. Configure the hosting
+platform for a single instance and do not enable horizontal autoscaling until
+a shared pub/sub transport is implemented.
 
 ## Persistence
 
@@ -137,10 +152,13 @@ apps/collab/
 ├── nitro.config.ts          # Nitro + websocket + env loading
 ├── server/
 │   ├── routes/
-│   │   ├── document.ts      # WebSocket collab handler
+│   │   ├── document.ts      # Durable collaboration handler
+│   │   ├── presence.ts      # Ephemeral awareness handler
 │   │   └── health.ts
 │   └── utils/
-│       ├── auth.ts          # JWT + workspace membership
+│       ├── auth.ts          # JWT/public document authorization
+│       ├── gateway-auth.ts  # HMAC upgrade verification
+│       ├── presence.ts      # Presence parsing, clocks, rate limits
 │       ├── event-store.ts   # Append / repair paging
 │       └── prisma.ts
 └── test/

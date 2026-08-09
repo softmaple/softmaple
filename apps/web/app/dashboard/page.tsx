@@ -8,12 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function DashboardPage() {
-  const { data: workspaces, error } = await cachedGetWorkspaces();
-
-  if (error) {
-    console.error(error);
-    throw error;
-  }
-
-  return <Dashboard workspaces={workspaces} />;
+  const result = await cachedGetWorkspaces();
+  if (!result.ok) throw new Error(result.message);
+  return <Dashboard workspaces={result.data} />;
 }

@@ -1,15 +1,14 @@
 import {
+  COLLAB_ACCESS_MODE,
   COLLAB_ERROR_CODE,
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
+  LEGACY_COLLAB_PROTOCOL_VERSION,
   parseClientCollabMessage,
+  type CollabCredential,
   type CollabErrorCode,
+  type SupportedCollabProtocolVersion,
 } from "@softmaple/collab-protocol";
-import {
-  hasCollabGatewayAuthHeaders,
-  parseCollabGatewayKeyring,
-  verifyCollabGatewayAuthRequest,
-} from "@softmaple/collab-gateway-auth";
 import { defineWebSocketHandler } from "nitro";
 import { authorizeDocument, type DocumentAccess } from "../utils/auth";
 import {
@@ -18,81 +17,25 @@ import {
   EventConflictError,
   readEventPage,
 } from "../utils/event-store";
+import { authenticateGatewayUpgrade } from "../utils/gateway-auth";
 
 const TOPIC_PREFIX = "document:";
 const AUTHORIZATION_CACHE_TTL_MS = 15_000;
 const MESSAGE_RATE_LIMIT_WINDOW_MS = 10_000;
 const MESSAGE_RATE_LIMIT_MAX = 120;
+const MAX_MESSAGE_BYTES = 256 * 1024;
+const MAX_DOCUMENT_CONNECTIONS = 100;
+const documentConnectionCounts = new Map<string, number>();
 
 interface MessageRateLimit {
   readonly count: number;
   readonly windowStartedAt: number;
 }
 
-// Release-one migration fallback only. It has no default and is unreachable
-// once the deprecated deployment variable is removed after the rollback window.
-const legacyAllowedOrigins = (): ReadonlySet<string> => {
-  const configured = process.env.COLLAB_ALLOWED_ORIGINS;
-  if (!configured) return new Set();
-  return new Set(
-    configured
-      .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean),
-  );
-};
-
-const rejectUpgrade = (mode: "hmac" | "legacy", reason: string): never => {
-  console.warn("Collaboration gateway upgrade rejected", { mode, reason });
-  throw new Response("Forbidden", { status: 403 });
-};
-
-const authenticateGatewayUpgrade = (
-  request: Request,
-): Readonly<Record<string, unknown>> => {
-  if (hasCollabGatewayAuthHeaders(request.headers)) {
-    let verification;
-    try {
-      const keyring = parseCollabGatewayKeyring(
-        process.env.COLLAB_GATEWAY_HMAC_KEYS,
-      );
-      verification = verifyCollabGatewayAuthRequest(request, keyring);
-    } catch {
-      return rejectUpgrade("hmac", "invalid-configuration");
-    }
-    if (!verification.ok) {
-      return rejectUpgrade("hmac", verification.reason);
-    }
-    console.info("Collaboration gateway upgrade accepted", {
-      mode: "hmac",
-      keyId: verification.keyId,
-    });
-    return Object.freeze({
-      gatewayAuthMode: "hmac",
-      gatewayAuthKeyId: verification.keyId,
-    });
-  }
-
-  if (process.env.COLLAB_GATEWAY_HMAC_KEYS !== undefined) {
-    try {
-      parseCollabGatewayKeyring(process.env.COLLAB_GATEWAY_HMAC_KEYS);
-    } catch {
-      return rejectUpgrade("legacy", "invalid-configuration");
-    }
-  }
-
-  const origin = request.headers.get("origin");
-  if (origin === null || !legacyAllowedOrigins().has(origin)) {
-    return rejectUpgrade("legacy", "origin-not-allowed");
-  }
-  console.warn("Collaboration gateway upgrade accepted in legacy mode", {
-    mode: "legacy",
-  });
-  return Object.freeze({ gatewayAuthMode: "legacy" });
-};
-
-const topicForDocument = (documentId: string): string =>
-  `${TOPIC_PREFIX}${documentId}`;
+const topicForDocument = (
+  documentId: string,
+  protocolVersion: SupportedCollabProtocolVersion,
+): string => `${TOPIC_PREFIX}v${protocolVersion}:${documentId}`;
 
 const accessFromContext = (
   context: Record<string, unknown>,
@@ -102,21 +45,50 @@ const accessFromContext = (
   const access = value as Partial<DocumentAccess>;
   if (
     typeof access.documentId !== "string" ||
-    typeof access.userId !== "string" ||
-    typeof access.role !== "string" ||
+    (access.accessMode !== COLLAB_ACCESS_MODE.Authenticated &&
+      access.accessMode !== COLLAB_ACCESS_MODE.Public) ||
     typeof access.canWrite !== "boolean"
+  ) {
+    return null;
+  }
+  if (
+    access.accessMode === COLLAB_ACCESS_MODE.Authenticated &&
+    (typeof access.userId !== "string" || typeof access.role !== "string")
+  ) {
+    return null;
+  }
+  if (
+    access.accessMode === COLLAB_ACCESS_MODE.Public &&
+    (access.userId !== null || access.role !== null || access.canWrite)
   ) {
     return null;
   }
   return access as DocumentAccess;
 };
 
-const accessTokenFromContext = (
+const credentialFromContext = (
   context: Record<string, unknown>,
-): string | null => {
-  const value = context.accessToken;
-  return typeof value === "string" && value.length > 0 ? value : null;
+): CollabCredential | null => {
+  const value = context.credential;
+  if (typeof value !== "object" || value === null) return null;
+  const credential = value as Partial<CollabCredential>;
+  if (credential.kind === "public") return { kind: "public" };
+  if (
+    credential.kind === "access-token" &&
+    typeof credential.token === "string" &&
+    credential.token.length > 0
+  ) {
+    return { kind: "access-token", token: credential.token };
+  }
+  return null;
 };
+
+const protocolVersionFromContext = (
+  context: Record<string, unknown>,
+): SupportedCollabProtocolVersion =>
+  context.protocolVersion === LEGACY_COLLAB_PROTOCOL_VERSION
+    ? LEGACY_COLLAB_PROTOCOL_VERSION
+    : COLLAB_PROTOCOL_VERSION;
 
 const authorizationExpiresAtFromContext = (
   context: Record<string, unknown>,
@@ -140,6 +112,28 @@ const cacheDocumentAccess = (
 const invalidateDocumentAccess = (context: Record<string, unknown>): void => {
   delete context.documentAccess;
   delete context.authorizationExpiresAt;
+};
+
+const countedDocumentIdFromContext = (
+  context: Record<string, unknown>,
+): string | null => {
+  const value = context.countedDocumentId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+};
+
+const releaseDocumentConnection = (
+  context: Record<string, unknown>,
+  documentId: string,
+): void => {
+  if (context.connectionCounted !== true) return;
+  const nextCount = Math.max(
+    0,
+    (documentConnectionCounts.get(documentId) ?? 1) - 1,
+  );
+  if (nextCount === 0) documentConnectionCounts.delete(documentId);
+  else documentConnectionCounts.set(documentId, nextCount);
+  delete context.connectionCounted;
+  delete context.countedDocumentId;
 };
 
 const consumeMessageQuota = (context: Record<string, unknown>): boolean => {
@@ -182,8 +176,9 @@ const errorMessage = (
   code: CollabErrorCode,
   message: string,
   retryable: boolean,
+  protocolVersion: SupportedCollabProtocolVersion = COLLAB_PROTOCOL_VERSION,
 ) => ({
-  protocolVersion: COLLAB_PROTOCOL_VERSION,
+  protocolVersion,
   type: COLLAB_MESSAGE_TYPE.Error,
   code,
   message,
@@ -193,16 +188,22 @@ const errorMessage = (
 export default defineWebSocketHandler({
   async upgrade(request) {
     const context = authenticateGatewayUpgrade(request);
-    return { namespace: "softmaple-collab-v2", context };
+    return { namespace: "softmaple-collab-v3", context };
   },
 
   async message(peer, rawMessage) {
+    const rawText = rawMessage.text();
+    if (new TextEncoder().encode(rawText).byteLength > MAX_MESSAGE_BYTES) {
+      peer.close(1009, "Collaboration message is too large");
+      return;
+    }
     if (!consumeMessageQuota(peer.context)) {
       peer.send(
         errorMessage(
           COLLAB_ERROR_CODE.InvalidMessage,
           "Too many collaboration messages",
           true,
+          protocolVersionFromContext(peer.context),
         ),
       );
       peer.close(1013, "Message rate limit exceeded");
@@ -211,7 +212,7 @@ export default defineWebSocketHandler({
 
     let message;
     try {
-      message = parseClientCollabMessage(JSON.parse(rawMessage.text()));
+      message = parseClientCollabMessage(JSON.parse(rawText));
     } catch (error) {
       logRouteError(
         error,
@@ -223,6 +224,7 @@ export default defineWebSocketHandler({
           COLLAB_ERROR_CODE.InvalidMessage,
           "The collaboration message is invalid",
           false,
+          protocolVersionFromContext(peer.context),
         ),
       );
       return;
@@ -244,33 +246,100 @@ export default defineWebSocketHandler({
       }
       peer.context.authenticationPending = true;
       try {
-        const access = await authorizeDocument(
-          message.accessToken,
-          message.documentId,
-        );
+        const credential: CollabCredential =
+          message.protocolVersion === LEGACY_COLLAB_PROTOCOL_VERSION
+            ? { kind: "access-token", token: message.accessToken }
+            : message.credential;
+        const access = await authorizeDocument(credential, message.documentId);
         if (access === null) {
           peer.send(
             errorMessage(
               COLLAB_ERROR_CODE.AuthenticationFailed,
               "Authentication or document membership failed",
               false,
+              message.protocolVersion,
             ),
           );
           peer.close(1008, "Unauthorized");
           return;
         }
+        if (
+          message.protocolVersion === LEGACY_COLLAB_PROTOCOL_VERSION &&
+          access.accessMode !== COLLAB_ACCESS_MODE.Authenticated
+        ) {
+          peer.close(1008, "Legacy public collaboration is unsupported");
+          return;
+        }
+        const currentConnections =
+          documentConnectionCounts.get(access.documentId) ?? 0;
+        if (currentConnections >= MAX_DOCUMENT_CONNECTIONS) {
+          peer.send(
+            errorMessage(
+              COLLAB_ERROR_CODE.Forbidden,
+              "This document has reached its connection limit",
+              true,
+              message.protocolVersion,
+            ),
+          );
+          peer.close(1013, "Document connection limit reached");
+          return;
+        }
+        documentConnectionCounts.set(access.documentId, currentConnections + 1);
+        peer.context.connectionCounted = true;
+        peer.context.countedDocumentId = access.documentId;
         cacheDocumentAccess(peer.context, access);
-        peer.context.accessToken = message.accessToken;
+        peer.context.credential = credential;
+        peer.context.protocolVersion = message.protocolVersion;
         peer.context.sessionId = message.sessionId;
-        peer.subscribe(topicForDocument(access.documentId));
-        peer.send({
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.Ready,
-          documentId: access.documentId,
-          userId: access.userId,
-          role: access.role,
-          canWrite: access.canWrite,
-        });
+        peer.subscribe(
+          topicForDocument(access.documentId, message.protocolVersion),
+        );
+        peer.context.authorizationRecheckTimer = setInterval(() => {
+          if (peer.context.authorizationRecheckPending === true) return;
+          peer.context.authorizationRecheckPending = true;
+          void authorizeDocument(credential, access.documentId)
+            .then((reauthorized) => {
+              const current = accessFromContext(peer.context);
+              if (
+                current === null ||
+                reauthorized === null ||
+                reauthorized.accessMode !== current.accessMode ||
+                reauthorized.userId !== current.userId
+              ) {
+                invalidateDocumentAccess(peer.context);
+                peer.close(1008, "Collaboration access was revoked");
+                return;
+              }
+              cacheDocumentAccess(peer.context, reauthorized);
+            })
+            .catch((error: unknown) => {
+              logRouteError(error, access.documentId, "authorization-recheck");
+              peer.close(1011, "Authorization recheck failed");
+            })
+            .finally(() => {
+              delete peer.context.authorizationRecheckPending;
+            });
+        }, AUTHORIZATION_CACHE_TTL_MS);
+        peer.send(
+          message.protocolVersion === LEGACY_COLLAB_PROTOCOL_VERSION
+            ? {
+                protocolVersion: LEGACY_COLLAB_PROTOCOL_VERSION,
+                type: COLLAB_MESSAGE_TYPE.Ready,
+                documentId: access.documentId,
+                userId: access.userId,
+                role: access.role,
+                canWrite: access.canWrite,
+              }
+            : {
+                protocolVersion: COLLAB_PROTOCOL_VERSION,
+                type: COLLAB_MESSAGE_TYPE.Ready,
+                accessMode: access.accessMode,
+                documentId: access.documentId,
+                userId: access.userId,
+                role: access.role,
+                canWrite: access.canWrite,
+              },
+        );
       } catch (error) {
         invalidateDocumentAccess(peer.context);
         logRouteError(error, message.documentId, message.type);
@@ -279,6 +348,7 @@ export default defineWebSocketHandler({
             COLLAB_ERROR_CODE.AuthenticationFailed,
             "Authentication is temporarily unavailable",
             true,
+            message.protocolVersion,
           ),
         );
       } finally {
@@ -294,18 +364,20 @@ export default defineWebSocketHandler({
           COLLAB_ERROR_CODE.AuthenticationFailed,
           "Authenticate before sending collaboration messages",
           false,
+          protocolVersionFromContext(peer.context),
         ),
       );
       return;
     }
 
-    const accessToken = accessTokenFromContext(peer.context);
-    if (accessToken === null) {
+    const credential = credentialFromContext(peer.context);
+    if (credential === null) {
       peer.send(
         errorMessage(
           COLLAB_ERROR_CODE.AuthenticationFailed,
           "The collaboration session is invalid",
           false,
+          protocolVersionFromContext(peer.context),
         ),
       );
       peer.close(1008, "Unauthorized");
@@ -316,16 +388,21 @@ export default defineWebSocketHandler({
     if (authorizationExpiresAtFromContext(peer.context) <= Date.now()) {
       try {
         const reauthorized = await authorizeDocument(
-          accessToken,
+          credential,
           access.documentId,
         );
-        if (reauthorized === null || reauthorized.userId !== access.userId) {
+        if (
+          reauthorized === null ||
+          reauthorized.accessMode !== access.accessMode ||
+          reauthorized.userId !== access.userId
+        ) {
           invalidateDocumentAccess(peer.context);
           peer.send(
             errorMessage(
               COLLAB_ERROR_CODE.AuthenticationFailed,
               "Authentication or document membership failed",
               false,
+              protocolVersionFromContext(peer.context),
             ),
           );
           peer.close(1008, "Unauthorized");
@@ -341,6 +418,7 @@ export default defineWebSocketHandler({
             COLLAB_ERROR_CODE.AuthenticationFailed,
             "Authentication is temporarily unavailable",
             true,
+            protocolVersionFromContext(peer.context),
           ),
         );
         peer.close(1011, "Authentication unavailable");
@@ -355,7 +433,7 @@ export default defineWebSocketHandler({
           message.afterCursor,
         );
         peer.send({
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
+          protocolVersion: protocolVersionFromContext(peer.context),
           type: COLLAB_MESSAGE_TYPE.RepairResponse,
           requestId: message.requestId,
           ...page,
@@ -367,6 +445,7 @@ export default defineWebSocketHandler({
             COLLAB_ERROR_CODE.PersistenceFailed,
             "Document history could not be loaded",
             true,
+            protocolVersionFromContext(peer.context),
           ),
         );
       }
@@ -380,6 +459,18 @@ export default defineWebSocketHandler({
             COLLAB_ERROR_CODE.Forbidden,
             "This workspace role cannot edit documents",
             false,
+            protocolVersionFromContext(peer.context),
+          ),
+        );
+        return;
+      }
+      if (currentAccess.accessMode !== COLLAB_ACCESS_MODE.Authenticated) {
+        peer.send(
+          errorMessage(
+            COLLAB_ERROR_CODE.Forbidden,
+            "Public document sessions are read-only",
+            false,
+            protocolVersionFromContext(peer.context),
           ),
         );
         return;
@@ -391,15 +482,23 @@ export default defineWebSocketHandler({
           message.batches,
         );
         peer.send({
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
+          protocolVersion: protocolVersionFromContext(peer.context),
           type: COLLAB_MESSAGE_TYPE.DurableAck,
           batchIds,
         });
-        peer.publish(topicForDocument(currentAccess.documentId), {
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.Event,
-          batches: message.batches,
-        });
+        for (const protocolVersion of [
+          LEGACY_COLLAB_PROTOCOL_VERSION,
+          COLLAB_PROTOCOL_VERSION,
+        ] as const) {
+          peer.publish(
+            topicForDocument(currentAccess.documentId, protocolVersion),
+            {
+              protocolVersion,
+              type: COLLAB_MESSAGE_TYPE.Event,
+              batches: message.batches,
+            },
+          );
+        }
       } catch (error) {
         logRouteError(error, currentAccess.documentId, message.type);
         const conflict = error instanceof EventConflictError;
@@ -417,6 +516,7 @@ export default defineWebSocketHandler({
                 ? "The event batch conflicts with stored document history"
                 : "The event batch was not saved",
             !conflict && !forbidden,
+            protocolVersionFromContext(peer.context),
           ),
         );
       }
@@ -424,9 +524,20 @@ export default defineWebSocketHandler({
   },
 
   close(peer) {
+    const authorizationRecheckTimer = peer.context.authorizationRecheckTimer;
+    if (authorizationRecheckTimer !== undefined) {
+      clearInterval(
+        authorizationRecheckTimer as ReturnType<typeof setInterval>,
+      );
+    }
     const access = accessFromContext(peer.context);
-    if (access !== null) {
-      peer.unsubscribe(topicForDocument(access.documentId));
+    const documentId =
+      access?.documentId ?? countedDocumentIdFromContext(peer.context);
+    if (documentId !== null) {
+      peer.unsubscribe(
+        topicForDocument(documentId, protocolVersionFromContext(peer.context)),
+      );
+      releaseDocumentConnection(peer.context, documentId);
     }
   },
 });

@@ -6,8 +6,13 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/utils/supabase/middleware";
 
-const COLLAB_GATEWAY_PATH = "/collab/document";
-const COLLAB_BACKEND_PATH = "/document";
+const COLLAB_GATEWAY_ROUTES = {
+  "/collab/document": { backendPath: "/document", query: "none" },
+  "/collab/presence": { backendPath: "/presence", query: "room" },
+} as const;
+type CollabGatewayPath = keyof typeof COLLAB_GATEWAY_ROUTES;
+const DOCUMENT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SENSITIVE_FORWARDED_HEADERS = Object.freeze([
   "authorization",
   "cookie",
@@ -46,7 +51,10 @@ const isSameOriginBrowserRequest = (request: NextRequest): boolean => {
   }
 };
 
-const collabBackendUrl = (configuredOrigin: string | undefined): URL => {
+const collabBackendUrl = (
+  configuredOrigin: string | undefined,
+  backendPath: string,
+): URL => {
   if (configuredOrigin === undefined) {
     throw new Error("COLLAB_BACKEND_ORIGIN is missing");
   }
@@ -61,14 +69,31 @@ const collabBackendUrl = (configuredOrigin: string | undefined): URL => {
   ) {
     throw new Error("COLLAB_BACKEND_ORIGIN must be an HTTP origin");
   }
-  return new URL(COLLAB_BACKEND_PATH, origin);
+  return new URL(backendPath, origin);
 };
 
-const collabGatewayRewrite = (request: NextRequest): NextResponse => {
+const hasValidGatewayQuery = (
+  request: NextRequest,
+  path: CollabGatewayPath,
+): boolean => {
+  const route = COLLAB_GATEWAY_ROUTES[path];
+  if (route.query === "none") return request.nextUrl.search === "";
+  const entries = [...request.nextUrl.searchParams.entries()];
+  return (
+    entries.length === 1 &&
+    entries[0]?.[0] === "roomId" &&
+    DOCUMENT_ID_PATTERN.test(entries[0]?.[1] ?? "")
+  );
+};
+
+const collabGatewayRewrite = (
+  request: NextRequest,
+  path: CollabGatewayPath,
+): NextResponse => {
   if (
     request.method !== "GET" ||
-    request.nextUrl.pathname !== COLLAB_GATEWAY_PATH ||
-    request.nextUrl.search !== "" ||
+    request.nextUrl.pathname !== path ||
+    !hasValidGatewayQuery(request, path) ||
     !isWebSocketUpgrade(request)
   ) {
     return badRequest();
@@ -78,7 +103,13 @@ const collabGatewayRewrite = (request: NextRequest): NextResponse => {
   let backendUrl: URL;
   let signerConfig;
   try {
-    backendUrl = collabBackendUrl(process.env.COLLAB_BACKEND_ORIGIN);
+    backendUrl = collabBackendUrl(
+      process.env.COLLAB_BACKEND_ORIGIN,
+      COLLAB_GATEWAY_ROUTES[path].backendPath,
+    );
+    if (COLLAB_GATEWAY_ROUTES[path].query === "room") {
+      backendUrl.search = request.nextUrl.search;
+    }
     signerConfig = parseCollabGatewaySignerConfig(
       process.env.COLLAB_GATEWAY_HMAC_KEY_ID,
       process.env.COLLAB_GATEWAY_HMAC_SECRET,
@@ -98,6 +129,7 @@ const collabGatewayRewrite = (request: NextRequest): NextResponse => {
     authHeaders = createCollabGatewayAuthHeaders({
       config: signerConfig,
       webSocketKey,
+      path: `${backendUrl.pathname}${backendUrl.search}`,
     });
   } catch {
     return badRequest();
@@ -120,8 +152,9 @@ const collabGatewayRewrite = (request: NextRequest): NextResponse => {
 };
 
 export async function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname === COLLAB_GATEWAY_PATH) {
-    return collabGatewayRewrite(request);
+  const path = request.nextUrl.pathname;
+  if (path === "/collab/document" || path === "/collab/presence") {
+    return collabGatewayRewrite(request, path);
   }
   return await updateSession(request);
 }

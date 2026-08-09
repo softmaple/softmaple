@@ -53,7 +53,6 @@ model Workspace {
   owner             User              @relation("WorkspaceOwner", fields: [owner_id], references: [id], onDelete: Cascade)
   members           WorkspaceMember[]
   documents         Document[]
-  document_versions DocumentVersion[]
 
   @@index([owner_id])
   @@map("workspaces")
@@ -77,6 +76,7 @@ model WorkspaceMember {
   @@unique([user_id, workspace_id])
   @@index([user_id])
   @@index([workspace_id])
+  @@index([workspace_id, created_at, id], map: "workspace_members_workspace_created_cursor_idx")
   @@map("workspace_members")
 }
 
@@ -92,22 +92,20 @@ model Document {
   author_id        String    @db.Uuid
   title            String
   slug             String    @unique
-  markdown_content String? // Markdown content of the document
-  // content      Json // Yjs JSON snapshot
   created_at       DateTime  @default(now()) @db.Timestamptz(3)
   updated_at       DateTime? @updatedAt @db.Timestamptz(3)
   created_by       String?   @db.Uuid
   updated_by       String?   @db.Uuid
 
-  is_public Boolean? @default(false)
+  is_public Boolean @default(false)
 
   workspace     Workspace            @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   author        User                 @relation("DocumentAuthor", fields: [author_id], references: [id], onDelete: Cascade)
-  versions      DocumentVersion[]
   event_batches DocumentEventBatch[]
 
   @@index([workspace_id])
   @@index([author_id])
+  @@index([workspace_id, updated_at(sort: Desc), id(sort: Desc)], map: "documents_workspace_updated_cursor_idx")
   @@map("documents")
 }
 
@@ -145,22 +143,4 @@ model DocumentEventId {
   @@id([document_id, event_id])
   @@index([batch_row_id])
   @@map("document_event_ids")
-}
-
-model DocumentVersion {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  doc_id     String    @db.Uuid
-  // snapshot   String? // history snapshot of the raw document
-  // history snapshot of Yjs document
-  created_at DateTime  @default(now()) @db.Timestamptz(3)
-  updated_at DateTime? @updatedAt @db.Timestamptz(3)
-  created_by String?   @db.Uuid
-  updated_by String?   @db.Uuid
-
-  workspace_id Int
-  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  document     Document  @relation(fields: [doc_id], references: [id], onDelete: Cascade)
-
-  @@index([doc_id])
-  @@map("document_versions")
 }

@@ -182,7 +182,8 @@ export const isCursorPosition = (value: unknown): value is CursorPosition =>
 /** True when the cursor carries a stable sequence anchor. */
 export const isStableCursor = (
   cursor: CursorPosition,
-): cursor is StableCursorPosition => "anchor" in cursor && cursor.anchor != null;
+): cursor is StableCursorPosition =>
+  "anchor" in cursor && cursor.anchor != null;
 
 /** Resolve a numeric offset from either cursor form when available. */
 export const getCursorOffset = (cursor: CursorPosition): number | undefined =>

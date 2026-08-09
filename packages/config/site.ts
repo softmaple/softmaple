@@ -3,6 +3,7 @@
  */
 
 export const SITE_CONFIG = {
+  DOCS: "https://docs.softmaple.ink",
   PLAYGROUND: "https://playground.softmaple.ink",
   CONTACT_EMAIL: "hello@softmaple.ink",
   GITHUB_REPO: "https://github.com/softmaple/softmaple",

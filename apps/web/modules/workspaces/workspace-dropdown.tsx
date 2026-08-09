@@ -10,6 +10,7 @@ import {
 import { Button } from "@softmaple/ui/components/button";
 import { ChevronDown, FileText, Plus, Settings } from "lucide-react";
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
+import Link from "next/link";
 
 export type WorkspaceDropdownProps = {
   workspaceSlug: string;
@@ -19,14 +20,15 @@ export type WorkspaceDropdownProps = {
 export const WorkspaceDropdown: FC<WorkspaceDropdownProps> = (props) => {
   const { workspaceSlug, workspacesResource } = props;
 
-  const { data, error } = workspacesResource;
-
-  if (error) {
-    console.error("Failed to fetch workspaces:", error);
-    return <div>Error loading workspaces</div>;
+  if (!workspacesResource.ok) {
+    return (
+      <div className="p-2 text-sm text-destructive">
+        {workspacesResource.message}
+      </div>
+    );
   }
 
-  const workspaces = (data || []).map((workspace) => ({
+  const workspaces = workspacesResource.data.map((workspace) => ({
     ...workspace,
     key: workspace.id,
   }));
@@ -59,29 +61,35 @@ export const WorkspaceDropdown: FC<WorkspaceDropdownProps> = (props) => {
         <DropdownMenuSeparator />
         {workspaces.map((workspace) => {
           return (
-            <DropdownMenuItem key={workspace.key}>
-              <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
-                  <FileText className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="font-medium">{workspace.title}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {workspace.description}
+            <DropdownMenuItem asChild key={workspace.key}>
+              <Link href={`/workspace/${workspace.slug}`}>
+                <div className="flex items-center space-x-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
+                    <FileText className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <div className="font-medium">{workspace.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {workspace.description}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </Link>
             </DropdownMenuItem>
           );
         })}
         <DropdownMenuSeparator />
-        <DropdownMenuItem>
-          <Plus className="mr-2 h-4 w-4" />
-          Create New Workspace
+        <DropdownMenuItem asChild>
+          <Link href="/dashboard">
+            <Plus className="mr-2 h-4 w-4" />
+            Create New Workspace
+          </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem>
-          <Settings className="mr-2 h-4 w-4" />
-          Manage Workspaces
+        <DropdownMenuItem asChild>
+          <Link href={`/workspace/${workspaceSlug}/settings`}>
+            <Settings className="mr-2 h-4 w-4" />
+            Workspace settings
+          </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

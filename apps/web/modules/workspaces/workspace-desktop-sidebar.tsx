@@ -1,72 +1,38 @@
 import type { FC, ReactNode } from "react";
 import Link from "next/link";
-import {
-  ChevronDown,
-  FileText,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Settings,
-} from "lucide-react";
-import { Button } from "@softmaple/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@softmaple/ui/components/dropdown-menu";
-import { Input } from "@softmaple/ui/components/input";
+import { FileText } from "lucide-react";
+import type { DocsType } from "@/types/model";
 import { WorkspaceNavigation } from "@/modules/workspaces/workspace-navigation";
-import { Separator } from "@softmaple/ui/components/separator";
 import { WorkspaceDocsList } from "@/modules/workspaces/workspace-docs-list";
 
 export type WorkspaceDesktopSidebarProps = {
-  workspaceSlug: string;
-  children?: ReactNode;
+  readonly canEdit: boolean;
+  readonly children?: ReactNode;
+  readonly documents: ReadonlyArray<DocsType["Row"]>;
+  readonly workspaceSlug: string;
 };
 
-export const WorkspaceDesktopSidebar: FC<WorkspaceDesktopSidebarProps> = (
-  props,
-) => {
-  const { workspaceSlug, children } = props;
-
-  return (
-    <div className="hidden md:flex w-80 border-r border-border/40 bg-muted/30 flex-col">
-      {/* Workspace Header */}
-      <div className="p-4 border-b border-border/40">
-        <div className="flex items-center justify-between mb-4">
-          <Link href="/dashboard" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-              <FileText className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-semibold">Softmaple</span>
-          </Link>
-          <Button variant="ghost" size="icon">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {children}
-
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input
-            id="search-documents"
-            placeholder="Search documents..."
-            className="pl-10"
-          />
-        </div>
-      </div>
-
-      {/* Navigation */}
-      <WorkspaceNavigation workspaceSlug={workspaceSlug} />
-
-      <Separator />
-
-      {/* Documents */}
-      <WorkspaceDocsList workspaceSlug={workspaceSlug} />
+export const WorkspaceDesktopSidebar: FC<WorkspaceDesktopSidebarProps> = ({
+  canEdit,
+  children,
+  documents,
+  workspaceSlug,
+}) => (
+  <aside className="hidden w-72 shrink-0 flex-col border-r bg-sidebar md:flex xl:w-80">
+    <div className="border-b p-4">
+      <Link className="mb-4 flex items-center gap-2" href="/dashboard">
+        <span className="grid size-8 place-items-center rounded-sm border bg-background text-primary">
+          <FileText className="size-4" />
+        </span>
+        <span className="font-display font-semibold">Softmaple</span>
+      </Link>
+      {children}
     </div>
-  );
-};
+    <WorkspaceNavigation workspaceSlug={workspaceSlug} />
+    <WorkspaceDocsList
+      canEdit={canEdit}
+      documents={documents}
+      workspaceSlug={workspaceSlug}
+    />
+  </aside>
+);

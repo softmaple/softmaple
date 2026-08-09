@@ -1,5 +1,6 @@
 {
   "$schema": "https://v2-9-12.turborepo.dev/schema.json",
+  "globalEnv": ["CI"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -9,10 +10,16 @@
         "COLLAB_GATEWAY_HMAC_KEYS",
         "COLLAB_GATEWAY_HMAC_SECRET",
         "DATABASE_URL",
+        "E2E_ALLOW_REMOTE_SEED",
+        "E2E_SEED_SECRET",
+        "E2E_SUPABASE_PROJECT_REF",
+        "NEXT_PUBLIC_APP_URL",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY",
         "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
         "NEXT_PUBLIC_SUPABASE_URL",
         "SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_PRODUCTION_PROJECT_REF",
+        "SUPABASE_SERVICE_ROLE_KEY",
         "SUPABASE_URL"
       ],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
@@ -28,8 +35,8 @@
     "lint": {
       "dependsOn": ["^lint"]
     },
-    "check-types": {
-      "dependsOn": ["^check-types"]
+    "typecheck": {
+      "dependsOn": ["^build"]
     },
     "bench": {
       "cache": false,
@@ -37,7 +44,18 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["EG_WALKER_PROPERTY_RUNS", "EG_WALKER_REFERENCE_ROOT"]
+      "env": [
+        "E2E_BASE_URL",
+        "E2E_COLLAB_ORIGIN",
+        "E2E_COLLAB_PORT",
+        "E2E_GATEWAY_PORT",
+        "E2E_NEXT_ORIGIN",
+        "E2E_NEXT_PORT",
+        "E2E_SEED_SECRET",
+        "E2E_WEB_PORT",
+        "EG_WALKER_PROPERTY_RUNS",
+        "EG_WALKER_REFERENCE_ROOT"
+      ]
     },
     "dev": {
       "dependsOn": ["^build"],

@@ -3,7 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 const AUTH_VERSION = "1";
 const CANONICAL_PREFIX = "softmaple-collab-upgrade-v1";
 const UPGRADE_METHOD = "GET";
-const UPGRADE_PATH = "/document";
+const DEFAULT_UPGRADE_TARGET = "/document";
 const MAX_CLOCK_SKEW_SECONDS = 30;
 const KEY_BYTE_LENGTH = 32;
 const NONCE_BYTE_LENGTH = 16;
@@ -13,6 +13,8 @@ const KEY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const TIMESTAMP_PATTERN = /^(0|[1-9][0-9]{0,12})$/;
 const UNPADDED_BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 const STANDARD_BASE64_PATTERN = /^[A-Za-z0-9+/]{22}==$/;
+const UPGRADE_TARGET_PATTERN =
+  /^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*)?$/;
 
 export const COLLAB_GATEWAY_AUTH_HEADERS = Object.freeze({
   version: "x-softmaple-collab-auth-version",
@@ -45,6 +47,8 @@ interface CanonicalPayloadInput {
 interface CreateAuthHeadersInput {
   readonly config: CollabGatewaySignerConfig;
   readonly webSocketKey: string;
+  /** Backend upgrade target: pathname plus query, for example `/presence?roomId=…`. */
+  readonly path?: string;
   readonly nowSeconds?: number;
   readonly nonce?: Uint8Array;
 }
@@ -95,6 +99,31 @@ const isValidWebSocketKey = (value: string): boolean => {
     decoded.byteLength === WEB_SOCKET_KEY_BYTE_LENGTH &&
     decoded.toString("base64") === value
   );
+};
+
+/** Canonical request target bound into the HMAC (pathname + search, no hash). */
+export const collabGatewayUpgradeTarget = (url: URL): string =>
+  `${url.pathname}${url.search}`;
+
+const isValidUpgradeTarget = (path: string): boolean => {
+  if (
+    !UPGRADE_TARGET_PATTERN.test(path) ||
+    path.includes("\\") ||
+    path.includes("..")
+  ) {
+    return false;
+  }
+  try {
+    const parsed = new URL(path, "https://collab.invalid");
+    return (
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.hash === "" &&
+      collabGatewayUpgradeTarget(parsed) === path
+    );
+  } catch {
+    return false;
+  }
 };
 
 const parseTimestamp = (value: string): number | null => {
@@ -199,6 +228,7 @@ const createSignature = (
 export const createCollabGatewayAuthHeaders = ({
   config,
   webSocketKey,
+  path = DEFAULT_UPGRADE_TARGET,
   nowSeconds = Math.floor(Date.now() / 1000),
   nonce = randomBytes(NONCE_BYTE_LENGTH),
 }: CreateAuthHeadersInput): Headers => {
@@ -223,6 +253,11 @@ export const createCollabGatewayAuthHeaders = ({
       "The WebSocket key is invalid",
     );
   }
+  if (!isValidUpgradeTarget(path)) {
+    throw new CollabGatewayAuthConfigurationError(
+      "The collaboration gateway upgrade target is invalid",
+    );
+  }
 
   const timestamp = String(nowSeconds);
   const encodedNonce = Buffer.from(nonce).toString("base64url");
@@ -231,7 +266,7 @@ export const createCollabGatewayAuthHeaders = ({
     timestamp,
     nonce: encodedNonce,
     method: UPGRADE_METHOD,
-    path: UPGRADE_PATH,
+    path,
     webSocketKey,
   });
   const signature = createSignature(config.secret, canonicalPayload);
@@ -257,11 +292,16 @@ export const verifyCollabGatewayAuthRequest = (
   keyring: CollabGatewayKeyring,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): CollabGatewayVerificationResult => {
-  const url = new URL(request.url);
+  let upgradeTarget: string;
+  try {
+    const url = new URL(request.url);
+    upgradeTarget = collabGatewayUpgradeTarget(url);
+  } catch {
+    return invalid("invalid-request");
+  }
   if (
     request.method !== UPGRADE_METHOD ||
-    url.pathname !== UPGRADE_PATH ||
-    url.search !== ""
+    !isValidUpgradeTarget(upgradeTarget)
   ) {
     return invalid("invalid-request");
   }
@@ -309,7 +349,7 @@ export const verifyCollabGatewayAuthRequest = (
     timestamp: timestampValue,
     nonce,
     method: request.method,
-    path: url.pathname,
+    path: upgradeTarget,
     webSocketKey,
   });
   const expectedSignature = Buffer.from(

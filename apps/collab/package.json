@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@softmaple/awareness": "workspace:*",
     "@softmaple/block-model": "workspace:*",
     "@softmaple/collab-gateway-auth": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",

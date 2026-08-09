@@ -11,7 +11,7 @@ import { Button } from "@softmaple/ui/components/button";
 import { Download, FileText } from "lucide-react";
 import { $convertToMarkdownString } from "@lexical/markdown";
 import { PLAYGROUND_TRANSFORMERS } from "@softmaple/editor/components/core/plugins/MarkdownTransformers/MarkdownTransformers";
-import { markdownToLatex } from "@softmaple/md2latex/src/md2latex";
+import { markdownToLatex } from "@softmaple/md2latex";
 import type { LexicalEditor } from "lexical";
 import type { ExportFormat } from "./ExportFilesMenuItem";
 import { ExportFilesMenuItem } from "./ExportFilesMenuItem";

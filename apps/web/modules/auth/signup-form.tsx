@@ -1,147 +1,100 @@
 "use client";
 
-import type { FC } from "react";
-
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
-import { useState, useTransition } from "react";
 import { signup } from "@/app/actions/auth";
-import { SubmitButton } from "./submit-button";
+import { SubmitButton } from "@/modules/auth/submit-button";
 
-export type SignupFormProps = {};
+const FieldError = ({
+  field,
+  state,
+}: {
+  readonly field: string;
+  readonly state: Awaited<ReturnType<typeof signup>> | null;
+}) => (
+  <p className="text-xs text-destructive" id={`${field}-error`}>
+    {state !== null && !state.ok ? state.fieldErrors?.[field]?.[0] : null}
+  </p>
+);
 
-export const SignupForm: FC<SignupFormProps> = () => {
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  });
-  const [error, setError] = useState<string>("");
-  const [isPending, startTransition] = useTransition();
+export const SignupForm = () => {
+  const [state, action] = useActionState(signup, null);
+  const router = useRouter();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-
-    // Basic validation
-    if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match");
-      return;
+  useEffect(() => {
+    if (state?.ok && state.data.redirectTo !== undefined) {
+      router.replace(state.data.redirectTo);
     }
-
-    if (formData.password.length < 6) {
-      setError("Password must be at least 6 characters");
-      return;
-    }
-
-    // Create FormData for server action
-    const formDataObj = new FormData();
-    formDataObj.append("firstName", formData.firstName);
-    formDataObj.append("lastName", formData.lastName);
-    formDataObj.append("email", formData.email);
-    formDataObj.append("password", formData.password);
-
-    startTransition(async () => {
-      const result = await signup(formDataObj);
-      // Check if the server action returned an error
-      if (result?.error) {
-        setError(result.error);
-      }
-      // If no error, the server action will handle the redirect
-    });
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-    // Clear error when user starts typing
-    if (error) {
-      setError("");
-    }
-  };
+  }, [router, state]);
 
   return (
-    <div className="space-y-4">
-      {error && (
-        <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
-          {error}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="firstName">First name</Label>
-            <Input
-              id="firstName"
-              name="firstName"
-              type="text"
-              placeholder="John"
-              value={formData.firstName}
-              onChange={handleChange}
-              required
-              disabled={isPending}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="lastName">Last name</Label>
-            <Input
-              id="lastName"
-              name="lastName"
-              type="text"
-              placeholder="Doe"
-              value={formData.lastName}
-              onChange={handleChange}
-              required
-              disabled={isPending}
-            />
-          </div>
+    <form action={action} className="space-y-4">
+      {state !== null && !state.ok ? (
+        <p
+          className="rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {state.message}
+        </p>
+      ) : null}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="firstName">First name</Label>
+          <Input
+            autoComplete="given-name"
+            id="firstName"
+            name="firstName"
+            required
+          />
+          <FieldError field="firstName" state={state} />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="lastName">Last name</Label>
           <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="you@example.com"
-            value={formData.email}
-            onChange={handleChange}
+            autoComplete="family-name"
+            id="lastName"
+            name="lastName"
             required
-            disabled={isPending}
           />
+          <FieldError field="lastName" state={state} />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            value={formData.password}
-            onChange={handleChange}
-            required
-            disabled={isPending}
-            minLength={6}
-            placeholder="At least 6 characters"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
-          <Input
-            id="confirmPassword"
-            name="confirmPassword"
-            type="password"
-            value={formData.confirmPassword}
-            onChange={handleChange}
-            required
-            disabled={isPending}
-            minLength={6}
-          />
-        </div>
-        <SubmitButton text="Create account" loadingText="Creating account..." />
-      </form>
-    </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="email">Email</Label>
+        <Input
+          autoComplete="email"
+          id="email"
+          name="email"
+          type="email"
+          required
+        />
+        <FieldError field="email" state={state} />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          autoComplete="new-password"
+          id="password"
+          name="password"
+          type="password"
+          required
+        />
+        <FieldError field="password" state={state} />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="confirmPassword">Confirm password</Label>
+        <Input
+          autoComplete="new-password"
+          id="confirmPassword"
+          name="confirmPassword"
+          type="password"
+          required
+        />
+        <FieldError field="confirmPassword" state={state} />
+      </div>
+      <SubmitButton text="Create account" loadingText="Creating account..." />
+    </form>
   );
 };

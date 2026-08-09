@@ -12,6 +12,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
     "format": "biome format --config-path=biome.json --write .",
     "format:check": "biome format --config-path=biome.json .",
     "prepare": "husky"

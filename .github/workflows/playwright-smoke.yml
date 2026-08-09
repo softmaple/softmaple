@@ -1,129 +1,54 @@
-name: Smoke Tests (Fast)
+name: Chromium Smoke
 
 on:
+  pull_request:
+    paths:
+      - "apps/collab/**"
+      - "apps/web/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "turbo.json"
+      - ".github/workflows/playwright-smoke.yml"
   workflow_dispatch:
 
-# Concurrency control - cancel old runs within the same PR when new commits arrive
-# Different PRs and branches can run in parallel
 concurrency:
-  group: playwright-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true  # Cancel old runs when new commits arrive in the same PR
+  group: chromium-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  approve:
-    name: Approve Smoke Test Run
-    runs-on: ubuntu-latest
-    environment: apps/web-e2e-smoke
-    steps:
-      - name: Request approval
-        run: echo "✅ Smoke tests approved for execution"
-
   smoke:
-    name: Smoke Tests
-    needs: [approve]
-    if: ${{ needs.approve.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Much faster than full E2E
+    timeout-minutes: 20
     env:
       CI: true
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/softmaple
+      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/softmaple
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
-        name: Install pnpm
         with:
           run_install: false
-
-      - name: Install Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24.12.0
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Cache Playwright browsers
-      - name: Cache Playwright Browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-smoke-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
-
-      # Cache Next.js build output
-      - name: Cache Next.js Build
-        uses: actions/cache@v5
-        with:
-          path: |
-            apps/web/.next/cache
-            apps/web/.next/standalone
-            apps/web/.next/static
-          key: nextjs-smoke-${{ runner.os }}-${{ hashFiles('apps/web/**', 'packages/**') }}
-
-      - name: Run database migrations for E2E tests
-        working-directory: packages/db
-        run: pnpm run db:deploy
-        env:
-          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-
-      - name: Build apps/web
-        run: pnpm --filter @softmaple/web build
-        env:
-          CI: true
-          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_E2E_TEST_MODE: true
-          # Skip Next.js telemetry during build
-          NEXT_TELEMETRY_DISABLED: 1
-
-      - name: Install Playwright Browsers
-        working-directory: apps/web
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Run Smoke Tests
-        working-directory: apps/web
-        run: pnpm exec playwright test smoke.spec.ts --project=chromium
-        env:
-          CI: true
-          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_E2E_TEST_MODE: true
-
-      # Clean up database after tests to reduce storage consumption
-      - name: Clean database after tests
-        if: always()
-        working-directory: packages/db
-        run: pnpm run db:clean
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL }}
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v7
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-smoke-report
-          path: apps/web/playwright-report/
-          retention-days: 7
-
-      - name: Upload test artifacts on failure
-        uses: actions/upload-artifact@v7
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build Web and Collab
+        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
+      - name: Install Chromium
+        run: pnpm --filter @softmaple/web exec playwright install --with-deps chromium
+      - name: Run public-surface smoke
+        run: pnpm --filter @softmaple/web exec playwright test public.spec.ts --project=chromium
+      - name: Upload failure traces
         if: failure()
+        uses: actions/upload-artifact@v7
         with:
-          name: playwright-smoke-traces
+          name: chromium-smoke-traces
           path: apps/web/test-results/
           retention-days: 7

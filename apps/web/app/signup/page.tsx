@@ -10,13 +10,8 @@ import {
 import { FileText, Github, Mail } from "lucide-react";
 import { SignupForm } from "@/modules/auth/signup-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
-import { redirect } from "next/navigation";
 
 export default async function SignupPage() {
-  if (process.env.NEXT_PUBLIC_DISABLE_SIGNUP === "true") {
-    redirect("/coming-soon");
-  }
-
   return (
     <AuthGuard>
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -47,15 +42,21 @@ export default async function SignupPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <Button variant="outline">
+              <Button aria-describedby="oauth-note" disabled variant="outline">
                 <Github className="mr-2 h-4 w-4" />
                 GitHub
               </Button>
-              <Button variant="outline">
+              <Button aria-describedby="oauth-note" disabled variant="outline">
                 <Mail className="mr-2 h-4 w-4" />
                 Google
               </Button>
             </div>
+            <p
+              className="text-center text-xs text-muted-foreground"
+              id="oauth-note"
+            >
+              GitHub and Google sign-up are coming soon.
+            </p>
 
             <div className="text-center text-sm">
               <span className="text-muted-foreground">

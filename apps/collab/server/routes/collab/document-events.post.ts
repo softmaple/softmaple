@@ -68,6 +68,9 @@ export default defineHandler(async (event) => {
       return Response.json({ error: error.message }, { status: 403 });
     }
     if (error instanceof EventConflictError) {
+      // Keep the HTTP contract aligned with persistPrivateDocumentEvents:
+      // clients only consume `{ error }` on 409; structured conflict metadata
+      // stays on the WebSocket/server log path.
       return Response.json({ error: error.message }, { status: 409 });
     }
     throw error;

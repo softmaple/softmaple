@@ -189,6 +189,23 @@ const consumeMessageQuota = (context: Record<string, unknown>): boolean => {
   return true;
 };
 
+const LOG_ID_SAMPLE_LIMIT = 8;
+
+const boundedIdSample = (
+  ids: ReadonlyArray<string> | undefined,
+):
+  | {
+      readonly count: number;
+      readonly sample: ReadonlyArray<string>;
+    }
+  | undefined => {
+  if (ids === undefined) return undefined;
+  return {
+    count: ids.length,
+    sample: ids.slice(0, LOG_ID_SAMPLE_LIMIT),
+  };
+};
+
 const logRouteError = (
   error: unknown,
   documentId: string | null,
@@ -198,6 +215,16 @@ const logRouteError = (
     documentId,
     messageType,
     errorName: error instanceof Error ? error.name : "UnknownError",
+    errorMessage: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    ...(error instanceof EventConflictError
+      ? {
+          conflictType: error.details.conflictType,
+          batchIds: boundedIdSample(error.details.batchIds),
+          eventIds: boundedIdSample(error.details.eventIds),
+          missingParentIds: boundedIdSample(error.details.missingParentIds),
+        }
+      : {}),
   });
 };
 
@@ -553,6 +580,10 @@ export default defineWebSocketHandler({
               : conflict
                 ? "The event batch conflicts with stored document history"
                 : "The event batch was not saved",
+            // All event conflicts are non-retryable: advisory locking plus the
+            // client in-flight queue remove the transient race, and missing
+            // parents after that are repaired on the next intentional sync
+            // rather than via conflict-driven reconnect loops.
             !conflict && !forbidden,
             protocolVersionFromContext(peer.context),
           ),

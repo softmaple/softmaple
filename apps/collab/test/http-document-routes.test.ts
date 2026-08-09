@@ -19,12 +19,14 @@ vi.mock("../server/utils/origin-auth", () => ({
   authenticateBrowserOrigin: mocks.authenticateBrowserOrigin,
 }));
 
-vi.mock("../server/utils/event-store", () => ({
-  appendEventBatches: mocks.appendEventBatches,
-  EventAuthorizationError: class EventAuthorizationError extends Error {},
-  EventConflictError: class EventConflictError extends Error {},
-  readEventPage: mocks.readEventPage,
-}));
+vi.mock("../server/utils/event-store", async () => {
+  const { eventStoreRouteMocks } = await import("./helpers/eventStoreMocks");
+  return {
+    appendEventBatches: mocks.appendEventBatches,
+    ...eventStoreRouteMocks,
+    readEventPage: mocks.readEventPage,
+  };
+});
 
 import historyRoute from "../server/routes/collab/document-history.get";
 import eventsRoute from "../server/routes/collab/document-events.post";

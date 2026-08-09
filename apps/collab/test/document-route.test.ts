@@ -8,9 +8,15 @@ import {
   resetTopicBridgesForTests,
   setRealtimeForTests,
 } from "../server/utils/realtime";
+import { EVENT_CONFLICT_TYPE } from "../server/utils/event-conflict";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
+import { MockEventConflictError } from "./helpers/eventStoreMocks";
+
+const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
 const mocks = vi.hoisted(() => ({
   authorizeDocument: vi.fn(),
+  appendEventBatches: vi.fn(),
 }));
 
 vi.mock("nitro", () => ({
@@ -21,14 +27,18 @@ vi.mock("../server/utils/auth", () => ({
   authorizeDocument: mocks.authorizeDocument,
 }));
 
-vi.mock("../server/utils/event-store", () => ({
-  appendEventBatches: vi.fn(),
-  EventAuthorizationError: class EventAuthorizationError extends Error {},
-  EventConflictError: class EventConflictError extends Error {},
-  readEventPage: vi.fn(),
-}));
+vi.mock("../server/utils/event-store", async () => {
+  const { eventStoreRouteMocks } = await import("./helpers/eventStoreMocks");
+  return {
+    appendEventBatches: mocks.appendEventBatches,
+    ...eventStoreRouteMocks,
+    readEventPage: vi.fn(),
+  };
+});
 
 import documentRoute from "../server/routes/collab/document";
+
+const mockedAppendEventBatches = vi.mocked(mocks.appendEventBatches);
 
 interface TestPeer {
   readonly context: Record<string, unknown>;
@@ -243,5 +253,108 @@ describe("collaboration document authentication", () => {
 
     for (const peer of peers.slice(1)) await route.close(peer);
     await route.close(replacement);
+  });
+});
+
+describe("collaboration document event conflicts", () => {
+  const authenticatedPeers: TestPeer[] = [];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    authenticatedPeers.length = 0;
+    vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    await setRealtimeForTests(createMemoryRealtime());
+    await resetTopicBridgesForTests();
+    mocks.authorizeDocument.mockResolvedValue({
+      accessMode: "authenticated",
+      documentId: "00000000-0000-4000-8000-000000000001",
+      userId: "00000000-0000-4000-8000-000000000002",
+      role: "EDITOR",
+      canWrite: true,
+    });
+  });
+
+  afterEach(async () => {
+    for (const peer of authenticatedPeers) {
+      await route.close(peer);
+    }
+    authenticatedPeers.length = 0;
+    await resetTopicBridgesForTests();
+    await setRealtimeForTests(null);
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const authedPeer = async (): Promise<TestPeer> => {
+    const peer = createPeer();
+    await route.message(peer, authMessage("session-writer"));
+    peer.send.mockClear();
+    authenticatedPeers.push(peer);
+    return peer;
+  };
+
+  it("marks missing-parent conflicts non-retryable to avoid reconnect loops", async () => {
+    mockedAppendEventBatches.mockRejectedValueOnce(
+      new MockEventConflictError(
+        "event batch references document history that has not been stored",
+        {
+          conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
+        },
+      ),
+    );
+    const peer = await authedPeer();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await route.message(peer, {
+      text: () =>
+        JSON.stringify({
+          protocolVersion: COLLAB_PROTOCOL_VERSION,
+          type: COLLAB_MESSAGE_TYPE.Event,
+          batches: [VALID_BATCH],
+        }),
+    });
+
+    expect(peer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: "conflict",
+        retryable: false,
+      }),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Collaboration request failed",
+      expect.objectContaining({
+        errorName: "EventConflictError",
+        errorMessage: expect.stringContaining("has not been stored"),
+        conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
+      }),
+    );
+  });
+
+  it("keeps payload conflicts non-retryable", async () => {
+    mockedAppendEventBatches.mockRejectedValueOnce(
+      new MockEventConflictError("conflicting payload for batch batch-1", {
+        conflictType: EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+        batchIds: ["batch-1"],
+      }),
+    );
+    const peer = await authedPeer();
+
+    await route.message(peer, {
+      text: () =>
+        JSON.stringify({
+          protocolVersion: COLLAB_PROTOCOL_VERSION,
+          type: COLLAB_MESSAGE_TYPE.Event,
+          batches: [VALID_BATCH],
+        }),
+    });
+
+    expect(peer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: "conflict",
+        retryable: false,
+      }),
+    );
   });
 });

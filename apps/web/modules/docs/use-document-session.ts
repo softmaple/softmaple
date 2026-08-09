@@ -379,7 +379,11 @@ const createSessionController = ({
         fatalConnectionError = true;
         onError(new Error("The collaboration server returned invalid data"));
         onCollaborationStatus("error");
-        nextSocket.close(1008, "Invalid collaboration response");
+        closeCollabClientSocket(
+          nextSocket,
+          COLLAB_CLIENT_CLOSE_CODE.InvalidServerResponse,
+          "Invalid collaboration response",
+        );
         return;
       }
 
@@ -442,19 +446,28 @@ const createSessionController = ({
               fatalConnectionError = true;
               onCollaborationStatus("error");
             }
-            nextSocket.close(
-              message.retryable ? 1011 : 1008,
+            closeCollabClientSocket(
+              nextSocket,
+              message.retryable
+                ? COLLAB_CLIENT_CLOSE_CODE.RetryableServerError
+                : COLLAB_CLIENT_CLOSE_CODE.FatalServerError,
               message.retryable ? "Retry collaboration sync" : "Fatal error",
             );
             return;
         }
       } catch (handlerError) {
-        onError(
+        const applyError =
           handlerError instanceof Error
             ? handlerError
-            : new Error("The collaboration response could not be applied"),
+            : new Error("The collaboration response could not be applied");
+        // Surface the apply failure before close() so a browser InvalidAccessError
+        // from WebSocket.close cannot hide the collaboration error.
+        onError(applyError);
+        closeCollabClientSocket(
+          nextSocket,
+          COLLAB_CLIENT_CLOSE_CODE.ResponseApplyFailure,
+          "Collaboration response could not be applied",
         );
-        nextSocket.close(1011, "Collaboration response could not be applied");
       }
     });
 

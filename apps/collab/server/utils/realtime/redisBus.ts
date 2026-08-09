@@ -30,13 +30,15 @@ export class RedisRealtimeBus implements RealtimeBus {
   private readonly pendingSubscribe = new Map<string, Promise<void>>();
   private closed = false;
 
+  private readonly onMessage = (channel: string, message: string): void => {
+    void this.dispatch(channel, message);
+  };
+
   constructor(options: RedisRealtimeBusOptions) {
     this.publisher = options.publisher;
     this.subscriber = options.subscriber;
     this.ownsSubscriber = options.ownsSubscriber;
-    this.subscriber.on("message", (channel, message) => {
-      void this.dispatch(channel, message);
-    });
+    this.subscriber.on("message", this.onMessage);
   }
 
   private async dispatch(channel: string, message: string): Promise<void> {
@@ -74,18 +76,23 @@ export class RedisRealtimeBus implements RealtimeBus {
     this.handlers.set(channel, existing);
 
     if (shouldSubscribe) {
-      const pending =
-        this.pendingSubscribe.get(channel) ??
-        this.subscriber.subscribe(channel).then(() => undefined);
+      const pending = this.subscriber
+        .subscribe(channel)
+        .then(() => undefined)
+        .finally(() => {
+          this.pendingSubscribe.delete(channel);
+        });
       this.pendingSubscribe.set(channel, pending);
+    }
+
+    const pending = this.pendingSubscribe.get(channel);
+    if (pending !== undefined) {
       try {
         await pending;
       } catch (error) {
         existing.delete(handler);
         if (existing.size === 0) this.handlers.delete(channel);
         throw error;
-      } finally {
-        this.pendingSubscribe.delete(channel);
       }
     }
 
@@ -112,7 +119,7 @@ export class RedisRealtimeBus implements RealtimeBus {
     this.closed = true;
     this.handlers.clear();
     this.pendingSubscribe.clear();
-    this.subscriber.removeAllListeners("message");
+    this.subscriber.off("message", this.onMessage);
     if (this.ownsSubscriber) {
       await this.subscriber.quit().catch(() => undefined);
     }

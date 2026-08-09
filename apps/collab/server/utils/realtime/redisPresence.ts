@@ -2,7 +2,7 @@ import type Redis from "ioredis";
 import {
   presenceUserIdFromUnknown,
   requirePresenceConnectionId,
-} from "./presence-user";
+} from "./presenceUser";
 import type {
   ExpiredPresenceMember,
   PresenceRoomStore,

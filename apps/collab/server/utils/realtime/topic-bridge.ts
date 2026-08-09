@@ -1,4 +1,4 @@
-import type { LocalTopicHub } from "./local-hub";
+import type { LocalTopicHub } from "./localHub";
 import type { RealtimeBus } from "./types";
 
 /**

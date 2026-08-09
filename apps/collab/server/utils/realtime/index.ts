@@ -10,7 +10,7 @@ export {
   createRedisRealtime,
   getRealtime,
   setRealtimeForTests,
-} from "./create-realtime";
+} from "./createRealtime";
 export {
   documentLeaseScope,
   documentRealtimeChannel,
@@ -27,7 +27,7 @@ export {
   documentTopicHub,
   LocalTopicHub,
   presenceTopicHub,
-} from "./local-hub";
+} from "./localHub";
 export { TopicBridge } from "./topic-bridge";
 export {
   LeaseAcquireResult,

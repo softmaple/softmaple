@@ -1,5 +1,5 @@
-import { getRealtime } from "./create-realtime";
-import { documentTopicHub, presenceTopicHub } from "./local-hub";
+import { getRealtime } from "./createRealtime";
+import { documentTopicHub, presenceTopicHub } from "./localHub";
 import { TopicBridge } from "./topic-bridge";
 
 let documentBridge: TopicBridge | null = null;

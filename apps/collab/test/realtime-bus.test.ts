@@ -1,4 +1,6 @@
 import { COLLAB_PROTOCOL_VERSION } from "@softmaple/collab-protocol";
+import type Redis from "ioredis";
+import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CollabRealtimeConfigError,
@@ -11,6 +13,25 @@ import {
   resolveRedisUrl,
   TopicBridge,
 } from "../server/utils/realtime";
+import { RedisRealtimeBus } from "../server/utils/realtime/redisBus";
+
+type MockRedis = EventEmitter & {
+  subscribe: ReturnType<typeof vi.fn>;
+  unsubscribe: ReturnType<typeof vi.fn>;
+  publish: ReturnType<typeof vi.fn>;
+  quit: ReturnType<typeof vi.fn>;
+};
+
+const createMockRedis = (): MockRedis => {
+  const client = new EventEmitter() as MockRedis;
+  client.subscribe = vi.fn(async () => 1);
+  client.unsubscribe = vi.fn(async () => 0);
+  client.publish = vi.fn(async () => 1);
+  client.quit = vi.fn(async () => "OK" as const);
+  return client;
+};
+
+const asRedis = (client: MockRedis): Redis => client as unknown as Redis;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -209,6 +230,105 @@ describe("presence room store", () => {
     );
     vi.useRealTimers();
     await shared.close();
+  });
+});
+
+describe("redis realtime bus", () => {
+  it("removes only its own message listener when closed on a shared subscriber", async () => {
+    const publisher = createMockRedis();
+    const subscriber = createMockRedis();
+    const busA = new RedisRealtimeBus({
+      publisher: asRedis(publisher),
+      subscriber: asRedis(subscriber),
+      ownsSubscriber: false,
+    });
+    const busB = new RedisRealtimeBus({
+      publisher: asRedis(publisher),
+      subscriber: asRedis(subscriber),
+      ownsSubscriber: false,
+    });
+
+    expect(subscriber.listenerCount("message")).toBe(2);
+
+    const seenB: unknown[] = [];
+    await busB.subscribe("shared-channel", (payload) => {
+      seenB.push(payload);
+    });
+
+    await busA.close();
+    expect(subscriber.listenerCount("message")).toBe(1);
+    expect(subscriber.quit).not.toHaveBeenCalled();
+
+    subscriber.emit("message", "shared-channel", JSON.stringify({ ok: true }));
+    await vi.waitFor(() => {
+      expect(seenB).toEqual([{ ok: true }]);
+    });
+
+    await busB.close();
+    expect(subscriber.listenerCount("message")).toBe(0);
+  });
+
+  it("awaits a shared in-flight subscribe for concurrent handlers", async () => {
+    const publisher = createMockRedis();
+    const subscriber = createMockRedis();
+    let resolveSubscribe: ((value: number) => void) | undefined;
+    subscriber.subscribe = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveSubscribe = resolve;
+        }),
+    );
+
+    const bus = new RedisRealtimeBus({
+      publisher: asRedis(publisher),
+      subscriber: asRedis(subscriber),
+      ownsSubscriber: false,
+    });
+
+    const first = bus.subscribe("pending-channel", () => undefined);
+    const second = bus.subscribe("pending-channel", () => undefined);
+
+    expect(subscriber.subscribe).toHaveBeenCalledTimes(1);
+    expect(resolveSubscribe).toBeTypeOf("function");
+    resolveSubscribe?.(1);
+
+    const [unsubscribeFirst, unsubscribeSecond] = await Promise.all([
+      first,
+      second,
+    ]);
+    await unsubscribeFirst();
+    await unsubscribeSecond();
+    await bus.close();
+  });
+
+  it("rolls back handlers when the shared subscribe promise rejects", async () => {
+    const publisher = createMockRedis();
+    const subscriber = createMockRedis();
+    subscriber.subscribe = vi.fn(async () => {
+      throw new Error("subscribe failed");
+    });
+
+    const bus = new RedisRealtimeBus({
+      publisher: asRedis(publisher),
+      subscriber: asRedis(subscriber),
+      ownsSubscriber: false,
+    });
+
+    await expect(
+      Promise.all([
+        bus.subscribe("fail-channel", () => undefined),
+        bus.subscribe("fail-channel", () => undefined),
+      ]),
+    ).rejects.toThrow("subscribe failed");
+
+    expect(subscriber.subscribe).toHaveBeenCalledTimes(1);
+    subscriber.emit(
+      "message",
+      "fail-channel",
+      JSON.stringify({ leaked: true }),
+    );
+    // No handlers should remain after rollback.
+    await bus.close();
   });
 });
 

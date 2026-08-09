@@ -120,11 +120,15 @@ test("two authenticated clients converge and show aggregated presence", async ({
   browser,
 }) => {
   const ownerContext = await browser.newContext();
+  const ownerPage = await openAs(ownerContext, seed.owner);
+  // Collaboration WebSockets are only enabled after a document is shared.
+  await ownerPage.getByRole("button", { name: "Share" }).click();
+  await expect(
+    ownerPage.getByText("Public collaboration link enabled."),
+  ).toBeVisible();
+
   const editorContext = await browser.newContext();
-  const [ownerPage, editorPage] = await Promise.all([
-    openAs(ownerContext, seed.owner),
-    openAs(editorContext, seed.editor),
-  ]);
+  const editorPage = await openAs(editorContext, seed.editor);
   await expect(ownerPage.getByLabel("Active collaborators")).toBeVisible({
     timeout: 15_000,
   });
@@ -152,7 +156,9 @@ test("preview, export, public sharing, and revocation use live content", async (
   await page.getByRole("button", { name: /Markdown/i }).click();
   await expect((await download).suggestedFilename()).toMatch(/\.md$/);
   await page.getByRole("button", { name: "Share" }).click();
-  await expect(page.getByText("Public read-only link enabled.")).toBeVisible();
+  await expect(
+    page.getByText("Public collaboration link enabled."),
+  ).toBeVisible();
 
   const anonymous = await page.context().browser()?.newContext();
   if (anonymous === undefined) throw new Error("Browser context unavailable");

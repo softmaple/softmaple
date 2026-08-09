@@ -11,19 +11,23 @@ import {
 export type DocEditorProps = Pick<
   CollabDocEditorProps,
   | "documentId"
+  | "isShared"
   | "onCollaborationChange"
   | "onExternalBindingChange"
   | "onMarkdownChange"
   | "onSelectionChange"
+  | "permission"
   | "sessionMode"
 >;
 
 const UnMemoizedDocEditor: FC<DocEditorProps> = ({
   documentId,
+  isShared,
   onCollaborationChange,
   onExternalBindingChange,
   onMarkdownChange,
   onSelectionChange,
+  permission,
   sessionMode,
 }) => {
   const [isMounted, setIsMounted] = useState(false);
@@ -50,10 +54,12 @@ const UnMemoizedDocEditor: FC<DocEditorProps> = ({
       activeEditor={activeEditor}
       setActiveEditor={setActiveEditor}
       commonEditorConfig={commonConfig}
+      isShared={isShared}
       onCollaborationChange={onCollaborationChange}
       onExternalBindingChange={onExternalBindingChange}
       onMarkdownChange={onMarkdownChange}
       onSelectionChange={onSelectionChange}
+      permission={permission}
       sessionMode={sessionMode}
     />
   );

@@ -31,7 +31,7 @@ import {
   updateDocumentTitle,
 } from "@/app/actions/documents/documents";
 import type { WorkspaceRole } from "@/lib/workspace-roles";
-import type { CollabDocumentStatus } from "@/modules/docs/use-collab-document";
+import type { DocumentUiStatus } from "@/modules/docs/use-document-session";
 
 export type DocHeaderProps = {
   canDelete: boolean;
@@ -39,20 +39,19 @@ export type DocHeaderProps = {
   canShare: boolean;
   docSlug: string;
   documentId: string;
+  flushDocument?: () => Promise<void>;
   isPublic: boolean;
   markdown: string;
+  onSharingChange: (isPublic: boolean) => void;
   role: WorkspaceRole;
   setTitle: Dispatch<SetStateAction<string>>;
-  status: CollabDocumentStatus;
+  status: DocumentUiStatus;
   title: string;
   workspaceSlug: string;
 };
 
 const STATUS_COPY: Readonly<
-  Record<
-    CollabDocumentStatus,
-    { readonly label: string; readonly tone: string }
-  >
+  Record<DocumentUiStatus, { readonly label: string; readonly tone: string }>
 > = {
   connecting: { label: "Connecting", tone: "text-muted-foreground" },
   syncing: { label: "Syncing", tone: "text-amber-600 dark:text-amber-400" },
@@ -77,8 +76,10 @@ export const DocHeader: FC<DocHeaderProps> = ({
   canShare,
   docSlug,
   documentId,
+  flushDocument,
   isPublic: initialIsPublic,
   markdown,
+  onSharingChange,
   role,
   setTitle,
   status,
@@ -92,6 +93,10 @@ export const DocHeader: FC<DocHeaderProps> = ({
   const [isPending, startTransition] = useTransition();
   const lastCommittedTitle = useRef(title);
   const statusCopy = STATUS_COPY[status];
+
+  useEffect(() => {
+    setIsPublic(initialIsPublic);
+  }, [initialIsPublic]);
 
   const persistTitle = useCallback(() => {
     const normalizedTitle = title.trim();
@@ -120,10 +125,24 @@ export const DocHeader: FC<DocHeaderProps> = ({
 
   const toggleSharing = (): void => {
     startTransition(async () => {
+      const enabling = !isPublic;
+      if (enabling) {
+        if (flushDocument === undefined) {
+          setMessage("The document is still loading. Try again in a moment.");
+          return;
+        }
+        try {
+          await flushDocument();
+        } catch {
+          setMessage("Could not save the latest edits before sharing.");
+          return;
+        }
+      }
+
       const result = await setDocumentPublic({
         docSlug,
         documentId,
-        enabled: !isPublic,
+        enabled: enabling,
         workspaceSlug,
       });
       if (!result.ok) {
@@ -131,9 +150,10 @@ export const DocHeader: FC<DocHeaderProps> = ({
         return;
       }
       setIsPublic(result.data.enabled);
+      onSharingChange(result.data.enabled);
       setMessage(
         result.data.enabled
-          ? "Public read-only link enabled."
+          ? "Public collaboration link enabled."
           : "Public link disabled.",
       );
     });
@@ -229,7 +249,14 @@ export const DocHeader: FC<DocHeaderProps> = ({
           </Button>
           {canShare ? (
             <>
-              <Button onClick={toggleSharing} size="sm" variant="outline">
+              <Button
+                disabled={
+                  isPending || (!isPublic && flushDocument === undefined)
+                }
+                onClick={toggleSharing}
+                size="sm"
+                variant="outline"
+              >
                 {isPending ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : (

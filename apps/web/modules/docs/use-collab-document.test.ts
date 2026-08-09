@@ -127,11 +127,15 @@ const renderCollabHook = (
   const root = createRoot(container);
   const result: { current: HookState } = {
     current: {
+      collaborationStatus: "connecting",
+      editable: false,
+      error: null,
+      flush: async () => undefined,
+      onBindingChange: () => {},
       replica: null,
+      saveStatus: "idle",
       status: "connecting",
       canWrite: false,
-      error: null,
-      onBindingChange: () => {},
     },
   };
 

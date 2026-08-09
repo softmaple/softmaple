@@ -156,6 +156,11 @@ export class BlockReplica {
     return this.state.document;
   }
 
+  getBatch(batchId: string): RichTextEventBatch | null {
+    const batch = this.batchesById.get(batchId);
+    return batch === undefined ? null : cloneBatch(batch);
+  }
+
   exportEvents(): ReadonlyArray<RichTextEventBatch> {
     return Object.freeze(
       [...this.batchesById.values()]

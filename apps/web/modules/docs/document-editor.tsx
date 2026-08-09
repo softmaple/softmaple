@@ -12,7 +12,11 @@ import {
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import { DocumentPresence } from "@/modules/docs/document-presence";
-import type { CollabDocumentState } from "@/modules/docs/use-collab-document";
+import {
+  permissionFromRole,
+  type DocumentPermission,
+} from "@/modules/docs/document-editability";
+import type { DocumentSessionState } from "@/modules/docs/use-document-session";
 import type { WorkspaceRole } from "@/lib/workspace-roles";
 import {
   canDeleteDocument,
@@ -61,8 +65,10 @@ const EditorLoading = () => (
 export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
   const [title, setTitle] = useState(props.title);
   const [markdown, setMarkdown] = useState("");
-  const [status, setStatus] =
-    useState<CollabDocumentState["status"]>("connecting");
+  const [isPublic, setIsPublic] = useState(
+    props.publicView === true ? true : props.isPublic,
+  );
+  const [session, setSession] = useState<DocumentSessionState | null>(null);
   const [openedViews, setOpenedViews] = useState<ReadonlySet<string>>(
     () => new Set(["editor"]),
   );
@@ -71,7 +77,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     setMarkdown(nextMarkdown);
   }, []);
   const handleCollaborationChange = useCallback(
-    (state: CollabDocumentState) => setStatus(state.status),
+    (state: DocumentSessionState) => setSession(state),
     [],
   );
 
@@ -89,12 +95,14 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         <div className="mx-auto min-h-[calc(100dvh-7rem)] max-w-5xl overflow-hidden">
           <DocEditor
             documentId={props.documentId}
+            isShared
             onCollaborationChange={handleCollaborationChange}
+            permission={null}
             sessionMode="public"
           />
         </div>
         <span className="sr-only" aria-live="polite">
-          {status}
+          {session?.status ?? "connecting"}
         </span>
       </main>
     );
@@ -106,6 +114,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     props.authorId,
     props.currentUserId,
   );
+  const permission: DocumentPermission | null = permissionFromRole(props.role);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -115,11 +124,13 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         canShare={canShareDocument(props.role)}
         docSlug={props.docSlug}
         documentId={props.documentId}
-        isPublic={props.isPublic}
+        flushDocument={session?.flush}
+        isPublic={isPublic}
         markdown={deferredMarkdown}
+        onSharingChange={setIsPublic}
         role={props.role}
         setTitle={setTitle}
-        status={status}
+        status={session?.status ?? "connecting"}
         title={title}
         workspaceSlug={props.workspaceSlug}
       />
@@ -153,9 +164,12 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
           <DocumentPresence
             avatarUrl={props.avatarUrl}
             documentId={props.documentId}
+            isShared={isPublic}
             name={props.userName}
             onCollaborationChange={handleCollaborationChange}
             onMarkdownChange={handleMarkdownChange}
+            permission={permission}
+            presenceEnabled={isPublic}
             userId={props.currentUserId}
           />
         </TabsContent>

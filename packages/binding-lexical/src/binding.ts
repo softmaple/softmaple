@@ -50,6 +50,21 @@ export interface LexicalBindingOptions {
   readonly onSelectionChange?: (selection: StableBlockSelection | null) => void;
 }
 
+/**
+ * Result of attempting to resolve a wire/stable selection against the current
+ * replica. `temporarily-unresolved` means at least one endpoint names an atom
+ * whose creating event has not been integrated yet (common for presence that
+ * races ahead of document collaboration). Invalid anchors still throw.
+ */
+export type ResolveSelectionResult =
+  | {
+      readonly status: "resolved";
+      readonly selection: LogicalSelection;
+    }
+  | {
+      readonly status: "temporarily-unresolved";
+    };
+
 export interface LexicalBinding {
   readonly editor: LexicalEditor;
   readonly replica: BlockReplica;
@@ -58,6 +73,12 @@ export interface LexicalBinding {
   ): ApplyRichTextEventsResult | null;
   captureSelection(): StableBlockSelection | null;
   resolveSelection(selection: StableBlockSelection): LogicalSelection;
+  /**
+   * Resolve a stable selection for ephemeral consumers (remote presence).
+   * Returns `temporarily-unresolved` instead of throwing when an endpoint
+   * references an atom that has not been integrated yet.
+   */
+  tryResolveSelection(selection: StableBlockSelection): ResolveSelectionResult;
   getBlockIndex(): LexicalBlockIndex;
   destroy(): void;
 }
@@ -299,6 +320,23 @@ const resolveStableSelection = (
   anchor: replica.resolveBlockAnchor(selection.anchor),
   focus: replica.resolveBlockAnchor(selection.focus),
 });
+
+const tryResolveStableSelection = (
+  selection: StableBlockSelection,
+  replica: BlockReplica,
+): ResolveSelectionResult => {
+  // Resolve both endpoints before short-circuiting so an invalid known atom on
+  // either side still throws instead of being masked as temporarily unresolved.
+  const anchor = replica.tryResolveBlockAnchor(selection.anchor);
+  const focus = replica.tryResolveBlockAnchor(selection.focus);
+  if (anchor === null || focus === null) {
+    return { status: "temporarily-unresolved" };
+  }
+  return {
+    status: "resolved",
+    selection: { anchor, focus },
+  };
+};
 
 const sameLinkValue = (
   left: ProjectedMark["value"],
@@ -689,6 +727,8 @@ export const createLexicalBinding = ({
     },
     captureSelection,
     resolveSelection: (selection) => resolveStableSelection(selection, replica),
+    tryResolveSelection: (selection) =>
+      tryResolveStableSelection(selection, replica),
     getBlockIndex: () => blockIndex,
     destroy: () => {
       if (destroyed) return;

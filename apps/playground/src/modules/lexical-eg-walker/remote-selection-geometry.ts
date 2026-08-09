@@ -129,15 +129,14 @@ const toStableSelection = (
 ): StableBlockSelection => selection;
 
 export const resolvePeerSelection = (
-  binding: Pick<LexicalBinding, "resolveSelection">,
+  binding: Pick<LexicalBinding, "tryResolveSelection">,
   peer: PresenceUser,
 ): LogicalSelection | null => {
   if (!isDirectionalSelectionRange(peer.selection)) return null;
-  try {
-    return binding.resolveSelection(toStableSelection(peer.selection));
-  } catch {
-    return null;
-  }
+  const resolved = binding.tryResolveSelection(
+    toStableSelection(peer.selection),
+  );
+  return resolved.status === "resolved" ? resolved.selection : null;
 };
 
 export const measurePeer = (

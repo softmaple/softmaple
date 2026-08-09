@@ -14,4 +14,8 @@ export {
   METADATA_MARKER,
   TEXT_ESCAPE,
 } from "./constants";
+export {
+  InvalidSequenceAtomError,
+  UnknownSequenceAtomError,
+} from "@softmaple/eg-walker/anchors";
 export type * from "./types";

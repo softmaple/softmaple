@@ -2,6 +2,7 @@ export {
   createLexicalBinding,
   type LexicalBinding,
   type LexicalBindingOptions,
+  type ResolveSelectionResult,
   type StableBlockSelection,
 } from "./binding";
 export { UnsupportedLexicalNodeError } from "./errors";

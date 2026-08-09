@@ -24,6 +24,7 @@ import {
 import {
   BOOTSTRAP_BLOCK_ID,
   createBlockReplica,
+  InvalidSequenceAtomError,
   type BlockReplicaOrigin,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
@@ -307,6 +308,131 @@ describe("createLexicalBinding", () => {
       focus: { blockId: blockIds[0], offset: 1 },
     });
     expect(JSON.parse(JSON.stringify(stable))).toEqual(stable);
+    binding.destroy();
+  });
+
+  it("defers remote presence selections until the creating event arrives", () => {
+    const author = createBlockReplica("presence-author");
+    const seed = author.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "AB");
+    });
+    if (seed === null) throw new Error("Expected a seed batch");
+    const receiverReplica = createBlockReplica("presence-receiver");
+    receiverReplica.applyRemoteEvents(seed);
+    const insert = author.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 2, "!");
+    });
+    if (insert === null) throw new Error("Expected an insert batch");
+    const stable = {
+      anchor: author.captureBlockAnchor(BOOTSTRAP_BLOCK_ID, 3, "after"),
+      focus: author.captureBlockAnchor(BOOTSTRAP_BLOCK_ID, 3, "after"),
+    };
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({
+      editor,
+      replica: receiverReplica,
+    });
+
+    expect(binding.tryResolveSelection(stable)).toEqual({
+      status: "temporarily-unresolved",
+    });
+    expect(() => binding.resolveSelection(stable)).toThrow(/unknown atom/);
+
+    binding.applyRemoteEvents(insert);
+
+    expect(binding.tryResolveSelection(stable)).toEqual({
+      status: "resolved",
+      selection: {
+        anchor: { blockId: BOOTSTRAP_BLOCK_ID, offset: 3 },
+        focus: { blockId: BOOTSTRAP_BLOCK_ID, offset: 3 },
+      },
+    });
+    expect(binding.resolveSelection(stable)).toEqual({
+      anchor: { blockId: BOOTSTRAP_BLOCK_ID, offset: 3 },
+      focus: { blockId: BOOTSTRAP_BLOCK_ID, offset: 3 },
+    });
+    binding.destroy();
+  });
+
+  it("does not treat invalid known-atom offsets as temporarily unresolved", () => {
+    const replica = createBlockReplica("invalid-atom");
+    const batch = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+    });
+    if (batch === null) throw new Error("Expected an insert batch");
+    const insertEventId = batch.events.find(
+      (event) => event.operation.type === "insert",
+    )?.id;
+    if (insertEventId === undefined) {
+      throw new Error("Expected an insert event id");
+    }
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const malformed = {
+      anchor: {
+        blockId: BOOTSTRAP_BLOCK_ID,
+        anchor: {
+          type: "atom" as const,
+          eventId: insertEventId,
+          offset: 99,
+          affinity: "before" as const,
+        },
+      },
+      focus: {
+        blockId: BOOTSTRAP_BLOCK_ID,
+        anchor: {
+          type: "atom" as const,
+          eventId: insertEventId,
+          offset: 99,
+          affinity: "before" as const,
+        },
+      },
+    };
+
+    expect(() => binding.tryResolveSelection(malformed)).toThrow(
+      InvalidSequenceAtomError,
+    );
+    binding.destroy();
+  });
+
+  it("throws for an invalid focus even when the anchor is temporarily unresolved", () => {
+    const replica = createBlockReplica("mixed-endpoints");
+    const batch = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+    });
+    if (batch === null) throw new Error("Expected an insert batch");
+    const insertEventId = batch.events.find(
+      (event) => event.operation.type === "insert",
+    )?.id;
+    if (insertEventId === undefined) {
+      throw new Error("Expected an insert event id");
+    }
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const mixed = {
+      anchor: {
+        blockId: BOOTSTRAP_BLOCK_ID,
+        anchor: {
+          type: "atom" as const,
+          eventId: "missing-remote-insert",
+          offset: 0,
+          affinity: "after" as const,
+        },
+      },
+      focus: {
+        blockId: BOOTSTRAP_BLOCK_ID,
+        anchor: {
+          type: "atom" as const,
+          eventId: insertEventId,
+          offset: 99,
+          affinity: "before" as const,
+        },
+      },
+    };
+
+    expect(() => binding.tryResolveSelection(mixed)).toThrow(
+      InvalidSequenceAtomError,
+    );
     binding.destroy();
   });
 

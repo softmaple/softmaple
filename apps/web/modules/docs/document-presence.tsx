@@ -12,8 +12,6 @@ import {
 import {
   createNoopAdapter,
   createWebSocketAdapter,
-  isDirectionalSelectionRange,
-  isStableCursorPosition,
   PresenceProvider,
   useOthers,
   usePresence,
@@ -38,6 +36,10 @@ import {
   domPointAtOffset,
   type DomPoint,
 } from "@/modules/docs/document-presence-dom";
+import {
+  mapPresenceUsers,
+  resolveRemotePresenceSelection,
+} from "@/modules/docs/document-presence-geometry";
 
 type ProfileIdentity = {
   readonly avatarUrl: string | null;
@@ -110,17 +112,8 @@ const geometryForUser = (
   container: HTMLElement,
   user: PresenceUser,
 ): RemoteGeometry | null => {
-  const selection = isDirectionalSelectionRange(user.selection)
-    ? user.selection
-    : null;
-  const cursor = isStableCursorPosition(user.cursor) ? user.cursor : null;
-  if (selection === null && cursor === null) return null;
-
-  const stableSelection: StableBlockSelection =
-    selection === null
-      ? { anchor: cursor!, focus: cursor! }
-      : { anchor: selection.anchor, focus: selection.focus };
-  const logical = binding.resolveSelection(stableSelection);
+  const logical = resolveRemotePresenceSelection(binding, user);
+  if (logical === null) return null;
   const anchorPoint = logicalDomPoint(binding, logical.anchor);
   const focusPoint = logicalDomPoint(binding, logical.focus);
   if (anchorPoint === null || focusPoint === null) return null;
@@ -171,19 +164,22 @@ const RemotePresenceOverlay: FC<{
       if (frame !== null) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         setGeometries(
-          others.flatMap((user) => {
-            const geometry = geometryForUser(binding, container, user);
-            return geometry === null ? [] : [geometry];
-          }),
+          mapPresenceUsers(others, (user) =>
+            geometryForUser(binding, container, user),
+          ),
         );
       });
     };
     refresh();
+    // Lexical updates cover materialize(); replica.subscribe covers remote
+    // integration even when a Lexical update is deferred (e.g. composition).
     const unregisterEditor = binding.editor.registerUpdateListener(refresh);
+    const unsubscribeReplica = binding.replica.subscribe(refresh);
     window.addEventListener("resize", refresh);
     window.addEventListener("scroll", refresh, true);
     return () => {
       unregisterEditor();
+      unsubscribeReplica();
       window.removeEventListener("resize", refresh);
       window.removeEventListener("scroll", refresh, true);
       if (frame !== null) cancelAnimationFrame(frame);

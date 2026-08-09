@@ -42,8 +42,12 @@ presence.
 The supported browser entry point is the same-origin
 `ws(s)://<web>/collab/document` gateway. `apps/web/proxy.ts` validates the
 browser Origin, adds an HMAC signature, and rewrites the upgrade to this
-service's `/document` endpoint. Direct browser connections to this service are
-rejected before peer context is created.
+service's `/document` endpoint. Direct unsigned upgrades are normally rejected
+before peer context is created. During the rollback window, an unsigned direct
+upgrade is temporarily accepted in legacy mode when its Origin is listed in
+the deprecated `COLLAB_ALLOWED_ORIGINS`; that path is not HMAC-protected.
+Remove `COLLAB_ALLOWED_ORIGINS` after the rollback window to enforce HMAC-only
+upgrades.
 
 ## Session flow
 

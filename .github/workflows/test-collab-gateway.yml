@@ -49,6 +49,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -73,6 +75,7 @@ jobs:
 
       - name: Check Nitro collaboration backend
         run: |
+          pnpm exec turbo run build --filter=@softmaple/collab... --filter=!@softmaple/collab
           pnpm --filter @softmaple/collab typecheck
           pnpm --filter @softmaple/collab test
           pnpm --filter @softmaple/collab build

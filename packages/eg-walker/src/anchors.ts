@@ -110,6 +110,11 @@ export interface SequenceAnchorProjection {
   readonly text: string;
   captureAnchor(index: number, affinity: AnchorAffinity): SequenceAnchor;
   resolveAnchor(anchor: SequenceAnchor): number;
+  /**
+   * Resolve an anchor against this projection, or return `null` when the
+   * atom's creating event is not present. Invalid anchors (bad shape, known
+   * event with a missing offset, etc.) still throw.
+   */
   tryResolveAnchor(anchor: SequenceAnchor): number | null;
 }
 

@@ -395,6 +395,47 @@ describe("createLexicalBinding", () => {
     binding.destroy();
   });
 
+  it("throws for an invalid focus even when the anchor is temporarily unresolved", () => {
+    const replica = createBlockReplica("mixed-endpoints");
+    const batch = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "A");
+    });
+    if (batch === null) throw new Error("Expected an insert batch");
+    const insertEventId = batch.events.find(
+      (event) => event.operation.type === "insert",
+    )?.id;
+    if (insertEventId === undefined) {
+      throw new Error("Expected an insert event id");
+    }
+    const editor = createTestEditor();
+    const binding = createLexicalBinding({ editor, replica });
+    const mixed = {
+      anchor: {
+        blockId: BOOTSTRAP_BLOCK_ID,
+        anchor: {
+          type: "atom" as const,
+          eventId: "missing-remote-insert",
+          offset: 0,
+          affinity: "after" as const,
+        },
+      },
+      focus: {
+        blockId: BOOTSTRAP_BLOCK_ID,
+        anchor: {
+          type: "atom" as const,
+          eventId: insertEventId,
+          offset: 99,
+          affinity: "before" as const,
+        },
+      },
+    };
+
+    expect(() => binding.tryResolveSelection(mixed)).toThrow(
+      InvalidSequenceAtomError,
+    );
+    binding.destroy();
+  });
+
   it("restores a forward same-block selection through a remote insert", () => {
     const localReplica = createBlockReplica("selection-local");
     const remoteReplica = createBlockReplica("selection-remote");

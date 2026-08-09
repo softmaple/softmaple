@@ -325,12 +325,11 @@ const tryResolveStableSelection = (
   selection: StableBlockSelection,
   replica: BlockReplica,
 ): ResolveSelectionResult => {
+  // Resolve both endpoints before short-circuiting so an invalid known atom on
+  // either side still throws instead of being masked as temporarily unresolved.
   const anchor = replica.tryResolveBlockAnchor(selection.anchor);
-  if (anchor === null) {
-    return { status: "temporarily-unresolved" };
-  }
   const focus = replica.tryResolveBlockAnchor(selection.focus);
-  if (focus === null) {
+  if (anchor === null || focus === null) {
     return { status: "temporarily-unresolved" };
   }
   return {

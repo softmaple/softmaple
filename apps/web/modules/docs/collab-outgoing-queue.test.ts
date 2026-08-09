@@ -13,11 +13,7 @@ describe("createOutgoingBatchQueue", () => {
     });
 
     expect(
-      queue.enqueue([
-        { batchId: "a" },
-        { batchId: "b" },
-        { batchId: "c" },
-      ]),
+      queue.enqueue([{ batchId: "a" }, { batchId: "b" }, { batchId: "c" }]),
     ).toBe(true);
     expect(sent).toEqual([["a", "b"]]);
     expect(queue.inFlightSize()).toBe(2);

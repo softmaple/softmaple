@@ -215,7 +215,61 @@ const pipeUpgrade = (req, socket, head, targetOrigin, path, headers) => {
   proxyReq.end();
 };
 
+const isCollabHttpPath = (pathname) =>
+  pathname === "/collab" || pathname.startsWith("/collab/");
+
 const server = http.createServer((req, res) => {
+  let requestUrl;
+  try {
+    requestUrl = new URL(req.url ?? "/", publicOrigin);
+  } catch {
+    res.writeHead(400);
+    res.end("Bad Request");
+    return;
+  }
+
+  // Match production: `/collab/*` HTTP traffic goes to apps/collab.
+  // Keep Authorization so private document HTTP persistence can authenticate.
+  if (isCollabHttpPath(requestUrl.pathname)) {
+    const headers = { ...req.headers, host: collabOrigin.host };
+    const proxyReq = http.request(
+      {
+        protocol: collabOrigin.protocol,
+        hostname: collabOrigin.hostname,
+        port: collabOrigin.port,
+        path: req.url,
+        method: req.method,
+        headers,
+      },
+      (proxyRes) => {
+        swallowStreamError(proxyRes);
+        if (res.writableEnded || res.destroyed) {
+          proxyRes.destroy();
+          return;
+        }
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+        res.on("close", () => {
+          if (!proxyRes.destroyed) proxyRes.destroy();
+        });
+      },
+    );
+    swallowStreamError(proxyReq);
+    proxyReq.on("error", () => {
+      if (!res.headersSent && !res.writableEnded) {
+        res.writeHead(502);
+        res.end("Bad gateway");
+        return;
+      }
+      res.destroy();
+    });
+    req.on("aborted", () => {
+      proxyReq.destroy();
+    });
+    req.pipe(proxyReq);
+    return;
+  }
+
   proxyHttp(req, res, nextOrigin);
 });
 

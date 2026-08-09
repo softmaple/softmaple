@@ -12,11 +12,12 @@ import type {
   LexicalBinding,
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
+import type { DocumentPermission } from "@/modules/docs/document-editability";
 import {
-  useCollabDocument,
-  type CollabDocumentState,
+  useDocumentSession,
   type CollabSessionMode,
-} from "@/modules/docs/use-collab-document";
+  type DocumentSessionState,
+} from "@/modules/docs/use-document-session";
 
 export type CollabDocEditorProps = Pick<
   EditorProps,
@@ -24,10 +25,12 @@ export type CollabDocEditorProps = Pick<
 > & {
   documentId: string;
   commonEditorConfig?: InitialConfigType;
-  onCollaborationChange?: (state: CollabDocumentState) => void;
+  isShared?: boolean;
+  onCollaborationChange?: (state: DocumentSessionState) => void;
   onExternalBindingChange?: (binding: LexicalBinding | null) => void;
   onMarkdownChange?: (markdown: string) => void;
   onSelectionChange?: (selection: StableBlockSelection | null) => void;
+  permission?: DocumentPermission | null;
   sessionMode?: CollabSessionMode;
 };
 
@@ -56,13 +59,13 @@ const MarkdownSyncPlugin: FC<{
 };
 
 const CollabBindingPlugin: FC<{
-  canWrite: CollabDocumentState["canWrite"];
-  onBindingChange: CollabDocumentState["onBindingChange"];
+  editable: boolean;
+  onBindingChange: DocumentSessionState["onBindingChange"];
   onExternalBindingChange?: (binding: LexicalBinding | null) => void;
   onSelectionChange?: (selection: StableBlockSelection | null) => void;
-  replica: NonNullable<CollabDocumentState["replica"]>;
+  replica: NonNullable<DocumentSessionState["replica"]>;
 }> = ({
-  canWrite,
+  editable,
   onBindingChange,
   onExternalBindingChange,
   onSelectionChange,
@@ -71,8 +74,8 @@ const CollabBindingPlugin: FC<{
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
-    editor.setEditable(canWrite);
-  }, [canWrite, editor]);
+    editor.setEditable(editable);
+  }, [editable, editor]);
 
   return (
     <LexicalEgWalkerPlugin
@@ -92,29 +95,36 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = ({
   documentId,
   commonEditorConfig,
   activeEditor,
+  isShared = true,
   onCollaborationChange,
   onExternalBindingChange,
   onMarkdownChange,
   onSelectionChange,
+  permission = null,
   sessionMode = "authenticated",
   setActiveEditor,
 }) => {
-  const collaboration = useCollabDocument(documentId, sessionMode);
+  const session = useDocumentSession({
+    documentId,
+    isShared,
+    permission,
+    sessionMode,
+  });
 
   useEffect(() => {
-    onCollaborationChange?.(collaboration);
-  }, [collaboration, onCollaborationChange]);
+    onCollaborationChange?.(session);
+  }, [onCollaborationChange, session]);
 
   const lexicalConfig: InitialConfigType = {
     ...LEXICAL_PLAYGROUND_CONFIG,
     ...commonEditorConfig,
-    editable: false,
+    editable: session.editable,
   };
 
-  if (collaboration.replica === null) {
+  if (session.replica === null) {
     return (
       <div className="grid h-full min-h-64 place-items-center text-sm text-muted-foreground">
-        {collaboration.error?.message ?? "Loading document history…"}
+        {session.error?.message ?? "Loading document…"}
       </div>
     );
   }
@@ -126,14 +136,14 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = ({
         setActiveEditor={setActiveEditor}
         historyMode="disabled"
         lexicalConfig={lexicalConfig}
-        showToolbar={sessionMode === "authenticated" && collaboration.canWrite}
+        showToolbar={session.editable}
       >
         <CollabBindingPlugin
-          canWrite={collaboration.canWrite}
-          onBindingChange={collaboration.onBindingChange}
+          editable={session.editable}
+          onBindingChange={session.onBindingChange}
           onExternalBindingChange={onExternalBindingChange}
           onSelectionChange={onSelectionChange}
-          replica={collaboration.replica}
+          replica={session.replica}
         />
         {onMarkdownChange === undefined ? null : (
           <MarkdownSyncPlugin onMarkdownChange={onMarkdownChange} />

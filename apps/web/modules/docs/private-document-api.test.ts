@@ -10,7 +10,7 @@ describe("private document HTTP API helpers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("should load history pages until complete", async () => {
+  it("should load history pages until complete and send the bearer token", async () => {
     const replica = createBlockReplica("api-test");
     const batch = replica.transact((transaction) => {
       transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "private");
@@ -51,9 +51,69 @@ describe("private document HTTP API helpers", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       "/collab/document-history",
     );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: "Bearer token",
+        }),
+      }),
+    );
   });
 
-  it("should post event batches for private persistence", async () => {
+  it("should reject a non-advancing history cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          batches: [],
+          nextCursor: "0",
+          complete: false,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      loadPrivateDocumentHistory({
+        accessToken: "token",
+        documentId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("Document history pagination did not advance");
+  });
+
+  it("should throw when history loading fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("nope", { status: 500 })),
+    );
+
+    await expect(
+      loadPrivateDocumentHistory({
+        accessToken: "token",
+        documentId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("Could not load document history (500)");
+  });
+
+  it("should throw when history payload shape is invalid", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ batches: "nope", complete: true }), {
+          status: 200,
+        }),
+      ),
+    );
+
+    await expect(
+      loadPrivateDocumentHistory({
+        accessToken: "token",
+        documentId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("Document history response is invalid");
+  });
+
+  it("should post event batches for private persistence with auth", async () => {
     const replica = createBlockReplica("api-test-2");
     const batch = replica.transact((transaction) => {
       transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "save-me");
@@ -76,7 +136,58 @@ describe("private document HTTP API helpers", () => {
     expect(batchIds).toEqual([batch.batchId]);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/collab/document-events"),
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer token",
+        }),
+      }),
     );
+  });
+
+  it("should throw when save responses are invalid", async () => {
+    const replica = createBlockReplica("api-test-3");
+    const batch = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "broken");
+    });
+    if (batch === null) throw new Error("expected batch");
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ batchIds: "nope" }), { status: 200 }),
+        ),
+    );
+
+    await expect(
+      persistPrivateDocumentEvents({
+        accessToken: "token",
+        batches: [batch],
+        documentId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("Save response is invalid");
+  });
+
+  it("should throw when save requests fail", async () => {
+    const replica = createBlockReplica("api-test-4");
+    const batch = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "fail");
+    });
+    if (batch === null) throw new Error("expected batch");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("nope", { status: 403 })),
+    );
+
+    await expect(
+      persistPrivateDocumentEvents({
+        accessToken: "token",
+        batches: [batch],
+        documentId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("Could not save document (403)");
   });
 });

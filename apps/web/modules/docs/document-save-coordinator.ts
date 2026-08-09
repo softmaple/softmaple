@@ -13,6 +13,9 @@ type PersistResult = "ack" | "empty";
 /**
  * Serializes overlapping saves and ignores stale completions so an older
  * response cannot mark newer unsaved edits as saved.
+ *
+ * `"ack"` means some work was persisted but more may remain — status stays
+ * non-terminal and persistence is requeued until `"empty"`.
  */
 export const createSaveCoordinator = (
   onStatus: (status: SaveStatus) => void,
@@ -27,7 +30,12 @@ export const createSaveCoordinator = (
     const run = async (): Promise<void> => {
       if (disposed) return;
       try {
-        await persist();
+        let result = await persist();
+        while (!disposed && result === "ack") {
+          // Trailing edits may have been added while the previous snapshot
+          // was in flight; keep persisting until the queue is empty.
+          result = await persist();
+        }
         if (disposed) return;
         if (generation !== latestGeneration) return;
         onStatus("saved");

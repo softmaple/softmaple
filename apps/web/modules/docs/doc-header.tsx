@@ -126,7 +126,11 @@ export const DocHeader: FC<DocHeaderProps> = ({
   const toggleSharing = (): void => {
     startTransition(async () => {
       const enabling = !isPublic;
-      if (enabling && flushDocument !== undefined) {
+      if (enabling) {
+        if (flushDocument === undefined) {
+          setMessage("The document is still loading. Try again in a moment.");
+          return;
+        }
         try {
           await flushDocument();
         } catch {
@@ -245,7 +249,14 @@ export const DocHeader: FC<DocHeaderProps> = ({
           </Button>
           {canShare ? (
             <>
-              <Button onClick={toggleSharing} size="sm" variant="outline">
+              <Button
+                disabled={
+                  isPending || (!isPublic && flushDocument === undefined)
+                }
+                onClick={toggleSharing}
+                size="sm"
+                variant="outline"
+              >
                 {isPending ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : (

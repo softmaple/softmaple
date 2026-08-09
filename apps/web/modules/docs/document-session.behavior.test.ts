@@ -9,6 +9,10 @@ import {
 } from "@softmaple/block-model";
 import { isDocumentEditable } from "@/modules/docs/document-editability";
 import { createSaveCoordinator } from "@/modules/docs/document-save-coordinator";
+import {
+  loadPrivateDocumentHistory,
+  persistPrivateDocumentEvents,
+} from "@/modules/docs/private-document-api";
 
 describe("document session behavior contracts", () => {
   beforeEach(() => {
@@ -33,12 +37,12 @@ describe("document session behavior contracts", () => {
 
     let release: (() => void) | undefined;
     const coordinator = createSaveCoordinator(() => undefined);
-    coordinator.requestSave(
-      () =>
-        new Promise<"ack">((resolve) => {
-          release = () => resolve("ack");
-        }),
-    );
+    coordinator.requestSave(async () => {
+      await new Promise<"empty">((resolve) => {
+        release = () => resolve("empty");
+      });
+      return "empty";
+    });
 
     // Saving must not flip editability.
     expect(
@@ -105,9 +109,43 @@ describe("document session behavior contracts", () => {
     expect(sharedReplica.getDocument().blocks[0]?.text).toBe("ABCDEFG");
   });
 
-  it("should not construct a WebSocket while exercising private save helpers", () => {
-    expect(() => new WebSocket("wss://example.test/collab/document")).toThrow(
-      /should not open/,
-    );
+  it("should load and save a private document without opening a WebSocket", async () => {
+    const replica = createBlockReplica("private-http");
+    const batch = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "solo");
+    });
+    if (batch === null) throw new Error("expected batch");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            batches: [batch],
+            nextCursor: "1",
+            complete: true,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ batchIds: [batch.batchId] }), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const history = await loadPrivateDocumentHistory({
+      accessToken: "token",
+      documentId: "00000000-0000-4000-8000-000000000099",
+    });
+    const batchIds = await persistPrivateDocumentEvents({
+      accessToken: "token",
+      batches: history,
+      documentId: "00000000-0000-4000-8000-000000000099",
+    });
+
+    expect(batchIds).toEqual([batch.batchId]);
+    expect(WebSocket).not.toHaveBeenCalled();
   });
 });

@@ -137,10 +137,26 @@ const createSessionController = ({
   let privateSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let transport: TransportKind | null = null;
   let shareSwitch: Promise<void> = Promise.resolve();
+  type FlushWaiter = {
+    readonly resolve: () => void;
+    readonly reject: (error: Error) => void;
+    readonly timer: ReturnType<typeof setTimeout>;
+  };
+  let flushWaiters: FlushWaiter[] = [];
 
   const saveCoordinator = createSaveCoordinator((status) => {
     if (!cancelled) onSaveStatus(status);
   });
+
+  const resolveFlushWaiters = (): void => {
+    if (pendingBatches.size > 0) return;
+    const waiters = flushWaiters;
+    flushWaiters = [];
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
+    }
+  };
 
   const applyBatches = (batches: ReadonlyArray<RichTextEventBatch>): void => {
     for (const batch of batches) {
@@ -238,13 +254,12 @@ const createSessionController = ({
       onCollaborationStatus("error");
       return;
     }
-    for (const batch of nextReplica.exportEvents()) {
-      knownBatches.set(batch.batchId, batch);
-    }
     const newPendingBatches: RichTextEventBatch[] = [];
     for (const batchId of change.batchIds) {
-      const batch = knownBatches.get(batchId);
-      if (batch !== undefined) newPendingBatches.push(batch);
+      const batch = nextReplica.getBatch(batchId);
+      if (batch === null) continue;
+      knownBatches.set(batchId, batch);
+      newPendingBatches.push(batch);
     }
     try {
       rememberPending(newPendingBatches);
@@ -390,12 +405,14 @@ const createSessionController = ({
       try {
         switch (message.type) {
           case COLLAB_MESSAGE_TYPE.Ready:
+            if (message.protocolVersion !== COLLAB_PROTOCOL_VERSION) {
+              throw new Error("The collaboration protocol version is invalid");
+            }
             if (
-              message.protocolVersion === COLLAB_PROTOCOL_VERSION &&
               message.accessMode !==
-                (sessionMode === "public"
-                  ? COLLAB_ACCESS_MODE.Public
-                  : COLLAB_ACCESS_MODE.Authenticated)
+              (sessionMode === "public"
+                ? COLLAB_ACCESS_MODE.Public
+                : COLLAB_ACCESS_MODE.Authenticated)
             ) {
               throw new Error("The collaboration access mode is invalid");
             }
@@ -439,6 +456,7 @@ const createSessionController = ({
             ) {
               onSaveStatus("saved");
             }
+            resolveFlushWaiters();
             return;
           case COLLAB_MESSAGE_TYPE.Error:
             onError(new Error(message.message));
@@ -565,12 +583,23 @@ const createSessionController = ({
       await saveCoordinator.flush(persistHttp);
       return;
     }
-    publishWsPending();
-    const started = Date.now();
-    while (pendingBatches.size > 0 && Date.now() - started < 5_000) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      publishWsPending();
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+      throw new Error("Could not save the latest edits before sharing");
     }
+    // One-shot publish; DurableAck resolves flush. Re-publish only on reconnect.
+    publishWsPending();
+    if (pendingBatches.size === 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        flushWaiters = flushWaiters.filter(
+          (waiter) => waiter.resolve !== resolve,
+        );
+        reject(new Error("Could not save the latest edits before sharing"));
+      }, 5_000);
+      flushWaiters.push({ reject, resolve, timer });
+      // A concurrent DurableAck may have already drained the queue.
+      resolveFlushWaiters();
+    });
   };
 
   void setShared(initialShared);
@@ -585,6 +614,11 @@ const createSessionController = ({
       unsubscribeReplica();
       bindingRef.current = null;
       if (privateSaveTimer !== null) clearTimeout(privateSaveTimer);
+      for (const waiter of flushWaiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(new Error("Document session was disposed"));
+      }
+      flushWaiters = [];
       stopWs();
       transport = null;
       onReplica(null);
@@ -655,16 +689,28 @@ export const useDocumentSession = ({
     await controllerRef.current?.flush();
   }, []);
 
-  return {
-    collaborationStatus,
-    editable,
-    error,
-    flush,
-    onBindingChange,
-    replica,
-    saveStatus,
-    status,
-  };
+  return useMemo(
+    () => ({
+      collaborationStatus,
+      editable,
+      error,
+      flush,
+      onBindingChange,
+      replica,
+      saveStatus,
+      status,
+    }),
+    [
+      collaborationStatus,
+      editable,
+      error,
+      flush,
+      onBindingChange,
+      replica,
+      saveStatus,
+      status,
+    ],
+  );
 };
 
 /** Compatibility wrapper used by older collab-only call sites. */

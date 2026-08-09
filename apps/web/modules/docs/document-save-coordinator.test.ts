@@ -12,13 +12,17 @@ describe("createSaveCoordinator", () => {
     });
 
     let releaseFirst: (() => void) | undefined;
-    const firstPersist = vi.fn(
-      () =>
-        new Promise<"ack">((resolve) => {
+    let firstCalls = 0;
+    const firstPersist = vi.fn(async () => {
+      firstCalls += 1;
+      if (firstCalls === 1) {
+        await new Promise<"ack">((resolve) => {
           releaseFirst = () => resolve("ack");
-        }),
-    );
-    const secondPersist = vi.fn(async () => "ack" as const);
+        });
+      }
+      return "empty" as const;
+    });
+    const secondPersist = vi.fn(async () => "empty" as const);
 
     coordinator.requestSave(firstPersist);
     coordinator.requestSave(secondPersist);
@@ -34,7 +38,31 @@ describe("createSaveCoordinator", () => {
     await vi.waitFor(() => {
       expect(statuses.at(-1)).toBe("saved");
     });
-    expect(firstPersist).toHaveBeenCalledOnce();
+    expect(firstPersist).toHaveBeenCalled();
+  });
+
+  it("should continue persisting while the result is ack", async () => {
+    const statuses: string[] = [];
+    const coordinator = createSaveCoordinator((status) => {
+      statuses.push(status);
+    });
+
+    let remaining = 2;
+    const persist = vi.fn(async () => {
+      if (remaining > 0) {
+        remaining -= 1;
+        return "ack" as const;
+      }
+      return "empty" as const;
+    });
+
+    coordinator.requestSave(persist);
+
+    await vi.waitFor(() => {
+      expect(statuses.at(-1)).toBe("saved");
+    });
+    expect(persist).toHaveBeenCalledTimes(3);
+    expect(statuses.filter((status) => status === "saved")).toHaveLength(1);
   });
 
   it("should ignore a stale save completion after a newer save was queued", async () => {
@@ -44,13 +72,17 @@ describe("createSaveCoordinator", () => {
     });
 
     let releaseFirst: (() => void) | undefined;
-    coordinator.requestSave(
-      () =>
-        new Promise<"ack">((resolve) => {
+    let firstCalls = 0;
+    coordinator.requestSave(async () => {
+      firstCalls += 1;
+      if (firstCalls === 1) {
+        await new Promise<"ack">((resolve) => {
           releaseFirst = () => resolve("ack");
-        }),
-    );
-    coordinator.requestSave(async () => "ack");
+        });
+      }
+      return "empty" as const;
+    });
+    coordinator.requestSave(async () => "empty");
 
     await vi.waitFor(() => {
       expect(releaseFirst).toBeTypeOf("function");
@@ -63,11 +95,53 @@ describe("createSaveCoordinator", () => {
     expect(statuses.filter((status) => status === "saved")).toHaveLength(1);
   });
 
-  it("should flush queued saves before resolving", async () => {
+  it("should flush until persist reports empty", async () => {
     const coordinator = createSaveCoordinator(() => undefined);
-    const persist = vi.fn(async () => "empty" as const);
+    let remaining = 1;
+    const persist = vi.fn(async () => {
+      if (remaining > 0) {
+        remaining -= 1;
+        return "ack" as const;
+      }
+      return "empty" as const;
+    });
     await coordinator.flush(persist);
-    expect(persist).toHaveBeenCalledOnce();
+    expect(persist).toHaveBeenCalledTimes(2);
+  });
+
+  it("should persist an edit that arrives during the first request", async () => {
+    const statuses: string[] = [];
+    const coordinator = createSaveCoordinator((status) => {
+      statuses.push(status);
+    });
+    const pending = new Set<string>(["edit-1"]);
+    let releaseFirst: (() => void) | undefined;
+
+    const persist = vi.fn(async (): Promise<"ack" | "empty"> => {
+      const snapshot = [...pending];
+      if (snapshot.length === 0) return "empty";
+      if (snapshot.includes("edit-1") && releaseFirst === undefined) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      for (const id of snapshot) pending.delete(id);
+      return pending.size === 0 ? "empty" : "ack";
+    });
+
+    coordinator.requestSave(persist);
+    await vi.waitFor(() => {
+      expect(releaseFirst).toBeTypeOf("function");
+    });
+    pending.add("edit-2");
+    coordinator.requestSave(persist);
+    releaseFirst?.();
+
+    await vi.waitFor(() => {
+      expect(statuses.at(-1)).toBe("saved");
+    });
+    expect(pending.size).toBe(0);
+    expect(persist.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });
 

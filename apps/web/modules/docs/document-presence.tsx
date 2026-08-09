@@ -361,27 +361,32 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
 
   useEffect(() => {
     if (!presenceEnabled) {
-      setLiveAdapter(null);
+      setLiveAdapter((current) => {
+        void current?.disconnect();
+        return null;
+      });
       setError(null);
       return;
     }
 
     let cancelled = false;
+    let created: PresenceAdapter | null = null;
     const configure = (token: string): void => {
       if (cancelled) return;
-      setLiveAdapter(
-        createWebSocketAdapter({
-          authToken: token,
-          roomId: editorProps.documentId,
-          url: resolvePresenceUrl(),
-          userInfo: {
-            userId,
-            name,
-            color: "#c9184a",
-            ...(avatarUrl === null ? {} : { avatarUrl }),
-          },
-        }),
-      );
+      const next = createWebSocketAdapter({
+        authToken: token,
+        roomId: editorProps.documentId,
+        url: resolvePresenceUrl(),
+        userInfo: {
+          userId,
+          name,
+          color: "#c9184a",
+          ...(avatarUrl === null ? {} : { avatarUrl }),
+        },
+      });
+      void created?.disconnect();
+      created = next;
+      setLiveAdapter(next);
       setError(null);
     };
     void supabase.auth.getSession().then(({ data, error: sessionError }) => {
@@ -400,6 +405,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     );
     return () => {
       cancelled = true;
+      void created?.disconnect();
       listener.subscription.unsubscribe();
     };
   }, [

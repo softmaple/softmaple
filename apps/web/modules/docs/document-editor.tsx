@@ -130,7 +130,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         onSharingChange={setIsPublic}
         role={props.role}
         setTitle={setTitle}
-        status={session?.status ?? (isPublic ? "connecting" : "saved")}
+        status={session?.status ?? "connecting"}
         title={title}
         workspaceSlug={props.workspaceSlug}
       />

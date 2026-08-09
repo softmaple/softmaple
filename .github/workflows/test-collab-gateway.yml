@@ -1,0 +1,84 @@
+name: Collaboration Gateway Tests
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - 'apps/collab/**'
+      - 'apps/web/modules/docs/use-collab-document.ts'
+      - 'apps/web/package.json'
+      - 'apps/web/proxy.ts'
+      - 'apps/web/proxy.test.ts'
+      - 'packages/collab-gateway-auth/**'
+      - '.github/workflows/test-collab-gateway.yml'
+      - 'pnpm-lock.yaml'
+      - 'turbo.json'
+  pull_request:
+    branches: [main, next]
+    paths:
+      - 'apps/collab/**'
+      - 'apps/web/modules/docs/use-collab-document.ts'
+      - 'apps/web/package.json'
+      - 'apps/web/proxy.ts'
+      - 'apps/web/proxy.test.ts'
+      - 'packages/collab-gateway-auth/**'
+      - '.github/workflows/test-collab-gateway.yml'
+      - 'pnpm-lock.yaml'
+      - 'turbo.json'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Signer, gateway, and backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COLLAB_BACKEND_ORIGIN: http://127.0.0.1:3002
+      COLLAB_GATEWAY_HMAC_KEY_ID: ci-test
+      COLLAB_GATEWAY_HMAC_KEYS: '{"ci-test":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
+      COLLAB_GATEWAY_HMAC_SECRET: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_test
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_test
+      SUPABASE_URL: https://example.supabase.co
+      NEXT_TELEMETRY_DISABLED: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check shared gateway authentication
+        run: |
+          pnpm --filter @softmaple/collab-gateway-auth lint
+          pnpm --filter @softmaple/collab-gateway-auth typecheck
+          pnpm --filter @softmaple/collab-gateway-auth test
+          pnpm --filter @softmaple/collab-gateway-auth build
+
+      - name: Check Nitro collaboration backend
+        run: |
+          pnpm --filter @softmaple/collab typecheck
+          pnpm --filter @softmaple/collab test
+          pnpm --filter @softmaple/collab build
+
+      - name: Check Next.js gateway
+        run: |
+          pnpm --filter @softmaple/web typecheck
+          pnpm --filter @softmaple/web exec vitest run proxy.test.ts
+          pnpm --filter @softmaple/web build

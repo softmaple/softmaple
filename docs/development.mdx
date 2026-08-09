@@ -17,6 +17,7 @@ softmaple/
 │   └── web/           # Next.js 16 application
 ├── packages/
 │   ├── db/            # Prisma database client
+│   ├── collab-gateway-auth/ # Server-to-server WebSocket HMAC
 │   ├── ui/            # Shared UI components
 │   ├── editor/        # Lexical editor extensions
 │   ├── md2latex/      # Markdown to LaTeX converter
@@ -58,7 +59,9 @@ Configure the web app in `apps/web/.env`:
 # Supabase Authentication
 NEXT_PUBLIC_SUPABASE_URL="your-supabase-project-url"
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
-NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:3002/document"
+COLLAB_BACKEND_ORIGIN="http://localhost:3002"
+COLLAB_GATEWAY_HMAC_KEY_ID="local-dev"
+COLLAB_GATEWAY_HMAC_SECRET="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 ```
 
 Configure Prisma in `packages/db/.env`:
@@ -75,9 +78,20 @@ variables defined by `apps/collab/.env.example`:
 DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
 SUPABASE_URL="your-supabase-project-url"
 SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
-COLLAB_ALLOWED_ORIGINS="http://localhost:3000"
-COLLAB_ALLOW_MISSING_ORIGIN="false"
+COLLAB_GATEWAY_HMAC_KEYS='{"local-dev":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
 ```
+
+The checked-in secret is for local development only. Production and Preview
+environments must use their own 32-byte unpadded base64url secret. The browser
+always connects to the web app's same-origin `/collab/document` gateway.
+
+<Warning>
+  The stock Next.js 16.3 local server does not exercise the release-equivalent
+  external WebSocket rewrite for `proxy.ts`. Keep the HMAC unit and Nitro
+  upgrade tests green, then use a Vercel Preview to gate the real handshake,
+  reconnect, and repair/resync flow. The collab backend must not be exposed as
+  a browser fallback.
+</Warning>
 
 ### 3. Database Setup
 

@@ -34,6 +34,11 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
     - ephemeral presence, transport adapters, rendering helpers
                  ↓
               apps/*
+
+@softmaple/collab-gateway-auth
+    - server-only HMAC for the trusted web-to-collab upgrade boundary
+                 ↓
+              apps/web + apps/collab
 ```
 
 The document path is directional: a lower model layer never imports a
@@ -197,6 +202,18 @@ server hosts.
   framework. Rich-text payloads enter through `@softmaple/block-model`.
 - Own WebSocket connections, Supabase clients, database access, JWT checks,
   React components, or any other host runtime.
+
+## Server-only host utility: `@softmaple/collab-gateway-auth`
+
+This package is deliberately outside the browser-safe model and wire layers.
+It owns the canonical request payload, HMAC-SHA-256 signing, keyring parsing,
+clock-window validation, and timing-safe signature comparison shared by
+`apps/web` and `apps/collab`.
+
+It must only run in server hosts and must not be imported by Client Components,
+model packages, editor bindings, awareness, or `@softmaple/collab-protocol`.
+It authenticates the gateway service, not the end user; Supabase JWT and
+workspace authorization remain app-owned.
 
 ## Layer 6: `apps/*`
 

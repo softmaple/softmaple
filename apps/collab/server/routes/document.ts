@@ -5,6 +5,11 @@ import {
   parseClientCollabMessage,
   type CollabErrorCode,
 } from "@softmaple/collab-protocol";
+import {
+  hasCollabGatewayAuthHeaders,
+  parseCollabGatewayKeyring,
+  verifyCollabGatewayAuthRequest,
+} from "@softmaple/collab-gateway-auth";
 import { defineWebSocketHandler } from "nitro";
 import { authorizeDocument, type DocumentAccess } from "../utils/auth";
 import {
@@ -24,21 +29,67 @@ interface MessageRateLimit {
   readonly windowStartedAt: number;
 }
 
-const allowedOrigins = (): ReadonlySet<string> => {
+// Release-one migration fallback only. It has no default and is unreachable
+// once the deprecated deployment variable is removed after the rollback window.
+const legacyAllowedOrigins = (): ReadonlySet<string> => {
   const configured = process.env.COLLAB_ALLOWED_ORIGINS;
-  if (configured) {
-    return new Set(
-      configured
-        .split(",")
-        .map((origin) => origin.trim())
-        .filter(Boolean),
-    );
-  }
-  return new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
+  if (!configured) return new Set();
+  return new Set(
+    configured
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  );
 };
 
-const allowMissingOrigin = (): boolean =>
-  process.env.COLLAB_ALLOW_MISSING_ORIGIN === "true";
+const rejectUpgrade = (mode: "hmac" | "legacy", reason: string): never => {
+  console.warn("Collaboration gateway upgrade rejected", { mode, reason });
+  throw new Response("Forbidden", { status: 403 });
+};
+
+const authenticateGatewayUpgrade = (
+  request: Request,
+): Readonly<Record<string, unknown>> => {
+  if (hasCollabGatewayAuthHeaders(request.headers)) {
+    let verification;
+    try {
+      const keyring = parseCollabGatewayKeyring(
+        process.env.COLLAB_GATEWAY_HMAC_KEYS,
+      );
+      verification = verifyCollabGatewayAuthRequest(request, keyring);
+    } catch {
+      return rejectUpgrade("hmac", "invalid-configuration");
+    }
+    if (!verification.ok) {
+      return rejectUpgrade("hmac", verification.reason);
+    }
+    console.info("Collaboration gateway upgrade accepted", {
+      mode: "hmac",
+      keyId: verification.keyId,
+    });
+    return Object.freeze({
+      gatewayAuthMode: "hmac",
+      gatewayAuthKeyId: verification.keyId,
+    });
+  }
+
+  if (process.env.COLLAB_GATEWAY_HMAC_KEYS !== undefined) {
+    try {
+      parseCollabGatewayKeyring(process.env.COLLAB_GATEWAY_HMAC_KEYS);
+    } catch {
+      return rejectUpgrade("legacy", "invalid-configuration");
+    }
+  }
+
+  const origin = request.headers.get("origin");
+  if (origin === null || !legacyAllowedOrigins().has(origin)) {
+    return rejectUpgrade("legacy", "origin-not-allowed");
+  }
+  console.warn("Collaboration gateway upgrade accepted in legacy mode", {
+    mode: "legacy",
+  });
+  return Object.freeze({ gatewayAuthMode: "legacy" });
+};
 
 const topicForDocument = (documentId: string): string =>
   `${TOPIC_PREFIX}${documentId}`;
@@ -140,15 +191,9 @@ const errorMessage = (
 });
 
 export default defineWebSocketHandler({
-  upgrade(request) {
-    const origin = request.headers.get("origin");
-    if (
-      (origin === null && !allowMissingOrigin()) ||
-      (origin !== null && !allowedOrigins().has(origin))
-    ) {
-      throw new Response("Origin is not allowed", { status: 403 });
-    }
-    return { namespace: "softmaple-collab-v2", context: {} };
+  async upgrade(request) {
+    const context = authenticateGatewayUpgrade(request);
+    return { namespace: "softmaple-collab-v2", context };
   },
 
   async message(peer, rawMessage) {

@@ -36,13 +36,7 @@ export interface CollabDocumentState {
 }
 
 const resolveCollabUrl = (): string => {
-  const configured = process.env.NEXT_PUBLIC_COLLAB_WS_URL;
-  if (configured) return configured;
-
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  if (window.location.hostname === "localhost") {
-    return `${protocol}//localhost:3002/document`;
-  }
   return `${protocol}//${window.location.host}/collab/document`;
 };
 

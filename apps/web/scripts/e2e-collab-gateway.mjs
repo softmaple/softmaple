@@ -44,6 +44,13 @@ const collabRoutes = new Map([
   ["/collab/presence", { backendPath: "/presence", query: "room" }],
 ]);
 
+/** Prevent transient proxy socket resets from crashing the gateway process. */
+const swallowStreamError = (stream) => {
+  stream.on("error", () => {
+    stream.destroy();
+  });
+};
+
 const isWebSocketUpgrade = (req) => {
   const connectionTokens = (req.headers.connection ?? "")
     .split(",")
@@ -78,7 +85,12 @@ const hasValidGatewayQuery = (url, queryMode) => {
 };
 
 const writeSocketError = (socket, statusLine) => {
-  socket.write(`HTTP/1.1 ${statusLine}\r\nConnection: close\r\n\r\n`);
+  swallowStreamError(socket);
+  try {
+    socket.write(`HTTP/1.1 ${statusLine}\r\nConnection: close\r\n\r\n`);
+  } catch {
+    // Client may already be gone.
+  }
   socket.destroy();
 };
 
@@ -93,6 +105,9 @@ const serializeHeaders = (headers) =>
     .join("\r\n");
 
 const proxyHttp = (req, res, targetOrigin) => {
+  swallowStreamError(req);
+  swallowStreamError(res);
+
   const headers = { ...req.headers, host: targetOrigin.host };
   const proxyReq = http.request(
     {
@@ -104,18 +119,36 @@ const proxyHttp = (req, res, targetOrigin) => {
       headers,
     },
     (proxyRes) => {
+      swallowStreamError(proxyRes);
+      if (res.writableEnded || res.destroyed) {
+        proxyRes.destroy();
+        return;
+      }
       res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
       proxyRes.pipe(res);
+      res.on("close", () => {
+        if (!proxyRes.destroyed) proxyRes.destroy();
+      });
     },
   );
+  swallowStreamError(proxyReq);
   proxyReq.on("error", () => {
-    if (!res.headersSent) res.writeHead(502);
-    res.end("Bad gateway");
+    if (!res.headersSent && !res.writableEnded) {
+      res.writeHead(502);
+      res.end("Bad gateway");
+      return;
+    }
+    res.destroy();
+  });
+  req.on("aborted", () => {
+    proxyReq.destroy();
   });
   req.pipe(proxyReq);
 };
 
 const pipeUpgrade = (req, socket, head, targetOrigin, path, headers) => {
+  swallowStreamError(socket);
+
   const proxyReq = http.request({
     protocol: targetOrigin.protocol,
     hostname: targetOrigin.hostname,
@@ -124,21 +157,40 @@ const pipeUpgrade = (req, socket, head, targetOrigin, path, headers) => {
     method: "GET",
     headers: { ...headers, host: targetOrigin.host },
   });
+  swallowStreamError(proxyReq);
 
   proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
-    socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\n${serializeHeaders(proxyRes.headers)}\r\n\r\n`,
-    );
+    swallowStreamError(proxySocket);
+    try {
+      socket.write(
+        `HTTP/1.1 101 Switching Protocols\r\n${serializeHeaders(proxyRes.headers)}\r\n\r\n`,
+      );
+    } catch {
+      proxySocket.destroy();
+      return;
+    }
     if (proxyHead.length > 0) socket.write(proxyHead);
     if (head.length > 0) proxySocket.write(head);
     proxySocket.pipe(socket);
     socket.pipe(proxySocket);
+    const tearDown = () => {
+      proxySocket.destroy();
+      socket.destroy();
+    };
+    socket.on("close", tearDown);
+    proxySocket.on("close", tearDown);
   });
 
   proxyReq.on("response", (proxyRes) => {
-    socket.write(
-      `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\r\n${serializeHeaders(proxyRes.headers)}\r\n\r\n`,
-    );
+    swallowStreamError(proxyRes);
+    try {
+      socket.write(
+        `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\r\n${serializeHeaders(proxyRes.headers)}\r\n\r\n`,
+      );
+    } catch {
+      proxyRes.destroy();
+      return;
+    }
     proxyRes.pipe(socket);
   });
 
@@ -152,7 +204,17 @@ const server = http.createServer((req, res) => {
   proxyHttp(req, res, nextOrigin);
 });
 
+server.on("clientError", (error, socket) => {
+  swallowStreamError(socket);
+  if (error.code === "ECONNRESET" || !socket.writable) {
+    socket.destroy();
+    return;
+  }
+  writeSocketError(socket, "400 Bad Request");
+});
+
 server.on("upgrade", (req, socket, head) => {
+  swallowStreamError(socket);
   let requestUrl;
   try {
     requestUrl = new URL(req.url ?? "/", publicOrigin);
@@ -174,7 +236,10 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
 
-  if (!isWebSocketUpgrade(req) || !hasValidGatewayQuery(requestUrl, route.query)) {
+  if (
+    !isWebSocketUpgrade(req) ||
+    !hasValidGatewayQuery(requestUrl, route.query)
+  ) {
     writeSocketError(socket, "400 Bad Request");
     return;
   }

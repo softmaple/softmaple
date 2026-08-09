@@ -138,8 +138,6 @@ Before promotion, verify in a real Preview environment:
 - avatar upload, public delivery, replacement, and removal;
 - a single Collab replica is configured.
 
-Playwright's local Upgrade-capable gateway covers signed document and Presence
-handshakes through that gateway (not against `next dev` directly). Production
-on Vercel uses the `app/collab/*` WebSocket bridge instead of an external
-rewrite. Preview validation of the real handshake remains a required release
-gate.
+Playwright and production both use `apps/web/scripts/collab-gateway.mjs` for
+signed document and Presence handshakes (not bare `next dev` / `next start`).
+Validate the real gateway handshake before promotion.

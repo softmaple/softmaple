@@ -111,10 +111,6 @@ export const resolveCollabGatewayTarget = (
   return { backendUrl, signerConfig };
 };
 
-/** Vercel Functions can terminate WebSockets; stock Next rewrite cannot. */
-export const usesVercelWebSocketBridge = (): boolean =>
-  process.env.VERCEL === "1";
-
 export const buildSignedUpgradeHeaders = ({
   request,
   backendUrl,

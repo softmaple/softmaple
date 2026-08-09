@@ -9,10 +9,14 @@ import {
   isSameOriginBrowserRequest,
   isWebSocketUpgrade,
   resolveCollabGatewayTarget,
-  usesVercelWebSocketBridge,
 } from "@/lib/collab-gateway";
 import { updateSession } from "@/utils/supabase/middleware";
 
+/**
+ * Fallback signer/rewrite when an Upgrade reaches Next directly.
+ * Split-host deployments should put `scripts/collab-gateway.mjs` on the
+ * public edge — stock Next.js does not proxy WebSocket Upgrades externally.
+ */
 const collabGatewayRewrite = (
   request: NextRequest,
   path: CollabGatewayPath,
@@ -26,13 +30,6 @@ const collabGatewayRewrite = (
     return badRequest();
   }
   if (!isSameOriginBrowserRequest(request)) return forbidden();
-
-  // On Vercel, App Router + @vercel/functions terminates the upgrade and
-  // opens a signed outbound socket. NextResponse.rewrite cannot proxy
-  // WebSocket Upgrades to a separate collab host.
-  if (usesVercelWebSocketBridge()) {
-    return NextResponse.next();
-  }
 
   let backendUrl: URL;
   let signerConfig;

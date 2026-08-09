@@ -108,9 +108,9 @@ Before you begin, make sure you have the following installed:
 
     <Note>
       Stock Next.js cannot proxy WebSocket Upgrades to a separate collab host.
-      Local Playwright uses `scripts/e2e-collab-gateway.mjs`; Vercel Preview
-      uses the App Router + `@vercel/functions` bridge under `app/collab/`.
-      Do not restore a direct unsigned browser URL as a workaround.
+      Use `apps/web/scripts/collab-gateway.mjs` on the public edge (Playwright
+      already does). Do not restore a direct unsigned browser URL as a
+      workaround.
     </Note>
   </Accordion>
 </AccordionGroup>

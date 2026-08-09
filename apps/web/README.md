@@ -8,11 +8,9 @@ the Lexical editor. Real-time collaboration goes over WebSocket to
 ## Role in the stack
 
 ```text
-Browser ──► apps/web (Next.js)
-              ├── Supabase Auth / Data API (anon / publishable key)
-              ├── same-origin /collab/document (durable EG-walker history)
-              └── same-origin /collab/presence (ephemeral awareness)
-                    └── HMAC bridge (Vercel) / rewrite ──► apps/collab
+Browser ──► collab-gateway.mjs (public edge)
+              ├── HTTP ──► apps/web (Next.js)
+              └── /collab/* Upgrade + HMAC ──► apps/collab
 ```
 
 | Concern | Owner |
@@ -52,6 +50,10 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 | `COLLAB_BACKEND_ORIGIN` | yes | Private collab service origin, for example `http://localhost:3002` |
 | `COLLAB_GATEWAY_HMAC_KEY_ID` | yes | Active key ID installed in the collab keyring |
 | `COLLAB_GATEWAY_HMAC_SECRET` | yes | Active 32-byte, unpadded base64url HMAC secret |
+| `NEXT_ORIGIN` | gateway | Upstream Next origin for `scripts/collab-gateway.mjs` |
+| `COLLAB_GATEWAY_PORT` | gateway | Public listen port for the HMAC gateway |
+| `COLLAB_GATEWAY_PUBLIC_ORIGIN` | gateway | Browser-facing origin used for Origin checks (TLS edge) |
+| `COLLAB_GATEWAY_BIND` | gateway | Bind address (default `127.0.0.1`; use `0.0.0.0` when exposed) |
 | `NEXT_PUBLIC_APP_URL` | production | Canonical origin used in auth redirects |
 
 \*Required unless `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set.
@@ -69,28 +71,32 @@ when `E2E_ALLOW_REMOTE_SEED=true`, the supplied project ref exactly matches the
 Supabase URL, a distinct production ref is configured, and a service-role key
 plus bearer secret are present. Never enable it against production.
 
-### WebSocket release gate
+### WebSocket gateway
 
 Stock Next.js cannot proxy WebSocket Upgrades to a separate collab host via
-`NextResponse.rewrite`. That is why a split web/collab deployment breaks if
-the browser only hits `/collab/*` on the Next server.
+`NextResponse.rewrite`. For split web/collab deployments, put
+[`scripts/collab-gateway.mjs`](./scripts/collab-gateway.mjs) on the public
+edge: it terminates same-origin `/collab/document` and `/collab/presence`
+upgrades, signs them with the shared HMAC, and pipes to
+`COLLAB_BACKEND_ORIGIN`. Other HTTP goes to Next. Collab stays private; the
+browser never gets a direct backend URL.
 
-On Vercel (`VERCEL=1`), `proxy.ts` validates the browser upgrade and lets the
-App Router handlers under `app/collab/` terminate the socket with
-`@vercel/functions` `experimental_upgradeWebSocket`, then open a signed
-outbound connection to `COLLAB_BACKEND_ORIGIN`. Collab stays private; the
-browser stays same-origin. Fluid Compute must be enabled. See
-[Vercel WebSockets](https://vercel.com/docs/functions/websockets).
+```bash
+# Example local shape (ports are illustrative)
+pnpm --filter @softmaple/collab dev          # :3002
+pnpm --filter @softmaple/web dev             # :3001 internal
+NEXT_ORIGIN=http://127.0.0.1:3001 \
+COLLAB_BACKEND_ORIGIN=http://127.0.0.1:3002 \
+COLLAB_GATEWAY_PORT=3000 \
+pnpm --filter @softmaple/web gateway
+```
 
-Locally, Playwright starts an Upgrade-capable reverse proxy
-(`scripts/e2e-collab-gateway.mjs`) in front of `next dev` so core E2E can
-exercise the same HMAC-signed `/collab/document` and `/collab/presence`
-handshakes. Do not work around this by exposing an unsigned backend URL to
-the browser.
+Playwright uses the same gateway (`e2e-collab-gateway.mjs` is a thin alias).
+`proxy.ts` keeps a signed rewrite fallback if an Upgrade reaches Next directly;
+do not treat that as release-equivalent for split hosts.
 
-Before promoting a deployment, verify a Preview handshake through
+Before promoting a deployment, verify a real gateway handshake through
 `/collab/document`, direct-backend rejection, reconnect, and repair/resync.
-Also configure a Vercel Firewall rate limit for the public gateway paths.
 
 Keys and URL must belong to the **same** Supabase project. Never put a
 `sb_secret_…` / `service_role` key in these `NEXT_PUBLIC_*` variables.
@@ -100,6 +106,9 @@ Keys and URL must belong to the **same** Supabase project. Never put a
 ```bash
 # Dev (Turbopack). Repo-root `pnpm dev` also starts apps/collab.
 pnpm --filter @softmaple/web dev
+
+# HMAC Upgrade gateway (required for real browser collab on split hosts)
+pnpm --filter @softmaple/web gateway
 
 pnpm --filter @softmaple/web typecheck
 pnpm --filter @softmaple/web lint

@@ -11,9 +11,9 @@ writer of `document_event_batches`.
 ## Role in the stack
 
 ```text
-Browser ──WebSocket──► apps/web ──HMAC bridge/rewrite──► apps/collab
-                                                           │
-                                                           └──Prisma──► Supabase Postgres
+Browser ──WebSocket──► collab-gateway ──HMAC──► apps/collab
+              │                                    │
+              └── HTTP ──► apps/web                └──Prisma──► Supabase Postgres
 
      @softmaple/collab-protocol   (shared wire messages)
      @softmaple/block-model       (RichTextEventBatch payloads)
@@ -41,13 +41,13 @@ presence.
 | `/presence` | WebSocket | Authenticated, ephemeral awareness session |
 
 The supported browser entry point is the same-origin
-`ws(s)://<web>/collab/document` gateway. `apps/web/proxy.ts` validates the
-browser Origin. On Vercel, the web App Router terminates the upgrade and opens
-a signed outbound socket to this service; on other hosts the proxy may rewrite
-with HMAC headers. Direct unsigned upgrades are normally rejected before peer
-context is created. During the rollback window, an unsigned direct upgrade is
-temporarily accepted in legacy mode when its Origin is listed in the deprecated
-`COLLAB_ALLOWED_ORIGINS`; that path is not HMAC-protected. Remove
+`ws(s)://<public>/collab/document` path on
+[`apps/web/scripts/collab-gateway.mjs`](../web/scripts/collab-gateway.mjs).
+That Node gateway validates Origin, signs the Upgrade with the shared HMAC, and
+forwards to this service. Direct unsigned upgrades are normally rejected before
+peer context is created. During the rollback window, an unsigned direct upgrade
+is temporarily accepted in legacy mode when its Origin is listed in the
+deprecated `COLLAB_ALLOWED_ORIGINS`; that path is not HMAC-protected. Remove
 `COLLAB_ALLOWED_ORIGINS` after the rollback window to enforce HMAC-only
 upgrades.
 

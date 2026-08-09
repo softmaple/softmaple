@@ -193,17 +193,6 @@ describe("collaboration WebSocket gateway", () => {
     );
   });
 
-  it("passes validated upgrades through on Vercel for the route bridge", async () => {
-    configureGateway();
-    vi.stubEnv("VERCEL", "1");
-
-    const response = await proxy(upgradeRequest("https://example.com"));
-
-    expect(isRewrite(response)).toBe(false);
-    expect(response.status).toBe(200);
-    expect(mocks.updateSession).not.toHaveBeenCalled();
-  });
-
   it("preserves Supabase session handling for other paths", async () => {
     const request = new NextRequest("https://example.com/dashboard");
     const response = await proxy(request);

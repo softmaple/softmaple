@@ -22,6 +22,7 @@ import {
   addPendingBatches,
   loadPendingBatches,
 } from "@/modules/docs/collab-pending-store";
+import { createOutgoingBatchQueue } from "@/modules/docs/collab-outgoing-queue";
 import {
   isDocumentEditable,
   type DocumentPermission,
@@ -76,16 +77,7 @@ const sendJson = (socket: WebSocket | null, message: unknown): boolean => {
   return true;
 };
 
-const batchChunks = (
-  batches: ReadonlyArray<RichTextEventBatch>,
-): ReadonlyArray<ReadonlyArray<RichTextEventBatch>> => {
-  const chunks: RichTextEventBatch[][] = [];
-  for (let index = 0; index < batches.length; index += 64) {
-    chunks.push(batches.slice(index, index + 64));
-  }
-  return chunks;
-};
-
+const WS_MAX_BATCHES_PER_SEND = 64;
 const PRIVATE_SAVE_DEBOUNCE_MS = 400;
 
 type TransportKind = "http" | "ws";
@@ -120,14 +112,23 @@ const createSessionController = ({
   const knownBatches = new Map(
     nextReplica.exportEvents().map((batch) => [batch.batchId, batch] as const),
   );
-  const pendingBatches = new Map<string, RichTextEventBatch>();
   const bindingRef: { current: LexicalBinding | null } = { current: null };
+  // Declared before the queue so send can close over the live socket.
+  let socket: WebSocket | null = null;
+  const outgoing = createOutgoingBatchQueue<RichTextEventBatch>({
+    maxBatchesPerSend: WS_MAX_BATCHES_PER_SEND,
+    send: (batches) =>
+      sendJson(socket, {
+        protocolVersion: COLLAB_PROTOCOL_VERSION,
+        type: COLLAB_MESSAGE_TYPE.Event,
+        batches,
+      }),
+  });
 
   let cancelled = false;
   let storageUserId: string | null = null;
   let accessToken: string | null = null;
   let localPersistenceFailed = false;
-  let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
   let synced = false;
@@ -149,7 +150,7 @@ const createSessionController = ({
   });
 
   const resolveFlushWaiters = (): void => {
-    if (pendingBatches.size > 0) return;
+    if (outgoing.hasPending()) return;
     const waiters = flushWaiters;
     flushWaiters = [];
     for (const waiter of waiters) {
@@ -172,9 +173,10 @@ const createSessionController = ({
 
   const rememberPending = (batches: ReadonlyArray<RichTextEventBatch>) => {
     for (const batch of batches) {
-      pendingBatches.set(batch.batchId, batch);
       knownBatches.set(batch.batchId, batch);
     }
+    // Track only; transport code decides when to open a durable write.
+    outgoing.add(batches);
     if (storageUserId === null) {
       throw new Error("Document storage is not initialized");
     }
@@ -182,9 +184,7 @@ const createSessionController = ({
   };
 
   const acknowledgePending = (batchIds: ReadonlyArray<string>) => {
-    for (const batchId of batchIds) {
-      pendingBatches.delete(batchId);
-    }
+    outgoing.acknowledge(batchIds);
     if (storageUserId === null) return;
     try {
       acknowledgePendingBatches(
@@ -202,7 +202,7 @@ const createSessionController = ({
     if (accessToken === null) {
       throw new Error("A signed-in session is required to save");
     }
-    const batches = [...pendingBatches.values()];
+    const batches = outgoing.peekPending();
     if (batches.length === 0) return "empty";
     const batchIds = await persistPrivateDocumentEvents({
       accessToken,
@@ -210,7 +210,7 @@ const createSessionController = ({
       documentId,
     });
     acknowledgePending(batchIds);
-    return pendingBatches.size === 0 ? "empty" : "ack";
+    return outgoing.hasPending() ? "ack" : "empty";
   };
 
   const schedulePrivateSave = (): void => {
@@ -223,16 +223,10 @@ const createSessionController = ({
   };
 
   const publishWsPending = (): void => {
-    if (!synced || pendingBatches.size === 0) return;
-    let sent = false;
-    for (const batches of batchChunks([...pendingBatches.values()])) {
-      sent =
-        sendJson(socket, {
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.Event,
-          batches,
-        }) || sent;
-    }
+    if (!synced) return;
+    // One in-flight durable write per session; further pending chunks wait for
+    // DurableAck so causally dependent batches are never validated early.
+    const sent = outgoing.flush();
     if (sent && !localPersistenceFailed) onSaveStatus("saving");
   };
 
@@ -310,8 +304,8 @@ const createSessionController = ({
           nextReplica.applyRemoteEvents(restored);
           for (const batch of restored) {
             knownBatches.set(batch.batchId, batch);
-            pendingBatches.set(batch.batchId, batch);
           }
+          outgoing.add(restored);
         }
       } catch {
         localPersistenceFailed = true;
@@ -333,6 +327,8 @@ const createSessionController = ({
     const active = socket;
     socket = null;
     synced = false;
+    // Preserve pending batch identity; allow exact resend after reconnect.
+    outgoing.resetInFlight();
     active?.close();
   };
 
@@ -440,7 +436,7 @@ const createSessionController = ({
             synced = true;
             onReplica(nextReplica);
             publishWsPending();
-            if (pendingBatches.size === 0 && !localPersistenceFailed) {
+            if (!outgoing.hasPending() && !localPersistenceFailed) {
               onSaveStatus("saved");
             }
             return;
@@ -449,12 +445,14 @@ const createSessionController = ({
             return;
           case COLLAB_MESSAGE_TYPE.DurableAck:
             acknowledgePending(message.batchIds);
-            if (
+            if (synced && !outgoing.hasPending() && !localPersistenceFailed) {
+              onSaveStatus("saved");
+            } else if (
               synced &&
-              pendingBatches.size === 0 &&
+              outgoing.hasInFlight() &&
               !localPersistenceFailed
             ) {
-              onSaveStatus("saved");
+              onSaveStatus("saving");
             }
             resolveFlushWaiters();
             return;
@@ -493,6 +491,8 @@ const createSessionController = ({
       if (cancelled || socket !== nextSocket || transport !== "ws") return;
       socket = null;
       synced = false;
+      // Drop in-flight markers only; pending payloads stay for idempotent resend.
+      outgoing.resetInFlight();
       if (!fatalConnectionError) {
         onCollaborationStatus("offline");
         const delay = Math.min(500 * 2 ** reconnectAttempt, 10_000);
@@ -522,7 +522,7 @@ const createSessionController = ({
       if (cancelled) return;
       applyBatches(history);
       onReplica(nextReplica);
-      if (pendingBatches.size > 0) {
+      if (outgoing.hasPending()) {
         saveCoordinator.requestSave(persistHttp);
       } else {
         onSaveStatus("saved");
@@ -556,8 +556,8 @@ const createSessionController = ({
 
       if (desired === "ws") {
         // Flush private HTTP persistence before opening collaboration so the
-        // server already has canonical content; in-flight local edits remain in
-        // pendingBatches and are published after WS repair.
+        // server already has canonical content; local edits remain in the
+        // outgoing queue and are published after WS repair.
         if (transport === "http") {
           await stopHttp();
         }
@@ -588,7 +588,7 @@ const createSessionController = ({
     }
     // One-shot publish; DurableAck resolves flush. Re-publish only on reconnect.
     publishWsPending();
-    if (pendingBatches.size === 0) return;
+    if (!outgoing.hasPending()) return;
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         flushWaiters = flushWaiters.filter(

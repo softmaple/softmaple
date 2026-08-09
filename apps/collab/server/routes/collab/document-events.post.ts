@@ -5,6 +5,7 @@ import {
   appendEventBatches,
   EventAuthorizationError,
   EventConflictError,
+  isRetryableEventConflict,
 } from "../../utils/event-store";
 
 export default defineHandler(async (event) => {
@@ -68,7 +69,14 @@ export default defineHandler(async (event) => {
       return Response.json({ error: error.message }, { status: 403 });
     }
     if (error instanceof EventConflictError) {
-      return Response.json({ error: error.message }, { status: 409 });
+      return Response.json(
+        {
+          error: error.message,
+          conflictType: error.details.conflictType,
+          retryable: isRetryableEventConflict(error),
+        },
+        { status: 409 },
+      );
     }
     throw error;
   }

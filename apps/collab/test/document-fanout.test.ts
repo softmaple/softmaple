@@ -64,7 +64,22 @@ vi.mock("../server/utils/auth", () => ({
 vi.mock("../server/utils/event-store", () => ({
   appendEventBatches: mocks.appendEventBatches,
   EventAuthorizationError: class EventAuthorizationError extends Error {},
-  EventConflictError: class EventConflictError extends Error {},
+  EventConflictError: class EventConflictError extends Error {
+    readonly details: { readonly conflictType: string };
+    constructor(
+      message: string,
+      details: { readonly conflictType: string } = {
+        conflictType: "stored-event-id-conflict",
+      },
+    ) {
+      super(message);
+      this.name = "EventConflictError";
+      this.details = details;
+    }
+  },
+  isRetryableEventConflict: (error: {
+    readonly details: { readonly conflictType: string };
+  }) => error.details.conflictType === "missing-parent-history",
   readEventPage: vi.fn(),
 }));
 

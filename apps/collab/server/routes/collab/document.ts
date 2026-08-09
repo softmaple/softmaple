@@ -16,6 +16,7 @@ import {
   appendEventBatches,
   EventAuthorizationError,
   EventConflictError,
+  isRetryableEventConflict,
   readEventPage,
 } from "../../utils/event-store";
 import { authenticateBrowserOrigin } from "../../utils/origin-auth";
@@ -194,10 +195,26 @@ const logRouteError = (
   documentId: string | null,
   messageType: string,
 ): void => {
-  console.error("Collaboration request failed", {
+  const base = {
     documentId,
     messageType,
     errorName: error instanceof Error ? error.name : "UnknownError",
+    errorMessage: error instanceof Error ? error.message : String(error),
+  };
+  if (error instanceof EventConflictError) {
+    console.error("Collaboration request failed", {
+      ...base,
+      conflictType: error.details.conflictType,
+      batchIds: error.details.batchIds,
+      eventIds: error.details.eventIds,
+      missingParentIds: error.details.missingParentIds,
+      stack: error.stack,
+    });
+    return;
+  }
+  console.error("Collaboration request failed", {
+    ...base,
+    stack: error instanceof Error ? error.stack : undefined,
   });
 };
 
@@ -539,21 +556,25 @@ export default defineWebSocketHandler({
         );
       } catch (error) {
         logRouteError(error, currentAccess.documentId, message.type);
-        const conflict = error instanceof EventConflictError;
+        const conflict = error instanceof EventConflictError ? error : null;
         const forbidden = error instanceof EventAuthorizationError;
+        const retryableConflict =
+          conflict !== null && isRetryableEventConflict(conflict);
         peer.send(
           errorMessage(
             forbidden
               ? COLLAB_ERROR_CODE.Forbidden
-              : conflict
+              : conflict !== null
                 ? COLLAB_ERROR_CODE.Conflict
                 : COLLAB_ERROR_CODE.PersistenceFailed,
             forbidden
               ? "This workspace role cannot edit documents"
-              : conflict
+              : conflict !== null
                 ? "The event batch conflicts with stored document history"
                 : "The event batch was not saved",
-            !conflict && !forbidden,
+            // Missing-parent conflicts are recoverable via reconnect/repair.
+            // Payload and stored-ID clashes remain non-retryable.
+            (conflict === null && !forbidden) || retryableConflict,
             protocolVersionFromContext(peer.context),
           ),
         );

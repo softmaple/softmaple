@@ -11,10 +11,31 @@ const REPAIR_PAGE_SIZE = 100;
 const CONFLICT_VERIFY_ATTEMPTS = 3;
 const CONFLICT_VERIFY_DELAY_MS = 20;
 
+export const EVENT_CONFLICT_TYPE = {
+  DuplicateIncomingEventId: "duplicate-incoming-event-id",
+  MissingParentHistory: "missing-parent-history",
+  BatchPayloadConflict: "batch-payload-conflict",
+  StoredEventIdConflict: "stored-event-id-conflict",
+} as const;
+
+export type EventConflictType =
+  (typeof EVENT_CONFLICT_TYPE)[keyof typeof EVENT_CONFLICT_TYPE];
+
+export interface EventConflictDetails {
+  readonly conflictType: EventConflictType;
+  readonly documentId?: string;
+  readonly batchIds?: ReadonlyArray<string>;
+  readonly eventIds?: ReadonlyArray<string>;
+  readonly missingParentIds?: ReadonlyArray<string>;
+}
+
 export class EventConflictError extends Error {
-  constructor(message: string) {
+  readonly details: EventConflictDetails;
+
+  constructor(message: string, details: EventConflictDetails) {
     super(message);
     this.name = "EventConflictError";
+    this.details = details;
   }
 }
 
@@ -24,6 +45,10 @@ export class EventAuthorizationError extends Error {
     this.name = "EventAuthorizationError";
   }
 }
+
+/** Missing parent history can clear after repair/resync; payload/ID clashes cannot. */
+export const isRetryableEventConflict = (error: EventConflictError): boolean =>
+  error.details.conflictType === EVENT_CONFLICT_TYPE.MissingParentHistory;
 
 const canonicalJson = (value: unknown): string => {
   if (
@@ -97,6 +122,19 @@ const verifyExistingBatchesWithRetry = async (
   return false;
 };
 
+/**
+ * Serialize durable appends for one document across serverless instances.
+ * Transaction-scoped so the lock is released on commit/rollback.
+ */
+const lockDocumentEventLog = async (
+  transaction: Prisma.TransactionClient,
+  documentId: string,
+): Promise<void> => {
+  await transaction.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${documentId}::text, 0))`,
+  );
+};
+
 export const appendEventBatches = async (
   documentId: string,
   actorId: string,
@@ -106,11 +144,18 @@ export const appendEventBatches = async (
     batch.events.map((event) => event.id),
   );
   if (new Set(incomingEventIds).size !== incomingEventIds.length) {
-    throw new EventConflictError("duplicate event IDs in incoming batches");
+    throw new EventConflictError("duplicate event IDs in incoming batches", {
+      conflictType: EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
+      documentId,
+      batchIds: batches.map((batch) => batch.batchId),
+      eventIds: incomingEventIds,
+    });
   }
 
   try {
     await prisma.$transaction(async (transaction) => {
+      await lockDocumentEventLog(transaction, documentId);
+
       const writeAccess = await transaction.$queryRaw<
         ReadonlyArray<{ readonly role: string }>
       >(Prisma.sql`
@@ -153,8 +198,18 @@ export const appendEventBatches = async (
           select: { event_id: true },
         });
         if (storedParents.length !== requiredParentIds.size) {
+          const stored = new Set(storedParents.map((row) => row.event_id));
+          const missingParentIds = [...requiredParentIds]
+            .filter((eventId) => !stored.has(eventId))
+            .sort();
           throw new EventConflictError(
             "event batch references document history that has not been stored",
+            {
+              conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
+              documentId,
+              batchIds: batches.map((batch) => batch.batchId),
+              missingParentIds,
+            },
           );
         }
       }
@@ -171,6 +226,11 @@ export const appendEventBatches = async (
           if (existingHash !== payloadHash) {
             throw new EventConflictError(
               `conflicting payload for batch ${batch.batchId}`,
+              {
+                conflictType: EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+                documentId,
+                batchIds: [batch.batchId],
+              },
             );
           }
           continue;
@@ -213,6 +273,12 @@ export const appendEventBatches = async (
       }
       throw new EventConflictError(
         "event IDs conflict with stored document history",
+        {
+          conflictType: EVENT_CONFLICT_TYPE.StoredEventIdConflict,
+          documentId,
+          batchIds: batches.map((batch) => batch.batchId),
+          eventIds: incomingEventIds,
+        },
       );
     }
     throw error;

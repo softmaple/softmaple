@@ -1,0 +1,29 @@
+{
+  "name": "@softmaple/collab-gateway-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-only authentication for the Softmaple collaboration gateway",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

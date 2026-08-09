@@ -56,7 +56,11 @@ Before you begin, make sure you have the following installed:
     # Supabase Auth
     NEXT_PUBLIC_SUPABASE_URL="your-supabase-url"
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
-    NEXT_PUBLIC_COLLAB_WS_URL="ws://localhost:3002/document"
+
+    # Collaboration gateway (server-only)
+    COLLAB_BACKEND_ORIGIN="http://localhost:3002"
+    COLLAB_GATEWAY_HMAC_KEY_ID="local-dev"
+    COLLAB_GATEWAY_HMAC_SECRET="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
     ```
 
     Add the same database connection values to `packages/db/.env` so Prisma
@@ -69,12 +73,15 @@ Before you begin, make sure you have the following installed:
   </Accordion>
   <Accordion icon="server" title="4. Configure collaboration">
     Create `apps/collab/.env.local` from its example, then provide
-    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and
-    `COLLAB_ALLOWED_ORIGINS`:
+    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the
+    matching HMAC keyring:
 
     ```bash
     cp apps/collab/.env.example apps/collab/.env.local
     ```
+
+    The example files use the same local-only HMAC key. Generate a new 32-byte
+    unpadded base64url secret for every deployed environment.
   </Accordion>
   <Accordion icon="database" title="5. Set up the database">
     Generate Prisma client and run migrations:
@@ -98,6 +105,14 @@ Before you begin, make sure you have the following installed:
     ```
 
     The application will be available at [http://localhost:3000](http://localhost:3000)
+
+    <Note>
+      Next.js 16.3's local server is not a release-equivalent test for the
+      external WebSocket rewrite in `proxy.ts`. The UI and unit tests run
+      locally, but the complete browser-to-gateway-to-Nitro handshake must be
+      verified on a Vercel Preview. Do not restore a direct browser URL as a
+      workaround.
+    </Note>
   </Accordion>
 </AccordionGroup>
 

@@ -10,7 +10,8 @@ the Lexical editor. Real-time collaboration goes over WebSocket to
 ```text
 Browser ──► apps/web (Next.js)
               ├── Supabase Auth / Data API (anon / publishable key)
-              └── WebSocket ──► apps/collab ──► Supabase Postgres
+              └── same-origin /collab/document
+                    └── HMAC rewrite ──► apps/collab ──► Supabase Postgres
 ```
 
 | Concern | Owner |
@@ -47,12 +48,30 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Project URL (`https://<ref>.supabase.co`) |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes* | Prefer `sb_publishable_…` from **Settings → API Keys** |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no | Legacy JWT `anon` key; used only if publishable key is unset |
-| `NEXT_PUBLIC_COLLAB_WS_URL` | yes (local collab) | Default `ws://localhost:3002/document` |
+| `COLLAB_BACKEND_ORIGIN` | yes | Private collab service origin, for example `http://localhost:3002` |
+| `COLLAB_GATEWAY_HMAC_KEY_ID` | yes | Active key ID installed in the collab keyring |
+| `COLLAB_GATEWAY_HMAC_SECRET` | yes | Active 32-byte, unpadded base64url HMAC secret |
 
 \*Required unless `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set.
 
 `NEXT_PUBLIC_*` values are inlined at **build** time. After changing them in
 Vercel (or any host), redeploy — restarting the running server is not enough.
+
+The collaboration gateway variables are server-only. Never prefix the HMAC
+secret with `NEXT_PUBLIC_` or expose the collab backend directly to browsers.
+The browser always connects to the current web origin at `/collab/document`.
+
+### WebSocket release gate
+
+The stock Next.js 16.3 local server does not provide a release-equivalent
+external WebSocket rewrite path for `proxy.ts`: local HTTP Proxy tests pass,
+but an Upgrade request does not reach the rewrite destination. Do not work
+around this by exposing an unsigned backend URL to the browser.
+
+Before promoting a deployment, verify a real Vercel Preview handshake through
+`/collab/document`, direct-backend rejection, reconnect, and repair/resync.
+Also configure a Vercel Firewall rate limit for the public gateway path. See
+[Vercel WebSockets](https://vercel.com/docs/functions/websockets).
 
 Keys and URL must belong to the **same** Supabase project. Never put a
 `sb_secret_…` / `service_role` key in these `NEXT_PUBLIC_*` variables.

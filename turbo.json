@@ -4,9 +4,11 @@
     "build": {
       "dependsOn": ["^build"],
       "env": [
-        "COLLAB_ALLOWED_ORIGINS",
+        "COLLAB_BACKEND_ORIGIN",
+        "COLLAB_GATEWAY_HMAC_KEY_ID",
+        "COLLAB_GATEWAY_HMAC_KEYS",
+        "COLLAB_GATEWAY_HMAC_SECRET",
         "DATABASE_URL",
-        "NEXT_PUBLIC_COLLAB_WS_URL",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY",
         "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
         "NEXT_PUBLIC_SUPABASE_URL",
@@ -34,6 +36,7 @@
       "outputLogs": "full"
     },
     "test": {
+      "dependsOn": ["^build"],
       "env": ["EG_WALKER_PROPERTY_RUNS", "EG_WALKER_REFERENCE_ROOT"]
     },
     "dev": {

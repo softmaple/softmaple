@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@softmaple/block-model": "workspace:*",
+    "@softmaple/collab-gateway-auth": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
     "@softmaple/db": "workspace:*",
     "@supabase/supabase-js": "^2.89.0",

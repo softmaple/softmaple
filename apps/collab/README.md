@@ -11,9 +11,10 @@ writer of `document_event_batches`.
 ## Role in the stack
 
 ```text
-apps/web  ──WebSocket──►  apps/collab  ──Prisma──►  Supabase Postgres
-                ▲
-                │
+Browser ──WebSocket──► apps/web ──HMAC rewrite──► apps/collab
+                                                    │
+                                                    └──Prisma──► Supabase Postgres
+
      @softmaple/collab-protocol   (shared wire messages)
      @softmaple/block-model       (RichTextEventBatch payloads)
 ```
@@ -38,26 +39,36 @@ presence.
 | `/health` | HTTP | Liveness probe (`{ service, status }`) |
 | `/document` | WebSocket | Authenticated collaboration session |
 
-Dev default: `ws://localhost:3002/document` (see `NEXT_PUBLIC_COLLAB_WS_URL` in
-`apps/web`).
-
-WebSocket upgrade uses the `softmaple-collab-v2` protocol and rejects origins
-outside `COLLAB_ALLOWED_ORIGINS`.
+The supported browser entry point is the same-origin
+`ws(s)://<web>/collab/document` gateway. `apps/web/proxy.ts` validates the
+browser Origin, adds an HMAC signature, and rewrites the upgrade to this
+service's `/document` endpoint. Direct unsigned upgrades are normally rejected
+before peer context is created. During the rollback window, an unsigned direct
+upgrade is temporarily accepted in legacy mode when its Origin is listed in
+the deprecated `COLLAB_ALLOWED_ORIGINS`; that path is not HMAC-protected.
+Remove `COLLAB_ALLOWED_ORIGINS` after the rollback window to enforce HMAC-only
+upgrades.
 
 ## Session flow
 
-1. Client opens `/document` and sends an `auth` message with
+1. Client opens the web gateway. The collab service verifies the server HMAC
+   during WebSocket upgrade.
+2. Client sends an `auth` message with
    `accessToken`, `documentId`, and `sessionId`.
-2. Server validates the JWT via Supabase Auth, loads workspace membership,
+3. Server validates the JWT via Supabase Auth, loads workspace membership,
    and replies with `ready` (`role`, `canWrite`).
-3. Client sends `repair-request` pages (`afterCursor`) until `complete` to
+4. Client sends `repair-request` pages (`afterCursor`) until `complete` to
    hydrate history.
-4. Client sends `event` messages with one or more `RichTextEventBatch` values
+5. Client sends `event` messages with one or more `RichTextEventBatch` values
    (max 64 per message). Writers only: `OWNER` / `EDITOR`.
-5. Server appends batches transactionally, returns `durable-ack`, then
+6. Server appends batches transactionally, returns `durable-ack`, then
    publishes the same `event` payload to the document topic.
-6. Authorization is re-checked about every 15s while the socket is open.
+7. Authorization is re-checked about every 15s while the socket is open.
    Messages are rate-limited (120 / 10s window per peer).
+
+The HMAC authenticates the web gateway, not the user. Supabase access-token
+verification and workspace membership remain the document authorization
+boundary.
 
 Message shapes and error codes live in `@softmaple/collab-protocol`
 (protocol version `2`).
@@ -93,11 +104,15 @@ pnpm --filter @softmaple/db db:migrate
 | `DATABASE_URL` | yes | Prisma connection (pooler URL is fine) |
 | `SUPABASE_URL` | yes | Auth project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | yes* | Falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
-| `COLLAB_ALLOWED_ORIGINS` | no | Comma-separated; defaults to `http://localhost:3000` and `http://127.0.0.1:3000` |
-| `COLLAB_ALLOW_MISSING_ORIGIN` | no | Set `true` only for non-browser clients that omit `Origin` |
+| `COLLAB_GATEWAY_HMAC_KEYS` | yes | JSON keyring of key IDs to 32-byte, unpadded base64url secrets; keep current and previous keys during rotation |
 
 `nitro.config.ts` loads `apps/collab/.env.local`, then
 `packages/db/.env`, so local Prisma credentials can be shared.
+
+HMAC signatures are valid for ±30 seconds and provide bounded replay under
+TLS. Nonces are not claimed to be single-use. Rotate by adding a new backend
+key, switching the web signer's active key, observing stable reconnects, then
+removing the old backend key after the rollback window.
 
 ## Commands
 

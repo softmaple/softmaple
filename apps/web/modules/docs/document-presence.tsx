@@ -361,16 +361,21 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
 
   useEffect(() => {
     if (!presenceEnabled) {
-      setLiveAdapter((current) => {
-        void current?.disconnect();
-        return null;
-      });
+      // Previous effect cleanup already disconnects the adapter it created.
+      setLiveAdapter(null);
       setError(null);
       return;
     }
 
     let cancelled = false;
     let created: PresenceAdapter | null = null;
+    const clearLivePresence = (message: string): void => {
+      if (cancelled) return;
+      void created?.disconnect();
+      created = null;
+      setLiveAdapter(null);
+      setError(message);
+    };
     const configure = (token: string): void => {
       if (cancelled) return;
       const next = createWebSocketAdapter({
@@ -392,20 +397,24 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     void supabase.auth.getSession().then(({ data, error: sessionError }) => {
       const token = data.session?.access_token;
       if (sessionError !== null || token === undefined) {
-        if (!cancelled) setError("Presence session is unavailable.");
+        clearLivePresence("Presence session is unavailable.");
         return;
       }
       configure(token);
     });
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        if (session?.access_token !== undefined)
+        if (session?.access_token !== undefined) {
           configure(session.access_token);
+          return;
+        }
+        clearLivePresence("Presence session is unavailable.");
       },
     );
     return () => {
       cancelled = true;
       void created?.disconnect();
+      created = null;
       listener.subscription.unsubscribe();
     };
   }, [

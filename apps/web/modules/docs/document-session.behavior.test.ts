@@ -1,6 +1,8 @@
 /**
  * @vitest-environment jsdom
  */
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BOOTSTRAP_BATCH_ID,
@@ -10,12 +12,85 @@ import {
 import { isDocumentEditable } from "@/modules/docs/document-editability";
 import { createSaveCoordinator } from "@/modules/docs/document-save-coordinator";
 import {
-  loadPrivateDocumentHistory,
-  persistPrivateDocumentEvents,
-} from "@/modules/docs/private-document-api";
+  useDocumentSession,
+  type DocumentSessionState,
+} from "@/modules/docs/use-document-session";
+
+vi.mock("@/utils/supabase/client", () => ({
+  createClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: {
+          session: {
+            access_token: "token",
+            user: { id: "user-private" },
+          },
+        },
+        error: null,
+      }),
+    },
+  }),
+}));
+
+const reactActGlobal = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
+
+const renderDocumentSession = ({
+  documentId,
+  isShared,
+}: {
+  readonly documentId: string;
+  readonly isShared: boolean;
+}): {
+  readonly result: { current: DocumentSessionState };
+  readonly unmount: () => void;
+} => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const result: { current: DocumentSessionState } = {
+    current: {
+      collaborationStatus: "disabled",
+      editable: false,
+      error: null,
+      flush: async () => undefined,
+      onBindingChange: () => {},
+      replica: null,
+      saveStatus: "idle",
+      status: "saved",
+    },
+  };
+
+  const Capture = (): null => {
+    result.current = useDocumentSession({
+      documentId,
+      isShared,
+      permission: "editor",
+      sessionMode: "authenticated",
+    });
+    return null;
+  };
+
+  act(() => {
+    root.render(createElement(Capture));
+  });
+
+  return {
+    result,
+    unmount: () => {
+      act(() => {
+        root.unmount();
+      });
+      container.remove();
+    },
+  };
+};
 
 describe("document session behavior contracts", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     vi.stubGlobal(
       "WebSocket",
       vi.fn(() => {
@@ -26,6 +101,7 @@ describe("document session behavior contracts", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("should keep permission-based editability while a save is in flight", async () => {
@@ -110,42 +186,80 @@ describe("document session behavior contracts", () => {
   });
 
   it("should load and save a private document without opening a WebSocket", async () => {
-    const replica = createBlockReplica("private-http");
-    const batch = replica.transact((transaction) => {
+    const seedReplica = createBlockReplica("private-http");
+    const seedBatch = seedReplica.transact((transaction) => {
       transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "solo");
     });
-    if (batch === null) throw new Error("expected batch");
+    if (seedBatch === null) throw new Error("expected batch");
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            batches: [batch],
-            nextCursor: "1",
-            complete: true,
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ batchIds: [batch.batchId] }), {
-          status: 200,
-        }),
-      );
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/collab/document-history")) {
+          return new Response(
+            JSON.stringify({
+              batches: [seedBatch],
+              nextCursor: "1",
+              complete: true,
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/collab/document-events")) {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            readonly batches?: ReadonlyArray<{ readonly batchId: string }>;
+          };
+          return new Response(
+            JSON.stringify({
+              batchIds: (body.batches ?? []).map((batch) => batch.batchId),
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
-    const history = await loadPrivateDocumentHistory({
-      accessToken: "token",
-      documentId: "00000000-0000-4000-8000-000000000099",
-    });
-    const batchIds = await persistPrivateDocumentEvents({
-      accessToken: "token",
-      batches: history,
-      documentId: "00000000-0000-4000-8000-000000000099",
+    const documentId = "00000000-0000-4000-8000-000000000099";
+    const { result, unmount } = renderDocumentSession({
+      documentId,
+      isShared: false,
     });
 
-    expect(batchIds).toEqual([batch.batchId]);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.replica).not.toBeNull();
+    });
+
+    expect(result.current.collaborationStatus).toBe("disabled");
+    expect(result.current.replica?.getDocument().blocks[0]?.text).toBe("solo");
     expect(WebSocket).not.toHaveBeenCalled();
+
+    const localBatch = result.current.replica?.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 4, "!");
+    });
+    if (localBatch === null || localBatch === undefined) {
+      throw new Error("expected local batch");
+    }
+
+    await act(async () => {
+      await result.current.flush();
+    });
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      new URL("/collab/document-events", window.location.origin).toString(),
+    );
+    expect(WebSocket).not.toHaveBeenCalled();
+
+    unmount();
   });
 });

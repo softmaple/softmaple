@@ -735,6 +735,43 @@ describe("BlockReplica", () => {
     expect(left.getDocument().blocks[0]?.text).toMatch(/^A(?:xy|yx)$/);
   });
 
+  it("should defer block anchors until the creating event is integrated", () => {
+    // Arrange — Case A: presence arrives before the document event.
+    const author = new BlockReplica("alice");
+    const seed = author.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "AB");
+    });
+    if (seed === null) throw new Error("Expected a seed batch");
+    const receiver = new BlockReplica("bob");
+    receiver.applyRemoteEvents(seed);
+    const insert = author.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 2, "!");
+    });
+    if (insert === null) throw new Error("Expected an insert batch");
+    const remoteAnchor = author.captureBlockAnchor(
+      BOOTSTRAP_BLOCK_ID,
+      3,
+      "after",
+    );
+
+    // Act / Assert — receiver has presence-shaped anchor but not the event.
+    expect(receiver.tryResolveBlockAnchor(remoteAnchor)).toBeNull();
+    expect(() => receiver.resolveBlockAnchor(remoteAnchor)).toThrow(
+      /unknown atom/,
+    );
+
+    receiver.applyRemoteEvents(insert);
+
+    expect(receiver.tryResolveBlockAnchor(remoteAnchor)).toEqual({
+      blockId: BOOTSTRAP_BLOCK_ID,
+      offset: 3,
+    });
+    expect(receiver.resolveBlockAnchor(remoteAnchor)).toEqual({
+      blockId: BOOTSTRAP_BLOCK_ID,
+      offset: 3,
+    });
+  });
+
   it("should preserve directional block anchors across a split", () => {
     // Arrange
     const replica = new BlockReplica("alice");

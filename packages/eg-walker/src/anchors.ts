@@ -16,6 +16,38 @@ import type { EventId, GraphEvent } from "./types";
 
 export type AnchorAffinity = "before" | "after";
 
+/**
+ * The referenced insert event is not present in the replica's integrated
+ * event graph. Ephemeral consumers (e.g. remote presence) may treat this as
+ * temporarily unresolved until document state catches up.
+ */
+export class UnknownSequenceAtomError extends Error {
+  override readonly name = "UnknownSequenceAtomError";
+
+  constructor(
+    readonly eventId: EventId,
+    readonly offset: number,
+  ) {
+    super(`Sequence anchor references unknown atom ${eventId}:${offset}`);
+  }
+}
+
+/**
+ * The referenced event is known to the replica, but the atom offset does not
+ * exist in the sequence projection (wrong offset, non-insert event, etc.).
+ * This is not a transient catch-up failure.
+ */
+export class InvalidSequenceAtomError extends Error {
+  override readonly name = "InvalidSequenceAtomError";
+
+  constructor(
+    readonly eventId: EventId,
+    readonly offset: number,
+  ) {
+    super(`Sequence anchor references invalid atom ${eventId}:${offset}`);
+  }
+}
+
 export interface AtomSequenceAnchor {
   readonly type: "atom";
   readonly eventId: EventId;
@@ -57,6 +89,11 @@ export interface LocalInsertWithAnchorsResult {
 export interface SequenceAnchorApi {
   captureAnchor(index: number, affinity: AnchorAffinity): SequenceAnchor;
   resolveAnchor(anchor: SequenceAnchor): number;
+  /**
+   * Like {@link resolveAnchor}, but returns `null` when the atom's creating
+   * event has not been integrated yet. Invalid anchors still throw.
+   */
+  tryResolveAnchor(anchor: SequenceAnchor): number | null;
   insert(index: number, text: string): LocalInsertWithAnchorsResult | null;
   delete(index: number, length: number): GraphEvent | null;
   getFrontier(): ReadonlySet<EventId>;
@@ -73,6 +110,7 @@ export interface SequenceAnchorProjection {
   readonly text: string;
   captureAnchor(index: number, affinity: AnchorAffinity): SequenceAnchor;
   resolveAnchor(anchor: SequenceAnchor): number;
+  tryResolveAnchor(anchor: SequenceAnchor): number | null;
 }
 
 interface SequenceAtom {
@@ -93,6 +131,7 @@ interface SequenceProjection {
     EventId,
     ReadonlyMap<number, SequenceAtomPosition>
   >;
+  readonly knownEventIds: ReadonlySet<EventId>;
   readonly text: string;
 }
 
@@ -105,6 +144,7 @@ export const createSequenceAnchorApi = (
 ): SequenceAnchorApi => ({
   captureAnchor: (index, affinity) => captureAnchor(replica, index, affinity),
   resolveAnchor: (anchor) => resolveAnchor(replica, anchor),
+  tryResolveAnchor: (anchor) => tryResolveAnchor(replica, anchor),
   insert: (index, text) => insertWithAnchors(replica, index, text),
   delete: (index, length) => replica.delete(index, length),
   getFrontier: () => replica.getFrontier(),
@@ -131,6 +171,8 @@ export const createSequenceAnchorProjection = (
       captureProjectedAnchor(projection, index, affinity),
     resolveAnchor: (anchor: SequenceAnchor): number =>
       resolveProjectedAnchor(projection, anchor),
+    tryResolveAnchor: (anchor: SequenceAnchor): number | null =>
+      tryResolveProjectedAnchor(projection, anchor),
   });
 };
 
@@ -161,18 +203,42 @@ export const resolveAnchor = (
   anchor: SequenceAnchor,
 ): number => createSequenceAnchorProjection(replica).resolveAnchor(anchor);
 
+/**
+ * Resolve an anchor, or return `null` when its creating event is not yet in
+ * the replica. Shape errors and known-but-invalid atoms still throw so callers
+ * can distinguish transient catch-up from corruption / malformed presence.
+ */
+export const tryResolveAnchor = (
+  replica: EgWalkerReplica,
+  anchor: SequenceAnchor,
+): number | null =>
+  createSequenceAnchorProjection(replica).tryResolveAnchor(anchor);
+
 const resolveProjectedAnchor = (
   projection: SequenceProjection,
   anchor: SequenceAnchor,
 ): number => {
+  const resolved = tryResolveProjectedAnchor(projection, anchor);
+  if (resolved !== null) {
+    return resolved;
+  }
+  if (anchor.type !== "atom") {
+    throw new Error("Expected an atom sequence anchor");
+  }
+  throw new UnknownSequenceAtomError(anchor.eventId, anchor.offset);
+};
+
+const tryResolveProjectedAnchor = (
+  projection: SequenceProjection,
+  anchor: SequenceAnchor,
+): number | null => {
   assertSequenceAnchor(anchor);
   if (anchor.type === "boundary") {
     return anchor.edge === "start" ? 0 : projection.text.length;
   }
 
-  const position = projection.atomPositions
-    .get(anchor.eventId)
-    ?.get(anchor.offset);
+  const eventAtoms = projection.atomPositions.get(anchor.eventId);
+  const position = eventAtoms?.get(anchor.offset);
   if (position !== undefined) {
     const resolved =
       anchor.affinity === "after" ? position.after : position.before;
@@ -180,9 +246,18 @@ const resolveProjectedAnchor = (
     return resolved;
   }
 
-  throw new Error(
-    `Sequence anchor references unknown atom ${anchor.eventId}:${anchor.offset}`,
-  );
+  // Event is integrated (or otherwise known to the projection) but this atom
+  // offset does not exist — malformed / corrupted anchor, not catch-up.
+  if (
+    eventAtoms !== undefined ||
+    projection.knownEventIds.has(anchor.eventId)
+  ) {
+    throw new InvalidSequenceAtomError(anchor.eventId, anchor.offset);
+  }
+
+  // Creating event is absent from the integrated graph: presence may arrive
+  // before the corresponding document collaboration event.
+  return null;
 };
 
 /**
@@ -315,7 +390,12 @@ const createProjection = (replica: EgWalkerReplica): SequenceProjection => {
       "Stable anchor projection failed to reproduce document text",
     );
   }
-  return { visibleAtoms, atomPositions, text: visibleText };
+  return {
+    visibleAtoms,
+    atomPositions,
+    knownEventIds: new Set(events.keys()),
+    text: visibleText,
+  };
 };
 
 const indexAtomPositions = (

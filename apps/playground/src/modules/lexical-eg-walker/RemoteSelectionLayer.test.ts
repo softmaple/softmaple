@@ -49,15 +49,18 @@ describe("remote selection resolution", () => {
       focus: { blockId: "block-a", offset: 4 },
     };
     let historyAvailable = false;
-    const resolveSelection = vi.fn(() => {
-      if (!historyAvailable) throw new Error("Unknown selection anchor");
-      return logical;
-    });
+    const tryResolveSelection = vi.fn(() =>
+      historyAvailable
+        ? { status: "resolved" as const, selection: logical }
+        : { status: "temporarily-unresolved" as const },
+    );
 
-    expect(resolvePeerSelection({ resolveSelection }, peer)).toBeNull();
+    expect(resolvePeerSelection({ tryResolveSelection }, peer)).toBeNull();
     historyAvailable = true;
-    expect(resolvePeerSelection({ resolveSelection }, peer)).toEqual(logical);
-    expect(resolveSelection).toHaveBeenCalledTimes(2);
+    expect(resolvePeerSelection({ tryResolveSelection }, peer)).toEqual(
+      logical,
+    );
+    expect(tryResolveSelection).toHaveBeenCalledTimes(2);
   });
 
   it("retries unresolved anchors when replica history changes", () => {
@@ -69,9 +72,9 @@ describe("remote selection resolution", () => {
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     let retry: (() => void) | null = null;
     const unsubscribe = vi.fn();
-    const resolveSelection = vi.fn(() => {
-      throw new Error("Unknown selection anchor");
-    });
+    const tryResolveSelection = vi.fn(() => ({
+      status: "temporarily-unresolved" as const,
+    }));
     const binding = {
       replica: {
         subscribe: (listener: () => void) => {
@@ -79,7 +82,7 @@ describe("remote selection resolution", () => {
           return unsubscribe;
         },
       },
-      resolveSelection,
+      tryResolveSelection,
       getBlockIndex: () => ({
         blockIdToNodeKey: new Map(),
         nodeKeyToBlockId: new Map(),
@@ -96,11 +99,11 @@ describe("remote selection resolution", () => {
         users: [peer],
       }),
     );
-    expect(resolveSelection).toHaveBeenCalledTimes(1);
+    expect(tryResolveSelection).toHaveBeenCalledTimes(1);
 
     act(() => retry?.());
 
-    expect(resolveSelection).toHaveBeenCalledTimes(2);
+    expect(tryResolveSelection).toHaveBeenCalledTimes(2);
     rendered.unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
     host.remove();

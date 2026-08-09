@@ -3,6 +3,7 @@ import {
   captureAnchor,
   createSequenceAnchorProjection,
   resolveAnchor,
+  tryResolveAnchor,
   type AnchorAffinity,
 } from "@softmaple/eg-walker/anchors";
 
@@ -225,6 +226,26 @@ export class BlockReplica {
 
   resolveBlockAnchor(anchor: BlockAnchor): ResolvedBlockAnchor {
     const rawIndex = resolveRawAnchor(this.egWalker, anchor);
+    const resolved = nearestBlockBoundary(
+      this.state.projectedBlocks,
+      rawIndex,
+      anchor,
+    );
+    if (resolved === null) {
+      throw new Error("Cannot resolve block anchor in an empty document");
+    }
+    return resolved;
+  }
+
+  /**
+   * Resolve a block anchor, or return `null` when the underlying sequence atom
+   * has not been integrated yet. Invalid anchors still throw.
+   */
+  tryResolveBlockAnchor(anchor: BlockAnchor): ResolvedBlockAnchor | null {
+    const rawIndex = tryResolveRawAnchor(this.egWalker, anchor);
+    if (rawIndex === null) {
+      return null;
+    }
     const resolved = nearestBlockBoundary(
       this.state.projectedBlocks,
       rawIndex,
@@ -914,6 +935,11 @@ const resolveRawAnchor = (
   // current on-demand EG replay without changing the public block API.
   return resolveAnchor(egWalker, anchor.anchor);
 };
+
+const tryResolveRawAnchor = (
+  egWalker: EgWalkerReplica,
+  anchor: BlockAnchor,
+): number | null => tryResolveAnchor(egWalker, anchor.anchor);
 
 const nearestBlockBoundary = (
   projectedBlocks: ReadonlyArray<ProjectedBlock>,

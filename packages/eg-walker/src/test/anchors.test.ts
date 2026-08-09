@@ -5,8 +5,11 @@ import {
   createSequenceAnchorApi,
   createSequenceAnchorProjection,
   insertWithAnchors,
+  InvalidSequenceAtomError,
   isSequenceAnchor,
   resolveAnchor,
+  tryResolveAnchor,
+  UnknownSequenceAtomError,
   type SequenceAnchor,
 } from "../anchors";
 import { NativeSnapshotCodec } from "../core/native-snapshot";
@@ -241,6 +244,63 @@ describe("resolveAnchor", () => {
     expect(() => resolveAnchor(replica, insidePair)).toThrow(
       "splits a UTF-16 surrogate pair",
     );
+  });
+
+  it("should treat missing insert events as temporarily unresolved", () => {
+    // Arrange — presence can arrive before the document collaboration event.
+    const author = bootstrapReplica("alice", "AB");
+    const bootstrap = author.exportEventGraph()[0]!;
+    author.insert(2, "!");
+    const lateInsert = author.exportEventGraph()[1]!;
+    const remoteAtom: SequenceAnchor = {
+      type: "atom",
+      eventId: lateInsert.id,
+      offset: 0,
+      affinity: "after",
+    };
+    const receiver = replicaFromEvents("bob", [bootstrap]);
+
+    // Act / Assert
+    expect(tryResolveAnchor(receiver, remoteAtom)).toBeNull();
+    expect(() => resolveAnchor(receiver, remoteAtom)).toThrow(
+      UnknownSequenceAtomError,
+    );
+
+    receiver.applyRemoteEvent(cloneEvent(lateInsert));
+
+    expect(tryResolveAnchor(receiver, remoteAtom)).toBe(3);
+    expect(resolveAnchor(receiver, remoteAtom)).toBe(3);
+  });
+
+  it("should not classify a known event with a bad offset as transient", () => {
+    // Arrange
+    const replica = bootstrapReplica("alice", "A");
+    const malformed: SequenceAnchor = {
+      type: "atom",
+      eventId: "alice:0",
+      offset: 99,
+      affinity: "before",
+    };
+
+    // Act / Assert
+    expect(() => tryResolveAnchor(replica, malformed)).toThrow(
+      InvalidSequenceAtomError,
+    );
+    expect(() => resolveAnchor(replica, malformed)).toThrow(
+      InvalidSequenceAtomError,
+    );
+  });
+
+  it("should keep deleted-atom affinity when resolving through tryResolve", () => {
+    // Arrange
+    const replica = bootstrapReplica("alice", "ABCDE");
+    const before = captureAnchor(replica, 2, "before");
+    const after = captureAnchor(replica, 3, "after");
+    replica.delete(1, 3);
+
+    // Act / Assert
+    expect(tryResolveAnchor(replica, before)).toBe(1);
+    expect(tryResolveAnchor(replica, after)).toBe(1);
   });
 });
 

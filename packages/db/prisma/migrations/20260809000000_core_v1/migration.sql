@@ -10,8 +10,24 @@ ALTER TABLE public.documents
     ALTER COLUMN is_public SET NOT NULL;
 
 -- Preserve legacy bodies/history before dropping them. Refuse to drop live
--- markdown that has not already been represented as CRDT event batches.
+-- markdown unless an offline CRDT replay has recorded a matching content hash.
+-- Prisma runs this migration in a single transaction, so the locks below are
+-- held through validation and DROP COLUMN / DROP TABLE.
 CREATE SCHEMA IF NOT EXISTS archive;
+
+-- Optional pre-migration artifact: after replaying document_event_batches and
+-- comparing reconstructed markdown to documents.markdown_content, insert
+-- (document_id, sha256(utf8 markdown)) here so this migration can proceed.
+CREATE TABLE IF NOT EXISTS archive.markdown_crdt_verified_20260809 (
+    document_id UUID PRIMARY KEY,
+    markdown_sha256 TEXT NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT markdown_crdt_verified_20260809_sha_hex
+        CHECK (markdown_sha256 ~ '^[0-9a-f]{64}$')
+);
+
+LOCK TABLE public.documents IN EXCLUSIVE MODE;
+LOCK TABLE public.document_versions IN EXCLUSIVE MODE;
 
 CREATE TABLE IF NOT EXISTS archive.documents_markdown_content_20260809 AS
 SELECT
@@ -45,12 +61,16 @@ BEGIN
           AND btrim(document.markdown_content) <> ''
           AND NOT EXISTS (
               SELECT 1
-              FROM public.document_event_batches AS batch
-              WHERE batch.document_id = document.id
+              FROM archive.markdown_crdt_verified_20260809 AS verified
+              WHERE verified.document_id = document.id
+                AND verified.markdown_sha256 = encode(
+                    sha256(convert_to(document.markdown_content, 'UTF8')),
+                    'hex'
+                )
           )
     ) THEN
         RAISE EXCEPTION
-            'core_v1 refuses to drop markdown_content: non-empty bodies exist without document_event_batches. Backfill CRDT history first; archived rows are in archive.documents_markdown_content_20260809';
+            'core_v1 refuses to drop markdown_content: non-empty bodies lack a matching archive.markdown_crdt_verified_20260809 hash after CRDT replay. Archived snapshot rows are in archive.documents_markdown_content_20260809';
     END IF;
 END
 $$;

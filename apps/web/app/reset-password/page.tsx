@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Button } from "@softmaple/ui/components/button";
 import {
   Card,
   CardContent,
@@ -34,8 +33,8 @@ export default async function ResetPasswordPage({
             </div>
             <CardTitle className="text-2xl">Reset your password</CardTitle>
             <CardDescription>
-              Enter your email address and we'll send you a link to reset your
-              password
+              Enter your email address and we&apos;ll send you a link to reset
+              your password
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

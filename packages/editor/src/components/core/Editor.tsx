@@ -27,6 +27,7 @@ export type EditorProps = {
   className?: string;
   children?: ReactNode;
   historyMode?: EditorHistoryMode;
+  showToolbar?: boolean;
   activeEditor: LexicalEditor | undefined;
   setActiveEditor: Dispatch<SetStateAction<LexicalEditor | undefined>>;
 };
@@ -36,6 +37,7 @@ export const Editor: FC<EditorProps> = (props) => {
     className,
     children,
     historyMode = DEFAULT_EDITOR_HISTORY_MODE,
+    showToolbar = true,
     activeEditor,
     setActiveEditor,
     ...rest
@@ -74,13 +76,15 @@ export const Editor: FC<EditorProps> = (props) => {
 
   return (
     <>
-      <ToolbarPlugin
-        editor={editor}
-        activeEditor={activeEditor}
-        historyMode={historyMode}
-        setActiveEditor={safeSetActiveEditor}
-        setIsLinkEditMode={setIsLinkEditMode}
-      />
+      {showToolbar ? (
+        <ToolbarPlugin
+          editor={editor}
+          activeEditor={activeEditor}
+          historyMode={historyMode}
+          setActiveEditor={safeSetActiveEditor}
+          setIsLinkEditMode={setIsLinkEditMode}
+        />
+      ) : null}
 
       <ShortcutsPlugin
         editor={activeEditor}

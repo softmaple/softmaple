@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@softmaple/ui/components/card";
-import { FileX, Home, ArrowLeft, Search } from "lucide-react";
+import { FileX, Home, Search } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -34,13 +34,6 @@ export default function DocNotFoundPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-3">
-            {/*{onGoBack && (*/}
-            {/*  <Button onClick={onGoBack} variant="default" className="w-full">*/}
-            {/*    <ArrowLeft className="mr-2 h-4 w-4" />*/}
-            {/*    Go Back*/}
-            {/*  </Button>*/}
-            {/*)}*/}
-
             <Button asChild variant="outline" className="w-full">
               <Link href="/dashboard">
                 <Home className="mr-2 h-4 w-4" />
@@ -54,15 +47,6 @@ export default function DocNotFoundPage() {
                 Browse All Documents
               </Link>
             </Button>
-          </div>
-
-          <div className="pt-4 border-t">
-            <p className="text-sm text-muted-foreground">
-              Need help?{" "}
-              <Link href="/support" className="text-primary hover:underline">
-                Contact support
-              </Link>
-            </p>
           </div>
         </CardContent>
       </Card>

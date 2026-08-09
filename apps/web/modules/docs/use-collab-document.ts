@@ -7,6 +7,7 @@ import {
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import {
+  COLLAB_ACCESS_MODE,
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
   parseServerCollabMessage,
@@ -35,6 +36,8 @@ export interface CollabDocumentState {
   readonly onBindingChange: (binding: LexicalBinding | null) => void;
 }
 
+export type CollabSessionMode = "authenticated" | "public";
+
 const resolveCollabUrl = (): string => {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/collab/document`;
@@ -56,7 +59,10 @@ const batchChunks = (
   return chunks;
 };
 
-export const useCollabDocument = (documentId: string): CollabDocumentState => {
+export const useCollabDocument = (
+  documentId: string,
+  sessionMode: CollabSessionMode = "authenticated",
+): CollabDocumentState => {
   const [replica, setReplica] = useState<BlockReplica | null>(null);
   const [status, setStatus] = useState<CollabDocumentStatus>("connecting");
   const [canWrite, setCanWrite] = useState(false);
@@ -132,6 +138,12 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
 
     const unsubscribeReplica = nextReplica.subscribe((change) => {
       if (change.origin !== "local") return;
+      if (sessionMode === "public") {
+        setCanWrite(false);
+        setError(new Error("Public document sessions are read-only"));
+        setStatus("error");
+        return;
+      }
       for (const batch of nextReplica.exportEvents()) {
         knownBatches.set(batch.batchId, batch);
       }
@@ -180,51 +192,60 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
         setStatus(reconnectAttempt === 0 ? "connecting" : "offline");
       }
 
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (sessionError) {
-        if (!localPersistenceFailed) setStatus("offline");
-        scheduleReconnect();
-        return;
-      }
-      const accessToken = data.session?.access_token;
-      const userId = data.session?.user.id;
-      if (!accessToken || !userId) {
-        fatalConnectionError = true;
-        setError(new Error("A signed-in Supabase session is required"));
-        setStatus("error");
-        return;
-      }
+      let credential:
+        | { readonly kind: "access-token"; readonly token: string }
+        | { readonly kind: "public" } = { kind: "public" };
 
-      if (storageUserId !== null && storageUserId !== userId) {
-        fatalConnectionError = true;
-        setCanWrite(false);
-        setError(new Error("The signed-in user changed; reload this document"));
-        setStatus("error");
-        return;
-      }
-      if (storageUserId === null) {
-        storageUserId = userId;
-        try {
-          const restoredBatches = loadPendingBatches(
-            window.localStorage,
-            documentId,
-            storageUserId,
-          );
-          if (restoredBatches.length > 0) {
-            nextReplica.applyRemoteEvents(restoredBatches);
-            for (const batch of restoredBatches) {
-              knownBatches.set(batch.batchId, batch);
-              pendingBatches.set(batch.batchId, batch);
-            }
-          }
-        } catch {
-          localPersistenceFailed = true;
+      if (sessionMode === "authenticated") {
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (sessionError) {
+          if (!localPersistenceFailed) setStatus("offline");
+          scheduleReconnect();
+          return;
+        }
+        const accessToken = data.session?.access_token;
+        const userId = data.session?.user.id;
+        if (!accessToken || !userId) {
+          fatalConnectionError = true;
+          setError(new Error("A signed-in Supabase session is required"));
+          setStatus("error");
+          return;
+        }
+        credential = { kind: "access-token", token: accessToken };
+
+        if (storageUserId !== null && storageUserId !== userId) {
+          fatalConnectionError = true;
           setCanWrite(false);
           setError(
-            new Error("Offline changes cannot be restored in this browser"),
+            new Error("The signed-in user changed; reload this document"),
           );
           setStatus("error");
+          return;
+        }
+        if (storageUserId === null) {
+          storageUserId = userId;
+          try {
+            const restoredBatches = loadPendingBatches(
+              window.localStorage,
+              documentId,
+              storageUserId,
+            );
+            if (restoredBatches.length > 0) {
+              nextReplica.applyRemoteEvents(restoredBatches);
+              for (const batch of restoredBatches) {
+                knownBatches.set(batch.batchId, batch);
+                pendingBatches.set(batch.batchId, batch);
+              }
+            }
+          } catch {
+            localPersistenceFailed = true;
+            setCanWrite(false);
+            setError(
+              new Error("Offline changes cannot be restored in this browser"),
+            );
+            setStatus("error");
+          }
         }
       }
 
@@ -236,7 +257,7 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
         sendJson(nextSocket, {
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.Auth,
-          accessToken,
+          credential,
           documentId,
           sessionId,
         });
@@ -259,10 +280,23 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
         try {
           switch (message.type) {
             case COLLAB_MESSAGE_TYPE.Ready:
+              if (
+                message.protocolVersion === COLLAB_PROTOCOL_VERSION &&
+                message.accessMode !==
+                  (sessionMode === "public"
+                    ? COLLAB_ACCESS_MODE.Public
+                    : COLLAB_ACCESS_MODE.Authenticated)
+              ) {
+                throw new Error("The collaboration access mode is invalid");
+              }
               reconnectAttempt = 0;
               fatalConnectionError = false;
               if (!localPersistenceFailed) setError(null);
-              setCanWrite(message.canWrite && !localPersistenceFailed);
+              setCanWrite(
+                sessionMode === "authenticated" &&
+                  message.canWrite &&
+                  !localPersistenceFailed,
+              );
               if (!localPersistenceFailed) setStatus("syncing");
               synced = false;
               requestRepair(repairCursor ?? "0");
@@ -364,7 +398,7 @@ export const useCollabDocument = (documentId: string): CollabDocumentState => {
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [documentId]);
+  }, [documentId, sessionMode]);
 
   return { replica, status, canWrite, error, onBindingChange };
 };

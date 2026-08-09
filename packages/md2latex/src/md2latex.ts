@@ -1,127 +1,187 @@
-export function markdownToLatex(markdown: string) {
-  const lines = markdown.split("\n");
-  const latexLines = [];
+export type LatexDocumentOptions = {
+  readonly author?: string;
+  readonly title?: string;
+};
 
-  let inList = false;
-  let listType = ""; // 'itemize' or 'enumerate'
+const LATEX_SPECIAL_CHARACTER = /[\\{}$&#_%~^]/g;
+const LATEX_ESCAPE: Readonly<Record<string, string>> = {
+  "#": "\\#",
+  $: "\\$",
+  "%": "\\%",
+  "&": "\\&",
+  "\\": "\\textbackslash{}",
+  _: "\\_",
+  "{": "\\{",
+  "}": "\\}",
+  "^": "\\textasciicircum{}",
+  "~": "\\textasciitilde{}",
+};
+
+export const escapeLatex = (value: string): string =>
+  value.replace(
+    LATEX_SPECIAL_CHARACTER,
+    (character) => LATEX_ESCAPE[character] ?? character,
+  );
+
+const renderInline = (value: string): string => {
+  const tokens: string[] = [];
+  const tokenized = value.replace(
+    /`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (
+      _match,
+      code: string | undefined,
+      label: string | undefined,
+      url: string | undefined,
+    ) => {
+      const replacement =
+        code !== undefined
+          ? `\\texttt{${escapeLatex(code)}}`
+          : `\\href{${escapeLatex(url ?? "")}}{${renderInline(label ?? "")}}`;
+      const token = `@@SOFTMAPLE${tokens.length}@@`;
+      tokens.push(replacement);
+      return token;
+    },
+  );
+
+  const normalizedStyles = tokenized
+    .replace(/___(.+?)___/g, "***$1***")
+    .replace(/__(.+?)__/g, "**$1**")
+    .replace(/_([^_]+?)_/g, "*$1*");
+
+  const styled = escapeLatex(normalizedStyles)
+    .replace(/\*\*\*(.+?)\*\*\*/g, "\\textbf{\\textit{$1}}")
+    .replace(/\*\*(.+?)\*\*/g, "\\textbf{$1}")
+    .replace(/\*(.+?)\*/g, "\\textit{$1}")
+    .replace(/~~(.+?)~~/g, "\\sout{$1}");
+
+  return tokens.reduce(
+    (result, token, index) => result.replace(`@@SOFTMAPLE${index}@@`, token),
+    styled,
+  );
+};
+
+const headingCommand = (level: number): string =>
+  ["section", "subsection", "subsubsection", "paragraph", "subparagraph"][
+    Math.min(level, 5) - 1
+  ] ?? "paragraph";
+
+export const markdownToLatexBody = (markdown: string): string => {
+  const output: string[] = [];
+  let listType: "enumerate" | "itemize" | null = null;
   let inBlockquote = false;
   let inCodeBlock = false;
 
-  for (const rawLine of lines) {
-    let line = rawLine.trim();
+  const closeList = () => {
+    if (listType !== null) output.push(`\\end{${listType}}`);
+    listType = null;
+  };
+  const closeBlockquote = () => {
+    if (inBlockquote) output.push("\\end{quote}");
+    inBlockquote = false;
+  };
 
-    // Handle code blocks
-    if (/^```/.test(line)) {
-      if (!inCodeBlock) {
-        latexLines.push("\\begin{verbatim}");
-        inCodeBlock = true;
-      } else {
-        latexLines.push("\\end{verbatim}");
-        inCodeBlock = false;
-      }
+  for (const rawLine of markdown.split("\n")) {
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith("```")) {
+      closeList();
+      closeBlockquote();
+      output.push(inCodeBlock ? "\\end{verbatim}" : "\\begin{verbatim}");
+      inCodeBlock = !inCodeBlock;
       continue;
     }
-
     if (inCodeBlock) {
-      latexLines.push(rawLine); // preserve indentation
+      output.push(rawLine);
       continue;
     }
 
-    // Blockquotes
-    if (line.startsWith(">")) {
-      if (!inBlockquote) {
-        latexLines.push("\\begin{quote}");
-        inBlockquote = true;
+    if (trimmed.length === 0) {
+      closeList();
+      closeBlockquote();
+      if (output.at(-1) !== "") output.push("");
+      continue;
+    }
+
+    const blockquoteMatch = trimmed.match(/^>\s?(.*)$/);
+    if (blockquoteMatch !== null) {
+      closeList();
+      if (!inBlockquote) output.push("\\begin{quote}");
+      inBlockquote = true;
+      output.push(`${renderInline(blockquoteMatch[1] ?? "")}\\\\`);
+      continue;
+    }
+    closeBlockquote();
+
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch !== null) {
+      closeList();
+      output.push(
+        `\\${headingCommand(headingMatch[1]?.length ?? 1)}{${renderInline(headingMatch[2] ?? "")}}`,
+      );
+      continue;
+    }
+
+    const checklistMatch = trimmed.match(/^[-*]\s+\[([ xX])\]\s+(.+)$/);
+    const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
+    const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    const nextListType = orderedMatch === null ? "itemize" : "enumerate";
+    if (
+      checklistMatch !== null ||
+      unorderedMatch !== null ||
+      orderedMatch !== null
+    ) {
+      if (listType !== nextListType) {
+        closeList();
+        output.push(`\\begin{${nextListType}}`);
+        listType = nextListType;
       }
-      line = line.replace(/^>\s?/, "");
-    } else if (inBlockquote) {
-      latexLines.push("\\end{quote}");
-      inBlockquote = false;
-    }
-
-    // Headings
-    if (/^#{1,6} /.test(line)) {
-      // @ts-expect-error FIXME
-      const level = line.match(/^#+/)[0].length;
-      const content = line.replace(/^#{1,6} /, "");
-      const headingMap: Record<number, string> = {
-        1: "section",
-        2: "subsection",
-        3: "subsubsection",
-        4: "paragraph",
-        5: "subparagraph",
-        6: "textbf",
-      };
-      const latexHeading = headingMap[level];
-      latexLines.push(`\\${latexHeading}{${content}}`);
-      continue;
-    }
-
-    // Lists
-    const ulMatch = line.match(/^[-*]\s+(.+)/);
-    const olMatch = line.match(/^\d+\.\s+(.+)/);
-
-    if (ulMatch) {
-      if (!inList || listType !== "itemize") {
-        if (inList) latexLines.push(`\\end{${listType}}`);
-        latexLines.push("\\begin{itemize}");
-        inList = true;
-        listType = "itemize";
+      if (checklistMatch !== null) {
+        const checked = checklistMatch[1]?.toLowerCase() === "x";
+        output.push(
+          `  \\item[$${checked ? "\\boxtimes" : "\\square"}$] ${renderInline(checklistMatch[2] ?? "")}`,
+        );
+      } else {
+        output.push(
+          `  \\item ${renderInline(orderedMatch?.[1] ?? unorderedMatch?.[1] ?? "")}`,
+        );
       }
-      latexLines.push(`  \\item ${applyInlineStyles(ulMatch[1])}`);
       continue;
-    } else if (olMatch) {
-      if (!inList || listType !== "enumerate") {
-        if (inList) latexLines.push(`\\end{${listType}}`);
-        latexLines.push("\\begin{enumerate}");
-        inList = true;
-        listType = "enumerate";
-      }
-      latexLines.push(`  \\item ${applyInlineStyles(olMatch[1])}`);
-      continue;
-    } else if (inList) {
-      latexLines.push(`\\end{${listType}}`);
-      inList = false;
-      listType = "";
     }
 
-    // Plain text (paragraphs)
-    if (line !== "") {
-      latexLines.push(applyInlineStyles(line) + "\\\\");
-    }
+    closeList();
+    output.push(`${renderInline(trimmed)}\\\\`);
   }
 
-  if (inBlockquote) latexLines.push("\\end{quote}");
-  if (inList) latexLines.push(`\\end{${listType}}`);
-  if (inCodeBlock) latexLines.push("\\end{verbatim}");
+  closeList();
+  closeBlockquote();
+  if (inCodeBlock) output.push("\\end{verbatim}");
+  while (output.at(-1) === "") output.pop();
+  return output.join("\n");
+};
 
-  return latexLines.join("\n");
-}
+export const markdownToLatex = (
+  markdown: string,
+  options: LatexDocumentOptions = {},
+): string => {
+  const title = escapeLatex(options.title ?? "Untitled document");
+  const authorLine =
+    options.author === undefined
+      ? ""
+      : `\n\\author{${escapeLatex(options.author)}}`;
+  const body = markdownToLatexBody(markdown);
+  return `\\documentclass{article}
+\\usepackage[T1]{fontenc}
+\\usepackage[utf8]{inputenc}
+\\usepackage{amssymb}
+\\usepackage[hidelinks]{hyperref}
+\\usepackage[normalem]{ulem}
+\\title{${title}}${authorLine}
+\\date{}
 
-// Helper: nested bold/italic/code (recursive)
-const applyInlineStyles = (text?: string): string => {
-  if (!text) return "";
+\\begin{document}
+\\maketitle
 
-  // Handle inline code first (no nesting inside it)
-  text = text.replace(/`([^`]+?)`/g, (_, code) => `\\texttt{${code}}`);
+${body}
 
-  // Bold+Italic (***) or (___)
-  text = text.replace(
-    /(\*\*\*|___)(.+?)\1/g,
-    (_, __, content) => `\\textbf{\\textit{${applyInlineStyles(content)}}}`,
-  );
-
-  // Bold (** or __)
-  text = text.replace(
-    /(\*\*|__)(.+?)\1/g,
-    (_, __, content) => `\\textbf{${applyInlineStyles(content)}}`,
-  );
-
-  // Italic (* or _)
-  text = text.replace(
-    /(\*|_)(.+?)\1/g,
-    (_, __, content) => `\\textit{${applyInlineStyles(content)}}`,
-  );
-
-  return text;
+\\end{document}
+`;
 };

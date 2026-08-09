@@ -1,0 +1,59 @@
+name: Quality Gates
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/softmaple
+      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/softmaple
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+      SUPABASE_URL: https://ci-placeholder.supabase.co
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+      COLLAB_BACKEND_ORIGIN: http://127.0.0.1:3002
+      COLLAB_GATEWAY_HMAC_KEY_ID: ci
+      COLLAB_GATEWAY_HMAC_SECRET: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8
+      COLLAB_GATEWAY_HMAC_KEYS: '{"ci":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter @softmaple/db db:generate
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Lint Web with zero warnings
+        run: pnpm --filter @softmaple/web lint
+      - name: Typecheck affected product packages
+        run: pnpm turbo run typecheck --filter=@softmaple/web --filter=@softmaple/collab --filter=@softmaple/editor --filter=@softmaple/awareness --filter=@softmaple/md2latex --filter=@softmaple/collab-protocol
+      - name: Run product unit and integration tests
+        run: |
+          pnpm --filter @softmaple/web test -- --run
+          pnpm --filter @softmaple/collab test
+          pnpm --filter @softmaple/collab-protocol test
+          pnpm --filter @softmaple/md2latex test -- --run
+          pnpm --filter @softmaple/editor exec vitest run --project=unit src/markdown.test.ts
+          pnpm --filter @softmaple/awareness exec vitest run --project=unit
+      - name: Build Web and Collab
+        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab

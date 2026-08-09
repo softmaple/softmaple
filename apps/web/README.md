@@ -10,7 +10,8 @@ the Lexical editor. Real-time collaboration goes over WebSocket to
 ```text
 Browser ──► apps/web (Next.js)
               ├── Supabase Auth / Data API (anon / publishable key)
-              └── same-origin /collab/document
+              ├── same-origin /collab/document (durable EG-walker history)
+              └── same-origin /collab/presence (ephemeral awareness)
                     └── HMAC rewrite ──► apps/collab ──► Supabase Postgres
 ```
 
@@ -51,6 +52,7 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 | `COLLAB_BACKEND_ORIGIN` | yes | Private collab service origin, for example `http://localhost:3002` |
 | `COLLAB_GATEWAY_HMAC_KEY_ID` | yes | Active key ID installed in the collab keyring |
 | `COLLAB_GATEWAY_HMAC_SECRET` | yes | Active 32-byte, unpadded base64url HMAC secret |
+| `NEXT_PUBLIC_APP_URL` | production | Canonical origin used in auth redirects |
 
 \*Required unless `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set.
 
@@ -59,7 +61,13 @@ Vercel (or any host), redeploy — restarting the running server is not enough.
 
 The collaboration gateway variables are server-only. Never prefix the HMAC
 secret with `NEXT_PUBLIC_` or expose the collab backend directly to browsers.
-The browser always connects to the current web origin at `/collab/document`.
+The browser always connects to the current web origin at `/collab/document`
+and `/collab/presence`.
+
+The server-only E2E seed endpoint is disabled by default. It activates only
+when `E2E_ALLOW_REMOTE_SEED=true`, the supplied project ref exactly matches the
+Supabase URL, a distinct production ref is configured, and a service-role key
+plus bearer secret are present. Never enable it against production.
 
 ### WebSocket release gate
 
@@ -86,8 +94,13 @@ pnpm --filter @softmaple/web typecheck
 pnpm --filter @softmaple/web lint
 pnpm --filter @softmaple/web test
 pnpm --filter @softmaple/web test:e2e
-pnpm --filter @softmaple/web build
+pnpm turbo run build --filter=@softmaple/web
 ```
+
+Real product E2E requires the isolated variables documented in
+[`docs/development.mdx`](../../docs/development.mdx). It starts Web and Collab
+on dynamic ports with `reuseExistingServer=false`; no mock client or forged
+authentication cookie is used.
 
 ## Layout
 

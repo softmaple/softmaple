@@ -94,6 +94,33 @@ describe("collaboration WebSocket gateway", () => {
     ).toEqual({ ok: true, keyId: KEY_ID });
   });
 
+  it("rewrites a validated presence room to the presence backend", async () => {
+    configureGateway();
+    const roomId = "9e2cb8d6-fb45-4daf-8f6e-0e598c82d8c5";
+    const response = await proxy(
+      upgradeRequest(
+        "https://example.com",
+        `/collab/presence?roomId=${roomId}`,
+      ),
+    );
+
+    expect(isRewrite(response)).toBe(true);
+    expect(getRewrittenUrl(response)).toBe(
+      `http://localhost:3002/presence?roomId=${roomId}`,
+    );
+  });
+
+  it.each([
+    "/collab/presence",
+    "/collab/presence?roomId=not-a-document",
+    "/collab/presence?roomId=9e2cb8d6-fb45-4daf-8f6e-0e598c82d8c5&extra=1",
+  ])("rejects an invalid presence query: %s", async (path) => {
+    configureGateway();
+    expect(
+      (await proxy(upgradeRequest("https://example.com", path))).status,
+    ).toBe(400);
+  });
+
   it.each([
     ["cross-origin", "https://evil.example", 403],
     ["missing Origin", null, 403],

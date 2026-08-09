@@ -86,7 +86,7 @@ const authMessage = (sessionId: string): TestRawMessage => ({
     JSON.stringify({
       protocolVersion: COLLAB_PROTOCOL_VERSION,
       type: COLLAB_MESSAGE_TYPE.Auth,
-      accessToken: "access-token",
+      credential: { kind: "access-token", token: "access-token" },
       documentId: "00000000-0000-4000-8000-000000000001",
       sessionId,
     }),
@@ -118,7 +118,7 @@ describe("collaboration document authentication", () => {
     const upgrade = await route.upgrade(signedUpgradeRequest());
 
     expect(upgrade).toEqual({
-      namespace: "softmaple-collab-v2",
+      namespace: "softmaple-collab-v3",
       context: {
         gatewayAuthMode: "hmac",
         gatewayAuthKeyId: GATEWAY_KEY_ID,
@@ -187,7 +187,7 @@ describe("collaboration document authentication", () => {
     await route.message(peer, authMessage("session-invalid"));
 
     expect(mocks.authorizeDocument).toHaveBeenCalledWith(
-      "access-token",
+      { kind: "access-token", token: "access-token" },
       "00000000-0000-4000-8000-000000000001",
     );
     expect(peer.send).toHaveBeenCalledWith(
@@ -201,6 +201,7 @@ describe("collaboration document authentication", () => {
 
   it("rejects a second Auth message while authorization is pending", async () => {
     const authorization = deferred<{
+      readonly accessMode: "authenticated";
       readonly documentId: string;
       readonly userId: string;
       readonly role: "EDITOR";
@@ -224,6 +225,7 @@ describe("collaboration document authentication", () => {
     );
 
     authorization.resolve({
+      accessMode: "authenticated",
       documentId: "00000000-0000-4000-8000-000000000001",
       userId: "00000000-0000-4000-8000-000000000002",
       role: "EDITOR",

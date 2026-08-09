@@ -1,349 +1,218 @@
 "use client";
 
+import { type ChangeEvent, type FC, useState, useTransition } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  KeyRound,
+  LoaderCircle,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
 } from "@softmaple/ui/components/avatar";
 import { Button } from "@softmaple/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@softmaple/ui/components/card";
-import { Bell, Settings, Shield, Trash2, Upload, User } from "lucide-react";
-import Link from "next/link";
-import type { FC } from "react";
-import { useState, useEffect } from "react";
-import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
-import { Switch } from "@softmaple/ui/components/switch";
-import { Separator } from "@softmaple/ui/components/separator";
-import { createClient } from "@/utils/supabase/client";
-import { useRouter } from "next/navigation";
+import { Label } from "@softmaple/ui/components/label";
+import type { UsersType } from "@/types/model";
+import { ModeToggle } from "@/components/mode-toggle";
+import { removeAvatar, updateProfile, uploadAvatar } from "@/app/actions/users";
 
-export type ProfileProps = {
-  userId: string;
-};
+type ProfileRow = UsersType["Row"];
 
-export const Profile: FC<ProfileProps> = (props) => {
-  const { userId } = props;
-  const router = useRouter();
+const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 
-  const supbase = createClient();
+export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
+  initialProfile,
+}) => {
+  const [profile, setProfile] = useState(initialProfile);
+  const [displayName, setDisplayName] = useState(profile.full_name ?? "");
+  const [message, setMessage] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  const [profile, setProfile] = useState({
-    name: "John Doe",
-    email: "john@example.com",
-    avatar: "/placeholder.svg?height=80&width=80",
-  });
-
-  const [notifications, setNotifications] = useState({
-    emailNotifications: true,
-    pushNotifications: false,
-    weeklyDigest: true,
-    collaboratorUpdates: true,
-  });
-
-  const getUserProfile = async () => {
-    try {
-      if (!userId) {
-        throw new Error("User ID is required to fetch profile");
+  const applyAvatar = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
+    if (file === undefined) return;
+    const formData = new FormData();
+    formData.set("avatar", file);
+    startTransition(async () => {
+      const result = await uploadAvatar(formData);
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
       }
-
-      const { data, error } = await supbase
-        .from("users")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
-      if (error) throw error;
-
-      if (data) {
-        setProfile({
-          name: (data as any)?.full_name || "",
-          email: (data as any)?.email || "",
-          avatar: (data as any)?.avatar_url || "",
-        });
-      }
-    } catch (e) {
-      console.error("Failed to fetch user profile:", e);
-    }
-  };
-
-  useEffect(() => {
-    getUserProfile();
-  }, []);
-
-  const handleSaveProfile = () => {
-    // Simulate save
-    console.log("Profile saved");
-  };
-
-  const handleSaveNotifications = () => {
-    // Simulate save
-    console.log("Notifications saved");
-  };
-
-  const handleChangePassword = () => {
-    // For authenticated users, we redirect to the update password page directly
-    // since they're already logged in
-    router.push("/reset-password/update");
+      setProfile(result.data);
+      setMessage("Avatar updated.");
+      event.target.value = "";
+    });
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Link href="/dashboard" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-                <Settings className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-semibold text-xl">Account Settings</span>
+    <main className="min-h-dvh px-4 py-6 sm:px-8 sm:py-10">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-center justify-between gap-3">
+          <Button asChild size="sm" variant="ghost">
+            <Link href="/dashboard">
+              <ArrowLeft className="size-4" /> Dashboard
             </Link>
-          </div>
-          <Link href="/dashboard">
-            <Button variant="ghost">Back to Dashboard</Button>
-          </Link>
+          </Button>
+          <ModeToggle />
         </div>
-      </header>
+        <div className="mt-9">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Personal settings
+          </p>
+          <h1 className="mt-2 font-display text-3xl font-semibold">Account</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Your profile is visible to members of workspaces you join.
+          </p>
+        </div>
 
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="space-y-8">
-          {/* Profile Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <User className="mr-2 h-5 w-5" />
-                Profile Information
-              </CardTitle>
-              <CardDescription>
-                Update your personal information and profile picture
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center space-x-6">
-                <Avatar className="w-20 h-20">
-                  <AvatarImage src={profile.avatar || "/placeholder.svg"} />
-                  <AvatarFallback className="text-lg">
-                    {profile.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="space-y-2">
-                  <Button variant="outline" size="sm">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload Photo
-                  </Button>
-                  <p className="text-sm text-muted-foreground">
-                    JPG, PNG or GIF. Max size 2MB.
-                  </p>
-                </div>
-              </div>
+        {message === null ? null : (
+          <p
+            className="mt-6 border-l-2 border-primary bg-muted px-3 py-2 text-sm"
+            role="status"
+          >
+            {message}
+          </p>
+        )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Full Name</Label>
-                  <Input
-                    id="name"
-                    value={profile.name}
-                    onChange={(e) =>
-                      setProfile((prev) => ({ ...prev, name: e.target.value }))
-                    }
+        <section className="mt-7 border bg-card p-5 sm:p-7">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+            <Avatar className="size-20 border">
+              <AvatarImage
+                alt={profile.avatar_alt ?? ""}
+                src={profile.avatar_src ?? undefined}
+              />
+              <AvatarFallback className="font-display text-xl">
+                {initials(profile.full_name ?? profile.email)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild disabled={isPending} size="sm" variant="outline">
+                <label>
+                  {isPending ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
+                  Upload image
+                  <input
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    disabled={isPending}
+                    onChange={applyAvatar}
+                    type="file"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email Address</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={profile.email}
-                    onChange={(e) =>
-                      setProfile((prev) => ({ ...prev, email: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <Button onClick={handleSaveProfile}>Save Changes</Button>
-            </CardContent>
-          </Card>
-
-          {/* Notification Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Bell className="mr-2 h-5 w-5" />
-                Notification Preferences
-              </CardTitle>
-              <CardDescription>
-                Choose how you want to be notified about updates
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Email Notifications</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receive notifications via email
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.emailNotifications}
-                    onCheckedChange={(checked) =>
-                      setNotifications((prev) => ({
-                        ...prev,
-                        emailNotifications: checked,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Push Notifications</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receive push notifications in your browser
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.pushNotifications}
-                    onCheckedChange={(checked) =>
-                      setNotifications((prev) => ({
-                        ...prev,
-                        pushNotifications: checked,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Weekly Digest</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Get a weekly summary of your activity
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.weeklyDigest}
-                    onCheckedChange={(checked) =>
-                      setNotifications((prev) => ({
-                        ...prev,
-                        weeklyDigest: checked,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Collaborator Updates</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Get notified when collaborators make changes
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.collaboratorUpdates}
-                    onCheckedChange={(checked) =>
-                      setNotifications((prev) => ({
-                        ...prev,
-                        collaboratorUpdates: checked,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <Button onClick={handleSaveNotifications}>
-                Save Preferences
+                </label>
               </Button>
-            </CardContent>
-          </Card>
-
-          {/* Security Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Shield className="mr-2 h-5 w-5" />
-                Security
-              </CardTitle>
-              <CardDescription>
-                Manage your account security settings
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">Change Password</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Update your password to keep your account secure
-                  </p>
-                </div>
-                <Button variant="outline" onClick={handleChangePassword}>
-                  Change Password
+              {profile.avatar_src === null ? null : (
+                <Button
+                  disabled={isPending}
+                  onClick={() =>
+                    startTransition(async () => {
+                      const result = await removeAvatar();
+                      if (!result.ok) {
+                        setMessage(result.message);
+                        return;
+                      }
+                      setProfile(result.data);
+                      setMessage("Avatar removed.");
+                    })
+                  }
+                  size="sm"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-4" /> Remove
                 </Button>
-              </div>
+              )}
+              <p className="w-full font-mono text-[10px] text-muted-foreground">
+                JPEG, PNG, or WebP · 2 MB · 2048 × 2048 max
+              </p>
+            </div>
+          </div>
 
-              <Separator />
+          <form
+            className="mt-8 grid gap-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              startTransition(async () => {
+                const result = await updateProfile({ displayName });
+                if (!result.ok) {
+                  setMessage(result.message);
+                  return;
+                }
+                setProfile(result.data);
+                setDisplayName(result.data.full_name ?? "");
+                setMessage("Profile saved.");
+              });
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="display-name">Display name</Label>
+              <Input
+                disabled={isPending}
+                id="display-name"
+                maxLength={80}
+                onChange={(event) => setDisplayName(event.target.value)}
+                required
+                value={displayName}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="account-email">Email</Label>
+              <Input
+                disabled
+                id="account-email"
+                readOnly
+                value={profile.email}
+              />
+              <p className="text-xs text-muted-foreground">
+                Email changes are not available in this release.
+              </p>
+            </div>
+            <Button
+              className="w-fit"
+              disabled={isPending || displayName.trim().length === 0}
+              type="submit"
+            >
+              Save profile
+            </Button>
+          </form>
+        </section>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">Two-Factor Authentication</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Add an extra layer of security to your account
-                  </p>
-                </div>
-                <Button variant="outline">Enable 2FA</Button>
-              </div>
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">Active Sessions</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Manage your active login sessions
-                  </p>
-                </div>
-                <Button variant="outline">View Sessions</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Danger Zone */}
-          <Card className="border-destructive">
-            <CardHeader>
-              <CardTitle className="flex items-center text-destructive">
-                <Trash2 className="mr-2 h-5 w-5" />
-                Danger Zone
-              </CardTitle>
-              <CardDescription>
-                Irreversible and destructive actions
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between p-4 border border-destructive rounded-lg">
-                <div>
-                  <h4 className="font-medium">Delete Account</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Permanently delete your account and all associated data
-                  </p>
-                </div>
-                <Button variant="destructive">
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Account
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
-    </div>
+        <section className="mt-5 grid gap-px border bg-border sm:grid-cols-2">
+          <div className="bg-card p-5">
+            <h2 className="font-display text-lg font-semibold">Appearance</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Use Light, Dark, or your system preference.
+            </p>
+            <div className="mt-4">
+              <ModeToggle />
+            </div>
+          </div>
+          <div className="bg-card p-5">
+            <h2 className="font-display text-lg font-semibold">Password</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Send a secure reset link to your account email.
+            </p>
+            <Button asChild className="mt-4" size="sm" variant="outline">
+              <Link href="/reset-password">
+                <KeyRound className="size-4" /> Reset password
+              </Link>
+            </Button>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 };

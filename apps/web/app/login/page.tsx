@@ -12,12 +12,13 @@ import { LoginForm } from "@/modules/auth/login-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
 
 interface LoginPageProps {
-  searchParams: Promise<{ message?: string }>;
+  searchParams: Promise<{ error?: string; message?: string; next?: string }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
-  const message = params?.message;
+  const message = params.message;
+  const error = params.error;
 
   return (
     <AuthGuard>
@@ -38,7 +39,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 {message}
               </div>
             )}
-            <LoginForm />
+            {error === undefined ? null : (
+              <div
+                className="rounded-sm bg-destructive/10 p-3 text-sm text-destructive"
+                role="alert"
+              >
+                {error}
+              </div>
+            )}
+            <LoginForm next={params.next} />
 
             <div className="text-right">
               <Link
@@ -61,19 +70,25 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <Button variant="outline">
+              <Button aria-describedby="oauth-note" disabled variant="outline">
                 <Github className="mr-2 h-4 w-4" />
                 GitHub
               </Button>
-              <Button variant="outline">
+              <Button aria-describedby="oauth-note" disabled variant="outline">
                 <Mail className="mr-2 h-4 w-4" />
                 Google
               </Button>
             </div>
+            <p
+              className="text-center text-xs text-muted-foreground"
+              id="oauth-note"
+            >
+              GitHub and Google sign-in are coming soon.
+            </p>
 
             <div className="text-center text-sm">
               <span className="text-muted-foreground">
-                Don't have an account?{" "}
+                Don&apos;t have an account?{" "}
               </span>
               <Link href="/signup" className="text-primary hover:underline">
                 Sign up

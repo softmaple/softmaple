@@ -17,10 +17,10 @@ export async function GET() {
   try {
     const supabase = await createClient();
 
-    const { error, status, statusText } = await supabase
-      .from("money_fort_hq_assessment_results")
-      .select("id", { head: true, count: "estimated" })
-      .limit(1);
+    const { error, status, statusText } = await supabase.rpc(
+      "get_public_document_by_slug",
+      { p_slug: "__softmaple_health_check__" },
+    );
 
     if (error) {
       console.error("Supabase keep-alive error", error);

@@ -1,219 +1,273 @@
 "use client";
 
-import type { FC, Dispatch, SetStateAction } from "react";
-import { useEffect, useState } from "react";
+import {
+  type Dispatch,
+  type FC,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@softmaple/ui/components/button";
 import { Input } from "@softmaple/ui/components/input";
 import { Badge } from "@softmaple/ui/components/badge";
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@softmaple/ui/components/avatar";
-import { Button } from "@softmaple/ui/components/button";
-import {
-  Clock,
+  Check,
+  Clipboard,
   Download,
-  Edit3,
-  Eye,
-  MoreHorizontal,
-  Save,
-  Share,
-  Users,
+  FileCode2,
+  LoaderCircle,
+  Radio,
+  Share2,
+  Trash2,
+  WifiOff,
 } from "lucide-react";
-import { Separator } from "@softmaple/ui/components/separator";
-import { createDoc } from "@/modules/docs/utils/create-doc";
-import kebabCase from "lodash/kebabCase";
-import { usePathname, useSearchParams, useRouter } from "next/navigation";
-import { useEditorState } from "@/contexts/EditorStateContext";
-import { ExportFilesDropdownMenu } from "@softmaple/editor/components/core/ExportFiles/ExportFilesDropdownMenu";
+import {
+  deleteDocument,
+  setDocumentPublic,
+  updateDocumentTitle,
+} from "@/app/actions/documents/documents";
+import type { WorkspaceRole } from "@/lib/workspace-roles";
+import type { CollabDocumentStatus } from "@/modules/docs/use-collab-document";
 
 export type DocHeaderProps = {
-  title: string;
+  canDelete: boolean;
+  canEdit: boolean;
+  canShare: boolean;
+  docSlug: string;
+  documentId: string;
+  isPublic: boolean;
+  markdown: string;
+  role: WorkspaceRole;
   setTitle: Dispatch<SetStateAction<string>>;
-  content: string;
-  setContent: Dispatch<SetStateAction<string>>;
-  isNewDoc: boolean;
-  workspaceId: number;
-  userId: string;
-  docSlug?: string;
+  status: CollabDocumentStatus;
+  title: string;
+  workspaceSlug: string;
 };
 
-export const DocHeader: FC<DocHeaderProps> = (props) => {
-  const {
-    title,
-    setTitle,
-    content,
-    setContent,
-    isNewDoc,
-    userId,
-    workspaceId,
-    docSlug,
-  } = props;
+const STATUS_COPY: Readonly<
+  Record<
+    CollabDocumentStatus,
+    { readonly label: string; readonly tone: string }
+  >
+> = {
+  connecting: { label: "Connecting", tone: "text-muted-foreground" },
+  syncing: { label: "Syncing", tone: "text-amber-600 dark:text-amber-400" },
+  saving: { label: "Saving", tone: "text-amber-600 dark:text-amber-400" },
+  saved: { label: "Saved", tone: "text-teal-600 dark:text-teal-400" },
+  offline: { label: "Offline", tone: "text-orange-600 dark:text-orange-400" },
+  error: { label: "Error", tone: "text-destructive" },
+};
 
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+const downloadText = (content: string, name: string, type: string): void => {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+export const DocHeader: FC<DocHeaderProps> = ({
+  canDelete,
+  canEdit,
+  canShare,
+  docSlug,
+  documentId,
+  isPublic: initialIsPublic,
+  markdown,
+  role,
+  setTitle,
+  status,
+  title,
+  workspaceSlug,
+}) => {
   const router = useRouter();
+  const [isPublic, setIsPublic] = useState(initialIsPublic);
+  const [message, setMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const lastCommittedTitle = useRef(title);
+  const statusCopy = STATUS_COPY[status];
 
-  const { activeEditor } = useEditorState();
-
-  const [isEditing, setIsEditing] = useState(true);
-  const [lastSaved, setLastSaved] = useState("2 minutes ago");
-
-  const collaborators = [
-    {
-      name: "John Doe",
-      avatar: "/placeholder.svg?height=32&width=32",
-      status: "online",
-    },
-    {
-      name: "Jane Smith",
-      avatar: "/placeholder.svg?height=32&width=32",
-      status: "away",
-    },
-  ];
-
-  const handleSave = async () => {
-    try {
-      if (!isNewDoc) return;
-
-      const newDoc = {
-        title,
-        slug: kebabCase(`${title}-${Date.now()}`),
-        workspace_id: workspaceId,
-        author_id: userId,
-        // FIXME: retrieve the content from the editor
-        markdown_content: "",
-      };
-      const { data: createdDoc, error } = await createDoc(newDoc);
-
-      if (error) {
-        console.error("Error creating document:", error);
-        throw error;
+  const persistTitle = useCallback(() => {
+    const normalizedTitle = title.trim();
+    if (!canEdit || normalizedTitle.length === 0) return;
+    if (normalizedTitle === lastCommittedTitle.current) return;
+    startTransition(async () => {
+      const result = await updateDocumentTitle({
+        docSlug,
+        title: normalizedTitle,
+        workspaceSlug,
+      });
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
       }
-
-      // update the page slug in the URL if it's a new document
-      if (createdDoc) {
-        const newSlug = createdDoc.slug;
-        // Update the URL to reflect the new document slug
-        const urlParams = new URLSearchParams(searchParams.toString());
-
-        // replace the "new" slug in the end with the new document slug
-        const pathnameParts = pathname.split("/");
-        pathnameParts[pathnameParts.length - 1] = newSlug;
-        const newPathname = pathnameParts.join("/");
-        // Update the URL with the new slug
-        router.push(`${newPathname}?${urlParams.toString()}`, { scroll: true });
-      }
-
-      setLastSaved("Just now");
-    } catch (error) {
-      console.error("Error saving document:", error);
-    } finally {
-      //
-    }
-  };
+      lastCommittedTitle.current = result.data.title;
+      setTitle(result.data.title);
+      setMessage(null);
+    });
+  }, [canEdit, docSlug, setTitle, title, workspaceSlug]);
 
   useEffect(() => {
-    if (isNewDoc) return;
+    const timeout = setTimeout(persistTitle, 700);
+    return () => clearTimeout(timeout);
+  }, [persistTitle]);
 
-    const interval = setInterval(() => {
-      handleSave();
-    }, 30000);
+  const toggleSharing = (): void => {
+    startTransition(async () => {
+      const result = await setDocumentPublic({
+        docSlug,
+        documentId,
+        enabled: !isPublic,
+        workspaceSlug,
+      });
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
+      }
+      setIsPublic(result.data.enabled);
+      setMessage(
+        result.data.enabled
+          ? "Public read-only link enabled."
+          : "Public link disabled.",
+      );
+    });
+  };
 
-    return () => clearInterval(interval);
-  }, [isNewDoc]);
+  const copyShareLink = async (): Promise<void> => {
+    await navigator.clipboard.writeText(
+      `${window.location.origin}/share/${docSlug}`,
+    );
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1_500);
+  };
+
+  const removeDocument = (): void => {
+    if (!window.confirm(`Delete “${title}”? This cannot be undone.`)) return;
+    startTransition(async () => {
+      const result = await deleteDocument({
+        docSlug,
+        documentId,
+        workspaceSlug,
+      });
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
+      }
+      router.replace(`/workspace/${workspaceSlug}`);
+      router.refresh();
+    });
+  };
+
+  const exportLatex = (): void => {
+    startTransition(async () => {
+      const { markdownToLatex } = await import("@softmaple/md2latex");
+      downloadText(
+        markdownToLatex(markdown, { title }),
+        `${docSlug}.tex`,
+        "text/x-latex;charset=utf-8",
+      );
+    });
+  };
 
   return (
-    <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="px-6 py-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-4 flex-1">
-            <Input
-              name="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="text-xl font-semibold border-none bg-transparent p-0 h-auto focus-visible:ring-0"
-            />
-            <Badge variant="secondary">Draft</Badge>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-1">
-              {collaborators.map((collaborator, index) => (
-                <Avatar
-                  key={index}
-                  className="w-8 h-8 border-2 border-background"
-                >
-                  <AvatarImage src={collaborator.avatar} />
-                  <AvatarFallback className="text-xs">
-                    {collaborator.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </AvatarFallback>
-                </Avatar>
-              ))}
-              <Button variant="ghost" size="icon" className="w-8 h-8">
-                <Users className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <Separator orientation="vertical" className="h-6" />
-
-            <Button variant="ghost" size="sm">
-              <Share className="mr-2 h-4 w-4" />
-              Share
-            </Button>
-            <ExportFilesDropdownMenu
-              dropdownMenuTrigger={
-                <Button variant="ghost" size="sm">
-                  <Download className="mr-2 h-4 w-4" />
-                  Export
-                </Button>
-              }
-              editor={activeEditor}
-            />
-            <Button size="sm" onClick={handleSave}>
-              <Save className="mr-2 h-4 w-4" />
-              Save
-            </Button>
-            <Button variant="ghost" size="icon">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </div>
+    <header className="border-b bg-background/95 px-3 py-2 backdrop-blur sm:px-5">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <Input
+          aria-label="Document title"
+          className="h-9 min-w-36 flex-1 border-0 bg-transparent px-1 font-display text-lg font-semibold shadow-none focus-visible:ring-1"
+          disabled={!canEdit || isPending}
+          maxLength={160}
+          onBlur={persistTitle}
+          onChange={(event) => setTitle(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          value={title}
+        />
+        <Badge className="shrink-0 font-mono text-[10px]" variant="outline">
+          {role.toLowerCase()}
+        </Badge>
+        <div
+          aria-live="polite"
+          className={`flex shrink-0 items-center gap-1.5 font-mono text-[11px] ${statusCopy.tone}`}
+          role="status"
+        >
+          {status === "offline" ? (
+            <WifiOff className="size-3.5" />
+          ) : status === "saved" ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Radio className="size-3.5" />
+          )}
+          {statusCopy.label}
         </div>
-
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <Clock className="mr-1 h-4 w-4" />
-              Last saved {lastSaved}
-            </div>
-            <div className="flex items-center">
-              <Users className="mr-1 h-4 w-4" />2 collaborators
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
+        <div className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto pb-0.5">
+          <Button
+            aria-label="Download Markdown"
+            onClick={() =>
+              downloadText(
+                markdown,
+                `${docSlug}.md`,
+                "text/markdown;charset=utf-8",
+              )
+            }
+            size="sm"
+            variant="ghost"
+          >
+            <Download className="size-4" />
+            <span className="hidden sm:inline">Markdown</span>
+          </Button>
+          <Button onClick={exportLatex} size="sm" variant="ghost">
+            <FileCode2 className="size-4" />
+            <span className="hidden sm:inline">LaTeX</span>
+          </Button>
+          {canShare ? (
+            <>
+              <Button onClick={toggleSharing} size="sm" variant="outline">
+                {isPending ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Share2 className="size-4" />
+                )}
+                {isPublic ? "Disable link" : "Share"}
+              </Button>
+              {isPublic ? (
+                <Button
+                  aria-label="Copy public link"
+                  onClick={() => void copyShareLink()}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  {copied ? (
+                    <Check className="size-4" />
+                  ) : (
+                    <Clipboard className="size-4" />
+                  )}
+                </Button>
+              ) : null}
+            </>
+          ) : null}
+          {canDelete ? (
             <Button
-              variant={isEditing ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setIsEditing(true)}
+              aria-label="Delete document"
+              onClick={removeDocument}
+              size="icon-sm"
+              variant="ghost"
             >
-              <Edit3 className="mr-2 h-4 w-4" />
-              Edit
+              <Trash2 className="size-4 text-destructive" />
             </Button>
-            <Button
-              variant={!isEditing ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setIsEditing(false)}
-            >
-              <Eye className="mr-2 h-4 w-4" />
-              Preview
-            </Button>
-          </div>
+          ) : null}
         </div>
       </div>
+      {message === null ? null : (
+        <p className="mt-1 text-xs text-muted-foreground">{message}</p>
+      )}
     </header>
   );
 };

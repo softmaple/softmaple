@@ -1,182 +1,218 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-
+import { z } from "zod";
 import { createClient } from "@/utils/supabase/server";
-import { loginFormSchema } from "@/modules/auth/utils/auth-form-schema";
-import type { LoginFormSchema } from "@/modules/auth/utils/auth-form-schema";
+import type { User } from "@supabase/supabase-js";
+import { sanitizeRedirectUrl } from "@/utils/auth/sanitize-redirect";
+import {
+  ACTION_ERROR_CODE,
+  actionFailure,
+  actionSuccess,
+  fromZodError,
+  type ActionResult,
+} from "@/lib/actions/result";
 
-export async function login(formData: FormData) {
+export type AuthActionData = {
+  readonly message?: string;
+  readonly redirectTo?: string;
+};
+
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters.")
+  .max(128)
+  .regex(/[a-zA-Z]/, "Password must contain a letter.")
+  .regex(/[0-9]/, "Password must contain a number.");
+const loginSchema = z.object({
+  email: z.email("Enter a valid email address.").trim().toLowerCase(),
+  password: z.string().min(1, "Password is required."),
+});
+const signupSchema = z
+  .object({
+    confirmPassword: z.string(),
+    email: z.email("Enter a valid email address.").trim().toLowerCase(),
+    firstName: z.string().trim().min(1, "First name is required.").max(60),
+    lastName: z.string().trim().min(1, "Last name is required.").max(60),
+    password: passwordSchema,
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmPassword"],
+  });
+const resetSchema = z.object({
+  email: z.email("Enter a valid email address.").trim().toLowerCase(),
+});
+const updatePasswordSchema = z
+  .object({
+    confirmPassword: z.string(),
+    password: passwordSchema,
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmPassword"],
+  });
+
+const appOrigin = (): string => {
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  if (configured === undefined) return "http://localhost:3000";
+  return new URL(configured).origin;
+};
+
+const authFailure = (message: string): ActionResult<never> =>
+  actionFailure(ACTION_ERROR_CODE.AuthenticationRequired, message);
+
+export const login = async (
+  _previousState: ActionResult<AuthActionData> | null,
+  formData: FormData,
+): Promise<ActionResult<AuthActionData>> => {
+  const parsed = loginSchema.safeParse({
+    email: formData.get("email"),
+    password: formData.get("password"),
+  });
+  if (!parsed.success) return fromZodError(parsed.error);
+
   const supabase = await createClient();
-
-  const rawEmail = formData.get("email");
-  const rawPassword = formData.get("password");
-
-  const rawData: LoginFormSchema = {
-    email: rawEmail as Extract<typeof rawEmail, string>,
-    password: rawPassword as Extract<typeof rawPassword, string>,
-  };
-
-  const {
-    data,
-    error: formError,
-    success,
-  } = loginFormSchema.safeParse(rawData);
-
-  if (!success) {
-    console.error("Form validation error:", formError);
-    throw formError;
+  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  if (error !== null) {
+    return authFailure("The email or password is incorrect.");
   }
 
-  const { error } = await supabase.auth.signInWithPassword(data);
+  const rawNext = formData.get("next");
+  const redirectTo =
+    typeof rawNext === "string" && rawNext.length > 0
+      ? sanitizeRedirectUrl(rawNext)
+      : "/dashboard";
+  revalidatePath("/", "layout");
+  return actionSuccess({ redirectTo });
+};
 
-  if (error) {
-    console.error(error);
-    throw error;
-  }
+export const signup = async (
+  _previousState: ActionResult<AuthActionData> | null,
+  formData: FormData,
+): Promise<ActionResult<AuthActionData>> => {
+  const parsed = signupSchema.safeParse({
+    confirmPassword: formData.get("confirmPassword"),
+    email: formData.get("email"),
+    firstName: formData.get("firstName"),
+    lastName: formData.get("lastName"),
+    password: formData.get("password"),
+  });
+  if (!parsed.success) return fromZodError(parsed.error);
 
-  revalidatePath("/dashboard", "layout");
-  redirect("/dashboard");
-}
-
-export async function signup(formData: FormData) {
   const supabase = await createClient();
-
-  // Extract and validate data
-  const firstName = formData.get("firstName") as string;
-  const lastName = formData.get("lastName") as string;
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-
-  if (!firstName || !lastName || !email || !password) {
-    return { error: "All fields are required" };
-  }
-
+  const fullName = `${parsed.data.firstName} ${parsed.data.lastName}`;
   const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
+    email: parsed.data.email,
+    password: parsed.data.password,
     options: {
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/confirm`,
       data: {
-        first_name: firstName,
-        last_name: lastName,
-        full_name: `${firstName} ${lastName}`,
+        first_name: parsed.data.firstName,
+        full_name: fullName,
+        last_name: parsed.data.lastName,
       },
+      emailRedirectTo: `${appOrigin()}/auth/confirm?next=/dashboard`,
     },
   });
-
-  if (error) {
-    console.error("Signup error:", error);
-    return { error: error.message };
-  }
-
-  // Note: The user metadata (first_name, last_name, full_name) is stored in Supabase Auth
-  // The users table in the database should be populated via a trigger or separate process
-  // that syncs the auth metadata with the database
-
-  // Check if email confirmation is required
-  if (data?.user && !data.session) {
-    // User created but needs email confirmation
-    revalidatePath("/login", "layout");
-    redirect("/login?message=Check your email to confirm your account");
-  } else if (data?.session) {
-    // User created and auto-confirmed (for dev environments)
-    revalidatePath("/dashboard", "layout");
-    redirect("/dashboard");
-  }
-
-  // Fallback redirect
-  revalidatePath("/", "layout");
-  redirect("/");
-}
-
-export async function resetPassword(formData: FormData) {
-  const supabase = await createClient();
-
-  const email = formData.get("email") as string;
-
-  if (!email) {
-    redirect("/reset-password?error=Email is required");
-  }
-
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback?type=recovery`,
-  });
-
-  if (error) {
-    console.error("Password reset error:", error);
-    redirect(`/reset-password?error=${encodeURIComponent(error.message)}`);
-  }
-
-  redirect(
-    "/reset-password?message=Check your email for the password reset link",
-  );
-}
-
-export async function updatePassword(formData: FormData) {
-  const supabase = await createClient();
-
-  const password = formData.get("password") as string;
-  const confirmPassword = formData.get("confirmPassword") as string;
-
-  if (!password || !confirmPassword) {
-    redirect("/reset-password/update?error=All fields are required");
-  }
-
-  if (password !== confirmPassword) {
-    redirect("/reset-password/update?error=Passwords do not match");
-  }
-
-  if (password.length < 6) {
-    redirect(
-      "/reset-password/update?error=Password must be at least 6 characters",
+  if (error !== null) {
+    const code =
+      error.code === "user_already_exists"
+        ? ACTION_ERROR_CODE.Conflict
+        : ACTION_ERROR_CODE.Internal;
+    return actionFailure(
+      code,
+      code === ACTION_ERROR_CODE.Conflict
+        ? "An account with that email already exists."
+        : "Could not create your account. Try again.",
     );
   }
+  if (data.session !== null) {
+    revalidatePath("/", "layout");
+    return actionSuccess({ redirectTo: "/dashboard" });
+  }
+  return actionSuccess({
+    message: "Check your email to confirm your account, then sign in.",
+    redirectTo:
+      "/login?message=Check%20your%20email%20to%20confirm%20your%20account",
+  });
+};
 
-  // This works for both:
-  // 1. Authenticated users changing their password from settings
-  // 2. Users who clicked a password reset link (they have a recovery session)
+export const resetPassword = async (
+  _previousState: ActionResult<AuthActionData> | null,
+  formData: FormData,
+): Promise<ActionResult<AuthActionData>> => {
+  const parsed = resetSchema.safeParse({ email: formData.get("email") });
+  if (!parsed.success) return fromZodError(parsed.error);
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    parsed.data.email,
+    {
+      redirectTo: `${appOrigin()}/auth/callback?type=recovery&next=/reset-password/update`,
+    },
+  );
+  if (error !== null) {
+    return actionFailure(
+      ACTION_ERROR_CODE.Internal,
+      "Could not send the reset link. Try again.",
+    );
+  }
+  return actionSuccess({
+    message:
+      "If an account uses that email, a password reset link is on its way.",
+  });
+};
+
+export const updatePassword = async (
+  _previousState: ActionResult<AuthActionData> | null,
+  formData: FormData,
+): Promise<ActionResult<AuthActionData>> => {
+  const parsed = updatePasswordSchema.safeParse({
+    confirmPassword: formData.get("confirmPassword"),
+    password: formData.get("password"),
+  });
+  if (!parsed.success) return fromZodError(parsed.error);
+
+  const supabase = await createClient();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError !== null || userData.user === null) {
+    return authFailure("This password reset link is invalid or has expired.");
+  }
   const { error } = await supabase.auth.updateUser({
-    password: password,
+    password: parsed.data.password,
   });
-
-  if (error) {
-    console.error("Password update error:", error);
-    redirect(
-      `/reset-password/update?error=${encodeURIComponent(error.message)}`,
+  if (error !== null) {
+    return actionFailure(
+      ACTION_ERROR_CODE.Internal,
+      "Could not update your password. Request a new reset link.",
     );
   }
-
-  // Sign out the user after successful password reset to ensure they login with new password
   await supabase.auth.signOut();
-
-  redirect(
-    "/login?message=Password updated successfully. Please sign in with your new password.",
-  );
-}
-
-export async function logout() {
-  const supabase = await createClient();
-
-  const { error } = await supabase.auth.signOut();
-
-  if (error) {
-    console.error(error);
-    throw error;
-  }
-
   revalidatePath("/", "layout");
-  redirect("/");
-}
+  return actionSuccess({
+    redirectTo:
+      "/login?message=Password%20updated.%20Sign%20in%20with%20your%20new%20password.",
+  });
+};
 
-export async function getCurrentUser() {
-  try {
-    const supabase = await createClient();
-
-    return supabase.auth.getUser();
-  } catch (error) {
-    console.error("Error fetching current user:", error);
-    throw error;
+export const logout = async (): Promise<ActionResult<AuthActionData>> => {
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signOut();
+  if (error !== null) {
+    return actionFailure(
+      ACTION_ERROR_CODE.Internal,
+      "Could not sign out. Try again.",
+    );
   }
-}
+  revalidatePath("/", "layout");
+  return actionSuccess({ redirectTo: "/" });
+};
+
+export const getCurrentUser = async (): Promise<ActionResult<User>> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getUser();
+  if (error !== null || data.user === null) {
+    return authFailure("Sign in to continue.");
+  }
+  return actionSuccess(data.user);
+};

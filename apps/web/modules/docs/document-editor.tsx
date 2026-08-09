@@ -1,7 +1,7 @@
 "use client";
 
-import type { FC } from "react";
-import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { type FC, useCallback, useDeferredValue, useState } from "react";
 import { Code, Edit3, Eye, FileText } from "lucide-react";
 import {
   Tabs,
@@ -11,109 +11,180 @@ import {
 } from "@softmaple/ui/components/tabs";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
-import type { DocHeaderProps } from "@/modules/docs/doc-header";
-import { sanitizeHtml } from "@/modules/docs/sanitize-html";
+import { DocumentPresence } from "@/modules/docs/document-presence";
+import type { CollabDocumentState } from "@/modules/docs/use-collab-document";
+import type { WorkspaceRole } from "@/lib/workspace-roles";
+import {
+  canDeleteDocument,
+  canEditDocument,
+  canShareDocument,
+} from "@/lib/permissions";
 
-export type DocumentEditorProps = Omit<
-  DocHeaderProps,
-  "setTitle" | "setContent"
-> & {
-  documentId?: string;
+const PreviewPane = dynamic(() =>
+  import("@/modules/docs/preview-pane").then((module) => module.PreviewPane),
+);
+const LatexPane = dynamic(() =>
+  import("@/modules/docs/latex-pane").then((module) => module.LatexPane),
+);
+
+type AuthenticatedDocumentEditorProps = {
+  readonly authorId: string;
+  readonly avatarUrl: string | null;
+  readonly currentUserId: string;
+  readonly docSlug: string;
+  readonly documentId: string;
+  readonly isPublic: boolean;
+  readonly publicView?: false;
+  readonly role: WorkspaceRole;
+  readonly title: string;
+  readonly userName: string;
+  readonly workspaceSlug: string;
 };
 
-export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
-  const {
-    title: initialTitle,
-    content: initialContent,
-    workspaceId,
-    userId,
-    isNewDoc,
-    documentId,
-  } = props;
+type PublicDocumentEditorProps = {
+  readonly docSlug: string;
+  readonly documentId: string;
+  readonly publicView: true;
+  readonly title: string;
+};
 
-  const [title, setTitle] = useState<string>(initialTitle);
-  const [content, setContent] = useState<string>(initialContent);
-  const sanitizedPreview = useMemo(() => sanitizeHtml(content), [content]);
+export type DocumentEditorProps =
+  | AuthenticatedDocumentEditorProps
+  | PublicDocumentEditorProps;
+
+const EditorLoading = () => (
+  <div className="grid min-h-64 place-items-center font-mono text-xs text-muted-foreground">
+    Preparing view…
+  </div>
+);
+
+export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
+  const [title, setTitle] = useState(props.title);
+  const [markdown, setMarkdown] = useState("");
+  const [status, setStatus] =
+    useState<CollabDocumentState["status"]>("connecting");
+  const [openedViews, setOpenedViews] = useState<ReadonlySet<string>>(
+    () => new Set(["editor"]),
+  );
+  const deferredMarkdown = useDeferredValue(markdown);
+  const handleMarkdownChange = useCallback((nextMarkdown: string) => {
+    setMarkdown(nextMarkdown);
+  }, []);
+  const handleCollaborationChange = useCallback(
+    (state: CollabDocumentState) => setStatus(state.status),
+    [],
+  );
+
+  if (props.publicView === true) {
+    return (
+      <main className="min-h-dvh bg-background text-foreground">
+        <header className="border-b px-5 py-5 sm:px-8">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Shared read-only document
+          </p>
+          <h1 className="mt-2 font-display text-2xl font-semibold sm:text-3xl">
+            {props.title}
+          </h1>
+        </header>
+        <div className="mx-auto min-h-[calc(100dvh-7rem)] max-w-5xl overflow-hidden">
+          <DocEditor
+            documentId={props.documentId}
+            onCollaborationChange={handleCollaborationChange}
+            sessionMode="public"
+          />
+        </div>
+        <span className="sr-only" aria-live="polite">
+          {status}
+        </span>
+      </main>
+    );
+  }
+
+  const canEdit = canEditDocument(props.role);
+  const canDelete = canDeleteDocument(
+    props.role,
+    props.authorId,
+    props.currentUserId,
+  );
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Document Header */}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <DocHeader
-        title={title}
+        canDelete={canDelete}
+        canEdit={canEdit}
+        canShare={canShareDocument(props.role)}
+        docSlug={props.docSlug}
+        documentId={props.documentId}
+        isPublic={props.isPublic}
+        markdown={deferredMarkdown}
+        role={props.role}
         setTitle={setTitle}
-        content={content}
-        setContent={setContent}
-        isNewDoc={isNewDoc}
-        workspaceId={workspaceId}
-        userId={userId}
+        status={status}
+        title={title}
+        workspaceSlug={props.workspaceSlug}
       />
-
-      {/* Document Content */}
-      <main className="flex-1 overflow-hidden">
-        <Tabs defaultValue="editor" className="h-full flex flex-col">
-          <TabsList className="mx-6 mt-4 w-fit">
+      <Tabs
+        className="flex min-h-0 flex-1 flex-col"
+        defaultValue="editor"
+        onValueChange={(value) =>
+          setOpenedViews((current) => new Set([...current, value]))
+        }
+      >
+        <div className="border-b px-3 sm:px-5">
+          <TabsList className="h-10 max-w-full justify-start overflow-x-auto rounded-none bg-transparent p-0">
             <TabsTrigger value="editor">
-              <Edit3 className="mr-2 h-4 w-4" />
-              Editor
+              <Edit3 className="size-3.5" /> Editor
             </TabsTrigger>
             <TabsTrigger value="preview">
-              <Eye className="mr-2 h-4 w-4" />
-              Preview
-            </TabsTrigger>
-            <TabsTrigger value="latex">
-              <Code className="mr-2 h-4 w-4" />
-              LaTeX
+              <Eye className="size-3.5" /> Preview
             </TabsTrigger>
             <TabsTrigger value="markdown">
-              <FileText className="mr-2 h-4 w-4" />
-              Markdown
+              <FileText className="size-3.5" /> Markdown
+            </TabsTrigger>
+            <TabsTrigger value="latex">
+              <Code className="size-3.5" /> LaTeX
             </TabsTrigger>
           </TabsList>
-
-          <TabsContent value="editor" className="flex-1 m-0">
-            <DocEditor documentId={documentId} />
-          </TabsContent>
-
-          <TabsContent value="preview" className="flex-1 m-0">
-            <div className="h-full p-6 overflow-auto">
-              <div className="max-w-4xl mx-auto prose prose-slate dark:prose-invert">
-                <div
-                  dangerouslySetInnerHTML={{
-                    __html: sanitizedPreview,
-                  }}
-                />
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="latex" className="flex-1 m-0">
-            <div className="h-full p-6">
-              <pre className="w-full h-full overflow-auto bg-muted/30 p-4 rounded-lg font-mono text-sm">
-                {`\\documentclass{article}
-\\usepackage[utf8]{inputenc}
-\\title{${title}}
-\\author{Research Team}
-\\date{\\today}
-
-\\begin{document}
-\\maketitle
-
-${content.replace(/# /g, "\\section{").replace(/\n/g, "}\n")}
-
-\\end{document}`}
-              </pre>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="markdown" className="flex-1 m-0">
-            <div className="h-full p-6">
-              <pre className="w-full h-full overflow-auto bg-muted/30 p-4 rounded-lg font-mono text-sm">
-                {content}
-              </pre>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </main>
+        </div>
+        <TabsContent
+          className="m-0 min-h-0 flex-1 overflow-auto"
+          value="editor"
+        >
+          <DocumentPresence
+            avatarUrl={props.avatarUrl}
+            documentId={props.documentId}
+            name={props.userName}
+            onCollaborationChange={handleCollaborationChange}
+            onMarkdownChange={handleMarkdownChange}
+            userId={props.currentUserId}
+          />
+        </TabsContent>
+        <TabsContent
+          className="m-0 min-h-0 flex-1 overflow-auto"
+          value="preview"
+        >
+          {openedViews.has("preview") ? (
+            <PreviewPane markdown={deferredMarkdown} />
+          ) : (
+            <EditorLoading />
+          )}
+        </TabsContent>
+        <TabsContent
+          className="m-0 min-h-0 flex-1 overflow-auto"
+          value="markdown"
+        >
+          <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words px-5 py-8 font-mono text-xs leading-6 sm:px-8">
+            {deferredMarkdown}
+          </pre>
+        </TabsContent>
+        <TabsContent className="m-0 min-h-0 flex-1 overflow-auto" value="latex">
+          {openedViews.has("latex") ? (
+            <LatexPane markdown={deferredMarkdown} title={title} />
+          ) : (
+            <EditorLoading />
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

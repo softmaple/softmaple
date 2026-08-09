@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:e2e": "next dev",
-    "e2e:gateway": "node ./scripts/e2e-collab-gateway.mjs",
+    "e2e:router": "node ./scripts/e2e-collab-router.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
@@ -26,7 +26,6 @@
     "@softmaple/awareness": "workspace:*",
     "@softmaple/binding-lexical": "workspace:*",
     "@softmaple/block-model": "workspace:*",
-    "@softmaple/collab-gateway-auth": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
     "@softmaple/config": "workspace:*",
     "@softmaple/db": "workspace:*",

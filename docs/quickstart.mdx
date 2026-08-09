@@ -49,18 +49,10 @@ Before you begin, make sure you have the following installed:
     Edit `apps/web/.env` with your configuration:
 
     ```env
-    # Database
-    DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
-    DIRECT_URL="postgresql://user:password@localhost:5432/softmaple"
-
     # Supabase Auth
     NEXT_PUBLIC_SUPABASE_URL="your-supabase-url"
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
-
-    # Collaboration gateway (server-only)
-    COLLAB_BACKEND_ORIGIN="http://localhost:3002"
-    COLLAB_GATEWAY_HMAC_KEY_ID="local-dev"
-    COLLAB_GATEWAY_HMAC_SECRET="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    NEXT_PUBLIC_APP_URL="http://localhost:3000"
     ```
 
     Add the same database connection values to `packages/db/.env` so Prisma
@@ -73,15 +65,21 @@ Before you begin, make sure you have the following installed:
   </Accordion>
   <Accordion icon="server" title="4. Configure collaboration">
     Create `apps/collab/.env.local` from its example, then provide
-    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the
-    matching HMAC keyring:
+    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and
+    `COLLAB_ALLOWED_ORIGINS`. Local development defaults to the in-memory
+    realtime adapter; Vercel deployments require `REDIS_URL`.
 
     ```bash
     cp apps/collab/.env.example apps/collab/.env.local
     ```
 
-    The example files use the same local-only HMAC key. Generate a new 32-byte
-    unpadded base64url secret for every deployed environment.
+    ```env
+    DATABASE_URL="postgresql://user:password@localhost:5432/softmaple"
+    SUPABASE_URL="your-supabase-url"
+    SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
+    COLLAB_ALLOWED_ORIGINS="http://localhost:3000"
+    COLLAB_REALTIME_DRIVER="memory"
+    ```
   </Accordion>
   <Accordion icon="database" title="5. Set up the database">
     Generate Prisma client and run migrations:
@@ -92,26 +90,36 @@ Before you begin, make sure you have the following installed:
     ```
   </Accordion>
   <Accordion icon="rocket" title="6. Start the development servers">
-    Keep both commands running in separate terminals. The first starts the
-    root development task without duplicating the collaboration service; the
-    second starts collaboration exactly once:
+    Stock `next dev` does not forward `/collab/*` WebSocket upgrades. For a
+    working same-origin collaboration path locally, run the collab service,
+    Next.js on an internal port, and the Upgrade-capable router on port 3000:
 
-    ```bash Terminal 1 — web and workspace packages
-    pnpm dev --filter='!@softmaple/collab'
-    ```
-
-    ```bash Terminal 2 — collaboration service
+    ```bash Terminal 1 — collaboration service
     pnpm --filter @softmaple/collab dev
     ```
 
-    The application will be available at [http://localhost:3000](http://localhost:3000)
+    ```bash Terminal 2 — Next.js (internal)
+    pnpm --filter @softmaple/web exec next dev --port 3001
+    ```
+
+    ```bash Terminal 3 — same-origin /collab router
+    E2E_GATEWAY_PORT=3000 \
+    E2E_NEXT_ORIGIN=http://127.0.0.1:3001 \
+    E2E_COLLAB_ORIGIN=http://127.0.0.1:3002 \
+      pnpm --filter @softmaple/web e2e:router
+    ```
+
+    Open [http://localhost:3000](http://localhost:3000). Set
+    `COLLAB_ALLOWED_ORIGINS="http://localhost:3000"` in
+    `apps/collab/.env.local`.
+
+    Alternatively, use `vercel dev` from the repository root so the Services
+    routing in `vercel.json` serves `/collab/*` from `apps/collab`.
 
     <Note>
-      Next.js 16.3's local server is not a release-equivalent test for the
-      external WebSocket rewrite in `proxy.ts`. The UI and unit tests run
-      locally, but the complete browser-to-gateway-to-Nitro handshake must be
-      verified on a Vercel Preview. Do not restore a direct browser URL as a
-      workaround.
+      The local router is not a release-equivalent test of Vercel Services
+      WebSocket routing. Verify document and Presence handshakes on a real
+      Preview deployment before promoting.
     </Note>
   </Accordion>
 </AccordionGroup>

@@ -9,33 +9,36 @@ import {
   type CollabErrorCode,
   type SupportedCollabProtocolVersion,
 } from "@softmaple/collab-protocol";
+import { randomUUID } from "node:crypto";
 import { defineWebSocketHandler } from "nitro";
-import { authorizeDocument, type DocumentAccess } from "../utils/auth";
+import { authorizeDocument, type DocumentAccess } from "../../utils/auth";
 import {
   appendEventBatches,
   EventAuthorizationError,
   EventConflictError,
   readEventPage,
-} from "../utils/event-store";
-import { authenticateGatewayUpgrade } from "../utils/gateway-auth";
+} from "../../utils/event-store";
+import { authenticateBrowserOrigin } from "../../utils/origin-auth";
+import {
+  documentLeaseScope,
+  documentRealtimeChannel,
+  documentTopicHub,
+  getDocumentTopicBridge,
+  getRealtime,
+  LeaseAcquireResult,
+} from "../../utils/realtime";
 
-const TOPIC_PREFIX = "document:";
 const AUTHORIZATION_CACHE_TTL_MS = 15_000;
 const MESSAGE_RATE_LIMIT_WINDOW_MS = 10_000;
 const MESSAGE_RATE_LIMIT_MAX = 120;
 const MAX_MESSAGE_BYTES = 256 * 1024;
 const MAX_DOCUMENT_CONNECTIONS = 100;
-const documentConnectionCounts = new Map<string, number>();
+const CONNECTION_LEASE_TTL_MS = 45_000;
 
 interface MessageRateLimit {
   readonly count: number;
   readonly windowStartedAt: number;
 }
-
-const topicForDocument = (
-  documentId: string,
-  protocolVersion: SupportedCollabProtocolVersion,
-): string => `${TOPIC_PREFIX}v${protocolVersion}:${documentId}`;
 
 const accessFromContext = (
   context: Record<string, unknown>,
@@ -114,26 +117,52 @@ const invalidateDocumentAccess = (context: Record<string, unknown>): void => {
   delete context.authorizationExpiresAt;
 };
 
-const countedDocumentIdFromContext = (
+const stringFromContext = (
   context: Record<string, unknown>,
+  key: string,
 ): string | null => {
-  const value = context.countedDocumentId;
+  const value = context[key];
   return typeof value === "string" && value.length > 0 ? value : null;
 };
 
-const releaseDocumentConnection = (
+const releaseDocumentResources = async (
   context: Record<string, unknown>,
-  documentId: string,
-): void => {
-  if (context.connectionCounted !== true) return;
-  const nextCount = Math.max(
-    0,
-    (documentConnectionCounts.get(documentId) ?? 1) - 1,
-  );
-  if (nextCount === 0) documentConnectionCounts.delete(documentId);
-  else documentConnectionCounts.set(documentId, nextCount);
-  delete context.connectionCounted;
-  delete context.countedDocumentId;
+): Promise<void> => {
+  const unsubscribeLocal = context.unsubscribeLocal;
+  if (typeof unsubscribeLocal === "function") {
+    (unsubscribeLocal as () => void)();
+    delete context.unsubscribeLocal;
+  }
+  const channel = stringFromContext(context, "realtimeChannel");
+  if (channel !== null) {
+    try {
+      await getDocumentTopicBridge().release(channel);
+    } catch (error) {
+      logRouteError(
+        error,
+        stringFromContext(context, "countedDocumentId"),
+        "bridge-release",
+      );
+    }
+    delete context.realtimeChannel;
+  }
+  const documentId = stringFromContext(context, "countedDocumentId");
+  const connectionId = stringFromContext(context, "connectionId");
+  if (
+    documentId !== null &&
+    connectionId !== null &&
+    context.connectionCounted === true
+  ) {
+    try {
+      await getRealtime().leases.release(
+        documentLeaseScope(documentId),
+        connectionId,
+      );
+    } catch (error) {
+      logRouteError(error, documentId, "lease-release");
+    }
+    delete context.connectionCounted;
+  }
 };
 
 const consumeMessageQuota = (context: Record<string, unknown>): boolean => {
@@ -187,7 +216,9 @@ const errorMessage = (
 
 export default defineWebSocketHandler({
   async upgrade(request) {
-    const context = authenticateGatewayUpgrade(request);
+    // Shallow mutable copy: Origin auth returns a frozen object, but peer
+    // handlers need to attach timers and delete authorizationRecheckPending.
+    const context = { ...authenticateBrowserOrigin(request) };
     return { namespace: "softmaple-collab-v3", context };
   },
 
@@ -270,9 +301,15 @@ export default defineWebSocketHandler({
           peer.close(1008, "Legacy public collaboration is unsupported");
           return;
         }
-        const currentConnections =
-          documentConnectionCounts.get(access.documentId) ?? 0;
-        if (currentConnections >= MAX_DOCUMENT_CONNECTIONS) {
+
+        const connectionId = randomUUID();
+        const leaseResult = await getRealtime().leases.tryAcquire(
+          documentLeaseScope(access.documentId),
+          connectionId,
+          MAX_DOCUMENT_CONNECTIONS,
+          CONNECTION_LEASE_TTL_MS,
+        );
+        if (leaseResult !== LeaseAcquireResult.Acquired) {
           peer.send(
             errorMessage(
               COLLAB_ERROR_CODE.Forbidden,
@@ -284,27 +321,44 @@ export default defineWebSocketHandler({
           peer.close(1013, "Document connection limit reached");
           return;
         }
-        documentConnectionCounts.set(access.documentId, currentConnections + 1);
+
+        const channel = documentRealtimeChannel(
+          access.documentId,
+          message.protocolVersion,
+        );
         peer.context.connectionCounted = true;
         peer.context.countedDocumentId = access.documentId;
+        peer.context.connectionId = connectionId;
+        peer.context.realtimeChannel = channel;
+        peer.context.unsubscribeLocal = documentTopicHub.subscribe(
+          channel,
+          peer,
+        );
+        await getDocumentTopicBridge().retain(channel);
+
         cacheDocumentAccess(peer.context, access);
         peer.context.credential = credential;
         peer.context.protocolVersion = message.protocolVersion;
         peer.context.sessionId = message.sessionId;
-        peer.subscribe(
-          topicForDocument(access.documentId, message.protocolVersion),
-        );
         peer.context.authorizationRecheckTimer = setInterval(() => {
           if (peer.context.authorizationRecheckPending === true) return;
           peer.context.authorizationRecheckPending = true;
-          void authorizeDocument(credential, access.documentId)
-            .then((reauthorized) => {
+          void Promise.all([
+            authorizeDocument(credential, access.documentId),
+            getRealtime().leases.refresh(
+              documentLeaseScope(access.documentId),
+              connectionId,
+              CONNECTION_LEASE_TTL_MS,
+            ),
+          ])
+            .then(([reauthorized, leaseAlive]) => {
               const current = accessFromContext(peer.context);
               if (
                 current === null ||
                 reauthorized === null ||
                 reauthorized.accessMode !== current.accessMode ||
-                reauthorized.userId !== current.userId
+                reauthorized.userId !== current.userId ||
+                !leaseAlive
               ) {
                 invalidateDocumentAccess(peer.context);
                 peer.close(1008, "Collaboration access was revoked");
@@ -342,6 +396,7 @@ export default defineWebSocketHandler({
         );
       } catch (error) {
         invalidateDocumentAccess(peer.context);
+        await releaseDocumentResources(peer.context);
         logRouteError(error, message.documentId, message.type);
         peer.send(
           errorMessage(
@@ -475,30 +530,13 @@ export default defineWebSocketHandler({
         );
         return;
       }
+      let batchIds: ReadonlyArray<string>;
       try {
-        const batchIds = await appendEventBatches(
+        batchIds = await appendEventBatches(
           currentAccess.documentId,
           currentAccess.userId,
           message.batches,
         );
-        peer.send({
-          protocolVersion: protocolVersionFromContext(peer.context),
-          type: COLLAB_MESSAGE_TYPE.DurableAck,
-          batchIds,
-        });
-        for (const protocolVersion of [
-          LEGACY_COLLAB_PROTOCOL_VERSION,
-          COLLAB_PROTOCOL_VERSION,
-        ] as const) {
-          peer.publish(
-            topicForDocument(currentAccess.documentId, protocolVersion),
-            {
-              protocolVersion,
-              type: COLLAB_MESSAGE_TYPE.Event,
-              batches: message.batches,
-            },
-          );
-        }
       } catch (error) {
         logRouteError(error, currentAccess.documentId, message.type);
         const conflict = error instanceof EventConflictError;
@@ -519,25 +557,43 @@ export default defineWebSocketHandler({
             protocolVersionFromContext(peer.context),
           ),
         );
+        return;
+      }
+
+      // Persist before publish: never fan out a batch that failed durably.
+      peer.send({
+        protocolVersion: protocolVersionFromContext(peer.context),
+        type: COLLAB_MESSAGE_TYPE.DurableAck,
+        batchIds,
+      });
+      for (const protocolVersion of [
+        LEGACY_COLLAB_PROTOCOL_VERSION,
+        COLLAB_PROTOCOL_VERSION,
+      ] as const) {
+        try {
+          await getRealtime().bus.publish(
+            documentRealtimeChannel(currentAccess.documentId, protocolVersion),
+            {
+              protocolVersion,
+              type: COLLAB_MESSAGE_TYPE.Event,
+              batches: message.batches,
+            },
+          );
+        } catch (error) {
+          // Durable write already succeeded; peers recover via repair/resync.
+          logRouteError(error, currentAccess.documentId, "realtime-publish");
+        }
       }
     }
   },
 
-  close(peer) {
+  async close(peer) {
     const authorizationRecheckTimer = peer.context.authorizationRecheckTimer;
     if (authorizationRecheckTimer !== undefined) {
       clearInterval(
         authorizationRecheckTimer as ReturnType<typeof setInterval>,
       );
     }
-    const access = accessFromContext(peer.context);
-    const documentId =
-      access?.documentId ?? countedDocumentIdFromContext(peer.context);
-    if (documentId !== null) {
-      peer.unsubscribe(
-        topicForDocument(documentId, protocolVersionFromContext(peer.context)),
-      );
-      releaseDocumentConnection(peer.context, documentId);
-    }
+    await releaseDocumentResources(peer.context);
   },
 });

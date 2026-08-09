@@ -1,4 +1,4 @@
-name: Collaboration Gateway Tests
+name: Collaboration Service Tests
 
 on:
   push:
@@ -9,7 +9,9 @@ on:
       - 'apps/web/package.json'
       - 'apps/web/proxy.ts'
       - 'apps/web/proxy.test.ts'
-      - 'packages/collab-gateway-auth/**'
+      - 'apps/web/scripts/e2e-collab-router.mjs'
+      - 'apps/web/playwright.config.ts'
+      - 'vercel.json'
       - '.github/workflows/test-collab-gateway.yml'
       - 'pnpm-lock.yaml'
       - 'turbo.json'
@@ -21,7 +23,9 @@ on:
       - 'apps/web/package.json'
       - 'apps/web/proxy.ts'
       - 'apps/web/proxy.test.ts'
-      - 'packages/collab-gateway-auth/**'
+      - 'apps/web/scripts/e2e-collab-router.mjs'
+      - 'apps/web/playwright.config.ts'
+      - 'vercel.json'
       - '.github/workflows/test-collab-gateway.yml'
       - 'pnpm-lock.yaml'
       - 'turbo.json'
@@ -31,14 +35,12 @@ permissions:
 
 jobs:
   test:
-    name: Signer, gateway, and backend
+    name: Collab realtime and web routing
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      COLLAB_BACKEND_ORIGIN: http://127.0.0.1:3002
-      COLLAB_GATEWAY_HMAC_KEY_ID: ci-test
-      COLLAB_GATEWAY_HMAC_KEYS: '{"ci-test":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
-      COLLAB_GATEWAY_HMAC_SECRET: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8
+      COLLAB_ALLOWED_ORIGINS: http://127.0.0.1:32110
+      COLLAB_REALTIME_DRIVER: memory
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_test
       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
@@ -66,13 +68,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check shared gateway authentication
-        run: |
-          pnpm --filter @softmaple/collab-gateway-auth lint
-          pnpm --filter @softmaple/collab-gateway-auth typecheck
-          pnpm --filter @softmaple/collab-gateway-auth test
-          pnpm --filter @softmaple/collab-gateway-auth build
-
       - name: Check Nitro collaboration backend
         run: |
           pnpm exec turbo run build --filter=@softmaple/collab... --filter=!@softmaple/collab
@@ -80,7 +75,7 @@ jobs:
           pnpm --filter @softmaple/collab test
           pnpm --filter @softmaple/collab build
 
-      - name: Check Next.js gateway
+      - name: Check Next.js host routing
         run: |
           pnpm exec turbo run build --filter=@softmaple/web... --filter=!@softmaple/web
           pnpm --filter @softmaple/web typecheck

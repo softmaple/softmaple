@@ -24,10 +24,8 @@ jobs:
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
       SUPABASE_URL: https://ci-placeholder.supabase.co
       SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
-      COLLAB_BACKEND_ORIGIN: http://127.0.0.1:3002
-      COLLAB_GATEWAY_HMAC_KEY_ID: ci
-      COLLAB_GATEWAY_HMAC_SECRET: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8
-      COLLAB_GATEWAY_HMAC_KEYS: '{"ci":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}'
+      COLLAB_ALLOWED_ORIGINS: http://127.0.0.1:3000
+      COLLAB_REALTIME_DRIVER: memory
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v6

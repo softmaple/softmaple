@@ -2,27 +2,31 @@
 
 Nitro WebSocket service that authenticates document sessions, persists
 EG-walker event batches to Supabase Postgres, fans committed batches out to
-document peers, and hosts ephemeral awareness rooms.
+document peers across instances, and hosts ephemeral awareness rooms.
 
 This replaces Liveblocks for durable document collaboration. The browser host
-(`apps/web`) connects with a Supabase access token; this service is the only
-writer of `document_event_batches`.
+(`apps/web`) connects with a Supabase access token over same-origin
+`/collab/*` URLs; this service is the only writer of `document_event_batches`.
 
 ## Role in the stack
 
 ```text
-Browser ──WebSocket──► apps/web ──HMAC rewrite──► apps/collab
-                                                    │
-                                                    └──Prisma──► Supabase Postgres
-
-     @softmaple/collab-protocol   (shared wire messages)
-     @softmaple/block-model       (RichTextEventBatch payloads)
+Browser ──wss──► /collab/document|presence
+                    │
+              Vercel Services routing
+                    │
+               apps/collab (Nitro)
+                    │
+         +----------+----------+
+         │                     │
+       Redis              Supabase Postgres
+   realtime / leases      durable EG-walker history
 ```
 
 Layer boundaries are documented in
 [`docs/design/collaboration-layers.md`](../../docs/design/collaboration-layers.md).
-This app owns transport, auth, and persistence only — not editor bindings or
-presence.
+This app owns transport, auth, persistence, and distributed realtime
+coordination — not editor bindings.
 
 | Concern | Owner |
 | --- | --- |
@@ -30,63 +34,74 @@ presence.
 | Rich-text batches / CRDT model | `@softmaple/block-model` / `@softmaple/eg-walker` |
 | Lexical projection | `@softmaple/binding-lexical` + `apps/web` |
 | Presence protocol / client state | `@softmaple/awareness` |
-| Auth, durable store, fan-out, presence rooms | **this service** |
+| Auth, durable store, Redis fan-out, presence rooms | **this service** |
+
+## Storage roles
+
+| Store | Responsibility |
+| --- | --- |
+| **Postgres** | Durable EG-walker event history (`document_event_batches`) |
+| **Redis** | Distributed realtime Pub/Sub, presence TTLs, connection leases |
+| **Process memory** | Socket objects, local peer lookup, short-lived caches only |
+
+Redis is never the durable collaboration database. Missed realtime messages are
+recovered through Postgres + the existing repair/resync protocol.
 
 ## Endpoints
 
 | Path | Kind | Purpose |
 | --- | --- | --- |
 | `/health` | HTTP | Liveness probe (`{ service, status }`) |
-| `/document` | WebSocket | Authenticated collaboration session |
-| `/presence` | WebSocket | Authenticated, ephemeral awareness session |
+| `/collab/health` | HTTP | Same probe under the public `/collab` prefix |
+| `/collab/document` | WebSocket | Authenticated collaboration session |
+| `/collab/presence` | WebSocket | Authenticated, ephemeral awareness session |
 
-The supported browser entry point is the same-origin
-`ws(s)://<web>/collab/document` gateway. `apps/web/proxy.ts` validates the
-browser Origin, adds an HMAC signature, and rewrites the upgrade to this
-service. Direct unsigned upgrades are normally rejected
-before peer context is created. During the rollback window, an unsigned direct
-upgrade is temporarily accepted in legacy mode when its Origin is listed in
-the deprecated `COLLAB_ALLOWED_ORIGINS`; that path is not HMAC-protected.
-Remove `COLLAB_ALLOWED_ORIGINS` after the rollback window to enforce HMAC-only
-upgrades.
+The browser always connects to the app origin at `/collab/document` and
+`/collab/presence`. In production, Vercel Services routes `/collab/**` to this
+app. Local Playwright uses `apps/web/scripts/e2e-collab-router.mjs` because
+stock `next dev` does not forward WebSocket upgrades.
+
+Upgrades require a browser `Origin` listed in `COLLAB_ALLOWED_ORIGINS` (or a
+Vercel preview/production host derived from `VERCEL_*` / `NEXT_PUBLIC_APP_URL`).
+User authorization remains Supabase JWT validation + workspace/document
+membership (and public-document rules) inside each session.
 
 ## Session flow
 
-1. Client opens the web gateway. The collab service verifies the server HMAC
-   during WebSocket upgrade.
-2. Client sends a v3 `auth` message with a credential (`access-token` or
+1. Client opens `wss://<app-origin>/collab/document`.
+2. Server validates the browser Origin during WebSocket upgrade.
+3. Client sends a v3 `auth` message with a credential (`access-token` or
    `public`), `documentId`, and `sessionId`.
-3. Server validates the JWT via Supabase Auth, loads workspace membership,
-   and replies with `ready` (`role`, `canWrite`).
-4. Client sends `repair-request` pages (`afterCursor`) until `complete` to
-   hydrate history.
-5. Client sends `event` messages with one or more `RichTextEventBatch` values
+4. Server validates the JWT via Supabase Auth, loads workspace membership,
+   acquires a distributed connection lease, and replies with `ready`.
+5. Client sends `repair-request` pages until `complete` to hydrate history.
+6. Client sends `event` messages with one or more `RichTextEventBatch` values
    (max 64 per message). Writers only: `OWNER` / `EDITOR`.
-6. Server appends batches transactionally, returns `durable-ack`, then
-   publishes the same `event` payload to the document topic.
-7. Authorization is re-checked about every 15s while the socket is open.
+7. Server appends batches transactionally, returns `durable-ack`, then
+   publishes a realtime notification through Redis Pub/Sub so every collab
+   instance can deliver to its local peers.
+8. Authorization and lease refresh run about every 15s while the socket is open.
    Messages are rate-limited (120 / 10s window per peer).
-
-The HMAC authenticates the web gateway, not the user. Supabase access-token
-verification and workspace membership remain the document authorization
-boundary.
 
 Public credentials are accepted only for documents already marked public.
 Those sessions replay and subscribe to history but cannot send events and do
 not join Presence. Protocol v3 is current; v2 authenticated clients remain
 accepted during rollout.
 
-Presence uses its own awareness v2 messages, a 64 KiB frame ceiling, per-peer
-rate and clock checks, heartbeat expiry, database-authoritative profiles, and
-periodic membership reauthorization. Presence never writes Postgres.
+Presence uses awareness v2 messages, Redis-backed room state with TTL /
+heartbeat leases, a 64 KiB frame ceiling, per-peer rate and clock checks,
+database-authoritative profiles, and periodic membership reauthorization.
+Presence never writes Postgres. When an instance disappears without running
+WebSocket `close` handlers, presence members and connection leases expire via
+TTL.
 
 ## Deployment topology
 
-Version 1 must run exactly **one Nitro replica**. Document fan-out and Presence
-rooms use process-local pub/sub; multiple replicas would partition live peers
-even though durable document history remains safe. Configure the hosting
-platform for a single instance and do not enable horizontal autoscaling until
-a shared pub/sub transport is implemented.
+Multiple Nitro / Vercel Function instances are supported. Configure Upstash
+Redis (Vercel Marketplace) and set `REDIS_URL` (native `redis://` / `rediss://`
+URL for ioredis). Production and Preview deployments on Vercel **require** Redis
+and fail fast if it is missing. They never silently fall back to process-local
+coordination.
 
 ## Persistence
 
@@ -119,15 +134,12 @@ pnpm --filter @softmaple/db db:migrate
 | `DATABASE_URL` | yes | Prisma connection (pooler URL is fine) |
 | `SUPABASE_URL` | yes | Auth project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | yes* | Falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
-| `COLLAB_GATEWAY_HMAC_KEYS` | yes | JSON keyring of key IDs to 32-byte, unpadded base64url secrets; keep current and previous keys during rotation |
+| `COLLAB_ALLOWED_ORIGINS` | yes* | Comma-separated browser Origins; Vercel hosts are also auto-allowed |
+| `COLLAB_REALTIME_DRIVER` | no | `memory` (local default) or `redis` |
+| `REDIS_URL` | on Vercel / when driver=redis | Upstash native Redis URL for ioredis |
 
 `nitro.config.ts` loads `apps/collab/.env.local`, then
 `packages/db/.env`, so local Prisma credentials can be shared.
-
-HMAC signatures are valid for ±30 seconds and provide bounded replay under
-TLS. Nonces are not claimed to be single-use. Rotate by adding a new backend
-key, switching the web signer's active key, observing stable reconnects, then
-removing the old backend key after the rollback window.
 
 ## Commands
 
@@ -143,26 +155,29 @@ pnpm --filter @softmaple/collab preview
 ```
 
 `pnpm dev` at the repo root also starts this app via Turborepo alongside
-`apps/web`.
+`apps/web`. For same-origin browser WebSockets locally, use the Playwright
+router or `vercel dev` (see [`docs/development.mdx`](../../docs/development.mdx)).
 
 ## Layout
 
 ```text
 apps/collab/
-├── nitro.config.ts          # Nitro + websocket + env loading
+├── nitro.config.ts
 ├── server/
 │   ├── routes/
-│   │   ├── document.ts      # Durable collaboration handler
-│   │   ├── presence.ts      # Ephemeral awareness handler
+│   │   ├── collab/
+│   │   │   ├── document.ts
+│   │   │   ├── presence.ts
+│   │   │   └── health.ts
 │   │   └── health.ts
 │   └── utils/
-│       ├── auth.ts          # JWT/public document authorization
-│       ├── gateway-auth.ts  # HMAC upgrade verification
-│       ├── presence.ts      # Presence parsing, clocks, rate limits
-│       ├── event-store.ts   # Append / repair paging
-│       └── prisma.ts
+│       ├── auth.ts
+│       ├── origin-auth.ts
+│       ├── presence.ts
+│       ├── event-store.ts
+│       ├── prisma.ts
+│       └── realtime/          # bus, leases, presence, Redis/memory adapters
 └── test/
-    └── document-route.test.ts
 ```
 
 ## Related docs

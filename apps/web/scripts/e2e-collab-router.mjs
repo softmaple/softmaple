@@ -1,18 +1,13 @@
 #!/usr/bin/env node
 /**
- * Upgrade-capable local gateway for Playwright.
+ * Upgrade-capable local router for Playwright.
  *
- * Stock `next dev` does not forward external WebSocket Upgrade rewrites from
- * `proxy.ts`. This reverse proxy terminates `/collab/document` and
- * `/collab/presence` upgrades with the same HMAC signer, then pipes them to
- * the collab backend. All other traffic is proxied to Next.js.
+ * Stock `next dev` does not forward external WebSocket Upgrade traffic for
+ * `/collab/*`. This reverse proxy terminates those upgrades and pipes them to
+ * `apps/collab` while preserving the `/collab/*` path. All other traffic is
+ * proxied to Next.js. Production uses Vercel Services routing instead.
  */
 import http from "node:http";
-import {
-  COLLAB_GATEWAY_AUTH_HEADER_NAMES,
-  createCollabGatewayAuthHeaders,
-  parseCollabGatewaySignerConfig,
-} from "@softmaple/collab-gateway-auth";
 
 const DOCUMENT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -34,17 +29,13 @@ const listenPort = Number(requireEnv("E2E_GATEWAY_PORT"));
 const nextOrigin = new URL(requireEnv("E2E_NEXT_ORIGIN"));
 const collabOrigin = new URL(requireEnv("E2E_COLLAB_ORIGIN"));
 const publicOrigin = `http://127.0.0.1:${listenPort}`;
-const signerConfig = parseCollabGatewaySignerConfig(
-  process.env.COLLAB_GATEWAY_HMAC_KEY_ID,
-  process.env.COLLAB_GATEWAY_HMAC_SECRET,
-);
 
 const collabRoutes = new Map([
-  ["/collab/document", { backendPath: "/document", query: "none" }],
-  ["/collab/presence", { backendPath: "/presence", query: "room" }],
+  ["/collab/document", { query: "none" }],
+  ["/collab/presence", { query: "room" }],
 ]);
 
-/** Prevent transient proxy socket resets from crashing the gateway process. */
+/** Prevent transient proxy socket resets from crashing the router process. */
 const swallowStreamError = (stream) => {
   stream.on("error", () => {
     stream.destroy();
@@ -74,7 +65,7 @@ const isSameOriginBrowserRequest = (req) => {
   }
 };
 
-const hasValidGatewayQuery = (url, queryMode) => {
+const hasValidCollabQuery = (url, queryMode) => {
   if (queryMode === "none") return url.search === "";
   const entries = [...url.searchParams.entries()];
   return (
@@ -111,7 +102,7 @@ const publicHostFromRequest = (req) =>
 
 /**
  * Headers for upstream Next. Keep the browser-facing Host / forwarded host so
- * Server Actions CSRF accepts Origin from the public gateway port.
+ * Server Actions CSRF accepts Origin from the public router port.
  */
 const nextProxyHeaders = (req) => {
   const publicHost = publicHostFromRequest(req);
@@ -262,7 +253,7 @@ server.on("upgrade", (req, socket, head) => {
 
   if (
     !isWebSocketUpgrade(req) ||
-    !hasValidGatewayQuery(requestUrl, route.query)
+    !hasValidCollabQuery(requestUrl, route.query)
   ) {
     writeSocketError(socket, "400 Bad Request");
     return;
@@ -272,31 +263,9 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
 
-  const backendUrl = new URL(route.backendPath, collabOrigin);
-  if (route.query === "room") backendUrl.search = requestUrl.search;
-
-  let authHeaders;
-  try {
-    authHeaders = createCollabGatewayAuthHeaders({
-      config: signerConfig,
-      webSocketKey: req.headers["sec-websocket-key"],
-      path: `${backendUrl.pathname}${backendUrl.search}`,
-    });
-  } catch {
-    writeSocketError(socket, "400 Bad Request");
-    return;
-  }
-
   const headers = { ...req.headers, host: collabOrigin.host };
   for (const header of SENSITIVE_FORWARDED_HEADERS) {
     delete headers[header];
-  }
-  for (const header of COLLAB_GATEWAY_AUTH_HEADER_NAMES) {
-    delete headers[header];
-  }
-  for (const header of COLLAB_GATEWAY_AUTH_HEADER_NAMES) {
-    const value = authHeaders.get(header);
-    if (value !== null) headers[header] = value;
   }
 
   pipeUpgrade(
@@ -304,13 +273,13 @@ server.on("upgrade", (req, socket, head) => {
     socket,
     head,
     collabOrigin,
-    `${backendUrl.pathname}${backendUrl.search}`,
+    `${requestUrl.pathname}${requestUrl.search}`,
     headers,
   );
 });
 
 server.listen(listenPort, "127.0.0.1", () => {
   console.log(
-    `E2E collab gateway on ${publicOrigin} → next ${nextOrigin.origin}, collab ${collabOrigin.origin}`,
+    `E2E collab router on ${publicOrigin} → next ${nextOrigin.origin}, collab ${collabOrigin.origin}`,
   );
 });

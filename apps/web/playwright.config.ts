@@ -14,8 +14,6 @@ const nextPort = integerPort(process.env.E2E_NEXT_PORT, 32_112);
 const baseURL = `http://127.0.0.1:${webPort}`;
 const nextOrigin = `http://127.0.0.1:${nextPort}`;
 const collabOrigin = `http://127.0.0.1:${collabPort}`;
-const gatewayKeyId = "playwright-2026";
-const gatewaySecret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
 process.env.E2E_BASE_URL = baseURL;
 
@@ -48,9 +46,8 @@ export default defineConfig({
       cwd: "../collab",
       env: {
         ...process.env,
-        COLLAB_GATEWAY_HMAC_KEYS: JSON.stringify({
-          [gatewayKeyId]: gatewaySecret,
-        }),
+        COLLAB_REALTIME_DRIVER: "memory",
+        COLLAB_ALLOWED_ORIGINS: baseURL,
         SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
         SUPABASE_PUBLISHABLE_KEY:
           process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
@@ -62,15 +59,12 @@ export default defineConfig({
       url: `${collabOrigin}/health`,
     },
     {
-      // Next remains on an internal port; Upgrade rewrites are not release-
-      // equivalent here, so browsers only talk to the gateway below.
+      // Next remains on an internal port; Upgrade routing for `/collab/*` is
+      // handled by the local router below (Vercel Services in production).
       command: `pnpm exec next dev --port ${nextPort}`,
       cwd: ".",
       env: {
         ...process.env,
-        COLLAB_BACKEND_ORIGIN: collabOrigin,
-        COLLAB_GATEWAY_HMAC_KEY_ID: gatewayKeyId,
-        COLLAB_GATEWAY_HMAC_SECRET: gatewaySecret,
         NEXT_PUBLIC_APP_URL: baseURL,
       },
       reuseExistingServer: false,
@@ -78,15 +72,13 @@ export default defineConfig({
       url: nextOrigin,
     },
     {
-      command: "node ./scripts/e2e-collab-gateway.mjs",
+      command: "node ./scripts/e2e-collab-router.mjs",
       cwd: ".",
       env: {
         ...process.env,
         E2E_GATEWAY_PORT: String(webPort),
         E2E_NEXT_ORIGIN: nextOrigin,
         E2E_COLLAB_ORIGIN: collabOrigin,
-        COLLAB_GATEWAY_HMAC_KEY_ID: gatewayKeyId,
-        COLLAB_GATEWAY_HMAC_SECRET: gatewaySecret,
       },
       reuseExistingServer: false,
       timeout: 120_000,

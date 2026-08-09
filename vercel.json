@@ -3,10 +3,12 @@
   "services": {
     "web": {
       "root": "apps/web",
-      "framework": "nextjs"
+      "framework": "nextjs",
+      "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@softmaple/web"
     },
     "collab": {
-      "root": "apps/collab"
+      "root": "apps/collab",
+      "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@softmaple/collab"
     }
   },
   "rewrites": [

@@ -528,31 +528,13 @@ export default defineWebSocketHandler({
         );
         return;
       }
+      let batchIds: ReadonlyArray<string>;
       try {
-        const batchIds = await appendEventBatches(
+        batchIds = await appendEventBatches(
           currentAccess.documentId,
           currentAccess.userId,
           message.batches,
         );
-        // Persist before publish: never fan out a batch that failed durably.
-        peer.send({
-          protocolVersion: protocolVersionFromContext(peer.context),
-          type: COLLAB_MESSAGE_TYPE.DurableAck,
-          batchIds,
-        });
-        for (const protocolVersion of [
-          LEGACY_COLLAB_PROTOCOL_VERSION,
-          COLLAB_PROTOCOL_VERSION,
-        ] as const) {
-          await getRealtime().bus.publish(
-            documentRealtimeChannel(currentAccess.documentId, protocolVersion),
-            {
-              protocolVersion,
-              type: COLLAB_MESSAGE_TYPE.Event,
-              batches: message.batches,
-            },
-          );
-        }
       } catch (error) {
         logRouteError(error, currentAccess.documentId, message.type);
         const conflict = error instanceof EventConflictError;
@@ -573,6 +555,32 @@ export default defineWebSocketHandler({
             protocolVersionFromContext(peer.context),
           ),
         );
+        return;
+      }
+
+      // Persist before publish: never fan out a batch that failed durably.
+      peer.send({
+        protocolVersion: protocolVersionFromContext(peer.context),
+        type: COLLAB_MESSAGE_TYPE.DurableAck,
+        batchIds,
+      });
+      try {
+        for (const protocolVersion of [
+          LEGACY_COLLAB_PROTOCOL_VERSION,
+          COLLAB_PROTOCOL_VERSION,
+        ] as const) {
+          await getRealtime().bus.publish(
+            documentRealtimeChannel(currentAccess.documentId, protocolVersion),
+            {
+              protocolVersion,
+              type: COLLAB_MESSAGE_TYPE.Event,
+              batches: message.batches,
+            },
+          );
+        }
+      } catch (error) {
+        // Durable write already succeeded; peers recover via repair/resync.
+        logRouteError(error, currentAccess.documentId, "realtime-publish");
       }
     }
   },

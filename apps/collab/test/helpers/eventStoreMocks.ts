@@ -14,7 +14,14 @@ export class MockEventConflictError extends Error {
   }
 }
 
+export class MockEventAuthorizationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EventAuthorizationError";
+  }
+}
+
 export const eventStoreRouteMocks = {
-  EventAuthorizationError: class EventAuthorizationError extends Error {},
+  EventAuthorizationError: MockEventAuthorizationError,
   EventConflictError: MockEventConflictError,
 };

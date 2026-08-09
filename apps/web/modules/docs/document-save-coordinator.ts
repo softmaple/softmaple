@@ -80,7 +80,10 @@ export const deriveDocumentUiStatus = ({
     return "saved";
   }
   if (collaborationStatus === "connecting") return "connecting";
-  if (collaborationStatus === "reconnecting" || collaborationStatus === "offline") {
+  if (
+    collaborationStatus === "reconnecting" ||
+    collaborationStatus === "offline"
+  ) {
     return "offline";
   }
   if (collaborationStatus === "error") return "error";

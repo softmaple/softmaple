@@ -427,7 +427,8 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     [onSelectionChange],
   );
 
-  const adapter = presenceEnabled && liveAdapter !== null ? liveAdapter : noopAdapter;
+  const adapter =
+    presenceEnabled && liveAdapter !== null ? liveAdapter : noopAdapter;
   const presenceLive = presenceEnabled && liveAdapter !== null;
 
   return (

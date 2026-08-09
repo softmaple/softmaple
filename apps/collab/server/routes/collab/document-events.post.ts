@@ -31,7 +31,10 @@ export default defineHandler(async (event) => {
   }
 
   if (!Array.isArray(record.batches)) {
-    return Response.json({ error: "batches must be an array" }, { status: 400 });
+    return Response.json(
+      { error: "batches must be an array" },
+      { status: 400 },
+    );
   }
 
   let batches;
@@ -41,7 +44,9 @@ export default defineHandler(async (event) => {
     return Response.json(
       {
         error:
-          error instanceof Error ? error.message : "Invalid event batch payload",
+          error instanceof Error
+            ? error.message
+            : "Invalid event batch payload",
       },
       { status: 400 },
     );

@@ -70,7 +70,12 @@ describe("private document HTTP routes", () => {
     const response = await history({
       req: new Request(
         "http://localhost:3002/collab/document-history?documentId=00000000-0000-4000-8000-000000000001&after=0",
-        { headers: { authorization: "Bearer token", origin: "http://localhost:3000" } },
+        {
+          headers: {
+            authorization: "Bearer token",
+            origin: "http://localhost:3000",
+          },
+        },
       ),
     });
 

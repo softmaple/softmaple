@@ -51,10 +51,7 @@ export type DocHeaderProps = {
 };
 
 const STATUS_COPY: Readonly<
-  Record<
-    DocumentUiStatus,
-    { readonly label: string; readonly tone: string }
-  >
+  Record<DocumentUiStatus, { readonly label: string; readonly tone: string }>
 > = {
   connecting: { label: "Connecting", tone: "text-muted-foreground" },
   syncing: { label: "Syncing", tone: "text-amber-600 dark:text-amber-400" },

@@ -7,7 +7,55 @@ WHERE is_public IS NULL;
 
 ALTER TABLE public.documents
     ALTER COLUMN is_public SET DEFAULT FALSE,
-    ALTER COLUMN is_public SET NOT NULL,
+    ALTER COLUMN is_public SET NOT NULL;
+
+-- Preserve legacy bodies/history before dropping them. Refuse to drop live
+-- markdown that has not already been represented as CRDT event batches.
+CREATE SCHEMA IF NOT EXISTS archive;
+
+CREATE TABLE IF NOT EXISTS archive.documents_markdown_content_20260809 AS
+SELECT
+    document.id AS document_id,
+    document.workspace_id,
+    document.author_id,
+    document.title,
+    document.slug,
+    document.markdown_content,
+    document.created_at,
+    document.updated_at,
+    document.created_by,
+    document.updated_by,
+    clock_timestamp() AS archived_at
+FROM public.documents AS document
+WHERE document.markdown_content IS NOT NULL
+  AND btrim(document.markdown_content) <> '';
+
+CREATE TABLE IF NOT EXISTS archive.document_versions_20260809 AS
+SELECT
+    version.*,
+    clock_timestamp() AS archived_at
+FROM public.document_versions AS version;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM public.documents AS document
+        WHERE document.markdown_content IS NOT NULL
+          AND btrim(document.markdown_content) <> ''
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.document_event_batches AS batch
+              WHERE batch.document_id = document.id
+          )
+    ) THEN
+        RAISE EXCEPTION
+            'core_v1 refuses to drop markdown_content: non-empty bodies exist without document_event_batches. Backfill CRDT history first; archived rows are in archive.documents_markdown_content_20260809';
+    END IF;
+END
+$$;
+
+ALTER TABLE public.documents
     DROP COLUMN markdown_content;
 
 DROP TABLE public.document_versions;

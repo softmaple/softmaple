@@ -114,6 +114,28 @@ const invalidateDocumentAccess = (context: Record<string, unknown>): void => {
   delete context.authorizationExpiresAt;
 };
 
+const countedDocumentIdFromContext = (
+  context: Record<string, unknown>,
+): string | null => {
+  const value = context.countedDocumentId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+};
+
+const releaseDocumentConnection = (
+  context: Record<string, unknown>,
+  documentId: string,
+): void => {
+  if (context.connectionCounted !== true) return;
+  const nextCount = Math.max(
+    0,
+    (documentConnectionCounts.get(documentId) ?? 1) - 1,
+  );
+  if (nextCount === 0) documentConnectionCounts.delete(documentId);
+  else documentConnectionCounts.set(documentId, nextCount);
+  delete context.connectionCounted;
+  delete context.countedDocumentId;
+};
+
 const consumeMessageQuota = (context: Record<string, unknown>): boolean => {
   const now = Date.now();
   const stored = context.messageRateLimit;
@@ -264,6 +286,7 @@ export default defineWebSocketHandler({
         }
         documentConnectionCounts.set(access.documentId, currentConnections + 1);
         peer.context.connectionCounted = true;
+        peer.context.countedDocumentId = access.documentId;
         cacheDocumentAccess(peer.context, access);
         peer.context.credential = credential;
         peer.context.protocolVersion = message.protocolVersion;
@@ -508,21 +531,13 @@ export default defineWebSocketHandler({
       );
     }
     const access = accessFromContext(peer.context);
-    if (access !== null) {
+    const documentId =
+      access?.documentId ?? countedDocumentIdFromContext(peer.context);
+    if (documentId !== null) {
       peer.unsubscribe(
-        topicForDocument(
-          access.documentId,
-          protocolVersionFromContext(peer.context),
-        ),
+        topicForDocument(documentId, protocolVersionFromContext(peer.context)),
       );
-      if (peer.context.connectionCounted === true) {
-        const nextCount = Math.max(
-          0,
-          (documentConnectionCounts.get(access.documentId) ?? 1) - 1,
-        );
-        if (nextCount === 0) documentConnectionCounts.delete(access.documentId);
-        else documentConnectionCounts.set(access.documentId, nextCount);
-      }
+      releaseDocumentConnection(peer.context, documentId);
     }
   },
 });

@@ -138,5 +138,7 @@ Before promotion, verify in a real Preview environment:
 - avatar upload, public delivery, replacement, and removal;
 - a single Collab replica is configured.
 
-The local Next.js dev server is not a release-equivalent test of an external
-WebSocket rewrite, so Preview validation remains a required release gate.
+Playwright's local Upgrade-capable gateway covers signed document and Presence
+handshakes against `next dev`, but it is not a release-equivalent test of the
+Vercel external WebSocket rewrite, so Preview validation remains a required
+release gate.

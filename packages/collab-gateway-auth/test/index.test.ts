@@ -123,6 +123,33 @@ describe("collaboration gateway HMAC", () => {
     );
   });
 
+  it("accepts a presence upgrade signed for the room query target", () => {
+    const roomId = "9e2cb8d6-fb45-4daf-8f6e-0e598c82d8c5";
+    const path = `/presence?roomId=${roomId}`;
+    const headers = createCollabGatewayAuthHeaders({
+      config: signer,
+      webSocketKey: WEB_SOCKET_KEY,
+      path,
+      nowSeconds: TIMESTAMP,
+      nonce: NONCE,
+    });
+
+    expect(
+      verifyCollabGatewayAuthRequest(
+        signedRequest({ headers, path }),
+        keyring,
+        TIMESTAMP,
+      ),
+    ).toEqual({ ok: true, keyId: KEY_ID });
+    expect(
+      verifyCollabGatewayAuthRequest(
+        signedRequest({ headers, path: `/presence?roomId=${roomId}&extra=1` }),
+        keyring,
+        TIMESTAMP,
+      ).ok,
+    ).toBe(false);
+  });
+
   it.each([
     [COLLAB_GATEWAY_AUTH_HEADERS.version, "2"],
     [COLLAB_GATEWAY_AUTH_HEADERS.keyId, "unknown"],

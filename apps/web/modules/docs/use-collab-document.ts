@@ -14,6 +14,10 @@ import {
 } from "@softmaple/collab-protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  closeCollabClientSocket,
+  COLLAB_CLIENT_CLOSE_CODE,
+} from "@/modules/docs/collab-client-close";
+import {
   acknowledgePendingBatches,
   addPendingBatches,
   loadPendingBatches,
@@ -273,7 +277,11 @@ export const useCollabDocument = (
           setError(new Error("The collaboration server returned invalid data"));
           setStatus("error");
           setCanWrite(false);
-          nextSocket.close(1008, "Invalid collaboration response");
+          closeCollabClientSocket(
+            nextSocket,
+            COLLAB_CLIENT_CLOSE_CODE.InvalidServerResponse,
+            "Invalid collaboration response",
+          );
           return;
         }
 
@@ -357,19 +365,28 @@ export const useCollabDocument = (
                 setStatus("error");
                 setCanWrite(false);
               }
-              nextSocket.close(
-                message.retryable ? 1011 : 1008,
+              closeCollabClientSocket(
+                nextSocket,
+                message.retryable
+                  ? COLLAB_CLIENT_CLOSE_CODE.RetryableServerError
+                  : COLLAB_CLIENT_CLOSE_CODE.FatalServerError,
                 message.retryable ? "Retry collaboration sync" : "Fatal error",
               );
               return;
           }
         } catch (handlerError) {
-          setError(
+          const applyError =
             handlerError instanceof Error
               ? handlerError
-              : new Error("The collaboration response could not be applied"),
+              : new Error("The collaboration response could not be applied");
+          // Surface the apply failure before close() so a browser InvalidAccessError
+          // from WebSocket.close cannot hide the collaboration error.
+          setError(applyError);
+          closeCollabClientSocket(
+            nextSocket,
+            COLLAB_CLIENT_CLOSE_CODE.ResponseApplyFailure,
+            "Collaboration response could not be applied",
           );
-          nextSocket.close(1011, "Collaboration response could not be applied");
         }
       });
 

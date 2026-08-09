@@ -104,11 +104,30 @@ const serializeHeaders = (headers) =>
     })
     .join("\r\n");
 
+const publicHostFromRequest = (req) =>
+  typeof req.headers.host === "string" && req.headers.host.length > 0
+    ? req.headers.host
+    : `127.0.0.1:${listenPort}`;
+
+/**
+ * Headers for upstream Next. Keep the browser-facing Host / forwarded host so
+ * Server Actions CSRF accepts Origin from the public gateway port.
+ */
+const nextProxyHeaders = (req) => {
+  const publicHost = publicHostFromRequest(req);
+  return {
+    ...req.headers,
+    host: publicHost,
+    "x-forwarded-host": publicHost,
+    "x-forwarded-proto": "http",
+    "x-forwarded-port": String(listenPort),
+  };
+};
+
 const proxyHttp = (req, res, targetOrigin) => {
   swallowStreamError(req);
   swallowStreamError(res);
 
-  const headers = { ...req.headers, host: targetOrigin.host };
   const proxyReq = http.request(
     {
       protocol: targetOrigin.protocol,
@@ -116,7 +135,7 @@ const proxyHttp = (req, res, targetOrigin) => {
       port: targetOrigin.port,
       path: req.url,
       method: req.method,
-      headers,
+      headers: nextProxyHeaders(req),
     },
     (proxyRes) => {
       swallowStreamError(proxyRes);
@@ -155,7 +174,7 @@ const pipeUpgrade = (req, socket, head, targetOrigin, path, headers) => {
     port: targetOrigin.port,
     path,
     method: "GET",
-    headers: { ...headers, host: targetOrigin.host },
+    headers,
   });
   swallowStreamError(proxyReq);
 
@@ -171,14 +190,16 @@ const pipeUpgrade = (req, socket, head, targetOrigin, path, headers) => {
     }
     if (proxyHead.length > 0) socket.write(proxyHead);
     if (head.length > 0) proxySocket.write(head);
-    proxySocket.pipe(socket);
-    socket.pipe(proxySocket);
     const tearDown = () => {
       proxySocket.destroy();
       socket.destroy();
     };
-    socket.on("close", tearDown);
+    proxySocket.on("error", tearDown);
+    socket.on("error", tearDown);
     proxySocket.on("close", tearDown);
+    socket.on("close", tearDown);
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
   });
 
   proxyReq.on("response", (proxyRes) => {
@@ -191,6 +212,9 @@ const pipeUpgrade = (req, socket, head, targetOrigin, path, headers) => {
       proxyRes.destroy();
       return;
     }
+    proxyRes.on("error", () => {
+      socket.destroy();
+    });
     proxyRes.pipe(socket);
   });
 
@@ -231,7 +255,7 @@ server.on("upgrade", (req, socket, head) => {
       head,
       nextOrigin,
       `${requestUrl.pathname}${requestUrl.search}`,
-      { ...req.headers },
+      nextProxyHeaders(req),
     );
     return;
   }
@@ -263,7 +287,7 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
 
-  const headers = { ...req.headers };
+  const headers = { ...req.headers, host: collabOrigin.host };
   for (const header of SENSITIVE_FORWARDED_HEADERS) {
     delete headers[header];
   }

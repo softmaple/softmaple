@@ -258,6 +258,13 @@ describe("document session behavior contracts", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       new URL("/collab/document-events", window.location.origin).toString(),
     );
+    const persistInit = fetchMock.mock.calls[1]?.[1] as RequestInit | undefined;
+    const persistBody = JSON.parse(String(persistInit?.body ?? "{}")) as {
+      readonly batches?: ReadonlyArray<{ readonly batchId: string }>;
+    };
+    expect(persistBody.batches?.map((batch) => batch.batchId)).toContain(
+      localBatch.batchId,
+    );
     expect(WebSocket).not.toHaveBeenCalled();
 
     unmount();

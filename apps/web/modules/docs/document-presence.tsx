@@ -369,6 +369,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
 
     let cancelled = false;
     let created: PresenceAdapter | null = null;
+    let authRevision = 0;
     const clearLivePresence = (message: string): void => {
       if (cancelled) return;
       void created?.disconnect();
@@ -394,7 +395,10 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       setLiveAdapter(next);
       setError(null);
     };
+    const sessionRequestRevision = authRevision;
     void supabase.auth.getSession().then(({ data, error: sessionError }) => {
+      // Ignore stale getSession results after a later auth-state change.
+      if (cancelled || sessionRequestRevision !== authRevision) return;
       const token = data.session?.access_token;
       if (sessionError !== null || token === undefined) {
         clearLivePresence("Presence session is unavailable.");
@@ -404,6 +408,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     });
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        authRevision += 1;
         if (session?.access_token !== undefined) {
           configure(session.access_token);
           return;

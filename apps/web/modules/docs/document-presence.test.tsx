@@ -27,7 +27,17 @@ type AuthListener = (
   session: { access_token?: string } | null,
 ) => void;
 
+type SessionResult = {
+  readonly data: {
+    readonly session: { readonly access_token: string } | null;
+  };
+  readonly error: null;
+};
+
 let authListener: AuthListener | null = null;
+let resolveGetSession:
+  | ((value: SessionResult) => void)
+  | null = null;
 
 vi.mock("@softmaple/awareness", () => ({
   PresenceProvider: ({ children }: { children: ReactNode }) => children,
@@ -78,14 +88,10 @@ vi.mock("@/modules/docs/doc-editor", async () => {
 vi.mock("@/utils/supabase/client", () => ({
   createClient: () => ({
     auth: {
-      getSession: async () => ({
-        data: {
-          session: {
-            access_token: "initial-token",
-          },
-        },
-        error: null,
-      }),
+      getSession: () =>
+        new Promise<SessionResult>((resolve) => {
+          resolveGetSession = resolve;
+        }),
       onAuthStateChange: (listener: AuthListener) => {
         authListener = listener;
         return {
@@ -131,6 +137,7 @@ describe("remote presence DOM mapping", () => {
 describe("DocumentPresence auth lifecycle", () => {
   beforeEach(() => {
     authListener = null;
+    resolveGetSession = null;
     disconnect.mockClear();
     createWebSocketAdapter.mockClear();
     createNoopAdapter.mockClear();
@@ -140,7 +147,7 @@ describe("DocumentPresence auth lifecycle", () => {
     document.body.replaceChildren();
   });
 
-  it("clears the live adapter and shows unavailable on a null-session auth event", async () => {
+  it("ignores a stale getSession after a null-session auth event", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -158,15 +165,31 @@ describe("DocumentPresence auth lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(createWebSocketAdapter).toHaveBeenCalled();
     expect(authListener).toBeTypeOf("function");
+    expect(resolveGetSession).toBeTypeOf("function");
+    expect(createWebSocketAdapter).not.toHaveBeenCalled();
 
     await act(async () => {
       authListener?.("SIGNED_OUT", null);
       await Promise.resolve();
     });
 
-    expect(disconnect).toHaveBeenCalled();
+    expect(container.textContent).toContain("Presence session is unavailable.");
+    expect(createWebSocketAdapter).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: {
+          session: {
+            access_token: "stale-token",
+          },
+        },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Presence session is unavailable.");
 
     await act(async () => {

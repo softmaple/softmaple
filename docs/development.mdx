@@ -139,6 +139,7 @@ Before promotion, verify in a real Preview environment:
 - a single Collab replica is configured.
 
 Playwright's local Upgrade-capable gateway covers signed document and Presence
-handshakes through that gateway (not against `next dev` directly), but it is
-not a release-equivalent test of the Vercel external WebSocket rewrite, so
-Preview validation remains a required release gate.
+handshakes through that gateway (not against `next dev` directly). Production
+on Vercel uses the `app/collab/*` WebSocket bridge instead of an external
+rewrite. Preview validation of the real handshake remains a required release
+gate.

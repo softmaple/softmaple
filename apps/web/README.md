@@ -12,7 +12,7 @@ Browser ──► apps/web (Next.js)
               ├── Supabase Auth / Data API (anon / publishable key)
               ├── same-origin /collab/document (durable EG-walker history)
               └── same-origin /collab/presence (ephemeral awareness)
-                    └── HMAC rewrite ──► apps/collab ──► Supabase Postgres
+                    └── HMAC bridge (Vercel) / rewrite ──► apps/collab
 ```
 
 | Concern | Owner |
@@ -71,20 +71,26 @@ plus bearer secret are present. Never enable it against production.
 
 ### WebSocket release gate
 
-The stock Next.js 16.3 local server does not provide a release-equivalent
-external WebSocket rewrite path for `proxy.ts`: local HTTP Proxy tests pass,
-but an Upgrade request does not reach the rewrite destination. Do not work
-around this by exposing an unsigned backend URL to the browser.
+Stock Next.js cannot proxy WebSocket Upgrades to a separate collab host via
+`NextResponse.rewrite`. That is why a split web/collab deployment breaks if
+the browser only hits `/collab/*` on the Next server.
 
-Playwright starts an Upgrade-capable reverse proxy
-(`scripts/e2e-collab-gateway.mjs`) in front of `next dev` so core E2E can exercise
-HMAC-signed `/collab/document` and `/collab/presence` handshakes locally.
-That proxy is still not a Vercel Preview substitute.
-
-Before promoting a deployment, verify a real Vercel Preview handshake through
-`/collab/document`, direct-backend rejection, reconnect, and repair/resync.
-Also configure a Vercel Firewall rate limit for the public gateway path. See
+On Vercel (`VERCEL=1`), `proxy.ts` validates the browser upgrade and lets the
+App Router handlers under `app/collab/` terminate the socket with
+`@vercel/functions` `experimental_upgradeWebSocket`, then open a signed
+outbound connection to `COLLAB_BACKEND_ORIGIN`. Collab stays private; the
+browser stays same-origin. Fluid Compute must be enabled. See
 [Vercel WebSockets](https://vercel.com/docs/functions/websockets).
+
+Locally, Playwright starts an Upgrade-capable reverse proxy
+(`scripts/e2e-collab-gateway.mjs`) in front of `next dev` so core E2E can
+exercise the same HMAC-signed `/collab/document` and `/collab/presence`
+handshakes. Do not work around this by exposing an unsigned backend URL to
+the browser.
+
+Before promoting a deployment, verify a Preview handshake through
+`/collab/document`, direct-backend rejection, reconnect, and repair/resync.
+Also configure a Vercel Firewall rate limit for the public gateway paths.
 
 Keys and URL must belong to the **same** Supabase project. Never put a
 `sb_secret_…` / `service_role` key in these `NEXT_PUBLIC_*` variables.

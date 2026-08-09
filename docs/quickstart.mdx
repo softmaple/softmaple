@@ -107,11 +107,10 @@ Before you begin, make sure you have the following installed:
     The application will be available at [http://localhost:3000](http://localhost:3000)
 
     <Note>
-      Next.js 16.3's local server is not a release-equivalent test for the
-      external WebSocket rewrite in `proxy.ts`. The UI and unit tests run
-      locally, but the complete browser-to-gateway-to-Nitro handshake must be
-      verified on a Vercel Preview. Do not restore a direct browser URL as a
-      workaround.
+      Stock Next.js cannot proxy WebSocket Upgrades to a separate collab host.
+      Local Playwright uses `scripts/e2e-collab-gateway.mjs`; Vercel Preview
+      uses the App Router + `@vercel/functions` bridge under `app/collab/`.
+      Do not restore a direct unsigned browser URL as a workaround.
     </Note>
   </Accordion>
 </AccordionGroup>

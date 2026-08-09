@@ -2,10 +2,7 @@
  * Pure functions for user status management (active/idle/offline)
  */
 
-import {
-  derivePresenceStatus,
-  withDerivedStatus,
-} from "../core/status";
+import { derivePresenceStatus, withDerivedStatus } from "../core/status";
 import type { PresenceStatus, PresenceUser } from "../types/presence";
 import { markUserActivity, patchPresenceUser } from "../types/presence";
 import type { PresenceState, PresenceStateConfig } from "../types/state";

@@ -230,13 +230,13 @@ describe("ActivityIndicator label coverage", () => {
                 "a",
                 {
                   userId: "a",
-      connectionId: "a",
+                  connectionId: "a",
                   name: "Ada",
                   color: "#000",
                   status: "active",
                   lastActivityAt: 0,
                   lastSeenAt: 0,
-      clock: 0,
+                  clock: 0,
                 },
               ],
             ])
@@ -273,13 +273,13 @@ describe("ActivityIndicator label coverage", () => {
               "a",
               {
                 userId: "a",
-      connectionId: "a",
+                connectionId: "a",
                 name: "Ada",
                 color: "#000",
                 status: "active",
                 lastActivityAt: 0,
                 lastSeenAt: 0,
-      clock: 0,
+                clock: 0,
               },
             ],
           ])
@@ -442,13 +442,13 @@ describe("PresenceBar with PresenceContext fallback", () => {
 describe("ActivityIndicator with PresenceContext fallback", () => {
   const ada: PresenceUser = {
     userId: "ada",
-      connectionId: "ada",
+    connectionId: "ada",
     name: "Ada",
     color: "#000",
     status: "active",
     lastActivityAt: 0,
     lastSeenAt: 0,
-      clock: 0,
+    clock: 0,
   };
 
   const ctx = (
@@ -669,7 +669,7 @@ describe("PresenceProvider activity branches", () => {
           type: PRESENCE_EVENT.JOIN,
           user: createPresenceUser({
             userId: "peer",
-      connectionId: "peer",
+            connectionId: "peer",
             name: "Peer",
             color: "#000",
           }),

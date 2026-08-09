@@ -11,12 +11,11 @@ test.describe("public product surface", () => {
     );
     await page.getByRole("link", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("button", { name: "GitHub" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Google" })).toBeDisabled();
     await expect(
-      page.getByRole("button", { name: /GitHub.*Coming soon/i }),
-    ).toBeDisabled();
-    await expect(
-      page.getByRole("button", { name: /Google.*Coming soon/i }),
-    ).toBeDisabled();
+      page.getByText("GitHub and Google sign-in are coming soon."),
+    ).toBeVisible();
   });
 
   test("email forms expose validation and recovery paths", async ({ page }) => {
@@ -44,7 +43,13 @@ test.describe("public product surface", () => {
         document.documentElement.clientWidth,
     );
     expect(initialOverflow).toBeLessThanOrEqual(0);
-    await page.getByRole("button", { name: "Toggle theme" }).click();
+    const themeToggle = page.getByRole("button", { name: "Toggle theme" });
+    // Wait for the client dropdown trigger to hydrate, then open via keyboard
+    // to avoid Radix pointerdown/mouseup dismiss races in headless CI.
+    await expect(themeToggle).toHaveAttribute("aria-haspopup", "menu");
+    await themeToggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: "Dark" })).toBeVisible();
     await page.getByRole("menuitem", { name: "Dark" }).click();
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.keyboard.press("Tab");

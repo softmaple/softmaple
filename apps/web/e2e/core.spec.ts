@@ -174,7 +174,13 @@ test("account profile supports theme, avatar entry, and password reset", async (
   await login(page, seed.owner);
   await page.goto("/settings/account");
   await expect(page.getByLabel("Email")).toHaveValue(seed.owner.email);
-  await page.getByRole("button", { name: "Toggle theme" }).first().click();
+  const themeToggle = page
+    .getByRole("button", { name: "Toggle theme" })
+    .first();
+  await expect(themeToggle).toHaveAttribute("aria-haspopup", "menu");
+  await themeToggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "Light" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Light" }).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.getByLabel("Upload image").setInputFiles({

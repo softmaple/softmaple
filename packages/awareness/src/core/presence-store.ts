@@ -7,8 +7,8 @@
 
 import {
   applyClockedPresenceUpdate,
-  createPresenceUser,
   type CreatePresenceUserOptions,
+  createPresenceUser,
   markUserActivity,
   type PresenceUser,
   type PresenceUserPatch,
@@ -18,10 +18,7 @@ import {
   DEFAULT_PRESENCE_CONFIG,
   type PresenceStateConfig,
 } from "../types/state";
-import {
-  type StatusTimeouts,
-  sweepPresenceStatuses,
-} from "./status";
+import { type StatusTimeouts, sweepPresenceStatuses } from "./status";
 
 export type PresenceStoreListener = (
   presence: ReadonlyMap<string, PresenceUser>,

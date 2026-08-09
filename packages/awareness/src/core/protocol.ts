@@ -19,8 +19,7 @@ export const PRESENCE_CAPABILITIES = {
   stableCursor: true,
 } as const;
 
-export type PresenceCapability =
-  keyof typeof PRESENCE_CAPABILITIES;
+export type PresenceCapability = keyof typeof PRESENCE_CAPABILITIES;
 
 export interface PresenceHello {
   readonly protocolVersion: typeof PRESENCE_PROTOCOL_VERSION;

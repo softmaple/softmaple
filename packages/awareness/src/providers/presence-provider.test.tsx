@@ -383,13 +383,13 @@ describe("PresenceProvider", () => {
     for (let i = 0; i < 5; i++) {
       const peer: PresenceUser = {
         userId: `peer-${i}`,
-    connectionId: `peer-${i}`,
+        connectionId: `peer-${i}`,
         name: `Peer ${i}`,
         color: "#111",
         status: "active",
         lastActivityAt: i,
         lastSeenAt: i,
-      clock: 0,
+        clock: 0,
       };
       act(() => {
         adapter.emitJoin(peer);

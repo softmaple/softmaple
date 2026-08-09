@@ -499,7 +499,7 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
       name: "Stale",
       lastActivityAt: Date.now() - 1_500, // older than idle threshold,
       lastSeenAt: Date.now() - 1_500,
-  clock: 0, // older than idle threshold
+      clock: 0, // older than idle threshold
       status: "active",
     });
 
@@ -534,7 +534,7 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
       name: "Self",
       lastActivityAt: Date.now() - 1_500,
       lastSeenAt: Date.now() - 1_500,
-  clock: 0,
+      clock: 0,
       status: "active",
     });
     adapter.self = selfUser;
@@ -617,7 +617,7 @@ describe("PresenceProvider status sweep (design §4.2)", () => {
       name: "Stale",
       lastActivityAt: Date.now() - 10_000,
       lastSeenAt: Date.now() - 10_000,
-  clock: 0,
+      clock: 0,
       status: "active",
     });
 

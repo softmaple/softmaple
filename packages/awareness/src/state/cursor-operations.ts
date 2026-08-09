@@ -7,10 +7,7 @@ import type {
   PresenceSelection,
   PresenceUser,
 } from "../types/presence";
-import {
-  markUserActivity,
-  selectionReferencesBlock,
-} from "../types/presence";
+import { markUserActivity, selectionReferencesBlock } from "../types/presence";
 import type { PresenceState } from "../types/state";
 
 /**

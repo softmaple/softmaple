@@ -62,14 +62,14 @@ describe("presence components", () => {
         status: "idle",
         lastActivityAt: 3000,
         lastSeenAt: 3000,
-  clock: 0,
+        clock: 0,
       }),
       createUser("active", {
         name: "Active",
         status: "active",
         lastActivityAt: 2000,
         lastSeenAt: 2000,
-  clock: 0,
+        clock: 0,
       }),
     ] as const;
 
@@ -696,7 +696,7 @@ describe("presence components", () => {
       status: "idle",
       lastActivityAt: Date.now() - 5 * 60_000,
       lastSeenAt: Date.now() - 5 * 60_000,
-  clock: 0,
+      clock: 0,
     });
 
     await act(async () => {

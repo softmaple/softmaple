@@ -20,7 +20,7 @@ vi.mock("../server/utils/origin-auth", () => ({
 }));
 
 vi.mock("../server/utils/event-store", async () => {
-  const { eventStoreRouteMocks } = await import("./helpers/event-store-mocks");
+  const { eventStoreRouteMocks } = await import("./helpers/eventStoreMocks");
   return {
     appendEventBatches: mocks.appendEventBatches,
     ...eventStoreRouteMocks,

@@ -161,50 +161,66 @@ export const appendEventBatches = async (
           );
         }
 
-        const incomingEventIdSet = new Set(incomingEventIds);
-        const requiredParentIds = new Set(
-          batches
-            .flatMap((batch) => [
-              ...batch.parentVersion,
-              ...batch.events.flatMap((event) => event.parentVersion),
-            ])
-            .filter(
-              (eventId) =>
-                eventId !== BOOTSTRAP_EVENT_ID &&
-                !incomingEventIdSet.has(eventId),
-            ),
-        );
-        if (requiredParentIds.size > 0) {
-          const storedParents = await transaction.documentEventId.findMany({
-            where: {
-              document_id: documentId,
-              event_id: { in: [...requiredParentIds] },
-            },
-            select: { event_id: true },
-          });
-          if (storedParents.length !== requiredParentIds.size) {
-            const stored = new Set(storedParents.map((row) => row.event_id));
-            const missingParentIds = [...requiredParentIds]
-              .filter((eventId) => !stored.has(eventId))
-              .sort();
-            throw new EventConflictError(
-              "event batch references document history that has not been stored",
-              {
-                conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
-                documentId,
-                batchIds: batches.map((batch) => batch.batchId),
-                missingParentIds,
-              },
-            );
-          }
-        }
-
+        // Parents may resolve against bootstrap, durable history, or event IDs
+        // produced by preceding batches in this request — never later batches.
+        const availableEventIds = new Set<string>();
         const existingHashes = await existingBatchHashes(
           transaction,
           documentId,
           batches,
         );
         for (const batch of batches) {
+          const requiredParentIds = new Set<string>();
+          const knownAtBatchStart = availableEventIds;
+          const seenInBatch = new Set<string>();
+          for (const parentId of batch.parentVersion) {
+            if (
+              parentId !== BOOTSTRAP_EVENT_ID &&
+              !knownAtBatchStart.has(parentId)
+            ) {
+              requiredParentIds.add(parentId);
+            }
+          }
+          for (const event of batch.events) {
+            for (const parentId of event.parentVersion) {
+              if (
+                parentId !== BOOTSTRAP_EVENT_ID &&
+                !knownAtBatchStart.has(parentId) &&
+                !seenInBatch.has(parentId)
+              ) {
+                requiredParentIds.add(parentId);
+              }
+            }
+            seenInBatch.add(event.id);
+          }
+          if (requiredParentIds.size > 0) {
+            const storedParents = await transaction.documentEventId.findMany({
+              where: {
+                document_id: documentId,
+                event_id: { in: [...requiredParentIds] },
+              },
+              select: { event_id: true },
+            });
+            if (storedParents.length !== requiredParentIds.size) {
+              const stored = new Set(storedParents.map((row) => row.event_id));
+              const missingParentIds = [...requiredParentIds]
+                .filter((eventId) => !stored.has(eventId))
+                .sort();
+              throw new EventConflictError(
+                "event batch references document history that has not been stored",
+                {
+                  conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
+                  documentId,
+                  batchIds: [batch.batchId],
+                  missingParentIds,
+                },
+              );
+            }
+            for (const row of storedParents) {
+              availableEventIds.add(row.event_id);
+            }
+          }
+
           const payloadHash = hashBatch(batch);
           const existingHash = existingHashes.get(batch.batchId);
           if (existingHash !== undefined) {
@@ -217,6 +233,9 @@ export const appendEventBatches = async (
                   batchIds: [batch.batchId],
                 },
               );
+            }
+            for (const event of batch.events) {
+              availableEventIds.add(event.id);
             }
             continue;
           }
@@ -240,6 +259,9 @@ export const appendEventBatches = async (
               batch_row_id: created.id,
             })),
           });
+          for (const event of batch.events) {
+            availableEventIds.add(event.id);
+          }
         }
       },
       {

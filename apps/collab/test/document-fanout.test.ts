@@ -11,7 +11,7 @@ import {
   resetTopicBridgesForTests,
   setRealtimeForTests,
 } from "../server/utils/realtime";
-import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrap-batch";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
 
 const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
@@ -29,7 +29,7 @@ vi.mock("../server/utils/auth", () => ({
 }));
 
 vi.mock("../server/utils/event-store", async () => {
-  const { eventStoreRouteMocks } = await import("./helpers/event-store-mocks");
+  const { eventStoreRouteMocks } = await import("./helpers/eventStoreMocks");
   return {
     appendEventBatches: mocks.appendEventBatches,
     ...eventStoreRouteMocks,

@@ -7,7 +7,7 @@ import {
 } from "@softmaple/block-model";
 import { Prisma } from "@softmaple/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrap-batch";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
 
 type StoredBatch = {
   readonly batch_id: string;
@@ -354,6 +354,30 @@ describe("appendEventBatches conflict paths", () => {
     await expect(
       appendEventBatches(DOCUMENT_ID, ACTOR_ID, [second]),
     ).resolves.toEqual([second.batchId]);
+  });
+
+  it("rejects reversed causally dependent batches in one request", async () => {
+    const { first, second } = createCausalBatches();
+    await expect(
+      appendEventBatches(DOCUMENT_ID, ACTOR_ID, [second, first]),
+    ).rejects.toMatchObject({
+      name: "EventConflictError",
+      details: {
+        conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
+        batchIds: [second.batchId],
+      },
+    });
+    expect(mocks.state.batches.has(first.batchId)).toBe(false);
+    expect(mocks.state.batches.has(second.batchId)).toBe(false);
+  });
+
+  it("accepts causally ordered dependent batches in one request", async () => {
+    const { first, second } = createCausalBatches();
+    await expect(
+      appendEventBatches(DOCUMENT_ID, ACTOR_ID, [first, second]),
+    ).resolves.toEqual([first.batchId, second.batchId]);
+    expect(mocks.state.batches.has(first.batchId)).toBe(true);
+    expect(mocks.state.batches.has(second.batchId)).toBe(true);
   });
 
   it("exposes structured conflict details for diagnostics", () => {

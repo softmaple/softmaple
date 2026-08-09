@@ -9,8 +9,8 @@ import {
   setRealtimeForTests,
 } from "../server/utils/realtime";
 import { EVENT_CONFLICT_TYPE } from "../server/utils/event-conflict";
-import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrap-batch";
-import { MockEventConflictError } from "./helpers/event-store-mocks";
+import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
+import { MockEventConflictError } from "./helpers/eventStoreMocks";
 
 const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
@@ -28,7 +28,7 @@ vi.mock("../server/utils/auth", () => ({
 }));
 
 vi.mock("../server/utils/event-store", async () => {
-  const { eventStoreRouteMocks } = await import("./helpers/event-store-mocks");
+  const { eventStoreRouteMocks } = await import("./helpers/eventStoreMocks");
   return {
     appendEventBatches: mocks.appendEventBatches,
     ...eventStoreRouteMocks,

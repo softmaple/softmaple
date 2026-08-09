@@ -220,9 +220,9 @@ const logRouteError = (
     ...(error instanceof EventConflictError
       ? {
           conflictType: error.details.conflictType,
-          batchIds: error.details.batchIds,
+          batchIds: boundedIdSample(error.details.batchIds),
           eventIds: boundedIdSample(error.details.eventIds),
-          missingParentIds: error.details.missingParentIds,
+          missingParentIds: boundedIdSample(error.details.missingParentIds),
         }
       : {}),
   });

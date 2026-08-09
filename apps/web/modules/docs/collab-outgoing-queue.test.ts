@@ -84,6 +84,7 @@ describe("createOutgoingBatchQueue", () => {
     expect(queue.inFlightSize()).toBe(1);
     expect(queue.acknowledge(["c"])).toBe(false);
     expect(queue.hasPending()).toBe(false);
+    expect(queue.inFlightSize()).toBe(0);
   });
 
   it("does not mark batches in-flight when send fails", () => {

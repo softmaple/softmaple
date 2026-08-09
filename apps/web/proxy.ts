@@ -129,6 +129,7 @@ const collabGatewayRewrite = (
     authHeaders = createCollabGatewayAuthHeaders({
       config: signerConfig,
       webSocketKey,
+      path: `${backendUrl.pathname}${backendUrl.search}`,
     });
   } catch {
     return badRequest();

@@ -46,7 +46,11 @@
       "dependsOn": ["^build"],
       "env": [
         "E2E_BASE_URL",
+        "E2E_COLLAB_ORIGIN",
         "E2E_COLLAB_PORT",
+        "E2E_GATEWAY_PORT",
+        "E2E_NEXT_ORIGIN",
+        "E2E_NEXT_PORT",
         "E2E_SEED_SECRET",
         "E2E_WEB_PORT",
         "EG_WALKER_PROPERTY_RUNS",

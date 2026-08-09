@@ -7,7 +7,75 @@ WHERE is_public IS NULL;
 
 ALTER TABLE public.documents
     ALTER COLUMN is_public SET DEFAULT FALSE,
-    ALTER COLUMN is_public SET NOT NULL,
+    ALTER COLUMN is_public SET NOT NULL;
+
+-- Preserve legacy bodies/history before dropping them. Refuse to drop live
+-- markdown unless an offline CRDT replay has recorded a matching content hash.
+-- Prisma runs this migration in a single transaction, so the locks below are
+-- held through validation and DROP COLUMN / DROP TABLE.
+CREATE SCHEMA IF NOT EXISTS archive;
+
+-- Optional pre-migration artifact: after replaying document_event_batches and
+-- comparing reconstructed markdown to documents.markdown_content, insert
+-- (document_id, sha256(utf8 markdown)) here so this migration can proceed.
+CREATE TABLE IF NOT EXISTS archive.markdown_crdt_verified_20260809 (
+    document_id UUID PRIMARY KEY,
+    markdown_sha256 TEXT NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT markdown_crdt_verified_20260809_sha_hex
+        CHECK (markdown_sha256 ~ '^[0-9a-f]{64}$')
+);
+
+LOCK TABLE public.documents IN EXCLUSIVE MODE;
+LOCK TABLE public.document_versions IN EXCLUSIVE MODE;
+
+CREATE TABLE IF NOT EXISTS archive.documents_markdown_content_20260809 AS
+SELECT
+    document.id AS document_id,
+    document.workspace_id,
+    document.author_id,
+    document.title,
+    document.slug,
+    document.markdown_content,
+    document.created_at,
+    document.updated_at,
+    document.created_by,
+    document.updated_by,
+    clock_timestamp() AS archived_at
+FROM public.documents AS document
+WHERE document.markdown_content IS NOT NULL
+  AND btrim(document.markdown_content) <> '';
+
+CREATE TABLE IF NOT EXISTS archive.document_versions_20260809 AS
+SELECT
+    version.*,
+    clock_timestamp() AS archived_at
+FROM public.document_versions AS version;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM public.documents AS document
+        WHERE document.markdown_content IS NOT NULL
+          AND btrim(document.markdown_content) <> ''
+          AND NOT EXISTS (
+              SELECT 1
+              FROM archive.markdown_crdt_verified_20260809 AS verified
+              WHERE verified.document_id = document.id
+                AND verified.markdown_sha256 = encode(
+                    sha256(convert_to(document.markdown_content, 'UTF8')),
+                    'hex'
+                )
+          )
+    ) THEN
+        RAISE EXCEPTION
+            'core_v1 refuses to drop markdown_content: non-empty bodies lack a matching archive.markdown_crdt_verified_20260809 hash after CRDT replay. Archived snapshot rows are in archive.documents_markdown_content_20260809';
+    END IF;
+END
+$$;
+
+ALTER TABLE public.documents
     DROP COLUMN markdown_content;
 
 DROP TABLE public.document_versions;

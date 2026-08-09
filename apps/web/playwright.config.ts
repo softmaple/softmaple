@@ -10,7 +10,9 @@ const integerPort = (value: string | undefined, fallback: number): number => {
 
 const webPort = integerPort(process.env.E2E_WEB_PORT, 32_110);
 const collabPort = integerPort(process.env.E2E_COLLAB_PORT, 32_111);
+const nextPort = integerPort(process.env.E2E_NEXT_PORT, 32_112);
 const baseURL = `http://127.0.0.1:${webPort}`;
+const nextOrigin = `http://127.0.0.1:${nextPort}`;
 const collabOrigin = `http://127.0.0.1:${collabPort}`;
 const gatewayKeyId = "playwright-2026";
 const gatewaySecret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
@@ -60,7 +62,9 @@ export default defineConfig({
       url: `${collabOrigin}/health`,
     },
     {
-      command: `pnpm exec next dev --port ${webPort}`,
+      // Next remains on an internal port; Upgrade rewrites are not release-
+      // equivalent here, so browsers only talk to the gateway below.
+      command: `pnpm exec next dev --port ${nextPort}`,
       cwd: ".",
       env: {
         ...process.env,
@@ -68,6 +72,21 @@ export default defineConfig({
         COLLAB_GATEWAY_HMAC_KEY_ID: gatewayKeyId,
         COLLAB_GATEWAY_HMAC_SECRET: gatewaySecret,
         NEXT_PUBLIC_APP_URL: baseURL,
+      },
+      reuseExistingServer: false,
+      timeout: 120_000,
+      url: nextOrigin,
+    },
+    {
+      command: "node ./scripts/e2e-collab-gateway.mjs",
+      cwd: ".",
+      env: {
+        ...process.env,
+        E2E_GATEWAY_PORT: String(webPort),
+        E2E_NEXT_ORIGIN: nextOrigin,
+        E2E_COLLAB_ORIGIN: collabOrigin,
+        COLLAB_GATEWAY_HMAC_KEY_ID: gatewayKeyId,
+        COLLAB_GATEWAY_HMAC_SECRET: gatewaySecret,
       },
       reuseExistingServer: false,
       timeout: 120_000,

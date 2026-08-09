@@ -97,6 +97,7 @@ describe("collaboration WebSocket gateway", () => {
   it("rewrites a validated presence room to the presence backend", async () => {
     configureGateway();
     const roomId = "9e2cb8d6-fb45-4daf-8f6e-0e598c82d8c5";
+    const backendTarget = `http://localhost:3002/presence?roomId=${roomId}`;
     const response = await proxy(
       upgradeRequest(
         "https://example.com",
@@ -105,9 +106,14 @@ describe("collaboration WebSocket gateway", () => {
     );
 
     expect(isRewrite(response)).toBe(true);
-    expect(getRewrittenUrl(response)).toBe(
-      `http://localhost:3002/presence?roomId=${roomId}`,
-    );
+    expect(getRewrittenUrl(response)).toBe(backendTarget);
+    const forwarded = overriddenRequestHeaders(response);
+    expect(
+      verifyCollabGatewayAuthRequest(
+        new Request(backendTarget, { method: "GET", headers: forwarded }),
+        parseCollabGatewayKeyring(JSON.stringify({ [KEY_ID]: SECRET })),
+      ),
+    ).toEqual({ ok: true, keyId: KEY_ID });
   });
 
   it.each([

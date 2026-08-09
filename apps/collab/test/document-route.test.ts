@@ -49,6 +49,7 @@ interface TestDocumentRoute {
     readonly context: Record<string, unknown>;
   }>;
   readonly message: (peer: TestPeer, message: TestRawMessage) => Promise<void>;
+  readonly close: (peer: TestPeer) => void;
 }
 
 const route = documentRoute as unknown as TestDocumentRoute;
@@ -81,13 +82,16 @@ const createPeer = (): TestPeer => ({
   unsubscribe: vi.fn(),
 });
 
-const authMessage = (sessionId: string): TestRawMessage => ({
+const authMessage = (
+  sessionId: string,
+  documentId = "00000000-0000-4000-8000-000000000001",
+): TestRawMessage => ({
   text: () =>
     JSON.stringify({
       protocolVersion: COLLAB_PROTOCOL_VERSION,
       type: COLLAB_MESSAGE_TYPE.Auth,
       credential: { kind: "access-token", token: "access-token" },
-      documentId: "00000000-0000-4000-8000-000000000001",
+      documentId,
       sessionId,
     }),
 });
@@ -234,5 +238,49 @@ describe("collaboration document authentication", () => {
     await firstAuth;
 
     expect(peer.context.authenticationPending).toBeUndefined();
+  });
+
+  it("releases the document connection slot when access is cleared before close", async () => {
+    const documentId = "00000000-0000-4000-8000-000000000099";
+    const access = {
+      accessMode: "authenticated" as const,
+      documentId,
+      userId: "00000000-0000-4000-8000-000000000002",
+      role: "EDITOR" as const,
+      canWrite: true as const,
+    };
+    const peers: TestPeer[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      mocks.authorizeDocument.mockResolvedValueOnce(access);
+      const peer = createPeer();
+      await route.message(peer, authMessage(`session-${index}`, documentId));
+      expect(peer.context.connectionCounted).toBe(true);
+      peers.push(peer);
+    }
+
+    mocks.authorizeDocument.mockResolvedValueOnce(access);
+    const blocked = createPeer();
+    await route.message(blocked, authMessage("session-blocked", documentId));
+    expect(blocked.close).toHaveBeenCalledWith(
+      1013,
+      "Document connection limit reached",
+    );
+
+    // Match the revocation path: clear cached access, then close.
+    delete peers[0]?.context.documentAccess;
+    delete peers[0]?.context.authorizationExpiresAt;
+    route.close(peers[0]!);
+
+    mocks.authorizeDocument.mockResolvedValueOnce(access);
+    const replacement = createPeer();
+    await route.message(
+      replacement,
+      authMessage("session-replacement", documentId),
+    );
+    expect(replacement.context.connectionCounted).toBe(true);
+    expect(replacement.close).not.toHaveBeenCalled();
+
+    for (const peer of peers.slice(1)) route.close(peer);
+    route.close(replacement);
   });
 });

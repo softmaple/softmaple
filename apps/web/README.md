@@ -76,6 +76,11 @@ external WebSocket rewrite path for `proxy.ts`: local HTTP Proxy tests pass,
 but an Upgrade request does not reach the rewrite destination. Do not work
 around this by exposing an unsigned backend URL to the browser.
 
+Playwright starts an Upgrade-capable reverse proxy
+(`scripts/e2e-collab-gateway.mjs`) in front of `next dev` so core E2E can exercise
+HMAC-signed `/collab/document` and `/collab/presence` handshakes locally.
+That proxy is still not a Vercel Preview substitute.
+
 Before promoting a deployment, verify a real Vercel Preview handshake through
 `/collab/document`, direct-backend rejection, reconnect, and repair/resync.
 Also configure a Vercel Firewall rate limit for the public gateway path. See

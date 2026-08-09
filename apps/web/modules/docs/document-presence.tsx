@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  createNoopAdapter,
   createWebSocketAdapter,
   isDirectionalSelectionRange,
   isStableCursorPosition,
@@ -281,72 +282,94 @@ const WorkspacePresenceBar = () => {
   );
 };
 
-const ConnectedEditor: FC<DocEditorProps> = (props) => {
+const PresenceSelectionPublisher: FC<{
+  readonly enabled: boolean;
+  readonly selection: StableBlockSelection | null;
+}> = ({ enabled, selection }) => {
   const updateCursor = useUpdateCursor(50);
   const updateSelection = useUpdateSelection(50);
   const { updatePresence } = usePresence();
-  const [binding, setBinding] = useState<LexicalBinding | null>(null);
-  const [container, setContainer] = useState<HTMLDivElement | null>(null);
-
-  const clearPosition = useCallback(() => {
-    updatePresence({ cursor: undefined, selection: undefined });
-  }, [updatePresence]);
 
   useEffect(() => {
+    if (!enabled) return;
+    const clearPosition = (): void => {
+      updatePresence({ cursor: undefined, selection: undefined });
+    };
     window.addEventListener("blur", clearPosition);
     return () => {
       window.removeEventListener("blur", clearPosition);
       clearPosition();
     };
-  }, [clearPosition]);
+  }, [enabled, updatePresence]);
 
-  const publishSelection = useCallback(
-    (selection: StableBlockSelection | null): void => {
-      if (selection === null) {
-        updateCursor(null);
-        updateSelection(null);
-        return;
-      }
-      const collapsed =
-        selection.anchor.blockId === selection.focus.blockId &&
-        JSON.stringify(selection.anchor.anchor) ===
-          JSON.stringify(selection.focus.anchor);
-      updateCursor(selection.focus);
-      updateSelection(collapsed ? null : selection);
-    },
-    [updateCursor, updateSelection],
-  );
+  useLayoutEffect(() => {
+    if (!enabled) return;
+    if (selection === null) {
+      updateCursor(null);
+      updateSelection(null);
+      return;
+    }
+    const collapsed =
+      selection.anchor.blockId === selection.focus.blockId &&
+      JSON.stringify(selection.anchor.anchor) ===
+        JSON.stringify(selection.focus.anchor);
+    updateCursor(selection.focus);
+    updateSelection(collapsed ? null : selection);
+  }, [enabled, selection, updateCursor, updateSelection]);
 
-  return (
-    <div className="flex min-h-full flex-col">
-      <WorkspacePresenceBar />
-      <div className="relative min-h-0 flex-1" ref={setContainer}>
-        <DocEditor
-          {...props}
-          onExternalBindingChange={setBinding}
-          onSelectionChange={publishSelection}
-        />
-        <RemotePresenceOverlay binding={binding} container={container} />
-      </div>
-    </div>
-  );
+  return null;
 };
 
-export const DocumentPresence: FC<DocEditorProps & ProfileIdentity> = ({
+export type DocumentPresenceProps = DocEditorProps &
+  ProfileIdentity & {
+    /** Presence WebSocket is only opened for shared/collaborative documents. */
+    readonly presenceEnabled?: boolean;
+  };
+
+/**
+ * Keeps DocEditor mounted across private→shared transitions by always wrapping
+ * with PresenceProvider (noop adapter while private; WebSocket once shared).
+ */
+export const DocumentPresence: FC<DocumentPresenceProps> = ({
   avatarUrl,
   name,
+  presenceEnabled = true,
   userId,
+  onExternalBindingChange,
+  onSelectionChange,
   ...editorProps
 }) => {
   const supabase = useMemo(() => createClient(), []);
-  const [adapter, setAdapter] = useState<PresenceAdapter | null>(null);
+  const noopAdapter = useMemo(
+    () =>
+      createNoopAdapter({
+        roomId: editorProps.documentId,
+        userInfo: {
+          userId,
+          name,
+          color: "#c9184a",
+          ...(avatarUrl === null ? {} : { avatarUrl }),
+        },
+      }),
+    [avatarUrl, editorProps.documentId, name, userId],
+  );
+  const [liveAdapter, setLiveAdapter] = useState<PresenceAdapter | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [binding, setBinding] = useState<LexicalBinding | null>(null);
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const [selection, setSelection] = useState<StableBlockSelection | null>(null);
 
   useEffect(() => {
+    if (!presenceEnabled) {
+      setLiveAdapter(null);
+      setError(null);
+      return;
+    }
+
     let cancelled = false;
     const configure = (token: string): void => {
       if (cancelled) return;
-      setAdapter(
+      setLiveAdapter(
         createWebSocketAdapter({
           authToken: token,
           roomId: editorProps.documentId,
@@ -379,19 +402,58 @@ export const DocumentPresence: FC<DocEditorProps & ProfileIdentity> = ({
       cancelled = true;
       listener.subscription.unsubscribe();
     };
-  }, [avatarUrl, editorProps.documentId, name, supabase, userId]);
+  }, [
+    avatarUrl,
+    editorProps.documentId,
+    name,
+    presenceEnabled,
+    supabase,
+    userId,
+  ]);
 
-  if (adapter === null) {
-    return (
-      <div className="grid min-h-64 place-items-center font-mono text-xs text-muted-foreground">
-        {error ?? "Connecting presence…"}
-      </div>
-    );
-  }
+  const handleBindingChange = useCallback(
+    (next: LexicalBinding | null) => {
+      setBinding(next);
+      onExternalBindingChange?.(next);
+    },
+    [onExternalBindingChange],
+  );
+
+  const handleSelectionChange = useCallback(
+    (next: StableBlockSelection | null) => {
+      setSelection(next);
+      onSelectionChange?.(next);
+    },
+    [onSelectionChange],
+  );
+
+  const adapter = presenceEnabled && liveAdapter !== null ? liveAdapter : noopAdapter;
+  const presenceLive = presenceEnabled && liveAdapter !== null;
 
   return (
     <PresenceProvider adapter={adapter} statusSweepMs={5_000}>
-      <ConnectedEditor {...editorProps} />
+      <div className="flex min-h-full flex-col">
+        {presenceEnabled && liveAdapter === null ? (
+          <div className="border-b px-3 py-2 font-mono text-[11px] text-muted-foreground sm:px-5">
+            {error ?? "Connecting presence…"}
+          </div>
+        ) : null}
+        {presenceLive ? <WorkspacePresenceBar /> : null}
+        <PresenceSelectionPublisher
+          enabled={presenceLive}
+          selection={selection}
+        />
+        <div className="relative min-h-0 flex-1" ref={setContainer}>
+          <DocEditor
+            {...editorProps}
+            onExternalBindingChange={handleBindingChange}
+            onSelectionChange={handleSelectionChange}
+          />
+          {presenceLive ? (
+            <RemotePresenceOverlay binding={binding} container={container} />
+          ) : null}
+        </div>
+      </div>
     </PresenceProvider>
   );
 };

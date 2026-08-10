@@ -11,11 +11,14 @@ export {
   DEFAULT_DOCUMENT_ROOM_POLICY,
   type DocumentRoom,
   type DocumentRoomPolicy,
+  type DocumentRoomScheduledTask,
+  type DocumentRoomScheduler,
   type DocumentRoomServices,
   ROOM_LEAVE_REASON,
   type RoomLeaveReason,
   type RoomPeer,
 } from "./document-room";
+export { createDocumentRoom } from "./document-room-impl";
 export {
   DOCUMENT_SESSION_END_REASON,
   type AuthenticatedDocumentAccess,

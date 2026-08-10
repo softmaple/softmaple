@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Runtime-independent document room and session contracts",
+  "description": "Runtime-independent document room semantics and contracts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,6 +17,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }

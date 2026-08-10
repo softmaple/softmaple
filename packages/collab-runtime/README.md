@@ -6,7 +6,8 @@ host adapter.
 
 The public capabilities cover:
 
-- `DocumentRoom` and transport-neutral `RoomPeer` lifecycle
+- `createDocumentRoom`, `DocumentRoom`, and transport-neutral `RoomPeer`
+  lifecycle
 - normalized authenticated and public document sessions
 - durable event append and repair-page reads
 - committed-event fan-out across room instances
@@ -25,6 +26,6 @@ adapters translate infrastructure errors into the exported runtime error
 taxonomy before room logic maps them to protocol errors.
 
 This package deliberately contains no Nitro, Redis, Prisma, Supabase,
-Cloudflare Workers, editor-framework, React, routing, or UI integrations. The
-current production host is not wired to these contracts yet; that migration is
-a separate phase.
+Cloudflare Workers, editor-framework, React, routing, or UI integrations.
+Concrete hosts compose the shared state machine with runtime-specific
+capability adapters.

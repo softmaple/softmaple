@@ -5,6 +5,7 @@ on:
     branches: [main, next]
     paths:
       - 'apps/collab/**'
+      - 'packages/collab-runtime/**'
       - 'apps/web/modules/docs/use-collab-document.ts'
       - 'apps/web/package.json'
       - 'apps/web/proxy.ts'
@@ -19,6 +20,7 @@ on:
     branches: [main, next]
     paths:
       - 'apps/collab/**'
+      - 'packages/collab-runtime/**'
       - 'apps/web/modules/docs/use-collab-document.ts'
       - 'apps/web/package.json'
       - 'apps/web/proxy.ts'
@@ -71,6 +73,7 @@ jobs:
       - name: Check Nitro collaboration backend
         run: |
           pnpm exec turbo run build --filter=@softmaple/collab... --filter=!@softmaple/collab
+          pnpm --filter @softmaple/collab-runtime test
           pnpm --filter @softmaple/collab typecheck
           pnpm --filter @softmaple/collab test
           pnpm --filter @softmaple/collab build

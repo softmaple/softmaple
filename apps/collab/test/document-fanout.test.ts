@@ -3,6 +3,7 @@ import {
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetDocumentRoomHostForTests } from "../server/document-room-host";
 import {
   createMemoryRealtime,
   documentRealtimeChannel,
@@ -78,6 +79,7 @@ describe("document event fan-out across instances", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    await resetDocumentRoomHostForTests();
     await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
     mocks.authorizeDocument.mockResolvedValue({
@@ -91,6 +93,7 @@ describe("document event fan-out across instances", () => {
   });
 
   afterEach(async () => {
+    await resetDocumentRoomHostForTests();
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();

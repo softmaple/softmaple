@@ -57,6 +57,7 @@ jobs:
           pnpm --filter @softmaple/web test -- --run
           pnpm --filter @softmaple/collab test
           pnpm --filter @softmaple/collab-protocol test
+          pnpm --filter @softmaple/collab-runtime test
           pnpm --filter @softmaple/md2latex test -- --run
           pnpm --filter @softmaple/editor exec vitest run --project=unit src/markdown.test.ts
           pnpm --filter @softmaple/awareness exec vitest run --project=unit

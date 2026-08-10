@@ -29,6 +29,24 @@ export interface DocumentRoomPolicy {
   readonly connection: ConnectionPolicy;
 }
 
+export interface DocumentRoomScheduledTask {
+  /** Repeated calls must be safe. */
+  cancel(): void;
+}
+
+/**
+ * Runtime-provided clock/timer boundary. Hosts that cannot rely on process
+ * timers (for example, hibernating runtimes) can drive refresh work through
+ * alarms while tests can advance it deterministically.
+ */
+export interface DocumentRoomScheduler {
+  now(): number;
+  repeat(
+    intervalMs: number,
+    task: () => void | Promise<void>,
+  ): DocumentRoomScheduledTask;
+}
+
 export const DEFAULT_DOCUMENT_ROOM_POLICY: DocumentRoomPolicy = Object.freeze({
   authorizationRefreshIntervalMs: 15_000,
   connection: Object.freeze({
@@ -44,6 +62,7 @@ export interface DocumentRoomServices {
   readonly events: DocumentEventStore;
   readonly fanout: RoomFanout;
   readonly policy: DocumentRoomPolicy;
+  readonly scheduler?: DocumentRoomScheduler;
   readonly sessions: DocumentSessionHooks;
 }
 

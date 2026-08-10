@@ -11,8 +11,10 @@ the same room behavior be implemented on the current Nitro/Redis/Postgres
 stack and on a future runtime without importing either environment into the
 contract package.
 
-This phase defines contracts only. The production route in `apps/collab`
-continues to own the current behavior until it is migrated separately.
+The package provides both the capability contracts and the shared
+`createDocumentRoom` state machine. The Nitro host supplies adapters for
+Supabase-backed authorization, Prisma/Postgres durability, Redis fan-out, and
+Redis connection leases; its WebSocket route retains only transport concerns.
 
 ## Capability boundary
 
@@ -88,6 +90,14 @@ current 256 KiB limit (close 1009), 120 messages per 10 seconds limit
 (`InvalidMessage`, retryable, then close 1013), and malformed-message behavior
 (`InvalidMessage`, non-retryable). Browser clients close on protocol Error and
 reconnect only when it is retryable.
+
+The Nitro adapter keeps the deployed Redis channel payload identical to the
+browser `ServerEventMessage` during rolling releases. Every commit is
+published to both legacy v2 and v3 document channels, while new room instances
+consume v3 as the canonical channel and translate the Event to each local
+session's protocol version. Subscribing only to v3 is safe while every current
+publisher writes both channels; publishing v2 can stop only after no deployed
+instance can still host a legacy peer.
 
 ## Durable append and acknowledgement
 

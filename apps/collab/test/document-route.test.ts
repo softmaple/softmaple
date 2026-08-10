@@ -3,6 +3,7 @@ import {
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetDocumentRoomHostForTests } from "../server/document-room-host";
 import {
   createMemoryRealtime,
   resetTopicBridgesForTests,
@@ -100,11 +101,13 @@ describe("collaboration document authentication", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    await resetDocumentRoomHostForTests();
     await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
   });
 
   afterEach(async () => {
+    await resetDocumentRoomHostForTests();
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();
@@ -189,7 +192,6 @@ describe("collaboration document authentication", () => {
     await vi.waitFor(() => {
       expect(mocks.authorizeDocument).toHaveBeenCalledTimes(1);
     });
-    expect(peer.context.authenticationPending).toBe(true);
 
     await route.message(peer, authMessage("session-2"));
 
@@ -207,11 +209,9 @@ describe("collaboration document authentication", () => {
       canWrite: true,
     });
     await firstAuth;
-
-    expect(peer.context.authenticationPending).toBeUndefined();
   });
 
-  it("releases the document connection slot when access is cleared before close", async () => {
+  it("releases the document connection slot when a peer closes", async () => {
     const documentId = "00000000-0000-4000-8000-000000000099";
     const access = {
       accessMode: "authenticated" as const,
@@ -225,7 +225,7 @@ describe("collaboration document authentication", () => {
       mocks.authorizeDocument.mockResolvedValueOnce(access);
       const peer = createPeer();
       await route.message(peer, authMessage(`session-${index}`, documentId));
-      expect(peer.context.connectionCounted).toBe(true);
+      expect(peer.close).not.toHaveBeenCalled();
       peers.push(peer);
     }
 
@@ -237,9 +237,6 @@ describe("collaboration document authentication", () => {
       "Document connection limit reached",
     );
 
-    // Match the revocation path: clear cached access, then close.
-    delete peers[0]?.context.documentAccess;
-    delete peers[0]?.context.authorizationExpiresAt;
     await route.close(peers[0]!);
 
     mocks.authorizeDocument.mockResolvedValueOnce(access);
@@ -248,7 +245,6 @@ describe("collaboration document authentication", () => {
       replacement,
       authMessage("session-replacement", documentId),
     );
-    expect(replacement.context.connectionCounted).toBe(true);
     expect(replacement.close).not.toHaveBeenCalled();
 
     for (const peer of peers.slice(1)) await route.close(peer);
@@ -263,6 +259,7 @@ describe("collaboration document event conflicts", () => {
     vi.clearAllMocks();
     authenticatedPeers.length = 0;
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    await resetDocumentRoomHostForTests();
     await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
     mocks.authorizeDocument.mockResolvedValue({
@@ -279,6 +276,7 @@ describe("collaboration document event conflicts", () => {
       await route.close(peer);
     }
     authenticatedPeers.length = 0;
+    await resetDocumentRoomHostForTests();
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();

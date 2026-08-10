@@ -97,22 +97,19 @@ describe("requireWorkspaceRouteData", () => {
     [ACTION_ERROR_CODE.Conflict, "That change conflicts with existing data."],
     [ACTION_ERROR_CODE.Validation, "Check the highlighted fields."],
     [ACTION_ERROR_CODE.Storage, "Storage failed."],
-  ] as const)(
-    "maps %s to a thrown server error instead of notFound",
-    async (code, message) => {
-      const { requireWorkspaceRouteData } = await import("./workspace-route");
-      expect(() =>
-        requireWorkspaceRouteData(actionFailure(code, message), context),
-      ).toThrow(`${context.operation} failed (${code}): ${message}`);
-      expect(notFound).not.toHaveBeenCalled();
-      expect(console.error).toHaveBeenCalledWith(
-        "[workspace-route]",
-        expect.objectContaining({
-          code,
-          operation: context.operation,
-          workspaceSlug: context.workspaceSlug,
-        }),
-      );
-    },
-  );
+  ] as const)("maps %s to a thrown server error instead of notFound", async (code, message) => {
+    const { requireWorkspaceRouteData } = await import("./workspace-route");
+    expect(() =>
+      requireWorkspaceRouteData(actionFailure(code, message), context),
+    ).toThrow(`${context.operation} failed (${code}): ${message}`);
+    expect(notFound).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[workspace-route]",
+      expect.objectContaining({
+        code,
+        operation: context.operation,
+        workspaceSlug: context.workspaceSlug,
+      }),
+    );
+  });
 });

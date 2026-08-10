@@ -6,9 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceNavigation } from "./workspace-navigation";
 
 const usePathname = vi.hoisted(() => vi.fn(() => "/workspace/acme"));
-const useSearchParams = vi.hoisted(
-  () => vi.fn(() => new URLSearchParams()),
-);
+const useSearchParams = vi.hoisted(() => vi.fn(() => new URLSearchParams()));
 
 vi.mock("next/navigation", () => ({
   usePathname,
@@ -31,8 +29,7 @@ vi.mock("next/link", () => ({
       "a",
       {
         href,
-        "data-prefetch":
-          prefetch === undefined ? "default" : String(prefetch),
+        "data-prefetch": prefetch === undefined ? "default" : String(prefetch),
         ...props,
       },
       children,

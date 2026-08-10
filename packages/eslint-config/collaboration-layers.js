@@ -12,6 +12,8 @@
  *   MUST NOT bypass the block model to import EG-walker directly.
  * - `@softmaple/collab-protocol` may import the block model, but MUST NOT
  *   depend on a binding, awareness, editor framework, or host runtime.
+ * - `@softmaple/collab-runtime` may import protocol/model value contracts, but
+ *   MUST NOT depend on convergence internals, UI, or a concrete host runtime.
  * - `@softmaple/awareness` MUST NOT import a document model, surface binding,
  *   or editor framework. Awareness enforces this via Biome's
  *   `style/noRestrictedImports` in `packages/awareness/biome.jsonc`.
@@ -69,26 +71,61 @@ const COLLAB_PROTOCOL_PATTERNS = [
   },
 ];
 
+const COLLAB_RUNTIME_PATTERNS = [
+  {
+    group: ["@softmaple/collab-runtime", "@softmaple/collab-runtime/**"],
+    message:
+      "Reverse-layer import: see docs/design/collaboration-layers.md. " +
+      "Model, awareness, binding, and wire-protocol packages must not " +
+      "depend on host-level room semantics.",
+  },
+];
+
 const HOST_RUNTIME_PATTERNS = [
   {
     group: [
       "@softmaple/db",
       "@softmaple/db/*",
+      "@softmaple/editor",
+      "@softmaple/editor/*",
+      "@softmaple/ui",
+      "@softmaple/ui/*",
+      "@cloudflare/*",
+      "@cloudflare/*/**",
       "@prisma/*",
       "@prisma/*/**",
       "@supabase/*",
       "@supabase/*/**",
+      "cloudflare:*",
+      "h3",
+      "h3/**",
+      "ioredis",
+      "ioredis/**",
       "next",
       "next/**",
       "nitro",
       "nitro/**",
+      "prisma",
+      "prisma/**",
       "react",
       "react/**",
     ],
     message:
       "Host-runtime import: see docs/design/collaboration-layers.md. " +
-      "The collaboration protocol contains only wire contracts and parsers; " +
-      "database, auth, server, and UI integrations belong in apps/*.",
+      "Shared collaboration contracts contain no database, auth SDK, " +
+      "server framework, deployment-runtime, or UI integrations; those " +
+      "belong in apps/* adapters.",
+  },
+];
+
+const COLLAB_RUNTIME_IMPORT_ALLOWLIST = [
+  {
+    regex:
+      "^(?!(?:\\.{1,2}/|@softmaple/(?:block-model|collab-protocol)(?:/|$))).+",
+    message:
+      "Runtime boundary: see docs/design/collaboration-layers.md. " +
+      "@softmaple/collab-runtime may import only local modules, " +
+      "@softmaple/collab-protocol, and @softmaple/block-model.",
   },
 ];
 
@@ -138,6 +175,7 @@ export const egWalkerCollaborationPatterns = [
   ...BLOCK_MODEL_PATTERNS,
   ...SURFACE_BINDING_PATTERNS,
   ...COLLAB_PROTOCOL_PATTERNS,
+  ...COLLAB_RUNTIME_PATTERNS,
   ...EDITOR_FRAMEWORK_PATTERNS,
 ];
 
@@ -149,6 +187,7 @@ export const blockModelCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
   ...SURFACE_BINDING_PATTERNS,
   ...COLLAB_PROTOCOL_PATTERNS,
+  ...COLLAB_RUNTIME_PATTERNS,
   ...EDITOR_FRAMEWORK_PATTERNS,
 ];
 
@@ -160,6 +199,7 @@ export const blockModelBindingCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
   ...EG_WALKER_PATTERNS,
   ...COLLAB_PROTOCOL_PATTERNS,
+  ...COLLAB_RUNTIME_PATTERNS,
 ];
 
 /**
@@ -170,8 +210,18 @@ export const collabProtocolCollaborationPatterns = [
   ...AWARENESS_PATTERNS,
   ...EG_WALKER_PATTERNS,
   ...SURFACE_BINDING_PATTERNS,
+  ...COLLAB_RUNTIME_PATTERNS,
   ...EDITOR_FRAMEWORK_PATTERNS,
   ...HOST_RUNTIME_PATTERNS,
+];
+
+/**
+ * Patterns for host-level collaboration room/session contracts. The wire
+ * protocol is intentionally allowed; concrete persistence, transport,
+ * deployment, editor, and UI runtimes are not.
+ */
+export const collabRuntimeCollaborationPatterns = [
+  ...COLLAB_RUNTIME_IMPORT_ALLOWLIST,
 ];
 
 /**

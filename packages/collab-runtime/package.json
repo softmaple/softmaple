@@ -1,0 +1,31 @@
+{
+  "name": "@softmaple/collab-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runtime-independent document room and session contracts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@softmaple/collab-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -576,6 +576,25 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
+  packages/collab-runtime:
+    dependencies:
+      '@softmaple/collab-protocol':
+        specifier: workspace:*
+        version: link:../collab-protocol
+    devDependencies:
+      '@softmaple/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@softmaple/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@24.10.4))(jiti@2.7.0)(postcss@8.5.26)(tsx@4.23.10)(typescript@5.9.3)(yaml@2.8.1)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/config:
     devDependencies:
       '@softmaple/eslint-config':

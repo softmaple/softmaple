@@ -10,7 +10,9 @@ collaboration code is layered. It defines what each layer owns, what it
 must not depend on, and how model bindings and awareness compose inside
 `apps/*`. Durable write invariants and `EventConflictError` semantics are
 documented in
-[`collaboration-consistency.md`](./collaboration-consistency.md).
+[`collaboration-consistency.md`](./collaboration-consistency.md). The
+runtime-independent room/session contract is specified in
+[`collaboration-runtime.md`](./collaboration-runtime.md).
 
 The split is enforced by shared ESLint `no-restricted-imports` patterns and
 awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
@@ -23,24 +25,26 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
                  ↓
 @softmaple/block-model
     - blocks, structure, marks, rich-text event batches
-        ↙                 ↘
+        ↙                  ↓
 @softmaple/binding-lexical
     - Lexical ↔ block-model projection
                             @softmaple/collab-protocol
                             - versioned wire messages and validation
-        ↘                 ↙
-              apps/*
-    - persistence, transport, identity, UI composition
+                                      ↓
+                            @softmaple/collab-runtime
+                            - room/session and capability contracts
+        ↘                             ↓
+              apps/* and apps/collab adapters
+    - persistence, transport, identity, routing, UI composition
 
 @softmaple/awareness
     - ephemeral presence, transport adapters, rendering helpers
                  ↓
               apps/*
 
-apps/collab realtime coordination
+apps/collab runtime adapters
     - Redis Pub/Sub, presence TTLs, connection leases
-                 ↓
-              apps/collab
+    - Nitro transport, Prisma event store, Supabase authorization
 ```
 
 The document path is directional: a lower model layer never imports a
@@ -78,6 +82,8 @@ The CRDT runtime. Implements the Eg-walker paper directly.
 - Depend on `@softmaple/block-model` or any `@softmaple/binding-*`
   package; those are higher layers.
 - Depend on `@softmaple/collab-protocol`; wire contracts are host-facing.
+- Depend on `@softmaple/collab-runtime`; room semantics are a still higher
+  host-facing layer.
 - Depend on any editor framework — `lexical`, `prosemirror-*`,
   `slate` / `slate-*`, or equivalent.
 - Expose block IDs, DOM types, or editor selections. Stable sequence
@@ -115,6 +121,8 @@ sequence and causal DAG supplied by EG-walker.
 - Depend on a surface binding or editor framework.
 - Depend on `@softmaple/collab-protocol`; the protocol depends on model
   batches, never the reverse.
+- Depend on `@softmaple/collab-runtime`; host room semantics depend on model
+  values, never the reverse.
 - Expose Lexical node keys, DOM types, React components, or awareness users.
 
 It may depend on `@softmaple/eg-walker` and its `./anchors` entry; that is
@@ -146,6 +154,8 @@ The presence and cursor layer. Editor-class-agnostic.
   structurally mirrored JSON anchor types do not require a runtime import.
 - Depend on `@softmaple/collab-protocol`; presence and durable document sync
   remain independent channels.
+- Depend on `@softmaple/collab-runtime`; presence remains independent from
+  durable room/session lifecycle.
 - Depend on any editor framework — `lexical`, `prosemirror-*`, or
   `slate` / `slate-*`.
 
@@ -180,6 +190,8 @@ entry supplies lifecycle wiring with peer dependencies.
   boundary.
 - Import `@softmaple/collab-protocol`; the binding owns projection, not wire
   transport.
+- Import `@softmaple/collab-runtime`; bindings do not own hosted room
+  lifecycle.
 - Own network transport, durable persistence, user identity, awareness
   state, or remote-cursor rendering.
 
@@ -204,17 +216,52 @@ server hosts.
   framework. Rich-text payloads enter through `@softmaple/block-model`.
 - Own WebSocket connections, Supabase clients, database access, JWT checks,
   React components, or any other host runtime.
+- Import `@softmaple/collab-runtime`; wire contracts remain below room
+  semantics.
+
+## Layer 6: `@softmaple/collab-runtime`
+
+The runtime-independent server-side collaboration boundary. It defines how a
+document room talks to peers and to host-provided capabilities without
+choosing a deployment runtime or persistence implementation.
+
+### Responsibilities
+
+- Define `DocumentRoom`, `RoomPeer`, normalized document sessions, and room
+  lifecycle contracts.
+- Define capabilities for durable event append/history reads, committed-event
+  fan-out, connection admission/leases, and authorization refresh.
+- Reuse `@softmaple/collab-protocol` messages and validated batch shapes rather
+  than creating a second browser protocol.
+- Specify durable append, `DurableAck`, fan-out, and repair/resync ordering.
+
+The complete behavioral contract is in
+[`collaboration-runtime.md`](./collaboration-runtime.md).
+
+### Forbidden
+
+`@softmaple/collab-runtime` **MUST NOT**:
+
+- Import Nitro, H3, Next.js, Node built-ins, `ioredis`, Prisma,
+  `@softmaple/db`, Supabase SDKs, `cloudflare:workers`, or other concrete host
+  infrastructure.
+- Import EG-walker directly, awareness, a surface binding, an editor
+  framework, React, UI packages, or app routing.
+- Implement convergence, block integration, or another CRDT. EG-walker and
+  block-model retain those responsibilities.
+- Own a browser transport or alter the wire protocol.
 
 ## Host realtime coordination: `apps/collab` Redis adapters
 
 Cross-instance fan-out, presence TTLs, and connection leases live in
 `apps/collab/server/utils/realtime`. They are host-only concerns: model
-packages, awareness, and `@softmaple/collab-protocol` must not import Redis
-clients or deployment topology helpers. Browser Origin checks replace the
-former HMAC web-gateway boundary; Supabase JWT and workspace authorization
-remain the user auth boundary.
+packages, awareness, `@softmaple/collab-protocol`, and
+`@softmaple/collab-runtime` must not import Redis clients or deployment
+topology helpers. Browser Origin checks replace the former HMAC web-gateway
+boundary; Supabase JWT and workspace authorization remain the user auth
+boundary.
 
-## Layer 6: `apps/*`
+## Layer 7: `apps/*`
 
 The integration layer. Today that is `apps/web` (Next.js + Lexical)
 and `apps/playground` (CRDT experiments).
@@ -230,6 +277,9 @@ and `apps/playground` (CRDT experiments).
   `PresenceUser`.
 - **Routing and persistence** — document IDs, room IDs, hydration from
   the database.
+- **Runtime adapters** — connect Nitro peers, Prisma/Postgres history, Redis
+  fan-out/leases, and Supabase authorization to `@softmaple/collab-runtime`
+  contracts.
 
 ### Forbidden
 
@@ -260,10 +310,16 @@ awareness expresses the same independence boundary in Biome:
   `collabProtocolCollaborationPatterns`. It allows block-model wire values,
   while forbidding lower-layer bypasses, bindings, awareness, editors, and
   app-owned database/auth/server/UI runtimes.
+- **`@softmaple/collab-runtime`** (ESLint) — uses
+  `collabRuntimeCollaborationPatterns` as an import allowlist. Production
+  sources may import local modules, `@softmaple/collab-protocol`, and
+  `@softmaple/block-model`; bare imports of deployment, persistence, auth,
+  server, editor, and UI runtimes fail lint. CI also runs `turbo boundaries`
+  for the package so a relative import cannot escape its workspace boundary.
 - **`@softmaple/awareness`** (Biome) — wired in via the
   `style/noRestrictedImports` rule in `packages/awareness/biome.jsonc`.
-  Forbids EG-walker, block-model, binding-lexical, and editor frameworks
-  (including subpath imports).
+  Forbids EG-walker, block-model, binding-lexical, collab-protocol,
+  collab-runtime, and editor frameworks (including subpath imports).
 
 Subpath patterns (`@lexical/*/**`, `prosemirror-*/**`, `slate-*/**`)
 are spelled out explicitly in both configs because the glob `*` does
@@ -277,10 +333,11 @@ rather than `patterns`, so those are listed separately in
 right above the rule restating this gotcha for the next editor.
 
 A unit test in `packages/eslint-config` lints deliberately-bad imports
-against all three ESLint pattern sets and also asserts each intended
-downward import remains legal. The awareness Biome boundary test runs
-the real config against generated import fixtures, including bare and
-subpath forms.
+against every ESLint pattern set and also asserts each intended
+downward import remains legal. The same test applies each pattern set to its
+real package source tree. The awareness Biome boundary test runs the real
+config against generated import fixtures, including bare and subpath forms,
+and CI lints the awareness source tree with that config.
 
 If you need to add a new editor framework, extend the
 module-internal `EDITOR_FRAMEWORK_PATTERNS` constant inside

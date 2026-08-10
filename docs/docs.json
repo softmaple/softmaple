@@ -42,6 +42,7 @@
         "pages": [
           "design/awareness-and-presence",
           "design/collaboration-layers",
+          "design/collaboration-runtime",
           "design/collaboration-consistency"
         ]
       },

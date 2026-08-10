@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { FileText, Plus, Settings2, Users } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import { Badge } from "@softmaple/ui/components/badge";
@@ -18,6 +17,7 @@ import {
   getWorkspaceMemberByUserId,
   listWorkspaceMembers,
 } from "@/app/actions/workspaceMembers";
+import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 
 type Props = { params: Promise<{ workspaceSlug: string }> };
@@ -43,12 +43,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function WorkspacePage({ params }: Props) {
   const { workspaceSlug } = await params;
-  const workspaceResult = await cachedGetWorkspaceBySlug(workspaceSlug);
-  if (!workspaceResult.ok) {
-    if (workspaceResult.code === "NOT_FOUND") notFound();
-    throw new Error(workspaceResult.message);
-  }
-  const workspace = workspaceResult.data;
+  const loginNext = `/workspace/${workspaceSlug}`;
+  const route = "/workspace/[workspaceSlug]";
+  const workspace = requireWorkspaceRouteData(
+    await cachedGetWorkspaceBySlug(workspaceSlug),
+    {
+      loginNext,
+      operation: "get_workspace_by_slug",
+      route,
+      workspaceSlug,
+    },
+  );
   const [documentsResult, documentCountResult, membersResult, roleResult] =
     await Promise.all([
       listWorkspaceDocuments(workspace.id, 5),
@@ -56,15 +61,35 @@ export default async function WorkspacePage({ params }: Props) {
       listWorkspaceMembers(workspace.id),
       getWorkspaceMemberByUserId(workspace.id),
     ]);
-  if (!documentsResult.ok) throw new Error(documentsResult.message);
-  if (!documentCountResult.ok) throw new Error(documentCountResult.message);
-  if (!membersResult.ok) throw new Error(membersResult.message);
-  if (!roleResult.ok) throw new Error(roleResult.message);
+  const documents = requireWorkspaceRouteData(documentsResult, {
+    loginNext,
+    operation: "list_workspace_documents",
+    route,
+    workspaceSlug,
+  });
+  const documentCount = requireWorkspaceRouteData(documentCountResult, {
+    loginNext,
+    operation: "count_workspace_documents",
+    route,
+    workspaceSlug,
+  });
+  const members = requireWorkspaceRouteData(membersResult, {
+    loginNext,
+    operation: "list_workspace_members",
+    route,
+    workspaceSlug,
+  });
+  const membership = requireWorkspaceRouteData(roleResult, {
+    loginNext,
+    operation: "get_workspace_member_by_user_id",
+    route,
+    workspaceSlug,
+  });
 
   const canEdit =
-    roleResult.data.role === WORKSPACE_ROLE.Owner ||
-    roleResult.data.role === WORKSPACE_ROLE.Editor;
-  const isOwner = roleResult.data.role === WORKSPACE_ROLE.Owner;
+    membership.role === WORKSPACE_ROLE.Owner ||
+    membership.role === WORKSPACE_ROLE.Editor;
+  const isOwner = membership.role === WORKSPACE_ROLE.Owner;
 
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
@@ -72,7 +97,7 @@ export default async function WorkspacePage({ params }: Props) {
         <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
-              Workspace / {roleResult.data.role.toLowerCase()}
+              Workspace / {membership.role.toLowerCase()}
             </p>
             <h1 className="font-display mt-2 truncate text-3xl font-semibold">
               {workspace.title}
@@ -83,7 +108,10 @@ export default async function WorkspacePage({ params }: Props) {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline">
-              <Link href={`/workspace/${workspaceSlug}/settings`}>
+              <Link
+                href={`/workspace/${workspaceSlug}/settings`}
+                prefetch={false}
+              >
                 <Settings2 className="mr-2 h-4 w-4" />
                 Settings
               </Link>
@@ -106,11 +134,11 @@ export default async function WorkspacePage({ params }: Props) {
             <div>
               <h2 className="text-lg font-semibold">Recent documents</h2>
               <p className="text-sm text-muted-foreground">
-                {documentCountResult.data} total
+                {documentCount} total
               </p>
             </div>
           </div>
-          {documentsResult.data.length === 0 ? (
+          {documents.length === 0 ? (
             <div className="rounded-sm border border-dashed p-10 text-center">
               <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
               <h3 className="mt-4 font-medium">No documents yet</h3>
@@ -128,7 +156,7 @@ export default async function WorkspacePage({ params }: Props) {
             </div>
           ) : (
             <div className="divide-y rounded-sm border bg-card">
-              {documentsResult.data.map((document) => (
+              {documents.map((document) => (
                 <Link
                   className="flex min-w-0 items-center gap-4 p-4 transition-colors hover:bg-accent"
                   href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
@@ -159,13 +187,13 @@ export default async function WorkspacePage({ params }: Props) {
             <div>
               <h2 className="text-lg font-semibold">Members</h2>
               <p className="text-sm text-muted-foreground">
-                {membersResult.data.length} people
+                {members.length} people
               </p>
             </div>
             <Users className="h-4 w-4 text-muted-foreground" />
           </div>
           <div className="space-y-1">
-            {membersResult.data.slice(0, 8).map((member) => (
+            {members.slice(0, 8).map((member) => (
               <div
                 className="flex items-center gap-3 rounded-sm px-2 py-2"
                 key={member.member_id}
@@ -192,7 +220,10 @@ export default async function WorkspacePage({ params }: Props) {
           </div>
           {isOwner ? (
             <Button asChild className="mt-4 w-full" size="sm" variant="outline">
-              <Link href={`/workspace/${workspaceSlug}/settings?tab=members`}>
+              <Link
+                href={`/workspace/${workspaceSlug}/settings?tab=members`}
+                prefetch={false}
+              >
                 Manage members
               </Link>
             </Button>

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
 import { listWorkspaceDocuments } from "@/app/actions/documents/documents";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
+import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-sidebar";
 import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
@@ -17,13 +18,18 @@ type Props = {
 export default async function WorkspaceLayoutPage(props: Props) {
   const { params, children } = props;
   const { workspaceSlug } = await params;
+  const loginNext = `/workspace/${workspaceSlug}`;
+  const route = "/workspace/[workspaceSlug]";
 
-  const workspaceResource = await cachedGetWorkspaces();
-  const currentWorkspace = workspaceResource.ok
-    ? workspaceResource.data.find(
-        (workspace) => workspace.slug === workspaceSlug,
-      )
-    : undefined;
+  const workspaces = requireWorkspaceRouteData(await cachedGetWorkspaces(), {
+    loginNext,
+    operation: "get_workspaces",
+    route,
+    workspaceSlug,
+  });
+  const currentWorkspace = workspaces.find(
+    (workspace) => workspace.slug === workspaceSlug,
+  );
   const [documentsResource, membershipResource] =
     currentWorkspace === undefined
       ? [null, null]
@@ -31,16 +37,27 @@ export default async function WorkspaceLayoutPage(props: Props) {
           listWorkspaceDocuments(currentWorkspace.id, 100),
           getWorkspaceMemberByUserId(currentWorkspace.id),
         ]);
-  if (documentsResource !== null && !documentsResource.ok) {
-    throw new Error(documentsResource.message);
-  }
-  if (membershipResource !== null && !membershipResource.ok) {
-    throw new Error(membershipResource.message);
-  }
-  const documents = documentsResource?.data ?? [];
+  const documents =
+    documentsResource === null
+      ? []
+      : requireWorkspaceRouteData(documentsResource, {
+          loginNext,
+          operation: "list_workspace_documents",
+          route,
+          workspaceSlug,
+        });
+  const membership =
+    membershipResource === null
+      ? null
+      : requireWorkspaceRouteData(membershipResource, {
+          loginNext,
+          operation: "get_workspace_member_by_user_id",
+          route,
+          workspaceSlug,
+        });
   const canEdit =
-    membershipResource?.data.role === WORKSPACE_ROLE.Owner ||
-    membershipResource?.data.role === WORKSPACE_ROLE.Editor;
+    membership?.role === WORKSPACE_ROLE.Owner ||
+    membership?.role === WORKSPACE_ROLE.Editor;
 
   return (
     <div className="flex h-dvh min-w-0 bg-background">
@@ -52,7 +69,7 @@ export default async function WorkspaceLayoutPage(props: Props) {
       >
         <WorkspaceDropdown
           workspaceSlug={workspaceSlug}
-          workspacesResource={workspaceResource}
+          workspacesResource={{ ok: true, data: workspaces }}
         />
       </WorkspaceMobileSidebar>
 
@@ -64,7 +81,7 @@ export default async function WorkspaceLayoutPage(props: Props) {
       >
         <WorkspaceDropdown
           workspaceSlug={workspaceSlug}
-          workspacesResource={workspaceResource}
+          workspacesResource={{ ok: true, data: workspaces }}
         />
       </WorkspaceDesktopSidebar>
 

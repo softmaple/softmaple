@@ -75,10 +75,12 @@ recovered on the next intentional repair/resync after a clean reconnect path,
 not by blindly retrying the conflicting payload.
 
 HTTP appends use a different surface. In `document-events.post.ts`,
-`EventConflictError` maps to **HTTP 409** with an `{ error }` body. Structured
-fields such as `missingParentIds` remain on the server-side
-`EventConflictError` for diagnostics and recovery context; they are not
-included in that HTTP response (they stay on the WebSocket/server log path).
+`EventConflictError` maps to **HTTP 409** with an `{ error }` body (the conflict
+message string only). Structured fields such as `missingParentIds` exist on the
+server-side `EventConflictError` instance; they are not included in that HTTP
+response. On the realtime route, the same details are written to server logs via
+`logRouteError` as bounded samples and are not sent on the WebSocket `Error`
+payload.
 
 Implementation: `EVENT_CONFLICT_TYPE` / `EventConflictError` in
 `apps/collab/server/utils/event-conflict.ts`.

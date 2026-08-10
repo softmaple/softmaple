@@ -233,13 +233,16 @@ export type HarnessClient = {
   readonly pendingBatchIds: () => ReadonlyArray<string>;
   readonly acknowledgedBatchIds: () => ReadonlySet<string>;
   readonly knownBatchIds: () => ReadonlySet<string>;
+  /** Event batch IDs enqueued on the current connection generation. */
+  readonly sentBatchIdsSinceConnect: () => ReadonlyArray<string>;
   readonly conflicts: () => ReadonlyArray<HarnessConflict>;
   readonly repairRequestCount: () => number;
   readonly documentFingerprint: () => string;
 };
 
 type ConnectedPeer = RealtimePeer & {
-  readonly client: HarnessClientInternal;
+  client?: HarnessClientInternal;
+  readonly generation: number;
   readonly context: {
     unsubscribeLocal?: () => void;
     realtimeChannel?: string;
@@ -281,6 +284,14 @@ export type CollabConsistencyHarness = {
    * Used to interleave repair pages with live commits.
    */
   readonly pumpProtocol: (maxTurns?: number) => Promise<number>;
+  /**
+   * Advance the protocol queue one turn at a time until `predicate` holds.
+   * Fails clearly when the turn budget is exhausted.
+   */
+  readonly pumpUntil: (
+    predicate: () => boolean,
+    maxTurns?: number,
+  ) => Promise<number>;
   readonly protocolQueueSize: () => number;
   readonly assertReplicasConverged: (
     clients: ReadonlyArray<HarnessClient>,
@@ -301,7 +312,10 @@ const waitFor = async (
     if (Date.now() - started > timeoutMs) {
       throw new Error(`Timed out waiting for ${label}`);
     }
-    await Promise.resolve();
+    // Macrotask yield so timer-/IO-backed work can progress between polls.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
   }
 };
 
@@ -318,9 +332,33 @@ export const createCollabConsistencyHarness = (options?: {
   const protocolQueue = new WorkQueue();
   const instances = new Map<string, CollabInstance>();
   const channel = documentRealtimeChannel(documentId, COLLAB_PROTOCOL_VERSION);
+  let settleInFlight: Promise<void> | null = null;
 
   const enqueueProtocol = (work: WorkItem): void => {
     protocolQueue.enqueue(work);
+  };
+
+  const isActivePeer = (
+    peer: ConnectedPeer,
+    generation: number,
+    activeGeneration: () => number,
+    currentPeer: () => ConnectedPeer | null,
+  ): peer is ConnectedPeer & { readonly client: HarnessClientInternal } =>
+    peer.generation === generation &&
+    activeGeneration() === generation &&
+    currentPeer() === peer &&
+    peer.client !== undefined;
+
+  const releasePeerChannel = async (
+    instance: { readonly bridge: TopicBridge },
+    peer: ConnectedPeer,
+  ): Promise<void> => {
+    peer.context.unsubscribeLocal?.();
+    delete peer.context.unsubscribeLocal;
+    if (peer.context.realtimeChannel !== undefined) {
+      await instance.bridge.release(peer.context.realtimeChannel);
+      delete peer.context.realtimeChannel;
+    }
   };
 
   const handleClientMessage = async (
@@ -330,12 +368,27 @@ export const createCollabConsistencyHarness = (options?: {
     },
     peer: ConnectedPeer,
     message: ClientCollabMessage,
+    generation: number,
+    activeGeneration: () => number,
+    currentPeer: () => ConnectedPeer | null,
   ): Promise<void> => {
+    if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+      return;
+    }
+
     if (message.type === COLLAB_MESSAGE_TYPE.Auth) {
       peer.context.unsubscribeLocal = instance.hub.subscribe(channel, peer);
       await instance.bridge.retain(channel);
+      if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+        // Dropped Auth after retain: release so the channel is not leaked.
+        await releasePeerChannel(instance, peer);
+        return;
+      }
       peer.context.realtimeChannel = channel;
       enqueueProtocol(async () => {
+        if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+          return;
+        }
         await peer.client.receive({
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.Ready,
@@ -352,6 +405,9 @@ export const createCollabConsistencyHarness = (options?: {
     if (message.type === COLLAB_MESSAGE_TYPE.RepairRequest) {
       const page = await store.readEventPage(documentId, message.afterCursor);
       enqueueProtocol(async () => {
+        if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+          return;
+        }
         await peer.client.receive({
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.RepairResponse,
@@ -385,13 +441,23 @@ export const createCollabConsistencyHarness = (options?: {
           retryable: !conflict,
         };
         enqueueProtocol(async () => {
+          if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+            return;
+          }
           await peer.client.receive(errorMessage);
         });
         return;
       }
 
+      if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+        return;
+      }
+
       // Durable commit before DurableAck and before fan-out.
       enqueueProtocol(async () => {
+        if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
+          return;
+        }
         await peer.client.receive({
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.DurableAck,
@@ -416,7 +482,9 @@ export const createCollabConsistencyHarness = (options?: {
     );
     const acknowledged = new Set<string>();
     const conflicts: HarnessConflict[] = [];
+    const sentSinceConnect: string[] = [];
     let peer: ConnectedPeer | null = null;
+    let peerGeneration = 0;
     let synced = false;
     let connected = false;
     let activeRepairRequestId: string | null = null;
@@ -432,12 +500,25 @@ export const createCollabConsistencyHarness = (options?: {
     };
 
     const enqueueClientMessage = (message: ClientCollabMessage): void => {
-      if (peer === null) {
+      if (peer === null || !connected) {
         throw new Error(`Client ${clientOptions.id} is not connected`);
       }
       const activePeer = peer;
+      const generation = activePeer.generation;
+      if (message.type === COLLAB_MESSAGE_TYPE.Event) {
+        for (const batch of message.batches) {
+          sentSinceConnect.push(batch.batchId);
+        }
+      }
       enqueueProtocol(async () => {
-        await handleClientMessage(instance, activePeer, message);
+        await handleClientMessage(
+          instance,
+          activePeer,
+          message,
+          generation,
+          () => peerGeneration,
+          () => peer,
+        );
       });
     };
 
@@ -476,18 +557,31 @@ export const createCollabConsistencyHarness = (options?: {
       enqueueClientMessage,
       async connect() {
         if (connected) return;
-        peer = {
-          client: undefined as unknown as HarnessClientInternal,
+        peerGeneration += 1;
+        sentSinceConnect.length = 0;
+        const nextPeer: ConnectedPeer = {
+          generation: peerGeneration,
           context: {},
           send(payload: unknown) {
             const message = payload as ServerCollabMessage;
+            const generation = nextPeer.generation;
             enqueueProtocol(async () => {
+              if (
+                !isActivePeer(
+                  nextPeer,
+                  generation,
+                  () => peerGeneration,
+                  () => peer,
+                )
+              ) {
+                return;
+              }
               await client.receive(message);
             });
           },
         };
-        // Assign after object creation so send can close over `client`.
-        (peer as { client: HarnessClientInternal }).client = client;
+        nextPeer.client = client;
+        peer = nextPeer;
         connected = true;
         enqueueClientMessage({
           protocolVersion: COLLAB_PROTOCOL_VERSION,
@@ -499,10 +593,10 @@ export const createCollabConsistencyHarness = (options?: {
       },
       async disconnect() {
         if (!connected || peer === null) return;
-        peer.context.unsubscribeLocal?.();
-        if (peer.context.realtimeChannel !== undefined) {
-          await instance.bridge.release(peer.context.realtimeChannel);
-        }
+        const disconnecting = peer;
+        // Invalidate queued work for this connection generation first.
+        peerGeneration += 1;
+        await releasePeerChannel(instance, disconnecting);
         peer = null;
         connected = false;
         synced = false;
@@ -546,6 +640,7 @@ export const createCollabConsistencyHarness = (options?: {
         outgoing.peekPending().map((batch) => batch.batchId),
       acknowledgedBatchIds: () => acknowledged,
       knownBatchIds: () => new Set(knownBatches.keys()),
+      sentBatchIdsSinceConnect: () => [...sentSinceConnect],
       conflicts: () => [...conflicts],
       repairRequestCount: () => repairRequests,
       documentFingerprint: () => fingerprintDocument(replica),
@@ -600,14 +695,22 @@ export const createCollabConsistencyHarness = (options?: {
     return client;
   };
 
-  const settleLoop = async (): Promise<void> => {
-    for (let turn = 0; turn < 10_000; turn += 1) {
-      const protocolWork = await protocolQueue.runAll();
-      const fanoutWork =
-        bus.deliveryMode === "deferred" ? await bus.deliverAll() : 0;
-      if (protocolWork === 0 && fanoutWork === 0) return;
-    }
-    throw new Error("Harness settle exceeded turn budget");
+  const settleLoop = (): Promise<void> => {
+    if (settleInFlight !== null) return settleInFlight;
+    settleInFlight = (async () => {
+      try {
+        for (let turn = 0; turn < 10_000; turn += 1) {
+          const protocolWork = await protocolQueue.runAll();
+          const fanoutWork =
+            bus.deliveryMode === "deferred" ? await bus.deliverAll() : 0;
+          if (protocolWork === 0 && fanoutWork === 0) return;
+        }
+        throw new Error("Harness settle exceeded turn budget");
+      } finally {
+        settleInFlight = null;
+      }
+    })();
+    return settleInFlight;
   };
 
   const createInstance = (name: string): CollabInstance => {
@@ -662,6 +765,20 @@ export const createCollabConsistencyHarness = (options?: {
         return count;
       };
       return run();
+    },
+    async pumpUntil(predicate, maxTurns = 100) {
+      for (let turns = 0; turns < maxTurns; turns += 1) {
+        if (predicate()) return turns;
+        const advanced = await protocolQueue.runOne();
+        if (!advanced) {
+          if (predicate()) return turns;
+          throw new Error(
+            `pumpUntil exhausted with an empty protocol queue after ${turns} turns`,
+          );
+        }
+      }
+      if (predicate()) return maxTurns;
+      throw new Error(`pumpUntil exceeded turn budget (${maxTurns})`);
     },
     protocolQueueSize: () => protocolQueue.size(),
     assertReplicasConverged(clients) {

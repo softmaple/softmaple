@@ -44,7 +44,7 @@ The server order is:
 2. Send `DurableAck` to the writing peer.
 3. Publish the `Event` on the realtime bus for local and remote peers.
 
-If persistence fails, nothing is faned out. If fan-out fails after commit,
+If persistence fails, nothing is fanned out. If fan-out fails after commit,
 peers recover through repair/resync.
 
 ### 4. Idempotent exact resend
@@ -68,11 +68,17 @@ document history or durable batch appends.
 
 ## EventConflictError semantics
 
-Conflicts are surfaced to clients as non-retryable protocol `Error` messages
-with code `conflict`. The browser does **not** enter a conflict-driven
-reconnect/retry loop. Missing history is recovered on the next intentional
-repair/resync after a clean reconnect path, not by blindly retrying the
-conflicting payload.
+On the **realtime** transport, conflicts are surfaced to clients as
+non-retryable protocol `Error` messages with code `conflict`. The browser does
+**not** enter a conflict-driven reconnect/retry loop. Missing history is
+recovered on the next intentional repair/resync after a clean reconnect path,
+not by blindly retrying the conflicting payload.
+
+HTTP appends use a different surface. In `document-events.post.ts`,
+`EventConflictError` maps to **HTTP 409** with an `{ error }` body. Structured
+fields such as `missingParentIds` remain on the server-side
+`EventConflictError` for diagnostics and recovery context; they are not
+included in that HTTP response (they stay on the WebSocket/server log path).
 
 Implementation: `EVENT_CONFLICT_TYPE` / `EventConflictError` in
 `apps/collab/server/utils/event-conflict.ts`.

@@ -9,10 +9,10 @@ const ACTOR_A = "00000000-0000-4000-8000-0000000000a1";
 const ACTOR_B = "00000000-0000-4000-8000-0000000000a2";
 
 describe("repair and live-event interleaving", () => {
-  let harness: CollabConsistencyHarness;
+  let harness: CollabConsistencyHarness | undefined;
 
   afterEach(async () => {
-    await harness.close();
+    await harness?.close();
   });
 
   it("should apply live Event after a partial repair page without losing history", async () => {
@@ -26,13 +26,17 @@ describe("repair and live-event interleaving", () => {
     const instanceA = harness.createInstance("A");
     const instanceB = harness.createInstance("B");
 
-    // Act: start client A repair, but only complete the first page turn.
+    // Act: start client A repair, but stop once page 1 is applied.
     const clientA = await instanceA.connectClient({
       id: "client-a",
       actorId: ACTOR_A,
     });
-    // Auth -> Ready enqueue -> RepairRequest -> RepairResponse(page1) -> next RepairRequest
-    await harness.pumpProtocol(5);
+    await harness.pumpUntil(
+      () =>
+        clientA.knownBatchIds().has(first.batchId) &&
+        !clientA.knownBatchIds().has(second.batchId) &&
+        !clientA.isSynced(),
+    );
     expect(clientA.isSynced()).toBe(false);
     expect(clientA.knownBatchIds().has(first.batchId)).toBe(true);
     expect(clientA.knownBatchIds().has(second.batchId)).toBe(false);
@@ -122,7 +126,12 @@ describe("repair and live-event interleaving", () => {
     });
 
     // Act: stop after first repair response applied and next request queued.
-    await harness.pumpProtocol(5);
+    await harness.pumpUntil(
+      () =>
+        clientA.knownBatchIds().has(seed.first.batchId) &&
+        !clientA.knownBatchIds().has(seed.second.batchId) &&
+        !clientA.isSynced(),
+    );
     expect(clientA.knownBatchIds().has(seed.first.batchId)).toBe(true);
     expect(clientA.isSynced()).toBe(false);
 
@@ -169,7 +178,9 @@ describe("repair and live-event interleaving", () => {
     await harness.settle();
     await client.waitUntilIdle();
 
-    // Assert
+    // Assert: stale pre-disconnect Event work is discarded; only the new
+    // connection generation resends the exact pending batch identity.
+    expect(client.sentBatchIdsSinceConnect()).toEqual([pending.batchId]);
     expect(harness.store.hasBatch(harness.documentId, pending.batchId)).toBe(
       true,
     );

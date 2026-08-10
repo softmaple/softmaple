@@ -9,10 +9,10 @@ const ACTOR_A = "00000000-0000-4000-8000-0000000000b1";
 const ACTOR_B = "00000000-0000-4000-8000-0000000000b2";
 
 describe("multi-instance collaboration harness", () => {
-  let harness: CollabConsistencyHarness;
+  let harness: CollabConsistencyHarness | undefined;
 
   afterEach(async () => {
-    await harness.close();
+    await harness?.close();
   });
 
   it("should keep local peer state isolated across instances while sharing durable history", async () => {
@@ -92,7 +92,9 @@ describe("multi-instance collaboration harness", () => {
 
     // Act
     const batch = clientA.localInsert("fan", 0);
-    await harness.pumpProtocol(20);
+    await harness.pumpUntil(() =>
+      clientA.acknowledgedBatchIds().has(batch.batchId),
+    );
     expect(clientA.acknowledgedBatchIds().has(batch.batchId)).toBe(true);
     expect(harness.pendingDeliveries()).toBeGreaterThan(0);
 

@@ -11,9 +11,20 @@ const ACTORS = [
   "00000000-0000-4000-8000-0000000000c3",
 ] as const;
 
-const CI_NUM_RUNS = Number(process.env.COLLAB_CONVERGENCE_RUNS ?? 40);
-const SOAK_NUM_RUNS = Number(process.env.COLLAB_CONVERGENCE_SOAK_RUNS ?? 200);
+const positiveIntEnv = (raw: string | undefined, fallback: number): number => {
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  return parsed;
+};
+
+const CI_NUM_RUNS = positiveIntEnv(process.env.COLLAB_CONVERGENCE_RUNS, 40);
+const SOAK_NUM_RUNS = positiveIntEnv(
+  process.env.COLLAB_CONVERGENCE_SOAK_RUNS,
+  200,
+);
 const isSoak = process.env.COLLAB_CONVERGENCE_SOAK === "1";
+const PROPERTY_TIMEOUT_MS = isSoak ? 120_000 : 30_000;
 
 type TraceOp =
   | { readonly kind: "edit"; readonly client: number; readonly text: string }
@@ -175,20 +186,24 @@ const runTrace = async (trace: Trace): Promise<void> => {
 };
 
 describe("randomized collaboration convergence", () => {
-  it("should converge for seeded multi-client collaboration traces", async () => {
-    await fc.assert(
-      fc.asyncProperty(traceArb, async (trace) => {
-        await runTrace(trace);
-      }),
-      {
-        numRuns: isSoak ? SOAK_NUM_RUNS : CI_NUM_RUNS,
-        // Fixed seed keeps CI deterministic; override with fc seed on failure.
-        seed: 868_001,
-        verbose: true,
-        endOnFailure: true,
-      },
-    );
-  });
+  it(
+    "should converge for seeded multi-client collaboration traces",
+    { timeout: PROPERTY_TIMEOUT_MS },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(traceArb, async (trace) => {
+          await runTrace(trace);
+        }),
+        {
+          numRuns: isSoak ? SOAK_NUM_RUNS : CI_NUM_RUNS,
+          // Fixed seed keeps CI deterministic; override with fc seed on failure.
+          seed: 868_001,
+          verbose: true,
+          endOnFailure: true,
+        },
+      );
+    },
+  );
 
   it("should reproduce a known reconnect-and-duplicate interleaving", async () => {
     // Arrange / Act / Assert: explicit regression seed path for debugging.

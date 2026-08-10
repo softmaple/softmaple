@@ -57,7 +57,12 @@ const canonicalJson = (value: unknown): string => {
     const record = value as Record<string, unknown>;
     return `{${Object.keys(record)
       .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .flatMap((key) => {
+        const entry = record[key];
+        // Match JSON.stringify: omit undefined-valued properties.
+        if (entry === undefined) return [];
+        return [`${JSON.stringify(key)}:${canonicalJson(entry)}`];
+      })
       .join(",")}}`;
   }
   throw new Error("event batch contains a non-JSON value");
@@ -135,10 +140,14 @@ export const createInMemoryEventStore = (options?: {
     const log = getLog(documentId);
     await acquireLock(log);
     try {
+      // Stage first so a mid-request conflict cannot partially mutate the log.
+      const stagedRows: StoredBatch[] = [];
+      const stagedEventIds = new Set<string>();
       const availableEventIds = new Set<string>();
+
       for (const batch of batches) {
         const requiredParentIds = new Set<string>();
-        const knownAtBatchStart = availableEventIds;
+        const knownAtBatchStart = new Set(availableEventIds);
         const seenInBatch = new Set<string>();
         for (const parentId of batch.parentVersion) {
           if (
@@ -162,11 +171,17 @@ export const createInMemoryEventStore = (options?: {
         }
 
         for (const parentId of requiredParentIds) {
-          if (!log.eventIds.has(parentId) && !availableEventIds.has(parentId)) {
+          if (
+            !log.eventIds.has(parentId) &&
+            !stagedEventIds.has(parentId) &&
+            !availableEventIds.has(parentId)
+          ) {
             const missingParentIds = [...requiredParentIds]
               .filter(
                 (eventId) =>
-                  !log.eventIds.has(eventId) && !availableEventIds.has(eventId),
+                  !log.eventIds.has(eventId) &&
+                  !stagedEventIds.has(eventId) &&
+                  !availableEventIds.has(eventId),
               )
               .sort();
             throw new EventConflictError(
@@ -183,7 +198,9 @@ export const createInMemoryEventStore = (options?: {
         }
 
         const payloadHash = hashBatch(batch);
-        const existing = log.batchesById.get(batch.batchId);
+        const existing =
+          log.batchesById.get(batch.batchId) ??
+          stagedRows.find((row) => row.batchId === batch.batchId);
         if (existing !== undefined) {
           if (existing.payloadHash !== payloadHash) {
             throw new EventConflictError(
@@ -202,7 +219,7 @@ export const createInMemoryEventStore = (options?: {
         }
 
         for (const event of batch.events) {
-          if (log.eventIds.has(event.id)) {
+          if (log.eventIds.has(event.id) || stagedEventIds.has(event.id)) {
             throw new EventConflictError(
               "event IDs conflict with stored document history",
               {
@@ -216,16 +233,23 @@ export const createInMemoryEventStore = (options?: {
         }
 
         const row: StoredBatch = {
-          id: BigInt(log.ordered.length + 1),
+          id: BigInt(log.ordered.length + stagedRows.length + 1),
           batchId: batch.batchId,
           payloadHash,
           payload: batch,
         };
-        log.batchesById.set(batch.batchId, row);
-        log.ordered.push(row);
+        stagedRows.push(row);
         for (const event of batch.events) {
-          log.eventIds.add(event.id);
+          stagedEventIds.add(event.id);
           availableEventIds.add(event.id);
+        }
+      }
+
+      for (const row of stagedRows) {
+        log.batchesById.set(row.batchId, row);
+        log.ordered.push(row);
+        for (const event of row.payload.events) {
+          log.eventIds.add(event.id);
         }
       }
     } finally {

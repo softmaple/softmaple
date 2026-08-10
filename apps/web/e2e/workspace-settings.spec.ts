@@ -71,11 +71,22 @@ test("missing workspace Settings slug returns 404", async ({ page }) => {
 test("authenticated viewer gets 404 for a missing workspace Settings slug", async ({
   page,
 }) => {
-  // Seed helpers only create one shared workspace where viewer is a member, so
-  // this covers a truly missing slug (not a separate foreign-workspace seed).
   await login(page, seed.viewer);
   const response = await page.goto(
     "/workspace/does-not-exist-zzzzzzzzzzzz/settings",
+  );
+  expect(response?.status()).toBe(404);
+  await expect(page.getByText(/This page could not be found/i)).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/);
+});
+
+test("non-member viewer gets 404 for an owner-only workspace Settings route", async ({
+  page,
+}) => {
+  // RLS hides inaccessible workspaces as missing → ActionResult NOT_FOUND → notFound().
+  await login(page, seed.viewer);
+  const response = await page.goto(
+    `/workspace/${seed.ownerOnlyWorkspace.slug}/settings`,
   );
   expect(response?.status()).toBe(404);
   await expect(page.getByText(/This page could not be found/i)).toBeVisible();

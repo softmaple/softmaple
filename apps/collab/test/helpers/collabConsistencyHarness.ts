@@ -24,11 +24,7 @@ import {
 } from "@softmaple/collab-runtime";
 import { randomUUID } from "node:crypto";
 import { createRealtimeRoomFanout } from "../../server/adapters/redis-room-fanout";
-import {
-  documentRealtimeChannel,
-  LocalTopicHub,
-  TopicBridge,
-} from "../../server/utils/realtime";
+import { LocalTopicHub, TopicBridge } from "../../server/utils/realtime";
 import type {
   RealtimeBus,
   RealtimeHandler,
@@ -681,9 +677,11 @@ export const createCollabConsistencyHarness = (options?: {
       bridge,
       room,
       localPeerCount: (id) =>
-        hub.localSubscriberCount(
-          documentRealtimeChannel(id, COLLAB_PROTOCOL_VERSION),
-        ),
+        id === documentId
+          ? [...actorByPeerId.keys()].filter((peerId) =>
+              peerId.startsWith(`${name}:`),
+            ).length
+          : 0,
       async connectClient(connectOptions) {
         const client = createClient(instance, connectOptions);
         await client.connect();

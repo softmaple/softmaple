@@ -2,8 +2,8 @@ import type { RoomPeer } from "@softmaple/collab-runtime";
 import { randomUUID } from "node:crypto";
 
 export interface NitroPeerLike {
-  close(code: number, reason: string): void | Promise<void>;
-  send(message: unknown): void | Promise<void>;
+  close(code: number, reason: string): unknown;
+  send(message: unknown): unknown;
 }
 
 const roomPeers = new WeakMap<NitroPeerLike, RoomPeer>();
@@ -14,8 +14,12 @@ export const toNitroRoomPeer = (peer: NitroPeerLike): RoomPeer => {
 
   const adapted: RoomPeer = {
     id: randomUUID(),
-    close: (code, reason) => peer.close(code, reason),
-    send: (message) => peer.send(message),
+    async close(code, reason) {
+      await peer.close(code, reason);
+    },
+    async send(message) {
+      await peer.send(message);
+    },
   };
   roomPeers.set(peer, adapted);
   return adapted;

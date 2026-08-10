@@ -46,8 +46,17 @@ export async function updateSession(request: NextRequest) {
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();
+    const returnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
     url.pathname = "/login";
-    return NextResponse.redirect(url);
+    url.search = "";
+    url.searchParams.set("next", returnPath);
+    const redirectResponse = NextResponse.redirect(url);
+    // Preserve any cookies Supabase refreshed/cleared during getUser().
+    // ResponseCookies has no setAll(); copy each cookie from supabaseResponse.
+    for (const cookie of supabaseResponse.cookies.getAll()) {
+      redirectResponse.cookies.set(cookie);
+    }
+    return redirectResponse;
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.

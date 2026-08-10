@@ -135,6 +135,29 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+  // Owner-only workspace: trigger adds the owner member; viewer/editor stay out.
+  const ownerOnlyWorkspace = await admin
+    .from("workspaces")
+    .insert({
+      description: `Owner-only Playwright run ${parsed.data.runId}`,
+      owner_id: owner.data.user.id,
+      slug: `e2e-owner-only-${parsed.data.runId}-${suffix}`,
+      title: `E2E Owner Only ${parsed.data.runId}`,
+    })
+    .select("id, slug, title")
+    .single();
+  if (ownerOnlyWorkspace.error !== null) {
+    await Promise.all([
+      admin.auth.admin.deleteUser(owner.data.user.id),
+      admin.auth.admin.deleteUser(editor.data.user.id),
+      admin.auth.admin.deleteUser(viewer.data.user.id),
+    ]);
+    return NextResponse.json(
+      { error: "Owner-only workspace seed failed" },
+      { status: 500 },
+    );
+  }
+
   const membership = await admin.from("workspace_members").insert([
     {
       invited_by: owner.data.user.id,
@@ -175,6 +198,7 @@ export async function POST(request: Request) {
     document: document.data,
     editor: { email: emails.editor, password },
     owner: { email: emails.owner, password },
+    ownerOnlyWorkspace: ownerOnlyWorkspace.data,
     viewer: { email: emails.viewer, password },
     workspace: workspace.data,
   });

@@ -1,5 +1,11 @@
 import type { Page } from "@playwright/test";
 
+type SeedWorkspace = {
+  readonly id: number;
+  readonly slug: string;
+  readonly title: string;
+};
+
 export type E2ESeed = {
   readonly document: {
     readonly id: string;
@@ -8,12 +14,11 @@ export type E2ESeed = {
   };
   readonly editor: { readonly email: string; readonly password: string };
   readonly owner: { readonly email: string; readonly password: string };
+  /** Workspace owned by seed.owner with no viewer/editor membership. */
+  readonly ownerOnlyWorkspace: SeedWorkspace;
   readonly viewer: { readonly email: string; readonly password: string };
-  readonly workspace: {
-    readonly id: number;
-    readonly slug: string;
-    readonly title: string;
-  };
+  /** Shared workspace where viewer is a member. */
+  readonly workspace: SeedWorkspace;
 };
 
 const seedRequest = async (action: "cleanup" | "seed", runId: string) => {

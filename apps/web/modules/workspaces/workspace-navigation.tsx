@@ -32,9 +32,15 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           Overview
         </Button>
       </Link>
+      {/*
+        Settings/Members are auth- and membership-sensitive admin routes.
+        Speculative Link prefetch can race session refresh and historically
+        collapsed ActionResult failures into cacheable 404s; load on navigate.
+      */}
       <Link
         href={`/workspace/${workspaceSlug}/settings?tab=members`}
         onClick={onNavigate}
+        prefetch={false}
       >
         <Button
           className="w-full justify-start"
@@ -48,7 +54,11 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           Members
         </Button>
       </Link>
-      <Link href={`/workspace/${workspaceSlug}/settings`} onClick={onNavigate}>
+      <Link
+        href={`/workspace/${workspaceSlug}/settings`}
+        onClick={onNavigate}
+        prefetch={false}
+      >
         <Button
           variant={
             isSettings && searchParams.get("tab") !== "members"

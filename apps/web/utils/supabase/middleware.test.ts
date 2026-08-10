@@ -22,7 +22,14 @@ describe("updateSession protected-route redirects", () => {
     vi.clearAllMocks();
     createServerClient.mockImplementation((_url, _key, options) => {
       options.cookies.getAll();
-      options.cookies.setAll([{ name: "sb", value: "1", options: {} }]);
+      options.cookies.setAll([
+        { name: "sb-access-token", value: "refreshed", options: {} },
+        {
+          name: "sb-refresh-token",
+          value: "",
+          options: { maxAge: 0 },
+        },
+      ]);
       return {
         auth: {
           getUser,
@@ -55,6 +62,8 @@ describe("updateSession protected-route redirects", () => {
     expect(response.headers.get("location")).toBe(
       "http://localhost:3000/login?next=%2Fworkspace%2Facme%2Fsettings%3Ftab%3Dmembers",
     );
+    expect(response.cookies.get("sb-access-token")?.value).toBe("refreshed");
+    expect(response.cookies.get("sb-refresh-token")?.value).toBe("");
   });
 
   it("allows authenticated workspace requests through", async () => {
@@ -78,5 +87,6 @@ describe("updateSession protected-route redirects", () => {
 
     const response = await updateSession(request as never);
     expect(response.status).toBe(200);
+    expect(response.cookies.get("sb-access-token")?.value).toBe("refreshed");
   });
 });

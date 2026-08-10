@@ -17,18 +17,20 @@ export default async function WorkspaceSettingsPage({
 }) {
   const { workspaceSlug } = await params;
   const { tab } = await searchParams;
-  const loginNext =
-    tab === "members"
-      ? `/workspace/${workspaceSlug}/settings?tab=members`
-      : `/workspace/${workspaceSlug}/settings`;
+  const failureContext = {
+    loginNext:
+      tab === "members"
+        ? `/workspace/${workspaceSlug}/settings?tab=members`
+        : `/workspace/${workspaceSlug}/settings`,
+    route: ROUTE,
+    workspaceSlug,
+  } as const;
 
   const workspace = requireWorkspaceRouteData(
     await cachedGetWorkspaceBySlug(workspaceSlug),
     {
-      loginNext,
+      ...failureContext,
       operation: "get_workspace_by_slug",
-      route: ROUTE,
-      workspaceSlug,
     },
   );
 
@@ -38,16 +40,12 @@ export default async function WorkspaceSettingsPage({
   ]);
 
   const membership = requireWorkspaceRouteData(membershipResult, {
-    loginNext,
+    ...failureContext,
     operation: "get_workspace_member_by_user_id",
-    route: ROUTE,
-    workspaceSlug,
   });
   const members = requireWorkspaceRouteData(membersResult, {
-    loginNext,
+    ...failureContext,
     operation: "list_workspace_members",
-    route: ROUTE,
-    workspaceSlug,
   });
 
   return (

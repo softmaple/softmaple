@@ -32,7 +32,9 @@ test("authenticated member can open Settings and Members from the workspace", as
 
   await settingsLink.click();
   await expect(page).toHaveURL(
-    new RegExp(`/workspace/${seed.workspace.slug}/settings`),
+    (url) =>
+      url.pathname === `/workspace/${seed.workspace.slug}/settings` &&
+      url.search === "",
   );
   await expect(page.getByLabel("Name")).toHaveValue(seed.workspace.title);
 
@@ -66,14 +68,14 @@ test("missing workspace Settings slug returns 404", async ({ page }) => {
   await expect(page.getByText(/This page could not be found/i)).toBeVisible();
 });
 
-test("inaccessible workspace Settings returns intentional 404", async ({
+test("authenticated viewer gets 404 for a missing workspace Settings slug", async ({
   page,
 }) => {
-  // Viewer is a member of the seeded workspace; use a slug they cannot see.
-  // RLS hides foreign private workspaces as missing → same 404 as not found.
+  // Seed helpers only create one shared workspace where viewer is a member, so
+  // this covers a truly missing slug (not a separate foreign-workspace seed).
   await login(page, seed.viewer);
   const response = await page.goto(
-    "/workspace/someone-elses-workspace-zzzz/settings",
+    "/workspace/does-not-exist-zzzzzzzzzzzz/settings",
   );
   expect(response?.status()).toBe(404);
   await expect(page.getByText(/This page could not be found/i)).toBeVisible();

@@ -9,26 +9,18 @@ import {
 } from "@softmaple/ui/components/dropdown-menu";
 import { Button } from "@softmaple/ui/components/button";
 import { ChevronDown, FileText, Plus, Settings } from "lucide-react";
-import { cachedGetWorkspaces } from "@/app/actions/workspaces";
+import type { WorkspaceSummary } from "@/app/actions/workspaces";
 import Link from "next/link";
 
 export type WorkspaceDropdownProps = {
   workspaceSlug: string;
-  workspacesResource: Awaited<ReturnType<typeof cachedGetWorkspaces>>;
+  workspaces: ReadonlyArray<WorkspaceSummary>;
 };
 
 export const WorkspaceDropdown: FC<WorkspaceDropdownProps> = (props) => {
-  const { workspaceSlug, workspacesResource } = props;
+  const { workspaceSlug, workspaces: workspaceSummaries } = props;
 
-  if (!workspacesResource.ok) {
-    return (
-      <div className="p-2 text-sm text-destructive">
-        {workspacesResource.message}
-      </div>
-    );
-  }
-
-  const workspaces = workspacesResource.data.map((workspace) => ({
+  const workspaces = workspaceSummaries.map((workspace) => ({
     ...workspace,
     key: workspace.id,
   }));

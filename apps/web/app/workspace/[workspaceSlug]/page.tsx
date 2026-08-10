@@ -43,15 +43,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function WorkspacePage({ params }: Props) {
   const { workspaceSlug } = await params;
-  const loginNext = `/workspace/${workspaceSlug}`;
-  const route = "/workspace/[workspaceSlug]";
+  const failureContext = {
+    loginNext: `/workspace/${workspaceSlug}`,
+    route: "/workspace/[workspaceSlug]",
+    workspaceSlug,
+  } as const;
   const workspace = requireWorkspaceRouteData(
     await cachedGetWorkspaceBySlug(workspaceSlug),
     {
-      loginNext,
+      ...failureContext,
       operation: "get_workspace_by_slug",
-      route,
-      workspaceSlug,
     },
   );
   const [documentsResult, documentCountResult, membersResult, roleResult] =
@@ -62,28 +63,20 @@ export default async function WorkspacePage({ params }: Props) {
       getWorkspaceMemberByUserId(workspace.id),
     ]);
   const documents = requireWorkspaceRouteData(documentsResult, {
-    loginNext,
+    ...failureContext,
     operation: "list_workspace_documents",
-    route,
-    workspaceSlug,
   });
   const documentCount = requireWorkspaceRouteData(documentCountResult, {
-    loginNext,
+    ...failureContext,
     operation: "count_workspace_documents",
-    route,
-    workspaceSlug,
   });
   const members = requireWorkspaceRouteData(membersResult, {
-    loginNext,
+    ...failureContext,
     operation: "list_workspace_members",
-    route,
-    workspaceSlug,
   });
   const membership = requireWorkspaceRouteData(roleResult, {
-    loginNext,
+    ...failureContext,
     operation: "get_workspace_member_by_user_id",
-    route,
-    workspaceSlug,
   });
 
   const canEdit =

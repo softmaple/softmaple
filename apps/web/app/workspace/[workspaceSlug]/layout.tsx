@@ -18,14 +18,15 @@ type Props = {
 export default async function WorkspaceLayoutPage(props: Props) {
   const { params, children } = props;
   const { workspaceSlug } = await params;
-  const loginNext = `/workspace/${workspaceSlug}`;
-  const route = "/workspace/[workspaceSlug]";
+  const failureContext = {
+    loginNext: `/workspace/${workspaceSlug}`,
+    route: "/workspace/[workspaceSlug]",
+    workspaceSlug,
+  } as const;
 
   const workspaces = requireWorkspaceRouteData(await cachedGetWorkspaces(), {
-    loginNext,
+    ...failureContext,
     operation: "get_workspaces",
-    route,
-    workspaceSlug,
   });
   const currentWorkspace = workspaces.find(
     (workspace) => workspace.slug === workspaceSlug,
@@ -41,19 +42,15 @@ export default async function WorkspaceLayoutPage(props: Props) {
     documentsResource === null
       ? []
       : requireWorkspaceRouteData(documentsResource, {
-          loginNext,
+          ...failureContext,
           operation: "list_workspace_documents",
-          route,
-          workspaceSlug,
         });
   const membership =
     membershipResource === null
       ? null
       : requireWorkspaceRouteData(membershipResource, {
-          loginNext,
+          ...failureContext,
           operation: "get_workspace_member_by_user_id",
-          route,
-          workspaceSlug,
         });
   const canEdit =
     membership?.role === WORKSPACE_ROLE.Owner ||
@@ -69,7 +66,7 @@ export default async function WorkspaceLayoutPage(props: Props) {
       >
         <WorkspaceDropdown
           workspaceSlug={workspaceSlug}
-          workspacesResource={{ ok: true, data: workspaces }}
+          workspaces={workspaces}
         />
       </WorkspaceMobileSidebar>
 
@@ -81,7 +78,7 @@ export default async function WorkspaceLayoutPage(props: Props) {
       >
         <WorkspaceDropdown
           workspaceSlug={workspaceSlug}
-          workspacesResource={{ ok: true, data: workspaces }}
+          workspaces={workspaces}
         />
       </WorkspaceDesktopSidebar>
 

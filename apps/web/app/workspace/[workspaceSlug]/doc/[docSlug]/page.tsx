@@ -28,9 +28,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function DocumentPage({ params }: Props) {
   const { docSlug, workspaceSlug } = await params;
-  const loginNext = `/workspace/${workspaceSlug}/doc/${docSlug}`;
+
+  if (docSlug === "new") {
+    return <NewDocumentForm workspaceSlug={workspaceSlug} />;
+  }
+
   const failureContext = {
-    loginNext,
+    loginNext: `/workspace/${workspaceSlug}/doc/${docSlug}`,
     route: ROUTE,
     workspaceSlug,
   } as const;
@@ -53,10 +57,6 @@ export default async function DocumentPage({ params }: Props) {
     ...failureContext,
     operation: "get_current_profile",
   });
-
-  if (docSlug === "new") {
-    return <NewDocumentForm workspaceSlug={workspaceSlug} />;
-  }
 
   const [documentResult, membershipResult] = await Promise.all([
     cachedGetDocumentBySlug(workspaceSlug, docSlug),

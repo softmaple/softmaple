@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTION_ERROR_CODE, actionFailure, actionSuccess } from "./result";
 
 const notFound = vi.hoisted(() =>
@@ -29,6 +29,10 @@ describe("requireWorkspaceRouteData", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("returns data for successful results", async () => {

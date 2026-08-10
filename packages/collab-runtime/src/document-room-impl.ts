@@ -41,7 +41,10 @@ const CLOSE_CODE = {
 
 const SYSTEM_SCHEDULER: DocumentRoomScheduler = Object.freeze({
   now: () => Date.now(),
-  repeat(intervalMs, task) {
+  repeat(
+    intervalMs: number,
+    task: () => void | Promise<void>,
+  ): DocumentRoomScheduledTask {
     const handle = globalThis.setInterval(() => {
       void Promise.resolve(task()).catch(() => undefined);
     }, intervalMs);
@@ -653,19 +656,6 @@ export const createDocumentRoom = (
       );
       return;
     }
-    if (session.accessMode !== COLLAB_ACCESS_MODE.Authenticated) {
-      await safeSend(
-        state.peer,
-        errorMessage(
-          COLLAB_ERROR_CODE.Forbidden,
-          "Public document sessions are read-only",
-          false,
-          session.protocolVersion,
-        ),
-      );
-      return;
-    }
-
     let batchIds: ReadonlyArray<string>;
     try {
       batchIds = await services.events.append(

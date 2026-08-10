@@ -41,7 +41,8 @@
         "group": "Design Documents",
         "pages": [
           "design/awareness-and-presence",
-          "design/collaboration-layers"
+          "design/collaboration-layers",
+          "design/collaboration-consistency"
         ]
       },
       {

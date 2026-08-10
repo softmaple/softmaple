@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, extname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Linter } from "eslint";
+import typescriptParser from "@typescript-eslint/parser";
 
 import {
   blockModelBindingCollaborationPatterns,
   blockModelCollaborationPatterns,
   collabProtocolCollaborationPatterns,
+  collabRuntimeCollaborationPatterns,
   egWalkerCollaborationConfig,
   egWalkerCollaborationPatterns,
 } from "../collaboration-layers.js";
@@ -18,17 +23,24 @@ import {
  *
  * @param {Array<object>} patterns
  * @param {string} code
+ * @param {string} [filename]
  * @returns {ReturnType<Linter["verify"]>}
  */
-function lintWithPatterns(patterns, code) {
+function lintWithPatterns(patterns, code, filename = "fixture.ts") {
   const linter = new Linter();
-  return linter.verify(code, [
-    {
-      rules: {
-        "no-restricted-imports": ["error", { patterns }],
+  return linter.verify(
+    code,
+    [
+      {
+        files: ["**/*.ts", "**/*.tsx"],
+        languageOptions: { parser: typescriptParser },
+        rules: {
+          "no-restricted-imports": ["error", { patterns }],
+        },
       },
-    },
-  ]);
+    ],
+    { filename },
+  );
 }
 
 /**
@@ -47,6 +59,43 @@ function lintWithConfig(flatConfig, code, relativeFilename) {
 
 function findRestrictedImportMessages(messages) {
   return messages.filter((m) => m.ruleId === "no-restricted-imports");
+}
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+function typescriptFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return typescriptFiles(path);
+    return [".ts", ".tsx"].includes(extname(entry.name)) ? [path] : [];
+  });
+}
+
+function assertSourceTreeConforms(relativeDirectory, patterns) {
+  const directory = resolve(REPO_ROOT, relativeDirectory);
+  for (const filename of typescriptFiles(directory)) {
+    const messages = lintWithPatterns(
+      patterns,
+      readFileSync(filename, "utf8"),
+      filename,
+    );
+    const fatal = messages.filter((message) => message.fatal);
+    assert.equal(
+      fatal.length,
+      0,
+      `${relative(REPO_ROOT, filename)} could not be parsed:\n${fatal
+        .map((message) => message.message)
+        .join("\n")}`,
+    );
+    const restricted = findRestrictedImportMessages(messages);
+    assert.equal(
+      restricted.length,
+      0,
+      `${relative(REPO_ROOT, filename)} violates collaboration layering:\n${restricted
+        .map((message) => message.message)
+        .join("\n")}`,
+    );
+  }
 }
 
 test("eg-walker patterns forbid importing @softmaple/awareness", () => {
@@ -78,6 +127,8 @@ test("eg-walker patterns forbid reverse imports from block models and bindings",
     "@softmaple/binding-lexical",
     "@softmaple/binding-lexical/react",
     "@softmaple/collab-protocol",
+    "@softmaple/collab-runtime",
+    "@softmaple/collab-runtime/internal/contracts",
   ]) {
     const messages = lintWithPatterns(
       egWalkerCollaborationPatterns,
@@ -168,6 +219,7 @@ test("block-model patterns allow EG-walker but forbid awareness, bindings, and e
     "@softmaple/binding-lexical",
     "@softmaple/binding-lexical/react",
     "@softmaple/collab-protocol",
+    "@softmaple/collab-runtime",
     "lexical",
     "@lexical/react/LexicalComposer",
   ]) {
@@ -195,6 +247,7 @@ test("block-model binding patterns prevent bypassing the model API", () => {
     "@softmaple/eg-walker",
     "@softmaple/eg-walker/anchors",
     "@softmaple/collab-protocol",
+    "@softmaple/collab-runtime",
   ]) {
     const messages = lintWithPatterns(
       blockModelBindingCollaborationPatterns,
@@ -214,6 +267,7 @@ test("collab-protocol allows block-model but forbids host and higher layers", ()
     "@softmaple/awareness",
     "@softmaple/eg-walker",
     "@softmaple/binding-lexical",
+    "@softmaple/collab-runtime",
     "@softmaple/db",
     "@prisma/adapter-pg",
     "@prisma/client",
@@ -239,4 +293,55 @@ test("collab-protocol allows block-model but forbids host and higher layers", ()
     'import { parseRichTextEventBatch } from "@softmaple/block-model";\n',
   );
   assert.equal(findRestrictedImportMessages(allowed).length, 0);
+});
+
+test("collab-runtime allows protocol contracts but forbids host infrastructure", () => {
+  for (const specifier of [
+    "@softmaple/awareness",
+    "@softmaple/eg-walker",
+    "@softmaple/binding-lexical",
+    "@softmaple/db",
+    "@softmaple/editor",
+    "@softmaple/ui",
+    "@cloudflare/workers-types",
+    "@prisma/client",
+    "@supabase/supabase-js",
+    "cloudflare:workers",
+    "h3",
+    "ioredis",
+    "next/server",
+    "nitro",
+    "node:crypto",
+    "prisma",
+    "react",
+    "lexical",
+    "lodash",
+  ]) {
+    const messages = lintWithPatterns(
+      collabRuntimeCollaborationPatterns,
+      `import x from "${specifier}";\n`,
+    );
+    assert.equal(
+      findRestrictedImportMessages(messages).length,
+      1,
+      `expected ${specifier} to be restricted`,
+    );
+  }
+  const allowed = lintWithPatterns(
+    collabRuntimeCollaborationPatterns,
+    'import type { ClientCollabMessage } from "@softmaple/collab-protocol";\nimport type { RichTextEventBatch } from "@softmaple/block-model";\nimport type { Local } from "./local";\nimport type { Parent } from "../parent";\n',
+  );
+  assert.equal(findRestrictedImportMessages(allowed).length, 0);
+});
+
+test("collaboration package source trees obey their dependency direction", () => {
+  for (const [directory, patterns] of [
+    ["packages/eg-walker/src", egWalkerCollaborationPatterns],
+    ["packages/block-model/src", blockModelCollaborationPatterns],
+    ["packages/binding-lexical/src", blockModelBindingCollaborationPatterns],
+    ["packages/collab-protocol/src", collabProtocolCollaborationPatterns],
+    ["packages/collab-runtime/src", collabRuntimeCollaborationPatterns],
+  ]) {
+    assertSourceTreeConforms(directory, patterns);
+  }
 });

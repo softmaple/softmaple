@@ -43,15 +43,22 @@ jobs:
         run: pnpm format:check
       - name: Lint Web with zero warnings
         run: pnpm --filter @softmaple/web lint
+      - name: Lint collaboration runtime boundaries with zero warnings
+        run: pnpm --filter @softmaple/collab-runtime lint
+      - name: Lint awareness collaboration boundaries
+        run: pnpm --filter @softmaple/awareness exec biome lint --only=style/noRestrictedImports .
+      - name: Check workspace package boundaries
+        run: pnpm turbo boundaries
       - name: Typecheck affected product packages
-        run: pnpm turbo run typecheck --filter=@softmaple/web --filter=@softmaple/collab --filter=@softmaple/editor --filter=@softmaple/awareness --filter=@softmaple/md2latex --filter=@softmaple/collab-protocol
+        run: pnpm turbo run typecheck --filter=@softmaple/web --filter=@softmaple/collab --filter=@softmaple/editor --filter=@softmaple/awareness --filter=@softmaple/md2latex --filter=@softmaple/collab-protocol --filter=@softmaple/collab-runtime
       - name: Run product unit and integration tests
         run: |
+          pnpm --filter @softmaple/eslint-config test
           pnpm --filter @softmaple/web test -- --run
           pnpm --filter @softmaple/collab test
           pnpm --filter @softmaple/collab-protocol test
           pnpm --filter @softmaple/md2latex test -- --run
           pnpm --filter @softmaple/editor exec vitest run --project=unit src/markdown.test.ts
           pnpm --filter @softmaple/awareness exec vitest run --project=unit
-      - name: Build Web and Collab
-        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
+      - name: Build Web, Collab, and collaboration runtime
+        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab --filter=@softmaple/collab-runtime

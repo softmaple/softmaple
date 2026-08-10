@@ -11,8 +11,9 @@ This document records the **current** collaboration consistency model after
 [`collaboration-models.md`](./collaboration-models.md) (engine contracts).
 
 It describes what the Nitro/Postgres collaboration host and browser session
-guarantee today. It is not an aspirational redesign and does not introduce a
-`DocumentRoom` or Durable Objects runtime.
+guarantee today. The runtime-independent `DocumentRoom` contracts are defined
+in [`collaboration-runtime.md`](./collaboration-runtime.md), but production is
+not wired to them yet. This page does not describe a Durable Objects runtime.
 
 ## Durable write invariants
 

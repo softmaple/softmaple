@@ -8,7 +8,9 @@ description: Layering boundaries between the EG-walker sequence core, block mode
 This document is the **source of truth** for how Softmaple's real-time
 collaboration code is layered. It defines what each layer owns, what it
 must not depend on, and how model bindings and awareness compose inside
-`apps/*`.
+`apps/*`. Durable write invariants and `EventConflictError` semantics are
+documented in
+[`collaboration-consistency.md`](./collaboration-consistency.md).
 
 The split is enforced by shared ESLint `no-restricted-imports` patterns and
 awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).

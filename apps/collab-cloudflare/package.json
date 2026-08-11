@@ -1,0 +1,31 @@
+{
+  "name": "@softmaple/collab-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "cf-typegen": "wrangler types --strict-vars=false",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run --max-workers=1 --no-isolate",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json"
+  },
+  "dependencies": {
+    "@softmaple/block-model": "workspace:*",
+    "@softmaple/collab-protocol": "workspace:*",
+    "@softmaple/collab-runtime": "workspace:*",
+    "@softmaple/db": "workspace:*",
+    "@supabase/supabase-js": "^2.112.2"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.0",
+    "@softmaple/eslint-config": "workspace:*",
+    "@softmaple/typescript-config": "workspace:*",
+    "@types/node": "^24.10.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.1"
+  }
+}

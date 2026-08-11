@@ -241,4 +241,16 @@ describe("Cloudflare DocumentRoomDO", () => {
       error: "Forbidden origin",
     });
   });
+
+  it("rejects a missing browser origin before upgrading", async () => {
+    const response = await exports.default.fetch(
+      new Request("https://collab.example/collab/document", {
+        headers: { Upgrade: "websocket" },
+      }),
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
+  });
 });

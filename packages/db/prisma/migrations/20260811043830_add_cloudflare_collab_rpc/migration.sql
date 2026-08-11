@@ -196,7 +196,18 @@ BEGIN
                     p_actor_id
                 )
                 RETURNING id INTO v_batch_row_id;
+            EXCEPTION WHEN unique_violation THEN
+                RAISE EXCEPTION USING
+                    ERRCODE = 'P0001',
+                    MESSAGE = jsonb_build_object(
+                        'kind', 'conflict',
+                        'conflictType', 'batch-payload-conflict',
+                        'documentId', p_document_id,
+                        'batchIds', jsonb_build_array(v_batch_id)
+                    )::TEXT;
+            END;
 
+            BEGIN
                 INSERT INTO public.document_event_ids (
                     document_id,
                     event_id,
@@ -287,6 +298,11 @@ GRANT INSERT ON TABLE
     public.document_event_batches,
     public.document_event_ids
 TO service_role;
+GRANT UPDATE (updated_at, updated_by) ON TABLE public.documents TO service_role;
+-- PostgreSQL row-locking clauses require UPDATE on at least one column. The
+-- RPC never updates membership data; this narrow audit-column grant only
+-- permits FOR SHARE to protect the authorization check from concurrent edits.
+GRANT UPDATE (updated_at) ON TABLE public.workspace_members TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.document_event_batches_id_seq TO service_role;
 GRANT EXECUTE ON FUNCTION public.append_document_event_batches(UUID, UUID, JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.read_document_event_page(UUID, BIGINT, INTEGER) TO service_role;

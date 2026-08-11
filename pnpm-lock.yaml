@@ -98,6 +98,9 @@ importers:
       '@softmaple/collab-runtime':
         specifier: workspace:*
         version: link:../../packages/collab-runtime
+      '@softmaple/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@supabase/supabase-js':
         specifier: ^2.112.2
         version: 2.112.2

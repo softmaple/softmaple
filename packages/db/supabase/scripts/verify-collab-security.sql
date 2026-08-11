@@ -253,8 +253,14 @@ BEGIN
         'service_role',
         'public.read_document_event_page(uuid,bigint,integer)',
         'EXECUTE'
+    ) OR NOT has_column_privilege(
+        'service_role', 'public.documents', 'updated_at', 'UPDATE'
+    ) OR NOT has_column_privilege(
+        'service_role', 'public.documents', 'updated_by', 'UPDATE'
+    ) OR NOT has_column_privilege(
+        'service_role', 'public.workspace_members', 'updated_at', 'UPDATE'
     ) THEN
-        RAISE EXCEPTION 'collaboration RPC execute grants are unsafe';
+        RAISE EXCEPTION 'collaboration RPC grants are unsafe';
     END IF;
 
     IF NOT EXISTS (

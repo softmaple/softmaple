@@ -10,11 +10,11 @@ import {
   DocumentEventAuthorizationError,
   DocumentEventConflictError,
   type DocumentEventConflictType,
-  type DocumentEventStore,
   DocumentEventStoreUnavailableError,
   type DocumentAccess,
-  type DocumentSessionHooks,
 } from "@softmaple/collab-runtime";
+import type { DocumentBackend } from "./room-services";
+import type { CollabDatabase } from "./supabaseTypes";
 
 interface SupabaseBackendEnv {
   readonly SUPABASE_PUBLISHABLE_KEY: string;
@@ -41,6 +41,10 @@ interface RpcErrorShape {
   readonly message?: string;
   readonly missingParentIds?: ReadonlyArray<string>;
 }
+
+type CollabSupabaseClient = SupabaseClient<CollabDatabase>;
+type AppendRpcBatches =
+  CollabDatabase["public"]["Functions"]["append_document_event_batches"]["Args"]["p_batches"];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -172,20 +176,27 @@ const clientOptions = {
 } as const;
 
 const createClients = (env: SupabaseBackendEnv) => ({
-  admin: createClient(
+  admin: createClient<CollabDatabase>(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
     clientOptions,
   ),
-  auth: createClient(
+  auth: createClient<CollabDatabase>(
     env.SUPABASE_URL,
     env.SUPABASE_PUBLISHABLE_KEY,
     clientOptions,
   ),
 });
 
+const publicDocumentAccess = (): DocumentAccess => ({
+  accessMode: COLLAB_ACCESS_MODE.Public,
+  actorId: null,
+  canWrite: false,
+  role: null,
+});
+
 const authorizePublic = async (
-  admin: SupabaseClient,
+  admin: CollabSupabaseClient,
   documentId: string,
 ): Promise<DocumentAccess | null> => {
   const { data, error } = await admin
@@ -197,17 +208,12 @@ const authorizePublic = async (
   if (error !== null) throw error;
   const document = documentRow(data as unknown);
   if (document === null || !document.is_public) return null;
-  return {
-    accessMode: COLLAB_ACCESS_MODE.Public,
-    actorId: null,
-    canWrite: false,
-    role: null,
-  };
+  return publicDocumentAccess();
 };
 
 const authorizeAuthenticated = async (
-  auth: SupabaseClient,
-  admin: SupabaseClient,
+  auth: CollabSupabaseClient,
+  admin: CollabSupabaseClient,
   token: string,
   documentId: string,
 ): Promise<DocumentAccess | null> => {
@@ -239,7 +245,9 @@ const authorizeAuthenticated = async (
     .maybeSingle();
   if (memberError !== null) throw memberError;
   const member = memberRow(rawMember as unknown);
-  if (member === null) return null;
+  if (member === null) {
+    return document.is_public ? publicDocumentAccess() : null;
+  }
 
   return {
     accessMode: COLLAB_ACCESS_MODE.Authenticated,
@@ -250,8 +258,8 @@ const authorizeAuthenticated = async (
 };
 
 const authorize = async (
-  auth: SupabaseClient,
-  admin: SupabaseClient,
+  auth: CollabSupabaseClient,
+  admin: CollabSupabaseClient,
   credential: CollabCredential,
   documentId: string,
 ): Promise<DocumentAccess | null> =>
@@ -259,17 +267,14 @@ const authorize = async (
     ? authorizePublic(admin, documentId)
     : authorizeAuthenticated(auth, admin, credential.token, documentId);
 
-export interface SupabaseDocumentBackend {
-  readonly events: DocumentEventStore;
-  readonly sessions: DocumentSessionHooks;
-}
+export type SupabaseDocumentBackend = DocumentBackend;
 
 export const createSupabaseDocumentBackend = (
   env: SupabaseBackendEnv,
 ): SupabaseDocumentBackend => {
   const { admin, auth } = createClients(env);
 
-  const events: DocumentEventStore = {
+  const events: DocumentBackend["events"] = {
     async append(documentId, actorId, batches) {
       const rpcBatches = await Promise.all(
         batches.map(async (batch) => ({
@@ -279,7 +284,9 @@ export const createSupabaseDocumentBackend = (
       );
       const { data, error } = await admin.rpc("append_document_event_batches", {
         p_actor_id: actorId,
-        p_batches: rpcBatches,
+        // RichTextEventBatch is protocol-validated JSON, but its named
+        // interface intentionally lacks Json's open index signature.
+        p_batches: rpcBatches as unknown as AppendRpcBatches,
         p_document_id: documentId,
       });
       if (error !== null) throw appendError(documentId, error);
@@ -331,7 +338,7 @@ export const createSupabaseDocumentBackend = (
     },
   };
 
-  const sessions: DocumentSessionHooks = {
+  const sessions: DocumentBackend["sessions"] = {
     async authorize(request) {
       return authorize(auth, admin, request.credential, request.documentId);
     },

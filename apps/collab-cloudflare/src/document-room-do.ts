@@ -95,7 +95,15 @@ class DurableObjectRoomPeer implements RoomPeer {
           peerId: this.id,
         });
         this.close(1011, "Collaboration runtime failure");
-        await this.cleanup();
+        try {
+          await this.cleanup();
+        } catch (cleanupError) {
+          logError(cleanupError, {
+            documentId: this.documentId,
+            messageType: "websocket-cleanup",
+            peerId: this.id,
+          });
+        }
       });
   }
 
@@ -203,7 +211,22 @@ export class DocumentRoomDO extends DurableObject<Env> {
     const server = pair[1];
     server.accept();
     const peer = new DurableObjectRoomPeer(documentId, this.room, server);
-    await this.room.join(peer);
+    try {
+      await this.room.join(peer);
+    } catch (error) {
+      logError(error, { documentId, messageType: "room-join" });
+      try {
+        if (server.readyState < 2) {
+          server.close(1011, "Document room unavailable");
+        }
+      } catch (closeError) {
+        logError(closeError, { documentId, messageType: "room-join-close" });
+      }
+      return Response.json(
+        { error: "Document room unavailable" },
+        { status: 503 },
+      );
+    }
     peer.start();
     return new Response(null, { status: 101, webSocket: client });
   }

@@ -6,7 +6,12 @@ import {
   type LegacyAuthMessage,
   type ServerCollabMessage,
 } from "@softmaple/collab-protocol";
-import { errorMessage, logError, MAX_MESSAGE_BYTES } from "./constants";
+import {
+  errorMessage,
+  INITIAL_AUTH_TIMEOUT_MS,
+  logError,
+  MAX_MESSAGE_BYTES,
+} from "./constants";
 import { documentRoomPath, normalizeDocumentId } from "./document-id";
 
 const textFromMessage = (message: string | ArrayBuffer): string =>
@@ -28,6 +33,7 @@ const isAllowedOrigin = (request: Request, env: Env): boolean => {
 
 class DocumentSocketProxy {
   private closed = false;
+  private initialAuthTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: Promise<void> = Promise.resolve();
   private upstream: WebSocket | null = null;
 
@@ -37,6 +43,11 @@ class DocumentSocketProxy {
   ) {}
 
   start(): void {
+    this.initialAuthTimer = setTimeout(() => {
+      if (this.upstream === null) {
+        this.close(1008, "Authentication timed out");
+      }
+    }, INITIAL_AUTH_TIMEOUT_MS);
     this.client.addEventListener("message", (event) => {
       this.enqueue(async () => {
         await this.receive(event.data);
@@ -44,10 +55,12 @@ class DocumentSocketProxy {
     });
     this.client.addEventListener("close", () => {
       this.closed = true;
+      this.clearInitialAuthTimer();
       this.closeUpstream(1000, "Client closed");
     });
     this.client.addEventListener("error", () => {
       this.closed = true;
+      this.clearInitialAuthTimer();
       this.closeUpstream(1011, "Client transport error");
     });
   }
@@ -59,7 +72,7 @@ class DocumentSocketProxy {
         logError(error, { messageType: "websocket-proxy" });
         this.sendToClient(
           errorMessage(
-            COLLAB_ERROR_CODE.AuthenticationFailed,
+            COLLAB_ERROR_CODE.PersistenceFailed,
             "Collaboration is temporarily unavailable",
             true,
           ),
@@ -137,6 +150,14 @@ class DocumentSocketProxy {
     );
     const upstream = response.webSocket;
     if (response.status !== 101 || upstream === null) {
+      if (upstream !== null) {
+        try {
+          upstream.accept();
+          upstream.close(1011, "Document room upgrade failed");
+        } catch (closeError) {
+          logError(closeError, { messageType: "failed-upgrade-cleanup" });
+        }
+      }
       throw new Error(`DocumentRoomDO upgrade failed with ${response.status}`);
     }
     if (this.closed) {
@@ -146,6 +167,7 @@ class DocumentSocketProxy {
     }
 
     this.upstream = upstream;
+    this.clearInitialAuthTimer();
     upstream.accept();
     upstream.addEventListener("message", (event) => {
       if (!this.closed && this.client.readyState === 1) {
@@ -170,6 +192,7 @@ class DocumentSocketProxy {
   private close(code: number, reason: string): void {
     if (this.closed) return;
     this.closed = true;
+    this.clearInitialAuthTimer();
     this.closeUpstream(code, reason);
     if (this.client.readyState < 2) this.client.close(code, reason);
   }
@@ -181,6 +204,12 @@ class DocumentSocketProxy {
     ) {
       this.upstream.close(code, reason);
     }
+  }
+
+  private clearInitialAuthTimer(): void {
+    if (this.initialAuthTimer === null) return;
+    clearTimeout(this.initialAuthTimer);
+    this.initialAuthTimer = null;
   }
 }
 

@@ -11,7 +11,7 @@ import {
 import { logError } from "./constants";
 import { createSupabaseDocumentBackend } from "./supabase-backend";
 
-interface DocumentBackend {
+export interface DocumentBackend {
   readonly events: DocumentEventStore;
   readonly sessions: DocumentSessionHooks;
 }

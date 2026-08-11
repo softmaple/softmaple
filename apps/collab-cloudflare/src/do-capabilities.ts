@@ -47,7 +47,7 @@ export const createDurableObjectRoomFanout = (): RoomFanout => {
   return {
     async publish(event: CommittedDocumentEvent) {
       const current = [...(handlers.get(event.documentId) ?? [])];
-      await Promise.all(current.map((handler) => handler(event)));
+      await Promise.allSettled(current.map((handler) => handler(event)));
     },
 
     async subscribe(documentId, handler) {

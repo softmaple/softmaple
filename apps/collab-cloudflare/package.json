@@ -16,6 +16,7 @@
     "@softmaple/block-model": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
     "@softmaple/collab-runtime": "workspace:*",
+    "@softmaple/db": "workspace:*",
     "@supabase/supabase-js": "^2.112.2"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import {
 export const MESSAGE_RATE_LIMIT_WINDOW_MS = 10_000;
 export const MESSAGE_RATE_LIMIT_MAX = 120;
 export const MAX_MESSAGE_BYTES = 256 * 1024;
+export const INITIAL_AUTH_TIMEOUT_MS = 10_000;
 
 export const errorMessage = (
   code: CollabErrorCode,

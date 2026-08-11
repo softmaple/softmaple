@@ -12,12 +12,11 @@ export default defineConfig({
           SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
           SUPABASE_URL: "https://example.supabase.co",
         },
-        compatibilityDate: "2026-08-11",
-        compatibilityFlags: ["nodejs_compat"],
         durableObjects: {
           DOCUMENT_ROOMS: "TestDocumentRoomDO",
         },
       },
+      wrangler: { configPath: "./wrangler.jsonc" },
     }),
   ],
 });

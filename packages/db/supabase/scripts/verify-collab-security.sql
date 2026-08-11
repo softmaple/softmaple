@@ -12,7 +12,8 @@ BEGIN
             ('20260808230200_validate_collab_composite_fk'),
             ('20260808230300_harden_auth_profile_trigger'),
             ('20260808230400_fix_workspace_owner_membership_rls'),
-            ('20260809000000_core_v1')
+            ('20260809000000_core_v1'),
+            ('20260811043830_add_cloudflare_collab_rpc')
     )
     SELECT string_agg(expected.migration_name, ', ' ORDER BY migration_name)
     INTO missing_migrations
@@ -199,6 +200,12 @@ BEGIN
        OR to_regprocedure('public.remove_workspace_member(integer,uuid)') IS NULL
        OR to_regprocedure('public.set_document_public(uuid,boolean)') IS NULL
        OR to_regprocedure('public.get_public_document_by_slug(text)') IS NULL
+       OR to_regprocedure(
+            'public.append_document_event_batches(uuid,uuid,jsonb)'
+       ) IS NULL
+       OR to_regprocedure(
+            'public.read_document_event_page(uuid,bigint,integer)'
+       ) IS NULL
     THEN
         RAISE EXCEPTION 'a core behavior RPC is missing';
     END IF;
@@ -212,6 +219,42 @@ BEGIN
         'anon', 'public.get_public_document_by_slug(text)', 'EXECUTE'
     ) THEN
         RAISE EXCEPTION 'core RPC execute grants are unsafe';
+    END IF;
+
+    IF has_function_privilege(
+        'public',
+        'public.append_document_event_batches(uuid,uuid,jsonb)',
+        'EXECUTE'
+    ) OR has_function_privilege(
+        'anon',
+        'public.append_document_event_batches(uuid,uuid,jsonb)',
+        'EXECUTE'
+    ) OR has_function_privilege(
+        'authenticated',
+        'public.append_document_event_batches(uuid,uuid,jsonb)',
+        'EXECUTE'
+    ) OR NOT has_function_privilege(
+        'service_role',
+        'public.append_document_event_batches(uuid,uuid,jsonb)',
+        'EXECUTE'
+    ) OR has_function_privilege(
+        'public',
+        'public.read_document_event_page(uuid,bigint,integer)',
+        'EXECUTE'
+    ) OR has_function_privilege(
+        'anon',
+        'public.read_document_event_page(uuid,bigint,integer)',
+        'EXECUTE'
+    ) OR has_function_privilege(
+        'authenticated',
+        'public.read_document_event_page(uuid,bigint,integer)',
+        'EXECUTE'
+    ) OR NOT has_function_privilege(
+        'service_role',
+        'public.read_document_event_page(uuid,bigint,integer)',
+        'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'collaboration RPC execute grants are unsafe';
     END IF;
 
     IF NOT EXISTS (

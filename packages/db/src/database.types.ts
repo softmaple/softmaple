@@ -286,6 +286,14 @@ export type Database = {
         Args: { p_email: string; p_role: string; p_workspace_id: number };
         Returns: string;
       };
+      append_document_event_batches: {
+        Args: {
+          p_actor_id: string;
+          p_batches: Json;
+          p_document_id: string;
+        };
+        Returns: string[];
+      };
       get_public_document_by_slug: {
         Args: { p_slug: string };
         Returns: {
@@ -310,6 +318,14 @@ export type Database = {
       remove_workspace_member: {
         Args: { p_member_id: string; p_workspace_id: number };
         Returns: undefined;
+      };
+      read_document_event_page: {
+        Args: {
+          p_after_cursor: number;
+          p_document_id: string;
+          p_limit?: number;
+        };
+        Returns: Json;
       };
       set_document_public: {
         Args: { p_document_id: string; p_enabled: boolean };

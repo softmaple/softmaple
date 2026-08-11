@@ -11,6 +11,7 @@ node_modules
 .env.development.local
 .env.test.local
 .env.production.local
+.dev.vars*
 
 # Testing
 coverage
@@ -20,6 +21,7 @@ coverage
 
 # Vercel
 .vercel
+.wrangler
 
 # Build Outputs
 .next/

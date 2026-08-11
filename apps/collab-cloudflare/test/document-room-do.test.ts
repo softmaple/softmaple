@@ -506,8 +506,12 @@ describe("Cloudflare DocumentRoomDO", () => {
         sessionId: "hibernate-reader",
       }),
     ]);
-    expect(after[0]!.quota.count).toBeGreaterThan(before[0]!.quota.count);
-    expect(after[1]!.quota.count).toBeGreaterThan(before[1]!.quota.count);
+    expect(after[0]!.quota.windowStartedAt).toBe(
+      before[0]!.quota.windowStartedAt,
+    );
+    expect(after[1]!.quota.windowStartedAt).toBe(
+      before[1]!.quota.windowStartedAt,
+    );
     const audit = await sessionAudit(stub);
     expect(
       audit.refreshes

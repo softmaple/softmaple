@@ -61,6 +61,7 @@ interface PeerState {
   phase: PeerPhase;
   readonly peer: RoomPeer;
   queue: Promise<void>;
+  queuePending: number;
   session: DocumentSession | null;
 }
 
@@ -78,6 +79,7 @@ const createPeerState = (peer: RoomPeer): PeerState => ({
   phase: PEER_PHASE.Joined,
   peer,
   queue: Promise.resolve(),
+  queuePending: 0,
   session: null,
 });
 
@@ -805,6 +807,7 @@ class RuntimeDocumentRoom implements DocumentRoom {
       (state) =>
         state.phase === PEER_PHASE.Authenticated &&
         !state.leaveRequested &&
+        state.queuePending === 0 &&
         (state.authorizationExpiresAt <= now || state.leaseRefreshAt <= now),
     );
     await Promise.all(
@@ -1336,7 +1339,10 @@ class RuntimeDocumentRoom implements DocumentRoom {
   }
 
   private enqueue<T>(state: PeerState, work: () => Promise<T>): Promise<T> {
-    const operation = state.queue.then(work, work);
+    state.queuePending += 1;
+    const operation = state.queue.then(work, work).finally(() => {
+      state.queuePending -= 1;
+    });
     state.queue = operation.then(
       () => undefined,
       () => undefined,

@@ -795,13 +795,25 @@ describe("createDocumentRoom refresh semantics", () => {
   });
 
   it("does not hold the room maintenance lock across peer persistence I/O", async () => {
-    const fixture = createFixture();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 60_000,
+        leaseTtlMs: 120_000,
+        maxConnectionsPerDocument: 100,
+      },
+    });
     const slowRead =
       deferred<Awaited<ReturnType<DocumentEventStore["read"]>>>();
-    fixture.controls.readImpl = async (_documentId, afterCursor) =>
-      afterCursor === "0"
-        ? slowRead.promise
-        : { batches: BATCHES, complete: true, nextCursor: afterCursor };
+    fixture.controls.readImpl = async (_documentId, afterCursor) => {
+      if (afterCursor === "0") {
+        vi.setSystemTime(1_030);
+        return slowRead.promise;
+      }
+      return { batches: BATCHES, complete: true, nextCursor: afterCursor };
+    };
     const room = createRoom(fixture, {
       refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
     });
@@ -814,6 +826,7 @@ describe("createDocumentRoom refresh semantics", () => {
       authMessage({ sessionId: "fast-session" }),
     );
 
+    vi.setSystemTime(1_011);
     const slowRequest = room.receive(slowPeer, repairMessage());
     await vi.waitFor(() => expect(fixture.read).toHaveBeenCalledOnce());
     let fastFinished = false;

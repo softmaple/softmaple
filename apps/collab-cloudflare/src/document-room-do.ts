@@ -53,8 +53,10 @@ class DurableObjectRoomPeer implements RoomPeer {
   private attachment: DocumentWebSocketAttachment;
   private cleanedUp = false;
   private closeRequested = false;
+  private messageCount: number;
   private messageQueue: Promise<void> = Promise.resolve();
   private pendingAuth: AuthMessage | LegacyAuthMessage | null = null;
+  private windowStartedAt: number;
 
   constructor(
     private readonly room: DocumentRoom,
@@ -63,6 +65,8 @@ class DurableObjectRoomPeer implements RoomPeer {
   ) {
     this.attachment = attachment;
     this.id = attachment.peerId;
+    this.messageCount = attachment.quota.count;
+    this.windowStartedAt = attachment.quota.windowStartedAt;
   }
 
   get active(): boolean {
@@ -211,8 +215,9 @@ class DurableObjectRoomPeer implements RoomPeer {
 
   private consumeQuota(): boolean {
     const now = Date.now();
-    const quota = this.attachment.quota;
-    if (now - quota.windowStartedAt >= MESSAGE_RATE_LIMIT_WINDOW_MS) {
+    if (now - this.windowStartedAt >= MESSAGE_RATE_LIMIT_WINDOW_MS) {
+      this.messageCount = 1;
+      this.windowStartedAt = now;
       this.replaceAttachment(
         attachmentWithQuota(this.attachment, {
           count: 1,
@@ -221,13 +226,8 @@ class DurableObjectRoomPeer implements RoomPeer {
       );
       return true;
     }
-    if (quota.count >= MESSAGE_RATE_LIMIT_MAX) return false;
-    this.replaceAttachment(
-      attachmentWithQuota(this.attachment, {
-        ...quota,
-        count: quota.count + 1,
-      }),
-    );
+    if (this.messageCount >= MESSAGE_RATE_LIMIT_MAX) return false;
+    this.messageCount += 1;
     return true;
   }
 
@@ -468,7 +468,10 @@ export class DocumentRoomDO extends DurableObject<Env> {
       this.initializationPromise = this.restoreAttachedSockets(
         documentId,
         this.room,
-      );
+      ).catch((error: unknown) => {
+        this.initializationPromise = null;
+        throw error;
+      });
     }
     await this.initializationPromise;
     return this.room;
@@ -544,7 +547,9 @@ export class DocumentRoomDO extends DurableObject<Env> {
   ): Promise<DurableObjectRoomPeer | null> {
     if (socket.readyState !== WebSocket.OPEN) return null;
     const existing = this.peers.get(attachment.peerId);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      return existing.ownsSocket(socket) ? existing : null;
+    }
     const peer = new DurableObjectRoomPeer(room, socket, attachment);
     this.peers.set(peer.id, peer);
     try {

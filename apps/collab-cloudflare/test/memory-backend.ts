@@ -22,7 +22,10 @@ const TEST_ACCESS_TOKEN = "test-token";
 const STORAGE_KEY = {
   authorization: "test-backend:authorization",
   events: "test-backend:events",
-  sessionAudit: "test-backend:session-audit",
+  sessionAuditAuthorization: "test-backend:session-audit:authorization:",
+  sessionAuditEnd: "test-backend:session-audit:end:",
+  sessionAuditRefresh: "test-backend:session-audit:refresh:",
+  sessionAuditSequence: "test-backend:session-audit:sequence",
 } as const;
 
 interface StoredBatch {
@@ -64,12 +67,6 @@ export interface MemorySessionAudit {
 const defaultAuthorizationState = (): StoredAuthorizationState => ({
   authenticatedAccessRevoked: false,
   publicAccessEnabled: true,
-});
-
-const emptySessionAudit = (): MemorySessionAudit => ({
-  authorizations: [],
-  refreshes: [],
-  ends: [],
 });
 
 const canonicalJson = (value: unknown): string => {
@@ -134,19 +131,27 @@ const authorizationState = async (
   return initial;
 };
 
+const nextAuditSequence = async (
+  transaction: DurableObjectTransaction,
+): Promise<number> => {
+  const sequence =
+    ((await transaction.get<number>(STORAGE_KEY.sessionAuditSequence)) ?? 0) +
+    1;
+  await transaction.put(STORAGE_KEY.sessionAuditSequence, sequence);
+  return sequence;
+};
+
 const appendAuthorizationAudit = async (
   storage: DurableObjectStorage,
   entry: MemoryAuthorizeAuditEntry,
 ): Promise<StoredAuthorizationState> =>
   storage.transaction(async (transaction) => {
     const state = await authorizationState(transaction);
-    const audit =
-      (await transaction.get<MemorySessionAudit>(STORAGE_KEY.sessionAudit)) ??
-      emptySessionAudit();
-    await transaction.put(STORAGE_KEY.sessionAudit, {
-      ...audit,
-      authorizations: [...audit.authorizations, entry],
-    });
+    const sequence = await nextAuditSequence(transaction);
+    await transaction.put(
+      `${STORAGE_KEY.sessionAuditAuthorization}${sequence}`,
+      entry,
+    );
     return state;
   });
 
@@ -156,13 +161,11 @@ const appendRefreshAudit = async (
 ): Promise<StoredAuthorizationState> =>
   storage.transaction(async (transaction) => {
     const state = await authorizationState(transaction);
-    const audit =
-      (await transaction.get<MemorySessionAudit>(STORAGE_KEY.sessionAudit)) ??
-      emptySessionAudit();
-    await transaction.put(STORAGE_KEY.sessionAudit, {
-      ...audit,
-      refreshes: [...audit.refreshes, entry],
-    });
+    const sequence = await nextAuditSequence(transaction);
+    await transaction.put(
+      `${STORAGE_KEY.sessionAuditRefresh}${sequence}`,
+      entry,
+    );
     return state;
   });
 
@@ -171,13 +174,8 @@ const appendEndAudit = async (
   entry: MemoryEndAuditEntry,
 ): Promise<void> => {
   await storage.transaction(async (transaction) => {
-    const audit =
-      (await transaction.get<MemorySessionAudit>(STORAGE_KEY.sessionAudit)) ??
-      emptySessionAudit();
-    await transaction.put(STORAGE_KEY.sessionAudit, {
-      ...audit,
-      ends: [...audit.ends, entry],
-    });
+    const sequence = await nextAuditSequence(transaction);
+    await transaction.put(`${STORAGE_KEY.sessionAuditEnd}${sequence}`, entry);
   });
 };
 
@@ -207,11 +205,32 @@ export const setMemoryPublicAccessEnabled = async (
   });
 };
 
+const listedAuditEntries = async <T>(
+  storage: DurableObjectStorage,
+  prefix: string,
+): Promise<ReadonlyArray<T>> => {
+  const entries = await storage.list<T>({ prefix });
+  return [...entries.entries()]
+    .toSorted(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => value);
+};
+
 export const readMemorySessionAudit = async (
   storage: DurableObjectStorage,
-): Promise<MemorySessionAudit> =>
-  (await storage.get<MemorySessionAudit>(STORAGE_KEY.sessionAudit)) ??
-  emptySessionAudit();
+): Promise<MemorySessionAudit> => ({
+  authorizations: await listedAuditEntries<MemoryAuthorizeAuditEntry>(
+    storage,
+    STORAGE_KEY.sessionAuditAuthorization,
+  ),
+  refreshes: await listedAuditEntries<MemoryRefreshAuditEntry>(
+    storage,
+    STORAGE_KEY.sessionAuditRefresh,
+  ),
+  ends: await listedAuditEntries<MemoryEndAuditEntry>(
+    storage,
+    STORAGE_KEY.sessionAuditEnd,
+  ),
+});
 
 export interface MemoryDocumentBackend {
   readonly events: DocumentEventStore;

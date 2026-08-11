@@ -17,9 +17,10 @@ object; there is no Cloudflare-specific wire format.
 
 `DocumentRoomDO` accepts its server sockets with the Durable Objects WebSocket
 Hibernation API. Each socket has a versioned attachment containing its stable
-peer and session identity, protocol/access metadata, reauthorization
-credential, and message quota. After constructor re-entry, the object restores
-all attached sockets before processing the wake-up message and revalidates each
+peer and session identity, protocol/access metadata, the caller's access token
+as the reauthorization credential (retained for the connection's lifetime), and
+message quota. After constructor re-entry, the object restores all attached
+sockets before processing the wake-up message and revalidates each
 authenticated session without sending another protocol `Ready` message. The
 runtime uses message-driven authorization and lease maintenance in this host,
 so no room timer prevents an idle object from hibernating.

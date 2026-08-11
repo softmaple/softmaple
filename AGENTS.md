@@ -18,7 +18,8 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
 
 - **Formatting:** 2-space indent, double quotes, semicolons (Biome)
 - **Components:** PascalCase filenames
-- **Utilities:** camelCase filenames
+- **Utilities:** camelCase filenames; kebab-case is also fine for multi-word
+  modules when that matches the local package convention (e.g. `apps/collab-cloudflare`)
 - **Routes:** lowercase-hyphenated
 - **Linting:** ESLint configs in `packages/eslint-config/`
 - Husky pre-commit hooks auto-format staged files

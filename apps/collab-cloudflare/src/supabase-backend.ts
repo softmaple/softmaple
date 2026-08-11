@@ -245,7 +245,9 @@ const authorizeAuthenticated = async (
     .maybeSingle();
   if (memberError !== null) throw memberError;
   const member = memberRow(rawMember as unknown);
-  if (member === null) return null;
+  if (member === null) {
+    return document.is_public ? publicDocumentAccess() : null;
+  }
 
   return {
     accessMode: COLLAB_ACCESS_MODE.Authenticated,

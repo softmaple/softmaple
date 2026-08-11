@@ -16,6 +16,7 @@ import {
   DEFAULT_DOCUMENT_ROOM_POLICY,
   ROOM_LEAVE_REASON,
   type DocumentRoom,
+  type DocumentRoomErrorContext,
   type RoomPeer,
 } from "@softmaple/collab-runtime";
 import { randomUUID } from "node:crypto";
@@ -27,6 +28,7 @@ import {
   ControllableRoomFanout,
   createUnlimitedConnectionLimiter,
   FakeDocumentSessionHooks,
+  type FakeDocumentSessionEnd,
 } from "./runtimeFakes";
 
 const MAX_BATCHES_PER_SEND = 64;
@@ -125,6 +127,16 @@ export type HarnessConflict = {
   readonly retryable: boolean;
 };
 
+export type HarnessCloseEvent = {
+  readonly code: number;
+  readonly reason: string;
+};
+
+export type HarnessRoomError = {
+  readonly context: DocumentRoomErrorContext;
+  readonly error: unknown;
+};
+
 export type HarnessClient = {
   readonly id: string;
   readonly actorId: string;
@@ -145,6 +157,7 @@ export type HarnessClient = {
   /** Event batch IDs enqueued on the current connection generation. */
   readonly sentBatchIdsSinceConnect: () => ReadonlyArray<string>;
   readonly conflicts: () => ReadonlyArray<HarnessConflict>;
+  readonly closeEvents: () => ReadonlyArray<HarnessCloseEvent>;
   readonly repairRequestCount: () => number;
   readonly documentFingerprint: () => string;
 };
@@ -201,6 +214,8 @@ export type CollabConsistencyHarness = {
     maxTurns?: number,
   ) => Promise<number>;
   readonly protocolQueueSize: () => number;
+  readonly roomErrors: () => ReadonlyArray<HarnessRoomError>;
+  readonly sessionEnds: () => ReadonlyArray<FakeDocumentSessionEnd>;
   readonly assertReplicasConverged: (
     clients: ReadonlyArray<HarnessClient>,
   ) => void;
@@ -241,6 +256,7 @@ export const createCollabConsistencyHarness = (options?: {
   const sessions = new FakeDocumentSessionHooks();
   const protocolQueue = new WorkQueue();
   const instances = new Map<string, CollabInstanceInternal>();
+  const roomErrors: HarnessRoomError[] = [];
   let settleInFlight: Promise<void> | null = null;
 
   const enqueueProtocol = (work: WorkItem): void => {
@@ -267,6 +283,7 @@ export const createCollabConsistencyHarness = (options?: {
       replica.exportEvents().map((batch) => [batch.batchId, batch] as const),
     );
     const acknowledged = new Set<string>();
+    const closeEvents: HarnessCloseEvent[] = [];
     const conflicts: HarnessConflict[] = [];
     const sentSinceConnect: string[] = [];
     let peer: ConnectedPeer | null = null;
@@ -351,7 +368,8 @@ export const createCollabConsistencyHarness = (options?: {
         const nextPeer: ConnectedPeer = {
           id: `${instance.name}:${clientOptions.id}:${peerGeneration}`,
           generation: peerGeneration,
-          close() {
+          close(code, reason) {
+            closeEvents.push({ code, reason });
             const generation = nextPeer.generation;
             if (
               !isActivePeer(
@@ -365,7 +383,6 @@ export const createCollabConsistencyHarness = (options?: {
             }
             peerGeneration += 1;
             instance.localPeerIds.delete(nextPeer.id);
-            sessions.forgetPeer(nextPeer.id);
             peer = null;
             connected = false;
             synced = false;
@@ -414,11 +431,11 @@ export const createCollabConsistencyHarness = (options?: {
         activeRepairRequestId = null;
         outgoing.resetInFlight();
         instance.localPeerIds.delete(disconnecting.id);
-        sessions.forgetPeer(disconnecting.id);
         await instance.room.leave(
           disconnecting,
           ROOM_LEAVE_REASON.ConnectionClosed,
         );
+        sessions.forgetPeer(disconnecting.id);
       },
       isConnected: () => connected,
       isSynced: () => synced,
@@ -459,6 +476,7 @@ export const createCollabConsistencyHarness = (options?: {
       knownBatchIds: () => new Set(knownBatches.keys()),
       sentBatchIdsSinceConnect: () => [...sentSinceConnect],
       conflicts: () => [...conflicts],
+      closeEvents: () => [...closeEvents],
       repairRequestCount: () => repairRequests,
       documentFingerprint: () => fingerprintDocument(replica),
       async receive(message) {
@@ -540,6 +558,9 @@ export const createCollabConsistencyHarness = (options?: {
       events: store,
       fanout: bus,
       policy: DEFAULT_DOCUMENT_ROOM_POLICY,
+      reportError(error, context) {
+        roomErrors.push({ context, error });
+      },
       sessions,
     });
     const instance: CollabInstanceInternal = {
@@ -601,6 +622,8 @@ export const createCollabConsistencyHarness = (options?: {
       throw new Error(`pumpUntil exceeded turn budget (${maxTurns})`);
     },
     protocolQueueSize: () => protocolQueue.size(),
+    roomErrors: () => [...roomErrors],
+    sessionEnds: () => sessions.sessionEnds(),
     assertReplicasConverged(clients) {
       if (clients.length === 0) return;
       const expected = clients[0]!.documentFingerprint();

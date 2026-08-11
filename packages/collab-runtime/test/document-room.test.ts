@@ -125,7 +125,11 @@ class FakePeer implements RoomPeer {
   readonly messages: ServerCollabMessage[] = [];
   readonly sendAttempts: ServerCollabMessage[] = [];
   readonly sendFailures = new Set<ServerCollabMessage["type"]>();
+  closeImpl: (code: number, reason: string) => Promise<void> = async () =>
+    undefined;
   onSend: ((message: ServerCollabMessage) => void) | null = null;
+  sendImpl: (message: ServerCollabMessage) => Promise<void> = async () =>
+    undefined;
 
   constructor(id: string) {
     this.id = id;
@@ -133,6 +137,7 @@ class FakePeer implements RoomPeer {
 
   async close(code: number, reason: string): Promise<void> {
     this.closes.push({ code, reason });
+    await this.closeImpl(code, reason);
   }
 
   async send(message: ServerCollabMessage): Promise<void> {
@@ -141,6 +146,7 @@ class FakePeer implements RoomPeer {
     if (this.sendFailures.has(message.type)) {
       throw new Error(`send failed for ${message.type}`);
     }
+    await this.sendImpl(message);
     this.messages.push(message);
   }
 }
@@ -168,6 +174,7 @@ class MemoryRoomFanout implements RoomFanout {
   publishError: Error | null = null;
   subscribeError: Error | null = null;
   subscribeCalls = 0;
+  unsubscribeFailuresRemaining = 0;
   unsubscribeCalls = 0;
   onPublish: ((event: CommittedDocumentEvent) => void) | null = null;
 
@@ -197,8 +204,12 @@ class MemoryRoomFanout implements RoomFanout {
     return {
       unsubscribe: async () => {
         if (!subscribed) return;
-        subscribed = false;
         this.unsubscribeCalls += 1;
+        if (this.unsubscribeFailuresRemaining > 0) {
+          this.unsubscribeFailuresRemaining -= 1;
+          throw new Error("unsubscribe failed");
+        }
+        subscribed = false;
         const current = this.handlers.get(documentId);
         current?.delete(handler);
         if (current?.size === 0) this.handlers.delete(documentId);
@@ -382,7 +393,7 @@ describe("createDocumentRoom authentication", () => {
     });
     authorization.resolve(AUTHENTICATED_ACCESS);
     await firstAuth;
-    await vi.waitFor(() => expect(fixture.fanout.subscribeCalls).toBe(0));
+    expect(fixture.fanout.subscribeCalls).toBe(0);
     expect(
       peer.messages.some(
         (message) => message.type === COLLAB_MESSAGE_TYPE.Ready,
@@ -403,6 +414,48 @@ describe("createDocumentRoom authentication", () => {
       reason: "Already authenticated",
     });
     await vi.waitFor(() => expect(fixture.leases[0]?.releaseCalls).toBe(1));
+  });
+
+  it("does not authorize messages received after shutdown starts", async () => {
+    const fixture = createFixture();
+    const room = createRoom(fixture);
+    const peer = new FakePeer("peer-auth-during-close");
+    const close = deferred<void>();
+    peer.closeImpl = async () => close.promise;
+    await room.join(peer);
+
+    const closing = room.close();
+    await vi.waitFor(() => expect(peer.closes).toHaveLength(1));
+    await room.receive(peer, authMessage());
+
+    expect(fixture.authorize).not.toHaveBeenCalled();
+    close.resolve();
+    await closing;
+  });
+
+  it("does not expose a session to fan-out until Ready is delivered", async () => {
+    const fixture = createFixture();
+    const room = createRoom(fixture);
+    const peer = new FakePeer("peer-ready-ordering");
+    const ready = deferred<void>();
+    peer.sendImpl = async (message) =>
+      message.type === COLLAB_MESSAGE_TYPE.Ready
+        ? ready.promise
+        : Promise.resolve();
+
+    const authenticating = authenticate(room, peer);
+    await vi.waitFor(() => expect(fixture.fanout.subscribeCalls).toBe(1));
+    await fixture.fanout.emit({ documentId: DOCUMENT_ID, batches: BATCHES });
+    expect(peer.sendAttempts).not.toContainEqual(
+      expect.objectContaining({ type: COLLAB_MESSAGE_TYPE.Event }),
+    );
+
+    ready.resolve();
+    await authenticating;
+    await fixture.fanout.emit({ documentId: DOCUMENT_ID, batches: BATCHES });
+    expect(peer.messages).toContainEqual(
+      expect.objectContaining({ type: COLLAB_MESSAGE_TYPE.Event }),
+    );
   });
 
   it("cleans a temporary authorization failure and allows the same peer to retry", async () => {
@@ -628,9 +681,75 @@ describe("createDocumentRoom refresh semantics", () => {
 
     expect(fixture.leases[0]?.refreshCalls).toBe(1);
     expect(peer.closes).toContainEqual({
+      code: 1013,
+      reason: "Collaboration connection lease was lost",
+    });
+    expect(fixture.end).toHaveBeenCalledWith(
+      expect.anything(),
+      DOCUMENT_SESSION_END_REASON.PeerLeft,
+    );
+  });
+
+  it("refreshes a lease at its own deadline when intervals do not divide evenly", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 17,
+      connection: {
+        leaseRefreshIntervalMs: 20,
+        leaseTtlMs: 21,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    const room = createRoom(fixture);
+    const peer = new FakePeer("peer-independent-deadlines");
+    await authenticate(room, peer);
+
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+    expect(fixture.leases[0]?.refreshCalls).toBe(1);
+  });
+
+  it("refreshes access while a durable append is still pending", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const append = deferred<ReadonlyArray<string>>();
+    const appendStarted = deferred<void>();
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 10,
+        leaseTtlMs: 100,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    fixture.controls.appendImpl = async () => {
+      appendStarted.resolve();
+      return append.promise;
+    };
+    fixture.controls.refreshAccess = null;
+    const room = createRoom(fixture);
+    const peer = new FakePeer("peer-refresh-during-append");
+    await authenticate(room, peer);
+
+    const receiving = room.receive(peer, eventMessage());
+    await appendStarted.promise;
+    expect(fixture.append).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+    expect(peer.closes).toContainEqual({
       code: 1008,
       reason: "Collaboration access was revoked",
     });
+    append.resolve(["batch-1"]);
+    await receiving;
+    expect(
+      peer.messages.some(
+        (message) => message.type === COLLAB_MESSAGE_TYPE.Event,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -836,6 +955,31 @@ describe("createDocumentRoom durability, repair, and fan-out", () => {
 });
 
 describe("createDocumentRoom cleanup races", () => {
+  it("retries a failed final unsubscribe before creating a replacement", async () => {
+    const fixture = createFixture();
+    const room = createRoom(fixture);
+    const first = new FakePeer("peer-first-subscription");
+    await authenticate(room, first);
+    fixture.fanout.unsubscribeFailuresRemaining = 1;
+
+    await room.leave(first);
+
+    expect(fixture.fanout.handlers.get(DOCUMENT_ID)?.size).toBe(1);
+    const second = new FakePeer("peer-replacement-subscription");
+    await authenticate(room, second, authMessage({ sessionId: "session-2" }));
+    expect(fixture.fanout.unsubscribeCalls).toBe(2);
+    expect(fixture.fanout.subscribeCalls).toBe(2);
+    expect(fixture.fanout.handlers.get(DOCUMENT_ID)?.size).toBe(1);
+
+    second.messages.length = 0;
+    await fixture.fanout.emit({ documentId: DOCUMENT_ID, batches: BATCHES });
+    expect(
+      second.messages.filter(
+        (message) => message.type === COLLAB_MESSAGE_TYPE.Event,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("still fans out when the peer leaves during a durable append", async () => {
     const append = deferred<ReadonlyArray<string>>();
     const fixture = createFixture();

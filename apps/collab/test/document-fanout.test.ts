@@ -9,6 +9,7 @@ import {
   documentRealtimeChannel,
   documentTopicHub,
   getDocumentTopicBridge,
+  getRealtime,
   resetTopicBridgesForTests,
   setRealtimeForTests,
 } from "../server/utils/realtime";
@@ -95,6 +96,7 @@ describe("document event fan-out across instances", () => {
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("publishes persisted events to peers on another simulated instance", async () => {
@@ -203,6 +205,28 @@ describe("document event fan-out across instances", () => {
 
     unsubscribeRemote();
     await getDocumentTopicBridge().release(remoteChannel);
+    await route.close(writer);
+  });
+
+  it("reports malformed realtime payloads without forwarding them", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const writer = createPeer();
+    await route.message(writer, authMessage);
+    writer.send.mockClear();
+
+    await getRealtime().bus.publish(
+      documentRealtimeChannel(DOCUMENT_ID, COLLAB_PROTOCOL_VERSION),
+      { invalid: true },
+    );
+
+    expect(writer.send).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      "Collaboration realtime payload was ignored",
+      expect.objectContaining({
+        documentId: DOCUMENT_ID,
+        messageType: "realtime-parse",
+      }),
+    );
     await route.close(writer);
   });
 });

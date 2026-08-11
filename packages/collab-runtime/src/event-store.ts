@@ -76,8 +76,8 @@ export class DocumentEventStoreUnavailableError extends Error {
   readonly kind = DOCUMENT_EVENT_STORE_ERROR_KIND.Unavailable;
   readonly retryable = true;
 
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "DocumentEventStoreUnavailableError";
   }
 }

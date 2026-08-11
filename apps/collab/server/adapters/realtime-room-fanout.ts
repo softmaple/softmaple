@@ -38,7 +38,12 @@ const committedEventFromPayload = (
       return null;
     }
     return { documentId, batches: message.batches };
-  } catch {
+  } catch (error) {
+    console.warn("Collaboration realtime payload was ignored", {
+      documentId,
+      messageType: "realtime-parse",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     return null;
   }
 };

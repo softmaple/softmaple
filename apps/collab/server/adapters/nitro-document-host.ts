@@ -27,8 +27,8 @@ import { realtimeConnectionLimiter } from "./realtime-connection-limiter";
 import { realtimeRoomFanout } from "./realtime-room-fanout";
 
 const MESSAGE_RATE_LIMIT_WINDOW_MS = 10_000;
-const MESSAGE_RATE_LIMIT_MAX = 120;
-const MAX_MESSAGE_BYTES = 256 * 1024;
+export const MESSAGE_RATE_LIMIT_MAX = 120;
+export const MAX_MESSAGE_BYTES = 256 * 1024;
 const DOCUMENT_HOST_CONTEXT_KEY = "documentRuntimeHost";
 
 interface MessageRateLimit {
@@ -179,6 +179,26 @@ interface RoomBinding {
 
 const rooms = new Map<string, RoomEntry>();
 
+const normalizeDocumentId = (documentId: string): string => {
+  const unwrapped =
+    documentId.startsWith("{") && documentId.endsWith("}")
+      ? documentId.slice(1, -1)
+      : documentId;
+  if (!/^[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}$/i.test(unwrapped)) {
+    return documentId;
+  }
+  const compact = unwrapped.replaceAll("-", "");
+  if (compact.length !== 32) return documentId;
+  const normalized = compact.toLowerCase();
+  return [
+    normalized.slice(0, 8),
+    normalized.slice(8, 12),
+    normalized.slice(12, 16),
+    normalized.slice(16, 20),
+    normalized.slice(20),
+  ].join("-");
+};
+
 const closeRoomEntry = async (
   documentId: string,
   entry: RoomEntry,
@@ -247,7 +267,7 @@ export class NitroDocumentHost {
 
   async receiveText(rawText: string): Promise<void> {
     if (this.closed || this.peer.closed) return;
-    if (new TextEncoder().encode(rawText).byteLength > MAX_MESSAGE_BYTES) {
+    if (Buffer.byteLength(rawText, "utf8") > MAX_MESSAGE_BYTES) {
       this.peer.close(1009, "Collaboration message is too large");
       await this.releaseRooms();
       return;
@@ -322,28 +342,33 @@ export class NitroDocumentHost {
       this.peer.close(1008, "Authentication already in progress");
       // Mark the in-flight room state as leaving without making this second
       // Auth wait for the provider call that it is interrupting.
-      void this.releaseRooms();
+      const documentId = this.pendingRoom?.documentId ?? null;
+      void this.releaseRooms().catch((error: unknown) => {
+        logHostError(error, documentId, "room-release");
+      });
       return;
     }
 
     this.transport.context.authenticationPending = true;
     let binding: RoomBinding | null = null;
+    const normalizedDocumentId = normalizeDocumentId(message.documentId);
+    const normalizedMessage = { ...message, documentId: normalizedDocumentId };
     try {
-      binding = await acquireRoom(message.documentId, this.peer);
+      binding = await acquireRoom(normalizedDocumentId, this.peer);
       this.pendingRoom = binding;
       if (this.closed || this.peer.closed) return;
-      await binding.room.receive(this.peer, message);
+      await binding.room.receive(this.peer, normalizedMessage);
       if (
         !this.closed &&
         !this.peer.closed &&
-        this.peer.observedReady(message.documentId)
+        this.peer.observedReady(normalizedDocumentId)
       ) {
         this.activeRoom = binding;
         this.pendingRoom = null;
         return;
       }
     } catch (error) {
-      logHostError(error, message.documentId, message.type);
+      logHostError(error, normalizedDocumentId, message.type);
       if (!this.closed && !this.peer.closed) {
         this.peer.send(
           errorMessage(

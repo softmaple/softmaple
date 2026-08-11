@@ -42,34 +42,43 @@ const PEER_PHASE = {
 type PeerPhase = (typeof PEER_PHASE)[keyof typeof PEER_PHASE];
 
 interface PeerState {
+  authorizationRefreshPromise: Promise<DocumentAccess | null> | null;
+  authorizationRefreshTimer: ReturnType<typeof setTimeout> | null;
   authorizationExpiresAt: number;
   credential: CollabCredential | null;
   fanoutRetained: boolean;
   lease: ConnectionLease | null;
+  leaseRefreshPending: boolean;
+  leaseRefreshTimer: ReturnType<typeof setTimeout> | null;
   leaseRefreshAt: number;
   leaveRequested: boolean;
   phase: PeerPhase;
   readonly peer: RoomPeer;
   queue: Promise<void>;
-  refreshPending: boolean;
-  refreshTimer: ReturnType<typeof setInterval> | null;
   session: DocumentSession | null;
 }
 
 const createPeerState = (peer: RoomPeer): PeerState => ({
+  authorizationRefreshPromise: null,
+  authorizationRefreshTimer: null,
   authorizationExpiresAt: 0,
   credential: null,
   fanoutRetained: false,
   lease: null,
+  leaseRefreshPending: false,
+  leaseRefreshTimer: null,
   leaseRefreshAt: 0,
   leaveRequested: false,
   phase: PEER_PHASE.Joined,
   peer,
   queue: Promise.resolve(),
-  refreshPending: false,
-  refreshTimer: null,
   session: null,
 });
+
+const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
+  const candidate = timer as unknown as { unref?: () => void };
+  candidate.unref?.();
+};
 
 const credentialFromAuth = (
   message: AuthMessage | LegacyAuthMessage,
@@ -201,7 +210,9 @@ class RuntimeDocumentRoom implements DocumentRoom {
   }
 
   async receive(peer: RoomPeer, message: ClientCollabMessage): Promise<void> {
+    if (this.closed) return;
     const state = this.peers.get(peer);
+    if (state?.leaveRequested === true) return;
     if (state === undefined || state.phase === PEER_PHASE.Left) {
       await this.sendIgnoringFailure(
         peer,
@@ -290,10 +301,12 @@ class RuntimeDocumentRoom implements DocumentRoom {
     );
     await this.withFanoutLock(async () => {
       const subscription = this.fanoutSubscription;
-      this.fanoutSubscription = null;
       this.fanoutRetainers = 0;
-      if (subscription !== null) {
-        await this.unsubscribeFanout(subscription, null);
+      if (
+        subscription !== null &&
+        (await this.unsubscribeFanout(subscription, null))
+      ) {
+        this.fanoutSubscription = null;
       }
     });
   }
@@ -482,9 +495,19 @@ class RuntimeDocumentRoom implements DocumentRoom {
         Date.now() + this.services.policy.authorizationRefreshIntervalMs;
       state.leaseRefreshAt =
         Date.now() + this.services.policy.connection.leaseRefreshIntervalMs;
-      state.phase = PEER_PHASE.Authenticated;
-      this.startRefreshTimer(state);
       await state.peer.send(readyMessage(session));
+      if (state.leaveRequested || this.closed) {
+        await this.resetState(
+          state,
+          true,
+          this.closed
+            ? DOCUMENT_SESSION_END_REASON.RoomClosed
+            : DOCUMENT_SESSION_END_REASON.PeerLeft,
+        );
+        return;
+      }
+      state.phase = PEER_PHASE.Authenticated;
+      this.startRefreshTimers(state);
     } catch (error) {
       await this.failTemporaryAuthentication(state, message, error);
     }
@@ -525,15 +548,20 @@ class RuntimeDocumentRoom implements DocumentRoom {
     const session = state.session;
     const credential = state.credential;
     if (session === null || credential === null) return false;
+    const ownsRefresh = state.authorizationRefreshPromise === null;
 
     let access: DocumentAccess | null;
     try {
-      access = await this.services.sessions.refresh({
-        credential,
-        peerId: state.peer.id,
+      access = await this.requestAuthorizationRefresh(
+        state,
         session,
-      });
+        credential,
+      );
     } catch (error) {
+      if (!ownsRefresh) return false;
+      if (state.leaveRequested || state.phase !== PEER_PHASE.Authenticated) {
+        return false;
+      }
       this.report(error, state, messageType);
       await this.sendIgnoringFailure(
         state.peer,
@@ -547,6 +575,14 @@ class RuntimeDocumentRoom implements DocumentRoom {
       );
       await this.closePeer(state.peer, 1011, "Authentication unavailable");
       await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+      return false;
+    }
+
+    if (!ownsRefresh) {
+      return this.isCurrentAuthenticatedSession(state, session);
+    }
+
+    if (!this.isCurrentAuthenticatedSession(state, session)) {
       return false;
     }
 
@@ -573,6 +609,7 @@ class RuntimeDocumentRoom implements DocumentRoom {
     state.session = sessionWithRefreshedAccess(session, access);
     state.authorizationExpiresAt =
       Date.now() + this.services.policy.authorizationRefreshIntervalMs;
+    this.scheduleAuthorizationRefresh(state);
     return true;
   }
 
@@ -590,6 +627,9 @@ class RuntimeDocumentRoom implements DocumentRoom {
         this.documentId,
         message.afterCursor,
       );
+      if (!this.isCurrentAuthenticatedSession(state, session)) {
+        return;
+      }
       await this.sendIgnoringFailure(
         state.peer,
         {
@@ -690,112 +730,193 @@ class RuntimeDocumentRoom implements DocumentRoom {
     }
   }
 
-  private startRefreshTimer(state: PeerState): void {
-    if (state.refreshTimer !== null) clearInterval(state.refreshTimer);
-    const cadence = Math.min(
-      this.services.policy.authorizationRefreshIntervalMs,
-      this.services.policy.connection.leaseRefreshIntervalMs,
-    );
-    state.refreshTimer = setInterval(() => {
-      if (state.refreshPending || state.phase !== PEER_PHASE.Authenticated) {
-        return;
-      }
-      state.refreshPending = true;
-      void this.enqueue(state, async () => {
-        await this.periodicRefresh(state);
-      })
-        .catch((error: unknown) => {
-          this.report(error, state, "authorization-recheck");
-        })
-        .finally(() => {
-          state.refreshPending = false;
-        });
-    }, cadence);
+  private startRefreshTimers(state: PeerState): void {
+    this.scheduleAuthorizationRefresh(state);
+    this.scheduleLeaseRefresh(state);
   }
 
-  private async periodicRefresh(state: PeerState): Promise<void> {
+  private scheduleAuthorizationRefresh(state: PeerState): void {
+    if (state.authorizationRefreshTimer !== null) {
+      clearTimeout(state.authorizationRefreshTimer);
+    }
+    const delay = Math.max(0, state.authorizationExpiresAt - Date.now());
+    state.authorizationRefreshTimer = setTimeout(() => {
+      state.authorizationRefreshTimer = null;
+      void this.refreshAuthorizationInBackground(state).catch(
+        (error: unknown) => {
+          this.report(error, state, "authorization-recheck");
+        },
+      );
+    }, delay);
+    unrefTimer(state.authorizationRefreshTimer);
+  }
+
+  private scheduleLeaseRefresh(state: PeerState): void {
+    if (state.leaseRefreshTimer !== null) {
+      clearTimeout(state.leaseRefreshTimer);
+    }
+    const delay = Math.max(0, state.leaseRefreshAt - Date.now());
+    state.leaseRefreshTimer = setTimeout(() => {
+      state.leaseRefreshTimer = null;
+      void this.refreshLeaseInBackground(state).catch((error: unknown) => {
+        this.report(error, state, "lease-refresh");
+      });
+    }, delay);
+    unrefTimer(state.leaseRefreshTimer);
+  }
+
+  private requestAuthorizationRefresh(
+    state: PeerState,
+    session: DocumentSession,
+    credential: CollabCredential,
+  ): Promise<DocumentAccess | null> {
+    if (state.authorizationRefreshPromise !== null) {
+      return state.authorizationRefreshPromise;
+    }
+    const refresh = this.services.sessions
+      .refresh({
+        credential,
+        peerId: state.peer.id,
+        session,
+      })
+      .finally(() => {
+        if (state.authorizationRefreshPromise === refresh) {
+          state.authorizationRefreshPromise = null;
+        }
+      });
+    state.authorizationRefreshPromise = refresh;
+    return refresh;
+  }
+
+  private async refreshAuthorizationInBackground(
+    state: PeerState,
+  ): Promise<void> {
     if (state.phase !== PEER_PHASE.Authenticated || state.leaveRequested) {
       return;
     }
     const session = state.session;
     const credential = state.credential;
-    const lease = state.lease;
-    if (session === null || credential === null || lease === null) return;
+    if (session === null || credential === null) return;
+    const ownsRefresh = state.authorizationRefreshPromise === null;
 
-    const now = Date.now();
-    const refreshAuthorization = state.authorizationExpiresAt <= now;
-    const refreshLease = state.leaseRefreshAt <= now;
-    if (!refreshAuthorization && !refreshLease) return;
-
+    let access: DocumentAccess | null;
     try {
-      const [access, leaseAlive] = await Promise.all([
-        refreshAuthorization
-          ? this.services.sessions.refresh({
-              credential,
-              peerId: state.peer.id,
-              session,
-            })
-          : Promise.resolve<DocumentAccess | null>(
-              this.accessFromSession(session),
-            ),
-        refreshLease ? lease.refresh() : Promise.resolve(true),
-      ]);
-      if (state.leaveRequested || state.phase !== PEER_PHASE.Authenticated) {
-        return;
-      }
-      if (
-        access === null ||
-        !accessMatchesSessionIdentity(access, session) ||
-        !leaseAlive
-      ) {
-        await this.closePeer(
-          state.peer,
-          1008,
-          "Collaboration access was revoked",
-        );
-        await this.resetState(
-          state,
-          true,
-          DOCUMENT_SESSION_END_REASON.AccessRevoked,
-        );
-        return;
-      }
-      state.session = sessionWithRefreshedAccess(session, access);
-      if (refreshAuthorization) {
-        state.authorizationExpiresAt =
-          now + this.services.policy.authorizationRefreshIntervalMs;
-      }
-      if (refreshLease) {
-        state.leaseRefreshAt =
-          now + this.services.policy.connection.leaseRefreshIntervalMs;
-      }
+      access = await this.requestAuthorizationRefresh(
+        state,
+        session,
+        credential,
+      );
     } catch (error) {
+      if (!ownsRefresh) return;
       this.report(error, state, "authorization-recheck");
-      await this.closePeer(state.peer, 1011, "Authorization recheck failed");
-      await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+      await this.terminateFromBackgroundRefresh(
+        state,
+        session,
+        1011,
+        "Authorization recheck failed",
+        DOCUMENT_SESSION_END_REASON.PeerLeft,
+      );
+      return;
+    }
+    if (!ownsRefresh) return;
+    if (!this.isCurrentAuthenticatedSession(state, session)) return;
+    if (access === null || !accessMatchesSessionIdentity(access, session)) {
+      await this.terminateFromBackgroundRefresh(
+        state,
+        session,
+        1008,
+        "Collaboration access was revoked",
+        DOCUMENT_SESSION_END_REASON.AccessRevoked,
+      );
+      return;
+    }
+    state.session = sessionWithRefreshedAccess(session, access);
+    state.authorizationExpiresAt =
+      Date.now() + this.services.policy.authorizationRefreshIntervalMs;
+    this.scheduleAuthorizationRefresh(state);
+  }
+
+  private async refreshLeaseInBackground(state: PeerState): Promise<void> {
+    if (
+      state.leaseRefreshPending ||
+      state.phase !== PEER_PHASE.Authenticated ||
+      state.leaveRequested
+    ) {
+      return;
+    }
+    const session = state.session;
+    const lease = state.lease;
+    if (session === null || lease === null) return;
+    state.leaseRefreshPending = true;
+    try {
+      const leaseAlive = await lease.refresh();
+      if (!this.isCurrentAuthenticatedSession(state, session)) return;
+      if (!leaseAlive) {
+        await this.terminateFromBackgroundRefresh(
+          state,
+          session,
+          1013,
+          "Collaboration connection lease was lost",
+          DOCUMENT_SESSION_END_REASON.PeerLeft,
+        );
+        return;
+      }
+      state.leaseRefreshAt =
+        Date.now() + this.services.policy.connection.leaseRefreshIntervalMs;
+      this.scheduleLeaseRefresh(state);
+    } catch (error) {
+      this.report(error, state, "lease-refresh");
+      await this.terminateFromBackgroundRefresh(
+        state,
+        session,
+        1011,
+        "Connection lease refresh failed",
+        DOCUMENT_SESSION_END_REASON.PeerLeft,
+      );
+    } finally {
+      state.leaseRefreshPending = false;
     }
   }
 
-  private accessFromSession(session: DocumentSession): DocumentAccess {
-    if (session.accessMode === COLLAB_ACCESS_MODE.Public) {
-      return {
-        accessMode: COLLAB_ACCESS_MODE.Public,
-        actorId: null,
-        canWrite: false,
-        role: null,
-      };
-    }
-    return {
-      accessMode: COLLAB_ACCESS_MODE.Authenticated,
-      actorId: session.actorId,
-      canWrite: session.canWrite,
-      role: session.role,
-    };
+  private isCurrentAuthenticatedSession(
+    state: PeerState,
+    session: DocumentSession,
+  ): boolean {
+    return (
+      state.phase === PEER_PHASE.Authenticated &&
+      !state.leaveRequested &&
+      state.session?.sessionId === session.sessionId
+    );
+  }
+
+  private async terminateFromBackgroundRefresh(
+    state: PeerState,
+    session: DocumentSession,
+    code: number,
+    reason: string,
+    endReason: DocumentSessionEndReason,
+  ): Promise<void> {
+    if (!this.isCurrentAuthenticatedSession(state, session)) return;
+    state.leaveRequested = true;
+    this.clearRefreshTimers(state);
+    await this.closePeer(state.peer, code, reason);
+    await this.enqueue(state, async () => {
+      await this.resetState(state, true, endReason);
+    });
   }
 
   private async retainFanout(state: PeerState): Promise<void> {
     await this.withFanoutLock(async () => {
       if (this.fanoutRetainers === 0) {
+        if (this.fanoutSubscription !== null) {
+          const staleSubscription = this.fanoutSubscription;
+          if (!(await this.unsubscribeFanout(staleSubscription, state))) {
+            throw new Error("Previous fanout subscription is still active");
+          }
+          if (this.fanoutSubscription === staleSubscription) {
+            this.fanoutSubscription = null;
+          }
+        }
         this.fanoutSubscription = await this.services.fanout.subscribe(
           this.documentId,
           async (event) => {
@@ -836,9 +957,12 @@ class RuntimeDocumentRoom implements DocumentRoom {
       this.fanoutRetainers = Math.max(0, this.fanoutRetainers - 1);
       if (this.fanoutRetainers !== 0) return;
       const subscription = this.fanoutSubscription;
-      this.fanoutSubscription = null;
-      if (subscription !== null) {
-        await this.unsubscribeFanout(subscription, state);
+      if (
+        subscription !== null &&
+        (await this.unsubscribeFanout(subscription, state)) &&
+        this.fanoutSubscription === subscription
+      ) {
+        this.fanoutSubscription = null;
       }
     });
   }
@@ -846,11 +970,24 @@ class RuntimeDocumentRoom implements DocumentRoom {
   private async unsubscribeFanout(
     subscription: RoomFanoutSubscription,
     state: PeerState | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await subscription.unsubscribe();
+      return true;
     } catch (error) {
       this.report(error, state, "fanout-unsubscribe");
+      return false;
+    }
+  }
+
+  private clearRefreshTimers(state: PeerState): void {
+    if (state.authorizationRefreshTimer !== null) {
+      clearTimeout(state.authorizationRefreshTimer);
+      state.authorizationRefreshTimer = null;
+    }
+    if (state.leaseRefreshTimer !== null) {
+      clearTimeout(state.leaseRefreshTimer);
+      state.leaseRefreshTimer = null;
     }
   }
 
@@ -859,11 +996,9 @@ class RuntimeDocumentRoom implements DocumentRoom {
     remove: boolean,
     endReason: DocumentSessionEndReason,
   ): Promise<void> {
-    if (state.refreshTimer !== null) {
-      clearInterval(state.refreshTimer);
-      state.refreshTimer = null;
-    }
-    state.refreshPending = false;
+    this.clearRefreshTimers(state);
+    state.authorizationRefreshPromise = null;
+    state.leaseRefreshPending = false;
 
     await this.releaseFanout(state);
     const lease = state.lease;

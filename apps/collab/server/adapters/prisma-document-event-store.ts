@@ -37,9 +37,8 @@ const unavailableStoreError = (
   error: unknown,
 ): DocumentEventStoreUnavailableError =>
   new DocumentEventStoreUnavailableError(
-    error instanceof Error
-      ? error.message
-      : `Document event ${operation} is unavailable`,
+    `Document event ${operation} is unavailable`,
+    { cause: error },
   );
 
 const appendError = (

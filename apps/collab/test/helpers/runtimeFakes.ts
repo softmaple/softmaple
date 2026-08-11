@@ -6,7 +6,9 @@ import type {
   CommittedDocumentEvent,
   ConnectionLimiter,
   DocumentAccess,
+  DocumentSession,
   DocumentSessionAuthorizationRequest,
+  DocumentSessionEndReason,
   DocumentSessionHooks,
   DocumentSessionRefreshRequest,
   RoomFanout,
@@ -123,9 +125,17 @@ export const createUnlimitedConnectionLimiter = (): ConnectionLimiter => ({
   },
 });
 
+export type FakeDocumentSessionEnd = {
+  readonly peerId: string;
+  readonly reason: DocumentSessionEndReason;
+  readonly session: DocumentSession;
+};
+
 /** Deterministic identity adapter keyed by the physical fake peer id. */
 export class FakeDocumentSessionHooks implements DocumentSessionHooks {
   private readonly accessByPeerId = new Map<string, DocumentAccess>();
+  private readonly ends: FakeDocumentSessionEnd[] = [];
+  private readonly peerIdBySessionId = new Map<string, string>();
 
   registerAuthenticatedPeer(
     peerId: string,
@@ -145,17 +155,43 @@ export class FakeDocumentSessionHooks implements DocumentSessionHooks {
 
   forgetPeer(peerId: string): void {
     this.accessByPeerId.delete(peerId);
+    for (const [sessionId, registeredPeerId] of this.peerIdBySessionId) {
+      if (registeredPeerId === peerId) {
+        this.peerIdBySessionId.delete(sessionId);
+      }
+    }
   }
 
   async authorize(
     request: DocumentSessionAuthorizationRequest,
   ): Promise<DocumentAccess | null> {
-    return this.accessByPeerId.get(request.peerId) ?? null;
+    const access = this.accessByPeerId.get(request.peerId) ?? null;
+    if (access !== null) {
+      this.peerIdBySessionId.set(request.sessionId, request.peerId);
+    }
+    return access;
   }
 
   async refresh(
     request: DocumentSessionRefreshRequest,
   ): Promise<DocumentAccess | null> {
     return this.accessByPeerId.get(request.peerId) ?? null;
+  }
+
+  async end(
+    session: DocumentSession,
+    reason: DocumentSessionEndReason,
+  ): Promise<void> {
+    const peerId = this.peerIdBySessionId.get(session.sessionId);
+    if (peerId === undefined) {
+      throw new Error(`Session ${session.sessionId} has no registered peer`);
+    }
+    this.ends.push({ peerId, reason, session });
+    this.peerIdBySessionId.delete(session.sessionId);
+    this.accessByPeerId.delete(peerId);
+  }
+
+  sessionEnds(): ReadonlyArray<FakeDocumentSessionEnd> {
+    return [...this.ends];
   }
 }

@@ -235,8 +235,8 @@ export const createInMemoryEventStore = (options?: {
                 conflictType:
                   DOCUMENT_EVENT_CONFLICT_TYPE.StoredEventIdConflict,
                 documentId,
-                batchIds: batches.map((entry) => entry.batchId),
-                eventIds: incomingEventIds,
+                batchIds: [batch.batchId],
+                eventIds: batch.events.map((entry) => entry.id),
               },
             );
           }

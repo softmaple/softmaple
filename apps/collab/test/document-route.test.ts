@@ -2,6 +2,7 @@ import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
+import { DocumentEventStoreUnavailableError } from "@softmaple/collab-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMemoryRealtime,
@@ -11,6 +12,11 @@ import {
 import { EVENT_CONFLICT_TYPE } from "../server/utils/event-conflict";
 import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
 import { MockEventConflictError } from "./helpers/eventStoreMocks";
+import {
+  MAX_MESSAGE_BYTES,
+  MESSAGE_RATE_LIMIT_MAX,
+} from "../server/adapters/nitro-document-host";
+import { prismaDocumentEventStore } from "../server/adapters/prisma-document-event-store";
 
 const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
@@ -108,6 +114,7 @@ describe("collaboration document authentication", () => {
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("accepts a same-origin browser upgrade before creating peer context", async () => {
@@ -156,9 +163,14 @@ describe("collaboration document authentication", () => {
 
   it("measures the raw UTF-8 payload and closes oversized messages", async () => {
     const peer = createPeer();
+    const multibyteCharacter = "界";
+    const oversizedCharacterCount =
+      Math.floor(
+        MAX_MESSAGE_BYTES / Buffer.byteLength(multibyteCharacter, "utf8"),
+      ) + 1;
 
     await route.message(peer, {
-      text: () => "界".repeat(90_000),
+      text: () => multibyteCharacter.repeat(oversizedCharacterCount),
     });
 
     expect(peer.send).not.toHaveBeenCalled();
@@ -170,7 +182,7 @@ describe("collaboration document authentication", () => {
   });
 
   it("keeps malformed JSON as a non-retryable protocol error", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const peer = createPeer();
 
     await route.message(peer, { text: () => "{not-json" });
@@ -184,14 +196,13 @@ describe("collaboration document authentication", () => {
     });
     expect(peer.close).not.toHaveBeenCalled();
     await route.close(peer);
-    errorSpy.mockRestore();
   });
 
   it("enforces the fixed-window message quota before parsing", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const peer = createPeer();
 
-    for (let index = 0; index <= 120; index += 1) {
+    for (let index = 0; index < MESSAGE_RATE_LIMIT_MAX + 1; index += 1) {
       await route.message(peer, { text: () => "{}" });
     }
 
@@ -207,7 +218,6 @@ describe("collaboration document authentication", () => {
       "Message rate limit exceeded",
     );
     await route.close(peer);
-    errorSpy.mockRestore();
   });
 
   it("still rejects an invalid Supabase token after Origin succeeds", async () => {
@@ -234,7 +244,7 @@ describe("collaboration document authentication", () => {
   it("allows a new document Auth after a temporary provider failure", async () => {
     const firstDocumentId = "00000000-0000-4000-8000-000000000011";
     const secondDocumentId = "00000000-0000-4000-8000-000000000022";
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.authorizeDocument
       .mockRejectedValueOnce(new Error("auth unavailable"))
       .mockResolvedValueOnce({
@@ -270,7 +280,34 @@ describe("collaboration document authentication", () => {
     );
 
     await route.close(peer);
-    errorSpy.mockRestore();
+  });
+
+  it("canonicalizes valid UUID spellings before acquiring a room", async () => {
+    const canonicalDocumentId = "abcdef00-0000-4000-8000-000000000001";
+    const wireDocumentId = canonicalDocumentId.toUpperCase();
+    mocks.authorizeDocument.mockResolvedValueOnce({
+      accessMode: "authenticated",
+      documentId: canonicalDocumentId,
+      userId: "00000000-0000-4000-8000-000000000002",
+      role: "EDITOR",
+      canWrite: true,
+    });
+    const peer = createPeer();
+
+    await route.message(peer, authMessage("session-uppercase", wireDocumentId));
+
+    expect(mocks.authorizeDocument).toHaveBeenCalledWith(
+      { kind: "access-token", token: "access-token" },
+      canonicalDocumentId,
+    );
+    expect(peer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Ready,
+        documentId: canonicalDocumentId,
+      }),
+    );
+    expect(peer.close).not.toHaveBeenCalled();
+    await route.close(peer);
   });
 
   it("rejects a second Auth message while authorization is pending", async () => {
@@ -452,5 +489,27 @@ describe("collaboration document event conflicts", () => {
         retryable: false,
       }),
     );
+  });
+
+  it("sanitizes unavailable store errors while retaining their cause", async () => {
+    const sourceError = new Error("postgres.internal:5432 secret detail");
+    mockedAppendEventBatches.mockRejectedValueOnce(sourceError);
+
+    const rejection = await prismaDocumentEventStore
+      .append(
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+        [VALID_BATCH],
+      )
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(rejection).toBeInstanceOf(DocumentEventStoreUnavailableError);
+    expect(rejection).toMatchObject({
+      message: "Document event append is unavailable",
+      cause: sourceError,
+    });
   });
 });

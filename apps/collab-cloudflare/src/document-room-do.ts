@@ -482,60 +482,84 @@ export class DocumentRoomDO extends DurableObject<Env> {
     room: DocumentRoom,
   ): Promise<void> {
     const restored: RestoredPeer[] = [];
-    for (const socket of this.ctx.getWebSockets()) {
-      if (socket.readyState !== WebSocket.OPEN) continue;
-      const attachment = this.attachmentFromSocket(socket);
-      if (attachment === null || attachment.documentId !== documentId) {
-        this.failSocket(socket, 1008, "Invalid collaboration connection", {
-          documentId,
-          messageType: "websocket-restore-invalid-attachment",
-        });
-        continue;
+    try {
+      for (const socket of this.ctx.getWebSockets()) {
+        if (socket.readyState !== WebSocket.OPEN) continue;
+        const attachment = this.attachmentFromSocket(socket);
+        if (attachment === null || attachment.documentId !== documentId) {
+          this.failSocket(socket, 1008, "Invalid collaboration connection", {
+            documentId,
+            messageType: "websocket-restore-invalid-attachment",
+          });
+          continue;
+        }
+        if (this.peers.has(attachment.peerId)) {
+          this.failSocket(socket, 1008, "Duplicate collaboration connection", {
+            documentId,
+            messageType: "websocket-restore-duplicate-peer",
+            peerId: attachment.peerId,
+          });
+          continue;
+        }
+        const peer = new DurableObjectRoomPeer(room, socket, attachment);
+        this.peers.set(peer.id, peer);
+        restored.push({ attachment, peer, socket });
       }
-      if (this.peers.has(attachment.peerId)) {
-        this.failSocket(socket, 1008, "Duplicate collaboration connection", {
-          documentId,
-          messageType: "websocket-restore-duplicate-peer",
-          peerId: attachment.peerId,
-        });
-        continue;
-      }
-      const peer = new DurableObjectRoomPeer(room, socket, attachment);
-      this.peers.set(peer.id, peer);
-      restored.push({ attachment, peer, socket });
-    }
 
+      await Promise.all(
+        restored.map(async ({ peer }) => {
+          try {
+            await room.join(peer);
+          } catch (error) {
+            await peer.fail(error, "websocket-restore-join");
+            this.peers.delete(peer.id);
+          }
+        }),
+      );
+      await Promise.all(
+        restored.map(async ({ attachment, peer, socket }) => {
+          if (
+            attachment.phase !== "authenticated" ||
+            this.peers.get(peer.id) !== peer
+          ) {
+            return;
+          }
+          const state = resumeStateFromAttachment(attachment);
+          if (state === null) {
+            this.failSocket(socket, 1008, "Invalid collaboration session", {
+              documentId,
+              messageType: "websocket-restore-invalid-session",
+              peerId: peer.id,
+            });
+            await peer.transportClosed();
+            this.peers.delete(peer.id);
+            return;
+          }
+          try {
+            await peer.resume(state);
+          } catch (error) {
+            await peer.fail(error, "websocket-restore-resume");
+            this.peers.delete(peer.id);
+            return;
+          }
+          if (!peer.active) this.peers.delete(peer.id);
+        }),
+      );
+    } catch (error) {
+      await this.discardRestoredPeers(restored);
+      this.room = null;
+      throw error;
+    }
+  }
+
+  private async discardRestoredPeers(
+    restored: ReadonlyArray<RestoredPeer>,
+  ): Promise<void> {
     await Promise.all(
       restored.map(async ({ peer }) => {
-        try {
-          await room.join(peer);
-        } catch (error) {
-          await peer.fail(error, "websocket-restore-join");
-          this.peers.delete(peer.id);
-        }
-      }),
-    );
-    await Promise.all(
-      restored.map(async ({ attachment, peer, socket }) => {
-        if (
-          attachment.phase !== "authenticated" ||
-          this.peers.get(peer.id) !== peer
-        ) {
-          return;
-        }
-        const state = resumeStateFromAttachment(attachment);
-        if (state === null) {
-          this.failSocket(socket, 1008, "Invalid collaboration session", {
-            documentId,
-            messageType: "websocket-restore-invalid-session",
-            peerId: peer.id,
-          });
-          await peer.transportClosed();
-          this.peers.delete(peer.id);
-          return;
-        }
-        await peer.resume(state);
-        if (!peer.active) this.peers.delete(peer.id);
+        if (this.peers.get(peer.id) !== peer) return;
+        await peer.transportClosed();
+        this.peers.delete(peer.id);
       }),
     );
   }
@@ -548,7 +572,13 @@ export class DocumentRoomDO extends DurableObject<Env> {
     if (socket.readyState !== WebSocket.OPEN) return null;
     const existing = this.peers.get(attachment.peerId);
     if (existing !== undefined) {
-      return existing.ownsSocket(socket) ? existing : null;
+      if (existing.ownsSocket(socket)) return existing;
+      this.failSocket(socket, 1008, "Duplicate collaboration connection", {
+        documentId: attachment.documentId,
+        messageType: "websocket-duplicate-peer",
+        peerId: attachment.peerId,
+      });
+      return null;
     }
     const peer = new DurableObjectRoomPeer(room, socket, attachment);
     this.peers.set(peer.id, peer);
@@ -584,7 +614,9 @@ export class DocumentRoomDO extends DurableObject<Env> {
     const attachment = this.attachmentFromSocket(socket);
     if (attachment !== null) {
       const peer = this.peers.get(attachment.peerId);
-      if (peer !== undefined) return peer;
+      if (peer !== undefined) {
+        return peer.ownsSocket(socket) ? peer : null;
+      }
     }
     return (
       [...this.peers.values()].find((peer) => peer.ownsSocket(socket)) ?? null

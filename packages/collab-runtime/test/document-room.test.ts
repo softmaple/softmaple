@@ -14,12 +14,14 @@ import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   CONNECTION_REJECTION_REASON,
   DOCUMENT_EVENT_CONFLICT_TYPE,
+  DOCUMENT_ROOM_REFRESH_MODE,
   DOCUMENT_SESSION_END_REASON,
   DocumentEventAuthorizationError,
   DocumentEventConflictError,
   DocumentEventStoreUnavailableError,
   ROOM_LEAVE_REASON,
   createDocumentRoom,
+  type AuthenticatedDocumentSession,
   type CommittedDocumentEvent,
   type ConnectionAdmission,
   type ConnectionAdmissionRequest,
@@ -27,7 +29,9 @@ import {
   type DocumentAccess,
   type DocumentEventStore,
   type DocumentRoom,
+  type DocumentRoomOptions,
   type DocumentRoomPolicy,
+  type DocumentRoomResumeState,
   type DocumentRoomServices,
   type DocumentSessionAuthorizationRequest,
   type DocumentSessionHooks,
@@ -71,6 +75,19 @@ const PUBLIC_ACCESS: DocumentAccess = {
   canWrite: false,
   role: null,
 };
+
+const resumeState = (
+  overrides: Partial<AuthenticatedDocumentSession> = {},
+): DocumentRoomResumeState => ({
+  credential: { kind: "access-token", token: "token" },
+  session: {
+    ...AUTHENTICATED_ACCESS,
+    documentId: DOCUMENT_ID,
+    protocolVersion: COLLAB_PROTOCOL_VERSION,
+    sessionId: "session-1",
+    ...overrides,
+  },
+});
 
 const authMessage = (overrides: Partial<AuthMessage> = {}): AuthMessage => ({
   protocolVersion: COLLAB_PROTOCOL_VERSION,
@@ -314,8 +331,11 @@ const createFixture = (policy = DEFAULT_TEST_POLICY): Fixture => {
 
 const openRooms: DocumentRoom[] = [];
 
-const createRoom = (fixture: Fixture): DocumentRoom => {
-  const room = createDocumentRoom(DOCUMENT_ID, fixture.services);
+const createRoom = (
+  fixture: Fixture,
+  options?: DocumentRoomOptions,
+): DocumentRoom => {
+  const room = createDocumentRoom(DOCUMENT_ID, fixture.services, options);
   openRooms.push(room);
   return room;
 };
@@ -604,7 +624,369 @@ describe("createDocumentRoom authentication", () => {
   });
 });
 
+describe("createDocumentRoom session resume", () => {
+  it("revalidates and reacquires a session without another Ready exchange", async () => {
+    const fixture = createFixture();
+    fixture.controls.refreshAccess = {
+      ...AUTHENTICATED_ACCESS,
+      role: "OWNER",
+    };
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const peer = new FakePeer("peer-resume");
+    const restored = resumeState();
+
+    const session = await room.resume(peer, restored);
+
+    expect(fixture.authorize).not.toHaveBeenCalled();
+    expect(fixture.refresh).toHaveBeenCalledWith({
+      credential: restored.credential,
+      peerId: peer.id,
+      session: restored.session,
+    });
+    expect(fixture.acquire).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: DOCUMENT_ID,
+        peerId: peer.id,
+        sessionId: restored.session.sessionId,
+      }),
+    );
+    expect(session).toMatchObject({
+      documentId: DOCUMENT_ID,
+      role: "OWNER",
+      sessionId: restored.session.sessionId,
+    });
+    expect(peer.messages).toHaveLength(0);
+
+    await room.receive(peer, eventMessage());
+    expect(peer.messages).toContainEqual(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.DurableAck,
+        batchIds: ["batch-1"],
+      }),
+    );
+    expect(peer.messages).toContainEqual(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Event,
+        batches: BATCHES,
+      }),
+    );
+  });
+
+  it("closes a resumed session when its access identity changed", async () => {
+    const fixture = createFixture();
+    fixture.controls.refreshAccess = {
+      ...AUTHENTICATED_ACCESS,
+      actorId: "00000000-0000-4000-8000-000000000099",
+    };
+    const room = createRoom(fixture);
+    const peer = new FakePeer("peer-resume-revoked");
+    const restored = resumeState();
+
+    await expect(room.resume(peer, restored)).resolves.toBeNull();
+
+    expect(fixture.acquire).not.toHaveBeenCalled();
+    expect(fixture.fanout.subscribeCalls).toBe(0);
+    expect(peer.closes).toContainEqual({
+      code: 1008,
+      reason: "Collaboration access was revoked",
+    });
+    expect(fixture.end).toHaveBeenCalledWith(
+      restored.session,
+      DOCUMENT_SESSION_END_REASON.AccessRevoked,
+    );
+  });
+
+  it("releases partial resumed setup when fan-out cannot be restored", async () => {
+    const fixture = createFixture();
+    fixture.fanout.subscribeError = new Error("fanout unavailable");
+    const room = createRoom(fixture);
+    const peer = new FakePeer("peer-resume-partial");
+
+    await expect(room.resume(peer, resumeState())).resolves.toBeNull();
+
+    expect(fixture.leases[0]?.releaseCalls).toBe(1);
+    expect(peer.closes).toContainEqual({
+      code: 1011,
+      reason: "Collaboration runtime unavailable",
+    });
+    expect(fixture.end).toHaveBeenCalledWith(
+      expect.anything(),
+      DOCUMENT_SESSION_END_REASON.PeerLeft,
+    );
+  });
+});
+
 describe("createDocumentRoom refresh semantics", () => {
+  it("refreshes access and leases lazily without background timers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 10,
+        leaseTtlMs: 100,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const peer = new FakePeer("peer-on-message-refresh");
+    await authenticate(room, peer);
+
+    expect(vi.getTimerCount()).toBe(0);
+    vi.setSystemTime(1_011);
+    expect(fixture.refresh).not.toHaveBeenCalled();
+    expect(fixture.leases[0]?.refreshCalls).toBe(0);
+
+    await room.receive(peer, repairMessage());
+
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+    expect(fixture.leases[0]?.refreshCalls).toBe(1);
+    expect(fixture.read).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await room.receive(peer, repairMessage({ requestId: "repair-2" }));
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+    expect(fixture.leases[0]?.refreshCalls).toBe(1);
+    expect(fixture.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("revalidates again before returning a repair that crossed its deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 20,
+        leaseTtlMs: 100,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    fixture.controls.readImpl = async (_documentId, afterCursor) => {
+      vi.setSystemTime(1_011);
+      fixture.controls.refreshAccess = null;
+      return { batches: BATCHES, complete: true, nextCursor: afterCursor };
+    };
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const peer = new FakePeer("peer-repair-deadline");
+    await authenticate(room, peer);
+    peer.messages.length = 0;
+
+    await room.receive(peer, repairMessage());
+
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+    expect(peer.closes).toContainEqual({ code: 1008, reason: "Unauthorized" });
+    expect(peer.messages).toContainEqual(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: COLLAB_ERROR_CODE.AuthenticationFailed,
+      }),
+    );
+    expect(
+      peer.messages.some(
+        (message) => message.type === COLLAB_MESSAGE_TYPE.RepairResponse,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not hold the room maintenance lock across peer persistence I/O", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 60_000,
+        leaseTtlMs: 120_000,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    const slowRead =
+      deferred<Awaited<ReturnType<DocumentEventStore["read"]>>>();
+    fixture.controls.readImpl = async (_documentId, afterCursor) => {
+      if (afterCursor === "0") {
+        vi.setSystemTime(1_030);
+        return slowRead.promise;
+      }
+      return { batches: BATCHES, complete: true, nextCursor: afterCursor };
+    };
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const slowPeer = new FakePeer("peer-slow-repair");
+    const fastPeer = new FakePeer("peer-fast-repair");
+    await authenticate(room, slowPeer);
+    await authenticate(
+      room,
+      fastPeer,
+      authMessage({ sessionId: "fast-session" }),
+    );
+
+    vi.setSystemTime(1_011);
+    const slowRequest = room.receive(slowPeer, repairMessage());
+    await vi.waitFor(() => expect(fixture.read).toHaveBeenCalledOnce());
+    let fastFinished = false;
+    const fastRequest = room
+      .receive(
+        fastPeer,
+        repairMessage({ afterCursor: "1", requestId: "fast-repair" }),
+      )
+      .then(() => {
+        fastFinished = true;
+      });
+    try {
+      await vi.waitFor(() => expect(fastFinished).toBe(true));
+    } finally {
+      slowRead.resolve({ batches: BATCHES, complete: true, nextCursor: "0" });
+      await Promise.all([slowRequest, fastRequest]);
+    }
+    expect(fastPeer.messages).toContainEqual(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.RepairResponse,
+        requestId: "fast-repair",
+      }),
+    );
+  });
+
+  it("closes a peer whose validation expired during append before fan-out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 20,
+        leaseTtlMs: 100,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    fixture.controls.appendImpl = async (_documentId, _actorId, batches) => {
+      vi.setSystemTime(1_011);
+      return batches.map((batch) => batch.batchId);
+    };
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const sender = new FakePeer("peer-deadline-sender");
+    const expired = new FakePeer("peer-expired-recipient");
+    await authenticate(room, sender);
+    await authenticate(
+      room,
+      expired,
+      authMessage({ sessionId: "expired-session" }),
+    );
+    sender.messages.length = 0;
+    expired.messages.length = 0;
+
+    await room.receive(sender, eventMessage());
+
+    expect(sender.messages).toContainEqual(
+      expect.objectContaining({ type: COLLAB_MESSAGE_TYPE.Event }),
+    );
+    expect(
+      expired.messages.some(
+        (message) => message.type === COLLAB_MESSAGE_TYPE.Event,
+      ),
+    ).toBe(false);
+
+    expect(expired.closes).toContainEqual({
+      code: 1012,
+      reason: "Collaboration session requires revalidation",
+    });
+    await vi.waitFor(() => {
+      expect(fixture.end).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "expired-session" }),
+        DOCUMENT_SESSION_END_REASON.PeerLeft,
+      );
+    });
+    expect(fixture.leases[1]?.releaseCalls).toBe(1);
+  });
+
+  it("removes every expired revoked peer before another peer publishes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 10,
+      connection: {
+        leaseRefreshIntervalMs: 20,
+        leaseTtlMs: 100,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    fixture.controls.refreshImpl = async (request) =>
+      request.peerId === "peer-idle-revoked" ? null : AUTHENTICATED_ACCESS;
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const sender = new FakePeer("peer-sender");
+    const revoked = new FakePeer("peer-idle-revoked");
+    await authenticate(room, sender);
+    await authenticate(
+      room,
+      revoked,
+      authMessage({ sessionId: "idle-session" }),
+    );
+    sender.messages.length = 0;
+    revoked.messages.length = 0;
+    vi.setSystemTime(1_011);
+
+    await room.receive(sender, eventMessage());
+
+    expect(fixture.refresh).toHaveBeenCalledTimes(2);
+    expect(revoked.closes).toContainEqual({
+      code: 1008,
+      reason: "Unauthorized",
+    });
+    expect(
+      revoked.messages.some(
+        (message) => message.type === COLLAB_MESSAGE_TYPE.Event,
+      ),
+    ).toBe(false);
+    expect(sender.messages).toContainEqual(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Event,
+        batches: BATCHES,
+      }),
+    );
+    expect(fixture.fanout.published).toHaveLength(1);
+    expect(fixture.leases[1]?.releaseCalls).toBe(1);
+  });
+
+  it("blocks a message when lazy connection lease maintenance fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const fixture = createFixture({
+      authorizationRefreshIntervalMs: 100,
+      connection: {
+        leaseRefreshIntervalMs: 10,
+        leaseTtlMs: 100,
+        maxConnectionsPerDocument: 100,
+      },
+    });
+    const room = createRoom(fixture, {
+      refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage,
+    });
+    const peer = new FakePeer("peer-lazy-lease-loss");
+    await authenticate(room, peer);
+    fixture.leases[0]!.refreshResult = false;
+    vi.setSystemTime(1_011);
+
+    await room.receive(peer, repairMessage());
+
+    expect(peer.closes).toContainEqual({
+      code: 1013,
+      reason: "Collaboration connection lease was lost",
+    });
+    expect(fixture.read).not.toHaveBeenCalled();
+    expect(fixture.end).toHaveBeenCalledWith(
+      expect.anything(),
+      DOCUMENT_SESSION_END_REASON.PeerLeft,
+    );
+  });
+
   it("lazily revalidates expired access and closes a revoked session", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

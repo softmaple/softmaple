@@ -1,9 +1,10 @@
 import type {
   ClientCollabMessage,
+  CollabCredential,
   ServerCollabMessage,
 } from "@softmaple/collab-protocol";
 import type { ConnectionLimiter, ConnectionPolicy } from "./connection-limiter";
-import type { DocumentSessionHooks } from "./document-session";
+import type { DocumentSession, DocumentSessionHooks } from "./document-session";
 import type { DocumentEventStore } from "./event-store";
 import type { RoomFanout } from "./room-fanout";
 
@@ -22,6 +23,25 @@ export const ROOM_LEAVE_REASON = {
 
 export type RoomLeaveReason =
   (typeof ROOM_LEAVE_REASON)[keyof typeof ROOM_LEAVE_REASON];
+
+export const DOCUMENT_ROOM_REFRESH_MODE = {
+  Background: "background",
+  OnMessage: "on-message",
+} as const;
+
+export type DocumentRoomRefreshMode =
+  (typeof DOCUMENT_ROOM_REFRESH_MODE)[keyof typeof DOCUMENT_ROOM_REFRESH_MODE];
+
+export interface DocumentRoomOptions {
+  /** Background timers are the default; hibernating hosts refresh on messages. */
+  readonly refreshMode?: DocumentRoomRefreshMode;
+}
+
+/** Server-owned session metadata restored by a hibernating transport host. */
+export interface DocumentRoomResumeState {
+  readonly credential: CollabCredential;
+  readonly session: DocumentSession;
+}
 
 export interface DocumentRoomPolicy {
   /** Positive cadence for revalidating cached document access. */
@@ -81,6 +101,15 @@ export type DocumentRoomErrorReporter = (
 export interface DocumentRoom {
   readonly documentId: string;
   join(peer: RoomPeer): Promise<void>;
+  /**
+   * Restores an already-established transport session without another wire Auth
+   * or Ready exchange. Access is always revalidated before resources are
+   * reacquired. A null result means the peer was closed and cleaned up.
+   */
+  resume(
+    peer: RoomPeer,
+    state: DocumentRoomResumeState,
+  ): Promise<DocumentSession | null>;
   receive(peer: RoomPeer, message: ClientCollabMessage): Promise<void>;
   leave(peer: RoomPeer, reason?: RoomLeaveReason): Promise<void>;
   close(): Promise<void>;

@@ -1,6 +1,7 @@
 import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
+  LEGACY_COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -109,8 +110,18 @@ describe("document event fan-out across instances", () => {
       remoteChannel,
       remotePeer,
     );
+    const legacyChannel = documentRealtimeChannel(
+      DOCUMENT_ID,
+      LEGACY_COLLAB_PROTOCOL_VERSION,
+    );
+    const legacyPeer = { send: vi.fn() };
+    const unsubscribeLegacy = documentTopicHub.subscribe(
+      legacyChannel,
+      legacyPeer,
+    );
     // Simulate a second instance retaining the same distributed channel.
     await getDocumentTopicBridge().retain(remoteChannel);
+    await getDocumentTopicBridge().retain(legacyChannel);
 
     const batches = [VALID_BATCH];
     await route.message(writer, {
@@ -142,9 +153,18 @@ describe("document event fan-out across instances", () => {
         batches,
       }),
     );
+    expect(legacyPeer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocolVersion: LEGACY_COLLAB_PROTOCOL_VERSION,
+        type: COLLAB_MESSAGE_TYPE.Event,
+        batches,
+      }),
+    );
 
     unsubscribeRemote();
+    unsubscribeLegacy();
     await getDocumentTopicBridge().release(remoteChannel);
+    await getDocumentTopicBridge().release(legacyChannel);
     await route.close(writer);
   });
 

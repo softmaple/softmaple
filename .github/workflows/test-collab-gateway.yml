@@ -5,6 +5,7 @@ on:
     branches: [main, next]
     paths:
       - 'apps/collab/**'
+      - 'packages/collab-runtime/**'
       - 'apps/web/modules/docs/use-collab-document.ts'
       - 'apps/web/package.json'
       - 'apps/web/proxy.ts'
@@ -19,6 +20,7 @@ on:
     branches: [main, next]
     paths:
       - 'apps/collab/**'
+      - 'packages/collab-runtime/**'
       - 'apps/web/modules/docs/use-collab-document.ts'
       - 'apps/web/package.json'
       - 'apps/web/proxy.ts'

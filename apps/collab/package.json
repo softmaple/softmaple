@@ -15,6 +15,7 @@
     "@softmaple/awareness": "workspace:*",
     "@softmaple/block-model": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
+    "@softmaple/collab-runtime": "workspace:*",
     "@softmaple/db": "workspace:*",
     "@supabase/supabase-js": "^2.89.0",
     "dotenv": "^17.4.2",

@@ -4,12 +4,14 @@ import {
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import {
-  EVENT_CONFLICT_TYPE,
-  EventConflictError,
-} from "../../server/utils/event-conflict";
-
-export type { EventPage } from "../../server/utils/event-store";
-import type { EventPage } from "../../server/utils/event-store";
+  DOCUMENT_EVENT_CONFLICT_TYPE,
+  DOCUMENT_EVENT_PAGE_LIMIT,
+  DocumentEventConflictError,
+  type DocumentEventBatches,
+  type DocumentEventCursor,
+  type DocumentEventPage,
+  type DocumentEventStore,
+} from "@softmaple/collab-runtime";
 
 type StoredBatch = {
   readonly id: bigint;
@@ -22,16 +24,17 @@ type StoredBatch = {
  * Infrastructure-independent durable event log for collaboration consistency
  * tests. Mirrors production append/repair conflict semantics without Prisma.
  */
-export type InMemoryEventStore = {
+export type InMemoryEventStore = DocumentEventStore & {
+  /** Compatibility aliases retained for the existing Phase 1 tests. */
   readonly appendEventBatches: (
     documentId: string,
     actorId: string,
-    batches: ReadonlyArray<RichTextEventBatch>,
+    batches: DocumentEventBatches,
   ) => Promise<ReadonlyArray<string>>;
   readonly readEventPage: (
     documentId: string,
-    afterCursor: string,
-  ) => Promise<EventPage>;
+    afterCursor: DocumentEventCursor,
+  ) => Promise<DocumentEventPage>;
   readonly listBatchIds: (documentId: string) => ReadonlyArray<string>;
   readonly listBatches: (
     documentId: string,
@@ -110,7 +113,10 @@ export const createInMemoryEventStore = (options?: {
   readonly pageSize?: number;
 }): InMemoryEventStore => {
   const documents = new Map<string, DocumentLog>();
-  let pageSize = Math.max(1, options?.pageSize ?? 100);
+  let pageSize = Math.min(
+    DOCUMENT_EVENT_PAGE_LIMIT,
+    Math.max(1, options?.pageSize ?? DOCUMENT_EVENT_PAGE_LIMIT),
+  );
 
   const getLog = (documentId: string): DocumentLog => {
     const existing = documents.get(documentId);
@@ -120,21 +126,24 @@ export const createInMemoryEventStore = (options?: {
     return created;
   };
 
-  const appendEventBatches = async (
+  const append = async (
     documentId: string,
     _actorId: string,
-    batches: ReadonlyArray<RichTextEventBatch>,
+    batches: DocumentEventBatches,
   ): Promise<ReadonlyArray<string>> => {
     const incomingEventIds = batches.flatMap((batch) =>
       batch.events.map((event) => event.id),
     );
     if (new Set(incomingEventIds).size !== incomingEventIds.length) {
-      throw new EventConflictError("duplicate event IDs in incoming batches", {
-        conflictType: EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
-        documentId,
-        batchIds: batches.map((batch) => batch.batchId),
-        eventIds: incomingEventIds,
-      });
+      throw new DocumentEventConflictError(
+        "duplicate event IDs in incoming batches",
+        {
+          conflictType: DOCUMENT_EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
+          documentId,
+          batchIds: batches.map((batch) => batch.batchId),
+          eventIds: incomingEventIds,
+        },
+      );
     }
 
     const log = getLog(documentId);
@@ -184,10 +193,10 @@ export const createInMemoryEventStore = (options?: {
                   !availableEventIds.has(eventId),
               )
               .sort();
-            throw new EventConflictError(
+            throw new DocumentEventConflictError(
               "event batch references document history that has not been stored",
               {
-                conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
+                conflictType: DOCUMENT_EVENT_CONFLICT_TYPE.MissingParentHistory,
                 documentId,
                 batchIds: [batch.batchId],
                 missingParentIds,
@@ -203,10 +212,10 @@ export const createInMemoryEventStore = (options?: {
           stagedRows.find((row) => row.batchId === batch.batchId);
         if (existing !== undefined) {
           if (existing.payloadHash !== payloadHash) {
-            throw new EventConflictError(
+            throw new DocumentEventConflictError(
               `conflicting payload for batch ${batch.batchId}`,
               {
-                conflictType: EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+                conflictType: DOCUMENT_EVENT_CONFLICT_TYPE.BatchPayloadConflict,
                 documentId,
                 batchIds: [batch.batchId],
               },
@@ -220,10 +229,11 @@ export const createInMemoryEventStore = (options?: {
 
         for (const event of batch.events) {
           if (log.eventIds.has(event.id) || stagedEventIds.has(event.id)) {
-            throw new EventConflictError(
+            throw new DocumentEventConflictError(
               "event IDs conflict with stored document history",
               {
-                conflictType: EVENT_CONFLICT_TYPE.StoredEventIdConflict,
+                conflictType:
+                  DOCUMENT_EVENT_CONFLICT_TYPE.StoredEventIdConflict,
                 documentId,
                 batchIds: batches.map((entry) => entry.batchId),
                 eventIds: incomingEventIds,
@@ -259,10 +269,10 @@ export const createInMemoryEventStore = (options?: {
     return batches.map((batch) => batch.batchId);
   };
 
-  const readEventPage = async (
+  const read = async (
     documentId: string,
-    afterCursor: string,
-  ): Promise<EventPage> => {
+    afterCursor: DocumentEventCursor,
+  ): Promise<DocumentEventPage> => {
     const log = getLog(documentId);
     const after = BigInt(afterCursor);
     const rows = log.ordered.filter((row) => row.id > after);
@@ -276,8 +286,10 @@ export const createInMemoryEventStore = (options?: {
   };
 
   return {
-    appendEventBatches,
-    readEventPage,
+    append,
+    read,
+    appendEventBatches: append,
+    readEventPage: read,
     listBatchIds: (documentId) =>
       getLog(documentId).ordered.map((row) => row.batchId),
     listBatches: (documentId) =>
@@ -285,7 +297,7 @@ export const createInMemoryEventStore = (options?: {
     hasBatch: (documentId, batchId) =>
       getLog(documentId).batchesById.has(batchId),
     setPageSize: (next) => {
-      pageSize = Math.max(1, next);
+      pageSize = Math.min(DOCUMENT_EVENT_PAGE_LIMIT, Math.max(1, next));
     },
     pageSize: () => pageSize,
   };

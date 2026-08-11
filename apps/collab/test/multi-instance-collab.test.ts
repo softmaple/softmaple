@@ -35,7 +35,7 @@ describe("multi-instance collaboration harness", () => {
     // Assert: each instance only tracks its own local peers.
     expect(instanceA.localPeerCount(harness.documentId)).toBe(1);
     expect(instanceB.localPeerCount(harness.documentId)).toBe(1);
-    expect(instanceA.hub).not.toBe(instanceB.hub);
+    expect(instanceA.room).not.toBe(instanceB.room);
   });
 
   it("should serialize concurrent writes from different instances into durable order", async () => {

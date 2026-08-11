@@ -9,10 +9,12 @@ description: Runtime-independent document room, session, durability, fan-out, an
 versioned collaboration protocol and concrete hosting infrastructure. It lets
 the same room behavior be implemented on the current Nitro/Redis/Postgres
 stack and on a future runtime without importing either environment into the
-contract package.
+runtime package.
 
-This phase defines contracts only. The production route in `apps/collab`
-continues to own the current behavior until it is migrated separately.
+The package supplies the shared `DocumentRoom` implementation as well as its
+contracts. The production Nitro host in `apps/collab` owns only transport and
+infrastructure adapters: raw WebSocket ingress, Supabase authorization,
+Prisma/Postgres history, and Redis-backed fan-out and connection leases.
 
 ## Capability boundary
 

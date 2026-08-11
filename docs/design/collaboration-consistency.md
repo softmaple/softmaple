@@ -11,9 +11,11 @@ This document records the **current** collaboration consistency model after
 [`collaboration-models.md`](./collaboration-models.md) (engine contracts).
 
 It describes what the Nitro/Postgres collaboration host and browser session
-guarantee today. The runtime-independent `DocumentRoom` contracts are defined
-in [`collaboration-runtime.md`](./collaboration-runtime.md), but production is
-not wired to them yet. This page does not describe a Durable Objects runtime.
+guarantee today. The runtime-independent `DocumentRoom` semantics and host
+capabilities are defined in
+[`collaboration-runtime.md`](./collaboration-runtime.md); the Nitro host supplies
+their production adapters. This page does not describe a Durable Objects
+runtime.
 
 ## Durable write invariants
 
@@ -160,6 +162,11 @@ Phase 1 hardening tests live under `apps/collab/test/`:
 - `repair-live-interleave.test.ts` — repair ↔ live Event races
 - `multi-instance-collab.test.ts` — write / repair / reconnect across instances
 - `collaboration-convergence.property.test.ts` — seeded randomized 2–3 client traces
+
+Their server-side harness instantiates the production `DocumentRoom` with
+in-memory capabilities. The client queue and EG-walker/block-model replicas
+remain test-owned, while authorization, repair, durable acknowledgement,
+fan-out, and room lifecycle exercise the same runtime semantics as Nitro.
 
 Optional soak:
 

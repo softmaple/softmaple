@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { DOCUMENT_SESSION_END_REASON } from "@softmaple/collab-runtime";
 import {
   createCollabConsistencyHarness,
   type CollabConsistencyHarness,
@@ -35,7 +36,7 @@ describe("multi-instance collaboration harness", () => {
     // Assert: each instance only tracks its own local peers.
     expect(instanceA.localPeerCount(harness.documentId)).toBe(1);
     expect(instanceB.localPeerCount(harness.documentId)).toBe(1);
-    expect(instanceA.hub).not.toBe(instanceB.hub);
+    expect(instanceA.room).not.toBe(instanceB.room);
   });
 
   it("should serialize concurrent writes from different instances into durable order", async () => {
@@ -131,6 +132,13 @@ describe("multi-instance collaboration harness", () => {
 
     // Act: B disconnects, A keeps writing, B reconnects and repairs.
     await clientB.disconnect();
+    expect(harness.sessionEnds()).toContainEqual(
+      expect.objectContaining({
+        reason: DOCUMENT_SESSION_END_REASON.PeerLeft,
+        session: expect.objectContaining({ sessionId: clientB.sessionId }),
+      }),
+    );
+    expect(harness.roomErrors()).toEqual([]);
     const second = clientA.localInsert("2", 1);
     await clientA.flushOutgoing();
     await harness.settle();

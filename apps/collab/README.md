@@ -25,16 +25,18 @@ Browser ──wss──► /collab/document|presence
 
 Layer boundaries are documented in
 [`docs/design/collaboration-layers.md`](../../docs/design/collaboration-layers.md).
-This app owns transport, auth, persistence, and distributed realtime
-coordination — not editor bindings.
+This app owns transport and the Supabase/Postgres/Redis adapters. Shared
+document-room semantics live in `@softmaple/collab-runtime`; editor bindings
+remain outside this service.
 
 | Concern | Owner |
 | --- | --- |
 | Wire messages / validation | `@softmaple/collab-protocol` |
+| Document room / session semantics | `@softmaple/collab-runtime` |
 | Rich-text batches / CRDT model | `@softmaple/block-model` / `@softmaple/eg-walker` |
 | Lexical projection | `@softmaple/binding-lexical` + `apps/web` |
 | Presence protocol / client state | `@softmaple/awareness` |
-| Auth, durable store, Redis fan-out, presence rooms | **this service** |
+| Auth, durable-store and Redis adapters; presence rooms | **this service** |
 
 ## Storage roles
 

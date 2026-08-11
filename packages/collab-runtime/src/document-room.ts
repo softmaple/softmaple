@@ -44,8 +44,21 @@ export interface DocumentRoomServices {
   readonly events: DocumentEventStore;
   readonly fanout: RoomFanout;
   readonly policy: DocumentRoomPolicy;
+  /** Optional host observability; reporter failures are ignored by the room. */
+  readonly reportError?: DocumentRoomErrorReporter;
   readonly sessions: DocumentSessionHooks;
 }
+
+export interface DocumentRoomErrorContext {
+  readonly documentId: string;
+  readonly messageType: string;
+  readonly peerId?: string;
+}
+
+export type DocumentRoomErrorReporter = (
+  error: unknown,
+  context: DocumentRoomErrorContext,
+) => void;
 
 /**
  * Runtime-independent collaboration state-machine boundary for one document.

@@ -5,30 +5,31 @@ import {
   type RichTextEventBatch,
 } from "@softmaple/block-model";
 import {
-  COLLAB_ACCESS_MODE,
   COLLAB_ERROR_CODE,
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
   type ClientCollabMessage,
-  type CollabErrorMessage,
   type ServerCollabMessage,
 } from "@softmaple/collab-protocol";
-import { randomUUID } from "node:crypto";
-import { EventConflictError } from "../../server/utils/event-conflict";
 import {
-  documentRealtimeChannel,
-  LocalTopicHub,
-  TopicBridge,
-  type RealtimePeer,
-} from "../../server/utils/realtime";
-import type {
-  RealtimeBus,
-  RealtimeHandler,
-} from "../../server/utils/realtime/types";
+  createDocumentRoom,
+  DEFAULT_DOCUMENT_ROOM_POLICY,
+  ROOM_LEAVE_REASON,
+  type DocumentRoom,
+  type DocumentRoomErrorContext,
+  type RoomPeer,
+} from "@softmaple/collab-runtime";
+import { randomUUID } from "node:crypto";
 import {
   createInMemoryEventStore,
   type InMemoryEventStore,
 } from "./inMemoryEventStore";
+import {
+  ControllableRoomFanout,
+  createUnlimitedConnectionLimiter,
+  FakeDocumentSessionHooks,
+  type FakeDocumentSessionEnd,
+} from "./runtimeFakes";
 
 const MAX_BATCHES_PER_SEND = 64;
 
@@ -85,96 +86,6 @@ const createOutgoingQueue = (
   };
 };
 
-type PendingDelivery = {
-  readonly channel: string;
-  readonly payload: unknown;
-  readonly handler: RealtimeHandler;
-};
-
-/**
- * Shared bus that can defer/duplicate fan-out while keeping instance hubs
- * independently owned. Immediate mode matches MemoryRealtimeBus timing.
- */
-class ControllableRealtimeBus implements RealtimeBus {
-  private readonly handlers = new Map<string, Set<RealtimeHandler>>();
-  private readonly pending: PendingDelivery[] = [];
-  private closed = false;
-  deliveryMode: "immediate" | "deferred" = "immediate";
-
-  async publish(channel: string, payload: unknown): Promise<void> {
-    if (this.closed) throw new Error("Realtime bus is closed");
-    const handlers = [...(this.handlers.get(channel) ?? [])];
-    if (this.deliveryMode === "immediate") {
-      await Promise.all(
-        handlers.map(async (handler) => {
-          await handler(payload);
-        }),
-      );
-      return;
-    }
-    for (const handler of handlers) {
-      this.pending.push({ channel, payload, handler });
-    }
-  }
-
-  async subscribe(
-    channel: string,
-    handler: RealtimeHandler,
-  ): Promise<() => Promise<void>> {
-    if (this.closed) throw new Error("Realtime bus is closed");
-    const existing = this.handlers.get(channel) ?? new Set<RealtimeHandler>();
-    existing.add(handler);
-    this.handlers.set(channel, existing);
-    return async () => {
-      const current = this.handlers.get(channel);
-      current?.delete(handler);
-      if (current?.size === 0) this.handlers.delete(channel);
-    };
-  }
-
-  async close(): Promise<void> {
-    this.closed = true;
-    this.handlers.clear();
-    this.pending.length = 0;
-  }
-
-  pendingCount(): number {
-    return this.pending.length;
-  }
-
-  async deliverNext(): Promise<boolean> {
-    const next = this.pending.shift();
-    if (next === undefined) return false;
-    await next.handler(next.payload);
-    return true;
-  }
-
-  async deliverAll(): Promise<number> {
-    let count = 0;
-    while (await this.deliverNext()) {
-      count += 1;
-    }
-    return count;
-  }
-
-  /** Re-queue the front delivery so the same payload is applied twice. */
-  duplicateNext(): boolean {
-    const next = this.pending[0];
-    if (next === undefined) return false;
-    this.pending.splice(1, 0, { ...next });
-    return true;
-  }
-
-  /** Move the front delivery behind the next one when both exist. */
-  reorderNextPair(): boolean {
-    if (this.pending.length < 2) return false;
-    const [first, second, ...rest] = this.pending;
-    this.pending.length = 0;
-    this.pending.push(second, first, ...rest);
-    return true;
-  }
-}
-
 type WorkItem = () => Promise<void>;
 
 class WorkQueue {
@@ -216,6 +127,16 @@ export type HarnessConflict = {
   readonly retryable: boolean;
 };
 
+export type HarnessCloseEvent = {
+  readonly code: number;
+  readonly reason: string;
+};
+
+export type HarnessRoomError = {
+  readonly context: DocumentRoomErrorContext;
+  readonly error: unknown;
+};
+
 export type HarnessClient = {
   readonly id: string;
   readonly actorId: string;
@@ -236,17 +157,14 @@ export type HarnessClient = {
   /** Event batch IDs enqueued on the current connection generation. */
   readonly sentBatchIdsSinceConnect: () => ReadonlyArray<string>;
   readonly conflicts: () => ReadonlyArray<HarnessConflict>;
+  readonly closeEvents: () => ReadonlyArray<HarnessCloseEvent>;
   readonly repairRequestCount: () => number;
   readonly documentFingerprint: () => string;
 };
 
-type ConnectedPeer = RealtimePeer & {
+type ConnectedPeer = RoomPeer & {
   client?: HarnessClientInternal;
   readonly generation: number;
-  readonly context: {
-    unsubscribeLocal?: () => void;
-    realtimeChannel?: string;
-  };
 };
 
 type HarnessClientInternal = HarnessClient & {
@@ -256,8 +174,7 @@ type HarnessClientInternal = HarnessClient & {
 
 export type CollabInstance = {
   readonly name: string;
-  readonly hub: LocalTopicHub;
-  readonly bridge: TopicBridge;
+  readonly room: DocumentRoom;
   readonly localPeerCount: (documentId: string) => number;
   readonly connectClient: (options: {
     readonly id: string;
@@ -266,10 +183,14 @@ export type CollabInstance = {
   readonly close: () => Promise<void>;
 };
 
+type CollabInstanceInternal = CollabInstance & {
+  readonly localPeerIds: Set<string>;
+};
+
 export type CollabConsistencyHarness = {
   readonly documentId: string;
   readonly store: InMemoryEventStore;
-  readonly bus: ControllableRealtimeBus;
+  readonly bus: ControllableRoomFanout;
   readonly createInstance: (name: string) => CollabInstance;
   readonly setDeliveryMode: (mode: "immediate" | "deferred") => void;
   readonly deliverNext: () => Promise<boolean>;
@@ -293,6 +214,8 @@ export type CollabConsistencyHarness = {
     maxTurns?: number,
   ) => Promise<number>;
   readonly protocolQueueSize: () => number;
+  readonly roomErrors: () => ReadonlyArray<HarnessRoomError>;
+  readonly sessionEnds: () => ReadonlyArray<FakeDocumentSessionEnd>;
   readonly assertReplicasConverged: (
     clients: ReadonlyArray<HarnessClient>,
   ) => void;
@@ -328,10 +251,12 @@ export const createCollabConsistencyHarness = (options?: {
   const store = createInMemoryEventStore({
     pageSize: options?.pageSize ?? 100,
   });
-  const bus = new ControllableRealtimeBus();
+  const bus = new ControllableRoomFanout();
+  const connections = createUnlimitedConnectionLimiter();
+  const sessions = new FakeDocumentSessionHooks();
   const protocolQueue = new WorkQueue();
-  const instances = new Map<string, CollabInstance>();
-  const channel = documentRealtimeChannel(documentId, COLLAB_PROTOCOL_VERSION);
+  const instances = new Map<string, CollabInstanceInternal>();
+  const roomErrors: HarnessRoomError[] = [];
   let settleInFlight: Promise<void> | null = null;
 
   const enqueueProtocol = (work: WorkItem): void => {
@@ -349,131 +274,8 @@ export const createCollabConsistencyHarness = (options?: {
     currentPeer() === peer &&
     peer.client !== undefined;
 
-  const releasePeerChannel = async (
-    instance: { readonly bridge: TopicBridge },
-    peer: ConnectedPeer,
-  ): Promise<void> => {
-    peer.context.unsubscribeLocal?.();
-    delete peer.context.unsubscribeLocal;
-    if (peer.context.realtimeChannel !== undefined) {
-      await instance.bridge.release(peer.context.realtimeChannel);
-      delete peer.context.realtimeChannel;
-    }
-  };
-
-  const handleClientMessage = async (
-    instance: {
-      readonly hub: LocalTopicHub;
-      readonly bridge: TopicBridge;
-    },
-    peer: ConnectedPeer,
-    message: ClientCollabMessage,
-    generation: number,
-    activeGeneration: () => number,
-    currentPeer: () => ConnectedPeer | null,
-  ): Promise<void> => {
-    if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-      return;
-    }
-
-    if (message.type === COLLAB_MESSAGE_TYPE.Auth) {
-      peer.context.unsubscribeLocal = instance.hub.subscribe(channel, peer);
-      await instance.bridge.retain(channel);
-      if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-        // Dropped Auth after retain: release so the channel is not leaked.
-        await releasePeerChannel(instance, peer);
-        return;
-      }
-      peer.context.realtimeChannel = channel;
-      enqueueProtocol(async () => {
-        if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-          return;
-        }
-        await peer.client.receive({
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.Ready,
-          accessMode: COLLAB_ACCESS_MODE.Authenticated,
-          documentId,
-          userId: peer.client.actorId,
-          role: "EDITOR",
-          canWrite: true,
-        });
-      });
-      return;
-    }
-
-    if (message.type === COLLAB_MESSAGE_TYPE.RepairRequest) {
-      const page = await store.readEventPage(documentId, message.afterCursor);
-      enqueueProtocol(async () => {
-        if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-          return;
-        }
-        await peer.client.receive({
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.RepairResponse,
-          requestId: message.requestId,
-          ...page,
-        });
-      });
-      return;
-    }
-
-    if (message.type === COLLAB_MESSAGE_TYPE.Event) {
-      let batchIds: ReadonlyArray<string>;
-      try {
-        batchIds = await store.appendEventBatches(
-          documentId,
-          peer.client.actorId,
-          message.batches,
-        );
-      } catch (error) {
-        const conflict = error instanceof EventConflictError;
-        const errorMessage: CollabErrorMessage = {
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.Error,
-          code: conflict
-            ? COLLAB_ERROR_CODE.Conflict
-            : COLLAB_ERROR_CODE.PersistenceFailed,
-          message: conflict
-            ? "The event batch conflicts with stored document history"
-            : "The event batch was not saved",
-          // Mirror production: conflicts are never reconnect-retried.
-          retryable: !conflict,
-        };
-        enqueueProtocol(async () => {
-          if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-            return;
-          }
-          await peer.client.receive(errorMessage);
-        });
-        return;
-      }
-
-      if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-        return;
-      }
-
-      // Durable commit before DurableAck and before fan-out.
-      enqueueProtocol(async () => {
-        if (!isActivePeer(peer, generation, activeGeneration, currentPeer)) {
-          return;
-        }
-        await peer.client.receive({
-          protocolVersion: COLLAB_PROTOCOL_VERSION,
-          type: COLLAB_MESSAGE_TYPE.DurableAck,
-          batchIds,
-        });
-      });
-      await bus.publish(channel, {
-        protocolVersion: COLLAB_PROTOCOL_VERSION,
-        type: COLLAB_MESSAGE_TYPE.Event,
-        batches: message.batches,
-      });
-    }
-  };
-
   const createClient = (
-    instance: CollabInstance,
+    instance: CollabInstanceInternal,
     clientOptions: { readonly id: string; readonly actorId: string },
   ): HarnessClientInternal => {
     const replica = createBlockReplica(clientOptions.id);
@@ -481,6 +283,7 @@ export const createCollabConsistencyHarness = (options?: {
       replica.exportEvents().map((batch) => [batch.batchId, batch] as const),
     );
     const acknowledged = new Set<string>();
+    const closeEvents: HarnessCloseEvent[] = [];
     const conflicts: HarnessConflict[] = [];
     const sentSinceConnect: string[] = [];
     let peer: ConnectedPeer | null = null;
@@ -511,14 +314,17 @@ export const createCollabConsistencyHarness = (options?: {
         }
       }
       enqueueProtocol(async () => {
-        await handleClientMessage(
-          instance,
-          activePeer,
-          message,
-          generation,
-          () => peerGeneration,
-          () => peer,
-        );
+        if (
+          !isActivePeer(
+            activePeer,
+            generation,
+            () => peerGeneration,
+            () => peer,
+          )
+        ) {
+          return;
+        }
+        await instance.room.receive(activePeer, message);
       });
     };
 
@@ -560,10 +366,30 @@ export const createCollabConsistencyHarness = (options?: {
         peerGeneration += 1;
         sentSinceConnect.length = 0;
         const nextPeer: ConnectedPeer = {
+          id: `${instance.name}:${clientOptions.id}:${peerGeneration}`,
           generation: peerGeneration,
-          context: {},
-          send(payload: unknown) {
-            const message = payload as ServerCollabMessage;
+          close(code, reason) {
+            closeEvents.push({ code, reason });
+            const generation = nextPeer.generation;
+            if (
+              !isActivePeer(
+                nextPeer,
+                generation,
+                () => peerGeneration,
+                () => peer,
+              )
+            ) {
+              return;
+            }
+            peerGeneration += 1;
+            instance.localPeerIds.delete(nextPeer.id);
+            peer = null;
+            connected = false;
+            synced = false;
+            activeRepairRequestId = null;
+            outgoing.resetInFlight();
+          },
+          send(message: ServerCollabMessage) {
             const generation = nextPeer.generation;
             enqueueProtocol(async () => {
               if (
@@ -581,8 +407,11 @@ export const createCollabConsistencyHarness = (options?: {
           },
         };
         nextPeer.client = client;
+        sessions.registerAuthenticatedPeer(nextPeer.id, clientOptions.actorId);
+        await instance.room.join(nextPeer);
         peer = nextPeer;
         connected = true;
+        instance.localPeerIds.add(nextPeer.id);
         enqueueClientMessage({
           protocolVersion: COLLAB_PROTOCOL_VERSION,
           type: COLLAB_MESSAGE_TYPE.Auth,
@@ -596,12 +425,17 @@ export const createCollabConsistencyHarness = (options?: {
         const disconnecting = peer;
         // Invalidate queued work for this connection generation first.
         peerGeneration += 1;
-        await releasePeerChannel(instance, disconnecting);
         peer = null;
         connected = false;
         synced = false;
         activeRepairRequestId = null;
         outgoing.resetInFlight();
+        instance.localPeerIds.delete(disconnecting.id);
+        await instance.room.leave(
+          disconnecting,
+          ROOM_LEAVE_REASON.ConnectionClosed,
+        );
+        sessions.forgetPeer(disconnecting.id);
       },
       isConnected: () => connected,
       isSynced: () => synced,
@@ -642,6 +476,7 @@ export const createCollabConsistencyHarness = (options?: {
       knownBatchIds: () => new Set(knownBatches.keys()),
       sentBatchIdsSinceConnect: () => [...sentSinceConnect],
       conflicts: () => [...conflicts],
+      closeEvents: () => [...closeEvents],
       repairRequestCount: () => repairRequests,
       documentFingerprint: () => fingerprintDocument(replica),
       async receive(message) {
@@ -717,24 +552,30 @@ export const createCollabConsistencyHarness = (options?: {
     if (instances.has(name)) {
       throw new Error(`Instance ${name} already exists`);
     }
-    const hub = new LocalTopicHub();
-    const bridge = new TopicBridge(bus, hub);
-    const instance: CollabInstance = {
+    const localPeerIds = new Set<string>();
+    const room = createDocumentRoom(documentId, {
+      connections,
+      events: store,
+      fanout: bus,
+      policy: DEFAULT_DOCUMENT_ROOM_POLICY,
+      reportError(error, context) {
+        roomErrors.push({ context, error });
+      },
+      sessions,
+    });
+    const instance: CollabInstanceInternal = {
       name,
-      hub,
-      bridge,
-      localPeerCount: (id) =>
-        hub.localSubscriberCount(
-          documentRealtimeChannel(id, COLLAB_PROTOCOL_VERSION),
-        ),
+      room,
+      localPeerIds,
+      localPeerCount: (id) => (id === documentId ? localPeerIds.size : 0),
       async connectClient(connectOptions) {
         const client = createClient(instance, connectOptions);
         await client.connect();
         return client;
       },
       async close() {
-        await bridge.close();
-        hub.clear();
+        await room.close();
+        localPeerIds.clear();
         instances.delete(name);
       },
     };
@@ -781,6 +622,8 @@ export const createCollabConsistencyHarness = (options?: {
       throw new Error(`pumpUntil exceeded turn budget (${maxTurns})`);
     },
     protocolQueueSize: () => protocolQueue.size(),
+    roomErrors: () => [...roomErrors],
+    sessionEnds: () => sessions.sessionEnds(),
     assertReplicasConverged(clients) {
       if (clients.length === 0) return;
       const expected = clients[0]!.documentFingerprint();

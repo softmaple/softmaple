@@ -2,6 +2,7 @@ import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
+import { DocumentEventStoreUnavailableError } from "@softmaple/collab-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMemoryRealtime,
@@ -11,6 +12,11 @@ import {
 import { EVENT_CONFLICT_TYPE } from "../server/utils/event-conflict";
 import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
 import { MockEventConflictError } from "./helpers/eventStoreMocks";
+import {
+  MAX_MESSAGE_BYTES,
+  MESSAGE_RATE_LIMIT_MAX,
+} from "../server/adapters/nitro-document-host";
+import { prismaDocumentEventStore } from "../server/adapters/prisma-document-event-store";
 
 const VALID_BATCH = TEST_BOOTSTRAP_BATCH;
 
@@ -108,6 +114,7 @@ describe("collaboration document authentication", () => {
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("accepts a same-origin browser upgrade before creating peer context", async () => {
@@ -154,6 +161,65 @@ describe("collaboration document authentication", () => {
     expect(await (rejection as Response).text()).toBe("Forbidden");
   });
 
+  it("measures the raw UTF-8 payload and closes oversized messages", async () => {
+    const peer = createPeer();
+    const multibyteCharacter = "界";
+    const oversizedCharacterCount =
+      Math.floor(
+        MAX_MESSAGE_BYTES / Buffer.byteLength(multibyteCharacter, "utf8"),
+      ) + 1;
+
+    await route.message(peer, {
+      text: () => multibyteCharacter.repeat(oversizedCharacterCount),
+    });
+
+    expect(peer.send).not.toHaveBeenCalled();
+    expect(peer.close).toHaveBeenCalledWith(
+      1009,
+      "Collaboration message is too large",
+    );
+    await route.close(peer);
+  });
+
+  it("keeps malformed JSON as a non-retryable protocol error", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const peer = createPeer();
+
+    await route.message(peer, { text: () => "{not-json" });
+
+    expect(peer.send).toHaveBeenCalledWith({
+      protocolVersion: COLLAB_PROTOCOL_VERSION,
+      type: COLLAB_MESSAGE_TYPE.Error,
+      code: "invalid-message",
+      message: "The collaboration message is invalid",
+      retryable: false,
+    });
+    expect(peer.close).not.toHaveBeenCalled();
+    await route.close(peer);
+  });
+
+  it("enforces the fixed-window message quota before parsing", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const peer = createPeer();
+
+    for (let index = 0; index < MESSAGE_RATE_LIMIT_MAX + 1; index += 1) {
+      await route.message(peer, { text: () => "{}" });
+    }
+
+    expect(peer.send).toHaveBeenLastCalledWith({
+      protocolVersion: COLLAB_PROTOCOL_VERSION,
+      type: COLLAB_MESSAGE_TYPE.Error,
+      code: "invalid-message",
+      message: "Too many collaboration messages",
+      retryable: true,
+    });
+    expect(peer.close).toHaveBeenCalledWith(
+      1013,
+      "Message rate limit exceeded",
+    );
+    await route.close(peer);
+  });
+
   it("still rejects an invalid Supabase token after Origin succeeds", async () => {
     const upgrade = await route.upgrade(browserUpgradeRequest());
     mocks.authorizeDocument.mockResolvedValueOnce(null);
@@ -172,6 +238,76 @@ describe("collaboration document authentication", () => {
       }),
     );
     expect(peer.close).toHaveBeenCalledWith(1008, "Unauthorized");
+    await route.close(peer);
+  });
+
+  it("allows a new document Auth after a temporary provider failure", async () => {
+    const firstDocumentId = "00000000-0000-4000-8000-000000000011";
+    const secondDocumentId = "00000000-0000-4000-8000-000000000022";
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.authorizeDocument
+      .mockRejectedValueOnce(new Error("auth unavailable"))
+      .mockResolvedValueOnce({
+        accessMode: "authenticated",
+        documentId: secondDocumentId,
+        userId: "00000000-0000-4000-8000-000000000002",
+        role: "EDITOR",
+        canWrite: true,
+      });
+    const peer = createPeer();
+
+    await route.message(peer, authMessage("session-first", firstDocumentId));
+    expect(peer.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: "authentication-failed",
+        retryable: true,
+      }),
+    );
+    expect(peer.close).not.toHaveBeenCalled();
+
+    await route.message(peer, authMessage("session-second", secondDocumentId));
+    expect(peer.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Ready,
+        documentId: secondDocumentId,
+      }),
+    );
+    expect(mocks.authorizeDocument).toHaveBeenNthCalledWith(
+      2,
+      { kind: "access-token", token: "access-token" },
+      secondDocumentId,
+    );
+
+    await route.close(peer);
+  });
+
+  it("canonicalizes valid UUID spellings before acquiring a room", async () => {
+    const canonicalDocumentId = "abcdef00-0000-4000-8000-000000000001";
+    const wireDocumentId = canonicalDocumentId.toUpperCase();
+    mocks.authorizeDocument.mockResolvedValueOnce({
+      accessMode: "authenticated",
+      documentId: canonicalDocumentId,
+      userId: "00000000-0000-4000-8000-000000000002",
+      role: "EDITOR",
+      canWrite: true,
+    });
+    const peer = createPeer();
+
+    await route.message(peer, authMessage("session-uppercase", wireDocumentId));
+
+    expect(mocks.authorizeDocument).toHaveBeenCalledWith(
+      { kind: "access-token", token: "access-token" },
+      canonicalDocumentId,
+    );
+    expect(peer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: COLLAB_MESSAGE_TYPE.Ready,
+        documentId: canonicalDocumentId,
+      }),
+    );
+    expect(peer.close).not.toHaveBeenCalled();
+    await route.close(peer);
   });
 
   it("rejects a second Auth message while authorization is pending", async () => {
@@ -189,7 +325,6 @@ describe("collaboration document authentication", () => {
     await vi.waitFor(() => {
       expect(mocks.authorizeDocument).toHaveBeenCalledTimes(1);
     });
-    expect(peer.context.authenticationPending).toBe(true);
 
     await route.message(peer, authMessage("session-2"));
 
@@ -207,8 +342,7 @@ describe("collaboration document authentication", () => {
       canWrite: true,
     });
     await firstAuth;
-
-    expect(peer.context.authenticationPending).toBeUndefined();
+    await route.close(peer);
   });
 
   it("releases the document connection slot when access is cleared before close", async () => {
@@ -225,7 +359,7 @@ describe("collaboration document authentication", () => {
       mocks.authorizeDocument.mockResolvedValueOnce(access);
       const peer = createPeer();
       await route.message(peer, authMessage(`session-${index}`, documentId));
-      expect(peer.context.connectionCounted).toBe(true);
+      expect(peer.close).not.toHaveBeenCalled();
       peers.push(peer);
     }
 
@@ -236,10 +370,9 @@ describe("collaboration document authentication", () => {
       1013,
       "Document connection limit reached",
     );
+    await route.close(blocked);
 
-    // Match the revocation path: clear cached access, then close.
-    delete peers[0]?.context.documentAccess;
-    delete peers[0]?.context.authorizationExpiresAt;
+    // Releasing a physical peer must make its distributed slot reusable.
     await route.close(peers[0]!);
 
     mocks.authorizeDocument.mockResolvedValueOnce(access);
@@ -248,7 +381,6 @@ describe("collaboration document authentication", () => {
       replacement,
       authMessage("session-replacement", documentId),
     );
-    expect(replacement.context.connectionCounted).toBe(true);
     expect(replacement.close).not.toHaveBeenCalled();
 
     for (const peer of peers.slice(1)) await route.close(peer);
@@ -329,6 +461,7 @@ describe("collaboration document event conflicts", () => {
         conflictType: EVENT_CONFLICT_TYPE.MissingParentHistory,
       }),
     );
+    expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 
   it("keeps payload conflicts non-retryable", async () => {
@@ -356,5 +489,27 @@ describe("collaboration document event conflicts", () => {
         retryable: false,
       }),
     );
+  });
+
+  it("sanitizes unavailable store errors while retaining their cause", async () => {
+    const sourceError = new Error("postgres.internal:5432 secret detail");
+    mockedAppendEventBatches.mockRejectedValueOnce(sourceError);
+
+    const rejection = await prismaDocumentEventStore
+      .append(
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+        [VALID_BATCH],
+      )
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(rejection).toBeInstanceOf(DocumentEventStoreUnavailableError);
+    expect(rejection).toMatchObject({
+      message: "Document event append is unavailable",
+      cause: sourceError,
+    });
   });
 });

@@ -1,6 +1,7 @@
 import {
   COLLAB_MESSAGE_TYPE,
   COLLAB_PROTOCOL_VERSION,
+  LEGACY_COLLAB_PROTOCOL_VERSION,
 } from "@softmaple/collab-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
   documentRealtimeChannel,
   documentTopicHub,
   getDocumentTopicBridge,
+  getRealtime,
   resetTopicBridgesForTests,
   setRealtimeForTests,
 } from "../server/utils/realtime";
@@ -94,6 +96,7 @@ describe("document event fan-out across instances", () => {
     await resetTopicBridgesForTests();
     await setRealtimeForTests(null);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("publishes persisted events to peers on another simulated instance", async () => {
@@ -109,8 +112,18 @@ describe("document event fan-out across instances", () => {
       remoteChannel,
       remotePeer,
     );
+    const legacyChannel = documentRealtimeChannel(
+      DOCUMENT_ID,
+      LEGACY_COLLAB_PROTOCOL_VERSION,
+    );
+    const legacyPeer = { send: vi.fn() };
+    const unsubscribeLegacy = documentTopicHub.subscribe(
+      legacyChannel,
+      legacyPeer,
+    );
     // Simulate a second instance retaining the same distributed channel.
     await getDocumentTopicBridge().retain(remoteChannel);
+    await getDocumentTopicBridge().retain(legacyChannel);
 
     const batches = [VALID_BATCH];
     await route.message(writer, {
@@ -142,9 +155,18 @@ describe("document event fan-out across instances", () => {
         batches,
       }),
     );
+    expect(legacyPeer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocolVersion: LEGACY_COLLAB_PROTOCOL_VERSION,
+        type: COLLAB_MESSAGE_TYPE.Event,
+        batches,
+      }),
+    );
 
     unsubscribeRemote();
+    unsubscribeLegacy();
     await getDocumentTopicBridge().release(remoteChannel);
+    await getDocumentTopicBridge().release(legacyChannel);
     await route.close(writer);
   });
 
@@ -183,6 +205,28 @@ describe("document event fan-out across instances", () => {
 
     unsubscribeRemote();
     await getDocumentTopicBridge().release(remoteChannel);
+    await route.close(writer);
+  });
+
+  it("reports malformed realtime payloads without forwarding them", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const writer = createPeer();
+    await route.message(writer, authMessage);
+    writer.send.mockClear();
+
+    await getRealtime().bus.publish(
+      documentRealtimeChannel(DOCUMENT_ID, COLLAB_PROTOCOL_VERSION),
+      { invalid: true },
+    );
+
+    expect(writer.send).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      "Collaboration realtime payload was ignored",
+      expect.objectContaining({
+        documentId: DOCUMENT_ID,
+        messageType: "realtime-parse",
+      }),
+    );
     await route.close(writer);
   });
 });

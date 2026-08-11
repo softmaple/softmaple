@@ -8,7 +8,7 @@ export class TestDocumentRoomDO extends DocumentRoomDO {
   protected override createServices(documentId: string): DocumentRoomServices {
     return createRoomServicesForBackend(
       documentId,
-      createMemoryDocumentBackend(documentId),
+      createMemoryDocumentBackend(documentId, this.ctx.storage),
     );
   }
 }

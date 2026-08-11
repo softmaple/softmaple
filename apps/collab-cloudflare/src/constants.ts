@@ -9,6 +9,10 @@ import {
 export const MESSAGE_RATE_LIMIT_WINDOW_MS = 10_000;
 export const MESSAGE_RATE_LIMIT_MAX = 120;
 export const MAX_MESSAGE_BYTES = 256 * 1024;
+// WebSocket attachments are capped at 16 KiB by Cloudflare. Keep half of that
+// budget for the Ready/session snapshot, quota, structured-clone overhead, and
+// future versioned fields.
+export const MAX_PERSISTED_AUTH_BYTES = 8 * 1024;
 export const INITIAL_AUTH_TIMEOUT_MS = 10_000;
 
 export const errorMessage = (

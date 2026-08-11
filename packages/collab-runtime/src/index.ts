@@ -9,10 +9,14 @@ export {
 } from "./connection-limiter";
 export {
   DEFAULT_DOCUMENT_ROOM_POLICY,
+  DOCUMENT_ROOM_REFRESH_MODE,
   type DocumentRoom,
   type DocumentRoomErrorContext,
   type DocumentRoomErrorReporter,
+  type DocumentRoomOptions,
   type DocumentRoomPolicy,
+  type DocumentRoomRefreshMode,
+  type DocumentRoomResumeState,
   type DocumentRoomServices,
   ROOM_LEAVE_REASON,
   type RoomLeaveReason,

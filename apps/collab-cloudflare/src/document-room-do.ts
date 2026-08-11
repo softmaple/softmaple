@@ -2,15 +2,19 @@ import { DurableObject } from "cloudflare:workers";
 import {
   COLLAB_ERROR_CODE,
   COLLAB_MESSAGE_TYPE,
-  COLLAB_PROTOCOL_VERSION,
   parseClientCollabMessage,
+  type AuthMessage,
   type ClientCollabMessage,
+  type LegacyAuthMessage,
+  type LegacyReadyMessage,
+  type ReadyMessage,
   type ServerCollabMessage,
-  type SupportedCollabProtocolVersion,
 } from "@softmaple/collab-protocol";
 import {
   createDocumentRoom,
+  DOCUMENT_ROOM_REFRESH_MODE,
   type DocumentRoom,
+  type DocumentRoomResumeState,
   type DocumentRoomServices,
   type RoomPeer,
 } from "@softmaple/collab-runtime";
@@ -18,16 +22,22 @@ import {
   errorMessage,
   logError,
   MAX_MESSAGE_BYTES,
+  MAX_PERSISTED_AUTH_BYTES,
   MESSAGE_RATE_LIMIT_MAX,
   MESSAGE_RATE_LIMIT_WINDOW_MS,
 } from "./constants";
 import { documentIdFromRoomPath } from "./document-id";
 import { createRoomServices } from "./room-services";
-
-interface MessageQuota {
-  readonly count: number;
-  readonly windowStartedAt: number;
-}
+import {
+  attachmentAfterReady,
+  attachmentAfterResume,
+  attachmentWithQuota,
+  createAwaitingAuthAttachment,
+  parseDocumentWebSocketAttachment,
+  protocolVersionFromAttachment,
+  resumeStateFromAttachment,
+  type DocumentWebSocketAttachment,
+} from "./websocket-attachment";
 
 const textFromMessage = (message: string | ArrayBuffer): string =>
   typeof message === "string" ? message : new TextDecoder().decode(message);
@@ -38,83 +48,186 @@ const messageBytes = (message: string | ArrayBuffer): number =>
     : message.byteLength;
 
 class DurableObjectRoomPeer implements RoomPeer {
-  readonly id = crypto.randomUUID();
+  readonly id: string;
 
+  private attachment: DocumentWebSocketAttachment;
   private cleanedUp = false;
   private closeRequested = false;
   private messageQueue: Promise<void> = Promise.resolve();
-  private protocolVersion: SupportedCollabProtocolVersion =
-    COLLAB_PROTOCOL_VERSION;
-  private quota: MessageQuota = { count: 0, windowStartedAt: Date.now() };
+  private pendingAuth: AuthMessage | LegacyAuthMessage | null = null;
 
   constructor(
-    private readonly documentId: string,
     private readonly room: DocumentRoom,
     private readonly socket: WebSocket,
-  ) {}
+    attachment: DocumentWebSocketAttachment,
+  ) {
+    this.attachment = attachment;
+    this.id = attachment.peerId;
+  }
 
-  start(): void {
-    this.socket.addEventListener("message", (event) => {
-      this.enqueue(async () => {
-        await this.receive(event.data);
-      });
+  get active(): boolean {
+    return !this.cleanedUp && !this.closeRequested;
+  }
+
+  get documentId(): string {
+    return this.attachment.documentId;
+  }
+
+  ownsSocket(socket: WebSocket): boolean {
+    return this.socket === socket;
+  }
+
+  dispatch(rawMessage: string | ArrayBuffer): Promise<void> {
+    return this.enqueue(async () => {
+      await this.receive(rawMessage);
     });
-    this.socket.addEventListener("close", () => {
-      this.enqueue(async () => {
-        await this.cleanup();
-      });
+  }
+
+  resume(state: DocumentRoomResumeState): Promise<void> {
+    return this.enqueue(async () => {
+      if (
+        this.cleanedUp ||
+        this.closeRequested ||
+        this.attachment.phase !== "authenticated"
+      ) {
+        return;
+      }
+      const session = await this.room.resume(this, state);
+      if (session === null) {
+        this.cleanedUp = true;
+        this.closeRequested = true;
+        return;
+      }
+      if (this.closeRequested) {
+        await this.cleanupNow();
+        return;
+      }
+      const attachment = attachmentAfterResume(
+        this.attachment,
+        session,
+        Date.now(),
+      );
+      if (attachment === null) {
+        throw new Error("Resumed collaboration session metadata is invalid");
+      }
+      this.replaceAttachment(attachment);
     });
-    this.socket.addEventListener("error", () => {
-      this.enqueue(async () => {
-        await this.cleanup();
-      });
+  }
+
+  transportClosed(): Promise<void> {
+    this.closeRequested = true;
+    return this.enqueue(async () => {
+      await this.cleanupNow();
+    });
+  }
+
+  transportError(error: unknown): Promise<void> {
+    logError(error, {
+      documentId: this.documentId,
+      messageType: "websocket-error",
+      peerId: this.id,
+    });
+    this.close(1011, "Collaboration transport failure");
+    return this.enqueue(async () => {
+      await this.cleanupNow();
+    });
+  }
+
+  fail(error: unknown, messageType: string): Promise<void> {
+    return this.enqueue(async () => {
+      await this.handleFailure(error, messageType);
     });
   }
 
   close(code: number, reason: string): void {
     if (this.closeRequested) return;
     this.closeRequested = true;
-    if (this.socket.readyState < 2) this.socket.close(code, reason);
-  }
-
-  send(message: ServerCollabMessage): void {
-    if (this.closeRequested || this.socket.readyState !== 1) return;
-    this.socket.send(JSON.stringify(message));
-    if (message.type === COLLAB_MESSAGE_TYPE.Ready) {
-      this.protocolVersion = message.protocolVersion;
+    if (this.socket.readyState < WebSocket.CLOSING) {
+      this.socket.close(code, reason);
     }
   }
 
-  private enqueue(operation: () => Promise<void>): void {
-    this.messageQueue = this.messageQueue
-      .then(operation)
-      .catch(async (error: unknown) => {
-        logError(error, {
-          documentId: this.documentId,
-          messageType: "websocket",
-          peerId: this.id,
-        });
-        this.close(1011, "Collaboration runtime failure");
+  send(message: ServerCollabMessage): void {
+    if (this.closeRequested || this.socket.readyState !== WebSocket.OPEN) {
+      if (message.type === COLLAB_MESSAGE_TYPE.Ready) {
+        throw new Error(
+          "Collaboration socket closed before authentication completed",
+        );
+      }
+      return;
+    }
+    const previousAttachment = this.attachment;
+    if (message.type === COLLAB_MESSAGE_TYPE.Ready) {
+      this.persistReady(message);
+    }
+    try {
+      this.socket.send(JSON.stringify(message));
+    } catch (error) {
+      if (message.type === COLLAB_MESSAGE_TYPE.Ready) {
         try {
-          await this.cleanup();
-        } catch (cleanupError) {
-          logError(cleanupError, {
+          this.replaceAttachment(previousAttachment);
+        } catch (rollbackError) {
+          logError(rollbackError, {
             documentId: this.documentId,
-            messageType: "websocket-cleanup",
+            messageType: "websocket-ready-rollback",
             peerId: this.id,
           });
+          this.close(1011, "Collaboration runtime failure");
         }
+      }
+      throw error;
+    }
+  }
+
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    const queued = this.messageQueue.then(operation, operation);
+    const guarded = queued.catch(async (error: unknown) => {
+      await this.handleFailure(error, "websocket");
+    });
+    this.messageQueue = guarded;
+    return guarded;
+  }
+
+  private async handleFailure(
+    error: unknown,
+    messageType: string,
+  ): Promise<void> {
+    logError(error, {
+      documentId: this.documentId,
+      messageType,
+      peerId: this.id,
+    });
+    this.close(1011, "Collaboration runtime failure");
+    try {
+      await this.cleanupNow();
+    } catch (cleanupError) {
+      logError(cleanupError, {
+        documentId: this.documentId,
+        messageType: "websocket-cleanup",
+        peerId: this.id,
       });
+    }
   }
 
   private consumeQuota(): boolean {
     const now = Date.now();
-    if (now - this.quota.windowStartedAt >= MESSAGE_RATE_LIMIT_WINDOW_MS) {
-      this.quota = { count: 1, windowStartedAt: now };
+    const quota = this.attachment.quota;
+    if (now - quota.windowStartedAt >= MESSAGE_RATE_LIMIT_WINDOW_MS) {
+      this.replaceAttachment(
+        attachmentWithQuota(this.attachment, {
+          count: 1,
+          windowStartedAt: now,
+        }),
+      );
       return true;
     }
-    if (this.quota.count >= MESSAGE_RATE_LIMIT_MAX) return false;
-    this.quota = { ...this.quota, count: this.quota.count + 1 };
+    if (quota.count >= MESSAGE_RATE_LIMIT_MAX) return false;
+    this.replaceAttachment(
+      attachmentWithQuota(this.attachment, {
+        ...quota,
+        count: quota.count + 1,
+      }),
+    );
     return true;
   }
 
@@ -122,7 +235,7 @@ class DurableObjectRoomPeer implements RoomPeer {
     if (this.cleanedUp || this.closeRequested) return;
     if (messageBytes(rawMessage) > MAX_MESSAGE_BYTES) {
       this.close(1009, "Collaboration message is too large");
-      await this.cleanup();
+      await this.cleanupNow();
       return;
     }
     if (!this.consumeQuota()) {
@@ -131,11 +244,11 @@ class DurableObjectRoomPeer implements RoomPeer {
           COLLAB_ERROR_CODE.InvalidMessage,
           "Too many collaboration messages",
           true,
-          this.protocolVersion,
+          protocolVersionFromAttachment(this.attachment),
         ),
       );
       this.close(1013, "Message rate limit exceeded");
-      await this.cleanup();
+      await this.cleanupNow();
       return;
     }
 
@@ -155,25 +268,69 @@ class DurableObjectRoomPeer implements RoomPeer {
           COLLAB_ERROR_CODE.InvalidMessage,
           "The collaboration message is invalid",
           false,
-          this.protocolVersion,
+          protocolVersionFromAttachment(this.attachment),
         ),
       );
       return;
     }
 
-    await this.room.receive(this, message);
-    if (this.closeRequested) await this.cleanup();
+    if (message.type === COLLAB_MESSAGE_TYPE.Auth) {
+      if (messageBytes(JSON.stringify(message)) > MAX_PERSISTED_AUTH_BYTES) {
+        this.close(1009, "Authentication metadata is too large");
+        await this.cleanupNow();
+        return;
+      }
+      this.pendingAuth = message;
+    }
+    try {
+      await this.room.receive(this, message);
+    } finally {
+      this.pendingAuth = null;
+    }
+    if (this.closeRequested) await this.cleanupNow();
   }
 
-  private async cleanup(): Promise<void> {
+  private persistReady(message: LegacyReadyMessage | ReadyMessage): void {
+    const auth = this.pendingAuth;
+    if (auth === null) {
+      throw new Error(
+        "Ready was sent without a pending authentication message",
+      );
+    }
+    const attachment = attachmentAfterReady(
+      this.attachment,
+      auth,
+      message,
+      Date.now(),
+    );
+    if (attachment === null) {
+      throw new Error("Authenticated collaboration metadata is inconsistent");
+    }
+    this.replaceAttachment(attachment);
+  }
+
+  private replaceAttachment(attachment: DocumentWebSocketAttachment): void {
+    this.socket.serializeAttachment(attachment);
+    this.attachment = attachment;
+  }
+
+  private async cleanupNow(): Promise<void> {
     if (this.cleanedUp) return;
     this.cleanedUp = true;
     await this.room.leave(this);
   }
 }
 
+interface RestoredPeer {
+  readonly attachment: DocumentWebSocketAttachment;
+  readonly peer: DurableObjectRoomPeer;
+  readonly socket: WebSocket;
+}
+
 export class DocumentRoomDO extends DurableObject<Env> {
   private documentId: string | null = null;
+  private initializationPromise: Promise<void> | null = null;
+  private readonly peers = new Map<string, DurableObjectRoomPeer>();
   private room: DocumentRoom | null = null;
 
   protected createServices(documentId: string): DocumentRoomServices {
@@ -192,42 +349,254 @@ export class DocumentRoomDO extends DurableObject<Env> {
     if (documentId === null) {
       return Response.json({ error: "Invalid document id" }, { status: 400 });
     }
-    if (this.documentId !== null && this.documentId !== documentId) {
+
+    let room: DocumentRoom | null;
+    try {
+      room = await this.ensureRoom(documentId);
+    } catch (error) {
+      logError(error, { documentId, messageType: "room-restore" });
+      return Response.json(
+        { error: "Document room unavailable" },
+        { status: 503 },
+      );
+    }
+    if (room === null) {
       return Response.json(
         { error: "Durable Object document mismatch" },
         { status: 409 },
-      );
-    }
-    if (this.room === null) {
-      this.documentId = documentId;
-      this.room = createDocumentRoom(
-        documentId,
-        this.createServices(documentId),
       );
     }
 
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-    server.accept();
-    const peer = new DurableObjectRoomPeer(documentId, this.room, server);
+    const attachment = createAwaitingAuthAttachment(documentId);
+    let peer: DurableObjectRoomPeer | null = null;
     try {
-      await this.room.join(peer);
+      this.ctx.acceptWebSocket(server);
+      server.serializeAttachment(attachment);
+      peer = new DurableObjectRoomPeer(room, server, attachment);
+      this.peers.set(peer.id, peer);
+      await room.join(peer);
     } catch (error) {
       logError(error, { documentId, messageType: "room-join" });
-      try {
-        if (server.readyState < 2) {
-          server.close(1011, "Document room unavailable");
-        }
-      } catch (closeError) {
-        logError(closeError, { documentId, messageType: "room-join-close" });
-      }
+      if (peer !== null) await peer.transportClosed();
+      this.failSocket(server, 1011, "Document room unavailable", {
+        documentId,
+        messageType: "room-join-close",
+      });
+      this.peers.delete(attachment.peerId);
       return Response.json(
         { error: "Document room unavailable" },
         { status: 503 },
       );
     }
-    peer.start();
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(
+    socket: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
+    const attachment = this.attachmentFromSocket(socket);
+    if (attachment === null) {
+      this.failSocket(socket, 1008, "Invalid collaboration connection", {
+        messageType: "invalid-websocket-attachment",
+      });
+      return;
+    }
+
+    try {
+      const room = await this.ensureRoom(attachment.documentId);
+      if (room === null) {
+        this.failSocket(socket, 1008, "Invalid collaboration document", {
+          documentId: attachment.documentId,
+          messageType: "websocket-document-mismatch",
+          peerId: attachment.peerId,
+        });
+        return;
+      }
+      const peer = await this.ensurePeer(socket, attachment, room);
+      if (peer === null) return;
+      await peer.dispatch(message);
+      if (!peer.active) this.peers.delete(peer.id);
+    } catch (error) {
+      logError(error, {
+        documentId: attachment.documentId,
+        messageType: "websocket-message",
+        peerId: attachment.peerId,
+      });
+      this.failSocket(socket, 1011, "Collaboration runtime failure", {
+        documentId: attachment.documentId,
+        messageType: "websocket-message-close",
+        peerId: attachment.peerId,
+      });
+    }
+  }
+
+  async webSocketClose(socket: WebSocket): Promise<void> {
+    const peer = this.peerFromSocket(socket);
+    if (peer === null) return;
+    await peer.transportClosed();
+    this.peers.delete(peer.id);
+  }
+
+  async webSocketError(socket: WebSocket, error: unknown): Promise<void> {
+    const peer = this.peerFromSocket(socket);
+    if (peer === null) {
+      logError(error, { messageType: "untracked-websocket-error" });
+      this.failSocket(socket, 1011, "Collaboration transport failure", {
+        messageType: "untracked-websocket-error-close",
+      });
+      return;
+    }
+    await peer.transportError(error);
+    this.peers.delete(peer.id);
+  }
+
+  private async ensureRoom(documentId: string): Promise<DocumentRoom | null> {
+    if (this.documentId !== null && this.documentId !== documentId) return null;
+    if (this.room === null) {
+      this.documentId = documentId;
+      this.room = createDocumentRoom(
+        documentId,
+        this.createServices(documentId),
+        { refreshMode: DOCUMENT_ROOM_REFRESH_MODE.OnMessage },
+      );
+    }
+    if (this.initializationPromise === null) {
+      this.initializationPromise = this.restoreAttachedSockets(
+        documentId,
+        this.room,
+      );
+    }
+    await this.initializationPromise;
+    return this.room;
+  }
+
+  private async restoreAttachedSockets(
+    documentId: string,
+    room: DocumentRoom,
+  ): Promise<void> {
+    const restored: RestoredPeer[] = [];
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const attachment = this.attachmentFromSocket(socket);
+      if (attachment === null || attachment.documentId !== documentId) {
+        this.failSocket(socket, 1008, "Invalid collaboration connection", {
+          documentId,
+          messageType: "websocket-restore-invalid-attachment",
+        });
+        continue;
+      }
+      if (this.peers.has(attachment.peerId)) {
+        this.failSocket(socket, 1008, "Duplicate collaboration connection", {
+          documentId,
+          messageType: "websocket-restore-duplicate-peer",
+          peerId: attachment.peerId,
+        });
+        continue;
+      }
+      const peer = new DurableObjectRoomPeer(room, socket, attachment);
+      this.peers.set(peer.id, peer);
+      restored.push({ attachment, peer, socket });
+    }
+
+    await Promise.all(
+      restored.map(async ({ peer }) => {
+        try {
+          await room.join(peer);
+        } catch (error) {
+          await peer.fail(error, "websocket-restore-join");
+          this.peers.delete(peer.id);
+        }
+      }),
+    );
+    await Promise.all(
+      restored.map(async ({ attachment, peer, socket }) => {
+        if (
+          attachment.phase !== "authenticated" ||
+          this.peers.get(peer.id) !== peer
+        ) {
+          return;
+        }
+        const state = resumeStateFromAttachment(attachment);
+        if (state === null) {
+          this.failSocket(socket, 1008, "Invalid collaboration session", {
+            documentId,
+            messageType: "websocket-restore-invalid-session",
+            peerId: peer.id,
+          });
+          await peer.transportClosed();
+          this.peers.delete(peer.id);
+          return;
+        }
+        await peer.resume(state);
+        if (!peer.active) this.peers.delete(peer.id);
+      }),
+    );
+  }
+
+  private async ensurePeer(
+    socket: WebSocket,
+    attachment: DocumentWebSocketAttachment,
+    room: DocumentRoom,
+  ): Promise<DurableObjectRoomPeer | null> {
+    if (socket.readyState !== WebSocket.OPEN) return null;
+    const existing = this.peers.get(attachment.peerId);
+    if (existing !== undefined) return existing;
+    const peer = new DurableObjectRoomPeer(room, socket, attachment);
+    this.peers.set(peer.id, peer);
+    try {
+      await room.join(peer);
+      if (attachment.phase === "authenticated") {
+        const state = resumeStateFromAttachment(attachment);
+        if (state === null)
+          throw new Error("Invalid resumed collaboration state");
+        await peer.resume(state);
+      }
+    } catch (error) {
+      await peer.fail(error, "websocket-peer-restore");
+    }
+    if (peer.active) return peer;
+    this.peers.delete(peer.id);
+    return null;
+  }
+
+  private attachmentFromSocket(
+    socket: WebSocket,
+  ): DocumentWebSocketAttachment | null {
+    try {
+      const value: unknown = socket.deserializeAttachment();
+      return parseDocumentWebSocketAttachment(value);
+    } catch (error) {
+      logError(error, { messageType: "websocket-attachment-read" });
+      return null;
+    }
+  }
+
+  private peerFromSocket(socket: WebSocket): DurableObjectRoomPeer | null {
+    const attachment = this.attachmentFromSocket(socket);
+    if (attachment !== null) {
+      const peer = this.peers.get(attachment.peerId);
+      if (peer !== undefined) return peer;
+    }
+    return (
+      [...this.peers.values()].find((peer) => peer.ownsSocket(socket)) ?? null
+    );
+  }
+
+  private failSocket(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+    context: Readonly<Record<string, unknown>>,
+  ): void {
+    logError(new Error(reason), context);
+    try {
+      if (socket.readyState < WebSocket.CLOSING) socket.close(code, reason);
+    } catch (error) {
+      logError(error, { ...context, messageType: "websocket-fail-close" });
+    }
   }
 }

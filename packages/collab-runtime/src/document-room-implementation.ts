@@ -21,11 +21,17 @@ import {
 } from "./document-session";
 import type {
   DocumentRoom,
+  DocumentRoomOptions,
+  DocumentRoomResumeState,
   DocumentRoomServices,
   RoomLeaveReason,
   RoomPeer,
 } from "./document-room";
-import { ROOM_LEAVE_REASON } from "./document-room";
+import {
+  DOCUMENT_ROOM_REFRESH_MODE,
+  ROOM_LEAVE_REASON,
+  type DocumentRoomRefreshMode,
+} from "./document-room";
 import {
   DocumentEventAuthorizationError,
   DocumentEventConflictError,
@@ -185,15 +191,23 @@ class RuntimeDocumentRoom implements DocumentRoom {
   private fanoutQueue: Promise<void> = Promise.resolve();
   private fanoutRetainers = 0;
   private fanoutSubscription: RoomFanoutSubscription | null = null;
+  private messageMaintenanceQueue: Promise<void> = Promise.resolve();
   private readonly peers = new Map<RoomPeer, PeerState>();
+  private readonly refreshMode: DocumentRoomRefreshMode;
   private readonly services: DocumentRoomServices;
 
-  constructor(documentId: string, services: DocumentRoomServices) {
+  constructor(
+    documentId: string,
+    services: DocumentRoomServices,
+    options: DocumentRoomOptions = {},
+  ) {
     if (documentId.length === 0) {
       throw new Error("DocumentRoom requires a non-empty document id");
     }
     this.assertPolicy(services);
     this.documentId = documentId;
+    this.refreshMode =
+      options.refreshMode ?? DOCUMENT_ROOM_REFRESH_MODE.Background;
     this.services = services;
   }
 
@@ -207,6 +221,31 @@ class RuntimeDocumentRoom implements DocumentRoom {
       return;
     }
     if (!this.peers.has(peer)) this.peers.set(peer, createPeerState(peer));
+  }
+
+  async resume(
+    peer: RoomPeer,
+    resumed: DocumentRoomResumeState,
+  ): Promise<DocumentSession | null> {
+    await this.join(peer);
+    const state = this.peers.get(peer);
+    if (state === undefined || this.closed) return null;
+
+    if (state.phase !== PEER_PHASE.Joined) {
+      state.leaveRequested = true;
+      await this.closePeer(peer, 1008, "Already authenticated");
+      await this.enqueue(state, async () => {
+        await this.resetState(
+          state,
+          true,
+          DOCUMENT_SESSION_END_REASON.PeerLeft,
+        );
+      });
+      return null;
+    }
+
+    state.phase = PEER_PHASE.Authenticating;
+    return this.enqueue(state, async () => this.resumeSession(state, resumed));
   }
 
   async receive(peer: RoomPeer, message: ClientCollabMessage): Promise<void> {
@@ -243,6 +282,23 @@ class RuntimeDocumentRoom implements DocumentRoom {
         ),
         message.type,
       );
+      return;
+    }
+
+    if (this.refreshMode === DOCUMENT_ROOM_REFRESH_MODE.OnMessage) {
+      await this.withMessageMaintenanceLock(async () => {
+        await this.maintainPeersForMessage(message.type);
+      });
+      await this.enqueue(state, async () => {
+        if (state.phase !== PEER_PHASE.Authenticated || state.leaveRequested) {
+          return;
+        }
+        if (message.type === COLLAB_MESSAGE_TYPE.RepairRequest) {
+          await this.receiveRepair(state, message);
+          return;
+        }
+        await this.receiveEvent(state, message);
+      });
       return;
     }
 
@@ -513,6 +569,134 @@ class RuntimeDocumentRoom implements DocumentRoom {
     }
   }
 
+  private async resumeSession(
+    state: PeerState,
+    resumed: DocumentRoomResumeState,
+  ): Promise<DocumentSession | null> {
+    if (resumed.session.documentId !== this.documentId) {
+      state.leaveRequested = true;
+      await this.closePeer(state.peer, 1008, "Unauthorized");
+      await this.resetState(
+        state,
+        true,
+        DOCUMENT_SESSION_END_REASON.AccessRevoked,
+      );
+      return null;
+    }
+
+    state.credential = resumed.credential;
+    state.session = resumed.session;
+
+    let access: DocumentAccess | null;
+    try {
+      access = await this.services.sessions.refresh({
+        credential: resumed.credential,
+        peerId: state.peer.id,
+        session: resumed.session,
+      });
+    } catch (error) {
+      this.report(error, state, "authorization-recheck");
+      state.leaveRequested = true;
+      await this.closePeer(state.peer, 1011, "Authorization recheck failed");
+      await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+      return null;
+    }
+
+    if (state.leaveRequested || this.closed) {
+      await this.resetState(
+        state,
+        true,
+        this.closed
+          ? DOCUMENT_SESSION_END_REASON.RoomClosed
+          : DOCUMENT_SESSION_END_REASON.PeerLeft,
+      );
+      return null;
+    }
+    if (
+      access === null ||
+      !accessMatchesSessionIdentity(access, resumed.session)
+    ) {
+      state.leaveRequested = true;
+      await this.closePeer(
+        state.peer,
+        1008,
+        "Collaboration access was revoked",
+      );
+      await this.resetState(
+        state,
+        true,
+        DOCUMENT_SESSION_END_REASON.AccessRevoked,
+      );
+      return null;
+    }
+
+    const session = sessionWithRefreshedAccess(resumed.session, access);
+    state.session = session;
+    try {
+      const admission = await this.services.connections.acquire({
+        documentId: this.documentId,
+        peerId: state.peer.id,
+        policy: this.services.policy.connection,
+        sessionId: session.sessionId,
+      });
+      if (!admission.accepted) {
+        state.leaveRequested = true;
+        await this.closePeer(
+          state.peer,
+          1013,
+          "Collaboration connection lease was lost",
+        );
+        await this.resetState(
+          state,
+          true,
+          DOCUMENT_SESSION_END_REASON.PeerLeft,
+        );
+        return null;
+      }
+      state.lease = admission.lease;
+      if (state.leaveRequested || this.closed) {
+        await this.resetState(
+          state,
+          true,
+          this.closed
+            ? DOCUMENT_SESSION_END_REASON.RoomClosed
+            : DOCUMENT_SESSION_END_REASON.PeerLeft,
+        );
+        return null;
+      }
+
+      await this.retainFanout(state);
+      if (state.leaveRequested || this.closed) {
+        await this.resetState(
+          state,
+          true,
+          this.closed
+            ? DOCUMENT_SESSION_END_REASON.RoomClosed
+            : DOCUMENT_SESSION_END_REASON.PeerLeft,
+        );
+        return null;
+      }
+
+      state.authorizationExpiresAt =
+        Date.now() + this.services.policy.authorizationRefreshIntervalMs;
+      state.leaseRefreshAt =
+        Date.now() + this.services.policy.connection.leaseRefreshIntervalMs;
+      state.phase = PEER_PHASE.Authenticated;
+      this.startRefreshTimers(state);
+      return session;
+    } catch (error) {
+      this.report(error, state, "session-resume");
+      state.leaveRequested = true;
+      await this.closePeer(
+        state.peer,
+        1011,
+        "Collaboration runtime unavailable",
+      );
+      await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+      return null;
+    }
+  }
+
   private async failTemporaryAuthentication(
     state: PeerState,
     message: AuthMessage | LegacyAuthMessage,
@@ -609,7 +793,74 @@ class RuntimeDocumentRoom implements DocumentRoom {
     state.session = sessionWithRefreshedAccess(session, access);
     state.authorizationExpiresAt =
       Date.now() + this.services.policy.authorizationRefreshIntervalMs;
-    this.scheduleAuthorizationRefresh(state);
+    if (this.refreshMode === DOCUMENT_ROOM_REFRESH_MODE.Background) {
+      this.scheduleAuthorizationRefresh(state);
+    }
+    return true;
+  }
+
+  private async maintainPeersForMessage(messageType: string): Promise<void> {
+    const now = Date.now();
+    const candidates = [...this.peers.values()].filter(
+      (state) =>
+        state.phase === PEER_PHASE.Authenticated &&
+        !state.leaveRequested &&
+        (state.authorizationExpiresAt <= now || state.leaseRefreshAt <= now),
+    );
+    await Promise.all(
+      candidates.map(async (state) => {
+        await this.enqueue(state, async () => {
+          await this.maintainPeerForMessage(state, messageType);
+        });
+      }),
+    );
+  }
+
+  private async maintainPeerForMessage(
+    state: PeerState,
+    messageType: string,
+  ): Promise<boolean> {
+    if (state.phase !== PEER_PHASE.Authenticated || state.leaveRequested) {
+      return false;
+    }
+    if (!(await this.refreshAuthorizationForMessage(state, messageType))) {
+      return false;
+    }
+    return this.refreshLeaseForMessage(state);
+  }
+
+  private async refreshLeaseForMessage(state: PeerState): Promise<boolean> {
+    if (state.leaseRefreshAt > Date.now()) return true;
+    const session = state.session;
+    const lease = state.lease;
+    if (session === null || lease === null) return false;
+
+    let leaseAlive: boolean;
+    try {
+      leaseAlive = await lease.refresh();
+    } catch (error) {
+      if (!this.isCurrentAuthenticatedSession(state, session)) return false;
+      this.report(error, state, "lease-refresh");
+      state.leaveRequested = true;
+      await this.closePeer(state.peer, 1011, "Connection lease refresh failed");
+      await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+      return false;
+    }
+
+    if (!this.isCurrentAuthenticatedSession(state, session)) return false;
+    if (!leaseAlive) {
+      state.leaveRequested = true;
+      await this.closePeer(
+        state.peer,
+        1013,
+        "Collaboration connection lease was lost",
+      );
+      await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+      return false;
+    }
+
+    state.leaseRefreshAt =
+      Date.now() + this.services.policy.connection.leaseRefreshIntervalMs;
     return true;
   }
 
@@ -627,6 +878,12 @@ class RuntimeDocumentRoom implements DocumentRoom {
         this.documentId,
         message.afterCursor,
       );
+      if (
+        this.refreshMode === DOCUMENT_ROOM_REFRESH_MODE.OnMessage &&
+        !(await this.maintainPeerForMessage(state, message.type))
+      ) {
+        return;
+      }
       if (!this.isCurrentAuthenticatedSession(state, session)) {
         return;
       }
@@ -711,15 +968,26 @@ class RuntimeDocumentRoom implements DocumentRoom {
 
     // A durable append must fan out even if the origin disconnects while the
     // write is in flight. A failed acknowledgement send is therefore isolated.
-    await this.sendIgnoringFailure(
-      state.peer,
-      {
-        protocolVersion: session.protocolVersion,
-        type: COLLAB_MESSAGE_TYPE.DurableAck,
-        batchIds,
-      },
-      message.type,
-    );
+    let senderActive =
+      this.refreshMode !== DOCUMENT_ROOM_REFRESH_MODE.OnMessage;
+    if (!senderActive) {
+      try {
+        senderActive = await this.maintainPeerForMessage(state, message.type);
+      } catch (error) {
+        this.report(error, state, "post-append-maintenance");
+      }
+    }
+    if (senderActive) {
+      await this.sendIgnoringFailure(
+        state.peer,
+        {
+          protocolVersion: session.protocolVersion,
+          type: COLLAB_MESSAGE_TYPE.DurableAck,
+          batchIds,
+        },
+        message.type,
+      );
+    }
     try {
       await this.services.fanout.publish({
         documentId: this.documentId,
@@ -731,6 +999,7 @@ class RuntimeDocumentRoom implements DocumentRoom {
   }
 
   private startRefreshTimers(state: PeerState): void {
+    if (this.refreshMode !== DOCUMENT_ROOM_REFRESH_MODE.Background) return;
     this.scheduleAuthorizationRefresh(state);
     this.scheduleLeaseRefresh(state);
   }
@@ -921,11 +1190,27 @@ class RuntimeDocumentRoom implements DocumentRoom {
           this.documentId,
           async (event) => {
             if (event.documentId !== this.documentId) return;
-            const recipients = [...this.peers.values()].filter(
+            const now = Date.now();
+            const active = [...this.peers.values()].filter(
               (candidate) =>
                 candidate.phase === PEER_PHASE.Authenticated &&
                 !candidate.leaveRequested &&
                 candidate.session !== null,
+            );
+            if (this.refreshMode === DOCUMENT_ROOM_REFRESH_MODE.OnMessage) {
+              const expired = active.filter(
+                (candidate) =>
+                  candidate.authorizationExpiresAt <= now ||
+                  candidate.leaseRefreshAt <= now,
+              );
+              await Promise.all(
+                expired.map(async (candidate) => {
+                  await this.closeExpiredFanoutPeer(candidate);
+                }),
+              );
+            }
+            const recipients = active.filter(
+              (candidate) => !candidate.leaveRequested,
             );
             await Promise.all(
               recipients.map(async (recipient) => {
@@ -947,6 +1232,23 @@ class RuntimeDocumentRoom implements DocumentRoom {
       }
       this.fanoutRetainers += 1;
       state.fanoutRetained = true;
+    });
+  }
+
+  private async closeExpiredFanoutPeer(state: PeerState): Promise<void> {
+    if (state.phase !== PEER_PHASE.Authenticated || state.leaveRequested) {
+      return;
+    }
+    state.leaveRequested = true;
+    await this.closePeer(
+      state.peer,
+      1012,
+      "Collaboration session requires revalidation",
+    );
+    void this.enqueue(state, async () => {
+      await this.resetState(state, true, DOCUMENT_SESSION_END_REASON.PeerLeft);
+    }).catch((error: unknown) => {
+      this.report(error, state, "expired-fanout-cleanup");
     });
   }
 
@@ -1033,9 +1335,18 @@ class RuntimeDocumentRoom implements DocumentRoom {
     }
   }
 
-  private enqueue(state: PeerState, work: () => Promise<void>): Promise<void> {
+  private enqueue<T>(state: PeerState, work: () => Promise<T>): Promise<T> {
     const operation = state.queue.then(work, work);
-    state.queue = operation.catch(() => undefined);
+    state.queue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
+  private withMessageMaintenanceLock(work: () => Promise<void>): Promise<void> {
+    const operation = this.messageMaintenanceQueue.then(work, work);
+    this.messageMaintenanceQueue = operation.catch(() => undefined);
     return operation;
   }
 
@@ -1107,4 +1418,5 @@ class RuntimeDocumentRoom implements DocumentRoom {
 export const createDocumentRoom = (
   documentId: string,
   services: DocumentRoomServices,
-): DocumentRoom => new RuntimeDocumentRoom(documentId, services);
+  options?: DocumentRoomOptions,
+): DocumentRoom => new RuntimeDocumentRoom(documentId, services, options);

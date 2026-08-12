@@ -2,7 +2,7 @@
  * Auth and heartbeat wire payload parsing.
  */
 
-import { isRecord } from "./envelope";
+import { isRecord, isShortString } from "./envelope";
 import { PRESENCE_CAPABILITIES, PRESENCE_PROTOCOL_VERSION } from "./version";
 
 export interface PresenceAuthPayload {
@@ -14,12 +14,9 @@ export interface PresenceAuthPayload {
 export const parsePresenceAuth = (payload: unknown): PresenceAuthPayload => {
   if (
     !isRecord(payload) ||
-    typeof payload.token !== "string" ||
-    payload.token.length === 0 ||
-    typeof payload.connectionId !== "string" ||
-    payload.connectionId.length === 0 ||
-    payload.connectionId.length > 256 ||
-    typeof payload.userId !== "string" ||
+    !isShortString(payload.token) ||
+    !isShortString(payload.connectionId) ||
+    !isShortString(payload.userId) ||
     payload.protocolVersion !== PRESENCE_PROTOCOL_VERSION ||
     !isRecord(payload.capabilities)
   ) {

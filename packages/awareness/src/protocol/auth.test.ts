@@ -52,6 +52,24 @@ describe("parsePresenceAuth", () => {
     ).toThrow("invalid presence authentication");
   });
 
+  it("rejects an empty userId", () => {
+    expect(() =>
+      parsePresenceAuth({ ...validAuthPayload(), userId: "" }),
+    ).toThrow("invalid presence authentication");
+  });
+
+  it("rejects a userId over 256 characters", () => {
+    expect(() =>
+      parsePresenceAuth({ ...validAuthPayload(), userId: "u".repeat(257) }),
+    ).toThrow("invalid presence authentication");
+  });
+
+  it("rejects a token over 256 characters", () => {
+    expect(() =>
+      parsePresenceAuth({ ...validAuthPayload(), token: "t".repeat(257) }),
+    ).toThrow("invalid presence authentication");
+  });
+
   it("rejects an unsupported protocolVersion", () => {
     expect(() =>
       parsePresenceAuth({ ...validAuthPayload(), protocolVersion: 999 }),

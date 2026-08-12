@@ -3,11 +3,9 @@
  */
 
 import type { PresenceUser } from "../types/presence";
+import { isRecord } from "./envelope";
 import { deterministicPresenceColor } from "./identity";
 import type { PresencePatch } from "./patch";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isPresenceStatus = (value: unknown): value is PresenceUser["status"] =>
   value === "active" || value === "idle" || value === "offline";
@@ -23,7 +21,8 @@ export const isPresenceUser = (value: unknown): value is PresenceUser =>
   Number.isFinite(value.lastActivityAt) &&
   typeof value.lastSeenAt === "number" &&
   Number.isFinite(value.lastSeenAt) &&
-  typeof value.clock === "number";
+  typeof value.clock === "number" &&
+  Number.isFinite(value.clock);
 
 /** Server-authoritative identity a host resolves before a member ever joins. */
 export interface PresenceMemberIdentity {
@@ -87,7 +86,7 @@ export const applyPresencePatch = (
       : { selection: patch.selection }),
     ...(patch.isTyping === undefined
       ? {}
-      : { meta: { isTyping: patch.isTyping } }),
+      : { meta: { ...current.meta, isTyping: patch.isTyping } }),
     status: "active",
     clock: patch.clock,
     lastActivityAt: now,
@@ -98,7 +97,7 @@ export const applyPresencePatch = (
     ...(patch.hasSelection ? { selection: patch.selection ?? null } : {}),
     ...(patch.isTyping === undefined
       ? {}
-      : { meta: { isTyping: patch.isTyping } }),
+      : { meta: { ...current.meta, isTyping: patch.isTyping } }),
     lastActivityAt: now,
     lastSeenAt: now,
     status: "active",

@@ -158,6 +158,7 @@ const acquireRoom = async (
 export class NitroPresenceHost {
   private readonly peer: NitroPresencePeer;
   private binding: RoomBinding | null = null;
+  private pendingBinding: Promise<RoomBinding> | null = null;
   private closed = false;
 
   constructor(
@@ -186,7 +187,13 @@ export class NitroPresenceHost {
       return;
     }
 
-    await this.binding.room.receive(this.peer, rawText);
+    try {
+      await this.binding.room.receive(this.peer, rawText);
+    } catch (error) {
+      logHostError(error, this.roomId, "room-receive");
+      await this.release();
+      return;
+    }
     if (this.peer.closed) await this.release();
   }
 
@@ -199,7 +206,16 @@ export class NitroPresenceHost {
 
   private async ensureRoom(): Promise<void> {
     if (this.binding !== null) return;
-    this.binding = await acquireRoom(this.roomId, this.peer);
+    // Concurrent calls share one in-flight acquisition instead of each
+    // calling acquireRoom independently, which would join the peer twice
+    // and leave one of the resulting bindings unreleased.
+    this.pendingBinding ??= acquireRoom(this.roomId, this.peer);
+    const pending = this.pendingBinding;
+    try {
+      this.binding = await pending;
+    } finally {
+      if (this.pendingBinding === pending) this.pendingBinding = null;
+    }
   }
 
   private async release(): Promise<void> {

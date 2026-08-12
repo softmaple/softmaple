@@ -40,7 +40,12 @@ export const realtimePresenceFanout: PresenceFanout = {
         );
       },
     });
-    await getPresenceTopicBridge().retain(channel);
+    try {
+      await getPresenceTopicBridge().retain(channel);
+    } catch (error) {
+      unsubscribeLocal();
+      throw error;
+    }
     let subscribed = true;
     return {
       async unsubscribe() {

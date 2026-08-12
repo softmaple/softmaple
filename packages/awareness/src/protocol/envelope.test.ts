@@ -50,10 +50,18 @@ describe("parsePresenceEnvelope", () => {
       "an empty roomId",
       { type: "join", roomId: "", senderId: "s", timestamp: 1 },
     ],
+    [
+      "an over-long roomId",
+      { type: "join", roomId: "r".repeat(257), senderId: "s", timestamp: 1 },
+    ],
     ["a missing senderId", { type: "join", roomId: "r", timestamp: 1 }],
     [
       "an empty senderId",
       { type: "join", roomId: "r", senderId: "", timestamp: 1 },
+    ],
+    [
+      "an over-long senderId",
+      { type: "join", roomId: "r", senderId: "s".repeat(257), timestamp: 1 },
     ],
     [
       "a non-numeric timestamp",

@@ -3,6 +3,7 @@ import {
   PRESENCE_FRAME,
   PRESENCE_MESSAGE,
   type PresenceCodec,
+  type PresenceFrameKind,
   type PresenceMemberRecord,
   type PresenceMessageKind,
   type PresencePatch,
@@ -31,7 +32,7 @@ const WIRE_TO_ROOM_MESSAGE: Partial<Record<string, PresenceMessageKind>> = {
   [WS_MESSAGE.PRESENCE_UPDATE]: PRESENCE_MESSAGE.Update,
 };
 
-const ROOM_FRAME_TO_WIRE: Record<string, string> = {
+const ROOM_FRAME_TO_WIRE: Record<PresenceFrameKind, string> = {
   [PRESENCE_FRAME.AuthError]: WS_MESSAGE.AUTH_ERROR,
   [PRESENCE_FRAME.AuthOk]: WS_MESSAGE.AUTH_OK,
   [PRESENCE_FRAME.Error]: WS_MESSAGE.ERROR,
@@ -41,6 +42,17 @@ const ROOM_FRAME_TO_WIRE: Record<string, string> = {
   [PRESENCE_FRAME.SyncResponse]: WS_MESSAGE.PRESENCE_SYNC_RESPONSE,
   [PRESENCE_FRAME.Update]: WS_MESSAGE.PRESENCE_UPDATE,
 };
+
+/** Compile-time check that a wider awareness type structurally satisfies a narrower runtime one. */
+const assertAssignable =
+  <To>() =>
+  <_From extends To>(): void =>
+    undefined;
+
+// `current`/`patch` below are cast through these; a shape drift that breaks
+// either direction fails the build here instead of at a runtime cast site.
+assertAssignable<PresenceMemberRecord>()<PresenceUser>();
+assertAssignable<PresencePatch>()<AwarenessPresencePatch>();
 
 /**
  * The payload-opaque `PresenceRoom` seam bound to `@softmaple/awareness`'s

@@ -13,7 +13,8 @@ export type PresenceEnvelope = {
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isShortString = (value: unknown, max = 256): value is string =>
+/** Shared bound (256) matches every other wire identifier in this protocol. */
+export const isShortString = (value: unknown, max = 256): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 
 export const parsePresenceEnvelope = (value: unknown): PresenceEnvelope => {

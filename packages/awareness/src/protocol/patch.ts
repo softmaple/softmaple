@@ -8,10 +8,7 @@ import {
   normalizePresenceSelection,
   type PresenceSelection,
 } from "../types/presence";
-import { isRecord } from "./envelope";
-
-const isShortString = (value: unknown, max = 256): value is string =>
-  typeof value === "string" && value.length > 0 && value.length <= max;
+import { isRecord, isShortString } from "./envelope";
 
 export type PresencePatch = {
   readonly clock: number;

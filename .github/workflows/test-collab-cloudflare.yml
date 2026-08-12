@@ -60,6 +60,7 @@ jobs:
 
       - name: Check Cloudflare collaboration backend
         run: |
+          pnpm exec turbo run build --filter=@softmaple/collab-cloudflare... --filter=!@softmaple/collab-cloudflare
           pnpm --filter @softmaple/collab-cloudflare typecheck
           pnpm --filter @softmaple/collab-cloudflare lint
           pnpm --filter @softmaple/collab-cloudflare test

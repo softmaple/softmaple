@@ -582,7 +582,6 @@ export const presenceRoomConformance = (
         {
           clock: 0,
           connectionId: "connection-1",
-          name: identity.name,
           userId: identity.userId,
         },
         60_000,

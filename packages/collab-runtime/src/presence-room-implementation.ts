@@ -256,26 +256,13 @@ class RuntimePresenceRoom implements PresenceRoom {
     }
 
     if (
-      state.phase !== PEER_PHASE.Authenticated &&
-      state.phase !== PEER_PHASE.Joined
-    ) {
-      state.leaveRequested = true;
-      await this.closePeer(peer, 1008, "Authenticate presence first");
-      await this.enqueue(state, async () => {
-        await this.resetState(
-          state,
-          true,
-          PRESENCE_SESSION_END_REASON.PeerLeft,
-        );
-      });
-      return;
-    }
-    if (
+      (state.phase !== PEER_PHASE.Authenticated &&
+        state.phase !== PEER_PHASE.Joined) ||
       state.connectionId === null ||
       envelope.senderId !== state.connectionId
     ) {
       state.leaveRequested = true;
-      await this.closePeer(peer, 1008, "Presence sender mismatch");
+      await this.closePeer(peer, 1008, "Authenticate presence first");
       await this.enqueue(state, async () => {
         await this.resetState(
           state,

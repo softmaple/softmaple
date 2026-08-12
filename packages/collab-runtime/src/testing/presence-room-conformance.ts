@@ -561,14 +561,47 @@ export const presenceRoomConformance = (
   {
     name: "a post-deadline frame in background mode still refreshes the heartbeat",
     async run() {
-      const { room } = factory({ refreshMode: "background" });
-      const peer = await authenticateAndJoin(room, "connection-1");
-      const expiredTime = Date.now() + 10 * 60_000;
-      await room.sweep(expiredTime);
+      const { room, sessions } = factory({ refreshMode: "background" });
+      const identity = { name: "User 1", userId: "user-1" };
+      sessions.authorizeImpl = async () => identity;
+      sessions.refreshImpl = async () => identity;
+
+      // Resume a peer with an already-expired heartbeat
+      const peer = createRecordingPresencePeer("connection-1");
+      const pastTime = Date.now() - 1000; // 1 second in the past
+      await room.resume(peer, {
+        connectionId: "connection-1",
+        credential: { kind: "access-token", token: "t" },
+        heartbeatExpiresAt: pastTime, // Already expired!
+        identity,
+        joined: true,
+        rateLimit: null,
+      });
+
+      // Send a heartbeat frame after the deadline
+      peer.sent.length = 0;
+      await room.receive(
+        peer,
+        heartbeatWire(ROOM_ID, "connection-1", "ping-revival"),
+      );
+
+      // Assert that the peer remains open and receives the heartbeat acknowledgement
       checkEqual(
-        peer.closes[0]?.code,
-        1001,
-        "expected heartbeat-expiry close in background mode",
+        peer.closes.length,
+        0,
+        "expected peer to remain open after receiving heartbeat frame",
+      );
+      const acks = framesOfType(peer, PRESENCE_FRAME.HeartbeatAck);
+      checkEqual(
+        acks.length,
+        1,
+        "expected peer to receive heartbeat acknowledgement",
+      );
+      const ack = acks[0] as { payload: { pingId: string } };
+      checkEqual(
+        ack.payload.pingId,
+        "ping-revival",
+        "expected the pingId to be echoed",
       );
     },
   },

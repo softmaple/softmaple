@@ -11,10 +11,12 @@ the same room behavior be implemented on the current Nitro/Redis/Postgres
 stack and on a future runtime without importing either environment into the
 runtime package.
 
-The package supplies the shared `DocumentRoom` implementation as well as its
-contracts. The production Nitro host in `apps/collab` owns only transport and
-infrastructure adapters: raw WebSocket ingress, Supabase authorization,
-Prisma/Postgres history, and Redis-backed fan-out and connection leases.
+The package supplies the shared `DocumentRoom` and `PresenceRoom`
+implementations as well as their contracts. The production Nitro host in
+`apps/collab` owns only transport and infrastructure adapters: raw WebSocket
+ingress, Supabase authorization, Prisma/Postgres history, and Redis-backed
+fan-out and connection leases. `PresenceRoom` is documented separately below
+— it shares no capability instance with `DocumentRoom`.
 
 ## Capability boundary
 
@@ -26,6 +28,18 @@ Prisma/Postgres history, and Redis-backed fan-out and connection leases.
 | `DocumentEventStore` | Atomic durable append and ordered repair pages | Prisma/Postgres implementation details |
 | `RoomFanout` | Committed document-event delivery across room instances | Presence or durable acknowledgement |
 | `ConnectionLimiter` | Per-document admission and renewable leases | Redis or Durable Object implementation details |
+| `PresenceRoom` | Peer join/receive/leave/close state machine for one presence room | WebSocket upgrade, raw JSON parsing, or document convergence |
+| `PresencePeer` | Sending codec-encoded frames and closing a transport peer | Wire frame shape or identity state |
+| `PresenceStore` | TTL-backed member storage with purge-on-read expiry | Redis or Durable Object storage implementation details |
+| `PresenceFanout` | Presence broadcast delivery across room instances, including loopback | Document event delivery or durable acknowledgement |
+| `PresenceSessionHooks` | Resolving and refreshing a server-authoritative presence identity | Supabase/JWT implementation details |
+| `PresenceCodec` | Wire type classification, payload validation, and frame encoding | Room dispatch, TTL, or connection-admission policy |
+
+`PresenceRoom` shares no capability instance with `DocumentRoom`: separate
+`PresenceStore`/`PresenceFanout` from `RoomFanout`, and its own
+`PresenceSessionHooks`. Only `ConnectionLimiter` is reused as-is, scoped by a
+different room id, so a presence failure structurally cannot block durable
+document convergence.
 
 The room consumes parsed `ClientCollabMessage` values and sends existing
 `ServerCollabMessage` values. `DocumentEventPage` is derived from
@@ -174,6 +188,68 @@ every conflict.
 On reconnect, the browser repairs to completion before it exact-resends its
 pending write. That one-in-flight queue is a client invariant that the room
 must remain compatible with; it is not server-owned session state.
+
+## Presence room
+
+`PresenceRoom` is a separate, payload-opaque state machine beside
+`DocumentRoom`. It shares **no** capability instance with the document room —
+`PresenceStore`/`PresenceFanout`/`PresenceSessionHooks` are distinct from
+`DocumentEventStore`/`RoomFanout`/`DocumentSessionHooks` — so a presence
+failure structurally cannot block durable document convergence, and a
+document-store outage cannot block presence. Presence is authenticated-only;
+there is no public-access path.
+
+The room never reads a presence payload directly. A `PresenceCodec` owns
+every wire type string, envelope/patch/auth/heartbeat shape, and the
+published `updates` object; the room only reads the three identity fields it
+owns on a stored member (`clock`, `connectionId`, `userId`) and dispatches on
+the codec's classification of an inbound frame. This is what lets the same
+`PresenceRoom` run behind `@softmaple/awareness/protocol` in production and
+behind a dependency-free test codec in this package's own tests.
+
+### Room-owned behavior
+
+| Rule | Behavior |
+| --- | --- |
+| Room match | A frame whose room id does not match `PresenceRoom.roomId` closes 1008 |
+| Sender binding | Pre-auth: `senderId` must equal the Auth payload's `connectionId`. Post-auth: `senderId` must equal the authenticated `connectionId`. A mismatch closes 1008 |
+| Identity match | A patch whose `connectionId`/`userId` does not match the authenticated peer closes 1008 |
+| Monotonic clock | `clock <= current.clock` is a **silent drop** (no publish, no store write, no close); `clock > current.clock + 1000` closes 1008 |
+| TTL refresh | Join, Heartbeat, and Update each refresh the stored member's TTL and the connection lease |
+| Rate limit | `PresenceCodec.consumeQuota` runs **before** parsing, so a malformed frame still consumes quota |
+| Expiry → Leave | Every `PresenceStore.listMembers()` read's `expired[]` produces one Leave broadcast, with `senderId` set to the expired member's `connectionId` |
+| Heartbeat expiry | Rearmed on every valid post-auth frame; lapsing closes 1001 |
+| Auth cadence | Cached for `PresenceRoomPolicy.authorizationRefreshIntervalMs`; `PresenceSessionHooks.refresh` returning null or a different `userId` closes 1008 |
+| Cleanup order | Release fan-out retain → release the connection lease → `PresenceStore.removeMember` → publish Leave if the member had joined |
+| "Had joined" | True if the peer's local Joined state was true, **or** `removeMember` returned a prior record (a peer can be discovered joined even after eviction wiped local state) |
+| Close codes | 1000 leave · 1001 heartbeat expired · 1008 protocol/auth/identity/clock/revocation · 1011 store/fan-out failure · 1012 shutdown · 1013 full/duplicate/rate-limited |
+
+Origin validation, `?roomId=` parsing, and the frame byte-size limit remain
+host adapter responsibilities, exactly as they do for `DocumentRoom`. Byte
+measurement is transport-specific.
+
+### Refresh modes
+
+`PresenceRoomOptions.refreshMode` mirrors `DocumentRoomRefreshMode`:
+
+- **`background`** — one per-peer heartbeat-expiry timer, unref'd so it never
+  blocks process exit. Used by hosts that do not hibernate (Nitro).
+- **`on-message`** — no timers. Every inbound frame first runs
+  `PresenceRoom.sweep(now)` under a room-level maintenance lock, which closes
+  peers past their heartbeat deadline and drains lapsed store members into
+  Leave broadcasts. Used by hosts that hibernate (a Durable Object), where a
+  `sweep()` call can also be driven by an alarm instead of an inbound frame.
+
+`sweep(now?)` is public on `PresenceRoom` precisely so a host's alarm or
+timer can drive liveness without reimplementing expiry rules, and so the
+shared conformance suite in `@softmaple/collab-runtime/testing` exercises it
+identically on both hosts. It is idempotent: a member already purged by an
+earlier `sweep()` or read is not reported expired again.
+
+`PresenceRoom.resume(peer, state)` restores an already-authenticated session
+after a hibernating host wakes a peer, without a new wire Auth or a second
+`auth-ok` — it revalidates through `PresenceSessionHooks.refresh` first, the
+same way `DocumentRoom.resume` does.
 
 ## Not a convergence layer
 

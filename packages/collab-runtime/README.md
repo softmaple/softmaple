@@ -12,6 +12,17 @@ The public capabilities cover:
 - committed-event fan-out across room instances
 - per-document connection admission and renewable leases
 - runtime-neutral authorization, conflict, and store-unavailable failures
+- `PresenceRoom` and transport-neutral `PresencePeer` lifecycle, built on a
+  payload-opaque `PresenceCodec` seam so this package never imports
+  `@softmaple/awareness`
+- TTL-backed presence membership (`PresenceStore`) and presence broadcast
+  fan-out (`PresenceFanout`), sharing no capability instance with
+  `DocumentRoom`
+
+A `./testing` subpath ships a dependency-free conformance kit (assertion
+library free, so it stays inside the same host-infrastructure-free import
+allowlist) that both the Redis-backed and Durable-Object-backed adapters run
+against to prove equivalent behavior.
 
 `createDocumentRoom` preserves the collaboration consistency baseline: append
 before `DurableAck`, acknowledge before fan-out, never fan out a failed append,

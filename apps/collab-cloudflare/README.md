@@ -1,10 +1,10 @@
 # Cloudflare collaboration PoC
 
-This app started as the issue #871 proof of concept and now includes the
-hibernatable room lifecycle from issue #872. It leaves `apps/collab` and its
-Nitro/Redis deployment unchanged while hosting the same
-`@softmaple/collab-runtime` `DocumentRoom` semantics in Cloudflare Durable
-Objects.
+This app started as the issue #871 proof of concept, added the hibernatable
+document room lifecycle from issue #872, and now adds a presence room from
+issue #873 phase 6. It leaves `apps/collab` and its Nitro/Redis deployment
+unchanged while hosting the same `@softmaple/collab-runtime` `DocumentRoom`
+and `PresenceRoom` semantics in Cloudflare Durable Objects.
 
 ## Runtime shape
 
@@ -43,6 +43,41 @@ default 100-connection room policy therefore assumes a Workers plan with an
 external-subrequest budget large enough for full-room recovery; a lower-budget
 deployment must lower that policy or add batched reauthorization first.
 
+## Presence room
+
+The public Worker also keeps the existing `/collab/presence?roomId=` endpoint.
+Unlike the document route, presence needs no auth-sniffing proxy in front of
+the object: the room id is already known from the query string at upgrade
+time, so the Worker validates origin and room id, then routes directly with
+`PRESENCE_ROOMS.getByName(roomId)` and returns the object's own upgrade
+response. `PresenceRoomDO` accepts sockets the same hibernatable way as
+`DocumentRoomDO`, with its own versioned attachment (identity, credential,
+rate-limit state, and heartbeat/authorization deadlines — no `Ready`/session
+snapshot, since presence never resends one).
+
+`PresenceRoomDO` is a fully separate Durable Object namespace and shares no
+capability instance or cross-stub call with `DocumentRoomDO`
+(`docs/design/collaboration-runtime.md`'s "Presence room" section is the
+source of truth for this boundary; `eslint.config.js` enforces it
+mechanically with `no-restricted-imports` between the two files' capability
+modules). It gets its own DO-local `ConnectionLimiter` and `PresenceFanout`
+(`presence-capabilities.ts`), its own Supabase-backed `PresenceSessionHooks`
+(`supabase-presence-backend.ts`), and its own `PresenceCodec` bound to
+`@softmaple/awareness/protocol` (`awareness-presence-codec.ts`) — so a
+presence failure structurally cannot block durable document convergence, and
+a document-store outage cannot block presence.
+
+Presence membership is `ctx.storage`-backed (not in-memory), so it survives
+hibernation: each member is stored with its own expiry and purged lazily on
+read, matching every other `PresenceStore` implementation's contract. The
+room runs in `PresenceRoomOptions.refreshMode: "on-message"`, and a
+Cloudflare Durable Object alarm (`PRESENCE_ALARM_INTERVAL_MS`, `constants.ts`)
+is the liveness backstop: it is the only timer mechanism that survives
+hibernation, so it drives `PresenceRoom.sweep()` to close expired heartbeats
+and broadcast Leave for lapsed members even when the room is otherwise idle.
+The alarm reschedules itself only while a WebSocket is still attached, so an
+empty room does not keep waking the object.
+
 ## Local setup
 
 Create `apps/collab-cloudflare/.dev.vars` (it is ignored by the repository) with:
@@ -74,8 +109,19 @@ pnpm --filter @softmaple/collab-cloudflare build
 ```
 
 The Cloudflare Vitest suite runs in `workerd` with a test entry point that
-subclasses the Durable Object and injects a test event adapter. The adapter uses
-test-only Durable Object storage to emulate an external durable history source
-across forced instance eviction. The production bundle imports only the
-Supabase/Postgres adapter, so test credentials cannot select that backend in a
-deployed Worker.
+subclasses each Durable Object and injects a test event adapter. The adapter
+uses test-only Durable Object storage to emulate an external durable history
+source (for documents) or authorization backend (for presence) across forced
+instance eviction. The production bundle imports only the Supabase/Postgres
+adapters, so test credentials cannot select that backend in a deployed
+Worker. `test/document-presence-isolation.test.ts` exercises the two objects
+together for the same room id to prove the no-shared-capability boundary at
+runtime, not just statically.
+
+`--no-isolate` runs the whole suite in one `workerd` process, so its two
+Durable Object namespaces' SQLite-backed storage accumulates across every
+test file; `vitest.config.ts` raises `testTimeout`/`hookTimeout` to 30s to
+give the later files enough room.
+
+CI runs this suite in `.github/workflows/test-collab-cloudflare.yml`,
+path-filtered on this app and the packages it depends on.

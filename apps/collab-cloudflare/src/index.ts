@@ -1,7 +1,9 @@
 import { DocumentRoomDO } from "./document-room-do";
+import { PresenceRoomDO } from "./presence-room-do";
+import { handlePresenceWebSocket } from "./presence-websocket";
 import { handleDocumentWebSocket } from "./websocket-proxy";
 
-export { DocumentRoomDO };
+export { DocumentRoomDO, PresenceRoomDO };
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -11,6 +13,9 @@ export default {
     }
     if (pathname === "/collab/document") {
       return handleDocumentWebSocket(request, env);
+    }
+    if (pathname === "/collab/presence") {
+      return handlePresenceWebSocket(request, env);
     }
     return Response.json({ error: "Not found" }, { status: 404 });
   },

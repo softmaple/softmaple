@@ -14,9 +14,17 @@ export default defineConfig({
         },
         durableObjects: {
           DOCUMENT_ROOMS: "TestDocumentRoomDO",
+          PRESENCE_ROOMS: "TestPresenceRoomDO",
         },
       },
       wrangler: { configPath: "./wrangler.jsonc" },
     }),
   ],
+  test: {
+    // Two Durable Object namespaces now share one `--no-isolate` workerd
+    // process across the suite; their accumulated SQLite-backed storage
+    // makes the default 10s budget too tight for the later test files.
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
+  },
 });

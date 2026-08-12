@@ -13,15 +13,8 @@ import {
   MAX_MESSAGE_BYTES,
 } from "./constants";
 import { documentRoomPath, normalizeDocumentId } from "./document-id";
+import { messageBytes, textFromMessage } from "./message-bytes";
 import { isAllowedOrigin } from "./origin";
-
-const textFromMessage = (message: string | ArrayBuffer): string =>
-  typeof message === "string" ? message : new TextDecoder().decode(message);
-
-const messageBytes = (message: string | ArrayBuffer): number =>
-  typeof message === "string"
-    ? new TextEncoder().encode(message).byteLength
-    : message.byteLength;
 
 class DocumentSocketProxy {
   private closed = false;

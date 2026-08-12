@@ -269,7 +269,6 @@ describe("Cloudflare PresenceRoomDO", () => {
       type: WS_MESSAGE.LEAVE,
       senderId: "connection-peer",
     });
-    console.error("DEBUG step 13: done");
   });
 
   it("closes 1008 on a room-id mismatch before authentication", async () => {

@@ -46,10 +46,13 @@ describe("Durable Object presence store (ctx.storage-backed, purge-on-read)", ()
     const stub = env.PRESENCE_ROOMS.getByName("store-test-1");
     await runInDurableObject(stub, async (_instance: PresenceRoomDO, state) => {
       const store = createDurableObjectPresenceStore(state.storage);
-      await store.setMember("room-1", MEMBER, 25);
+      // A generous TTL for the "not expired yet" check, so a slow CI
+      // scheduler can't lapse it before this assertion runs.
+      await store.setMember("room-1", MEMBER, 5_000);
       await expect(store.getMember("room-1", "connection-1")).resolves.toEqual(
         MEMBER,
       );
+      await store.setMember("room-1", MEMBER, 25);
       await sleep(40);
       await expect(
         store.getMember("room-1", "connection-1"),
@@ -78,7 +81,10 @@ describe("Durable Object presence store (ctx.storage-backed, purge-on-read)", ()
     const stub = env.PRESENCE_ROOMS.getByName("store-test-3");
     await runInDurableObject(stub, async (_instance: PresenceRoomDO, state) => {
       const store = createDurableObjectPresenceStore(state.storage);
-      await store.setMember("room-1", MEMBER, 25);
+      // A generous TTL here too: refreshMember's own call resets the expiry
+      // to now+200 regardless, so this only needs the member to still exist
+      // when refreshMember runs.
+      await store.setMember("room-1", MEMBER, 5_000);
       await expect(
         store.refreshMember("room-1", "connection-1", 200),
       ).resolves.toBe(true);

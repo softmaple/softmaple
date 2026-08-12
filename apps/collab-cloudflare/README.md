@@ -105,6 +105,7 @@ the service-role key to browser code.
 ```bash
 pnpm --filter @softmaple/collab-cloudflare test
 pnpm --filter @softmaple/collab-cloudflare typecheck
+pnpm --filter @softmaple/collab-cloudflare lint
 pnpm --filter @softmaple/collab-cloudflare build
 ```
 

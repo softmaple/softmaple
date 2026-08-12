@@ -131,22 +131,26 @@ const resolveIdentity = async (
   const document = documentRow(rawDocument as unknown);
   if (document === null) return null;
 
-  const { data: rawMember, error: memberError } = await admin
-    .from("workspace_members")
-    .select("user_id")
-    .eq("user_id", userId)
-    .eq("workspace_id", document.workspace_id)
-    .maybeSingle();
-  if (memberError !== null) throw memberError;
-  if (memberRow(rawMember as unknown) === null) return null;
+  // Independent of each other (both need only userId/document.workspace_id,
+  // already resolved above), so run them concurrently.
+  const [memberResult, userResult] = await Promise.all([
+    admin
+      .from("workspace_members")
+      .select("user_id")
+      .eq("user_id", userId)
+      .eq("workspace_id", document.workspace_id)
+      .maybeSingle(),
+    admin
+      .from("users")
+      .select("full_name,avatar_src")
+      .eq("id", userId)
+      .maybeSingle(),
+  ]);
+  if (memberResult.error !== null) throw memberResult.error;
+  if (memberRow(memberResult.data as unknown) === null) return null;
 
-  const { data: rawUser, error: userError } = await admin
-    .from("users")
-    .select("full_name,avatar_src")
-    .eq("id", userId)
-    .maybeSingle();
-  if (userError !== null) throw userError;
-  const user = userRow(rawUser as unknown);
+  if (userResult.error !== null) throw userResult.error;
+  const user = userRow(userResult.data as unknown);
   if (user === null) return null;
 
   return identityFromUserRow(userId, user);

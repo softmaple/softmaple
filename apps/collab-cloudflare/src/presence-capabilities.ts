@@ -88,6 +88,18 @@ const memberKey = (roomId: string, connectionId: string): string =>
 
 const memberPrefix = (roomId: string): string => `presence:${roomId}:member:`;
 
+// `DurableObjectStorage.delete` accepts at most 128 keys per call.
+const STORAGE_DELETE_BATCH_SIZE = 128;
+
+const deleteInBatches = async (
+  storage: DurableObjectStorage,
+  keys: ReadonlyArray<string>,
+): Promise<void> => {
+  for (let index = 0; index < keys.length; index += STORAGE_DELETE_BATCH_SIZE) {
+    await storage.delete(keys.slice(index, index + STORAGE_DELETE_BATCH_SIZE));
+  }
+};
+
 /**
  * `ctx.storage`-backed presence membership, so members survive Durable
  * Object hibernation/eviction. Storage has no native per-key TTL, so
@@ -128,7 +140,7 @@ export const createDurableObjectPresenceStore = (
       }
       members.push(entry.member);
     }
-    if (expiredKeys.length > 0) await storage.delete(expiredKeys);
+    if (expiredKeys.length > 0) await deleteInBatches(storage, expiredKeys);
     return { expired, members };
   },
 

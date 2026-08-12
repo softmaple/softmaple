@@ -15,6 +15,7 @@ import {
   PRESENCE_ALARM_INTERVAL_MS,
 } from "./constants";
 import { normalizeDocumentId } from "./document-id";
+import { messageBytes, textFromMessage } from "./message-bytes";
 import {
   attachmentAfterSnapshot,
   createAwaitingAuthAttachment,
@@ -23,14 +24,6 @@ import {
   type PresenceWebSocketAttachment,
 } from "./presence-attachment";
 import { createPresenceServices } from "./presence-services";
-
-const textFromMessage = (message: string | ArrayBuffer): string =>
-  typeof message === "string" ? message : new TextDecoder().decode(message);
-
-const messageBytes = (message: string | ArrayBuffer): number =>
-  typeof message === "string"
-    ? new TextEncoder().encode(message).byteLength
-    : message.byteLength;
 
 const jsonBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -262,7 +255,6 @@ export class PresenceRoomDO extends DurableObject<Env> {
       peer = new DurableObjectPresencePeer(room, server, attachment);
       this.peers.set(peer.id, peer);
       await room.join(peer);
-      await this.ensureAlarmScheduled();
     } catch (error) {
       logError(error, { messageType: "presence-room-join", roomId });
       if (peer !== null) await peer.transportClosed();
@@ -393,6 +385,13 @@ export class PresenceRoomDO extends DurableObject<Env> {
       });
     }
     await this.initializationPromise;
+    // Scheduling here (rather than only after `fetch`'s own join) also
+    // covers a peer resuming through `webSocketMessage`/`webSocketError`
+    // after a hibernation restore, and the alarm handler's own re-entry.
+    // `fetch` calls this before its new socket is attached, but that is
+    // harmless: `ensureAlarmScheduled` is idempotent, and by the time the
+    // alarm fires the new socket will already be attached.
+    await this.ensureAlarmScheduled();
     return this.room;
   }
 

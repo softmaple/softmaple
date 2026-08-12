@@ -68,14 +68,17 @@ const authorizationState = async (
   return initial;
 };
 
+// Zero-padded so `listedAuditEntries`'s `localeCompare` sort (over the whole
+// key string) stays in insertion order past 9 entries; unpadded "10" would
+// otherwise sort before "2".
 const nextAuditSequence = async (
   transaction: DurableObjectTransaction,
-): Promise<number> => {
+): Promise<string> => {
   const sequence =
     ((await transaction.get<number>(STORAGE_KEY.sessionAuditSequence)) ?? 0) +
     1;
   await transaction.put(STORAGE_KEY.sessionAuditSequence, sequence);
-  return sequence;
+  return sequence.toString().padStart(10, "0");
 };
 
 const appendAuthorizationAudit = async (

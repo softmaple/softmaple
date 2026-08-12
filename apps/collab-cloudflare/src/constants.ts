@@ -15,6 +15,17 @@ export const MAX_MESSAGE_BYTES = 256 * 1024;
 export const MAX_PERSISTED_AUTH_BYTES = 8 * 1024;
 export const INITIAL_AUTH_TIMEOUT_MS = 10_000;
 
+// Presence frames carry no document payload, so the transport limit can stay
+// well below the document room's 256 KiB.
+export const MAX_PRESENCE_MESSAGE_BYTES = 64 * 1024;
+// Presence attachments carry no Ready/session snapshot, so half of the
+// document room's 8 KiB budget is generous for identity + credential + quota.
+export const MAX_PERSISTED_PRESENCE_BYTES = 4 * 1024;
+// Cloudflare alarms are the only timer that survives hibernation; this
+// backstops `PresenceRoom.sweep()` liveness at roughly the room's own
+// heartbeat/member TTL cadence (`DEFAULT_PRESENCE_ROOM_POLICY`).
+export const PRESENCE_ALARM_INTERVAL_MS = 30_000;
+
 export const errorMessage = (
   code: CollabErrorCode,
   message: string,

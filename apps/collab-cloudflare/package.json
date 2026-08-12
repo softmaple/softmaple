@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json"
   },
   "dependencies": {
+    "@softmaple/awareness": "workspace:*",
     "@softmaple/block-model": "workspace:*",
     "@softmaple/collab-protocol": "workspace:*",
     "@softmaple/collab-runtime": "workspace:*",

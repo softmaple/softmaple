@@ -1,0 +1,67 @@
+name: Collaboration Cloudflare Tests
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - 'apps/collab-cloudflare/**'
+      - 'packages/collab-runtime/**'
+      - 'packages/collab-protocol/**'
+      - 'packages/awareness/**'
+      - 'packages/block-model/**'
+      - 'packages/eslint-config/**'
+      - 'pnpm-lock.yaml'
+      - 'turbo.json'
+      - '.github/workflows/test-collab-cloudflare.yml'
+  pull_request:
+    branches: [main, next]
+    paths:
+      - 'apps/collab-cloudflare/**'
+      - 'packages/collab-runtime/**'
+      - 'packages/collab-protocol/**'
+      - 'packages/awareness/**'
+      - 'packages/block-model/**'
+      - 'packages/eslint-config/**'
+      - 'pnpm-lock.yaml'
+      - 'turbo.json'
+      - '.github/workflows/test-collab-cloudflare.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Durable Object document and presence rooms
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.12.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @softmaple/db db:generate
+
+      - name: Check Cloudflare collaboration backend
+        run: |
+          pnpm exec turbo run build --filter=@softmaple/collab-cloudflare... --filter=!@softmaple/collab-cloudflare
+          pnpm --filter @softmaple/collab-cloudflare typecheck
+          pnpm --filter @softmaple/collab-cloudflare lint
+          pnpm --filter @softmaple/collab-cloudflare test
+          pnpm --filter @softmaple/collab-cloudflare build

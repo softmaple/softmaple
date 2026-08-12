@@ -13,23 +13,8 @@ import {
   MAX_MESSAGE_BYTES,
 } from "./constants";
 import { documentRoomPath, normalizeDocumentId } from "./document-id";
-
-const textFromMessage = (message: string | ArrayBuffer): string =>
-  typeof message === "string" ? message : new TextDecoder().decode(message);
-
-const messageBytes = (message: string | ArrayBuffer): number =>
-  typeof message === "string"
-    ? new TextEncoder().encode(message).byteLength
-    : message.byteLength;
-
-const isAllowedOrigin = (request: Request, env: Env): boolean => {
-  const origin = request.headers.get("origin");
-  if (origin === null) return false;
-  const allowed = env.COLLAB_ALLOWED_ORIGINS.split(",")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
-  return allowed.includes(origin);
-};
+import { messageBytes, textFromMessage } from "./message-bytes";
+import { isAllowedOrigin } from "./origin";
 
 class DocumentSocketProxy {
   private closed = false;

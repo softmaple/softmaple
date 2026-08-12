@@ -17,6 +17,10 @@
       {
         "name": "DOCUMENT_ROOMS",
         "class_name": "DocumentRoomDO"
+      },
+      {
+        "name": "PRESENCE_ROOMS",
+        "class_name": "PresenceRoomDO"
       }
     ]
   },
@@ -24,6 +28,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["DocumentRoomDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["PresenceRoomDO"]
     }
   ],
   "observability": {

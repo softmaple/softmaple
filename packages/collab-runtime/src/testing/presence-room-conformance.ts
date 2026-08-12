@@ -561,7 +561,7 @@ export const presenceRoomConformance = (
   {
     name: "a post-deadline frame in background mode still refreshes the heartbeat",
     async run() {
-      const { room, sessions } = factory({ refreshMode: "background" });
+      const { room, sessions, store } = factory({ refreshMode: "background" });
       const identity = { name: "User 1", userId: "user-1" };
       sessions.authorizeImpl = async () => identity;
       sessions.refreshImpl = async () => identity;
@@ -577,6 +577,16 @@ export const presenceRoomConformance = (
         joined: true,
         rateLimit: null,
       });
+      await store.setMember(
+        ROOM_ID,
+        {
+          clock: 0,
+          connectionId: "connection-1",
+          name: identity.name,
+          userId: identity.userId,
+        },
+        60_000,
+      );
 
       // Send a heartbeat frame after the deadline
       peer.sent.length = 0;

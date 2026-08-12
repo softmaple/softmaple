@@ -641,7 +641,7 @@ class RuntimePresenceRoom implements PresenceRoom {
       state.phase = state.joined ? PEER_PHASE.Joined : PEER_PHASE.Authenticated;
       if (
         this.refreshMode === PRESENCE_ROOM_REFRESH_MODE.Background &&
-        state.heartbeatExpiresAt > 0
+        state.heartbeatExpiresAt > Date.now()
       ) {
         this.rearmHeartbeatTimer(state);
       }

@@ -277,7 +277,10 @@ export const presenceRoomConformance = (
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
       await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
-      await room.receive(peer, updateWire(ROOM_ID, "connection-1", "user-1", 1));
+      await room.receive(
+        peer,
+        updateWire(ROOM_ID, "connection-1", "user-1", 1),
+      );
       checkEqual(
         peer.closes[0]?.code,
         1008,

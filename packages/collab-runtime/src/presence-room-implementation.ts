@@ -204,10 +204,15 @@ class RuntimePresenceRoom implements PresenceRoom {
       try {
         await this.sendIgnoringFailure(
           peer,
-          this.services.codec.encode(PRESENCE_FRAME.Error, "unknown", "server", {
-            code: "invalid-message",
-            message: "The presence message is invalid",
-          }),
+          this.services.codec.encode(
+            PRESENCE_FRAME.Error,
+            "unknown",
+            "server",
+            {
+              code: "invalid-message",
+              message: "The presence message is invalid",
+            },
+          ),
           "invalid-message",
         );
       } catch (encodeError) {

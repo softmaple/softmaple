@@ -214,7 +214,11 @@ export const createMemoryConnectionLimiter = (
             released = true;
             const live = rooms.get(request.documentId);
             const entry = live?.get(request.peerId);
-            if (entry !== undefined && entry.token === token && live !== undefined) {
+            if (
+              entry !== undefined &&
+              entry.token === token &&
+              live !== undefined
+            ) {
               live.delete(request.peerId);
               if (live.size === 0) {
                 rooms.delete(request.documentId);

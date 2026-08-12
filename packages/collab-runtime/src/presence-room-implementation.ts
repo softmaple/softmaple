@@ -166,7 +166,22 @@ class RuntimePresenceRoom implements PresenceRoom {
       return;
     }
 
-    const quota = this.services.codec.consumeQuota(state.rateLimit, Date.now());
+    let quota: { allowed: boolean; state: unknown };
+    try {
+      quota = this.services.codec.consumeQuota(state.rateLimit, Date.now());
+    } catch (error) {
+      this.report(error, state, "quota-check");
+      state.leaveRequested = true;
+      await this.closePeer(peer, 1011, "Presence rate limit check failed");
+      await this.enqueue(state, async () => {
+        await this.resetState(
+          state,
+          true,
+          PRESENCE_SESSION_END_REASON.PeerLeft,
+        );
+      });
+      return;
+    }
     state.rateLimit = quota.state;
     await this.persistSnapshot(state);
     if (!quota.allowed) {
@@ -186,14 +201,18 @@ class RuntimePresenceRoom implements PresenceRoom {
     try {
       envelope = this.services.codec.parseEnvelope(JSON.parse(rawMessage));
     } catch {
-      await this.sendIgnoringFailure(
-        peer,
-        this.services.codec.encode(PRESENCE_FRAME.Error, "unknown", "server", {
-          code: "invalid-message",
-          message: "The presence message is invalid",
-        }),
-        "invalid-message",
-      );
+      try {
+        await this.sendIgnoringFailure(
+          peer,
+          this.services.codec.encode(PRESENCE_FRAME.Error, "unknown", "server", {
+            code: "invalid-message",
+            message: "The presence message is invalid",
+          }),
+          "invalid-message",
+        );
+      } catch (encodeError) {
+        this.report(encodeError, state, "error-frame-encode");
+      }
       return;
     }
 
@@ -267,11 +286,16 @@ class RuntimePresenceRoom implements PresenceRoom {
       if (!(await this.refreshAuthorizationForMessage(state))) return;
       if (!this.isPeerLive(state)) return;
 
+      // Rearm the heartbeat BEFORE acquiring the maintenance lock. If we swept
+      // before rearming, this peer might be found expired, and sweepLocked would
+      // enqueue work on the same peer that is already holding its queue lock,
+      // causing a deadlock. By rearming first, the calling peer is guaranteed
+      // never to appear in the expired-heartbeats list.
       await this.rearmHeartbeat(state);
 
       if (this.refreshMode === PRESENCE_ROOM_REFRESH_MODE.OnMessage) {
         await this.withMessageMaintenanceLock(async () => {
-          await this.sweepLocked(Date.now());
+          await this.sweepLocked(Date.now(), state);
         });
         if (!this.isPeerLive(state)) return;
       }
@@ -318,7 +342,7 @@ class RuntimePresenceRoom implements PresenceRoom {
 
   async sweep(now: number = Date.now()): Promise<void> {
     await this.withMessageMaintenanceLock(async () => {
-      await this.sweepLocked(now);
+      await this.sweepLocked(now, null);
     });
   }
 
@@ -449,7 +473,19 @@ class RuntimePresenceRoom implements PresenceRoom {
         return;
       }
 
-      await this.retainFanout(state);
+      try {
+        await this.retainFanout(state);
+      } catch (fanoutError) {
+        this.report(fanoutError, state, "auth-fanout");
+        state.leaveRequested = true;
+        await this.closePeer(state.peer, 1011, "Presence runtime unavailable");
+        await this.resetState(
+          state,
+          true,
+          PRESENCE_SESSION_END_REASON.PeerLeft,
+        );
+        return;
+      }
       if (state.leaveRequested || this.closed) {
         await this.resetState(
           state,
@@ -679,18 +715,34 @@ class RuntimePresenceRoom implements PresenceRoom {
     if (identity === null || connectionId === null) return;
 
     const now = Date.now();
-    const member = this.services.codec.createMember(
-      identity,
-      connectionId,
-      now,
-    );
+    let member: PresenceMemberRecord;
+    try {
+      member = this.services.codec.createMember(identity, connectionId, now);
+    } catch (error) {
+      this.report(error, state, "create-member");
+      state.leaveRequested = true;
+      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.closePeer(state.peer, 1011, "Presence join failed");
+      return;
+    }
     try {
       await this.services.store.setMember(
         this.roomId,
         member,
         this.services.policy.memberTtlMs,
       );
-      if (state.lease !== null) await state.lease.refresh();
+      const leaseAlive =
+        state.lease !== null ? await state.lease.refresh() : true;
+      if (!leaseAlive) {
+        state.leaveRequested = true;
+        await this.resetState(
+          state,
+          true,
+          PRESENCE_SESSION_END_REASON.PeerLeft,
+        );
+        await this.closePeer(state.peer, 1008, "Presence lease expired");
+        return;
+      }
       state.joined = true;
       await this.persistSnapshot(state);
       state.phase = PEER_PHASE.Joined;
@@ -855,7 +907,18 @@ class RuntimePresenceRoom implements PresenceRoom {
         application.member,
         this.services.policy.memberTtlMs,
       );
-      if (state.lease !== null) await state.lease.refresh();
+      const leaseAlive =
+        state.lease !== null ? await state.lease.refresh() : true;
+      if (!leaseAlive) {
+        state.leaveRequested = true;
+        await this.resetState(
+          state,
+          true,
+          PRESENCE_SESSION_END_REASON.PeerLeft,
+        );
+        await this.closePeer(state.peer, 1008, "Presence lease expired");
+        return;
+      }
       await this.services.fanout.publish({
         roomId: this.roomId,
         frame: this.services.codec.encode(
@@ -899,9 +962,13 @@ class RuntimePresenceRoom implements PresenceRoom {
     });
   }
 
-  private async sweepLocked(now: number): Promise<void> {
+  private async sweepLocked(
+    now: number,
+    callingPeer: PeerState | null,
+  ): Promise<void> {
     const expiredHeartbeats = [...this.peers.values()].filter(
       (state) =>
+        state !== callingPeer &&
         (state.phase === PEER_PHASE.Authenticated ||
           state.phase === PEER_PHASE.Joined) &&
         !state.leaveRequested &&

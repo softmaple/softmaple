@@ -89,12 +89,14 @@ export const createMemoryPresenceStore = (): PresenceStore => {
       return true;
     },
     async removeMember(roomId, connectionId) {
-      const entries = rooms.get(roomId);
-      if (entries === undefined) return null;
-      const current = entries.get(connectionId)?.member ?? null;
+      const { entries } = purge(roomId, Date.now());
+      const current = entries.get(connectionId);
+      if (current === undefined) return null;
+      if (current.expiresAt <= Date.now()) return null;
       entries.delete(connectionId);
       if (entries.size === 0) rooms.delete(roomId);
-      return current;
+      else rooms.set(roomId, entries);
+      return current.member;
     },
     async setMember(roomId, member, ttlMs) {
       const { entries } = purge(roomId, Date.now());
@@ -145,14 +147,19 @@ export interface MemoryConnectionLimiterOptions {
 export const createMemoryConnectionLimiter = (
   options: MemoryConnectionLimiterOptions = {},
 ): ConnectionLimiter => {
-  const rooms = new Map<string, Map<string, { expiresAt: number }>>();
+  const rooms = new Map<
+    string,
+    Map<string, { expiresAt: number; token: number }>
+  >();
+  let nextToken = 1;
 
   const purge = (
     documentId: string,
     now: number,
-  ): Map<string, { expiresAt: number }> => {
+  ): Map<string, { expiresAt: number; token: number }> => {
     const entries =
-      rooms.get(documentId) ?? new Map<string, { expiresAt: number }>();
+      rooms.get(documentId) ??
+      new Map<string, { expiresAt: number; token: number }>();
     for (const [peerId, entry] of entries) {
       if (entry.expiresAt <= now) entries.delete(peerId);
     }
@@ -180,8 +187,10 @@ export const createMemoryConnectionLimiter = (
           reason: CONNECTION_REJECTION_REASON.Capacity,
         };
       }
+      const token = nextToken++;
       entries.set(request.peerId, {
         expiresAt: now + request.policy.leaseTtlMs,
+        token,
       });
       rooms.set(request.documentId, entries);
       let released = false;
@@ -191,9 +200,11 @@ export const createMemoryConnectionLimiter = (
           async refresh() {
             if (released) return false;
             const live = purge(request.documentId, Date.now());
-            if (!live.has(request.peerId)) return false;
+            const entry = live.get(request.peerId);
+            if (entry === undefined || entry.token !== token) return false;
             live.set(request.peerId, {
               expiresAt: Date.now() + request.policy.leaseTtlMs,
+              token,
             });
             rooms.set(request.documentId, live);
             return true;
@@ -202,9 +213,12 @@ export const createMemoryConnectionLimiter = (
             if (released) return;
             released = true;
             const live = rooms.get(request.documentId);
-            live?.delete(request.peerId);
-            if (live !== undefined && live.size === 0) {
-              rooms.delete(request.documentId);
+            const entry = live?.get(request.peerId);
+            if (entry !== undefined && entry.token === token && live !== undefined) {
+              live.delete(request.peerId);
+              if (live.size === 0) {
+                rooms.delete(request.documentId);
+              }
             }
           },
         },

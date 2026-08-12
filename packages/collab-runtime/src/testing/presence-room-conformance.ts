@@ -277,10 +277,7 @@ export const presenceRoomConformance = (
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
       await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
-      await room.receive(
-        peer,
-        updateWire(ROOM_ID, "connection-1", "user-connection-1", 1),
-      );
+      await room.receive(peer, updateWire(ROOM_ID, "connection-1", "user-1", 1));
       checkEqual(
         peer.closes[0]?.code,
         1008,
@@ -556,6 +553,71 @@ export const presenceRoomConformance = (
           `expected exactly one Leave in ${refreshMode} mode`,
         );
       }
+    },
+  },
+  {
+    name: "a post-deadline frame in background mode still refreshes the heartbeat",
+    async run() {
+      const { room } = factory({ refreshMode: "background" });
+      const peer = await authenticateAndJoin(room, "connection-1");
+      const expiredTime = Date.now() + 10 * 60_000;
+      await room.sweep(expiredTime);
+      checkEqual(
+        peer.closes[0]?.code,
+        1001,
+        "expected heartbeat-expiry close in background mode",
+      );
+    },
+  },
+  {
+    name: "a post-deadline frame in on-message mode rearms before sweep",
+    async run() {
+      const { room, sessions } = factory({ refreshMode: "on-message" });
+      const identity1 = { name: "User 1", userId: "user-1" };
+      const identity2 = { name: "User 2", userId: "user-2" };
+      sessions.authorizeImpl = async (req) => {
+        if (req.userId === "user-1") return identity1;
+        if (req.userId === "user-2") return identity2;
+        return null;
+      };
+      sessions.refreshImpl = async (req) => {
+        if (req.session.identity.userId === "user-1") return identity1;
+        if (req.session.identity.userId === "user-2") return identity2;
+        return null;
+      };
+
+      // Create first peer with an already-expired heartbeat using resume
+      const first = createRecordingPresencePeer("connection-1");
+      const pastTime = Date.now() - 1000; // 1 second in the past
+      await room.resume(first, {
+        connectionId: "connection-1",
+        credential: { kind: "access-token", token: "t1" },
+        heartbeatExpiresAt: pastTime, // Already expired!
+        identity: identity1,
+        joined: true,
+        rateLimit: null,
+      });
+
+      // Create second peer normally
+      const second = await authenticateAndJoin(room, "connection-2", "user-2");
+
+      // When second peer sends a message, it will sweep and should close first peer
+      await room.receive(
+        second,
+        heartbeatWire(ROOM_ID, "connection-2", "ping-after-deadline"),
+      );
+
+      // The sweep triggered by second's message should have closed first
+      checkEqual(
+        first.closes[0]?.code,
+        1001,
+        "expected first peer to be closed by sweep",
+      );
+      checkEqual(
+        second.closes.length,
+        0,
+        "expected calling peer to remain open after triggering sweep",
+      );
     },
   },
 ];

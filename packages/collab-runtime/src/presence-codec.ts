@@ -80,8 +80,12 @@ export interface PresenceQuotaResult {
  * selection, name, color, activity/liveness timestamps) live behind this
  * interface; `collab-runtime` never imports awareness.
  *
- * Every parse/classify method throws on invalid input; there is no null
- * sentinel to check.
+ * Throwing behavior:
+ * - Parse methods (`parseEnvelope`, `parseAuth`, `parseHeartbeat`, `parsePatch`)
+ *   and `classify` throw on invalid input; there is no null sentinel to check.
+ * - `consumeQuota`, `createMember`, `applyPatch`, `encode`, and `isMember` are
+ *   guaranteed not to throw under normal operation. The room guards `encode`
+ *   calls on error-path flows where host failures are possible.
  */
 export interface PresenceCodec {
   applyPatch(

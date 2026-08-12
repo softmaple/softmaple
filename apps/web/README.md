@@ -112,14 +112,41 @@ forth is reversible with no document-history migration.
 
 The decision is a pure function of `(documentId, config)`, so a given
 document always resolves to the same runtime for a stable config, and both
-its document and presence WebSocket connections use that same answer —
-no document is ever split across both runtimes at once.
+its document and presence WebSocket connections use that same answer for
+any newly-rendered page load.
+
+That guarantee applies at page-render time only, not to WebSockets a
+browser already has open. `collabRuntime` is resolved once server-side and
+baked into the live session (`useDocumentSession`); it does not re-resolve
+until the tab reconnects or reloads. So a config change (percent/override/
+allow-deny list) does not move already-connected tabs — they keep talking
+to whichever runtime they opened against, and won't pick up the new
+decision until their next reconnect or a full page reload. **Two tabs open
+on the same document across a config change will therefore briefly be on
+different runtimes**, with no cross-talk between them until Supabase's
+durable event log reconciles on reconnect/repair.
+
+Because of this, treat any rollout config change that could move a
+document already being edited (percent/override changes; adding/removing
+an id from the allow/deny lists) as requiring a **coordinated reload**:
+confirm no session is actively open on the affected document(s) before
+changing config, or explicitly ask connected users to refresh afterward.
+The automatic reconnect in `use-document-session.ts` does not help here —
+on drop it reopens against the same `collabRuntime` the session already
+committed to, it never re-derives the decision, so a reload (or a fresh
+tab) is the only way an existing session picks up a new routing outcome.
+Before shipping a config change, test both a tab that connected **before**
+the change (confirm it keeps working, unmigrated, until it reloads) and a
+tab that connects **after** (confirm it gets the new decision) against the
+same document.
 
 Rolling back is changing `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`
 back to their safe defaults (or clearing `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
-entirely) and redeploying — no data migration is involved. Deploying
-`apps/collab-cloudflare` itself (secrets, `wrangler deploy`, DNS) is a
-separate operational step; see [`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md).
+entirely) and redeploying — no data migration is involved, but per above,
+existing open tabs won't observe the rollback until they reconnect or
+reload either. Deploying `apps/collab-cloudflare` itself (secrets,
+`wrangler deploy`, DNS) is a separate operational step; see
+[`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md).
 
 ## Commands
 

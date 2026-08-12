@@ -359,6 +359,11 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       return;
     }
 
+    // Cleanup above disconnects the prior adapter without clearing this
+    // state, so reset it up front — otherwise presenceLive briefly reads
+    // true against an already-disconnected adapter during reconnect.
+    setLiveAdapter(null);
+
     let cancelled = false;
     let created: PresenceAdapter | null = null;
     let authRevision = 0;

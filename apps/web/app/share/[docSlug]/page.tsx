@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cachedGetPublicDocumentBySlug } from "@/app/actions/documents/documents";
+import { resolveCollabRuntime } from "@/modules/docs/collab-runtime-routing";
 import { DocumentEditor } from "@/modules/docs/document-editor";
 
 type Props = { params: Promise<{ docSlug: string }> };
@@ -22,6 +23,7 @@ export default async function SharedDocumentPage({ params }: Props) {
 
   return (
     <DocumentEditor
+      collabRuntime={resolveCollabRuntime(document.data.id)}
       docSlug={document.data.slug}
       documentId={document.data.id}
       publicView

@@ -56,8 +56,11 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 Vercel (or any host), redeploy — restarting the running server is not enough.
 
 Collaboration Redis credentials and collab private hosts must never be exposed
-through `NEXT_PUBLIC_*` variables. The browser always connects to the current
-web origin at `/collab/document` and `/collab/presence`.
+through `NEXT_PUBLIC_*` variables. By default the browser connects to the
+current web origin at `/collab/document` and `/collab/presence` (the Nitro
+runtime); see [Collaboration runtime routing](#collaboration-runtime-routing)
+for how a document can instead be routed to the Cloudflare Durable Objects
+runtime.
 
 The server-only E2E seed endpoint is disabled by default. It activates only
 when `E2E_ALLOW_REMOTE_SEED=true`, the supplied project ref exactly matches the
@@ -88,6 +91,35 @@ See [Vercel WebSockets](https://vercel.com/docs/functions/websockets) and
 
 Keys and URL must belong to the **same** Supabase project. Never put a
 `sb_secret_…` / `service_role` key in these `NEXT_PUBLIC_*` variables.
+
+### Collaboration runtime routing
+
+`resolveCollabRuntime` in
+[`modules/docs/collab-runtime-routing.ts`](./modules/docs/collab-runtime-routing.ts)
+picks, per document and on the server before the page renders, whether the
+browser connects to the existing Nitro+Redis runtime (`apps/collab`) or the
+Cloudflare Durable Objects runtime (`apps/collab-cloudflare`). Both runtimes
+read and write the same Supabase tables, so switching a document back and
+forth is reversible with no document-history migration.
+
+| Variable | Effect |
+| --- | --- |
+| `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` | Base WS URL for the deployed Cloudflare worker (e.g. `wss://softmaple-collab-cloudflare.<subdomain>.workers.dev`). **Unset by default** — until this is set, every document stays on Nitro regardless of the other variables below. |
+| `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT` | `0`-`100`. Percentage of documents deterministically bucketed onto Cloudflare by a stable hash of the document id. Defaults to `0`. |
+| `COLLAB_RUNTIME_OVERRIDE` | `nitro` or `cloudflare`. Global override applied to any document not on the allow/deny list below — used to test Cloudflare in an internal/preview environment (Stage 1-2), or as an instant rollback lever. |
+| `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` | Comma-separated document ids always routed to Cloudflare, regardless of percent/override. |
+| `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST` | Comma-separated document ids always routed to Nitro. Takes precedence over the allowlist — the strongest per-document rollback lever. |
+
+The decision is a pure function of `(documentId, config)`, so a given
+document always resolves to the same runtime for a stable config, and both
+its document and presence WebSocket connections use that same answer —
+no document is ever split across both runtimes at once.
+
+Rolling back is changing `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`
+back to their safe defaults (or clearing `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
+entirely) and redeploying — no data migration is involved. Deploying
+`apps/collab-cloudflare` itself (secrets, `wrangler deploy`, DNS) is a
+separate operational step; see [`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md).
 
 ## Commands
 

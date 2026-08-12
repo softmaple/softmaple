@@ -24,6 +24,11 @@ import {
 } from "@/modules/docs/collab-pending-store";
 import { createOutgoingBatchQueue } from "@/modules/docs/collab-outgoing-queue";
 import {
+  COLLAB_RUNTIME,
+  type CollabRuntime,
+} from "@/modules/docs/collab-runtime-routing";
+import { buildCollabWebSocketUrl } from "@/modules/docs/collab-runtime-url";
+import {
   isDocumentEditable,
   type DocumentPermission,
   type DocumentSessionMode,
@@ -66,11 +71,6 @@ export type CollabDocumentState = DocumentSessionState & {
   readonly canWrite: boolean;
 };
 
-const resolveCollabUrl = (): string => {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/collab/document`;
-};
-
 const sendJson = (socket: WebSocket | null, message: unknown): boolean => {
   if (socket?.readyState !== WebSocket.OPEN) return false;
   socket.send(JSON.stringify(message));
@@ -90,6 +90,7 @@ type SessionController = {
 };
 
 const createSessionController = ({
+  collabRuntime,
   documentId,
   initialShared,
   onCollaborationStatus,
@@ -98,6 +99,7 @@ const createSessionController = ({
   onSaveStatus,
   sessionMode,
 }: {
+  readonly collabRuntime: CollabRuntime;
   readonly documentId: string;
   readonly initialShared: boolean;
   readonly onCollaborationStatus: (status: CollaborationStatus) => void;
@@ -369,7 +371,9 @@ const createSessionController = ({
       credential = { kind: "access-token", token: accessToken };
     }
 
-    const nextSocket = new WebSocket(resolveCollabUrl());
+    const nextSocket = new WebSocket(
+      buildCollabWebSocketUrl(collabRuntime, "/collab/document"),
+    );
     socket = nextSocket;
 
     nextSocket.addEventListener("open", () => {
@@ -636,11 +640,13 @@ const createSessionController = ({
 };
 
 export const useDocumentSession = ({
+  collabRuntime,
   documentId,
   isShared,
   permission,
   sessionMode = "authenticated",
 }: {
+  readonly collabRuntime: CollabRuntime;
   readonly documentId: string;
   readonly isShared: boolean;
   readonly permission: DocumentPermission | null;
@@ -670,6 +676,7 @@ export const useDocumentSession = ({
     setCollaborationStatus(isShared ? "connecting" : "disabled");
 
     const controller = createSessionController({
+      collabRuntime,
       documentId,
       initialShared: isShared,
       onCollaborationStatus: setCollaborationStatus,
@@ -686,7 +693,7 @@ export const useDocumentSession = ({
     };
     // isShared is applied via setShared below so private→shared keeps the replica.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
-  }, [documentId, sessionMode]);
+  }, [collabRuntime, documentId, sessionMode]);
 
   useEffect(() => {
     void controllerRef.current?.setShared(isShared);
@@ -730,6 +737,7 @@ export const useCollabDocument = (
   },
 ): CollabDocumentState => {
   const session = useDocumentSession({
+    collabRuntime: COLLAB_RUNTIME.Nitro,
     documentId,
     isShared: options?.isShared ?? true,
     permission: options?.permission ?? null,

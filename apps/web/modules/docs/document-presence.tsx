@@ -31,6 +31,7 @@ import {
 } from "@softmaple/ui/components/avatar";
 import { Radio } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { buildCollabWebSocketUrl } from "@/modules/docs/collab-runtime-url";
 import { DocEditor, type DocEditorProps } from "@/modules/docs/doc-editor";
 import {
   domPointAtOffset,
@@ -62,11 +63,6 @@ type RemoteGeometry = {
     readonly top: number;
     readonly width: number;
   }>;
-};
-
-const resolvePresenceUrl = (): string => {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/collab/presence`;
 };
 
 const initials = (name: string): string =>
@@ -378,7 +374,10 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       const next = createWebSocketAdapter({
         authToken: token,
         roomId: editorProps.documentId,
-        url: resolvePresenceUrl(),
+        url: buildCollabWebSocketUrl(
+          editorProps.collabRuntime,
+          "/collab/presence",
+        ),
         userInfo: {
           userId,
           name,
@@ -420,6 +419,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     };
   }, [
     avatarUrl,
+    editorProps.collabRuntime,
     editorProps.documentId,
     name,
     presenceEnabled,

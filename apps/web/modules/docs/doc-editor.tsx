@@ -10,6 +10,7 @@ import {
 
 export type DocEditorProps = Pick<
   CollabDocEditorProps,
+  | "collabRuntime"
   | "documentId"
   | "isShared"
   | "onCollaborationChange"
@@ -21,6 +22,7 @@ export type DocEditorProps = Pick<
 >;
 
 const UnMemoizedDocEditor: FC<DocEditorProps> = ({
+  collabRuntime,
   documentId,
   isShared,
   onCollaborationChange,
@@ -52,6 +54,7 @@ const UnMemoizedDocEditor: FC<DocEditorProps> = ({
     <CollabDocEditor
       documentId={documentId}
       activeEditor={activeEditor}
+      collabRuntime={collabRuntime}
       setActiveEditor={setActiveEditor}
       commonEditorConfig={commonConfig}
       isShared={isShared}

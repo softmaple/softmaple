@@ -3,6 +3,7 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { COLLAB_RUNTIME } from "./collab-runtime-routing";
 import { DocumentPresence } from "./document-presence";
 import { domPointAtOffset } from "./document-presence-dom";
 
@@ -154,6 +155,7 @@ describe("DocumentPresence auth lifecycle", () => {
       root.render(
         createElement(DocumentPresence, {
           avatarUrl: null,
+          collabRuntime: COLLAB_RUNTIME.Nitro,
           documentId: "00000000-0000-4000-8000-000000000001",
           name: "Ada",
           presenceEnabled: true,

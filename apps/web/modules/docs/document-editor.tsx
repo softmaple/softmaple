@@ -9,6 +9,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@softmaple/ui/components/tabs";
+import type { CollabRuntime } from "@/modules/docs/collab-runtime-routing";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
 import { DocumentPresence } from "@/modules/docs/document-presence";
@@ -34,6 +35,7 @@ const LatexPane = dynamic(() =>
 type AuthenticatedDocumentEditorProps = {
   readonly authorId: string;
   readonly avatarUrl: string | null;
+  readonly collabRuntime: CollabRuntime;
   readonly currentUserId: string;
   readonly docSlug: string;
   readonly documentId: string;
@@ -46,6 +48,7 @@ type AuthenticatedDocumentEditorProps = {
 };
 
 type PublicDocumentEditorProps = {
+  readonly collabRuntime: CollabRuntime;
   readonly docSlug: string;
   readonly documentId: string;
   readonly publicView: true;
@@ -94,6 +97,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         </header>
         <div className="mx-auto min-h-[calc(100dvh-7rem)] max-w-5xl overflow-hidden">
           <DocEditor
+            collabRuntime={props.collabRuntime}
             documentId={props.documentId}
             isShared
             onCollaborationChange={handleCollaborationChange}
@@ -163,6 +167,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         >
           <DocumentPresence
             avatarUrl={props.avatarUrl}
+            collabRuntime={props.collabRuntime}
             documentId={props.documentId}
             isShared={isPublic}
             name={props.userName}

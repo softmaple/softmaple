@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { resolveCollabRuntime } from "@/modules/docs/collab-runtime-routing";
 import { DocumentEditor } from "@/modules/docs/document-editor";
 import { NewDocumentForm } from "@/modules/docs/new-document-form";
 import { cachedGetDocumentBySlug } from "@/app/actions/documents/documents";
@@ -76,6 +77,7 @@ export default async function DocumentPage({ params }: Props) {
     <DocumentEditor
       authorId={document.author_id}
       avatarUrl={profile.avatar_src}
+      collabRuntime={resolveCollabRuntime(document.id)}
       currentUserId={user.id}
       docSlug={document.slug}
       documentId={document.id}

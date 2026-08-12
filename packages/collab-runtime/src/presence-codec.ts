@@ -80,10 +80,15 @@ export interface PresenceQuotaResult {
  * selection, name, color, activity/liveness timestamps) live behind this
  * interface; `collab-runtime` never imports awareness.
  *
- * Every parse/classify method throws on invalid input; there is no null
- * sentinel to check.
+ * **Throwing contract:** `parseEnvelope`, `parseAuth`, `parseHeartbeat`,
+ * `parsePatch`, and `classify` throw on invalid input; there is no null
+ * sentinel to check. `applyPatch`, `consumeQuota`, `createMember`, `encode`,
+ * and `isMember` must not throw — they are pure transforms/validators the
+ * room calls outside parse-specific `try` blocks (including `consumeQuota`
+ * on every inbound frame and `encode` on error responses).
  */
 export interface PresenceCodec {
+  /** Must not throw; returns the patched member and broadcast payload. */
   applyPatch(
     current: PresenceMemberRecord,
     patch: PresencePatch,
@@ -91,21 +96,25 @@ export interface PresenceCodec {
   ): PresencePatchApplication;
   /** Throws for a wire type the room does not understand. */
   classify(envelope: PresenceEnvelope): PresenceMessageKind;
+  /** Must not throw; returns the next rate-limit state and allowance. */
   consumeQuota(
     current: PresenceRateLimitState | null,
     now: number,
   ): PresenceQuotaResult;
+  /** Must not throw; materializes a new stored member from identity. */
   createMember(
     identity: PresenceIdentity,
     connectionId: string,
     now: number,
   ): PresenceMemberRecord;
+  /** Must not throw; encodes an outbound frame for the transport. */
   encode(
     kind: PresenceFrameKind,
     roomId: string,
     senderId: string,
     payload: unknown,
   ): unknown;
+  /** Must not throw; narrows an opaque stored value. */
   isMember(value: unknown): value is PresenceMemberRecord;
   parseAuth(payload: unknown): PresenceAuthPayload;
   parseEnvelope(value: unknown): PresenceEnvelope;

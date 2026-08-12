@@ -50,7 +50,6 @@ interface PeerState {
   phase: PeerPhase;
   readonly peer: PresencePeer;
   queue: Promise<void>;
-  queuePending: number;
   rateLimit: unknown;
 }
 
@@ -68,7 +67,6 @@ const createPeerState = (peer: PresencePeer): PeerState => ({
   phase: PEER_PHASE.Connected,
   peer,
   queue: Promise.resolve(),
-  queuePending: 0,
   rateLimit: null,
 });
 
@@ -144,7 +142,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       });
@@ -175,7 +172,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       });
@@ -203,7 +199,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       });
@@ -219,7 +214,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       });
@@ -240,7 +234,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       });
@@ -255,7 +248,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       });
@@ -267,14 +259,30 @@ class RuntimePresenceRoom implements PresenceRoom {
       if (!(await this.refreshAuthorizationForMessage(state))) return;
       if (!this.isPeerLive(state)) return;
 
-      await this.rearmHeartbeat(state);
+      const now = Date.now();
 
       if (this.refreshMode === PRESENCE_ROOM_REFRESH_MODE.OnMessage) {
+        // Sweep other peers before rearming this one. Exclude `state` so
+        // sweepLocked does not enqueue cleanup on this peer's queue (deadlock).
         await this.withMessageMaintenanceLock(async () => {
-          await this.sweepLocked(Date.now());
+          await this.sweepLocked(now, state);
         });
         if (!this.isPeerLive(state)) return;
       }
+
+      // Evaluate heartbeat expiry before rearming so post-deadline frames close 1001.
+      if (
+        state.heartbeatExpiresAt > 0 &&
+        state.heartbeatExpiresAt <= now
+      ) {
+        state.leaveRequested = true;
+        this.clearHeartbeatTimer(state);
+        await this.closePeer(state.peer, 1001, "Presence heartbeat expired");
+        await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
+        return;
+      }
+
+      await this.rearmHeartbeat(state);
 
       switch (kind) {
         case PRESENCE_MESSAGE.Join:
@@ -305,7 +313,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     state.leaveRequested = true;
     this.clearHeartbeatTimer(state);
     await this.enqueue(state, async () => {
-      await this.resetState(state, true, endReasonFromLeave(reason));
+      await this.resetState(state, endReasonFromLeave(reason));
     });
   }
 
@@ -336,7 +344,6 @@ class RuntimePresenceRoom implements PresenceRoom {
         await this.enqueue(state, async () => {
           await this.resetState(
             state,
-            true,
             PRESENCE_SESSION_END_REASON.RoomClosed,
           );
         });
@@ -368,7 +375,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       void this.enqueue(state, async () => {
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
       }).catch((error: unknown) => {
@@ -388,35 +394,48 @@ class RuntimePresenceRoom implements PresenceRoom {
     state: PeerState,
     envelope: PresenceEnvelope,
   ): Promise<void> {
+    let auth;
     try {
-      const auth = this.services.codec.parseAuth(envelope.payload);
+      auth = this.services.codec.parseAuth(envelope.payload);
       if (envelope.senderId !== auth.connectionId) {
         throw new Error("presence sender mismatch");
       }
+    } catch (error) {
+      await this.failAuthentication(state, error);
+      return;
+    }
 
-      const identity = await this.services.sessions.authorize({
+    let identity: PresenceIdentity | null;
+    try {
+      identity = await this.services.sessions.authorize({
         connectionId: auth.connectionId,
         credential: auth.credential,
         roomId: this.roomId,
         userId: auth.userId,
       });
-      if (identity === null) {
-        throw new Error("presence membership denied");
-      }
+    } catch (error) {
+      await this.failInfrastructure(state, error, "auth");
+      return;
+    }
 
-      if (state.leaveRequested || this.closed) {
-        await this.resetState(
-          state,
-          true,
-          this.closed
-            ? PRESENCE_SESSION_END_REASON.RoomClosed
-            : PRESENCE_SESSION_END_REASON.PeerLeft,
-        );
-        return;
-      }
+    if (identity === null || identity.userId !== auth.userId) {
+      await this.failAuthentication(state);
+      return;
+    }
 
-      // Set before admission so a concurrent cleanup can identify the peer.
-      state.connectionId = auth.connectionId;
+    if (state.leaveRequested || this.closed) {
+      await this.resetState(
+        state,
+        this.closed
+          ? PRESENCE_SESSION_END_REASON.RoomClosed
+          : PRESENCE_SESSION_END_REASON.PeerLeft,
+      );
+      return;
+    }
+
+    // Set before admission so a concurrent cleanup can identify the peer.
+    state.connectionId = auth.connectionId;
+    try {
       const admission = await this.services.connections.acquire({
         documentId: this.roomId,
         peerId: auth.connectionId,
@@ -430,18 +449,13 @@ class RuntimePresenceRoom implements PresenceRoom {
           1013,
           "Presence room is full or duplicated",
         );
-        await this.resetState(
-          state,
-          true,
-          PRESENCE_SESSION_END_REASON.PeerLeft,
-        );
+        await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
         return;
       }
       state.lease = admission.lease;
       if (state.leaveRequested || this.closed) {
         await this.resetState(
           state,
-          true,
           this.closed
             ? PRESENCE_SESSION_END_REASON.RoomClosed
             : PRESENCE_SESSION_END_REASON.PeerLeft,
@@ -453,7 +467,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       if (state.leaveRequested || this.closed) {
         await this.resetState(
           state,
-          true,
           this.closed
             ? PRESENCE_SESSION_END_REASON.RoomClosed
             : PRESENCE_SESSION_END_REASON.PeerLeft,
@@ -478,25 +491,39 @@ class RuntimePresenceRoom implements PresenceRoom {
         "auth-ok",
       );
     } catch (error) {
-      this.report(error, state, "auth");
-      state.leaveRequested = true;
-      await this.resetState(
-        state,
-        true,
-        PRESENCE_SESSION_END_REASON.AccessRevoked,
-      );
-      await this.sendIgnoringFailure(
-        state.peer,
-        this.services.codec.encode(
-          PRESENCE_FRAME.AuthError,
-          this.roomId,
-          "server",
-          { message: "Authentication or document membership failed" },
-        ),
-        "auth-error",
-      );
-      await this.closePeer(state.peer, 1008, "Unauthorized");
+      await this.failInfrastructure(state, error, "auth");
     }
+  }
+
+  private async failAuthentication(
+    state: PeerState,
+    error?: unknown,
+  ): Promise<void> {
+    if (error !== undefined) this.report(error, state, "auth");
+    state.leaveRequested = true;
+    await this.resetState(state, PRESENCE_SESSION_END_REASON.AccessRevoked);
+    await this.sendIgnoringFailure(
+      state.peer,
+      this.services.codec.encode(
+        PRESENCE_FRAME.AuthError,
+        this.roomId,
+        "server",
+        { message: "Authentication or document membership failed" },
+      ),
+      "auth-error",
+    );
+    await this.closePeer(state.peer, 1008, "Unauthorized");
+  }
+
+  private async failInfrastructure(
+    state: PeerState,
+    error: unknown,
+    messageType: string,
+  ): Promise<void> {
+    this.report(error, state, messageType);
+    state.leaveRequested = true;
+    await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
+    await this.closePeer(state.peer, 1011, "Presence runtime unavailable");
   }
 
   private async resumeSession(
@@ -518,14 +545,13 @@ class RuntimePresenceRoom implements PresenceRoom {
       this.report(error, state, "session-resume");
       state.leaveRequested = true;
       await this.closePeer(state.peer, 1011, "Presence runtime unavailable");
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       return null;
     }
 
     if (state.leaveRequested || this.closed) {
       await this.resetState(
         state,
-        true,
         this.closed
           ? PRESENCE_SESSION_END_REASON.RoomClosed
           : PRESENCE_SESSION_END_REASON.PeerLeft,
@@ -537,7 +563,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       await this.closePeer(state.peer, 1008, "Presence access was revoked");
       await this.resetState(
         state,
-        true,
         PRESENCE_SESSION_END_REASON.AccessRevoked,
       );
       return null;
@@ -566,7 +591,6 @@ class RuntimePresenceRoom implements PresenceRoom {
         );
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
         return null;
@@ -575,7 +599,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       if (state.leaveRequested || this.closed) {
         await this.resetState(
           state,
-          true,
           this.closed
             ? PRESENCE_SESSION_END_REASON.RoomClosed
             : PRESENCE_SESSION_END_REASON.PeerLeft,
@@ -587,7 +610,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       if (state.leaveRequested || this.closed) {
         await this.resetState(
           state,
-          true,
           this.closed
             ? PRESENCE_SESSION_END_REASON.RoomClosed
             : PRESENCE_SESSION_END_REASON.PeerLeft,
@@ -595,8 +617,7 @@ class RuntimePresenceRoom implements PresenceRoom {
         return null;
       }
 
-      state.authorizationExpiresAt =
-        Date.now() + this.services.policy.authorizationRefreshIntervalMs;
+      state.authorizationExpiresAt = resumed.authorizationExpiresAt;
       state.phase = state.joined ? PEER_PHASE.Joined : PEER_PHASE.Authenticated;
       if (
         this.refreshMode === PRESENCE_ROOM_REFRESH_MODE.Background &&
@@ -613,7 +634,7 @@ class RuntimePresenceRoom implements PresenceRoom {
       this.report(error, state, "session-resume");
       state.leaveRequested = true;
       await this.closePeer(state.peer, 1011, "Presence runtime unavailable");
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       return null;
     }
   }
@@ -639,7 +660,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, state, "authorization-recheck");
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1011, "Authorization recheck failed");
       return false;
     }
@@ -649,7 +670,6 @@ class RuntimePresenceRoom implements PresenceRoom {
       state.leaveRequested = true;
       await this.resetState(
         state,
-        true,
         PRESENCE_SESSION_END_REASON.AccessRevoked,
       );
       await this.closePeer(
@@ -671,7 +691,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     if (state.phase !== PEER_PHASE.Authenticated) {
       state.leaveRequested = true;
       await this.closePeer(state.peer, 1008, "Presence already joined");
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       return;
     }
     const identity = state.identity;
@@ -690,7 +710,7 @@ class RuntimePresenceRoom implements PresenceRoom {
         member,
         this.services.policy.memberTtlMs,
       );
-      if (state.lease !== null) await state.lease.refresh();
+      if (!(await this.refreshLeaseOrClose(state))) return;
       state.joined = true;
       await this.persistSnapshot(state);
       state.phase = PEER_PHASE.Joined;
@@ -706,7 +726,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, state, "join");
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1011, "Presence join failed");
     }
   }
@@ -733,7 +753,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, state, "sync");
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1011, "Presence sync failed");
     }
   }
@@ -747,7 +767,7 @@ class RuntimePresenceRoom implements PresenceRoom {
       pingId = this.services.codec.parseHeartbeat(envelope.payload);
     } catch {
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1008, "Invalid presence heartbeat");
       return;
     }
@@ -766,7 +786,6 @@ class RuntimePresenceRoom implements PresenceRoom {
         state.leaveRequested = true;
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
         await this.closePeer(state.peer, 1008, "Presence lease expired");
@@ -785,7 +804,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, state, "heartbeat");
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1011, "Presence heartbeat failed");
     }
   }
@@ -808,7 +827,6 @@ class RuntimePresenceRoom implements PresenceRoom {
         state.leaveRequested = true;
         await this.resetState(
           state,
-          true,
           PRESENCE_SESSION_END_REASON.PeerLeft,
         );
         await this.closePeer(state.peer, 1008, "Join presence before updating");
@@ -818,7 +836,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, state, "update");
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1011, "Presence update failed");
       return;
     }
@@ -834,7 +852,7 @@ class RuntimePresenceRoom implements PresenceRoom {
       }
     } catch {
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1008, "Invalid presence update");
       return;
     }
@@ -842,7 +860,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     if (patch.clock <= current.clock) return; // Stale write; silently dropped.
     if (patch.clock > current.clock + 1_000) {
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1008, "Invalid presence update");
       return;
     }
@@ -855,7 +873,7 @@ class RuntimePresenceRoom implements PresenceRoom {
         application.member,
         this.services.policy.memberTtlMs,
       );
-      if (state.lease !== null) await state.lease.refresh();
+      if (!(await this.refreshLeaseOrClose(state))) return;
       await this.services.fanout.publish({
         roomId: this.roomId,
         frame: this.services.codec.encode(
@@ -873,7 +891,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, state, "update");
       state.leaveRequested = true;
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
       await this.closePeer(state.peer, 1011, "Presence update failed");
     }
   }
@@ -881,7 +899,7 @@ class RuntimePresenceRoom implements PresenceRoom {
   private async receiveLeave(state: PeerState): Promise<void> {
     state.leaveRequested = true;
     await this.closePeer(state.peer, 1000, "Presence left");
-    await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+    await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
   }
 
   private async publishLeave(
@@ -899,14 +917,18 @@ class RuntimePresenceRoom implements PresenceRoom {
     });
   }
 
-  private async sweepLocked(now: number): Promise<void> {
+  private async sweepLocked(
+    now: number,
+    excludePeer?: PeerState,
+  ): Promise<void> {
     const expiredHeartbeats = [...this.peers.values()].filter(
-      (state) =>
-        (state.phase === PEER_PHASE.Authenticated ||
-          state.phase === PEER_PHASE.Joined) &&
-        !state.leaveRequested &&
-        state.heartbeatExpiresAt > 0 &&
-        state.heartbeatExpiresAt <= now,
+      (candidate) =>
+        candidate !== excludePeer &&
+        (candidate.phase === PEER_PHASE.Authenticated ||
+          candidate.phase === PEER_PHASE.Joined) &&
+        !candidate.leaveRequested &&
+        candidate.heartbeatExpiresAt > 0 &&
+        candidate.heartbeatExpiresAt <= now,
     );
     await Promise.all(
       expiredHeartbeats.map(async (state) => {
@@ -914,11 +936,7 @@ class RuntimePresenceRoom implements PresenceRoom {
         this.clearHeartbeatTimer(state);
         await this.closePeer(state.peer, 1001, "Presence heartbeat expired");
         await this.enqueue(state, async () => {
-          await this.resetState(
-            state,
-            true,
-            PRESENCE_SESSION_END_REASON.PeerLeft,
-          );
+          await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
         });
       }),
     );
@@ -931,6 +949,16 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch (error) {
       this.report(error, null, "sweep");
     }
+  }
+
+  private async refreshLeaseOrClose(state: PeerState): Promise<boolean> {
+    if (state.lease === null) return true;
+    const leaseAlive = await state.lease.refresh();
+    if (leaseAlive) return true;
+    state.leaveRequested = true;
+    await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
+    await this.closePeer(state.peer, 1008, "Presence lease expired");
+    return false;
   }
 
   private async rearmHeartbeat(state: PeerState): Promise<void> {
@@ -981,7 +1009,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     state.leaveRequested = true;
     await this.closePeer(state.peer, 1001, "Presence heartbeat expired");
     await this.enqueue(state, async () => {
-      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      await this.resetState(state, PRESENCE_SESSION_END_REASON.PeerLeft);
     });
   }
 
@@ -1079,7 +1107,6 @@ class RuntimePresenceRoom implements PresenceRoom {
 
   private async resetState(
     state: PeerState,
-    remove: boolean,
     endReason: PresenceSessionEndReason,
   ): Promise<void> {
     this.clearHeartbeatTimer(state);
@@ -1139,21 +1166,12 @@ class RuntimePresenceRoom implements PresenceRoom {
     }
 
     state.connectionId = null;
-
-    if (remove) {
-      state.phase = PEER_PHASE.Left;
-      this.peers.delete(state.peer);
-    } else {
-      state.phase = PEER_PHASE.Connected;
-      state.leaveRequested = false;
-    }
+    state.phase = PEER_PHASE.Left;
+    this.peers.delete(state.peer);
   }
 
   private enqueue<T>(state: PeerState, work: () => Promise<T>): Promise<T> {
-    state.queuePending += 1;
-    const operation = state.queue.then(work, work).finally(() => {
-      state.queuePending -= 1;
-    });
+    const operation = state.queue.then(work, work);
     state.queue = operation.then(
       () => undefined,
       () => undefined,

@@ -9,8 +9,10 @@ import { check, checkEqual, type ConformanceCase } from "./conformance-case";
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const TEST_TTL_MS = 15;
-const TEST_TTL_MARGIN_MS = 60;
+export interface PresenceStoreConformanceOptions {
+  readonly testTtlMarginMs?: number;
+  readonly testTtlMs?: number;
+}
 
 const testMember = (
   overrides: Partial<PresenceMemberRecord> = {},
@@ -29,7 +31,12 @@ const testMember = (
  */
 export const presenceStoreConformance = (
   createStore: () => PresenceStore,
-): ConformanceCase[] => [
+  options: PresenceStoreConformanceOptions = {},
+): ConformanceCase[] => {
+  const TEST_TTL_MS = options.testTtlMs ?? 15;
+  const TEST_TTL_MARGIN_MS = options.testTtlMarginMs ?? 60;
+
+  return [
   {
     name: "getMember returns null for an absent member",
     async run() {
@@ -152,6 +159,17 @@ export const presenceStoreConformance = (
     },
   },
   {
+    name: "getMember returns null after TTL lapses",
+    async run() {
+      const store = createStore();
+      const member = testMember();
+      await store.setMember("room-a", member, TEST_TTL_MS);
+      await sleep(TEST_TTL_MS + TEST_TTL_MARGIN_MS);
+      const stored = await store.getMember("room-a", member.connectionId);
+      check(stored === null, "expected null for a lapsed member");
+    },
+  },
+  {
     name: "a purged member is not reported expired again",
     async run() {
       const store = createStore();
@@ -164,6 +182,7 @@ export const presenceStoreConformance = (
     },
   },
 ];
+};
 
 /**
  * Loopback delivery (required for browser self-suppression by senderId),

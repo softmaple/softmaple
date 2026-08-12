@@ -38,6 +38,8 @@ export interface PresencePeerSnapshot {
 
 /** Server-owned session metadata restored by a hibernating transport host. */
 export interface PresenceRoomResumeState {
+  /** Preserved as-is; the room does not recompute it on resume. */
+  readonly authorizationExpiresAt: number;
   readonly connectionId: string;
   readonly credential: CollabCredential;
   /** Preserved as-is; the room does not recompute it on resume. */

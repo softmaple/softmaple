@@ -1,7 +1,10 @@
 import { PRESENCE_FRAME } from "../presence-codec";
 import type { ConnectionLimiter } from "../connection-limiter";
 import type { PresenceFanout } from "../presence-fanout";
-import type { PresenceRoom, PresenceRoomOptions } from "../presence-room";
+import type {
+  PresenceRoom,
+  PresenceRoomOptions,
+} from "../presence-room";
 import type { PresenceStore } from "../presence-store";
 import { check, checkEqual, type ConformanceCase } from "./conformance-case";
 import {
@@ -9,6 +12,13 @@ import {
   createRecordingPresencePeer,
   type StubPresenceSessionHooks,
 } from "./fakes";
+
+export interface PresenceRoomConformanceOptions extends PresenceRoomOptions {
+  readonly heartbeatExpiryMs?: number;
+  readonly memberTtlMs?: number;
+  readonly testTtlMarginMs?: number;
+  readonly testTtlMs?: number;
+}
 
 export interface PresenceRoomHarness {
   readonly connections: ConnectionLimiter;
@@ -20,7 +30,7 @@ export interface PresenceRoomHarness {
 
 /** Must return a fully independent harness (fresh fakes) on every call. */
 export type PresenceRoomFactory = (
-  options?: PresenceRoomOptions,
+  options?: PresenceRoomConformanceOptions,
 ) => PresenceRoomHarness;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -80,7 +90,10 @@ const updateWire = (
 const leaveWire = (roomId: string, connectionId: string): string =>
   wire(TEST_PRESENCE_WIRE_TYPE.Leave, roomId, connectionId);
 
-const ROOM_ID = "room-a";
+export const PRESENCE_CONFORMANCE_ROOM_ID = "room-a";
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Authenticates and joins one peer; asserts each step succeeded. */
 const authenticateAndJoin = async (
@@ -90,12 +103,12 @@ const authenticateAndJoin = async (
 ): Promise<ReturnType<typeof createRecordingPresencePeer>> => {
   const peer = createRecordingPresencePeer(connectionId);
   await room.join(peer);
-  await room.receive(peer, authWire(ROOM_ID, connectionId, userId));
+  await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, connectionId, userId));
   check(
     framesOfType(peer, PRESENCE_FRAME.AuthOk).length === 1,
     `expected ${connectionId} to receive exactly one auth-ok`,
   );
-  await room.receive(peer, joinWire(ROOM_ID, connectionId));
+  await room.receive(peer, joinWire(PRESENCE_CONFORMANCE_ROOM_ID, connectionId));
   check(
     peer.closes.length === 0,
     `expected ${connectionId} to stay open after joining`,
@@ -111,7 +124,15 @@ const authenticateAndJoin = async (
  */
 export const presenceRoomConformance = (
   factory: PresenceRoomFactory,
-): ConformanceCase[] => [
+  suiteOptions: Pick<
+    PresenceRoomConformanceOptions,
+    "testTtlMarginMs" | "testTtlMs"
+  > = {},
+): ConformanceCase[] => {
+  const TEST_TTL_MS = suiteOptions.testTtlMs ?? 10;
+  const TEST_TTL_MARGIN_MS = suiteOptions.testTtlMarginMs ?? 60;
+
+  return [
   {
     name: "Auth denial closes 1008 and sends auth-error",
     async run() {
@@ -119,7 +140,7 @@ export const presenceRoomConformance = (
       sessions.authorizeImpl = async () => null;
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
-      await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
+      await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-1"));
       checkEqual(peer.closes[0]?.code, 1008, "expected a 1008 close on denial");
       check(
         framesOfType(peer, PRESENCE_FRAME.AuthError).length === 1,
@@ -148,7 +169,7 @@ export const presenceRoomConformance = (
       await room.join(peer);
       await room.receive(
         peer,
-        wire(TEST_PRESENCE_WIRE_TYPE.Auth, ROOM_ID, "someone-else", {
+        wire(TEST_PRESENCE_WIRE_TYPE.Auth, PRESENCE_CONFORMANCE_ROOM_ID, "someone-else", {
           connectionId: "connection-1",
           credential: { kind: "access-token", token: "t" },
           userId: "user-1",
@@ -166,7 +187,7 @@ export const presenceRoomConformance = (
     async run() {
       const { room } = factory();
       const peer = await authenticateAndJoin(room, "connection-1");
-      await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
+      await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-1"));
       checkEqual(peer.closes[0]?.code, 1008, "expected a duplicate-auth close");
     },
   },
@@ -176,7 +197,7 @@ export const presenceRoomConformance = (
       const { room } = factory();
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
-      await room.receive(peer, syncWire(ROOM_ID, "connection-1"));
+      await room.receive(peer, syncWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1"));
       checkEqual(
         peer.closes[0]?.code,
         1008,
@@ -190,8 +211,8 @@ export const presenceRoomConformance = (
       const { room } = factory();
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
-      await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
-      await room.receive(peer, syncWire(ROOM_ID, "someone-else"));
+      await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-1"));
+      await room.receive(peer, syncWire(PRESENCE_CONFORMANCE_ROOM_ID, "someone-else"));
       checkEqual(
         peer.closes[0]?.code,
         1008,
@@ -205,8 +226,8 @@ export const presenceRoomConformance = (
       const { room } = factory();
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
-      await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
-      await room.receive(peer, wire("nonsense", ROOM_ID, "connection-1"));
+      await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-1"));
+      await room.receive(peer, wire("nonsense", PRESENCE_CONFORMANCE_ROOM_ID, "connection-1"));
       checkEqual(
         peer.closes[0]?.code,
         1008,
@@ -266,7 +287,7 @@ export const presenceRoomConformance = (
     async run() {
       const { room } = factory();
       const peer = await authenticateAndJoin(room, "connection-1");
-      await room.receive(peer, joinWire(ROOM_ID, "connection-1"));
+      await room.receive(peer, joinWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1"));
       checkEqual(peer.closes[0]?.code, 1008, "expected a duplicate-join close");
     },
   },
@@ -276,10 +297,10 @@ export const presenceRoomConformance = (
       const { room } = factory();
       const peer = createRecordingPresencePeer("connection-1");
       await room.join(peer);
-      await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
+      await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-1"));
       await room.receive(
         peer,
-        updateWire(ROOM_ID, "connection-1", "user-connection-1", 1),
+        updateWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-1", 1),
       );
       checkEqual(
         peer.closes[0]?.code,
@@ -295,7 +316,7 @@ export const presenceRoomConformance = (
       const peer = await authenticateAndJoin(room, "connection-1");
       await room.receive(
         peer,
-        updateWire(ROOM_ID, "connection-1", "someone-else", 1),
+        updateWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "someone-else", 1),
       );
       checkEqual(
         peer.closes[0]?.code,
@@ -311,15 +332,15 @@ export const presenceRoomConformance = (
       const peer = await authenticateAndJoin(room, "connection-1");
       await room.receive(
         peer,
-        updateWire(ROOM_ID, "connection-1", "user-connection-1", 5),
+        updateWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-connection-1", 5),
       );
       let deliveries = 0;
-      await fanout.subscribe(ROOM_ID, () => {
+      await fanout.subscribe(PRESENCE_CONFORMANCE_ROOM_ID, () => {
         deliveries += 1;
       });
       await room.receive(
         peer,
-        updateWire(ROOM_ID, "connection-1", "user-connection-1", 3),
+        updateWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-connection-1", 3),
       );
       check(peer.closes.length === 0, "expected no close on a stale clock");
       checkEqual(deliveries, 0, "expected no publish on a stale clock");
@@ -332,7 +353,7 @@ export const presenceRoomConformance = (
       const peer = await authenticateAndJoin(room, "connection-1");
       await room.receive(
         peer,
-        updateWire(ROOM_ID, "connection-1", "user-connection-1", 5_000),
+        updateWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-connection-1", 5_000),
       );
       checkEqual(peer.closes[0]?.code, 1008, "expected a clock-jump close");
     },
@@ -346,7 +367,7 @@ export const presenceRoomConformance = (
       second.sent.length = 0;
       await room.receive(
         first,
-        updateWire(ROOM_ID, "connection-1", "user-connection-1", 1, {
+        updateWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "user-connection-1", 1, {
           cursor: "x",
         }),
       );
@@ -364,12 +385,12 @@ export const presenceRoomConformance = (
       const observer = await authenticateAndJoin(room, "connection-1");
       observer.sent.length = 0;
       await store.setMember(
-        ROOM_ID,
+        PRESENCE_CONFORMANCE_ROOM_ID,
         { clock: 0, connectionId: "ghost", userId: "ghost-user" },
-        10,
+        TEST_TTL_MS,
       );
-      await new Promise((resolve) => setTimeout(resolve, 60));
-      await room.receive(observer, syncWire(ROOM_ID, "connection-1"));
+      await sleep(TEST_TTL_MS + TEST_TTL_MARGIN_MS);
+      await room.receive(observer, syncWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1"));
       checkEqual(
         framesOfType(observer, PRESENCE_FRAME.Leave).length,
         1,
@@ -396,7 +417,7 @@ export const presenceRoomConformance = (
       peer.sent.length = 0;
       await room.receive(
         peer,
-        heartbeatWire(ROOM_ID, "connection-1", "ping-1"),
+        heartbeatWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "ping-1"),
       );
       const acks = framesOfType(peer, PRESENCE_FRAME.HeartbeatAck);
       checkEqual(acks.length, 1, "expected exactly one heartbeat-ack");
@@ -420,7 +441,7 @@ export const presenceRoomConformance = (
       const peer = await authenticateAndJoin(room, "connection-1");
       await room.receive(
         peer,
-        wire(TEST_PRESENCE_WIRE_TYPE.Heartbeat, ROOM_ID, "connection-1", {}),
+        wire(TEST_PRESENCE_WIRE_TYPE.Heartbeat, PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", {}),
       );
       checkEqual(
         peer.closes[0]?.code,
@@ -452,7 +473,7 @@ export const presenceRoomConformance = (
       observer.sent.length = 0;
       const peer = createRecordingPresencePeer("connection-2");
       await room.join(peer);
-      await room.receive(peer, authWire(ROOM_ID, "connection-2", "user-2"));
+      await room.receive(peer, authWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-2", "user-2"));
       await room.leave(peer);
       checkEqual(
         framesOfType(observer, PRESENCE_FRAME.Leave).length,
@@ -466,7 +487,7 @@ export const presenceRoomConformance = (
     async run() {
       const { room } = factory();
       const peer = await authenticateAndJoin(room, "connection-1");
-      await room.receive(peer, leaveWire(ROOM_ID, "connection-1"));
+      await room.receive(peer, leaveWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1"));
       checkEqual(peer.closes[0]?.code, 1000, "expected a clean 1000 close");
     },
   },
@@ -492,6 +513,7 @@ export const presenceRoomConformance = (
       sessions.refreshImpl = async () => identity;
       const peer = createRecordingPresencePeer("connection-1");
       const session = await room.resume(peer, {
+        authorizationExpiresAt: Date.now() + 8_000,
         connectionId: "connection-1",
         credential: { kind: "access-token", token: "t" },
         heartbeatExpiresAt: 0,
@@ -505,7 +527,7 @@ export const presenceRoomConformance = (
         0,
         "expected no second auth-ok frame on resume",
       );
-      await room.receive(peer, joinWire(ROOM_ID, "connection-1"));
+      await room.receive(peer, joinWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1"));
       check(
         peer.closes.length === 0,
         "expected the resumed peer to join successfully",
@@ -542,6 +564,48 @@ export const presenceRoomConformance = (
     },
   },
   {
+    name: "a post-deadline inbound frame closes 1001 (on-message)",
+    async run() {
+      const heartbeatExpiryMs = 10;
+      const { room } = factory({
+        heartbeatExpiryMs,
+        refreshMode: "on-message",
+      });
+      const peer = await authenticateAndJoin(room, "connection-1");
+      await sleep(heartbeatExpiryMs + TEST_TTL_MARGIN_MS);
+      await room.receive(
+        peer,
+        heartbeatWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "ping-late"),
+      );
+      checkEqual(
+        peer.closes[0]?.code,
+        1001,
+        "expected a post-deadline close in on-message mode",
+      );
+    },
+  },
+  {
+    name: "a post-deadline inbound frame closes 1001 (background)",
+    async run() {
+      const heartbeatExpiryMs = 10;
+      const { room } = factory({
+        heartbeatExpiryMs,
+        refreshMode: "background",
+      });
+      const peer = await authenticateAndJoin(room, "connection-1");
+      await sleep(heartbeatExpiryMs + TEST_TTL_MARGIN_MS);
+      await room.receive(
+        peer,
+        heartbeatWire(PRESENCE_CONFORMANCE_ROOM_ID, "connection-1", "ping-late"),
+      );
+      checkEqual(
+        peer.closes[0]?.code,
+        1001,
+        "expected a post-deadline close in background mode",
+      );
+    },
+  },
+  {
     name: "both refresh modes reach the same terminal state",
     async run() {
       for (const refreshMode of ["background", "on-message"] as const) {
@@ -559,3 +623,4 @@ export const presenceRoomConformance = (
     },
   },
 ];
+};

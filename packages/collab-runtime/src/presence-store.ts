@@ -43,8 +43,11 @@ export interface PresenceStore {
     connectionId: string,
     ttlMs: number,
   ): Promise<boolean>;
-  /** Returns the removed record, or null when nothing was stored. */
-  removeMember(roomId: string, connectionId: string): Promise<unknown>;
+  /**
+   * Returns the removed live record, or `null` when nothing was stored or the
+   * member had already lapsed. Implementations must never return `undefined`.
+   */
+  removeMember(roomId: string, connectionId: string): Promise<unknown | null>;
   setMember(
     roomId: string,
     member: PresenceMemberRecord,

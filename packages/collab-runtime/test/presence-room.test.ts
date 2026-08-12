@@ -2,7 +2,7 @@ import { describe, it } from "vitest";
 import {
   DEFAULT_PRESENCE_ROOM_POLICY,
   createPresenceRoom,
-  type PresenceRoomOptions,
+  type PresenceRoomPolicy,
 } from "../src";
 import {
   createMemoryConnectionLimiter,
@@ -10,22 +10,35 @@ import {
   createMemoryPresenceStore,
   createOpaqueTestCodec,
   createStubPresenceSessionHooks,
+  PRESENCE_CONFORMANCE_ROOM_ID,
   presenceRoomConformance,
+  type PresenceRoomConformanceOptions,
   type PresenceRoomHarness,
 } from "../src/testing";
 
-const createHarness = (options?: PresenceRoomOptions): PresenceRoomHarness => {
+const createHarness = (
+  options?: PresenceRoomConformanceOptions,
+): PresenceRoomHarness => {
   const store = createMemoryPresenceStore();
   const fanout = createMemoryPresenceFanout();
   const connections = createMemoryConnectionLimiter();
   const sessions = createStubPresenceSessionHooks();
+  const policy: PresenceRoomPolicy = {
+    ...DEFAULT_PRESENCE_ROOM_POLICY,
+    ...(options?.heartbeatExpiryMs === undefined
+      ? {}
+      : { heartbeatExpiryMs: options.heartbeatExpiryMs }),
+    ...(options?.memberTtlMs === undefined
+      ? {}
+      : { memberTtlMs: options.memberTtlMs }),
+  };
   const room = createPresenceRoom(
-    "room-a",
+    PRESENCE_CONFORMANCE_ROOM_ID,
     {
       codec: createOpaqueTestCodec(),
       connections,
       fanout,
-      policy: DEFAULT_PRESENCE_ROOM_POLICY,
+      policy,
       sessions,
       store,
     },

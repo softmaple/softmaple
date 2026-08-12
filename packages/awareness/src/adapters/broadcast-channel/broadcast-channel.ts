@@ -7,6 +7,7 @@
  *   lastActivityAt past idleTimeout → idle
  */
 
+import { withDerivedStatus } from "../../core/status";
 import {
   PRESENCE_EVENT,
   type PresenceEvent,
@@ -29,7 +30,6 @@ import {
   setPresenceUser,
   updateState,
 } from "../adapter-state";
-import { withDerivedStatus } from "../../core/status";
 import { createSubscriptionManager } from "../subscription-manager";
 import type {
   AdapterConfig,

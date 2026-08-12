@@ -52,6 +52,23 @@ export {
   usePresenceLayerOffset,
 } from "./components";
 export {
+  createPresenceStore,
+  createSelfSession,
+  derivePresenceStatus,
+  isUserIdle,
+  isUserOffline,
+  PRESENCE_CAPABILITIES,
+  PRESENCE_PROTOCOL_VERSION,
+  type PresenceCapability,
+  type PresenceHello,
+  type PresenceStore,
+  type PresenceStoreListener,
+  type PresenceStoreOptions,
+  type StatusTimeouts,
+  sweepPresenceStatuses,
+  withDerivedStatus,
+} from "./core";
+export {
   mapTextareaSelectionThroughOperation,
   type PeerCursor,
   type TextareaSelection,
@@ -116,6 +133,7 @@ export {
 } from "./types/events";
 export {
   type AtomSequenceAnchor,
+  applyClockedPresenceUpdate,
   type BlockSelectionPoint,
   type BoundarySequenceAnchor,
   type CreatePresenceUserOptions,
@@ -124,7 +142,6 @@ export {
   createPresenceUser,
   type DirectionalSelectionRange,
   type EndBoundarySequenceAnchor,
-  applyClockedPresenceUpdate,
   getCursorOffset,
   isCursorPosition,
   isDirectionalSelectionRange,
@@ -160,23 +177,6 @@ export type {
   PresenceStateConfig,
 } from "./types/state";
 export { DEFAULT_PRESENCE_CONFIG } from "./types/state";
-export {
-  createPresenceStore,
-  createSelfSession,
-  derivePresenceStatus,
-  isUserIdle,
-  isUserOffline,
-  PRESENCE_CAPABILITIES,
-  PRESENCE_PROTOCOL_VERSION,
-  type PresenceCapability,
-  type PresenceHello,
-  type PresenceStore,
-  type PresenceStoreListener,
-  type PresenceStoreOptions,
-  type StatusTimeouts,
-  sweepPresenceStatuses,
-  withDerivedStatus,
-} from "./core";
 export type {
   SurfaceBinding,
   SurfaceBindingSubscription,

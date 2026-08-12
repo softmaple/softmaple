@@ -97,7 +97,7 @@ const authenticateDocument = async (
   return ready;
 };
 
-const authenticateAndJoinPresence = async (
+const authenticatePresence = async (
   socket: WebSocket,
   roomId: string,
 ): Promise<void> => {
@@ -144,7 +144,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
       type: COLLAB_MESSAGE_TYPE.Ready,
       documentId: roomId,
     });
-    await authenticateAndJoinPresence(presenceSocket, roomId);
+    await authenticatePresence(presenceSocket, roomId);
 
     // Neither room's stub observes the other's capability instances: both
     // stay open and independently addressable for the same room id.
@@ -172,7 +172,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
     const documentSocket = await connectDocument();
     const presenceSocket = await connectPresence(roomId);
     await authenticateDocument(documentSocket, roomId);
-    await authenticateAndJoinPresence(presenceSocket, roomId);
+    await authenticatePresence(presenceSocket, roomId);
 
     await runInDurableObject(
       env.DOCUMENT_ROOMS.getByName(roomId),
@@ -204,7 +204,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
     const documentSocket = await connectDocument();
     const presenceSocket = await connectPresence(roomId);
     await authenticateDocument(documentSocket, roomId);
-    await authenticateAndJoinPresence(presenceSocket, roomId);
+    await authenticatePresence(presenceSocket, roomId);
 
     await runInDurableObject(
       env.PRESENCE_ROOMS.getByName(roomId),
@@ -236,7 +236,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
     const documentSocket = await connectDocument();
     const presenceSocket = await connectPresence(roomId);
     await authenticateDocument(documentSocket, roomId);
-    await authenticateAndJoinPresence(presenceSocket, roomId);
+    await authenticatePresence(presenceSocket, roomId);
 
     const documentClosed = nextClose(documentSocket);
     documentSocket.close(1000, "Client done");

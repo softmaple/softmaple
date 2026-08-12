@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "cloudflare@cloudflare": true
+  }
+}

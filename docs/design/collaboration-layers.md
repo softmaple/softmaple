@@ -231,6 +231,11 @@ choosing a deployment runtime or persistence implementation.
   lifecycle contracts.
 - Define capabilities for durable event append/history reads, committed-event
   fan-out, connection admission/leases, and authorization refresh.
+- Define ephemeral presence-room capabilities (`PresenceStore`,
+  `PresenceFanout`, `PresenceSessionHooks`) and a payload-opaque
+  `PresenceCodec` seam, plus the `PresenceRoom` state machine built on them.
+  Presence shares no capability instance with `DocumentRoom` — a presence
+  failure cannot block durable document convergence.
 - Reuse `@softmaple/collab-protocol` messages and validated batch shapes rather
   than creating a second browser protocol.
 - Specify durable append, `DurableAck`, fan-out, and repair/resync ordering.
@@ -247,6 +252,10 @@ The complete behavioral contract is in
   infrastructure.
 - Import EG-walker directly, awareness, a surface binding, an editor
   framework, React, UI packages, or app routing.
+- Import `@softmaple/awareness` or any subpath (including
+  `@softmaple/awareness/protocol` and `@softmaple/awareness/types/presence`)
+  — presence payload shapes are opaque here; the host injects a
+  `PresenceCodec`.
 - Implement convergence, block integration, or another CRDT. EG-walker and
   block-model retain those responsibilities.
 - Own a browser transport or alter the wire protocol.

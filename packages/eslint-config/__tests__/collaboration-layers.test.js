@@ -298,6 +298,8 @@ test("collab-protocol allows block-model but forbids host and higher layers", ()
 test("collab-runtime allows protocol contracts but forbids host infrastructure", () => {
   for (const specifier of [
     "@softmaple/awareness",
+    "@softmaple/awareness/protocol",
+    "@softmaple/awareness/types/presence",
     "@softmaple/eg-walker",
     "@softmaple/binding-lexical",
     "@softmaple/db",
@@ -316,6 +318,7 @@ test("collab-runtime allows protocol contracts but forbids host infrastructure",
     "react",
     "lexical",
     "lodash",
+    "vitest",
   ]) {
     const messages = lintWithPatterns(
       collabRuntimeCollaborationPatterns,

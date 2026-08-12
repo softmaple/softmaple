@@ -7,6 +7,7 @@ export type ConnectionRejectionReason =
   (typeof CONNECTION_REJECTION_REASON)[keyof typeof CONNECTION_REJECTION_REASON];
 
 export interface ConnectionAdmissionRequest {
+  /** The room-scope id; a document id for `DocumentRoom`, a presence room id for `PresenceRoom`. */
   readonly documentId: string;
   /** Stable server-side identity for this physical connection. */
   readonly peerId: string;

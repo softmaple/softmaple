@@ -92,10 +92,14 @@ empty room does not keep waking the object.
 | `SUPABASE_PUBLISHABLE_KEY` | yes | Used for the auth-scoped Supabase client |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Elevated, server-only — used for the admin-scoped Supabase client that issues RPC calls (`admin.rpc(...)` in `supabase-backend.ts`). Never expose to browser code. |
 
-These four are `wrangler.jsonc`'s `secrets.required` list — the Worker
-refuses to start without all of them. Unlike `apps/collab`, this app has no
-direct Postgres connection string; it only ever talks to Supabase over its
-RPC surface (`append_document_event_batches`, `read_document_event_page`).
+These four are `wrangler.jsonc`'s `secrets.required` list. The two tools
+enforce this differently: `wrangler deploy` validates all four are actually
+configured on the target Worker and **fails** with an error listing what's
+missing; `wrangler dev` (and the Vitest suite, which shares this check) only
+**warns** about missing local values and still starts. Unlike `apps/collab`,
+this app has no direct Postgres connection string; it only ever talks to
+Supabase over its RPC surface (`append_document_event_batches`,
+`read_document_event_page`).
 See
 [`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md#environment-configuration)
 for how this compares to Nitro's env config.
@@ -134,15 +138,21 @@ default `workers.dev` subdomain.
 The manual process, until a real pipeline exists:
 
 1. Set each of the four secrets above with `wrangler secret put <NAME>`
-   against the target Cloudflare account.
+   against the target Cloudflare account. **Each call creates a new Worker
+   version and deploys it immediately** — it is not a config-only write —
+   so on an already-running Worker this activates a new version per secret,
+   not just at the end of this sequence.
 2. Apply the same Prisma migrations applied for local setup, against the
    target environment's Supabase project.
 3. `pnpm --filter @softmaple/collab-cloudflare deploy` (runs `wrangler
    deploy` for real — this is the one command in this app that touches a
    live Cloudflare account).
 4. Set `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` in `apps/web`'s environment
-   to the resulting Worker URL — routing stays at 0% until this is set,
-   per [`apps/web/README.md`'s routing section](../web/README.md#collaboration-runtime-routing).
+   to the resulting Worker URL, then **rebuild and redeploy `apps/web`** —
+   `NEXT_PUBLIC_*` values are inlined at build time, so setting the
+   variable alone does nothing for an already-running deployment; routing
+   stays at 0% (all traffic on Nitro) until the rebuilt bundle ships, per
+   [`apps/web/README.md`'s routing section](../web/README.md#collaboration-runtime-routing).
 
 ## Rollback
 
@@ -153,6 +163,15 @@ specific, older version by id (`wrangler rollback <VERSION_ID>`). Because no
 deployment has ever been exercised, this procedure is documented but
 unverified — confirm it works during the first real Stage 2 deployment
 rather than assuming it does.
+
+**Rollback can fail outright.** Cloudflare refuses it if a Durable Object
+class lifecycle change (via `wrangler.jsonc`'s `migrations` array) happened
+between the active version and the rollback target, or if the target
+depends on a binding/resource that's since been modified or removed — both
+apply directly here once `DOCUMENT_ROOMS`/`PRESENCE_ROOMS` accumulate more
+than one migration entry. When `wrangler rollback` is refused for either
+reason, fall back to **routing rollback** below (move documents back to
+Nitro) rather than trying to force a Worker-level revert.
 
 This is a different lever from **routing rollback** (moving documents back
 to Nitro without touching what's deployed here) — see

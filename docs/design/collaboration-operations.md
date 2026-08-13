@@ -113,8 +113,14 @@ Two distinct levels — know which one you need before acting:
    [`apps/web/README.md`'s routing section](../../apps/web/README.md#collaboration-runtime-routing):
    reset `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT` to
    their safe defaults, or clear `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
-   entirely, and redeploy `apps/web`. **Already-open browser tabs don't
-   observe this until they reconnect or reload** — read that section's
+   entirely, and redeploy `apps/web`. **Resetting the override/percent
+   alone does not move documents on `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST`
+   — the allowlist takes precedence over the override.** To stop *all*
+   Cloudflare traffic, either clear the allowlist (or move the affected
+   ids to `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST`) or clear
+   `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` entirely, which wins regardless
+   of every other variable. **Already-open browser tabs don't observe any
+   of this until they reconnect or reload** — read that section's
    coordinated-reload guidance before changing rollout config on a
    document with active editors.
 2. **Runtime deploy rollback** — reverting what's actually running for a

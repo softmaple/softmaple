@@ -5,6 +5,14 @@
 import { isRecord, isShortString } from "./envelope";
 import { PRESENCE_CAPABILITIES, PRESENCE_PROTOCOL_VERSION } from "./version";
 
+/**
+ * A credential is a JWT, not a wire identifier: a Supabase access token is
+ * routinely ~1000 characters, so the shared 256 identifier bound would
+ * reject every real session. Matches the credential bound already used by
+ * the Cloudflare presence attachment parser.
+ */
+const MAX_PRESENCE_TOKEN_LENGTH = 4_096;
+
 export interface PresenceAuthPayload {
   readonly connectionId: string;
   readonly token: string;
@@ -14,7 +22,7 @@ export interface PresenceAuthPayload {
 export const parsePresenceAuth = (payload: unknown): PresenceAuthPayload => {
   if (
     !isRecord(payload) ||
-    !isShortString(payload.token) ||
+    !isShortString(payload.token, MAX_PRESENCE_TOKEN_LENGTH) ||
     !isShortString(payload.connectionId) ||
     !isShortString(payload.userId) ||
     payload.protocolVersion !== PRESENCE_PROTOCOL_VERSION ||

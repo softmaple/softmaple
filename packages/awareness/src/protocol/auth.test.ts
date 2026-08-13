@@ -64,9 +64,25 @@ describe("parsePresenceAuth", () => {
     ).toThrow("invalid presence authentication");
   });
 
-  it("rejects a token over 256 characters", () => {
+  it("accepts a JWT-length token", () => {
+    // A Supabase access token is ~1000 characters; the 256 identifier bound
+    // used to reject every real session with "invalid presence authentication".
+    const token = `${"h".repeat(40)}.${"p".repeat(900)}.${"s".repeat(43)}`;
+    expect(parsePresenceAuth({ ...validAuthPayload(), token }).token).toBe(
+      token,
+    );
+  });
+
+  it("accepts a token at the 4096 character bound", () => {
+    const token = "t".repeat(4096);
+    expect(parsePresenceAuth({ ...validAuthPayload(), token }).token).toBe(
+      token,
+    );
+  });
+
+  it("rejects a token over 4096 characters", () => {
     expect(() =>
-      parsePresenceAuth({ ...validAuthPayload(), token: "t".repeat(257) }),
+      parsePresenceAuth({ ...validAuthPayload(), token: "t".repeat(4097) }),
     ).toThrow("invalid presence authentication");
   });
 

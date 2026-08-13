@@ -130,6 +130,9 @@ const AUTHENTICATED_ACCESS = {
 
 const DEFAULT_PROFILE = { full_name: "Test User", avatar_src: null };
 
+/** Stand-in for a real Supabase access token (~1000 characters). */
+const JWT_LENGTH_TOKEN = `${"h".repeat(40)}.${"p".repeat(900)}.${"s".repeat(43)}`;
+
 // `mockResolvedValueOnce` queues leak across tests when only `clearAllMocks`
 // runs between them (it clears call history, not queued implementations).
 // Driving both mocks off mutable state avoids call-count bookkeeping and
@@ -333,6 +336,23 @@ describe("collaboration presence route", () => {
         }),
       );
       expect(peer.close).toHaveBeenCalledWith(1008, "Unauthorized");
+      await route.close(peer);
+    });
+
+    it("authenticates a JWT-length token", async () => {
+      const peer = await upgradedPeer();
+      await route.message(
+        peer,
+        authMessage(ROOM_ID, "connection-1", { token: JWT_LENGTH_TOKEN }),
+      );
+      expect(peer.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: WS_MESSAGE.AUTH_OK }),
+      );
+      expect(mocks.authorizeDocument).toHaveBeenCalledWith(
+        { kind: "access-token", token: JWT_LENGTH_TOKEN },
+        ROOM_ID,
+      );
+      expect(peer.close).not.toHaveBeenCalled();
       await route.close(peer);
     });
 

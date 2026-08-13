@@ -17,8 +17,15 @@ const fakeAdapter = () => ({
   subscribe: () => () => undefined,
   updatePresence: () => undefined,
 });
+const connectResolvers: Array<() => void> = [];
 const createWebSocketAdapter = vi.fn(() => ({
   ...fakeAdapter(),
+  connect: vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        connectResolvers.push(resolve);
+      }),
+  ),
   disconnect,
 }));
 const createNoopAdapter = vi.fn(fakeAdapter);
@@ -38,21 +45,35 @@ type SessionResult = {
 let authListener: AuthListener | null = null;
 let resolveGetSession: ((value: SessionResult) => void) | null = null;
 
-vi.mock("@softmaple/awareness", () => ({
-  PresenceProvider: ({ children }: { children: ReactNode }) => children,
-  createNoopAdapter: () => createNoopAdapter(),
-  createWebSocketAdapter: () => createWebSocketAdapter(),
-  isDirectionalSelectionRange: () => false,
-  isStableCursorPosition: () => false,
-  useOthers: () => [],
-  usePresence: () => ({
-    connectionState: "connected",
-    presence: new Map(),
-    updatePresence: vi.fn(),
-  }),
-  useUpdateCursor: () => () => undefined,
-  useUpdateSelection: () => () => undefined,
-}));
+vi.mock("@softmaple/awareness", async () => {
+  const { useEffect } = await import("react");
+  return {
+    PresenceProvider: ({
+      adapter,
+      children,
+    }: {
+      adapter: { connect: () => Promise<unknown> };
+      children: ReactNode;
+    }) => {
+      useEffect(() => {
+        void adapter.connect();
+      }, [adapter]);
+      return children;
+    },
+    createNoopAdapter: () => createNoopAdapter(),
+    createWebSocketAdapter: () => createWebSocketAdapter(),
+    isDirectionalSelectionRange: () => false,
+    isStableCursorPosition: () => false,
+    useOthers: () => [],
+    usePresence: () => ({
+      connectionState: "connected",
+      presence: new Map(),
+      updatePresence: vi.fn(),
+    }),
+    useUpdateCursor: () => () => undefined,
+    useUpdateSelection: () => () => undefined,
+  };
+});
 
 vi.mock("@softmaple/ui/components/avatar", () => ({
   Avatar: ({ children }: { children: ReactNode }) =>
@@ -138,6 +159,7 @@ describe("DocumentPresence auth lifecycle", () => {
   beforeEach(() => {
     authListener = null;
     resolveGetSession = null;
+    connectResolvers.length = 0;
     disconnect.mockClear();
     createWebSocketAdapter.mockClear();
     createNoopAdapter.mockClear();
@@ -294,9 +316,14 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(createWebSocketAdapter).toHaveBeenCalledTimes(1);
+    expect(connectResolvers).toHaveLength(1);
+    const resolveUser1Connect = connectResolvers[0];
+    if (resolveUser1Connect === undefined) {
+      throw new Error("expected the user-1 adapter connect() to remain pending");
+    }
     expect(container.textContent).not.toContain("Connecting presence");
 
-    // Switch signed-in user before the new connection attempt resolves.
+    // Switch signed-in user before the in-flight user-1 connect resolves.
     await act(async () => {
       root.render(
         createElement(DocumentPresence, { ...baseProps, userId: "user-2" }),
@@ -304,10 +331,18 @@ describe("DocumentPresence auth lifecycle", () => {
       await Promise.resolve();
     });
 
-    // The user-1 adapter must be disconnected and never shown as live under
-    // user-2's identity while the new connection is in flight.
     expect(disconnect).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain("Connecting presence");
+
+    // Resolving the stale user-1 connection must not restore it as live.
+    await act(async () => {
+      resolveUser1Connect();
+      await Promise.resolve();
+    });
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connecting presence");
+    expect(container.textContent).not.toContain("Presence connected");
 
     await act(async () => {
       resolveGetSession?.({
@@ -318,6 +353,17 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(createWebSocketAdapter).toHaveBeenCalledTimes(2);
+    expect(connectResolvers).toHaveLength(2);
+    const resolveUser2Connect = connectResolvers[1];
+    if (resolveUser2Connect === undefined) {
+      throw new Error("expected the user-2 adapter connect() to remain pending");
+    }
+
+    await act(async () => {
+      resolveUser2Connect();
+      await Promise.resolve();
+    });
+
     expect(container.textContent).not.toContain("Connecting presence");
 
     await act(async () => {

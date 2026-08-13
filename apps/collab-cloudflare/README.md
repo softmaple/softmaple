@@ -6,10 +6,10 @@ issue #873 phase 6. It leaves `apps/collab` and its Nitro/Redis deployment
 unchanged while hosting the same `@softmaple/collab-runtime` `DocumentRoom`
 and `PresenceRoom` semantics in Cloudflare Durable Objects.
 
-It is not yet deployed to a reachable environment — see "Production
-deployment" below and
+The repository does not automate deployment or configure `apps/web` to select
+this runtime by default — see "Production deployment" below and
 [`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md)
-for the cross-runtime operational picture and current rollout stage.
+for the cross-runtime operational picture and configured rollout stage.
 
 ## Runtime shape
 
@@ -36,12 +36,14 @@ silently miss a durable batch. A completely idle revoked socket may remain
 physically open until the next room wake-up, but it cannot receive data past
 its cached validation deadline.
 
-The Durable Object owns only live peer coordination, fan-out, and connection
+`DocumentRoomDO` owns live document peer coordination, fan-out, and connection
 limits. Durable event append/repair goes through Supabase RPCs backed by the
 existing `document_event_batches` and `document_event_ids` Postgres tables.
 The RPC migration uses the same per-document transaction advisory lock as the
 Nitro host. No Redis dependency is needed for fan-out inside a single object,
-and Durable Object SQLite is not used as event history.
+and Durable Object SQLite is not used as document event history. The separate
+`PresenceRoomDO` does use Durable Object storage for live presence membership,
+as described below.
 
 A constructor wake revalidates every attached session against Supabase. The
 default 100-connection room policy therefore assumes a Workers plan with an
@@ -70,7 +72,8 @@ modules). It gets its own DO-local `ConnectionLimiter` and `PresenceFanout`
 (`supabase-presence-backend.ts`), and its own `PresenceCodec` bound to
 `@softmaple/awareness/protocol` (`awareness-presence-codec.ts`) — so a
 presence failure structurally cannot block durable document convergence, and
-a document-store outage cannot block presence.
+an event-store-specific failure cannot block presence. A broader Supabase Auth
+or Data API outage can still affect both rooms.
 
 Presence membership is `ctx.storage`-backed (not in-memory), so it survives
 hibernation: each member is stored with its own expiry and purged lazily on
@@ -90,16 +93,18 @@ empty room does not keep waking the object.
 | `COLLAB_ALLOWED_ORIGINS` | yes | Comma-separated browser Origins allowed to open `/collab/*` |
 | `SUPABASE_URL` | yes | Same Supabase project as `apps/collab` |
 | `SUPABASE_PUBLISHABLE_KEY` | yes | Used for the auth-scoped Supabase client |
-| `SUPABASE_SERVICE_ROLE_KEY` | yes | Elevated, server-only — used for the admin-scoped Supabase client that issues RPC calls (`admin.rpc(...)` in `supabase-backend.ts`). Never expose to browser code. |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Elevated, server-only — used for event RPCs and privileged Data API reads of documents, workspace memberships, and user profiles. Never expose to browser code. |
 
-These four are `wrangler.jsonc`'s `secrets.required` list. The two tools
-enforce this differently: `wrangler deploy` validates all four are actually
-configured on the target Worker and **fails** with an error listing what's
-missing; `wrangler dev` (and the Vitest suite, which shares this check) only
-**warns** about missing local values and still starts. Unlike `apps/collab`,
-this app has no direct Postgres connection string; it only ever talks to
-Supabase over its RPC surface (`append_document_event_batches`,
-`read_document_event_page`).
+These four are `wrangler.jsonc`'s `secrets.required` list. A normal
+`wrangler deploy` validates that an existing Worker has all four and fails with
+an error listing missing bindings; a first deploy can provide all four with
+`--secrets-file`. `wrangler dev` (and the Vitest suite, which shares this
+check) only warns about missing local values and still starts. Unlike
+`apps/collab`, this app has no direct Postgres connection string. Durable event
+append/read use `append_document_event_batches` and
+`read_document_event_page`; session authorization and presence also call
+Supabase Auth and query `documents`, `workspace_members`, and `users` through
+the Data API.
 See
 [`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md#environment-configuration)
 for how this compares to Nitro's env config.
@@ -123,46 +128,92 @@ pnpm --filter @softmaple/collab-cloudflare cf-typegen
 pnpm --filter @softmaple/collab-cloudflare dev
 ```
 
-Set the same values with `wrangler secret put` before deployment. Never expose
-the service-role key to browser code.
+Never expose the service-role key to browser code. For production, follow the
+atomic first-deploy or later-rotation procedure below; do not bootstrap a new
+Worker with `wrangler secret put`.
 
 ## Production deployment
 
-**No CD pipeline exists yet, and this app has never been deployed to a
-reachable environment.** `.github/workflows/test-collab-cloudflare.yml`
-only runs `wrangler deploy --dry-run` as part of CI's `build` step; nothing
-runs a real `wrangler deploy`. `wrangler.jsonc` has no `routes` or custom
-domain, so even a manual deploy today would only be reachable at the
-default `workers.dev` subdomain.
+**No CD pipeline exists in the repository.**
+`.github/workflows/test-collab-cloudflare.yml` only runs
+`wrangler deploy --dry-run` as part of CI's `build` step; repository automation
+does not run a real deployment. `wrangler.jsonc` declares no route or custom
+domain, but `workers_dev` defaults to `true`, so a deploy publishes a reachable
+`workers.dev` endpoint. These facts do not prove Cloudflare account state: a
+Worker, deployment, route, custom domain, or traffic may already exist through
+manual commands or the dashboard.
 
-The manual process, until a real pipeline exists:
+### First deployment
 
-1. Set each of the four secrets above with `wrangler secret put <NAME>`
-   against the target Cloudflare account. **Each call creates a new Worker
-   version and deploys it immediately** — it is not a config-only write —
-   so on an already-running Worker this activates a new version per secret,
-   not just at the end of this sequence.
-2. Apply the same Prisma migrations applied for local setup, against the
-   target environment's Supabase project.
-3. `pnpm --filter @softmaple/collab-cloudflare deploy` (runs `wrangler
-   deploy` for real — this is the one command in this app that touches a
-   live Cloudflare account).
-4. Set `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` in `apps/web`'s environment
+Do not bootstrap a missing Worker with `wrangler secret put`. In the pinned
+Wrangler version, that command first creates and deploys placeholder Worker
+code, then deploys another version containing the secret. Supply all required
+secrets with the real application deployment instead:
+
+1. Confirm Wrangler is authenticated to the intended Cloudflare account with
+   `pnpm --filter @softmaple/collab-cloudflare exec wrangler whoami`. Before
+   any mutation, run
+   `pnpm --filter @softmaple/collab-cloudflare exec wrangler deployments status`
+   (a not-found result is expected for a new Worker), and inspect the Cloudflare
+   dashboard for routes, custom domains, and current traffic. Continue this
+   first-deployment procedure only if the Worker is absent and no external
+   trigger points at its intended name. If it exists, treat it as an existing
+   production resource: inventory its active and latest versions, bindings,
+   triggers, and traffic, then use the later-deployment procedure or stop for
+   reconciliation.
+2. Apply the repository's Prisma migrations to the target Supabase/Postgres
+   database.
+3. Create `apps/collab-cloudflare/.dev.vars.production` with all four required
+   values. The repository's `.dev.vars*` ignore rule prevents it from being
+   committed; still treat the file as temporary production secret material.
+4. Deploy the real Worker code, required secrets, and Durable Object migrations
+   together:
+
+   ```bash
+   pnpm --filter @softmaple/collab-cloudflare exec wrangler deploy \
+     --secrets-file .dev.vars.production
+   ```
+
+   A plain first `wrangler deploy` cannot inherit required bindings from a
+   Worker that does not exist.
+5. Securely remove the temporary file or retain it only in an approved secret
+   manager. The Worker is now reachable on its `workers.dev` URL. Verify its
+   HTTP/WebSocket paths, both event RPCs, Auth, and the required Data API table
+   reads before configuring `apps/web` to select it.
+6. Set `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` in `apps/web`'s environment
    to the resulting Worker URL, then **rebuild and redeploy `apps/web`** —
    `NEXT_PUBLIC_*` values are inlined at build time, so setting the
    variable alone does nothing for an already-running deployment; routing
    stays at 0% (all traffic on Nitro) until the rebuilt bundle ships, per
    [`apps/web/README.md`'s routing section](../web/README.md#collaboration-runtime-routing).
 
+### Later deployments and secret rotation
+
+Once the Worker exists, `pnpm --filter @softmaple/collab-cloudflare deploy`
+inherits its existing secrets and fails if a required binding is missing.
+
+For a controlled rotation, use `wrangler versions secret put <NAME>` (or
+`wrangler versions secret bulk <FILE>` for several values) to create an
+undeployed version. Before doing so, compare `wrangler deployments status` with
+`wrangler versions list`: these commands derive the secret version from the
+latest uploaded version, which may contain unrelated, undeployed code. Rotate
+only when that latest version is the intended active base. Review the new
+version, then explicitly activate its reported id with
+`wrangler versions deploy <VERSION_ID>`. Do not revoke the old upstream
+credential until the new version is active and verified.
+
+`wrangler secret put` is an immediate-activation alternative only when the
+latest version is already deployed. It creates and deploys a new version at
+once, so it is not a config-only write and needs no later `wrangler deploy`.
+
 ## Rollback
 
 To revert a bad deploy of the Worker itself (independent of the routing
 decision — see below): `wrangler rollback` reverts to the previously active
 version; `wrangler versions list` first if you need to roll back to a
-specific, older version by id (`wrangler rollback <VERSION_ID>`). Because no
-deployment has ever been exercised, this procedure is documented but
-unverified — confirm it works during the first real Stage 2 deployment
-rather than assuming it does.
+specific, older version by id (`wrangler rollback <VERSION_ID>`). Repository CI
+only exercises a dry run, so this procedure is not verified against account
+state. Confirm it during the first managed Stage 2 deployment.
 
 **Rollback can fail outright.** Cloudflare refuses it if a Durable Object
 class lifecycle change (via `wrangler.jsonc`'s `migrations` array) happened

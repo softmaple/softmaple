@@ -5,199 +5,219 @@ description: When to deploy Nitro vs. Durable Objects, environment/storage respo
 
 # Collaboration Runtime Operations
 
-This is the cross-runtime operational summary for the collaboration
-backend: `apps/collab` (Nitro + Redis + Supabase Postgres, the current
-production default) and `apps/collab-cloudflare` (Cloudflare Durable
-Objects + Supabase Postgres). Where a per-app doc already owns a detail,
-this page links to it rather than duplicating it — see
-[`apps/collab/README.md`](../../apps/collab/README.md) and
-[`apps/collab-cloudflare/README.md`](../../apps/collab-cloudflare/README.md)
-for the full per-runtime picture, and
-[`collaboration-runtime.md`](./collaboration-runtime.md) for the
-runtime-independent semantic contract both hosts implement.
+This is the cross-runtime operational summary for the collaboration backend:
+`apps/collab` (Nitro + Redis + Supabase Postgres, the repository-configured
+default) and `apps/collab-cloudflare` (Cloudflare Durable Objects + Supabase
+Postgres). See the repository docs for the full per-runtime picture:
+[`apps/collab/README.md`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md),
+[`apps/collab-cloudflare/README.md`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md),
+and the runtime-independent
+[`collaboration-runtime.md`](./collaboration-runtime.md) contract.
 
 ## When to deploy which runtime
 
-**Nitro is the always-on production default.** Every document resolves to
-it unless explicit routing config says otherwise — see
-[`apps/web/README.md`'s "Collaboration runtime routing"](../../apps/web/README.md#collaboration-runtime-routing)
-for the mechanism (`resolveCollabRuntime`, a pure function of
-`(documentId, config)` evaluated server-side per page render).
+**Nitro is the repository-configured routing default.** Every document resolves
+to it unless explicit routing config says otherwise. See
+[`apps/web/README.md`'s "Collaboration runtime routing"](https://github.com/softmaple/softmaple/blob/next/apps/web/README.md#collaboration-runtime-routing)
+for the mechanism: the server-side `resolveCollabRuntime(documentId)` wrapper
+reads environment config for each page render, then calls the pure
+`decideCollabRuntime(documentId, config)` decision function.
 
-**Cloudflare is test-only today.** It has never been deployed to a
-reachable endpoint — no CD pipeline, no `routes`/custom domain in
-`wrangler.jsonc`, only a manual `wrangler deploy` script (see "Production
-deployment" in
-[`apps/collab-cloudflare/README.md`](../../apps/collab-cloudflare/README.md)).
-Routing's own fail-safe already accounts for this:
-`NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` is unset by default, so the routing
-decision resolves to Nitro for every document regardless of the other
-rollout variables until someone actually deploys the Worker and sets that
-URL.
+**The repository is configured for Cloudflare test-only use.** It contains no
+Cloudflare deployment workflow, and `wrangler.jsonc` declares no route or
+custom domain. `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` is unset by default, so
+the web routing fail-safe keeps every document on Nitro. Repository state
+cannot prove what has been deployed manually or configured in the Cloudflare
+dashboard; verify the target account before relying on this stage description.
 
-The current stage against the issue's own staged-rollout plan:
-
-| Stage | Description | Status |
+| Stage | Description | Repository status |
 | --- | --- | --- |
-| 1 | Nitro = production, DO = test only | **Current stage.** DO is exercised by `packages/collab-runtime`'s unit suite, both apps' own test suites, and the shared conformance suite below — never by real traffic. |
-| 2 | DO = preview/internal environments | Not started — requires deploying the Worker to a reachable environment first. |
-| 3-5 | Small → expanded → full production cohort | Not applicable yet. |
+| 1 | Nitro = routing default, DO = test only | **Configured stage.** Local unit, app, and mocked adapter-conformance suites exercise the DO implementation; they do not prove a deployed Worker or production Supabase path. |
+| 2 | DO = preview/internal environments | Not configured. It requires a reachable Worker, a deployed integration smoke test, and operational signals described below. |
+| 3-5 | Small → expanded → full production cohort | Not ready. |
 
 ## Environment configuration
 
-Each app owns its own authoritative env-var table; this is a compact
-summary, not a replacement for either:
+Each app owns its authoritative environment-variable table; this is a compact
+summary:
 
 | | Nitro (`apps/collab`) | Cloudflare (`apps/collab-cloudflare`) |
 | --- | --- | --- |
-| Durable store connection | `DATABASE_URL` (direct Prisma/Postgres) | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (Supabase RPC) |
-| Auth project | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` |
+| Durable event store | `DATABASE_URL` (direct Prisma/Postgres) | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (Supabase RPC) |
+| Auth claims | `SUPABASE_URL` + publishable key | `SUPABASE_URL` + publishable key through Supabase Auth |
+| Membership/profile lookups | `DATABASE_URL` (direct Prisma/Postgres) | `SUPABASE_URL` + service-role key through the Data API |
 | Allowed browser origins | `COLLAB_ALLOWED_ORIGINS` | `COLLAB_ALLOWED_ORIGINS` |
-| Realtime fan-out | `COLLAB_REALTIME_DRIVER` (+ `REDIS_URL` on Vercel) | none — DO-local, no external config |
+| Live fan-out and presence | `COLLAB_REALTIME_DRIVER` (+ `REDIS_URL` on Vercel) | Durable Object-local; no Redis configuration |
 
-Full tables: [`apps/collab/README.md#environment`](../../apps/collab/README.md#environment),
-[`apps/collab-cloudflare/README.md#environment`](../../apps/collab-cloudflare/README.md#environment).
+Full tables:
+[`apps/collab/README.md#environment`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md#environment)
+and
+[`apps/collab-cloudflare/README.md#environment`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#environment).
 
-**The one genuine vendor asymmetry**: Cloudflare's adapter needs
-`SUPABASE_SERVICE_ROLE_KEY` — an elevated, server-only credential —
-because it reaches Supabase over RPC calls from the Worker. Nitro instead
-holds a direct `DATABASE_URL` Prisma connection to the same Postgres
-database and never touches that key at all. Neither is more or less
-secure by design, but they are not interchangeable: don't assume a value
-set for one runtime satisfies the other's requirement.
+Cloudflare needs `SUPABASE_SERVICE_ROLE_KEY`, an elevated server-only
+credential. Durable event persistence uses the two event RPCs; authorization
+and presence session hooks also use Supabase Auth and Data API queries for
+documents, workspace memberships, and user profiles. Nitro instead holds a
+direct Prisma connection to the same Postgres database and does not use the
+service-role key. Verify all three Cloudflare access surfaces in the target
+Supabase project; do not assume successful RPC access proves Auth or table
+access.
 
 ## Storage responsibilities
 
-### Supabase (shared by both runtimes)
+### Supabase Postgres (durable event history shared by both runtimes)
 
-Durable event history (`document_event_batches`, `document_event_ids`)
-and the presence backing store live in the same Supabase/Postgres
-database for both runtimes — this is *why* the routing decision needs no
-data migration when it moves a document between them (see
-[`apps/collab/README.md#persistence`](../../apps/collab/README.md#persistence)
-and [`packages/db/supabase/README.md`](../../packages/db/supabase/README.md)
-for the schema and Data-API access rules). The shared
-`documentEventStoreConformance` suite
-(`packages/collab-runtime/src/testing/capability-conformance.ts`) is the
-direct evidence that both adapters — Nitro's
-`prismaDocumentEventStore` and Cloudflare's
-`createSupabaseDocumentBackend(env).events` — honor the same append/read
-contract against this shared store.
+Both document runtimes append and read the same durable event-history tables:
+`document_event_batches` and `document_event_ids`. Moving a document between
+runtimes therefore needs no **event-history** migration. Browser clients do not
+write those tables. See
+[`apps/collab/README.md#persistence`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md#persistence)
+and
+[`packages/db/supabase/README.md`](https://github.com/softmaple/softmaple/blob/next/packages/db/supabase/README.md)
+for the schema and access rules.
+
+Presence is not part of this shared durable store. Nitro stores live presence
+membership in Redis (or process memory in local development), while
+Cloudflare stores it in `PresenceRoomDO`'s `ctx.storage`. A runtime handoff does
+not migrate live members: after a reload or fresh page render, clients
+authenticate and join the destination runtime's presence room again. Expect a
+temporary leave/rejoin boundary, and never use presence as durable application
+state.
+
+The `documentEventStoreConformance` suites prove that each adapter maps the
+shared append/read contract correctly against a test double. Nitro injects a
+mock Prisma client; Cloudflare stubs `fetch` over an in-memory reference store.
+They do **not** reach production Postgres, the real Supabase RPC functions, or a
+deployed Worker. A Stage 2 gate must add and run a deployed integration smoke
+test against the target Supabase project.
 
 ### Redis (Nitro only)
 
-Distributed realtime pub/sub, presence TTLs, and connection leases —
-never the durable store. A missed realtime message recovers through
-Postgres plus the existing repair/resync protocol, not through Redis
-persistence. See
-[`apps/collab/README.md#storage-roles`](../../apps/collab/README.md#storage-roles).
-Production and Preview Vercel deployments require Redis and fail fast if
-it's missing; they never silently fall back to process-local
-coordination.
+Redis owns distributed realtime pub/sub, presence TTLs, and connection leases,
+never durable event history. Missed realtime messages recover through Postgres
+and the repair/resync protocol. See
+[`apps/collab/README.md#storage-roles`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md#storage-roles).
+
+Production and Preview Vercel deployments select Redis and never fall back to
+process-local coordination. However, `REDIS_URL` validation is lazy: a missing
+URL can pass build, startup, and the current `/health` liveness endpoint, then
+fail when the first document or presence operation initializes realtime.
+Deployment verification must check the variable and exercise a real WebSocket
+handshake; `/health` alone is not a Redis-readiness check.
 
 ### Durable Objects (Cloudflare only)
 
-`DocumentRoomDO`/`PresenceRoomDO` own only live peer coordination,
-fan-out, and connection limits inside one object — no Redis dependency,
-and Durable Object SQLite storage is **not** used as event history (that
-role stays with Supabase Postgres, above). See
-[`apps/collab-cloudflare/README.md#runtime-shape`](../../apps/collab-cloudflare/README.md#runtime-shape).
+`DocumentRoomDO` owns live document coordination, fan-out, and connection
+limits. `PresenceRoomDO` separately owns live presence coordination and stores
+presence membership in Durable Object storage so it survives hibernation.
+Neither object uses its storage as durable document-event history; that role
+stays with Supabase Postgres. See
+[`apps/collab-cloudflare/README.md#runtime-shape`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#runtime-shape)
+and its Presence room section.
 
 ## Rollback procedure
 
-Two distinct levels — know which one you need before acting:
+There are two separate rollback levers:
 
-1. **Routing rollback** — moving documents back to Nitro without touching
-   what's deployed. This is the lever for "stop sending traffic to
-   Cloudflare" once it's live. Fully documented in
-   [`apps/web/README.md`'s routing section](../../apps/web/README.md#collaboration-runtime-routing):
-   reset `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT` to
-   their safe defaults, or clear `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
-   entirely, and redeploy `apps/web`. **Resetting the override/percent
-   alone does not move documents on `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST`
-   — the allowlist takes precedence over the override.** To stop *all*
-   Cloudflare traffic, either clear the allowlist (or move the affected
-   ids to `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST`) or clear
-   `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` entirely, which wins regardless
-   of every other variable. **Already-open browser tabs don't observe any
-   of this until they reconnect or reload** — read that section's
-   coordinated-reload guidance before changing rollout config on a
-   document with active editors.
-2. **Runtime deploy rollback** — reverting what's actually running for a
-   given service, independent of routing. For Nitro, this is a normal
-   Vercel deployment rollback. For Cloudflare, see "Rollback" in
-   [`apps/collab-cloudflare/README.md`](../../apps/collab-cloudflare/README.md) —
-   this has never been exercised against a real deployment, since none
-   exists yet.
+1. **Routing rollback** stops new page renders from selecting Cloudflare.
+   Reset `COLLAB_RUNTIME_OVERRIDE` and
+   `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`, or clear
+   `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`, then rebuild and redeploy
+   `apps/web`. Resetting only the override or percentage does not move ids on
+   `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST`; clear that list, deny the affected
+   ids, or clear the Worker URL to stop all new Cloudflare selections. See the
+   [web routing procedure](https://github.com/softmaple/softmaple/blob/next/apps/web/README.md#collaboration-runtime-routing).
+2. **Runtime deploy rollback** reverts the service code independently of web
+   routing. Nitro uses the normal Vercel rollback. Cloudflare uses the
+   [Worker rollback procedure](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#rollback),
+   subject to Durable Object migration and binding restrictions.
+
+An automatic WebSocket reconnect does **not** re-run routing. The rendered
+page keeps its original `collabRuntime`, and reconnect opens the same runtime
+again. Only a reload or fresh page render can pick up changed routing config.
+
+This makes tabs split across two runtimes a correctness incident, not only a
+UX issue. The two runtimes share durable event history but have no live
+cross-runtime fan-out, shared connection ownership, or shared presence. A
+config change can therefore leave old and new tabs concurrently writing the
+same document through different owners until every old page is re-rendered.
+Shared Postgres repair can reconcile durable history later; it does not make
+concurrent ownership safe.
+
+For any routing change that can affect active documents:
+
+1. Stop rollout expansion and identify the affected document ids.
+2. Prefer changing config while no affected editor is connected. Otherwise,
+   coordinate a reload or close of every old tab; automatic reconnect is not
+   sufficient.
+3. Treat the handoff as incomplete until old-runtime connections are gone and
+   reloaded clients have rejoined document and presence rooms on the selected
+   runtime.
+4. If split ownership is observed, keep the rollout stopped, drain/reload the
+   old tabs, and verify durable repair before resuming.
 
 ## Correctness gates and rollback triggers
 
-The issue's own gate list, and what's actually detectable today given
-what's shipped so far:
+Both hosts currently write structured collaboration events only to their
+console logs, and the log envelopes differ. There is no metrics backend,
+retention guarantee, dashboard, alert, or percentile aggregation in this
+repository. The events are queryable only if the hosting platform retains the
+logs and an operator supplies runtime-specific queries.
 
-| Gate | Detectable today? |
-| --- | --- |
-| `EventConflictError` rate by conflict type | **Yes.** `services.metrics` on both `DocumentRoomServices` implementations emits a typed `event-conflict` event (with `conflictType`) through the shared `report()` fan-in in `packages/collab-runtime/src/document-room-implementation.ts` — see both apps' `logDocumentMetric`/`logMetric` wiring. |
-| Runtime errors / authorization failures | **Yes**, same mechanism — `event-error` / `message-error` events. |
-| Append/durable-ack latency | **Yes.** `event-appended`/`event-acknowledged` events bracket `DocumentEventStore.append` and the `DurableAck` send. |
-| Convergence failures, unexplained durable-history conflicts, missing committed events, incorrect durable acks | Partially — the conformance suite (`documentEventStoreConformance`) proves both adapters satisfy the same contract in isolation, and `packages/collab-runtime/test/document-room.test.ts`'s ~40 state-machine cases cover the shared append→ack→fan-out ordering. Neither is a live production signal; both are pre-merge gates. |
-| Authorization isolation failures, document cross-talk | Only through the shared `DocumentRoom` contract's own invariants (document-scoped fan-out, no cross-document delivery) plus manual log inspection — **no automated cross-talk metric exists.** |
-| Repair loops, reconnect data loss | **No automatic signal today.** Neither transport host reads the WebSocket close code/reason yet — Nitro's crossws `close` hook and Cloudflare's `webSocketClose` handler both discard it (a known limitation below), so reconnect-rate and abnormal-close-rate metrics don't exist. Watching this currently means reading raw logs, not alerting on a metric. |
+| Gate | Evidence available today | Missing before it can be an operational trigger |
+| --- | --- | --- |
+| `EventConflictError` by conflict type | `event-conflict` log event with `conflictType` | Normalized aggregation, rate calculation, threshold, and alert |
+| Runtime and authorization failures | Thrown room/backend failures can produce `event-error` or `message-error` logs | Expected authorization denials/revocations that return `null` and read-only `canWrite === false` rejections are not reported; origin rejection also occurs outside room metrics |
+| Append and durable-ack timing | Per-operation `event-appended` and `event-acknowledged` duration samples | p50/p95/p99 aggregation and alerts; `event-acknowledged` records completion of the server send attempt, not confirmed client receipt |
+| Repair/resync frequency and success | No success/frequency metric | Instrument repair requests, completion, retries, and failures |
+| Adapter contract and append ordering | Local mocked conformance suites plus shared room state-machine tests | A deployed Worker/Supabase integration test and live signal |
+| Cross-document isolation and single-runtime ownership | Shared room contract tests and Cloudflare's document/presence isolation test | No live cross-talk, active-owner, or split-runtime metric |
+| Reconnect data loss and abnormal closes | Raw platform logs may help manually | Both transports discard close code/reason; no reconnect or abnormal-close metric |
 
-Given the last two rows, treat any expansion past Stage 1 as requiring
-manual log review during the exercised window, not just a metrics
-dashboard — the automated signal is real but partial.
+None of these rows is an automated rollback trigger today. Before Stage 2
+traffic, define log retention and normalized queries or export the events to a
+metrics backend, set explicit thresholds, and add alerts. Until then, use the
+local suites as pre-merge gates and a deliberate, retained-log review plus
+deployed smoke tests as rollout gates.
 
 ## Known limitations and vendor-specific behavior
 
-- `apps/collab-cloudflare` has no CD pipeline and has never served
-  production traffic — see "Production deployment" in its README.
-- No reconnect-rate or abnormal-WebSocket-close-rate metrics yet; this
-  needs new plumbing (reading the close code/reason from crossws and from
-  Cloudflare's hibernatable `webSocketClose` handler), not just a new
-  metric call — deferred deliberately rather than rushed.
-- No active-rooms/active-connections gauges or Durable Object
-  wake/hibernation counters — these need a periodic gauge or per-instance
-  registry, a different shape of instrumentation than the event-driven
-  metrics shipped so far.
-- No Postgres/Supabase query/transaction latency instrumentation inside
-  either adapter (`prisma-document-event-store.ts`,
-  `supabase-backend.ts`) — independent of the shared room code, and not
-  yet built.
-- The shared conformance suite covers `DocumentEventStore` only.
-  `RoomFanout` is deliberately not covered: Nitro's cross-instance Redis
-  pub/sub and Cloudflare's single-instance DO-local fanout are
-  architecturally different enough that forcing identical black-box
-  conformance isn't the right test shape.
-- Routing decisions don't propagate to already-open browser tabs — see
-  the rollback section above.
-- Cloudflare-specific: `DocumentRoomDO` revalidates every attached
-  socket's access against Supabase on constructor wake, up to the
-  100-connection room policy. This is a real per-wake cost budget; see
-  "Runtime shape" in
-  [`apps/collab-cloudflare/README.md`](../../apps/collab-cloudflare/README.md)
-  for the Workers-plan subrequest-budget implication before lowering (or
-  raising) that policy.
+- Repository state shows no Cloudflare CD pipeline or declared route, but it
+  cannot establish Cloudflare account or dashboard state.
+- There are no normalized aggregates, alerts, latency percentiles,
+  repair/resync success metrics, expected authorization-denial metrics,
+  reconnect/close metrics, or active-room/connection gauges.
+- There is no Postgres/Supabase query or transaction latency instrumentation
+  inside either adapter.
+- The mocked conformance suites cover `DocumentEventStore` only. Nitro's
+  cross-instance Redis fan-out and Cloudflare's DO-local fan-out need
+  host-specific integration coverage.
+- Routing changes do not propagate to open tabs. A reload/fresh server render
+  is required, and presence membership is recreated rather than migrated.
+- On each constructor wake, `DocumentRoomDO` revalidates every attached socket
+  against Supabase, up to the 100-connection room policy. Check the Workers
+  plan's external-subrequest budget before changing that policy; see the
+  [Cloudflare runtime shape](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#runtime-shape).
 
 ## Current decision
 
-**Not yet promotable to default. Stage 1 only.** Cloudflare has no
-production traffic and no deployment, so there is no data to base a
-promotion decision on — recording an optimistic verdict without evidence
-would be worse than recording none. What's needed to revisit this
-decision, in order:
+**Not yet promotable to the default; keep repository routing at Stage 1.** The
+repository contains no deployed-environment evidence, production metrics, or
+real-store conformance result on which to base a promotion. To revisit this
+decision:
 
-1. Deploy `apps/collab-cloudflare` to a reachable environment (see its
-   README's "Production deployment" section for the current, manual
-   process).
-2. Exercise Stage 2 (preview/internal traffic) and confirm the shared
-   conformance suite and both apps' test suites stay green against that
-   deployment.
-3. Collect the append/ack-latency and conflict/error-rate metrics this
-   phase's instrumentation now makes possible, for a real traffic window,
-   and compare them against Nitro's.
-4. Close enough of the reconnect/close-code gap (above) to watch the
-   remaining correctness gates before expanding past a small cohort.
+1. Verify the target Cloudflare account state, then deploy a reachable Worker
+   with the README's atomic first-deploy procedure.
+2. Keep both mocked conformance suites and app suites as pre-merge checks, and
+   add a deployed smoke/integration test that reaches the Worker, real Supabase
+   RPCs, Auth, and required Data API tables.
+3. Normalize and retain both hosts' events; add aggregation, p50/p95/p99
+   latency, thresholds, alerts, and the missing authorization, repair,
+   reconnect, and ownership signals.
+4. Exercise preview/internal traffic only after protecting active documents
+   from split ownership. Verify reload-based ownership handoff, presence
+   rejoin, durable repair, and absence of old-runtime connections.
+5. Compare a real traffic window with Nitro before expanding the cohort.
 
-Until then, this document's own existence is the operational readiness
-work for Stage 2 — not evidence that Stage 2 has happened.
+This document records what is required for Stage 2; it is not evidence that
+Stage 2 has happened.

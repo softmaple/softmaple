@@ -3,6 +3,7 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { COLLAB_RUNTIME } from "./collab-runtime-routing";
 import { DocumentPresence } from "./document-presence";
 import { domPointAtOffset } from "./document-presence-dom";
 
@@ -16,8 +17,15 @@ const fakeAdapter = () => ({
   subscribe: () => () => undefined,
   updatePresence: () => undefined,
 });
+const connectResolvers: Array<() => void> = [];
 const createWebSocketAdapter = vi.fn(() => ({
   ...fakeAdapter(),
+  connect: vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        connectResolvers.push(resolve);
+      }),
+  ),
   disconnect,
 }));
 const createNoopAdapter = vi.fn(fakeAdapter);
@@ -37,21 +45,35 @@ type SessionResult = {
 let authListener: AuthListener | null = null;
 let resolveGetSession: ((value: SessionResult) => void) | null = null;
 
-vi.mock("@softmaple/awareness", () => ({
-  PresenceProvider: ({ children }: { children: ReactNode }) => children,
-  createNoopAdapter: () => createNoopAdapter(),
-  createWebSocketAdapter: () => createWebSocketAdapter(),
-  isDirectionalSelectionRange: () => false,
-  isStableCursorPosition: () => false,
-  useOthers: () => [],
-  usePresence: () => ({
-    connectionState: "connected",
-    presence: new Map(),
-    updatePresence: vi.fn(),
-  }),
-  useUpdateCursor: () => () => undefined,
-  useUpdateSelection: () => () => undefined,
-}));
+vi.mock("@softmaple/awareness", async () => {
+  const { useEffect } = await import("react");
+  return {
+    PresenceProvider: ({
+      adapter,
+      children,
+    }: {
+      adapter: { connect: () => Promise<unknown> };
+      children: ReactNode;
+    }) => {
+      useEffect(() => {
+        void adapter.connect();
+      }, [adapter]);
+      return children;
+    },
+    createNoopAdapter: () => createNoopAdapter(),
+    createWebSocketAdapter: () => createWebSocketAdapter(),
+    isDirectionalSelectionRange: () => false,
+    isStableCursorPosition: () => false,
+    useOthers: () => [],
+    usePresence: () => ({
+      connectionState: "connected",
+      presence: new Map(),
+      updatePresence: vi.fn(),
+    }),
+    useUpdateCursor: () => () => undefined,
+    useUpdateSelection: () => () => undefined,
+  };
+});
 
 vi.mock("@softmaple/ui/components/avatar", () => ({
   Avatar: ({ children }: { children: ReactNode }) =>
@@ -76,6 +98,7 @@ vi.mock("@/modules/docs/doc-editor", async () => {
             registerUpdateListener: () => () => undefined,
           },
           getBlockIndex: () => ({ blockIdToNodeKey: new Map() }),
+          replica: { subscribe: () => () => undefined },
         });
       }, [onExternalBindingChange]);
       return null;
@@ -136,6 +159,7 @@ describe("DocumentPresence auth lifecycle", () => {
   beforeEach(() => {
     authListener = null;
     resolveGetSession = null;
+    connectResolvers.length = 0;
     disconnect.mockClear();
     createWebSocketAdapter.mockClear();
     createNoopAdapter.mockClear();
@@ -154,6 +178,7 @@ describe("DocumentPresence auth lifecycle", () => {
       root.render(
         createElement(DocumentPresence, {
           avatarUrl: null,
+          collabRuntime: COLLAB_RUNTIME.Nitro,
           documentId: "00000000-0000-4000-8000-000000000001",
           name: "Ada",
           presenceEnabled: true,
@@ -189,6 +214,161 @@ describe("DocumentPresence auth lifecycle", () => {
 
     expect(createWebSocketAdapter).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Presence session is unavailable.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("does not expose a stale adapter as live after collabRuntime changes mid-connect", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const documentId = "00000000-0000-4000-8000-000000000001";
+    const baseProps = {
+      avatarUrl: null,
+      documentId,
+      name: "Ada",
+      presenceEnabled: true,
+      userId: "user-1",
+    };
+
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, {
+          ...baseProps,
+          collabRuntime: COLLAB_RUNTIME.Nitro,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-nitro" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Connecting presence");
+
+    // Switch to cloudflare before the new connection attempt resolves.
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, {
+          ...baseProps,
+          collabRuntime: COLLAB_RUNTIME.Cloudflare,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    // The nitro adapter must be disconnected and never shown as live for
+    // the new (cloudflare) props while the new connection is in flight.
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connecting presence");
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-cloudflare" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Connecting presence");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("does not expose a stale adapter as live after userId changes mid-connect", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const baseProps = {
+      avatarUrl: null,
+      collabRuntime: COLLAB_RUNTIME.Nitro,
+      documentId: "00000000-0000-4000-8000-000000000001",
+      name: "Ada",
+      presenceEnabled: true,
+    };
+
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, { ...baseProps, userId: "user-1" }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-user-1" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(1);
+    expect(connectResolvers).toHaveLength(1);
+    const resolveUser1Connect = connectResolvers[0];
+    if (resolveUser1Connect === undefined) {
+      throw new Error(
+        "expected the user-1 adapter connect() to remain pending",
+      );
+    }
+    expect(container.textContent).not.toContain("Connecting presence");
+
+    // Switch signed-in user before the in-flight user-1 connect resolves.
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, { ...baseProps, userId: "user-2" }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connecting presence");
+
+    // Resolving the stale user-1 connection must not restore it as live.
+    await act(async () => {
+      resolveUser1Connect();
+      await Promise.resolve();
+    });
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connecting presence");
+    expect(container.textContent).not.toContain("Presence connected");
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-user-2" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(2);
+    expect(connectResolvers).toHaveLength(2);
+    const resolveUser2Connect = connectResolvers[1];
+    if (resolveUser2Connect === undefined) {
+      throw new Error(
+        "expected the user-2 adapter connect() to remain pending",
+      );
+    }
+
+    await act(async () => {
+      resolveUser2Connect();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).not.toContain("Connecting presence");
 
     await act(async () => {
       root.unmount();

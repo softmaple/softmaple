@@ -9,6 +9,7 @@ import {
   BOOTSTRAP_BLOCK_ID,
   createBlockReplica,
 } from "@softmaple/block-model";
+import { COLLAB_RUNTIME } from "@/modules/docs/collab-runtime-routing";
 import { isDocumentEditable } from "@/modules/docs/document-editability";
 import { createSaveCoordinator } from "@/modules/docs/document-save-coordinator";
 import {
@@ -65,6 +66,7 @@ const renderDocumentSession = ({
 
   const Capture = (): null => {
     result.current = useDocumentSession({
+      collabRuntime: COLLAB_RUNTIME.Nitro,
       documentId,
       isShared,
       permission: "editor",

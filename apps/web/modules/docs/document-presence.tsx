@@ -31,6 +31,8 @@ import {
 } from "@softmaple/ui/components/avatar";
 import { Radio } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import type { CollabRuntime } from "@/modules/docs/collab-runtime-routing";
+import { buildCollabWebSocketUrl } from "@/modules/docs/collab-runtime-url";
 import { DocEditor, type DocEditorProps } from "@/modules/docs/doc-editor";
 import {
   domPointAtOffset,
@@ -47,6 +49,15 @@ type ProfileIdentity = {
   readonly userId: string;
 };
 
+type LiveAdapterState = {
+  readonly adapter: PresenceAdapter;
+  readonly avatarUrl: string | null;
+  readonly collabRuntime: CollabRuntime;
+  readonly documentId: string;
+  readonly name: string;
+  readonly userId: string;
+} | null;
+
 type RemoteGeometry = {
   readonly caret: {
     readonly height: number;
@@ -62,11 +73,6 @@ type RemoteGeometry = {
     readonly top: number;
     readonly width: number;
   }>;
-};
-
-const resolvePresenceUrl = (): string => {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/collab/presence`;
 };
 
 const initials = (name: string): string =>
@@ -349,19 +355,32 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       }),
     [avatarUrl, editorProps.documentId, name, userId],
   );
-  const [liveAdapter, setLiveAdapter] = useState<PresenceAdapter | null>(null);
+  const [liveAdapterState, setLiveAdapterState] =
+    useState<LiveAdapterState>(null);
   const [error, setError] = useState<string | null>(null);
   const [binding, setBinding] = useState<LexicalBinding | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState<StableBlockSelection | null>(null);
 
   useEffect(() => {
+    const collabRuntime = editorProps.collabRuntime;
+    const documentId = editorProps.documentId;
+
     if (!presenceEnabled) {
       // Previous effect cleanup already disconnects the adapter it created.
-      setLiveAdapter(null);
+      setLiveAdapterState(null);
       setError(null);
       return;
     }
+
+    // Cleanup above disconnects the prior adapter without clearing this
+    // state, so reset it up front — otherwise presenceLive briefly reads
+    // true against an already-disconnected adapter during reconnect. The
+    // identity tag on LiveAdapterState below (documentId, collabRuntime,
+    // userId, name, avatarUrl — everything that feeds adapter construction)
+    // is the structural guard: even if this reset were ever skipped, a
+    // stale adapter tagged for different props can never be read as live.
+    setLiveAdapterState(null);
 
     let cancelled = false;
     let created: PresenceAdapter | null = null;
@@ -370,15 +389,15 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       if (cancelled) return;
       void created?.disconnect();
       created = null;
-      setLiveAdapter(null);
+      setLiveAdapterState(null);
       setError(message);
     };
     const configure = (token: string): void => {
       if (cancelled) return;
       const next = createWebSocketAdapter({
         authToken: token,
-        roomId: editorProps.documentId,
-        url: resolvePresenceUrl(),
+        roomId: documentId,
+        url: buildCollabWebSocketUrl(collabRuntime, "/collab/presence"),
         userInfo: {
           userId,
           name,
@@ -388,7 +407,14 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       });
       void created?.disconnect();
       created = next;
-      setLiveAdapter(next);
+      setLiveAdapterState({
+        adapter: next,
+        avatarUrl,
+        collabRuntime,
+        documentId,
+        name,
+        userId,
+      });
       setError(null);
     };
     const sessionRequestRevision = authRevision;
@@ -420,6 +446,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     };
   }, [
     avatarUrl,
+    editorProps.collabRuntime,
     editorProps.documentId,
     name,
     presenceEnabled,
@@ -443,6 +470,20 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     [onSelectionChange],
   );
 
+  // Only treat the stored adapter as live when it was built for the props
+  // this render is currently showing — a stale adapter tagged for a prior
+  // documentId/collabRuntime/userId/name/avatarUrl can never leak through
+  // as "live" here (nor expose stale userInfo to the room), even if the
+  // effect above raced with a prop change.
+  const liveAdapter =
+    liveAdapterState !== null &&
+    liveAdapterState.documentId === editorProps.documentId &&
+    liveAdapterState.collabRuntime === editorProps.collabRuntime &&
+    liveAdapterState.userId === userId &&
+    liveAdapterState.name === name &&
+    liveAdapterState.avatarUrl === avatarUrl
+      ? liveAdapterState.adapter
+      : null;
   const adapter =
     presenceEnabled && liveAdapter !== null ? liveAdapter : noopAdapter;
   const presenceLive = presenceEnabled && liveAdapter !== null;

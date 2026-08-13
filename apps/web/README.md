@@ -56,8 +56,11 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 Vercel (or any host), redeploy — restarting the running server is not enough.
 
 Collaboration Redis credentials and collab private hosts must never be exposed
-through `NEXT_PUBLIC_*` variables. The browser always connects to the current
-web origin at `/collab/document` and `/collab/presence`.
+through `NEXT_PUBLIC_*` variables. By default the browser connects to the
+current web origin at `/collab/document` and `/collab/presence` (the Nitro
+runtime); see [Collaboration runtime routing](#collaboration-runtime-routing)
+for how a document can instead be routed to the Cloudflare Durable Objects
+runtime.
 
 The server-only E2E seed endpoint is disabled by default. It activates only
 when `E2E_ALLOW_REMOTE_SEED=true`, the supplied project ref exactly matches the
@@ -88,6 +91,64 @@ See [Vercel WebSockets](https://vercel.com/docs/functions/websockets) and
 
 Keys and URL must belong to the **same** Supabase project. Never put a
 `sb_secret_…` / `service_role` key in these `NEXT_PUBLIC_*` variables.
+
+### Collaboration runtime routing
+
+`resolveCollabRuntime` in
+[`modules/docs/collab-runtime-routing.ts`](./modules/docs/collab-runtime-routing.ts)
+picks, per document and on the server before the page renders, whether the
+browser connects to the existing Nitro+Redis runtime (`apps/collab`) or the
+Cloudflare Durable Objects runtime (`apps/collab-cloudflare`). Both runtimes
+read and write the same Supabase tables, so switching a document back and
+forth is reversible with no document-history migration.
+
+| Variable | Effect |
+| --- | --- |
+| `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` | Base WS URL for the deployed Cloudflare worker (e.g. `wss://softmaple-collab-cloudflare.<subdomain>.workers.dev`). **Unset by default** — until this is set, every document stays on Nitro regardless of the other variables below. |
+| `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT` | `0`-`100`. Percentage of documents deterministically bucketed onto Cloudflare by a stable hash of the document id. Defaults to `0`. |
+| `COLLAB_RUNTIME_OVERRIDE` | `nitro` or `cloudflare`. Global override applied to any document not on the allow/deny list below — used to test Cloudflare in an internal/preview environment (Stage 1-2), or as a quick rollback lever for the percentage cohort. It does **not** move allow-listed documents: those stay on Cloudflare regardless of this variable, since the allowlist takes precedence. A complete rollback needs to also clear `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` (or move the affected ids to `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST`), or clear `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` entirely. |
+| `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` | Comma-separated document ids always routed to Cloudflare, regardless of percent/override. |
+| `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST` | Comma-separated document ids always routed to Nitro. Takes precedence over the allowlist — the strongest per-document rollback lever. |
+
+The decision is a pure function of `(documentId, config)`, so a given
+document always resolves to the same runtime for a stable config, and both
+its document and presence WebSocket connections use that same answer for
+any newly-rendered page load.
+
+That guarantee applies at page-render time only, not to WebSockets a
+browser already has open. `collabRuntime` is resolved once server-side and
+baked into the live session (`useDocumentSession`); it does not re-resolve
+until the tab reconnects or reloads. So a config change (percent/override/
+allow-deny list) does not move already-connected tabs — they keep talking
+to whichever runtime they opened against, and won't pick up the new
+decision until their next reconnect or a full page reload. **Two tabs open
+on the same document across a config change will therefore be on
+different runtimes for as long as the older tab stays open and
+unreloaded** — potentially indefinitely, not just for a moment — with no
+cross-talk between them until Supabase's durable event log reconciles on
+reconnect/repair.
+
+Because of this, treat any rollout config change that could move a
+document already being edited (percent/override changes; adding/removing
+an id from the allow/deny lists) as requiring a **coordinated reload**:
+confirm no session is actively open on the affected document(s) before
+changing config, or explicitly ask connected users to refresh afterward.
+The automatic reconnect in `use-document-session.ts` does not help here —
+on drop it reopens against the same `collabRuntime` the session already
+committed to, it never re-derives the decision, so a reload (or a fresh
+tab) is the only way an existing session picks up a new routing outcome.
+Before shipping a config change, test both a tab that connected **before**
+the change (confirm it keeps working, unmigrated, until it reloads) and a
+tab that connects **after** (confirm it gets the new decision) against the
+same document.
+
+Rolling back is changing `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`
+back to their safe defaults (or clearing `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
+entirely) and redeploying — no data migration is involved, but per above,
+existing open tabs won't observe the rollback until they reconnect or
+reload either. Deploying `apps/collab-cloudflare` itself (secrets,
+`wrangler deploy`, DNS) is a separate operational step; see
+[`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md).
 
 ## Commands
 

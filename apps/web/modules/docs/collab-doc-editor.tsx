@@ -12,6 +12,7 @@ import type {
   LexicalBinding,
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
+import type { CollabRuntime } from "@/modules/docs/collab-runtime-routing";
 import type { DocumentPermission } from "@/modules/docs/document-editability";
 import {
   useDocumentSession,
@@ -24,6 +25,7 @@ export type CollabDocEditorProps = Pick<
   "activeEditor" | "setActiveEditor"
 > & {
   documentId: string;
+  collabRuntime: CollabRuntime;
   commonEditorConfig?: InitialConfigType;
   isShared?: boolean;
   onCollaborationChange?: (state: DocumentSessionState) => void;
@@ -93,6 +95,7 @@ const CollabBindingPlugin: FC<{
 
 export const CollabDocEditor: FC<CollabDocEditorProps> = ({
   documentId,
+  collabRuntime,
   commonEditorConfig,
   activeEditor,
   isShared = true,
@@ -106,6 +109,7 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = ({
 }) => {
   const session = useDocumentSession({
     documentId,
+    collabRuntime,
     isShared,
     permission,
     sessionMode,

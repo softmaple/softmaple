@@ -23,6 +23,19 @@ const deferred = (): Deferred => {
   return { promise, resolve };
 };
 
+const documentBatchKey = (documentId: string, batchId: string): string =>
+  `${documentId}\0${batchId}`;
+
+const restoreMap = <K, V>(
+  target: Map<K, V>,
+  snapshot: ReadonlyMap<K, V>,
+): void => {
+  target.clear();
+  for (const [key, value] of snapshot) {
+    target.set(key, value);
+  }
+};
+
 /**
  * A hand-rolled `prisma` mock reproducing the exact behaviour
  * `appendEventBatches`/`readEventPage` (`server/utils/event-store.ts`) rely
@@ -84,7 +97,9 @@ export const createPrismaEventStoreMock = () => {
           };
         }) =>
           where.batch_id.in.flatMap((batchId) => {
-            const row = state.batches.get(batchId);
+            const row = state.batches.get(
+              documentBatchKey(where.document_id, batchId),
+            );
             return row === undefined
               ? []
               : [{ batch_id: row.batch_id, payload_hash: row.payload_hash }];
@@ -104,7 +119,8 @@ export const createPrismaEventStoreMock = () => {
           if (state.beforeCreateBatch !== null) {
             await state.beforeCreateBatch();
           }
-          if (state.batches.has(data.batch_id)) {
+          const key = documentBatchKey(data.document_id, data.batch_id);
+          if (state.batches.has(key)) {
             throw new Prisma.PrismaClientKnownRequestError(
               "Unique constraint",
               {
@@ -115,7 +131,7 @@ export const createPrismaEventStoreMock = () => {
           }
           const id = state.nextRowId;
           state.nextRowId += 1n;
-          state.batches.set(data.batch_id, {
+          state.batches.set(key, {
             batch_id: data.batch_id,
             document_id: data.document_id,
             payload_hash: data.payload_hash,
@@ -158,6 +174,8 @@ export const createPrismaEventStoreMock = () => {
                 },
               );
             }
+          }
+          for (const row of data) {
             state.eventIds.set(row.event_id, String(row.batch_row_id));
           }
           return { count: data.length };
@@ -172,8 +190,14 @@ export const createPrismaEventStoreMock = () => {
         fn: (tx: typeof transactionClient) => unknown,
         _options?: { readonly maxWait?: number; readonly timeout?: number },
       ) => {
+        const snapshotBatches = new Map(state.batches);
+        const snapshotEventIds = new Map(state.eventIds);
         try {
           return await fn(transactionClient);
+        } catch (error) {
+          restoreMap(state.batches, snapshotBatches);
+          restoreMap(state.eventIds, snapshotEventIds);
+          throw error;
         } finally {
           releaseLock();
         }
@@ -198,7 +222,12 @@ export const createPrismaEventStoreMock = () => {
           // needs document scoping / id-order / take.
           if (where.batch_id !== undefined) {
             return where.batch_id.in.flatMap((batchId) => {
-              const row = state.batches.get(batchId);
+              if (where.document_id === undefined) {
+                return [];
+              }
+              const row = state.batches.get(
+                documentBatchKey(where.document_id, batchId),
+              );
               return row === undefined
                 ? []
                 : [{ batch_id: row.batch_id, payload_hash: row.payload_hash }];
@@ -228,7 +257,14 @@ export const createPrismaEventStoreMock = () => {
     state.lockHolders = 0;
     state.lockWaiters = [];
     state.beforeCreateBatch = null;
-    vi.clearAllMocks();
+    transactionClient.$executeRaw.mockClear();
+    transactionClient.$queryRaw.mockClear();
+    transactionClient.documentEventBatch.findMany.mockClear();
+    transactionClient.documentEventBatch.create.mockClear();
+    transactionClient.documentEventId.findMany.mockClear();
+    transactionClient.documentEventId.createMany.mockClear();
+    prisma.$transaction.mockClear();
+    prisma.documentEventBatch.findMany.mockClear();
   };
 
   return { deferred, prisma, releaseLock, reset, state, transactionClient };

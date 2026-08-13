@@ -22,6 +22,19 @@ const isConflictLike = (error: unknown): error is ConflictLike =>
   error !== null &&
   (error as { name?: unknown }).name === "DocumentEventConflictError";
 
+const storeErrorResponse = (error: unknown): Response => {
+  if (isConflictLike(error)) {
+    return Response.json(
+      { message: JSON.stringify({ kind: "conflict", ...error.details }) },
+      { status: 400 },
+    );
+  }
+  return Response.json(
+    { message: JSON.stringify({ kind: "unavailable" }) },
+    { status: 500 },
+  );
+};
+
 /**
  * Simulates the two Postgres RPC functions
  * (`append_document_event_batches`, `read_document_event_page`) that
@@ -53,29 +66,24 @@ const createFetchMock =
         );
         return Response.json(ids);
       } catch (error) {
-        if (isConflictLike(error)) {
-          return Response.json(
-            { message: JSON.stringify({ kind: "conflict", ...error.details }) },
-            { status: 400 },
-          );
-        }
-        return Response.json(
-          { message: JSON.stringify({ kind: "unavailable" }) },
-          { status: 500 },
-        );
+        return storeErrorResponse(error);
       }
     }
 
     if (url.pathname === "/rest/v1/rpc/read_document_event_page") {
-      const page = await backingStore.read(
-        body.p_document_id as string,
-        body.p_after_cursor as string,
-      );
-      return Response.json({
-        batches: page.batches,
-        complete: page.complete,
-        nextCursor: page.nextCursor,
-      });
+      try {
+        const page = await backingStore.read(
+          body.p_document_id as string,
+          body.p_after_cursor as string,
+        );
+        return Response.json({
+          batches: page.batches,
+          complete: page.complete,
+          nextCursor: page.nextCursor,
+        });
+      } catch (error) {
+        return storeErrorResponse(error);
+      }
     }
 
     throw new Error(

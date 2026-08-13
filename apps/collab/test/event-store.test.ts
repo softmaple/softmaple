@@ -34,6 +34,9 @@ const { appendEventBatches, EVENT_CONFLICT_TYPE, EventConflictError } =
 const DOCUMENT_ID = "00000000-0000-4000-8000-000000000001";
 const ACTOR_ID = "00000000-0000-4000-8000-000000000002";
 
+const hasStoredBatch = (batchId: string): boolean =>
+  [...mocks.state.batches.values()].some((row) => row.batch_id === batchId);
+
 const BOOTSTRAP_BATCH = TEST_BOOTSTRAP_BATCH;
 
 const createCausalBatches = (): {
@@ -150,8 +153,8 @@ describe("appendEventBatches conflict paths", () => {
       first.batchId,
       second.batchId,
     ]);
-    expect(mocks.state.batches.has(first.batchId)).toBe(true);
-    expect(mocks.state.batches.has(second.batchId)).toBe(true);
+    expect(hasStoredBatch(first.batchId)).toBe(true);
+    expect(hasStoredBatch(second.batchId)).toBe(true);
   });
 
   it("stores a causal child after its parent commits under lock ordering", async () => {
@@ -173,8 +176,8 @@ describe("appendEventBatches conflict paths", () => {
         batchIds: [second.batchId],
       },
     });
-    expect(mocks.state.batches.has(first.batchId)).toBe(false);
-    expect(mocks.state.batches.has(second.batchId)).toBe(false);
+    expect(hasStoredBatch(first.batchId)).toBe(false);
+    expect(hasStoredBatch(second.batchId)).toBe(false);
   });
 
   it("accepts causally ordered dependent batches in one request", async () => {
@@ -182,8 +185,8 @@ describe("appendEventBatches conflict paths", () => {
     await expect(
       appendEventBatches(DOCUMENT_ID, ACTOR_ID, [first, second]),
     ).resolves.toEqual([first.batchId, second.batchId]);
-    expect(mocks.state.batches.has(first.batchId)).toBe(true);
-    expect(mocks.state.batches.has(second.batchId)).toBe(true);
+    expect(hasStoredBatch(first.batchId)).toBe(true);
+    expect(hasStoredBatch(second.batchId)).toBe(true);
   });
 
   it("exposes structured conflict details for diagnostics", () => {
@@ -210,7 +213,7 @@ describe("appendEventBatches conflict paths", () => {
     await expect(
       appendEventBatches(DOCUMENT_ID, ACTOR_ID, [BOOTSTRAP_BATCH]),
     ).resolves.toEqual([BOOTSTRAP_BATCH_ID]);
-    expect(mocks.state.batches.has(BOOTSTRAP_BATCH_ID)).toBe(true);
+    expect(hasStoredBatch(BOOTSTRAP_BATCH_ID)).toBe(true);
     expect(mocks.state.eventIds.has(BOOTSTRAP_EVENT_ID)).toBe(true);
   });
 });

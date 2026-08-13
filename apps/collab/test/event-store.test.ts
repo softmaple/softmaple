@@ -5,16 +5,9 @@ import {
   createBlockReplica,
   type RichTextEventBatch,
 } from "@softmaple/block-model";
-import { Prisma } from "@softmaple/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPrismaEventStoreMock } from "./helpers/prismaEventStoreMock";
 import { TEST_BOOTSTRAP_BATCH } from "./helpers/bootstrapBatch";
-
-type StoredBatch = {
-  readonly batch_id: string;
-  readonly payload_hash: string;
-  readonly payload: RichTextEventBatch;
-  readonly id: bigint;
-};
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -29,197 +22,20 @@ const deferred = <T>(): Deferred<T> => {
   return { promise, resolve };
 };
 
-const mocks = vi.hoisted(() => {
-  const state = {
-    batches: new Map<string, StoredBatch>(),
-    eventIds: new Map<string, string>(),
-    role: "EDITOR" as string | null,
-    nextRowId: 1n,
-    lockHolders: 0,
-    lockWaiters: [] as Array<() => void>,
-    beforeCreateBatch: null as null | (() => Promise<void>),
-  };
+const mocks = createPrismaEventStoreMock();
 
-  const acquireLock = async (): Promise<void> => {
-    if (state.lockHolders === 0) {
-      state.lockHolders = 1;
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      state.lockWaiters.push(resolve);
-    });
-    // Ownership was transferred by releaseLock; do not toggle holders here.
-  };
-
-  const releaseLock = (): void => {
-    const next = state.lockWaiters.shift();
-    if (next) {
-      // Keep the lock held while transferring ownership to the next waiter.
-      next();
-      return;
-    }
-    state.lockHolders = 0;
-  };
-
-  const transactionClient = {
-    $executeRaw: vi.fn(async () => {
-      // appendEventBatches only uses $executeRaw for the document advisory lock.
-      await acquireLock();
-      return 0;
-    }),
-    $queryRaw: vi.fn(async () =>
-      state.role === null ? [] : [{ role: state.role }],
-    ),
-    documentEventBatch: {
-      findMany: vi.fn(
-        async ({
-          where,
-        }: {
-          readonly where: {
-            readonly document_id: string;
-            readonly batch_id: { readonly in: ReadonlyArray<string> };
-          };
-        }) =>
-          where.batch_id.in.flatMap((batchId) => {
-            const row = state.batches.get(batchId);
-            return row === undefined
-              ? []
-              : [{ batch_id: row.batch_id, payload_hash: row.payload_hash }];
-          }),
-      ),
-      create: vi.fn(
-        async ({
-          data,
-        }: {
-          readonly data: {
-            readonly batch_id: string;
-            readonly payload_hash: string;
-            readonly payload: RichTextEventBatch;
-          };
-        }) => {
-          if (state.beforeCreateBatch !== null) {
-            await state.beforeCreateBatch();
-          }
-          if (state.batches.has(data.batch_id)) {
-            throw new Prisma.PrismaClientKnownRequestError(
-              "Unique constraint",
-              {
-                code: "P2002",
-                clientVersion: "test",
-              },
-            );
-          }
-          const id = state.nextRowId;
-          state.nextRowId += 1n;
-          state.batches.set(data.batch_id, {
-            batch_id: data.batch_id,
-            payload_hash: data.payload_hash,
-            payload: data.payload,
-            id,
-          });
-          return { id };
-        },
-      ),
-    },
-    documentEventId: {
-      findMany: vi.fn(
-        async ({
-          where,
-        }: {
-          readonly where: {
-            readonly event_id: { readonly in: ReadonlyArray<string> };
-          };
-        }) =>
-          where.event_id.in.flatMap((eventId) =>
-            state.eventIds.has(eventId) ? [{ event_id: eventId }] : [],
-          ),
-      ),
-      createMany: vi.fn(
-        async ({
-          data,
-        }: {
-          readonly data: ReadonlyArray<{
-            readonly event_id: string;
-            readonly batch_row_id: bigint;
-          }>;
-        }) => {
-          for (const row of data) {
-            if (state.eventIds.has(row.event_id)) {
-              throw new Prisma.PrismaClientKnownRequestError(
-                "Unique constraint",
-                {
-                  code: "P2002",
-                  clientVersion: "test",
-                },
-              );
-            }
-            state.eventIds.set(row.event_id, String(row.batch_row_id));
-          }
-          return { count: data.length };
-        },
-      ),
-    },
-  };
-
-  return {
-    state,
-    releaseLock,
-    prisma: {
-      $transaction: vi.fn(
-        async (
-          fn: (tx: typeof transactionClient) => unknown,
-          _options?: { readonly maxWait?: number; readonly timeout?: number },
-        ) => {
-          try {
-            return await fn(transactionClient);
-          } finally {
-            releaseLock();
-          }
-        },
-      ),
-      documentEventBatch: {
-        findMany: vi.fn(
-          async ({
-            where,
-          }: {
-            readonly where: {
-              readonly batch_id?: { readonly in: ReadonlyArray<string> };
-            };
-          }) => {
-            const ids = where.batch_id?.in ?? [...state.batches.keys()];
-            return ids.flatMap((batchId) => {
-              const row = state.batches.get(batchId);
-              return row === undefined
-                ? []
-                : [
-                    {
-                      batch_id: row.batch_id,
-                      payload_hash: row.payload_hash,
-                      id: row.id,
-                      payload: row.payload,
-                    },
-                  ];
-            });
-          },
-        ),
-      },
-    },
-    transactionClient,
-  };
-});
-
-vi.mock("../server/utils/prisma", () => ({
+vi.doMock("../server/utils/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-import {
-  appendEventBatches,
-  EVENT_CONFLICT_TYPE,
-  EventConflictError,
-} from "../server/utils/event-store";
+const { appendEventBatches, EVENT_CONFLICT_TYPE, EventConflictError } =
+  await import("../server/utils/event-store");
 
 const DOCUMENT_ID = "00000000-0000-4000-8000-000000000001";
 const ACTOR_ID = "00000000-0000-4000-8000-000000000002";
+
+const hasStoredBatch = (batchId: string): boolean =>
+  [...mocks.state.batches.values()].some((row) => row.batch_id === batchId);
 
 const BOOTSTRAP_BATCH = TEST_BOOTSTRAP_BATCH;
 
@@ -242,15 +58,8 @@ const createCausalBatches = (): {
 
 describe("appendEventBatches conflict paths", () => {
   beforeEach(() => {
-    mocks.state.batches.clear();
-    mocks.state.eventIds.clear();
-    mocks.state.role = "EDITOR";
-    mocks.state.nextRowId = 1n;
-    mocks.state.lockHolders = 0;
-    mocks.state.lockWaiters = [];
-    mocks.state.beforeCreateBatch = null;
+    mocks.reset();
     mocks.state.eventIds.set(BOOTSTRAP_EVENT_ID, "0");
-    vi.clearAllMocks();
   });
 
   it("rejects duplicate event IDs inside the incoming request", async () => {
@@ -344,8 +153,8 @@ describe("appendEventBatches conflict paths", () => {
       first.batchId,
       second.batchId,
     ]);
-    expect(mocks.state.batches.has(first.batchId)).toBe(true);
-    expect(mocks.state.batches.has(second.batchId)).toBe(true);
+    expect(hasStoredBatch(first.batchId)).toBe(true);
+    expect(hasStoredBatch(second.batchId)).toBe(true);
   });
 
   it("stores a causal child after its parent commits under lock ordering", async () => {
@@ -367,8 +176,8 @@ describe("appendEventBatches conflict paths", () => {
         batchIds: [second.batchId],
       },
     });
-    expect(mocks.state.batches.has(first.batchId)).toBe(false);
-    expect(mocks.state.batches.has(second.batchId)).toBe(false);
+    expect(hasStoredBatch(first.batchId)).toBe(false);
+    expect(hasStoredBatch(second.batchId)).toBe(false);
   });
 
   it("accepts causally ordered dependent batches in one request", async () => {
@@ -376,8 +185,8 @@ describe("appendEventBatches conflict paths", () => {
     await expect(
       appendEventBatches(DOCUMENT_ID, ACTOR_ID, [first, second]),
     ).resolves.toEqual([first.batchId, second.batchId]);
-    expect(mocks.state.batches.has(first.batchId)).toBe(true);
-    expect(mocks.state.batches.has(second.batchId)).toBe(true);
+    expect(hasStoredBatch(first.batchId)).toBe(true);
+    expect(hasStoredBatch(second.batchId)).toBe(true);
   });
 
   it("exposes structured conflict details for diagnostics", () => {
@@ -404,7 +213,7 @@ describe("appendEventBatches conflict paths", () => {
     await expect(
       appendEventBatches(DOCUMENT_ID, ACTOR_ID, [BOOTSTRAP_BATCH]),
     ).resolves.toEqual([BOOTSTRAP_BATCH_ID]);
-    expect(mocks.state.batches.has(BOOTSTRAP_BATCH_ID)).toBe(true);
+    expect(hasStoredBatch(BOOTSTRAP_BATCH_ID)).toBe(true);
     expect(mocks.state.eventIds.has(BOOTSTRAP_EVENT_ID)).toBe(true);
   });
 });

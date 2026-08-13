@@ -2,9 +2,20 @@ import type {
   ConnectionLimiter,
   ConnectionPolicy,
 } from "../connection-limiter";
+import {
+  DOCUMENT_EVENT_CONFLICT_TYPE,
+  INITIAL_DOCUMENT_EVENT_CURSOR,
+  type DocumentEventBatches,
+  type DocumentEventStore,
+} from "../event-store";
 import type { PresenceFanout } from "../presence-fanout";
 import type { PresenceMemberRecord, PresenceStore } from "../presence-store";
-import { check, checkEqual, type ConformanceCase } from "./conformance-case";
+import {
+  check,
+  checkEqual,
+  expectRejection,
+  type ConformanceCase,
+} from "./conformance-case";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -391,6 +402,263 @@ export const connectionLimiterConformance = (
       check(
         reacquired.accepted,
         "expected a released peerId to be re-acquirable",
+      );
+    },
+  },
+];
+
+/**
+ * A single-event batch whose shape satisfies block-model's own
+ * `parseBatch` invariants (batchId === the event's id, batch parentVersion
+ * === the event's parentVersion, non-empty insert text matching the
+ * text-insert effect). Real adapters re-validate stored payloads through
+ * that parser on read, so any batch a case expects to read back must be
+ * built this way — not just "TypeScript-shape-compatible".
+ */
+const validBatch = (
+  eventId: string,
+  parentVersion: ReadonlyArray<string>,
+  text = "hello",
+): DocumentEventBatches[number] => ({
+  schemaVersion: 1,
+  batchId: eventId,
+  parentVersion,
+  events: [
+    {
+      schemaVersion: 1,
+      id: eventId,
+      parentVersion,
+      timestamp: 0,
+      operation: { type: "insert", index: 0, text },
+      effect: { type: "text-insert", blockId: "block-1", text },
+    },
+  ],
+});
+
+/**
+ * A batch shaped only well enough to reach `DocumentEventStore.append` —
+ * batchId is independent of its event ids, so it must never be expected to
+ * survive a real adapter's read-back parser. Only for cases whose fixtures
+ * are rejected before ever being persisted (conflict/isolation checks that
+ * happen ahead of any durable write).
+ */
+const rejectedBatch = (
+  batchId: string,
+  parentVersion: ReadonlyArray<string>,
+  eventId: string,
+  eventParentVersion: ReadonlyArray<string> = parentVersion,
+): DocumentEventBatches[number] => ({
+  schemaVersion: 1,
+  batchId,
+  parentVersion,
+  events: [
+    {
+      schemaVersion: 1,
+      id: eventId,
+      parentVersion: eventParentVersion,
+      timestamp: 0,
+      operation: { type: "insert", index: 0, text: "x" },
+      effect: { type: "text-insert", blockId: "block-1", text: "x" },
+    },
+  ],
+});
+
+const DOCUMENT_ID = "conformance-document";
+const ACTOR_ID = "conformance-actor";
+
+type ConflictLike = {
+  readonly details: {
+    readonly batchIds?: ReadonlyArray<string>;
+    readonly conflictType: string;
+    readonly missingParentIds?: ReadonlyArray<string>;
+  };
+};
+
+/**
+ * Name-based, not `instanceof` — adapters running under a different module
+ * graph (e.g. apps/collab-cloudflare's workerd test runtime) must not be
+ * required to share a class identity with this package to pass conformance.
+ */
+const isConflict = (error: unknown): error is ConflictLike =>
+  typeof error === "object" &&
+  error !== null &&
+  (error as { name?: unknown }).name === "DocumentEventConflictError";
+
+/**
+ * Behavioural conformance for `DocumentEventStore`: atomic append, same-
+ * batchId idempotent resend, causal ordering within one request, and the
+ * conflict/cursor semantics documented on the port itself. Every
+ * `DocumentEventStore` adapter (Prisma/Postgres, Supabase RPC/Postgres) must
+ * pass this unmodified — it is the direct evidence that the two
+ * collaboration runtimes' durable history behaves identically.
+ *
+ * @param createStore Invoked once per case. Each invocation must provide
+ *   empty history for both `DOCUMENT_ID` and `"another-document"`. Shared
+ *   adapter instances must reset backing state before every conformance case.
+ */
+export const documentEventStoreConformance = (
+  createStore: () => DocumentEventStore,
+): ConformanceCase[] => [
+  {
+    name: "read on an empty document returns an empty, complete page at the initial cursor",
+    async run() {
+      const store = createStore();
+      const page = await store.read(DOCUMENT_ID, INITIAL_DOCUMENT_EVENT_CURSOR);
+      checkEqual(page.batches, [], "expected no batches");
+      check(page.complete, "expected an empty document to read as complete");
+      checkEqual(
+        page.nextCursor,
+        INITIAL_DOCUMENT_EVENT_CURSOR,
+        "expected the cursor to stay at its initial value",
+      );
+    },
+  },
+  {
+    name: "append then read round-trips the batch and advances the cursor",
+    async run() {
+      const store = createStore();
+      const batch = validBatch("event-1", []);
+      const ids = await store.append(DOCUMENT_ID, ACTOR_ID, [batch]);
+      checkEqual(ids, ["event-1"], "expected the appended batch id back");
+      const page = await store.read(DOCUMENT_ID, INITIAL_DOCUMENT_EVENT_CURSOR);
+      checkEqual(
+        page.batches.map((stored) => stored.batchId),
+        ["event-1"],
+        "expected the stored batch to be readable",
+      );
+      check(page.complete, "expected the page to be complete");
+      check(
+        page.nextCursor !== INITIAL_DOCUMENT_EVENT_CURSOR,
+        "expected the cursor to advance past the initial value",
+      );
+    },
+  },
+  {
+    name: "an exact duplicate batch resend is idempotent",
+    async run() {
+      const store = createStore();
+      const batch = validBatch("event-1", []);
+      const first = await store.append(DOCUMENT_ID, ACTOR_ID, [batch]);
+      const second = await store.append(DOCUMENT_ID, ACTOR_ID, [batch]);
+      checkEqual(first, ["event-1"], "expected the first append to succeed");
+      checkEqual(second, ["event-1"], "expected the resend to be idempotent");
+      const page = await store.read(DOCUMENT_ID, INITIAL_DOCUMENT_EVENT_CURSOR);
+      checkEqual(
+        page.batches.length,
+        1,
+        "expected the batch to be stored exactly once",
+      );
+    },
+  },
+  {
+    name: "the same batchId with a different payload is a conflict",
+    async run() {
+      const store = createStore();
+      const original = validBatch("event-1", [], "hello");
+      const conflicting = rejectedBatch("event-1", [], "event-1-other");
+      await store.append(DOCUMENT_ID, ACTOR_ID, [original]);
+      const error = await expectRejection(
+        () => store.append(DOCUMENT_ID, ACTOR_ID, [conflicting]),
+        "expected a payload conflict to reject",
+      );
+      check(isConflict(error), "expected a DocumentEventConflictError");
+      checkEqual(
+        error.details.conflictType,
+        DOCUMENT_EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+        "expected a batch-payload-conflict",
+      );
+    },
+  },
+  {
+    name: "a batch referencing an unstored parent is a missing-parent conflict",
+    async run() {
+      const store = createStore();
+      const orphan = rejectedBatch("batch-2", ["event-1"], "event-2", [
+        "event-1",
+      ]);
+      const error = await expectRejection(
+        () => store.append(DOCUMENT_ID, ACTOR_ID, [orphan]),
+        "expected a missing-parent conflict to reject",
+      );
+      check(isConflict(error), "expected a DocumentEventConflictError");
+      checkEqual(
+        error.details.conflictType,
+        DOCUMENT_EVENT_CONFLICT_TYPE.MissingParentHistory,
+        "expected missing-parent-history",
+      );
+      check(
+        (error.details.missingParentIds ?? []).includes("event-1"),
+        "expected the missing parent id to be reported",
+      );
+    },
+  },
+  {
+    name: "a duplicate event id within one request is a conflict",
+    async run() {
+      const store = createStore();
+      const first = rejectedBatch("batch-1", [], "event-x");
+      const second = rejectedBatch("batch-2", [], "event-x");
+      const error = await expectRejection(
+        () => store.append(DOCUMENT_ID, ACTOR_ID, [first, second]),
+        "expected a duplicate event id to reject",
+      );
+      check(isConflict(error), "expected a DocumentEventConflictError");
+      checkEqual(
+        error.details.conflictType,
+        DOCUMENT_EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
+        "expected duplicate-incoming-event-id",
+      );
+    },
+  },
+  {
+    name: "causally ordered batches in one request commit together, in order",
+    async run() {
+      const store = createStore();
+      const parent = validBatch("event-1", []);
+      const child = validBatch("event-2", ["event-1"]);
+      const ids = await store.append(DOCUMENT_ID, ACTOR_ID, [parent, child]);
+      checkEqual(
+        ids,
+        ["event-1", "event-2"],
+        "expected both ids back in input order",
+      );
+      const page = await store.read(DOCUMENT_ID, INITIAL_DOCUMENT_EVENT_CURSOR);
+      checkEqual(
+        page.batches.map((stored) => stored.batchId),
+        ["event-1", "event-2"],
+        "expected both batches to be readable in order",
+      );
+    },
+  },
+  {
+    name: "reversed causal order within one request is rejected atomically",
+    async run() {
+      const store = createStore();
+      const parent = validBatch("event-1", []);
+      const child = validBatch("event-2", ["event-1"]);
+      const error = await expectRejection(
+        () => store.append(DOCUMENT_ID, ACTOR_ID, [child, parent]),
+        "expected the reversed request to reject",
+      );
+      check(isConflict(error), "expected a DocumentEventConflictError");
+      const page = await store.read(DOCUMENT_ID, INITIAL_DOCUMENT_EVENT_CURSOR);
+      checkEqual(page.batches, [], "expected neither batch to have committed");
+    },
+  },
+  {
+    name: "reads for one document do not see another document's batches",
+    async run() {
+      const store = createStore();
+      const batch = validBatch("event-1", []);
+      await store.append(DOCUMENT_ID, ACTOR_ID, [batch]);
+      const page = await store.read(
+        "another-document",
+        INITIAL_DOCUMENT_EVENT_CURSOR,
+      );
+      checkEqual(
+        page.batches,
+        [],
+        "expected an unrelated document to be empty",
       );
     },
   },

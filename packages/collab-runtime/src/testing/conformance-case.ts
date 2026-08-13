@@ -9,9 +9,9 @@ export interface ConformanceCase {
   run(): Promise<void>;
 }
 
-export const check = (condition: boolean, message: string): void => {
+export function check(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
-};
+}
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -45,4 +45,17 @@ export const checkEqual = <T>(
       `${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
+};
+
+/** Runs `fn`, returning the thrown value, or throws if `fn` did not reject. */
+export const expectRejection = async (
+  fn: () => Promise<unknown>,
+  message: string,
+): Promise<unknown> => {
+  try {
+    await fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error(message);
 };

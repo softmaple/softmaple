@@ -150,6 +150,10 @@ reload either. Deploying `apps/collab-cloudflare` itself (secrets,
 `wrangler deploy`, DNS) is a separate operational step; see
 [`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md).
 
+For the cross-runtime picture — when to deploy which runtime, Supabase/
+Redis/DO responsibilities, and the current default-runtime decision — see
+[`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md).
+
 ## Commands
 
 ```bash

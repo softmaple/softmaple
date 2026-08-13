@@ -1,10 +1,15 @@
-# Cloudflare collaboration PoC
+# Cloudflare collaboration runtime
 
 This app started as the issue #871 proof of concept, added the hibernatable
 document room lifecycle from issue #872, and now adds a presence room from
 issue #873 phase 6. It leaves `apps/collab` and its Nitro/Redis deployment
 unchanged while hosting the same `@softmaple/collab-runtime` `DocumentRoom`
 and `PresenceRoom` semantics in Cloudflare Durable Objects.
+
+It is not yet deployed to a reachable environment — see "Production
+deployment" below and
+[`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md)
+for the cross-runtime operational picture and current rollout stage.
 
 ## Runtime shape
 
@@ -78,6 +83,23 @@ and broadcast Leave for lapsed members even when the room is otherwise idle.
 The alarm reschedules itself only while a WebSocket is still attached, so an
 empty room does not keep waking the object.
 
+## Environment
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `COLLAB_ALLOWED_ORIGINS` | yes | Comma-separated browser Origins allowed to open `/collab/*` |
+| `SUPABASE_URL` | yes | Same Supabase project as `apps/collab` |
+| `SUPABASE_PUBLISHABLE_KEY` | yes | Used for the auth-scoped Supabase client |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Elevated, server-only — used for the admin-scoped Supabase client that issues RPC calls (`admin.rpc(...)` in `supabase-backend.ts`). Never expose to browser code. |
+
+These four are `wrangler.jsonc`'s `secrets.required` list — the Worker
+refuses to start without all of them. Unlike `apps/collab`, this app has no
+direct Postgres connection string; it only ever talks to Supabase over its
+RPC surface (`append_document_event_batches`, `read_document_event_page`).
+See
+[`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md#environment-configuration)
+for how this compares to Nitro's env config.
+
 ## Local setup
 
 Create `apps/collab-cloudflare/.dev.vars` (it is ignored by the repository) with:
@@ -99,6 +121,45 @@ pnpm --filter @softmaple/collab-cloudflare dev
 
 Set the same values with `wrangler secret put` before deployment. Never expose
 the service-role key to browser code.
+
+## Production deployment
+
+**No CD pipeline exists yet, and this app has never been deployed to a
+reachable environment.** `.github/workflows/test-collab-cloudflare.yml`
+only runs `wrangler deploy --dry-run` as part of CI's `build` step; nothing
+runs a real `wrangler deploy`. `wrangler.jsonc` has no `routes` or custom
+domain, so even a manual deploy today would only be reachable at the
+default `workers.dev` subdomain.
+
+The manual process, until a real pipeline exists:
+
+1. Set each of the four secrets above with `wrangler secret put <NAME>`
+   against the target Cloudflare account.
+2. Apply the same Prisma migrations applied for local setup, against the
+   target environment's Supabase project.
+3. `pnpm --filter @softmaple/collab-cloudflare deploy` (runs `wrangler
+   deploy` for real — this is the one command in this app that touches a
+   live Cloudflare account).
+4. Set `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` in `apps/web`'s environment
+   to the resulting Worker URL — routing stays at 0% until this is set,
+   per [`apps/web/README.md`'s routing section](../web/README.md#collaboration-runtime-routing).
+
+## Rollback
+
+To revert a bad deploy of the Worker itself (independent of the routing
+decision — see below): `wrangler rollback` reverts to the previously active
+version; `wrangler versions list` first if you need to roll back to a
+specific, older version by id (`wrangler rollback <VERSION_ID>`). Because no
+deployment has ever been exercised, this procedure is documented but
+unverified — confirm it works during the first real Stage 2 deployment
+rather than assuming it does.
+
+This is a different lever from **routing rollback** (moving documents back
+to Nitro without touching what's deployed here) — see
+[`apps/web/README.md`'s routing section](../web/README.md#collaboration-runtime-routing)
+and
+[`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md#rollback-procedure)
+for that procedure and how the two levels relate.
 
 ## Verification
 

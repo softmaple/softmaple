@@ -18,7 +18,10 @@ import { evictAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { setMemoryAuthenticatedAccessRevoked } from "./memory-backend";
-import { setMemoryPresenceAccessRevoked } from "./memory-presence-backend";
+import {
+  setMemoryPresenceAccessRevoked,
+  TEST_PRESENCE_ACCESS_TOKEN,
+} from "./memory-presence-backend";
 
 const ORIGIN = "https://app.example";
 
@@ -108,7 +111,7 @@ const authenticatePresence = async (
         capabilities: PRESENCE_CAPABILITIES,
         connectionId: "isolation-presence-connection",
         protocolVersion: PRESENCE_PROTOCOL_VERSION,
-        token: "test-token",
+        token: TEST_PRESENCE_ACCESS_TOKEN,
         userId: "00000000-0000-4000-8000-000000000002",
       },
       roomId,

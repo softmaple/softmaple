@@ -9,7 +9,14 @@ import type {
 import type { PresenceBackend } from "../src/supabase-presence-backend";
 
 const TEST_ACTOR_ID = "00000000-0000-4000-8000-000000000002";
-const TEST_ACCESS_TOKEN = "test-token";
+/**
+ * Keep the Worker integration path on a realistic Supabase JWT length. This
+ * catches stale @softmaple/awareness builds that still apply the 256-character
+ * wire-identifier limit to credentials.
+ */
+export const TEST_PRESENCE_ACCESS_TOKEN = `${"h".repeat(40)}.${"p".repeat(
+  900,
+)}.${"s".repeat(43)}`;
 const TEST_IDENTITY: PresenceIdentity = {
   name: "Ada Lovelace",
   userId: TEST_ACTOR_ID,
@@ -161,7 +168,7 @@ const identityForCredential = (
   state: StoredAuthorizationState,
 ): PresenceIdentity | null => {
   if (state.revoked || credential.kind !== "access-token") return null;
-  if (credential.token !== TEST_ACCESS_TOKEN) return null;
+  if (credential.token !== TEST_PRESENCE_ACCESS_TOKEN) return null;
   if (claimedUserId !== TEST_ACTOR_ID) return null;
   return TEST_IDENTITY;
 };

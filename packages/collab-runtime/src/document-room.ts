@@ -5,7 +5,10 @@ import type {
 } from "@softmaple/collab-protocol";
 import type { ConnectionLimiter, ConnectionPolicy } from "./connection-limiter";
 import type { DocumentSession, DocumentSessionHooks } from "./document-session";
-import type { DocumentEventStore } from "./event-store";
+import type {
+  DocumentEventConflictType,
+  DocumentEventStore,
+} from "./event-store";
 import type { RoomFanout } from "./room-fanout";
 
 /** Transport adapter presented to runtime-independent room semantics. */
@@ -63,6 +66,8 @@ export interface DocumentRoomServices {
   readonly connections: ConnectionLimiter;
   readonly events: DocumentEventStore;
   readonly fanout: RoomFanout;
+  /** Optional host metrics sink; recorder failures are ignored by the room. */
+  readonly metrics?: DocumentRoomMetricsRecorder;
   readonly policy: DocumentRoomPolicy;
   /** Optional host observability; reporter failures are ignored by the room. */
   readonly reportError?: DocumentRoomErrorReporter;
@@ -78,6 +83,44 @@ export interface DocumentRoomErrorContext {
 export type DocumentRoomErrorReporter = (
   error: unknown,
   context: DocumentRoomErrorContext,
+) => void;
+
+/**
+ * Structured, typed room events for comparing runtimes — as opposed to
+ * `reportError`, which hands the host a raw `unknown` error for logging.
+ * `event-conflict`/`event-error` are classified once inside the room (see
+ * the private `report()` helper) so every host observes the same taxonomy
+ * regardless of which adapter raised the failure.
+ */
+export type DocumentRoomMetricEvent =
+  | {
+      readonly type: "event-appended";
+      readonly batchCount: number;
+      readonly documentId: string;
+      readonly durationMs: number;
+    }
+  | {
+      /** Elapsed time from receiving the Event message to sending DurableAck. */
+      readonly type: "event-acknowledged";
+      readonly documentId: string;
+      readonly durationMs: number;
+    }
+  | {
+      readonly conflictType: DocumentEventConflictType;
+      readonly documentId: string;
+      readonly messageType: string;
+      readonly type: "event-conflict";
+    }
+  | {
+      readonly documentId: string;
+      /** `error.name` when `error` is an `Error`, otherwise `"unknown"`. */
+      readonly errorKind: string;
+      readonly messageType: string;
+      readonly type: "event-error";
+    };
+
+export type DocumentRoomMetricsRecorder = (
+  event: DocumentRoomMetricEvent,
 ) => void;
 
 /**

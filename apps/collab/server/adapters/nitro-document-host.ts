@@ -15,6 +15,7 @@ import {
   DEFAULT_DOCUMENT_ROOM_POLICY,
   DocumentEventConflictError,
   type DocumentRoom,
+  type DocumentRoomMetricEvent,
   type DocumentRoomServices,
   ROOM_LEAVE_REASON,
   type RoomLeaveReason,
@@ -43,10 +44,15 @@ export interface NitroDocumentTransportPeer {
   send(message: unknown): unknown;
 }
 
+export const logDocumentMetric = (event: DocumentRoomMetricEvent): void => {
+  console.log("Collaboration metric", event);
+};
+
 const roomServices: DocumentRoomServices = {
   connections: realtimeConnectionLimiter,
   events: prismaDocumentEventStore,
   fanout: realtimeRoomFanout,
+  metrics: logDocumentMetric,
   policy: DEFAULT_DOCUMENT_ROOM_POLICY,
   reportError(error, context) {
     logHostError(error, context.documentId, context.messageType);

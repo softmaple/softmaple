@@ -938,6 +938,7 @@ class RuntimeDocumentRoom implements DocumentRoom {
       return;
     }
     let batchIds: ReadonlyArray<string>;
+    const receivedAt = Date.now();
     try {
       batchIds = await this.services.events.append(
         this.documentId,
@@ -968,6 +969,16 @@ class RuntimeDocumentRoom implements DocumentRoom {
       );
       return;
     }
+    try {
+      this.services.metrics?.({
+        type: "event-appended",
+        batchCount: message.batches.length,
+        documentId: this.documentId,
+        durationMs: Date.now() - receivedAt,
+      });
+    } catch {
+      // Observability must never change room behavior.
+    }
 
     // A durable append must fan out even if the origin disconnects while the
     // write is in flight. A failed acknowledgement send is therefore isolated.
@@ -990,6 +1001,15 @@ class RuntimeDocumentRoom implements DocumentRoom {
         },
         message.type,
       );
+      try {
+        this.services.metrics?.({
+          type: "event-acknowledged",
+          documentId: this.documentId,
+          durationMs: Date.now() - receivedAt,
+        });
+      } catch {
+        // Observability must never change room behavior.
+      }
     }
     try {
       await this.services.fanout.publish({
@@ -1397,6 +1417,25 @@ class RuntimeDocumentRoom implements DocumentRoom {
         messageType,
         ...(state === null ? {} : { peerId: state.peer.id }),
       });
+    } catch {
+      // Observability must never change room behavior.
+    }
+    try {
+      this.services.metrics?.(
+        error instanceof DocumentEventConflictError
+          ? {
+              type: "event-conflict",
+              conflictType: error.details.conflictType,
+              documentId: this.documentId,
+              messageType,
+            }
+          : {
+              type: "event-error",
+              documentId: this.documentId,
+              errorKind: error instanceof Error ? error.name : "unknown",
+              messageType,
+            },
+      );
     } catch {
       // Observability must never change room behavior.
     }

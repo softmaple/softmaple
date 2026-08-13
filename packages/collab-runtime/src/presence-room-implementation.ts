@@ -1270,6 +1270,16 @@ class RuntimePresenceRoom implements PresenceRoom {
     } catch {
       // Observability must never change room behavior.
     }
+    try {
+      this.services.metrics?.({
+        type: "message-error",
+        errorKind: error instanceof Error ? error.name : "unknown",
+        messageType,
+        roomId: this.roomId,
+      });
+    } catch {
+      // Observability must never change room behavior.
+    }
   }
 
   private assertPolicy(services: PresenceRoomServices): void {

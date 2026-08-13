@@ -52,3 +52,9 @@ export const logError = (
     }),
   );
 };
+
+export const logMetric = (event: Readonly<Record<string, unknown>>): void => {
+  console.log(
+    JSON.stringify({ ...event, message: "Cloudflare collaboration metric" }),
+  );
+};

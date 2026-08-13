@@ -3,7 +3,7 @@ import {
   type PresenceRoomServices,
 } from "@softmaple/collab-runtime";
 import { awarenessPresenceCodec } from "./awareness-presence-codec";
-import { logError } from "./constants";
+import { logError, logMetric } from "./constants";
 import {
   createDurableObjectPresenceConnectionLimiter,
   createDurableObjectPresenceFanout,
@@ -21,6 +21,7 @@ export const createPresenceServicesForBackend = (
   codec: awarenessPresenceCodec,
   connections: createDurableObjectPresenceConnectionLimiter(),
   fanout: createDurableObjectPresenceFanout(),
+  metrics: logMetric,
   policy: DEFAULT_PRESENCE_ROOM_POLICY,
   reportError(error, context) {
     logError(error, {

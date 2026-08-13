@@ -255,6 +255,7 @@ interface Fixture {
   readonly end: Mock<NonNullable<DocumentSessionHooks["end"]>>;
   readonly fanout: MemoryRoomFanout;
   readonly leases: FakeLease[];
+  readonly metrics: ReturnType<typeof vi.fn>;
   readonly read: ReturnType<typeof vi.fn>;
   readonly reportError: ReturnType<typeof vi.fn>;
   readonly refresh: ReturnType<typeof vi.fn>;
@@ -304,6 +305,7 @@ const createFixture = (policy = DEFAULT_TEST_POLICY): Fixture => {
     controls.refreshImpl(request),
   );
   const reportError = vi.fn();
+  const metrics = vi.fn();
   const end = vi.fn<NonNullable<DocumentSessionHooks["end"]>>(
     async () => undefined,
   );
@@ -315,6 +317,7 @@ const createFixture = (policy = DEFAULT_TEST_POLICY): Fixture => {
     end,
     fanout,
     leases,
+    metrics,
     read,
     reportError,
     refresh,
@@ -322,6 +325,7 @@ const createFixture = (policy = DEFAULT_TEST_POLICY): Fixture => {
       connections: { acquire },
       events: { append, read },
       fanout,
+      metrics,
       policy,
       reportError,
       sessions: { authorize, end, refresh },
@@ -1157,6 +1161,21 @@ describe("createDocumentRoom durability, repair, and fan-out", () => {
     expect(fixture.fanout.published).toEqual([
       { documentId: DOCUMENT_ID, batches: BATCHES },
     ]);
+    expect(fixture.metrics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "event-appended",
+        batchCount: BATCHES.length,
+        documentId: DOCUMENT_ID,
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(fixture.metrics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "event-acknowledged",
+        documentId: DOCUMENT_ID,
+        durationMs: expect.any(Number),
+      }),
+    );
   });
 
   it("fans out a committed event even when DurableAck sending fails", async () => {
@@ -1206,6 +1225,12 @@ describe("createDocumentRoom durability, repair, and fan-out", () => {
       error: new DocumentEventAuthorizationError("revoked"),
       code: COLLAB_ERROR_CODE.Forbidden,
       retryable: false,
+      metric: {
+        type: "event-error",
+        documentId: DOCUMENT_ID,
+        errorKind: "DocumentEventAuthorizationError",
+        messageType: COLLAB_MESSAGE_TYPE.Event,
+      },
     },
     {
       error: new DocumentEventConflictError("conflict", {
@@ -1214,13 +1239,30 @@ describe("createDocumentRoom durability, repair, and fan-out", () => {
       }),
       code: COLLAB_ERROR_CODE.Conflict,
       retryable: false,
+      metric: {
+        type: "event-conflict",
+        conflictType: DOCUMENT_EVENT_CONFLICT_TYPE.MissingParentHistory,
+        documentId: DOCUMENT_ID,
+        messageType: COLLAB_MESSAGE_TYPE.Event,
+      },
     },
     {
       error: new DocumentEventStoreUnavailableError("database unavailable"),
       code: COLLAB_ERROR_CODE.PersistenceFailed,
       retryable: true,
+      metric: {
+        type: "event-error",
+        documentId: DOCUMENT_ID,
+        errorKind: "DocumentEventStoreUnavailableError",
+        messageType: COLLAB_MESSAGE_TYPE.Event,
+      },
     },
-  ])("maps append failure to $code", async ({ error, code, retryable }) => {
+  ])("maps append failure to $code", async ({
+    error,
+    code,
+    retryable,
+    metric,
+  }) => {
     const fixture = createFixture();
     fixture.controls.appendImpl = async () => {
       throw error;
@@ -1229,6 +1271,7 @@ describe("createDocumentRoom durability, repair, and fan-out", () => {
     const peer = new FakePeer(`peer-${code}`);
     await authenticate(room, peer);
     peer.messages.length = 0;
+    fixture.metrics.mockClear();
 
     await room.receive(peer, eventMessage());
 
@@ -1243,6 +1286,7 @@ describe("createDocumentRoom durability, repair, and fan-out", () => {
         (message) => message.type === COLLAB_MESSAGE_TYPE.DurableAck,
       ),
     ).toBe(false);
+    expect(fixture.metrics).toHaveBeenCalledWith(metric);
   });
 
   it("echoes repair request metadata and maps read failures", async () => {

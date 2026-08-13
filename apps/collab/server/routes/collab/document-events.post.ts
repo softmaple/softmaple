@@ -1,5 +1,7 @@
 import { parseRichTextEventBatch } from "@softmaple/block-model";
 import { defineHandler } from "nitro";
+import { logDocumentMetric } from "../../adapters/nitro-document-host";
+import { runtimeConflictType } from "../../adapters/prisma-document-event-store";
 import { authorizeHttpDocumentRequest } from "../../utils/http-auth";
 import {
   appendEventBatches,
@@ -65,12 +67,24 @@ export default defineHandler(async (event) => {
     return Response.json({ batchIds });
   } catch (error) {
     if (error instanceof EventAuthorizationError) {
+      logDocumentMetric({
+        type: "event-error",
+        documentId: access.documentId,
+        errorKind: error.name,
+        messageType: "http-append",
+      });
       return Response.json({ error: error.message }, { status: 403 });
     }
     if (error instanceof EventConflictError) {
       // Keep the HTTP contract aligned with persistPrivateDocumentEvents:
       // clients only consume `{ error }` on 409; structured conflict metadata
-      // stays on the WebSocket/server log path.
+      // stays on the server log path.
+      logDocumentMetric({
+        type: "event-conflict",
+        conflictType: runtimeConflictType(error.details.conflictType),
+        documentId: access.documentId,
+        messageType: "http-append",
+      });
       return Response.json({ error: error.message }, { status: 409 });
     }
     throw error;

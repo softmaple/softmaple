@@ -81,9 +81,10 @@ HTTP appends use a different surface. In `document-events.post.ts`,
 `EventConflictError` maps to **HTTP 409** with an `{ error }` body (the conflict
 message string only). Structured fields such as `missingParentIds` exist on the
 server-side `EventConflictError` instance; they are not included in that HTTP
-response. On the realtime route, the same details are written to server logs via
-`logRouteError` as bounded samples and are not sent on the WebSocket `Error`
-payload.
+response. The HTTP handler logs `conflictType`, `documentId`, and
+`messageType` via `logDocumentMetric`; it does not record bounded batch or
+event ID samples. On the realtime route, structured conflict details are not
+sent on the WebSocket `Error` payload.
 
 Implementation: `EVENT_CONFLICT_TYPE` / `EventConflictError` in
 `apps/collab/server/utils/event-conflict.ts`.

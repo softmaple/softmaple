@@ -63,7 +63,7 @@ const serializeError = (error: unknown): Readonly<Record<string, string>> => {
 
   return {
     error: message.slice(0, MAX_LOG_ERROR_FIELD_LENGTH),
-    errorName: name,
+    errorName: name.slice(0, MAX_LOG_ERROR_FIELD_LENGTH),
     ...(code === null ? {} : { errorCode: code }),
     ...(details === null ? {} : { errorDetails: details }),
     ...(hint === null ? {} : { errorHint: hint }),

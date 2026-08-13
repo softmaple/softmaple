@@ -9,9 +9,9 @@ export interface ConformanceCase {
   run(): Promise<void>;
 }
 
-export const check = (condition: boolean, message: string): void => {
+export function check(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
-};
+}
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

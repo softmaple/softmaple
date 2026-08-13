@@ -491,6 +491,10 @@ const isConflict = (error: unknown): error is ConflictLike =>
  * `DocumentEventStore` adapter (Prisma/Postgres, Supabase RPC/Postgres) must
  * pass this unmodified — it is the direct evidence that the two
  * collaboration runtimes' durable history behaves identically.
+ *
+ * @param createStore Invoked once per case. Each invocation must provide
+ *   empty history for both `DOCUMENT_ID` and `"another-document"`. Shared
+ *   adapter instances must reset backing state before every conformance case.
  */
 export const documentEventStoreConformance = (
   createStore: () => DocumentEventStore,
@@ -558,13 +562,11 @@ export const documentEventStoreConformance = (
         "expected a payload conflict to reject",
       );
       check(isConflict(error), "expected a DocumentEventConflictError");
-      if (isConflict(error)) {
-        checkEqual(
-          error.details.conflictType,
-          DOCUMENT_EVENT_CONFLICT_TYPE.BatchPayloadConflict,
-          "expected a batch-payload-conflict",
-        );
-      }
+      checkEqual(
+        error.details.conflictType,
+        DOCUMENT_EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+        "expected a batch-payload-conflict",
+      );
     },
   },
   {
@@ -579,17 +581,15 @@ export const documentEventStoreConformance = (
         "expected a missing-parent conflict to reject",
       );
       check(isConflict(error), "expected a DocumentEventConflictError");
-      if (isConflict(error)) {
-        checkEqual(
-          error.details.conflictType,
-          DOCUMENT_EVENT_CONFLICT_TYPE.MissingParentHistory,
-          "expected missing-parent-history",
-        );
-        check(
-          (error.details.missingParentIds ?? []).includes("event-1"),
-          "expected the missing parent id to be reported",
-        );
-      }
+      checkEqual(
+        error.details.conflictType,
+        DOCUMENT_EVENT_CONFLICT_TYPE.MissingParentHistory,
+        "expected missing-parent-history",
+      );
+      check(
+        (error.details.missingParentIds ?? []).includes("event-1"),
+        "expected the missing parent id to be reported",
+      );
     },
   },
   {
@@ -603,13 +603,11 @@ export const documentEventStoreConformance = (
         "expected a duplicate event id to reject",
       );
       check(isConflict(error), "expected a DocumentEventConflictError");
-      if (isConflict(error)) {
-        checkEqual(
-          error.details.conflictType,
-          DOCUMENT_EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
-          "expected duplicate-incoming-event-id",
-        );
-      }
+      checkEqual(
+        error.details.conflictType,
+        DOCUMENT_EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
+        "expected duplicate-incoming-event-id",
+      );
     },
   },
   {

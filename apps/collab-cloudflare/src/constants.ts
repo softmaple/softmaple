@@ -39,6 +39,24 @@ export const errorMessage = (
   retryable,
 });
 
+/**
+ * `String(someObject)` is `"[object Object]"`, which silently discarded the
+ * whole diagnosis whenever a non-`Error` was thrown (a raw PostgREST result
+ * error, for instance). Serialize structurally instead so the log always
+ * names the failure.
+ */
+const describeError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null) {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      // Circular or non-serializable: fall through to the string coercion.
+    }
+  }
+  return String(error);
+};
+
 export const logError = (
   error: unknown,
   context: Readonly<Record<string, unknown>>,
@@ -46,7 +64,7 @@ export const logError = (
   console.error(
     JSON.stringify({
       ...context,
-      error: error instanceof Error ? error.message : String(error),
+      error: describeError(error),
       errorName: error instanceof Error ? error.name : "UnknownError",
       message: "Cloudflare collaboration request failed",
     }),

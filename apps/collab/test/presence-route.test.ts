@@ -425,6 +425,85 @@ describe("collaboration presence route", () => {
       await route.close(peer);
     });
 
+    it("reports a denial as a non-retryable auth-error", async () => {
+      currentAccess = null;
+      const peer = await upgradedPeer();
+      await route.message(peer, authMessage(ROOM_ID, "connection-1"));
+      expect(peer.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: WS_MESSAGE.AUTH_ERROR,
+          payload: {
+            message: "Authentication or document membership failed",
+            retryable: false,
+          },
+        }),
+      );
+      await route.close(peer);
+    });
+
+    // Supabase or Prisma being unreachable says nothing about this user's
+    // membership. Reporting it as a denial is what made an outage surface in
+    // the browser as "Authentication or document membership failed" and left
+    // the presence adapter permanently in `error` instead of reconnecting.
+    it.each([
+      [
+        "the identity provider is unreachable",
+        () => {
+          mocks.authorizeDocument.mockImplementation(async () => {
+            throw new Error("supabase auth request failed");
+          });
+        },
+      ],
+      [
+        "the profile lookup fails",
+        () => {
+          mocks.findUniqueUser.mockImplementation(async () => {
+            throw new Error("prisma connection pool timeout");
+          });
+        },
+      ],
+    ])("closes 1011 with a retryable auth-error when %s", async (_name, fail) => {
+      fail();
+      const peer = await upgradedPeer();
+      await route.message(peer, authMessage(ROOM_ID, "connection-1"));
+      expect(peer.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: WS_MESSAGE.AUTH_ERROR,
+          payload: {
+            message: "Presence authorization is temporarily unavailable",
+            retryable: true,
+          },
+        }),
+      );
+      expect(peer.close).toHaveBeenCalledWith(
+        1011,
+        "Presence runtime unavailable",
+      );
+      expect(peer.close).not.toHaveBeenCalledWith(1008, "Unauthorized");
+      await route.close(peer);
+    });
+
+    it("authenticates a reconnect once the identity provider recovers", async () => {
+      mocks.authorizeDocument.mockImplementationOnce(async () => {
+        throw new Error("supabase auth request failed");
+      });
+      const failed = await upgradedPeer();
+      await route.message(failed, authMessage(ROOM_ID, "connection-1"));
+      expect(failed.close).toHaveBeenCalledWith(
+        1011,
+        "Presence runtime unavailable",
+      );
+      await route.close(failed);
+
+      // The outage must not strand the connection lease it never acquired.
+      const retried = await upgradedPeer();
+      await route.message(retried, authMessage(ROOM_ID, "connection-1"));
+      expect(retried.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: WS_MESSAGE.AUTH_OK }),
+      );
+      await route.close(retried);
+    });
+
     it("does not publish a Leave for an authorization failure", async () => {
       const observer = await authorizeAndJoin("observer", "observer-user");
       observer.send.mockClear();

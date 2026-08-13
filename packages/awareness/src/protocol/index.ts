@@ -17,6 +17,7 @@ export {
   type PresencePatchApplication,
 } from "./member";
 export {
+  type AuthErrorPayload,
   type AuthPayload,
   type ErrorPayload,
   type HeartbeatPayload,

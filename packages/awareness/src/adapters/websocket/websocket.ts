@@ -269,7 +269,15 @@ export const createWebSocketAdapter = (
     }
     if (result.error !== undefined) {
       subscriptions.notifyError(result.error);
-      if (message.type === WS_MESSAGE.AUTH_ERROR) {
+      // A retryable auth error means the server could not reach its
+      // authorization dependencies, not that this credential was rejected.
+      // Leave the socket alone so its close drives the normal reconnect
+      // backoff; tearing down here would strand presence in `error` until
+      // the adapter is recreated.
+      if (
+        message.type === WS_MESSAGE.AUTH_ERROR &&
+        result.authErrorRetryable !== true
+      ) {
         setState({ connectionState: "error" });
         cleanupWebSocket(internal, handlers);
       }

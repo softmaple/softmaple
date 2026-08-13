@@ -313,6 +313,38 @@ describe("WebSocket Message Utilities", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.message).toContain("AUTH_FAILED");
     });
+
+    it("marks a retryable AUTH_ERROR so the adapter can reconnect", () => {
+      const message = createMessage(WS_MESSAGE.AUTH_ERROR, "room-1", "server", {
+        message: "Presence authorization is temporarily unavailable",
+        retryable: true,
+      });
+
+      const result = processMessage(state, message, selfId);
+      expect(result.error?.message).toBe(
+        "Presence authorization is temporarily unavailable",
+      );
+      expect(result.authErrorRetryable).toBe(true);
+    });
+
+    it("treats a denial AUTH_ERROR as non-retryable", () => {
+      const message = createMessage(WS_MESSAGE.AUTH_ERROR, "room-1", "server", {
+        message: "Authentication or document membership failed",
+        retryable: false,
+      });
+
+      const result = processMessage(state, message, selfId);
+      expect(result.authErrorRetryable).toBe(false);
+    });
+
+    it("fails closed when AUTH_ERROR omits the retryable flag", () => {
+      const message = createMessage(WS_MESSAGE.AUTH_ERROR, "room-1", "server", {
+        message: "Authentication or document membership failed",
+      });
+
+      const result = processMessage(state, message, selfId);
+      expect(result.authErrorRetryable).toBe(false);
+    });
   });
 });
 
@@ -633,6 +665,95 @@ describe("WebSocket adapter public API", () => {
     expect(fakeSockets.length).toBeGreaterThanOrEqual(2);
     completeReadyHandshake(fakeSockets[1]!);
     expect(adapter.getConnectionState()).toBe("connected");
+
+    await adapter.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("recovers from a retryable auth error once the server is available", async () => {
+    vi.useFakeTimers();
+    const adapter = createWebSocketAdapter({
+      ...baseConfig,
+      authToken: "jwt",
+      reconnect: {
+        enabled: true,
+        maxAttempts: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 100,
+      },
+    });
+    const errors: Error[] = [];
+    adapter.onError((error) => {
+      errors.push(error);
+    });
+
+    // `connect()` still rejects — the first attempt genuinely failed — but
+    // the adapter must keep trying rather than latching into `error`.
+    const rejection: Promise<Error | null> = adapter.connect().then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    fakeSockets[0]?.emitOpen();
+    fakeSockets[0]?.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.AUTH_ERROR, "room-1", "server", {
+          message: "Presence authorization is temporarily unavailable",
+          retryable: true,
+        }),
+      ),
+    );
+    expect(adapter.getConnectionState()).not.toBe("error");
+
+    fakeSockets[0]?.emitClose();
+    expect(adapter.getConnectionState()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(fakeSockets.length).toBeGreaterThanOrEqual(2);
+    completeReadyHandshake(fakeSockets[1]!, "room-1", { authOk: true });
+    expect(adapter.getConnectionState()).toBe("connected");
+
+    expect((await rejection)?.message).toBe(
+      "Presence authorization is temporarily unavailable",
+    );
+    expect(errors).toHaveLength(1);
+
+    await adapter.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("stops reconnecting when the auth error is a denial", async () => {
+    vi.useFakeTimers();
+    const adapter = createWebSocketAdapter({
+      ...baseConfig,
+      authToken: "jwt",
+      reconnect: {
+        enabled: true,
+        maxAttempts: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 100,
+      },
+    });
+
+    const rejection: Promise<Error | null> = adapter.connect().then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    fakeSockets[0]?.emitOpen();
+    fakeSockets[0]?.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.AUTH_ERROR, "room-1", "server", {
+          message: "Authentication or document membership failed",
+          retryable: false,
+        }),
+      ),
+    );
+
+    expect(adapter.getConnectionState()).toBe("error");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fakeSockets).toHaveLength(1);
+    expect((await rejection)?.message).toBe(
+      "Authentication or document membership failed",
+    );
 
     await adapter.disconnect();
     vi.useRealTimers();

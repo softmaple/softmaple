@@ -3,6 +3,7 @@ import type {
   PresenceIdentity,
   PresenceSessionHooks,
 } from "@softmaple/collab-runtime";
+import { supabaseQueryError } from "./supabase-error";
 import type { CollabDatabase } from "./supabaseTypes";
 
 /**
@@ -127,7 +128,9 @@ const resolveIdentity = async (
     .select("id,workspace_id")
     .eq("id", roomId)
     .maybeSingle();
-  if (documentError !== null) throw documentError;
+  if (documentError !== null) {
+    throw supabaseQueryError("presence document lookup", documentError);
+  }
   const document = documentRow(rawDocument as unknown);
   if (document === null) return null;
 
@@ -146,10 +149,14 @@ const resolveIdentity = async (
       .eq("id", userId)
       .maybeSingle(),
   ]);
-  if (memberResult.error !== null) throw memberResult.error;
+  if (memberResult.error !== null) {
+    throw supabaseQueryError("presence membership lookup", memberResult.error);
+  }
   if (memberRow(memberResult.data as unknown) === null) return null;
 
-  if (userResult.error !== null) throw userResult.error;
+  if (userResult.error !== null) {
+    throw supabaseQueryError("presence profile lookup", userResult.error);
+  }
   const user = userRow(userResult.data as unknown);
   if (user === null) return null;
 

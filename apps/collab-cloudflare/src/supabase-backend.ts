@@ -14,6 +14,7 @@ import {
   type DocumentAccess,
 } from "@softmaple/collab-runtime";
 import type { DocumentBackend } from "./room-services";
+import { supabaseQueryError } from "./supabase-error";
 import type { CollabDatabase } from "./supabaseTypes";
 
 interface SupabaseBackendEnv {
@@ -205,7 +206,7 @@ const authorizePublic = async (
     .eq("id", documentId)
     .eq("is_public", true)
     .maybeSingle();
-  if (error !== null) throw error;
+  if (error !== null) throw supabaseQueryError("public document lookup", error);
   const document = documentRow(data as unknown);
   if (document === null || !document.is_public) return null;
   return publicDocumentAccess();
@@ -233,7 +234,9 @@ const authorizeAuthenticated = async (
     .select("id,is_public,workspace_id")
     .eq("id", documentId)
     .maybeSingle();
-  if (documentError !== null) throw documentError;
+  if (documentError !== null) {
+    throw supabaseQueryError("document lookup", documentError);
+  }
   const document = documentRow(rawDocument as unknown);
   if (document === null) return null;
 
@@ -243,7 +246,9 @@ const authorizeAuthenticated = async (
     .eq("user_id", userId)
     .eq("workspace_id", document.workspace_id)
     .maybeSingle();
-  if (memberError !== null) throw memberError;
+  if (memberError !== null) {
+    throw supabaseQueryError("membership lookup", memberError);
+  }
   const member = memberRow(rawMember as unknown);
   if (member === null) {
     return document.is_public ? publicDocumentAccess() : null;

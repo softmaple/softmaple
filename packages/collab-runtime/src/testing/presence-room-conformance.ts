@@ -32,6 +32,10 @@ const framesOfType = (
 ): unknown[] =>
   peer.sent.filter((frame) => isRecord(frame) && frame.type === type);
 
+/** The `{ message, retryable }` body of an auth-error frame, or null. */
+const authErrorPayload = (frame: unknown): unknown =>
+  isRecord(frame) ? (frame.payload ?? null) : null;
+
 const wire = (
   type: string,
   roomId: string,
@@ -113,7 +117,7 @@ export const presenceRoomConformance = (
   factory: PresenceRoomFactory,
 ): ConformanceCase[] => [
   {
-    name: "Auth denial closes 1008 and sends auth-error",
+    name: "Auth denial closes 1008 and sends a non-retryable auth-error",
     async run() {
       const { room, sessions } = factory();
       sessions.authorizeImpl = async () => null;
@@ -121,9 +125,71 @@ export const presenceRoomConformance = (
       await room.join(peer);
       await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
       checkEqual(peer.closes[0]?.code, 1008, "expected a 1008 close on denial");
+      const frames = framesOfType(peer, PRESENCE_FRAME.AuthError);
+      check(frames.length === 1, "expected exactly one auth-error frame");
+      checkEqual(
+        authErrorPayload(frames[0]),
+        {
+          message: "Authentication or document membership failed",
+          retryable: false,
+        },
+        "expected a denial to be reported as non-retryable",
+      );
+    },
+  },
+  {
+    name: "an unavailable authorization provider closes 1011 and sends a retryable auth-error",
+    async run() {
+      const { room, sessions } = factory();
+      sessions.authorizeImpl = async () => {
+        throw new Error("authorization provider unreachable");
+      };
+      const peer = createRecordingPresencePeer("connection-1");
+      await room.join(peer);
+      await room.receive(peer, authWire(ROOM_ID, "connection-1", "user-1"));
+      checkEqual(
+        peer.closes[0]?.code,
+        1011,
+        "expected a 1011 close when the provider is unavailable",
+      );
+      const frames = framesOfType(peer, PRESENCE_FRAME.AuthError);
+      check(frames.length === 1, "expected exactly one auth-error frame");
+      checkEqual(
+        authErrorPayload(frames[0]),
+        {
+          message: "Presence authorization is temporarily unavailable",
+          retryable: true,
+        },
+        "expected an outage to be reported as retryable, not as a denial",
+      );
+    },
+  },
+  {
+    name: "an unavailable authorization provider still admits a later Auth once it recovers",
+    async run() {
+      const { room, sessions } = factory();
+      const working = sessions.authorizeImpl;
+      sessions.authorizeImpl = async () => {
+        throw new Error("authorization provider unreachable");
+      };
+      const failed = createRecordingPresencePeer("connection-1");
+      await room.join(failed);
+      await room.receive(failed, authWire(ROOM_ID, "connection-1", "user-1"));
+
+      // The outage must not have leaked a connection lease or left room
+      // state that blocks the client's reconnect.
+      sessions.authorizeImpl = working;
+      const retried = createRecordingPresencePeer("connection-1");
+      await room.join(retried);
+      await room.receive(retried, authWire(ROOM_ID, "connection-1", "user-1"));
       check(
-        framesOfType(peer, PRESENCE_FRAME.AuthError).length === 1,
-        "expected exactly one auth-error frame",
+        framesOfType(retried, PRESENCE_FRAME.AuthOk).length === 1,
+        "expected the reconnect after an outage to authenticate",
+      );
+      checkEqual(
+        retried.closes.length,
+        0,
+        "expected the reconnect to stay open",
       );
     },
   },

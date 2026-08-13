@@ -9,8 +9,11 @@ import { config } from "@softmaple/eslint-config/base";
 // symmetrically for the document side. `src/index.ts` and `test/worker.ts`
 // are composition roots that legitimately wire both sides, so neither glob
 // below includes them.
+// `supabase-error` belongs here for the same reason as `constants`: it is a
+// pure formatting function over a PostgREST result error, holding no client,
+// no state, and no capability instance for either side to share.
 const SHARED_UTILITY_FILES =
-  "constants|document-id|origin|message-bytes|supabaseTypes";
+  "constants|document-id|origin|message-bytes|supabase-error|supabaseTypes";
 const PRESENCE_OWN_FILES =
   "presence-[\\w-]*|awareness-presence-codec|supabase-presence-backend|memory-presence-backend";
 const DOCUMENT_OWN_FILES =

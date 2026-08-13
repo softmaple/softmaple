@@ -1,9 +1,13 @@
 import type { CollabCredential } from "@softmaple/collab-protocol";
-import type { ConnectionLease } from "./connection-limiter";
+import type {
+  ConnectionAdmission,
+  ConnectionLease,
+} from "./connection-limiter";
 import { ROOM_LEAVE_REASON, type RoomLeaveReason } from "./document-room";
 import {
   PRESENCE_FRAME,
   PRESENCE_MESSAGE,
+  type PresenceAuthPayload,
   type PresenceEnvelope,
   type PresenceMessageKind,
   type PresencePatch,
@@ -404,22 +408,41 @@ class RuntimePresenceRoom implements PresenceRoom {
     state: PeerState,
     envelope: PresenceEnvelope,
   ): Promise<void> {
+    let auth: PresenceAuthPayload;
     try {
-      const auth = this.services.codec.parseAuth(envelope.payload);
+      auth = this.services.codec.parseAuth(envelope.payload);
       if (envelope.senderId !== auth.connectionId) {
         throw new Error("presence sender mismatch");
       }
+    } catch (error) {
+      // A frame this room cannot parse is a client defect, not an outage:
+      // retrying the same handshake would fail identically.
+      await this.denyAuthentication(state, error);
+      return;
+    }
 
-      const identity = await this.services.sessions.authorize({
+    let identity: PresenceIdentity | null;
+    try {
+      identity = await this.services.sessions.authorize({
         connectionId: auth.connectionId,
         credential: auth.credential,
         roomId: this.roomId,
         userId: auth.userId,
       });
-      if (identity === null) {
-        throw new Error("presence membership denied");
-      }
+    } catch (error) {
+      // The provider never returned a decision, so access was not denied.
+      await this.failTemporaryAuthentication(state, error, "auth-provider");
+      return;
+    }
+    if (identity === null) {
+      await this.denyAuthentication(
+        state,
+        new Error("presence membership denied"),
+      );
+      return;
+    }
 
+    try {
       if (state.leaveRequested || this.closed) {
         await this.resetState(
           state,
@@ -433,12 +456,22 @@ class RuntimePresenceRoom implements PresenceRoom {
 
       // Set before admission so a concurrent cleanup can identify the peer.
       state.connectionId = auth.connectionId;
-      const admission = await this.services.connections.acquire({
-        documentId: this.roomId,
-        peerId: auth.connectionId,
-        policy: this.services.policy.connection,
-        sessionId: auth.connectionId,
-      });
+      let admission: ConnectionAdmission;
+      try {
+        admission = await this.services.connections.acquire({
+          documentId: this.roomId,
+          peerId: auth.connectionId,
+          policy: this.services.policy.connection,
+          sessionId: auth.connectionId,
+        });
+      } catch (admissionError) {
+        await this.failTemporaryAuthentication(
+          state,
+          admissionError,
+          "auth-admission",
+        );
+        return;
+      }
       if (!admission.accepted) {
         state.leaveRequested = true;
         await this.closePeer(
@@ -506,24 +539,79 @@ class RuntimePresenceRoom implements PresenceRoom {
         "auth-ok",
       );
     } catch (error) {
-      this.report(error, state, "auth");
-      state.leaveRequested = true;
-      await this.resetState(
-        state,
-        true,
-        PRESENCE_SESSION_END_REASON.AccessRevoked,
-      );
+      // Access was already granted above, so anything failing here is a
+      // runtime fault rather than a rejected credential.
+      await this.failTemporaryAuthentication(state, error, "auth-admission");
+    }
+  }
+
+  /**
+   * Terminal outcome for a credential this room refuses: the same handshake
+   * cannot succeed on a retry, so the client is told not to reconnect.
+   */
+  private async denyAuthentication(
+    state: PeerState,
+    error: unknown,
+  ): Promise<void> {
+    this.report(error, state, "auth");
+    state.leaveRequested = true;
+    await this.resetState(
+      state,
+      true,
+      PRESENCE_SESSION_END_REASON.AccessRevoked,
+    );
+    await this.sendAuthError(
+      state,
+      "Authentication or document membership failed",
+      false,
+    );
+    await this.closePeer(state.peer, 1008, "Unauthorized");
+  }
+
+  /**
+   * Outcome for an authorization that never completed because a dependency
+   * (identity provider, connection lease store, persistence) was
+   * unavailable. Access was neither granted nor denied, so the peer is told
+   * the failure is retryable and closed 1011 like every other presence
+   * runtime fault — a reconnect can still succeed once the dependency
+   * recovers. Collapsing these into the denial path above is what made an
+   * outage read as "Authentication or document membership failed" and left
+   * the client permanently in `error` instead of reconnecting.
+   */
+  private async failTemporaryAuthentication(
+    state: PeerState,
+    error: unknown,
+    messageType: string,
+  ): Promise<void> {
+    this.report(error, state, messageType);
+    state.leaveRequested = true;
+    await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+    await this.sendAuthError(
+      state,
+      "Presence authorization is temporarily unavailable",
+      true,
+    );
+    await this.closePeer(state.peer, 1011, "Presence runtime unavailable");
+  }
+
+  private async sendAuthError(
+    state: PeerState,
+    message: string,
+    retryable: boolean,
+  ): Promise<void> {
+    try {
       await this.sendIgnoringFailure(
         state.peer,
         this.services.codec.encode(
           PRESENCE_FRAME.AuthError,
           this.roomId,
           "server",
-          { message: "Authentication or document membership failed" },
+          { message, retryable },
         ),
         "auth-error",
       );
-      await this.closePeer(state.peer, 1008, "Unauthorized");
+    } catch (encodeError) {
+      this.report(encodeError, state, "auth-error-encode");
     }
   }
 

@@ -87,6 +87,22 @@ export interface HeartbeatPayload {
 }
 
 /**
+ * Auth failure payload.
+ *
+ * `retryable` separates the two outcomes that used to share one message:
+ * `false` means the room decided against this credential (membership
+ * denied, malformed handshake) and reconnecting cannot change that;
+ * `true` means the room never reached a decision because a dependency —
+ * identity provider, lease store, persistence — was unavailable, so a
+ * reconnect can still succeed. Servers predating the flag omit it, so an
+ * absent value keeps the original fail-closed behaviour.
+ */
+export interface AuthErrorPayload {
+  readonly message: string;
+  readonly retryable?: boolean;
+}
+
+/**
  * Auth handshake payload
  */
 export interface AuthPayload {

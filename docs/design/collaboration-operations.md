@@ -180,6 +180,43 @@ metrics backend, set explicit thresholds, and add alerts. Until then, use the
 local suites as pre-merge gates and a deliberate, retained-log review plus
 deployed smoke tests as rollout gates.
 
+## Diagnosing a presence connection failure
+
+Presence surfaces two distinct auth-error frames, and the browser message
+tells you which layer to look at. Both runtimes share the same
+`PresenceRoom`, so this taxonomy applies to Nitro and Cloudflare alike.
+
+| Browser console | Close code | Client behavior | What it means |
+| --- | --- | --- | --- |
+| `Authentication or document membership failed` | 1008 | Adapter stops; `Presence error` in the UI until the page reloads | The room reached a decision and refused: the caller is not an authenticated member of the document's workspace, the claimed `userId` does not match the token's `sub`, the `users` row is missing, or the Auth frame did not parse. Reconnecting cannot help. |
+| `Presence authorization is temporarily unavailable` | 1011 | Adapter reconnects with backoff and recovers on its own | The room never reached a decision because a dependency failed — Supabase auth, the Prisma profile read, or the connection-lease store (Redis on Nitro). Check `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY`, `DATABASE_URL`, and `REDIS_URL` for the collab host, not the user's membership. |
+
+Both frames carry a `retryable` boolean; the client fails closed when it is
+absent, so a server predating the flag still behaves as it did before.
+
+The matching server log is `Presence request failed` (Nitro) or
+`Cloudflare collaboration request failed` (Workers), keyed by `messageType`:
+
+| `messageType` | Failing step |
+| --- | --- |
+| `auth` | The room refused the credential, or the Auth frame did not parse |
+| `auth-provider` | `PresenceSessionHooks.authorize` threw — Supabase auth, or one of the `documents` / `workspace_members` / `users` reads |
+| `auth-admission` | The connection-lease store or peer persistence threw |
+| `auth-fanout` | The fan-out subscription could not be retained |
+
+Read that log before treating a presence failure as a membership problem —
+the generic denial message is not evidence that the credential was rejected.
+
+Both hosts serialize a thrown non-`Error` structurally. PostgREST reports
+query failures as a plain `{ code, details, hint, message }` object rather
+than an `Error`, so a re-thrown result error used to log as
+`errorName: "UnknownError"` with `error: "[object Object]"`, discarding the
+diagnosis. The Cloudflare Supabase backends now wrap those results with
+`supabaseQueryError`, so the log names the query (`presence membership
+lookup failed: 42501 | permission denied for table workspace_members`).
+A `42501`/`PGRST` code there points at the Worker's `SUPABASE_SERVICE_ROLE_KEY`
+secret or a row-level-security policy, not at the user's membership.
+
 ## Known limitations and vendor-specific behavior
 
 - Repository state shows no Cloudflare CD pipeline or declared route, but it

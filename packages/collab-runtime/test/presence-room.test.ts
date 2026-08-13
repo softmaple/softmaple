@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PRESENCE_ROOM_POLICY,
+  PRESENCE_FRAME,
   createPresenceRoom,
   type PresenceRoomOptions,
 } from "../src";
@@ -81,9 +82,99 @@ describe("createPresenceRoom metrics", () => {
     expect(metrics).toHaveBeenCalledWith({
       type: "message-error",
       errorKind: "Error",
-      messageType: "auth",
+      messageType: "auth-provider",
       roomId,
     });
+
+    await room.close();
+  });
+
+  it("reports an admission outage separately from a denied credential", async () => {
+    const roomId = "room-admission";
+    const metrics = vi.fn();
+    const room = createPresenceRoom(roomId, {
+      codec: createOpaqueTestCodec(),
+      connections: {
+        acquire: async () => {
+          throw new Error("lease store command timed out");
+        },
+      },
+      fanout: createMemoryPresenceFanout(),
+      metrics,
+      policy: DEFAULT_PRESENCE_ROOM_POLICY,
+      sessions: createStubPresenceSessionHooks(),
+      store: createMemoryPresenceStore(),
+    });
+
+    const peer = createRecordingPresencePeer("connection-1");
+    await room.join(peer);
+    await room.receive(
+      peer,
+      wire(TEST_PRESENCE_WIRE_TYPE.Auth, roomId, "connection-1", {
+        connectionId: "connection-1",
+        credential: { kind: "access-token", token: "test-token" },
+        userId: "user-1",
+      }),
+    );
+
+    // A lease store that never answered says nothing about membership, so
+    // the peer must not be told its credential was rejected.
+    expect(peer.sent).toEqual([
+      {
+        payload: {
+          message: "Presence authorization is temporarily unavailable",
+          retryable: true,
+        },
+        roomId,
+        senderId: "server",
+        type: PRESENCE_FRAME.AuthError,
+      },
+    ]);
+    expect(peer.closes).toEqual([
+      { code: 1011, reason: "Presence runtime unavailable" },
+    ]);
+    expect(metrics).toHaveBeenCalledWith({
+      type: "message-error",
+      errorKind: "Error",
+      messageType: "auth-admission",
+      roomId,
+    });
+
+    await room.close();
+  });
+
+  it("still denies an unparseable Auth frame without offering a retry", async () => {
+    const roomId = "room-malformed";
+    const room = createPresenceRoom(roomId, {
+      codec: createOpaqueTestCodec(),
+      connections: createMemoryConnectionLimiter(),
+      fanout: createMemoryPresenceFanout(),
+      policy: DEFAULT_PRESENCE_ROOM_POLICY,
+      sessions: createStubPresenceSessionHooks(),
+      store: createMemoryPresenceStore(),
+    });
+
+    const peer = createRecordingPresencePeer("connection-1");
+    await room.join(peer);
+    await room.receive(
+      peer,
+      wire(TEST_PRESENCE_WIRE_TYPE.Auth, roomId, "connection-1", {
+        connectionId: "connection-1",
+      }),
+    );
+
+    expect(peer.sent).toEqual([
+      {
+        payload: {
+          message: "Authentication or document membership failed",
+          retryable: false,
+        },
+        roomId,
+        senderId: "server",
+        type: PRESENCE_FRAME.AuthError,
+      },
+    ]);
+    expect(peer.closes).toEqual([{ code: 1008, reason: "Unauthorized" }]);
 
     await room.close();
   });

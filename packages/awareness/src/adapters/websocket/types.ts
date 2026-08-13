@@ -11,6 +11,7 @@
 import type { AdapterConfig, ReconnectConfig } from "../types";
 
 export {
+  type AuthErrorPayload,
   type AuthPayload,
   type ErrorPayload,
   type HeartbeatPayload,

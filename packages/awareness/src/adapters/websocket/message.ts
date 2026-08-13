@@ -42,6 +42,12 @@ export interface MessageProcessResult {
   readonly syncCompleted?: boolean;
   /** True when auth succeeded */
   readonly authOk?: boolean;
+  /**
+   * Set on an auth-error frame: true when the server reported the failure as
+   * a transient dependency outage rather than a rejected credential, so the
+   * adapter should reconnect instead of failing permanently.
+   */
+  readonly authErrorRetryable?: boolean;
   /** Heartbeat ack pingId when applicable */
   readonly heartbeatAckPingId?: string;
 }
@@ -291,14 +297,18 @@ export const processMessage = (
     }
 
     case WS_MESSAGE.AUTH_ERROR: {
+      const payload = isRecord(message.payload) ? message.payload : null;
       const messageText =
-        isRecord(message.payload) && typeof message.payload.message === "string"
-          ? message.payload.message
+        typeof payload?.message === "string"
+          ? payload.message
           : "Authentication failed";
       return {
         state,
         shouldNotifyPresence: false,
         error: new Error(messageText),
+        // Anything other than an explicit `true` fails closed, so a server
+        // that does not send the flag keeps the original behaviour.
+        authErrorRetryable: payload?.retryable === true,
       };
     }
 

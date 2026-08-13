@@ -48,4 +48,44 @@ describe("logError", () => {
       message: "Cloudflare collaboration request failed",
     });
   });
+
+  // A raw PostgREST result error is a plain object, and `String(...)` on it
+  // logged "[object Object]" — the whole diagnosis was lost.
+  it("serializes a thrown non-Error instead of collapsing it", () => {
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    logError(
+      {
+        code: "42501",
+        details: null,
+        hint: null,
+        message: "permission denied for table users",
+      },
+      { messageType: "auth", roomId: "room-1" },
+    );
+
+    const logged = JSON.parse(error.mock.calls[0]?.[0] as string) as {
+      error: string;
+    };
+    expect(logged.error).not.toBe("[object Object]");
+    expect(logged.error).toContain("42501");
+    expect(logged.error).toContain("permission denied for table users");
+  });
+
+  it("falls back to string coercion for a non-serializable value", () => {
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    logError(circular, { messageType: "auth" });
+
+    expect(JSON.parse(error.mock.calls[0]?.[0] as string)).toMatchObject({
+      error: "[object Object]",
+      errorName: "UnknownError",
+    });
+  });
 });

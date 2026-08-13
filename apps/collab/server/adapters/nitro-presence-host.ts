@@ -26,6 +26,23 @@ export interface NitroPresenceTransportPeer {
   send(message: unknown): unknown;
 }
 
+/**
+ * `String(someObject)` is `"[object Object]"`, which discards the diagnosis
+ * whenever a non-`Error` is thrown (a raw PostgREST/driver result error, for
+ * instance). Serialize structurally so the log always names the failure.
+ */
+const describeError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null) {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      // Circular or non-serializable: fall through to the string coercion.
+    }
+  }
+  return String(error);
+};
+
 const logHostError = (
   error: unknown,
   roomId: string | null,
@@ -35,7 +52,7 @@ const logHostError = (
     roomId,
     messageType,
     errorName: error instanceof Error ? error.name : "UnknownError",
-    errorMessage: error instanceof Error ? error.message : String(error),
+    errorMessage: describeError(error),
     stack: error instanceof Error ? error.stack : undefined,
   });
 };

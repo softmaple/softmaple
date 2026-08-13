@@ -319,7 +319,9 @@ describe("DocumentPresence auth lifecycle", () => {
     expect(connectResolvers).toHaveLength(1);
     const resolveUser1Connect = connectResolvers[0];
     if (resolveUser1Connect === undefined) {
-      throw new Error("expected the user-1 adapter connect() to remain pending");
+      throw new Error(
+        "expected the user-1 adapter connect() to remain pending",
+      );
     }
     expect(container.textContent).not.toContain("Connecting presence");
 
@@ -356,7 +358,9 @@ describe("DocumentPresence auth lifecycle", () => {
     expect(connectResolvers).toHaveLength(2);
     const resolveUser2Connect = connectResolvers[1];
     if (resolveUser2Connect === undefined) {
-      throw new Error("expected the user-2 adapter connect() to remain pending");
+      throw new Error(
+        "expected the user-2 adapter connect() to remain pending",
+      );
     }
 
     await act(async () => {

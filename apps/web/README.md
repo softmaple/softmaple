@@ -106,7 +106,7 @@ forth is reversible with no document-history migration.
 | --- | --- |
 | `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` | Base WS URL for the deployed Cloudflare worker (e.g. `wss://softmaple-collab-cloudflare.<subdomain>.workers.dev`). **Unset by default** — until this is set, every document stays on Nitro regardless of the other variables below. |
 | `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT` | `0`-`100`. Percentage of documents deterministically bucketed onto Cloudflare by a stable hash of the document id. Defaults to `0`. |
-| `COLLAB_RUNTIME_OVERRIDE` | `nitro` or `cloudflare`. Global override applied to any document not on the allow/deny list below — used to test Cloudflare in an internal/preview environment (Stage 1-2), or as an instant rollback lever. |
+| `COLLAB_RUNTIME_OVERRIDE` | `nitro` or `cloudflare`. Global override applied to any document not on the allow/deny list below — used to test Cloudflare in an internal/preview environment (Stage 1-2), or as a quick rollback lever for the percentage cohort. It does **not** move allow-listed documents: those stay on Cloudflare regardless of this variable, since the allowlist takes precedence. A complete rollback needs to also clear `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` (or move the affected ids to `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST`), or clear `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` entirely. |
 | `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` | Comma-separated document ids always routed to Cloudflare, regardless of percent/override. |
 | `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST` | Comma-separated document ids always routed to Nitro. Takes precedence over the allowlist — the strongest per-document rollback lever. |
 
@@ -122,9 +122,11 @@ until the tab reconnects or reloads. So a config change (percent/override/
 allow-deny list) does not move already-connected tabs — they keep talking
 to whichever runtime they opened against, and won't pick up the new
 decision until their next reconnect or a full page reload. **Two tabs open
-on the same document across a config change will therefore briefly be on
-different runtimes**, with no cross-talk between them until Supabase's
-durable event log reconciles on reconnect/repair.
+on the same document across a config change will therefore be on
+different runtimes for as long as the older tab stays open and
+unreloaded** — potentially indefinitely, not just for a moment — with no
+cross-talk between them until Supabase's durable event log reconciles on
+reconnect/repair.
 
 Because of this, treat any rollout config change that could move a
 document already being edited (percent/override changes; adding/removing

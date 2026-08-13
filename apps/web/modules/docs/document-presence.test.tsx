@@ -77,6 +77,7 @@ vi.mock("@/modules/docs/doc-editor", async () => {
             registerUpdateListener: () => () => undefined,
           },
           getBlockIndex: () => ({ blockIdToNodeKey: new Map() }),
+          replica: { subscribe: () => () => undefined },
         });
       }, [onExternalBindingChange]);
       return null;
@@ -191,6 +192,73 @@ describe("DocumentPresence auth lifecycle", () => {
 
     expect(createWebSocketAdapter).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Presence session is unavailable.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("does not expose a stale adapter as live after collabRuntime changes mid-connect", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const documentId = "00000000-0000-4000-8000-000000000001";
+    const baseProps = {
+      avatarUrl: null,
+      documentId,
+      name: "Ada",
+      presenceEnabled: true,
+      userId: "user-1",
+    };
+
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, {
+          ...baseProps,
+          collabRuntime: COLLAB_RUNTIME.Nitro,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-nitro" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Connecting presence");
+
+    // Switch to cloudflare before the new connection attempt resolves.
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, {
+          ...baseProps,
+          collabRuntime: COLLAB_RUNTIME.Cloudflare,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    // The nitro adapter must be disconnected and never shown as live for
+    // the new (cloudflare) props while the new connection is in flight.
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connecting presence");
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-cloudflare" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Connecting presence");
 
     await act(async () => {
       root.unmount();

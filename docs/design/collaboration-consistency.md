@@ -81,9 +81,10 @@ HTTP appends use a different surface. In `document-events.post.ts`,
 `EventConflictError` maps to **HTTP 409** with an `{ error }` body (the conflict
 message string only). Structured fields such as `missingParentIds` exist on the
 server-side `EventConflictError` instance; they are not included in that HTTP
-response. On the realtime route, the same details are written to server logs via
-`logRouteError` as bounded samples and are not sent on the WebSocket `Error`
-payload.
+response. Both this route and the realtime `DocumentRoom` path write the same
+structured details (conflict type, bounded batch/event id samples) to server
+logs via `logDocumentMetric` (`apps/collab/server/adapters/nitro-document-host.ts`)
+and are not sent on the WebSocket `Error` payload.
 
 Implementation: `EVENT_CONFLICT_TYPE` / `EventConflictError` in
 `apps/collab/server/utils/event-conflict.ts`.

@@ -5,6 +5,7 @@ import {
   type PresencePeer,
   type PresencePeerSnapshot,
   type PresenceRoom,
+  type PresenceRoomMetricEvent,
   type PresenceRoomServices,
   type RoomLeaveReason,
 } from "@softmaple/collab-runtime";
@@ -39,10 +40,15 @@ const logHostError = (
   });
 };
 
+const logPresenceMetric = (event: PresenceRoomMetricEvent): void => {
+  console.log("Presence metric", event);
+};
+
 const roomServices: PresenceRoomServices = {
   codec: awarenessPresenceCodec,
   connections: realtimePresenceConnectionLimiter,
   fanout: realtimePresenceFanout,
+  metrics: logPresenceMetric,
   policy: DEFAULT_PRESENCE_ROOM_POLICY,
   reportError(error, context) {
     logHostError(error, context.roomId, context.messageType ?? "unknown");

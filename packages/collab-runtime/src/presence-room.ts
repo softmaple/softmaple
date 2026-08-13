@@ -86,6 +86,8 @@ export interface PresenceRoomServices {
   readonly codec: PresenceCodec;
   readonly connections: ConnectionLimiter;
   readonly fanout: PresenceFanout;
+  /** Optional host metrics sink; recorder failures are ignored by the room. */
+  readonly metrics?: PresenceRoomMetricsRecorder;
   readonly policy: PresenceRoomPolicy;
   /** Optional host observability; reporter failures are ignored by the room. */
   readonly reportError?: PresenceRoomErrorReporter;
@@ -102,6 +104,22 @@ export interface PresenceRoomErrorContext {
 export type PresenceRoomErrorReporter = (
   error: unknown,
   context: PresenceRoomErrorContext,
+) => void;
+
+/**
+ * Structured, typed room events for comparing runtimes — mirrors
+ * `DocumentRoomMetricEvent`. Presence has no store-level conflict taxonomy
+ * of its own, so every `report()`-routed failure is `"message-error"`.
+ */
+export type PresenceRoomMetricEvent = {
+  readonly errorKind: string;
+  readonly messageType?: string;
+  readonly roomId: string;
+  readonly type: "message-error";
+};
+
+export type PresenceRoomMetricsRecorder = (
+  event: PresenceRoomMetricEvent,
 ) => void;
 
 /**

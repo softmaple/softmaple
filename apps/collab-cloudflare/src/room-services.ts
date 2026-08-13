@@ -8,7 +8,7 @@ import {
   createDurableObjectConnectionLimiter,
   createDurableObjectRoomFanout,
 } from "./do-capabilities";
-import { logError } from "./constants";
+import { logError, logMetric } from "./constants";
 import { createSupabaseDocumentBackend } from "./supabase-backend";
 
 export interface DocumentBackend {
@@ -24,6 +24,7 @@ export const createRoomServicesForBackend = (
     connections: createDurableObjectConnectionLimiter(),
     events: backend.events,
     fanout: createDurableObjectRoomFanout(),
+    metrics: logMetric,
     policy: DEFAULT_DOCUMENT_ROOM_POLICY,
     reportError(error, context) {
       logError(error, {

@@ -17,7 +17,7 @@ import {
   type EventConflictType,
 } from "../utils/event-conflict";
 
-const runtimeConflictType = (
+export const runtimeConflictType = (
   conflictType: EventConflictType,
 ): DocumentEventConflictType => {
   switch (conflictType) {

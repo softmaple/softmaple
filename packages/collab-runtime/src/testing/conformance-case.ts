@@ -46,3 +46,16 @@ export const checkEqual = <T>(
     );
   }
 };
+
+/** Runs `fn`, returning the thrown value, or throws if `fn` did not reject. */
+export const expectRejection = async (
+  fn: () => Promise<unknown>,
+  message: string,
+): Promise<unknown> => {
+  try {
+    await fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error(message);
+};

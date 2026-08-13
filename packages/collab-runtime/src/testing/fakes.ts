@@ -4,6 +4,15 @@ import {
   type ConnectionLimiter,
 } from "../connection-limiter";
 import {
+  DOCUMENT_EVENT_CONFLICT_TYPE,
+  DOCUMENT_EVENT_PAGE_LIMIT,
+  DocumentEventConflictError,
+  type DocumentEventBatches,
+  type DocumentEventCursor,
+  type DocumentEventPage,
+  type DocumentEventStore,
+} from "../event-store";
+import {
   PRESENCE_MESSAGE,
   type PresenceCodec,
   type PresenceEnvelope,
@@ -478,3 +487,156 @@ export const createOpaqueTestCodec = (): PresenceCodec => ({
     } as PresencePatch & TestPatchPayload;
   },
 });
+
+type StoredDocumentBatch = {
+  readonly batch: DocumentEventBatches[number];
+  readonly canonical: string;
+  readonly cursor: number;
+};
+
+type DocumentState = {
+  readonly batchesById: Map<string, StoredDocumentBatch>;
+  readonly durableEventIds: Set<string>;
+  readonly orderedBatchIds: string[];
+  nextCursor: number;
+};
+
+const canonicalizeBatch = (batch: DocumentEventBatches[number]): string =>
+  JSON.stringify({
+    events: batch.events,
+    parentVersion: batch.parentVersion,
+  });
+
+/**
+ * Reference `DocumentEventStore`: atomic multi-batch append (validates the
+ * whole request before committing any of it), same-batchId idempotent
+ * resend, and the same conflict-type taxonomy real adapters must produce.
+ * Also backs apps/collab-cloudflare's fetchMock RPC simulation, so this is
+ * the single source of truth both harnesses run `documentEventStoreConformance`
+ * against.
+ */
+export const createMemoryDocumentEventStore = (): DocumentEventStore => {
+  const documents = new Map<string, DocumentState>();
+
+  const getOrCreateDocument = (documentId: string): DocumentState => {
+    const existing = documents.get(documentId);
+    if (existing !== undefined) return existing;
+    const created: DocumentState = {
+      batchesById: new Map(),
+      durableEventIds: new Set(),
+      orderedBatchIds: [],
+      nextCursor: 0,
+    };
+    documents.set(documentId, created);
+    return created;
+  };
+
+  return {
+    async append(documentId, _actorId, batches) {
+      const document = getOrCreateDocument(documentId);
+
+      const seenEventIdsInRequest = new Set<string>();
+      for (const batch of batches) {
+        for (const event of batch.events) {
+          if (seenEventIdsInRequest.has(event.id)) {
+            throw new DocumentEventConflictError(
+              `duplicate event id ${event.id} within one append request`,
+              {
+                conflictType:
+                  DOCUMENT_EVENT_CONFLICT_TYPE.DuplicateIncomingEventId,
+                documentId,
+                eventIds: [event.id],
+              },
+            );
+          }
+          seenEventIdsInRequest.add(event.id);
+        }
+      }
+
+      const projectedDurableEventIds = new Set(document.durableEventIds);
+      const results: string[] = [];
+      const toCommit: StoredDocumentBatch[] = [];
+
+      for (const batch of batches) {
+        const existing = document.batchesById.get(batch.batchId);
+        const canonical = canonicalizeBatch(batch);
+        if (existing !== undefined) {
+          if (existing.canonical !== canonical) {
+            throw new DocumentEventConflictError(
+              `batch ${batch.batchId} was already stored with a different payload`,
+              {
+                conflictType: DOCUMENT_EVENT_CONFLICT_TYPE.BatchPayloadConflict,
+                documentId,
+                batchIds: [batch.batchId],
+              },
+            );
+          }
+          results.push(batch.batchId);
+          continue;
+        }
+
+        const missingParentIds = batch.parentVersion.filter(
+          (parentId) => !projectedDurableEventIds.has(parentId),
+        );
+        if (missingParentIds.length > 0) {
+          throw new DocumentEventConflictError(
+            `batch ${batch.batchId} references history that has not been stored`,
+            {
+              conflictType: DOCUMENT_EVENT_CONFLICT_TYPE.MissingParentHistory,
+              documentId,
+              batchIds: [batch.batchId],
+              missingParentIds,
+            },
+          );
+        }
+
+        for (const event of batch.events) {
+          projectedDurableEventIds.add(event.id);
+        }
+        toCommit.push({ batch, canonical, cursor: -1 });
+        results.push(batch.batchId);
+      }
+
+      // Nothing above mutated `document`, so a request that partly failed
+      // has left every prior append fully intact — commit only now.
+      for (const staged of toCommit) {
+        document.nextCursor += 1;
+        const stored: StoredDocumentBatch = {
+          ...staged,
+          cursor: document.nextCursor,
+        };
+        document.batchesById.set(staged.batch.batchId, stored);
+        document.orderedBatchIds.push(staged.batch.batchId);
+        for (const event of staged.batch.events) {
+          document.durableEventIds.add(event.id);
+        }
+      }
+
+      return results;
+    },
+
+    async read(
+      documentId: string,
+      afterCursor: DocumentEventCursor,
+    ): Promise<DocumentEventPage> {
+      const document = documents.get(documentId);
+      if (document === undefined) {
+        return { batches: [], complete: true, nextCursor: afterCursor };
+      }
+      const afterNumeric = Number(afterCursor);
+      const pending = document.orderedBatchIds
+        .map((batchId) => document.batchesById.get(batchId))
+        .filter(
+          (stored): stored is StoredDocumentBatch =>
+            stored !== undefined && stored.cursor > afterNumeric,
+        );
+      const page = pending.slice(0, DOCUMENT_EVENT_PAGE_LIMIT);
+      const last = page.at(-1);
+      return {
+        batches: page.map((stored) => stored.batch),
+        complete: page.length === pending.length,
+        nextCursor: last === undefined ? afterCursor : String(last.cursor),
+      };
+    },
+  };
+};

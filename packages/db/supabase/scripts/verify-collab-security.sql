@@ -13,7 +13,8 @@ BEGIN
             ('20260808230300_harden_auth_profile_trigger'),
             ('20260808230400_fix_workspace_owner_membership_rls'),
             ('20260809000000_core_v1'),
-            ('20260811043830_add_cloudflare_collab_rpc')
+            ('20260811043830_add_cloudflare_collab_rpc'),
+            ('20260813101534_grant_cloudflare_presence_profile_read')
     )
     SELECT string_agg(expected.migration_name, ', ' ORDER BY migration_name)
     INTO missing_migrations
@@ -259,8 +260,14 @@ BEGIN
         'service_role', 'public.documents', 'updated_by', 'UPDATE'
     ) OR NOT has_column_privilege(
         'service_role', 'public.workspace_members', 'updated_at', 'UPDATE'
+    ) OR NOT has_column_privilege(
+        'service_role', 'public.users', 'id', 'SELECT'
+    ) OR NOT has_column_privilege(
+        'service_role', 'public.users', 'full_name', 'SELECT'
+    ) OR NOT has_column_privilege(
+        'service_role', 'public.users', 'avatar_src', 'SELECT'
     ) THEN
-        RAISE EXCEPTION 'collaboration RPC grants are unsafe';
+        RAISE EXCEPTION 'collaboration RPC or presence grants are unsafe';
     END IF;
 
     IF NOT EXISTS (

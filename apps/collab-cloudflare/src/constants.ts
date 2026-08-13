@@ -39,6 +39,37 @@ export const errorMessage = (
   retryable,
 });
 
+const MAX_LOG_ERROR_FIELD_LENGTH = 2_048;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const boundedString = (value: unknown): string | null =>
+  typeof value === "string" ? value.slice(0, MAX_LOG_ERROR_FIELD_LENGTH) : null;
+
+const serializeError = (error: unknown): Readonly<Record<string, string>> => {
+  const record = isRecord(error) ? error : null;
+  const message =
+    error instanceof Error
+      ? error.message
+      : (boundedString(record?.message) ?? String(error));
+  const name =
+    error instanceof Error
+      ? error.name
+      : (boundedString(record?.name) ?? "UnknownError");
+  const code = boundedString(record?.code);
+  const details = boundedString(record?.details);
+  const hint = boundedString(record?.hint);
+
+  return {
+    error: message.slice(0, MAX_LOG_ERROR_FIELD_LENGTH),
+    errorName: name,
+    ...(code === null ? {} : { errorCode: code }),
+    ...(details === null ? {} : { errorDetails: details }),
+    ...(hint === null ? {} : { errorHint: hint }),
+  };
+};
+
 export const logError = (
   error: unknown,
   context: Readonly<Record<string, unknown>>,
@@ -46,8 +77,7 @@ export const logError = (
   console.error(
     JSON.stringify({
       ...context,
-      error: error instanceof Error ? error.message : String(error),
-      errorName: error instanceof Error ? error.name : "UnknownError",
+      ...serializeError(error),
       message: "Cloudflare collaboration request failed",
     }),
   );

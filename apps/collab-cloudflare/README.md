@@ -125,8 +125,13 @@ Nitro collaboration service, then run:
 
 ```bash
 pnpm --filter @softmaple/collab-cloudflare cf-typegen
-pnpm --filter @softmaple/collab-cloudflare dev
+pnpm exec turbo run dev --filter=@softmaple/collab-cloudflare
 ```
+
+Run the Worker through Turbo, as above, rather than invoking its package-level
+`dev` script directly. The Worker bundles compiled workspace-package exports;
+Turbo's `dev` dependency graph rebuilds those packages first, so a source
+change cannot be hidden by an older ignored `dist/` directory.
 
 Never expose the service-role key to browser code. For production, follow the
 atomic first-deploy or later-rotation procedure below; do not bootstrap a new
@@ -170,6 +175,9 @@ secrets with the real application deployment instead:
    together:
 
    ```bash
+   pnpm exec turbo run build \
+     --filter=@softmaple/collab-cloudflare... \
+     --filter=!@softmaple/collab-cloudflare
    pnpm --filter @softmaple/collab-cloudflare exec wrangler deploy \
      --secrets-file .dev.vars.production
    ```
@@ -189,8 +197,18 @@ secrets with the real application deployment instead:
 
 ### Later deployments and secret rotation
 
-Once the Worker exists, `pnpm --filter @softmaple/collab-cloudflare deploy`
-inherits its existing secrets and fails if a required binding is missing.
+Once the Worker exists, rebuild its workspace dependencies before deploying;
+the Worker bundles their compiled `dist/` exports rather than their source:
+
+```bash
+pnpm exec turbo run build \
+  --filter=@softmaple/collab-cloudflare... \
+  --filter=!@softmaple/collab-cloudflare
+pnpm --filter @softmaple/collab-cloudflare deploy
+```
+
+The deploy inherits its existing secrets and fails if a required binding is
+missing.
 
 For a controlled rotation, use `wrangler versions secret put <NAME>` (or
 `wrangler versions secret bulk <FILE>` for several values) to create an
@@ -234,6 +252,9 @@ for that procedure and how the two levels relate.
 ## Verification
 
 ```bash
+pnpm exec turbo run build \
+  --filter=@softmaple/collab-cloudflare... \
+  --filter=!@softmaple/collab-cloudflare
 pnpm --filter @softmaple/collab-cloudflare test
 pnpm --filter @softmaple/collab-cloudflare typecheck
 pnpm --filter @softmaple/collab-cloudflare lint

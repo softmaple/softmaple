@@ -48,4 +48,36 @@ describe("logError", () => {
       message: "Cloudflare collaboration request failed",
     });
   });
+
+  it("logs safe PostgREST error fields without serializing credentials", () => {
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    logError(
+      {
+        code: "42501",
+        details: "Data API role lacks SELECT",
+        hint: "Grant the required table privilege",
+        message: "permission denied for table users",
+        token: "must-not-be-logged",
+      },
+      { messageType: "auth" },
+    );
+
+    const logged = JSON.parse(error.mock.calls[0]?.[0] as string) as Record<
+      string,
+      unknown
+    >;
+    expect(logged).toMatchObject({
+      error: "permission denied for table users",
+      errorCode: "42501",
+      errorDetails: "Data API role lacks SELECT",
+      errorHint: "Grant the required table privilege",
+      errorName: "UnknownError",
+      message: "Cloudflare collaboration request failed",
+      messageType: "auth",
+    });
+    expect(logged).not.toHaveProperty("token");
+  });
 });

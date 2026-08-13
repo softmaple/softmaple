@@ -14,11 +14,12 @@ import { normalizeDocumentId } from "../src/document-id";
 import {
   readMemoryPresenceSessionAudit,
   setMemoryPresenceAccessRevoked,
+  TEST_PRESENCE_ACCESS_TOKEN,
 } from "./memory-presence-backend";
 
 const ORIGIN = "https://app.example";
 const TEST_USER_ID = "00000000-0000-4000-8000-000000000002";
-const TEST_TOKEN = "test-token";
+const TEST_TOKEN = TEST_PRESENCE_ACCESS_TOKEN;
 
 interface PresenceWireFrame {
   readonly type: string;

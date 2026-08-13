@@ -4,11 +4,15 @@ Nitro WebSocket service that authenticates document sessions, persists
 EG-walker event batches to Supabase Postgres, fans committed batches out to
 document peers across instances, and hosts ephemeral awareness rooms.
 
-This replaces Liveblocks for durable document collaboration. The browser host
-(`apps/web`) connects with a Supabase access token over same-origin
-`/collab/*` URLs; this service is the only writer of `document_event_batches`.
+This is the default Nitro host for durable document collaboration. For
+Nitro-routed documents, the browser host (`apps/web`) connects with a Supabase
+credential over same-origin `/collab/*` URLs. Both this service and
+`apps/collab-cloudflare` can write `document_event_batches`; browser clients
+cannot.
 
 ## Role in the stack
+
+The default Nitro path is:
 
 ```text
 Browser ──wss──► /collab/document|presence
@@ -36,7 +40,7 @@ remain outside this service.
 | Rich-text batches / CRDT model | `@softmaple/block-model` / `@softmaple/eg-walker` |
 | Lexical projection | `@softmaple/binding-lexical` + `apps/web` |
 | Presence protocol / client state | `@softmaple/awareness` |
-| Auth, durable-store and Redis adapters; presence rooms | **this service** |
+| Nitro auth, durable-store, and Redis adapters; Nitro presence rooms | **this service** |
 
 ## Storage roles
 
@@ -58,10 +62,12 @@ recovered through Postgres + the existing repair/resync protocol.
 | `/collab/document` | WebSocket | Authenticated collaboration session |
 | `/collab/presence` | WebSocket | Authenticated, ephemeral awareness session |
 
-The browser always connects to the app origin at `/collab/document` and
-`/collab/presence`. In production, Vercel Services routes `/collab/**` to this
-app. Local Playwright uses `apps/web/scripts/e2e-collab-router.mjs` because
-stock `next dev` does not forward WebSocket upgrades.
+For Nitro-routed documents, the browser connects to the app origin at
+`/collab/document` and `/collab/presence`; in production, Vercel Services routes
+`/collab/**` to this app. Cloudflare-routed documents connect directly to the
+configured Worker URL. Local Playwright uses
+`apps/web/scripts/e2e-collab-router.mjs` because stock `next dev` does not
+forward WebSocket upgrades.
 
 Upgrades require a browser `Origin` listed in `COLLAB_ALLOWED_ORIGINS` (or a
 Vercel preview/production host derived from `VERCEL_*` / `NEXT_PUBLIC_APP_URL`).
@@ -80,7 +86,7 @@ membership (and public-document rules) inside each session.
 6. Client sends `event` messages with one or more `RichTextEventBatch` values
    (max 64 per message). Writers only: `OWNER` / `EDITOR`.
 7. Server appends batches transactionally, returns `durable-ack`, then
-   publishes a realtime notification through Redis Pub/Sub so every collab
+   publishes a realtime notification through Redis Pub/Sub so every Nitro
    instance can deliver to its local peers.
 8. Authorization and lease refresh run about every 15s while the socket is open.
    Messages are rate-limited (120 / 10s window per peer).
@@ -101,9 +107,12 @@ TTL.
 
 Multiple Nitro / Vercel Function instances are supported. Configure Upstash
 Redis (Vercel Marketplace) and set `REDIS_URL` (native `redis://` / `rediss://`
-URL for ioredis). Production and Preview deployments on Vercel **require** Redis
-and fail fast if it is missing. They never silently fall back to process-local
-coordination.
+URL for ioredis). Production and Preview deployments on Vercel select Redis and
+never silently fall back to process-local coordination. `REDIS_URL` validation
+is currently lazy: missing configuration fails the first document or presence
+operation that initializes realtime, not the build, startup, or `/health`
+liveness check. Deployment readiness must therefore verify the variable and a
+real collaboration WebSocket handshake.
 
 ## Persistence
 

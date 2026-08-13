@@ -1,11 +1,14 @@
 # `@softmaple/web`
 
 Next.js 16 app router host for Softmaple: auth, workspaces, document UI, and
-the Lexical editor. Real-time collaboration goes over same-origin WebSocket
-paths to [`apps/collab`](../collab/README.md); this app does not write
-`document_event_batches` itself and does not proxy WebSocket upgrades.
+the Lexical editor. By default, realtime collaboration uses same-origin
+WebSocket paths routed to [`apps/collab`](../collab/README.md);
+Cloudflare-selected documents connect directly to the configured Worker. This
+app does not write `document_event_batches` or proxy WebSocket upgrades.
 
 ## Role in the stack
+
+The default Nitro path is:
 
 ```text
 Browser ──► apps/web (Next.js)
@@ -20,7 +23,7 @@ Browser ──► apps/web (Next.js)
 | Lexical UI + editor shell | `@softmaple/editor` + `modules/docs` |
 | Lexical ↔ EG-walker binding | `@softmaple/binding-lexical` |
 | Collab wire protocol | `@softmaple/collab-protocol` |
-| Durable event store / Redis fan-out | [`apps/collab`](../collab/README.md) |
+| Durable event persistence / realtime fan-out | [`apps/collab`](../collab/README.md) (Prisma + Redis) or [`apps/collab-cloudflare`](../collab-cloudflare/README.md) (Supabase RPC + DO-local fan-out) |
 | Schema, RLS, Prisma | [`packages/db`](../../packages/db) |
 
 Layer boundaries:
@@ -69,8 +72,9 @@ plus bearer secret are present. Never enable it against production.
 
 ### WebSocket routing
 
-Production routing is owned by the root [`vercel.json`](../../vercel.json)
-Services configuration:
+Same-origin Nitro WebSocket routing is owned by the root
+[`vercel.json`](../../vercel.json) Services configuration. Cloudflare-selected
+documents bypass this mapping and use the configured Worker URL directly:
 
 ```text
 /collab/** → apps/collab
@@ -98,9 +102,10 @@ Keys and URL must belong to the **same** Supabase project. Never put a
 [`modules/docs/collab-runtime-routing.ts`](./modules/docs/collab-runtime-routing.ts)
 picks, per document and on the server before the page renders, whether the
 browser connects to the existing Nitro+Redis runtime (`apps/collab`) or the
-Cloudflare Durable Objects runtime (`apps/collab-cloudflare`). Both runtimes
-read and write the same Supabase tables, so switching a document back and
-forth is reversible with no document-history migration.
+Cloudflare Durable Objects runtime (`apps/collab-cloudflare`). Both document
+runtimes read and write the same Supabase event-history tables, so switching a
+document back and forth needs no document-history migration. Live presence is
+runtime-local and is recreated when the client joins the destination runtime.
 
 | Variable | Effect |
 | --- | --- |
@@ -117,38 +122,39 @@ any newly-rendered page load.
 
 That guarantee applies at page-render time only, not to WebSockets a
 browser already has open. `collabRuntime` is resolved once server-side and
-baked into the live session (`useDocumentSession`); it does not re-resolve
-until the tab reconnects or reloads. So a config change (percent/override/
-allow-deny list) does not move already-connected tabs — they keep talking
-to whichever runtime they opened against, and won't pick up the new
-decision until their next reconnect or a full page reload. **Two tabs open
-on the same document across a config change will therefore be on
-different runtimes for as long as the older tab stays open and
-unreloaded** — potentially indefinitely, not just for a moment — with no
-cross-talk between them until Supabase's durable event log reconciles on
-reconnect/repair.
+baked into the live session (`useDocumentSession`). Automatic reconnect
+reuses that value; only a newly rendered page (normally a reload or fresh
+tab) can pick up changed routing config. Existing tabs therefore remain on
+their original runtime until re-rendered. **Two tabs open on the same
+document across a config change can be on different runtimes for as long
+as the older page remains open** — potentially indefinitely. They receive
+no live cross-runtime fan-out or shared presence. A reconnect can repair
+durable history from shared Postgres but remains on the same runtime; only
+a reload or fresh render transfers runtime ownership.
 
-Because of this, treat any rollout config change that could move a
-document already being edited (percent/override changes; adding/removing
-an id from the allow/deny lists) as requiring a **coordinated reload**:
-confirm no session is actively open on the affected document(s) before
-changing config, or explicitly ask connected users to refresh afterward.
-The automatic reconnect in `use-document-session.ts` does not help here —
-on drop it reopens against the same `collabRuntime` the session already
-committed to, it never re-derives the decision, so a reload (or a fresh
-tab) is the only way an existing session picks up a new routing outcome.
-Before shipping a config change, test both a tab that connected **before**
-the change (confirm it keeps working, unmigrated, until it reloads) and a
-tab that connects **after** (confirm it gets the new decision) against the
-same document.
+Because one document must not have concurrent runtime owners, treat that
+split as a **correctness and dual-write incident**, not only a stale-tab UX
+issue. Stop rollout expansion, identify affected document ids, and drain or
+coordinate a reload of every old-runtime tab before declaring the handoff
+complete; automatic reconnect is not sufficient. Prefer changing routing
+only while no affected editor is connected. Before resuming, verify old
+connections are gone, reloaded clients joined document and presence rooms
+on the selected runtime, and durable repair completed. Test both a page
+rendered before and one rendered after the change against the same
+document.
 
 Rolling back is changing `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`
 back to their safe defaults (or clearing `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
 entirely) and redeploying — no data migration is involved, but per above,
-existing open tabs won't observe the rollback until they reconnect or
-reload either. Deploying `apps/collab-cloudflare` itself (secrets,
-`wrangler deploy`, DNS) is a separate operational step; see
+existing open tabs observe the rollback only after a reload or fresh server
+render; automatic reconnect keeps their original runtime. Deploying
+`apps/collab-cloudflare` itself (secrets, `wrangler deploy`, DNS) is a separate
+operational step; see
 [`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md).
+
+For the cross-runtime picture — when to deploy which runtime, Supabase/
+Redis/DO responsibilities, and the current default-runtime decision — see
+[`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md).
 
 ## Commands
 

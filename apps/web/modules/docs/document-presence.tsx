@@ -51,8 +51,11 @@ type ProfileIdentity = {
 
 type LiveAdapterState = {
   readonly adapter: PresenceAdapter;
+  readonly avatarUrl: string | null;
   readonly collabRuntime: CollabRuntime;
   readonly documentId: string;
+  readonly name: string;
+  readonly userId: string;
 } | null;
 
 type RemoteGeometry = {
@@ -373,9 +376,10 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     // Cleanup above disconnects the prior adapter without clearing this
     // state, so reset it up front — otherwise presenceLive briefly reads
     // true against an already-disconnected adapter during reconnect. The
-    // documentId/collabRuntime tag on LiveAdapterState below is the
-    // structural guard: even if this reset were ever skipped, a stale
-    // adapter tagged for different props can never be read as live.
+    // identity tag on LiveAdapterState below (documentId, collabRuntime,
+    // userId, name, avatarUrl — everything that feeds adapter construction)
+    // is the structural guard: even if this reset were ever skipped, a
+    // stale adapter tagged for different props can never be read as live.
     setLiveAdapterState(null);
 
     let cancelled = false;
@@ -403,7 +407,14 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
       });
       void created?.disconnect();
       created = next;
-      setLiveAdapterState({ adapter: next, collabRuntime, documentId });
+      setLiveAdapterState({
+        adapter: next,
+        avatarUrl,
+        collabRuntime,
+        documentId,
+        name,
+        userId,
+      });
       setError(null);
     };
     const sessionRequestRevision = authRevision;
@@ -461,12 +472,16 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
 
   // Only treat the stored adapter as live when it was built for the props
   // this render is currently showing — a stale adapter tagged for a prior
-  // documentId/collabRuntime can never leak through as "live" here, even if
-  // the effect above raced with a prop change.
+  // documentId/collabRuntime/userId/name/avatarUrl can never leak through
+  // as "live" here (nor expose stale userInfo to the room), even if the
+  // effect above raced with a prop change.
   const liveAdapter =
     liveAdapterState !== null &&
     liveAdapterState.documentId === editorProps.documentId &&
-    liveAdapterState.collabRuntime === editorProps.collabRuntime
+    liveAdapterState.collabRuntime === editorProps.collabRuntime &&
+    liveAdapterState.userId === userId &&
+    liveAdapterState.name === name &&
+    liveAdapterState.avatarUrl === avatarUrl
       ? liveAdapterState.adapter
       : null;
   const adapter =

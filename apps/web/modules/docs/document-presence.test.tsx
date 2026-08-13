@@ -265,4 +265,64 @@ describe("DocumentPresence auth lifecycle", () => {
     });
     container.remove();
   });
+
+  it("does not expose a stale adapter as live after userId changes mid-connect", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const baseProps = {
+      avatarUrl: null,
+      collabRuntime: COLLAB_RUNTIME.Nitro,
+      documentId: "00000000-0000-4000-8000-000000000001",
+      name: "Ada",
+      presenceEnabled: true,
+    };
+
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, { ...baseProps, userId: "user-1" }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-user-1" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Connecting presence");
+
+    // Switch signed-in user before the new connection attempt resolves.
+    await act(async () => {
+      root.render(
+        createElement(DocumentPresence, { ...baseProps, userId: "user-2" }),
+      );
+      await Promise.resolve();
+    });
+
+    // The user-1 adapter must be disconnected and never shown as live under
+    // user-2's identity while the new connection is in flight.
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connecting presence");
+
+    await act(async () => {
+      resolveGetSession?.({
+        data: { session: { access_token: "token-user-2" } },
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(createWebSocketAdapter).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Connecting presence");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

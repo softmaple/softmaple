@@ -83,7 +83,8 @@ code {
 }
 
 .pg-status-rail {
-  overflow-y: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   overscroll-behavior-inline: contain;
   scrollbar-color: var(--pg-line) transparent;
   scrollbar-width: thin;

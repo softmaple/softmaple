@@ -75,10 +75,10 @@ export function LexicalEgWalkerDemo({
     window.history.replaceState(null, "", url);
   }, [requestedRoom, roomId]);
 
-  const copyRoomLink = useCallback(() => {
+  const copyRoomLink = useCallback(async () => {
     const url = new URL(window.location.href);
     url.searchParams.set("room", roomId);
-    void navigator.clipboard?.writeText(url.toString()).catch(() => undefined);
+    await navigator.clipboard.writeText(url.toString());
   }, [roomId]);
   const updatePresenceSelection = useCallback(
     (selection: StableBlockSelection | null) => {

@@ -35,7 +35,7 @@ export interface StatusRailProps {
   readonly pendingCount: number;
   readonly storageBytes: number;
   readonly users: ReadonlyArray<PresenceUser>;
-  readonly onCopyRoomLink: () => void;
+  readonly onCopyRoomLink: () => void | Promise<void>;
 }
 
 const StatusItem = ({

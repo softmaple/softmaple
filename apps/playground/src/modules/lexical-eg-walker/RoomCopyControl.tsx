@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 interface RoomCopyControlProps {
   readonly roomId: string;
-  readonly onCopyRoomLink: () => void;
+  readonly onCopyRoomLink: () => void | Promise<void>;
 }
 
 export function RoomCopyControl({
@@ -22,8 +22,12 @@ export function RoomCopyControl({
     [],
   );
 
-  const copyRoomLink = useCallback(() => {
-    onCopyRoomLink();
+  const copyRoomLink = useCallback(async () => {
+    try {
+      await onCopyRoomLink();
+    } catch {
+      return;
+    }
     setCopied(true);
     if (resetTimerRef.current !== null) {
       clearTimeout(resetTimerRef.current);

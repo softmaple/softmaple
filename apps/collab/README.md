@@ -144,7 +144,7 @@ pnpm --filter @softmaple/db db:migrate
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Prisma connection (pooler URL is fine) |
 | `SUPABASE_URL` | yes | Auth project URL |
-| `SUPABASE_PUBLISHABLE_KEY` | yes* | Falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| `SUPABASE_PUBLISHABLE_KEY` | yes | Auth project publishable key |
 | `COLLAB_ALLOWED_ORIGINS` | yes* | Comma-separated browser Origins; Vercel hosts are also auto-allowed |
 | `COLLAB_REALTIME_DRIVER` | no | `memory` (local default) or `redis` |
 | `REDIS_URL` | on Vercel / when driver=redis | Upstash native Redis URL for ioredis |

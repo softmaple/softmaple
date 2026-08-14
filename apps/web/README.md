@@ -49,11 +49,8 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Project URL (`https://<ref>.supabase.co`) |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes* | Prefer `sb_publishable_…` from **Settings → API Keys** |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no | Legacy JWT `anon` key; used only if publishable key is unset |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | `sb_publishable_…` from **Settings → API Keys** |
 | `NEXT_PUBLIC_APP_URL` | production | Canonical origin used in auth redirects |
-
-\*Required unless `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set.
 
 `NEXT_PUBLIC_*` values are inlined at **build** time. After changing them in
 Vercel (or any host), redeploy — restarting the running server is not enough.

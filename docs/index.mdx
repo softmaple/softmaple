@@ -9,7 +9,9 @@ description: "Build collaborative documents with real-time editing, Markdown sup
 
 ## What is Softmaple?
 
-Softmaple is a modern collaborative document editor built with Next.js 16, featuring convergent EG-walker collaboration over WebSocket, rich text editing with Lexical, durable Supabase Postgres history, and seamless Markdown to LaTeX conversion.
+Softmaple is a collaborative document editor built with Next.js 16. It uses
+EG-walker over WebSocket for real-time editing, Lexical for rich text,
+Supabase Postgres for durable history, and Markdown to LaTeX conversion.
 
 <Card
   title="Get Started"
@@ -22,8 +24,6 @@ Softmaple is a modern collaborative document editor built with Next.js 16, featu
 
 ## Core Features
 
-Everything you need for collaborative document creation and management.
-
 <Columns cols={2}>
   <Card
     title="Local Development"
@@ -35,29 +35,27 @@ Everything you need for collaborative document creation and management.
   <Card
     title="Real-time Collaboration"
     icon="users"
-    href="https://softmaple.ink"
+    href="/design/collaboration-layers"
   >
-    Work together with your team using the built-in EG-walker collaboration service.
-  </Card>
-    <Card
-    title="Workspace Management"
-    icon="folder-tree"
-    href="/api-reference/introduction"
-  >
-    Organize documents in workspaces with team collaboration.
+    Nitro WebSocket by default; optional Cloudflare Durable Objects runtime.
   </Card>
   <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
+    title="Playground"
+    icon="flask"
+    href="https://playground.softmaple.ink"
   >
-    Explore the Softmaple API for documents and workspaces.
+    Experiment with Lexical, EG-walker, and presence demos.
+  </Card>
+  <Card
+    title="Design Documents"
+    icon="diagram-project"
+    href="/design/collaboration-operations"
+  >
+    Runtime operations, consistency, and awareness contracts.
   </Card>
 </Columns>
 
 ## Technical Stack
-
-Built with modern technologies for performance and developer experience.
 
 <Columns cols={2}>
   <Card
@@ -65,14 +63,14 @@ Built with modern technologies for performance and developer experience.
     icon="react"
     href="/development"
   >
-    Built on the latest Next.js with App Router and React Server Components.
+    App Router and React Server Components.
   </Card>
   <Card
     title="Prisma & PostgreSQL"
     icon="database"
-    href="/development#database-setup"
+    href="/development#database"
   >
-    Type-safe database access with Prisma ORM and PostgreSQL.
+    Type-safe schema and migrations against Supabase Postgres.
   </Card>
   <Card
     title="Lexical Editor"
@@ -84,9 +82,9 @@ Built with modern technologies for performance and developer experience.
   <Card
     title="Turborepo Monorepo"
     icon="layer-group"
-    href="/development#monorepo-structure"
+    href="/development"
   >
-    Efficient monorepo management with shared packages and configurations.
+    Shared packages for the editor, CRDT, protocol, and UI.
   </Card>
 </Columns>
 

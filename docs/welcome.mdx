@@ -1,7 +1,7 @@
 ---
 title: Welcome to Softmaple
 sidebarTitle: Welcome
-description: Softmaple is a modern collaborative document editor built with Next.js, featuring real-time collaboration, Markdown support, and LaTeX conversion.
+description: Softmaple is a collaborative document editor with real-time editing, Markdown support, and LaTeX conversion.
 ---
 
 <Note>
@@ -13,8 +13,6 @@ description: Softmaple is a modern collaborative document editor built with Next
 <img className="hidden dark:block w-full" src="/images/hero-dark.png" alt="Hero Dark" />
 
 ## Getting Started
-
-Start building collaborative documents with Softmaple's powerful features.
 
 <CardGroup cols={2}>
   <Card
@@ -35,29 +33,27 @@ Start building collaborative documents with Softmaple's powerful features.
 
 ## Key Features
 
-Explore Softmaple's powerful features for collaborative document editing.
-
 <CardGroup cols={2}>
   <Card
     title="Real-time Collaboration"
     icon="users"
-    href="https://softmaple.ink"
+    href="/development"
   >
-    Work together with your team through the built-in collaboration service
+    EG-walker over WebSocket, with Nitro as the default runtime and Cloudflare Durable Objects as an optional rollout
   </Card>
   <Card
-    title="API Reference"
-    icon="code"
-    href="/api-reference/introduction"
+    title="Collaboration Design"
+    icon="diagram-project"
+    href="/design/collaboration-layers"
   >
-    Explore the Softmaple API for documents and workspaces
+    Architecture layers, runtime contracts, and operational docs
   </Card>
   <Card
-    title="Markdown & LaTeX"
-    icon="file-lines"
-    href="/essentials/markdown"
+    title="Playground"
+    icon="flask"
+    href="https://playground.softmaple.ink"
   >
-    Write documents with Markdown and convert to LaTeX
+    Live demos for Lexical, EG-walker, awareness, and WebSocket rooms
   </Card>
   <Card
     title="Community"

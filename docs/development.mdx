@@ -1,6 +1,6 @@
 ---
 title: 'Development'
-description: 'Run and verify the Softmaple v1 stack'
+description: 'Run and verify the Softmaple stack'
 ---
 
 <Info>
@@ -11,12 +11,17 @@ description: 'Run and verify the Softmaple v1 stack'
 ## Architecture
 
 The monorepo contains a Next.js 16 web app, a horizontally scalable Nitro
-WebSocket service, Prisma/Supabase migrations, the Lexical editor, and the
-EG-walker collaboration packages.
+WebSocket service (the default collaboration runtime), an optional Cloudflare
+Durable Objects runtime, Prisma/Supabase migrations, the Lexical editor, a
+TanStack Start playground, and the EG-walker collaboration packages.
 
 ```text
 Browser → /collab/* → apps/collab → Redis (realtime) + Supabase Postgres (history)
        ↘ apps/web → Supabase Auth / Data API / Storage
+
+Optional: apps/web can route selected documents to apps/collab-cloudflare
+(Durable Objects + the same Postgres history). See
+[collaboration operations](/design/collaboration-operations).
 ```
 
 Document metadata lives in `public.documents`. Document bodies exist only as

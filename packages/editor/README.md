@@ -1,60 +1,30 @@
-# Lexical Editor
+# `@softmaple/editor`
 
-# Tailwind CSS `v4` with `shadcn/ui`
+Lexical rich-text editor used by `apps/web` and `apps/playground`. React 19,
+Vite, Tailwind CSS v4, and shadcn/ui primitives from `@softmaple/ui`.
 
-# Storybookjs `v8`
+Markdown export goes through `@softmaple/md2latex`. Collaboration bindings are
+not in this package; Lexical ↔ EG-walker lives in `@softmaple/binding-lexical`.
 
-# React + TypeScript + Vite
+## Commands
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+```bash
+# Standalone Vite preview of the editor shell
+pnpm --filter @softmaple/editor dev
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-});
+pnpm --filter @softmaple/editor typecheck
+pnpm --filter @softmaple/editor lint
+pnpm --filter @softmaple/editor test
+pnpm --filter @softmaple/editor storybook
+pnpm --filter @softmaple/editor build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Layout
 
-```js
-// eslint.config.js
-import reactX from "eslint-plugin-react-x";
-import reactDom from "eslint-plugin-react-dom";
-
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    "react-x": reactX,
-    "react-dom": reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs["recommended-typescript"].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-});
+```text
+packages/editor/src/
+├── components/   # Editor UI (core, export, theme)
+├── context/      # Theme provider
+├── layout.tsx    # Standalone preview chrome
+└── App.tsx       # Vite entry
 ```

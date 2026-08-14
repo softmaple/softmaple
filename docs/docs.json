@@ -27,17 +27,6 @@
         "pages": ["welcome", "quickstart", "development"]
       },
       {
-        "group": "Essentials",
-        "pages": [
-          "essentials/markdown",
-          "essentials/code",
-          "essentials/images",
-          "essentials/settings",
-          "essentials/navigation",
-          "essentials/reusable-snippets"
-        ]
-      },
-      {
         "group": "Design Documents",
         "pages": [
           "design/awareness-and-presence",
@@ -45,26 +34,6 @@
           "design/collaboration-runtime",
           "design/collaboration-consistency",
           "design/collaboration-operations"
-        ]
-      },
-      {
-        "group": "AI Tools",
-        "pages": [
-          "ai-tools/cursor",
-          "ai-tools/claude-code",
-          "ai-tools/windsurf"
-        ]
-      },
-      {
-        "group": "API Documentation",
-        "pages": ["api-reference/introduction"]
-      },
-      {
-        "group": "Endpoint Examples",
-        "pages": [
-          "api-reference/endpoint/get",
-          "api-reference/endpoint/create",
-          "api-reference/endpoint/delete"
         ]
       }
     ]
@@ -94,10 +63,6 @@
           {
             "label": "Documentation",
             "href": "https://docs.softmaple.ink/welcome"
-          },
-          {
-            "label": "API Reference",
-            "href": "https://docs.softmaple.ink/api-reference/introduction"
           },
           {
             "label": "Blog",

@@ -1,8 +1,11 @@
-> ⚠️ **Under Construction**
+# Softmaple
 
-> For the old version, please check out the repo: [Eorg](https://github.com/zhyd1997/Eorg).
->
-> For `v1` of SoftMaple, please check out the `main` branch.
+A collaborative paper typesetting editor: Lexical rich text, EG-walker
+convergence, Markdown → $\LaTeX$, and durable history in Supabase Postgres.
+
+Development happens on the `next` branch. The previous product lives on
+[`main`](https://github.com/softmaple/softmaple/tree/main). The original
+prototype is [Eorg](https://github.com/zhyd1997/Eorg).
 
 ![landing hero section](https://ik.imagekit.io/1winv85cn8g/SoftMaple/landing@2x_OjkYtqPwZ.png?updatedAt=1749375184240)
 
@@ -11,7 +14,6 @@
   <a href="https://discord.gg/Vwsuqq7dQD"><img src="https://img.shields.io/discord/922309919158456330.svg" alt="Discord Chat" /></a>
   <a href="https://biomejs.dev/"><img alt="Formatted with Biome" src="https://img.shields.io/badge/Formatted_with-Biome-60a5fa?style=flat&logo=biome"></a>
   <a href="#license"><img src="https://img.shields.io/github/license/softmaple/softmaple.svg"></a>
-
   <a href="https://app.ona.com/#https://github.com/softmaple/softmaple"><img src="https://ona.com/build-with-ona.svg" alt="Build with Ona"/></a>
 </p>
 
@@ -25,48 +27,74 @@
  </picture>
 </a>
 
+# Architecture
+
+Turborepo monorepo. The product host is Next.js; collaboration is a separate
+WebSocket runtime (Nitro by default, Cloudflare Durable Objects as an optional
+rollout).
+
+## Apps
+
+- [web](apps/web) — Next.js 16 app router: auth, workspaces, document UI
+  - **Supabase Auth** and the Supabase Data API
+  - Same-origin `/collab/*` to [`apps/collab`](apps/collab) by default
+  - Optional per-document routing to [`apps/collab-cloudflare`](apps/collab-cloudflare)
+- [collab](apps/collab) — Nitro WebSocket service (default collaboration runtime)
+  - Persists EG-walker batches to **Supabase Postgres**
+  - Redis for multi-instance fan-out, presence TTLs, and connection leases
+- [collab-cloudflare](apps/collab-cloudflare) — Cloudflare Workers + Durable Objects
+  - Same `@softmaple/collab-runtime` semantics; Durable Object-local fan-out
+- [playground](apps/playground) — TanStack Start demos for EG-walker, Lexical,
+  awareness, and WebSocket rooms
+
+## Packages
+
+- [awareness](packages/awareness) — Presence UI and transport-agnostic protocol
+- [bench](packages/bench) — EG-walker performance harnesses
+- [binding-lexical](packages/binding-lexical) — Lexical ↔ block-model binding
+- [block-model](packages/block-model) — Editor-agnostic rich-text CRDT model
+- [collab-protocol](packages/collab-protocol) — Authenticated collaboration wire protocol
+- [collab-runtime](packages/collab-runtime) — Host-independent document and presence rooms
+- [config](packages/config) — Shared site URLs and constants
+- [db](packages/db) — Prisma schema, migrations, and Supabase helpers
+- [editor](packages/editor) — Lexical editor, React 19, Vite, Tailwind CSS v4
+- [eg-walker](packages/eg-walker) — Sequence-model EG-walker engine
+- [eslint-config](packages/eslint-config) — Shared ESLint configuration
+- [md2latex](packages/md2latex) — Markdown to $\LaTeX$ converter
+- [typescript-config](packages/typescript-config) — Shared TypeScript `tsconfig.json`
+- [ui](packages/ui) — Shared React component library (shadcn/ui)
+
+## Docs
+
+- [docs](docs) — Mintlify documentation at [docs.softmaple.ink](https://docs.softmaple.ink)
+
 # Development
 
-## shadcn/ui [turborepo](https://turborepo.org/) architecture:
-
-- apps
-  - [web](apps/web) - Main web application
-    - **Next.js** v16 with `app` folder
-    - **EG-walker + WebSocket** for real-time collaboration
-    - **Supabase Postgres** for durable history and **Supabase Auth** for authentication
-
-- packages
-  - [config](packages/config) - Site configuration
-  - [db](packages/db) - Database schema and migrations
-    - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
-    - **Supabase** self-hosted guide
-  - [editor](packages/editor) - Rich text editor
-    - **Lexical** for rich text editing
-    - **React** 19 and **Vite**
-  - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
-  - [eslint-config](packages/eslint-config) - Shared ESLint configuration
-  - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`
-  - [ui](packages/ui) - Shared React component library
-    - **shadcn/ui** for UI components
-    - **Tailwind CSS** v4 for styling
-
-- docs
-  - [docs](docs) - **Mintlify Documentation** - Project documentation
-
-We use `pnpm` for package management, if you never used it, see [pnpm](https://pnpm.io/installation) for installation.
+Requires **Node.js 24.12+** and **pnpm 11**. See
+[Development](docs/development.mdx) for environment variables and the
+same-origin WebSocket path.
 
 ```bash
 pnpm install
+cp apps/web/.env.example apps/web/.env
+cp apps/collab/.env.example apps/collab/.env.local
+cp packages/db/.env.example packages/db/.env
+pnpm --filter @softmaple/db db:generate
+pnpm --filter @softmaple/db db:migrate
 pnpm dev
 ```
 
+`pnpm dev` starts `apps/web` and `apps/collab` through Turborepo. Stock
+`next dev` does not forward `/collab/*` WebSocket upgrades; use the Playwright
+router or `vercel dev` from the repository root. See
+[apps/web/README.md](apps/web/README.md).
+
 # Community
 
-The SoftMaple community can be found on [GitHub Discussions](https://github.com/softmaple/softmaple/discussions), where you can ask questions and voice ideas.
+The Softmaple community is on [GitHub Discussions](https://github.com/softmaple/softmaple/discussions)
+and [Discord](https://discord.gg/Vwsuqq7dQD).
 
-To chat with other community members you can join the [SoftMaple Discord](https://discord.gg/Vwsuqq7dQD).
-
-Our [Code of Conduct](.github/CODE_OF_CONDUCT.md) applies to all SoftMaple community channels.
+Our [Code of Conduct](.github/CODE_OF_CONDUCT.md) applies to all community channels.
 
 # Contributing
 
@@ -77,8 +105,6 @@ See [Contributing Guidelines](.github/CONTRIBUTING.md).
 [Apache-2.0 License](LICENSE)
 
 # Special thanks
-
-[![Deploys by Netlify](https://www.netlify.com/v3/img/components/netlify-color-accent.svg)](https://www.netlify.com?utm_source=SoftMaple&utm_campaign=oss)
 
 [![BrowserStack](https://d2ogrdw2mh0rsl.cloudfront.net/production/images/static/header/header-logo.svg)](https://www.browserstack.com/)
 

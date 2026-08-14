@@ -5,39 +5,27 @@ import type {
 import {
   Check,
   CloudOff,
-  Copy,
   Database,
   LoaderCircle,
   Radio,
   WifiOff,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { TransportConnectionState } from "./persistence/channel";
+import { RoomCopyControl } from "./RoomCopyControl";
+import {
+  connectionLabel,
+  formatStorageSize,
+  isReconnectWarningState,
+  type PersistenceDisplayState,
+  persistenceLabel,
+} from "./statusRailLabels";
 
-export type PersistenceDisplayState =
-  | "loading"
-  | "pending"
-  | "saved"
-  | "unsaved";
-
-const CONNECTION_RANK = {
-  error: 0,
-  disconnected: 1,
-  reconnecting: 2,
-  connecting: 3,
-  authenticating: 4,
-  syncing: 5,
-  connected: 6,
-} as const satisfies Record<AdapterConnectionState, number>;
-
-/** Prefer the more degraded of presence + document sync states. */
-export const mergeConnectionStates = (
-  presence: AdapterConnectionState,
-  sync: TransportConnectionState | null | undefined,
-): AdapterConnectionState => {
-  if (sync == null) return presence;
-  return CONNECTION_RANK[presence] <= CONNECTION_RANK[sync] ? presence : sync;
-};
+export {
+  formatStorageSize,
+  mergeConnectionStates,
+  type PersistenceDisplayState,
+  persistenceLabel,
+} from "./statusRailLabels";
 
 export interface StatusRailProps {
   readonly roomId: string;
@@ -47,60 +35,8 @@ export interface StatusRailProps {
   readonly pendingCount: number;
   readonly storageBytes: number;
   readonly users: ReadonlyArray<PresenceUser>;
-  readonly onCopyRoomLink: () => void;
+  readonly onCopyRoomLink: () => void | Promise<void>;
 }
-
-const formatStorageSize = (bytes: number): string => {
-  if (bytes < 1_024) return `${bytes} B`;
-  return `${(bytes / 1_024).toFixed(1)} KB`;
-};
-
-const persistenceLabel = (
-  state: PersistenceDisplayState,
-  pendingCount: number,
-): string => {
-  switch (state) {
-    case "loading":
-      return "Loading local history";
-    case "pending":
-      return `${pendingCount} change${pendingCount === 1 ? "" : "s"} pending`;
-    case "saved":
-      return "Saved on this device";
-    case "unsaved":
-      return "Unsaved · memory only";
-  }
-};
-
-const connectionLabel = (
-  state: AdapterConnectionState,
-  transportMode: "websocket" | "broadcast" = "broadcast",
-): string => {
-  const channel =
-    transportMode === "websocket" ? "WebSocket" : "BroadcastChannel";
-  switch (state) {
-    case "connected":
-      return transportMode === "websocket"
-        ? "WebSocket connected"
-        : "Tabs connected";
-    case "connecting":
-      return `Connecting via ${channel}…`;
-    case "authenticating":
-      return `Authenticating via ${channel}…`;
-    case "syncing":
-      return `Syncing presence via ${channel}…`;
-    case "reconnecting":
-      return `Reconnecting via ${channel}…`;
-    case "error":
-      return `${channel} unavailable — refresh to retry`;
-    case "disconnected":
-      return transportMode === "websocket"
-        ? "WebSocket offline"
-        : "Working in this tab";
-  }
-};
-
-const isReconnectWarningState = (state: AdapterConnectionState): boolean =>
-  state === "disconnected" || state === "reconnecting" || state === "error";
 
 const StatusItem = ({
   icon,
@@ -126,12 +62,12 @@ const StatusItem = ({
 
   return (
     <span
-      className={`inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap ${toneClass}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap ${toneClass}`}
     >
       <span aria-hidden className={iconClass}>
         {icon}
       </span>
-      <span className="truncate">{children}</span>
+      <span>{children}</span>
     </span>
   );
 };
@@ -175,7 +111,7 @@ export function StatusRail({
   return (
     // biome-ignore lint/a11y/useSemanticElements: transport status live region; <output> is for form-calculated values.
     <div
-      className="relative z-20 flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--pg-line)] bg-[var(--pg-surface)]/90 px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] font-medium tracking-[0.02em] text-[var(--pg-ink-muted)] backdrop-blur-xl md:px-5"
+      className="pg-status-rail relative z-20 min-w-0 flex-1 overflow-x-auto font-[family-name:var(--font-mono)] text-[11px] font-medium tracking-[0.02em] text-[var(--pg-ink-muted)]"
       data-testid="collaboration-status"
       data-transport={transportMode}
       data-connection-state={connectionState}
@@ -186,52 +122,45 @@ export function StatusRail({
         aria-hidden
         className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[var(--pg-accent)] via-teal-400 to-orange-400"
       />
-      <button
-        type="button"
-        className="group inline-flex max-w-48 items-center gap-1.5 px-1.5 py-1 text-[var(--pg-ink)] outline-none transition-colors hover:bg-[var(--pg-elevated)] focus-visible:ring-2 focus-visible:ring-[var(--pg-accent)]"
-        onClick={onCopyRoomLink}
-        aria-label={`Copy link for room ${roomId}`}
-      >
-        <span className="truncate font-mono">room/{roomId}</span>
-        <Copy className="size-3 opacity-50 transition-opacity group-hover:opacity-100" />
-      </button>
-
-      <StatusItem icon={connectionIcon} tone={connectionTone}>
-        {connectionLabel(connectionState, transportMode)}
-      </StatusItem>
-      {isReconnectWarningState(connectionState) &&
-      transportMode === "websocket" ? (
-        <span className="border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
-          Sync paused until reconnect
-        </span>
-      ) : null}
-      <StatusItem icon={persistenceIcon}>
-        {persistenceLabel(persistenceState, pendingCount)}
-      </StatusItem>
-      <StatusItem icon={<Database className="size-3.5" />}>
-        {formatStorageSize(storageBytes)}
-      </StatusItem>
-
-      <div className="ml-auto flex items-center pl-1">
-        {users.slice(0, 5).map((user, index) => (
-          <span
-            key={user.userId}
-            className="grid size-6 place-items-center border-2 border-[var(--pg-surface)] text-[9px] font-bold text-white shadow-sm"
-            style={{
-              backgroundColor: user.color,
-              marginLeft: index === 0 ? 0 : -5,
-            }}
-            title={user.name}
-          >
-            {user.name.slice(0, 2).toUpperCase()}
+      <div className="flex min-h-12 min-w-max flex-1 items-center gap-3 px-3 md:gap-4 md:px-5">
+        <RoomCopyControl roomId={roomId} onCopyRoomLink={onCopyRoomLink} />
+        <span className="h-5 w-px shrink-0 bg-[var(--pg-line)]" aria-hidden />
+        <StatusItem icon={connectionIcon} tone={connectionTone}>
+          {connectionLabel(connectionState, transportMode)}
+        </StatusItem>
+        {isReconnectWarningState(connectionState) &&
+        transportMode === "websocket" ? (
+          <span className="border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+            Sync paused until reconnect
           </span>
-        ))}
-        <span className="ml-2 whitespace-nowrap text-[var(--pg-ink-muted)]">
-          {users.length} online
-        </span>
+        ) : null}
+        <span className="h-5 w-px shrink-0 bg-[var(--pg-line)]" aria-hidden />
+        <StatusItem icon={persistenceIcon}>
+          {persistenceLabel(persistenceState, pendingCount)}
+        </StatusItem>
+        <StatusItem icon={<Database className="size-3.5" />}>
+          {formatStorageSize(storageBytes)}
+        </StatusItem>
+
+        <div className="ml-auto hidden items-center pl-1 md:flex">
+          {users.slice(0, 5).map((user, index) => (
+            <span
+              key={user.connectionId}
+              className="grid size-6 place-items-center border-2 border-[var(--pg-surface)] text-[9px] font-bold text-white shadow-sm"
+              style={{
+                backgroundColor: user.color,
+                marginLeft: index === 0 ? 0 : -5,
+              }}
+              title={user.name}
+            >
+              {user.name.slice(0, 2).toUpperCase()}
+            </span>
+          ))}
+          <span className="ml-2 whitespace-nowrap text-[var(--pg-ink-muted)]">
+            {users.length} online
+          </span>
+        </div>
       </div>
     </div>
   );
 }
-
-export { formatStorageSize, persistenceLabel };

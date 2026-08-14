@@ -1,12 +1,28 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
+import { useEffect, useState } from "react";
 import { demos } from "@/lib/demos";
 
 const spring = { type: "spring" as const, stiffness: 320, damping: 30 };
 
 export function DemoList() {
   const reduceMotion = useReducedMotion();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setReady(true);
+  }, []);
+
+  const reveal = (index: number) =>
+    !ready || reduceMotion
+      ? {}
+      : {
+          initial: { opacity: 0, y: 16 },
+          whileInView: { opacity: 1, y: 0 },
+          viewport: { once: true, margin: "-40px" },
+          transition: { ...spring, delay: index * 0.04 },
+        };
 
   return (
     <section id="demos" className="mx-auto max-w-6xl px-6 py-20 md:py-28">
@@ -22,18 +38,12 @@ export function DemoList() {
 
       <ul className="divide-y divide-[var(--pg-line)] border-y border-[var(--pg-line)]">
         {demos.map((demo, index) => (
-          <motion.li
-            key={demo.id}
-            initial={reduceMotion ? false : { opacity: 0, y: 16 }}
-            whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{ ...spring, delay: index * 0.04 }}
-          >
+          <motion.li key={demo.id} {...reveal(index)}>
             <Link
               to={demo.link}
-              className="group relative flex flex-col gap-4 py-7 transition-colors md:flex-row md:items-start md:gap-8 md:py-9"
+              className="pg-focus-ring group relative flex flex-col gap-4 py-7 transition-[transform,color] active:translate-y-px md:flex-row md:items-start md:gap-8 md:py-9"
             >
-              <span className="absolute inset-x-[-1rem] inset-y-0 -z-10 rounded-sm bg-[var(--pg-elevated)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 md:inset-x-[-1.5rem]" />
+              <span className="absolute inset-x-[-1rem] inset-y-0 -z-10 rounded-sm bg-[var(--pg-elevated)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 md:inset-x-[-1.5rem]" />
 
               <span className="font-[family-name:var(--font-mono)] text-sm text-[var(--pg-ink-muted)] tabular-nums">
                 {demo.id}
@@ -61,7 +71,7 @@ export function DemoList() {
               </div>
 
               <span
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center border border-[var(--pg-line)] text-[var(--pg-ink)] transition-all duration-200 group-hover:border-[var(--pg-ink)] group-hover:bg-[var(--pg-ink)] group-hover:text-[var(--pg-paper)] group-hover:scale-105"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center border border-[var(--pg-line)] text-[var(--pg-ink)] transition-all duration-200 group-hover:scale-105 group-hover:border-[var(--pg-ink)] group-hover:bg-[var(--pg-ink)] group-hover:text-[var(--pg-paper)] group-focus-visible:scale-105 group-focus-visible:border-[var(--pg-ink)] group-focus-visible:bg-[var(--pg-ink)] group-focus-visible:text-[var(--pg-paper)]"
                 aria-hidden
               >
                 <ArrowUpRight size={18} />

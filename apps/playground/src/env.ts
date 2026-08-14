@@ -25,6 +25,8 @@ export const env = createEnv({
 
   client: {
     VITE_APP_TITLE: z.string().min(1).optional(),
+    /** Explicit opt-in for the floating TanStack development tools. */
+    VITE_PLAYGROUND_DEVTOOLS: z.enum(["true", "false"]).optional(),
     /** `websocket` (default) or `broadcast` for Lexical / online collab demos */
     VITE_COLLAB_TRANSPORT: z.enum(["websocket", "broadcast"]).optional(),
     /** Override document-sync WebSocket base URL (no roomId query) */

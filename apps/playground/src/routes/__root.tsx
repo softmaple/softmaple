@@ -9,12 +9,15 @@ import {
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { Analytics } from "@vercel/analytics/react";
 import Header from "@/components/Header";
+import { env } from "@/env";
 import TanStackQueryDevtools from "@/integrations/tanstack-query/devtools";
 import appCss from "@/styles.css?url";
 
 export interface MyRouterContext {
   queryClient: QueryClient;
 }
+
+const showTanStackDevtools = env.VITE_PLAYGROUND_DEVTOOLS === "true";
 
 export const Route = createRootRouteWithContext<MyRouterContext>()({
   head: () => ({
@@ -70,18 +73,20 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Header />
         {children}
         <Toaster theme="dark" position="bottom-right" />
-        <TanStackDevtools
-          config={{
-            position: "bottom-right",
-          }}
-          plugins={[
-            {
-              name: "Tanstack Router",
-              render: <TanStackRouterDevtoolsPanel />,
-            },
-            TanStackQueryDevtools,
-          ]}
-        />
+        {showTanStackDevtools ? (
+          <TanStackDevtools
+            config={{
+              position: "bottom-right",
+            }}
+            plugins={[
+              {
+                name: "Tanstack Router",
+                render: <TanStackRouterDevtoolsPanel />,
+              },
+              TanStackQueryDevtools,
+            ]}
+          />
+        ) : null}
         <Analytics />
         <Scripts />
       </body>

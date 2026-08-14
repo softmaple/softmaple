@@ -1,14 +1,7 @@
 import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@softmaple/ui/components/card";
-import { FileText } from "lucide-react";
 import { ResetPasswordForm } from "@/modules/auth/reset-password-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
+import { AuthShell } from "@/modules/auth/auth-shell";
 
 interface ResetPasswordPageProps {
   searchParams: Promise<{ message?: string; error?: string }>;
@@ -23,42 +16,39 @@ export default async function ResetPasswordPage({
 
   return (
     <AuthGuard>
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-                <FileText className="w-6 h-6 text-white" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl">Reset your password</CardTitle>
-            <CardDescription>
-              Enter your email address and we&apos;ll send you a link to reset
-              your password
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {message && (
-              <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
-                {message}
-              </div>
-            )}
-            {error && (
-              <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">
-                {error}
-              </div>
-            )}
-            <ResetPasswordForm />
+      <AuthShell
+        description="Enter your email address and we’ll send you a link to reset your password"
+        title="Reset your password"
+      >
+        {message === undefined ? null : (
+          <p
+            className="mb-5 border-l-2 border-primary bg-muted px-3 py-2 text-sm text-foreground"
+            role="status"
+          >
+            {message}
+          </p>
+        )}
+        {error === undefined ? null : (
+          <p
+            className="mb-5 border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
 
-            <div className="text-center text-sm text-muted-foreground">
-              Remember your password?{" "}
-              <Link href="/login" className="text-primary hover:underline">
-                Sign in
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        <ResetPasswordForm />
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Remember your password?{" "}
+          <Link
+            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="/login"
+          >
+            Sign in
+          </Link>
+        </p>
+      </AuthShell>
     </AuthGuard>
   );
 }

@@ -1,7 +1,7 @@
 import type { FC, ReactNode } from "react";
 import Link from "next/link";
-import { FileText } from "lucide-react";
 import type { DocsType } from "@/types/model";
+import { SoftmapleWordmark } from "@/components/BrandMark";
 import { WorkspaceNavigation } from "@/modules/workspaces/workspace-navigation";
 import { WorkspaceDocsList } from "@/modules/workspaces/workspace-docs-list";
 
@@ -20,11 +20,11 @@ export const WorkspaceDesktopSidebar: FC<WorkspaceDesktopSidebarProps> = ({
 }) => (
   <aside className="hidden w-72 shrink-0 flex-col border-r bg-sidebar md:flex xl:w-80">
     <div className="border-b p-4">
-      <Link className="mb-4 flex items-center gap-2" href="/dashboard">
-        <span className="grid size-8 place-items-center rounded-sm border bg-background text-primary">
-          <FileText className="size-4" />
-        </span>
-        <span className="font-display font-semibold">Softmaple</span>
+      <Link
+        className="mb-4 inline-flex rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+        href="/dashboard"
+      >
+        <SoftmapleWordmark className="text-lg" />
       </Link>
       {children}
     </div>

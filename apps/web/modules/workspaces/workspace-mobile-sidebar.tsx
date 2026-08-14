@@ -3,15 +3,17 @@
 import type { FC, ReactNode } from "react";
 import { useState } from "react";
 import Link from "next/link";
-import { FileText, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetTitle,
   SheetTrigger,
 } from "@softmaple/ui/components/sheet";
 import type { DocsType } from "@/types/model";
+import { SoftmapleWordmark } from "@/components/BrandMark";
 import { WorkspaceDocsList } from "@/modules/workspaces/workspace-docs-list";
 import { WorkspaceNavigation } from "@/modules/workspaces/workspace-navigation";
 
@@ -32,47 +34,45 @@ export const WorkspaceMobileSidebar: FC<WorkspaceMobileSidebarProps> = ({
   const close = (): void => setOpen(false);
 
   return (
-    <div className="fixed left-3 top-3 z-50 md:hidden">
-      <Sheet onOpenChange={setOpen} open={open}>
+    <Sheet onOpenChange={setOpen} open={open}>
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur md:hidden">
         <SheetTrigger asChild>
           <Button
             aria-label="Open workspace navigation"
-            size="icon"
+            className="shrink-0"
+            size="icon-sm"
             variant="outline"
           >
             <Menu className="size-4" />
           </Button>
         </SheetTrigger>
-        <SheetContent
-          className="flex w-[min(20rem,90vw)] flex-col p-0"
-          side="left"
-        >
-          <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
-          <div className="border-b p-4">
-            <Link
-              className="mb-4 flex items-center gap-2"
-              href="/dashboard"
-              onClick={close}
-            >
-              <span className="grid size-8 place-items-center rounded-sm border bg-background text-primary">
-                <FileText className="size-4" />
-              </span>
-              <span className="font-display font-semibold">Softmaple</span>
-            </Link>
-            {children}
-          </div>
-          <WorkspaceNavigation
-            onNavigate={close}
-            workspaceSlug={workspaceSlug}
-          />
-          <WorkspaceDocsList
-            canEdit={canEdit}
-            documents={documents}
-            onNavigate={close}
-            workspaceSlug={workspaceSlug}
-          />
-        </SheetContent>
-      </Sheet>
-    </div>
+        <div className="min-w-0 flex-1">{children}</div>
+      </header>
+      <SheetContent
+        className="flex h-dvh min-h-0 w-[min(20rem,90vw)] flex-col gap-0 p-0"
+        side="left"
+      >
+        <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
+        <SheetDescription className="sr-only">
+          Browse workspace sections and documents.
+        </SheetDescription>
+        <div className="shrink-0 border-b p-4">
+          <Link
+            className="inline-flex rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            href="/dashboard"
+            onClick={close}
+          >
+            <SoftmapleWordmark className="text-lg" />
+          </Link>
+        </div>
+        <WorkspaceNavigation onNavigate={close} workspaceSlug={workspaceSlug} />
+        <WorkspaceDocsList
+          canEdit={canEdit}
+          documents={documents}
+          onNavigate={close}
+          workspaceSlug={workspaceSlug}
+        />
+      </SheetContent>
+    </Sheet>
   );
 };

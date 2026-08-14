@@ -50,9 +50,7 @@ export default defineConfig({
         COLLAB_ALLOWED_ORIGINS: baseURL,
         SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
         SUPABASE_PUBLISHABLE_KEY:
-          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-          "",
+          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
       },
       reuseExistingServer: false,
       timeout: 120_000,

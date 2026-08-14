@@ -171,9 +171,6 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
-      '@tanstack/query-db-collection':
-        specifier: ^1.2.1
-        version: 1.2.1(@tanstack/query-core@5.101.4)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.95
         version: 0.1.95(react@19.2.8)(typescript@5.9.3)
@@ -515,7 +512,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   packages/binding-lexical:
     dependencies:
@@ -598,7 +595,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
+        version: 4.1.10(@types/node@24.10.4)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
 
   packages/collab-protocol:
     dependencies:
@@ -768,9 +765,6 @@ importers:
       '@storybook/addon-docs':
         specifier: ^10.5.5
         version: 10.5.5(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(esbuild@0.28.1)(rollup@4.60.3)(storybook@10.5.5(@types/react@19.2.18)(prettier@3.7.4)(react@19.2.8))(vite@8.2.1(@types/node@24.10.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.10)(yaml@2.8.1))
-      '@storybook/addon-onboarding':
-        specifier: ^10.5.5
-        version: 10.5.5(storybook@10.5.5(@types/react@19.2.18)(prettier@3.7.4)(react@19.2.8))
       '@storybook/addon-vitest':
         specifier: ^10.5.5
         version: 10.5.5(@vitest/browser-playwright@4.1.10)(@vitest/browser@4.1.10)(@vitest/runner@4.1.10)(react@19.2.8)(storybook@10.5.5(@types/react@19.2.18)(prettier@3.7.4)(react@19.2.8))(vitest@4.1.10)
@@ -3686,11 +3680,6 @@ packages:
       '@storybook/addon-vitest':
         optional: true
 
-  '@storybook/addon-onboarding@10.5.5':
-    resolution: {integrity: sha512-QF8mn5QDJdY1LI/RqpxlruaETrPspVFVMRl0oFLSYOIQENIKLY+9Jy48zBkEeiy2vVY8aTNeWdkrnFpDc9G2qA==}
-    peerDependencies:
-      storybook: ^10.5.5
-
   '@storybook/addon-vitest@10.5.5':
     resolution: {integrity: sha512-Ymq9ErkSkYiIDuqpJ2+hE5GCQ5J6TCLOWhutqArvwaeAO+HAibM82XNExpJ1/kvPqk9y961GDPkv2W15I88JIw==}
     peerDependencies:
@@ -4131,12 +4120,6 @@ packages:
 
   '@tanstack/query-core@5.101.4':
     resolution: {integrity: sha512-gNwcvOJcRbLWPOLG/2OBm+zM+Yv+MKsXKEOWC57USuZDEsI71hEErQsiEGx5wX9rzWWkfwM0fVSPoiIFSsxfiw==}
-
-  '@tanstack/query-db-collection@1.2.1':
-    resolution: {integrity: sha512-2IwtxdolgPMwLoV7TKaB+1qVGU7ukulacCQqhCt1/50+x/r9sLXF2668fy6OnLd0mEkkEthzCa+J3ZbiA4kNbg==}
-    peerDependencies:
-      '@tanstack/query-core': ^5.0.0
-      typescript: '>=4.7'
 
   '@tanstack/query-devtools@5.101.4':
     resolution: {integrity: sha512-z5IPHnDX3aUWeTWlRKLyooBQekaCAw4xRpZqPQ390RiWTDBcTynjpPT221BArw0u2+pnQMdGvPQI9YNNubBcmA==}
@@ -10459,10 +10442,6 @@ snapshots:
       - '@tmcp/auth'
       - typescript
 
-  '@storybook/addon-onboarding@10.5.5(storybook@10.5.5(@types/react@19.2.18)(prettier@3.7.4)(react@19.2.8))':
-    dependencies:
-      storybook: 10.5.5(@types/react@19.2.18)(prettier@3.7.4)(react@19.2.8)
-
   '@storybook/addon-vitest@10.5.5(@vitest/browser-playwright@4.1.10)(@vitest/browser@4.1.10)(@vitest/runner@4.1.10)(react@19.2.8)(storybook@10.5.5(@types/react@19.2.18)(prettier@3.7.4)(react@19.2.8))(vitest@4.1.10)':
     dependencies:
       '@storybook/global': 5.0.0
@@ -10854,13 +10833,6 @@ snapshots:
   '@tanstack/pacer-lite@0.2.2': {}
 
   '@tanstack/query-core@5.101.4': {}
-
-  '@tanstack/query-db-collection@1.2.1(@tanstack/query-core@5.101.4)(typescript@5.9.3)':
-    dependencies:
-      '@standard-schema/spec': 1.1.0
-      '@tanstack/db': 0.6.17(typescript@5.9.3)
-      '@tanstack/query-core': 5.101.4
-      typescript: 5.9.3
 
   '@tanstack/query-devtools@5.101.4': {}
 

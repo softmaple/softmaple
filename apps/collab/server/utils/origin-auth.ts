@@ -37,7 +37,7 @@ const configuredOrigins = (
     );
     if (normalized !== null) origins.add(normalized);
   }
-  const appUrl = env.NEXT_PUBLIC_APP_URL?.trim() || env.APP_ORIGIN?.trim();
+  const appUrl = env.NEXT_PUBLIC_APP_URL?.trim();
   if (appUrl) {
     const normalized = tryOrigin(appUrl);
     if (normalized !== null) origins.add(normalized);

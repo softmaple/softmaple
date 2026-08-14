@@ -29,9 +29,7 @@ let authClient: SupabaseClient | null = null;
 const getAuthClient = (): SupabaseClient => {
   if (authClient !== null) return authClient;
   const url = process.env.SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
     throw new Error(
       "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required by collab",

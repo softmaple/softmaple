@@ -13,10 +13,6 @@ const wsUrl = z
   .optional();
 
 export const env = createEnv({
-  server: {
-    SERVER_URL: z.string().url().optional(),
-  },
-
   /**
    * The prefix that client-side variables must have. This is enforced both at
    * a type-level and at runtime.
@@ -24,7 +20,6 @@ export const env = createEnv({
   clientPrefix: "VITE_",
 
   client: {
-    VITE_APP_TITLE: z.string().min(1).optional(),
     /** Explicit opt-in for the floating TanStack development tools. */
     VITE_PLAYGROUND_DEVTOOLS: z.enum(["true", "false"]).optional(),
     /** `websocket` (default) or `broadcast` for Lexical / online collab demos */

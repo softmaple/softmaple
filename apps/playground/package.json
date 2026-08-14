@@ -30,7 +30,6 @@
     "@softmaple/ui": "workspace:*",
     "@t3-oss/env-core": "^0.13.10",
     "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/query-db-collection": "^1.2.1",
     "@tanstack/react-db": "^0.1.95",
     "@tanstack/react-devtools": "^0.10.9",
     "@tanstack/react-query": "^5.101.4",

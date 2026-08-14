@@ -25,6 +25,7 @@
   --pg-ink-muted: #8b8b96;
   --pg-line: #2a2a32;
   --pg-accent: #e11d48;
+  --pg-grid-line: rgba(139, 139, 150, 0.08);
   --pg-glow-teal: rgba(45, 212, 191, 0.16);
   --pg-glow-orange: rgba(251, 146, 60, 0.12);
   --pg-glow-accent: rgba(225, 29, 72, 0.18);
@@ -48,6 +49,21 @@ code {
 }
 
 /* Shared Motion-inspired demo chrome */
+.pg-focus-ring {
+  outline: none;
+}
+
+.pg-focus-ring:focus-visible,
+.pg-action-cluster :where(a, button, [role="button"]):focus-visible {
+  outline: 2px solid var(--pg-accent);
+  outline-offset: 3px;
+}
+
+.pg-action-cluster
+  :where(a, button, [role="button"]):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .pg-panel {
   background: var(--pg-surface);
   border: 1px solid var(--pg-line);
@@ -64,6 +80,43 @@ code {
 .pg-panel-footer {
   border-top: 1px solid var(--pg-line);
   background: color-mix(in srgb, var(--pg-elevated) 70%, var(--pg-paper));
+}
+
+.pg-status-rail {
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--pg-line) transparent;
+  scrollbar-width: thin;
+}
+
+.pg-lexical-editor > div:first-child {
+  min-height: 3.5rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-color: var(--pg-line);
+  background: color-mix(in srgb, var(--pg-elevated) 58%, var(--pg-paper));
+  scrollbar-color: var(--pg-line) transparent;
+  scrollbar-width: thin;
+}
+
+.pg-lexical-editor > div:first-child :where(button, [role="combobox"]) {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  flex: none;
+}
+
+.pg-lexical-editor > div:first-child [data-slot="separator"] {
+  flex: none;
+}
+
+.pg-lexical-editor > div:last-child {
+  border-radius: 0;
+  background-color: color-mix(in srgb, var(--pg-surface) 92%, var(--pg-paper));
+  background-image:
+    linear-gradient(var(--pg-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--pg-grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 .pg-input {

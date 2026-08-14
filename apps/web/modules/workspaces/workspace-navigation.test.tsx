@@ -71,6 +71,8 @@ describe("WorkspaceNavigation", () => {
       "false",
     );
     expect(prefetchByHref["/workspace/acme/settings"]).toBe("false");
+    expect(container.querySelectorAll("a")).toHaveLength(3);
+    expect(container.querySelector("a button, button a")).toBeNull();
     act(() => {
       root.unmount();
     });

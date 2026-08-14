@@ -1,3 +1,5 @@
+import { RouteLoading } from "@/components/RouteLoading";
+
 export default function Loading() {
-  return null;
+  return <RouteLoading label="Loading your workspaces" />;
 }

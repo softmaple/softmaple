@@ -10,6 +10,10 @@ import { SubmitButton } from "@/modules/auth/submit-button";
 export const LoginForm = ({ next }: { readonly next?: string }) => {
   const [state, action] = useActionState(login, null);
   const router = useRouter();
+  const emailError =
+    state !== null && !state.ok ? state.fieldErrors?.email?.[0] : undefined;
+  const passwordError =
+    state !== null && !state.ok ? state.fieldErrors?.password?.[0] : undefined;
 
   useEffect(() => {
     if (state?.ok && state.data.redirectTo !== undefined) {
@@ -33,7 +37,10 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
-          aria-describedby="email-error"
+          aria-describedby={
+            emailError === undefined ? undefined : "email-error"
+          }
+          aria-invalid={emailError === undefined ? undefined : true}
           autoComplete="email"
           id="email"
           name="email"
@@ -41,25 +48,30 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
           placeholder="you@example.com"
           required
         />
-        <p className="text-xs text-destructive" id="email-error">
-          {state !== null && !state.ok ? state.fieldErrors?.email?.[0] : null}
-        </p>
+        {emailError === undefined ? null : (
+          <p className="text-xs text-destructive" id="email-error">
+            {emailError}
+          </p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
         <Input
-          aria-describedby="password-error"
+          aria-describedby={
+            passwordError === undefined ? undefined : "password-error"
+          }
+          aria-invalid={passwordError === undefined ? undefined : true}
           autoComplete="current-password"
           id="password"
           name="password"
           type="password"
           required
         />
-        <p className="text-xs text-destructive" id="password-error">
-          {state !== null && !state.ok
-            ? state.fieldErrors?.password?.[0]
-            : null}
-        </p>
+        {passwordError === undefined ? null : (
+          <p className="text-xs text-destructive" id="password-error">
+            {passwordError}
+          </p>
+        )}
       </div>
       <SubmitButton />
     </form>

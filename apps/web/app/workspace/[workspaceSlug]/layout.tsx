@@ -57,20 +57,19 @@ export default async function WorkspaceLayoutPage(props: Props) {
     membership?.role === WORKSPACE_ROLE.Editor;
 
   return (
-    <div className="flex h-dvh min-w-0 bg-background">
-      {/* Mobile Menu Trigger */}
+    <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background md:flex-row">
       <WorkspaceMobileSidebar
         canEdit={canEdit}
         documents={documents}
         workspaceSlug={workspaceSlug}
       >
         <WorkspaceDropdown
+          compact
           workspaceSlug={workspaceSlug}
           workspaces={workspaces}
         />
       </WorkspaceMobileSidebar>
 
-      {/* Desktop Sidebar */}
       <WorkspaceDesktopSidebar
         canEdit={canEdit}
         documents={documents}
@@ -82,8 +81,7 @@ export default async function WorkspaceLayoutPage(props: Props) {
         />
       </WorkspaceDesktopSidebar>
 
-      {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Suspense>{children}</Suspense>
       </div>
     </div>

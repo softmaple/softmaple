@@ -1,15 +1,8 @@
 import Link from "next/link";
-import { Button } from "@softmaple/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@softmaple/ui/components/card";
-import { FileText, Github, Mail } from "lucide-react";
 import { LoginForm } from "@/modules/auth/login-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
+import { AuthShell } from "@/modules/auth/auth-shell";
+import { AuthOAuthOptions } from "@/modules/auth/auth-oauth-options";
 
 interface LoginPageProps {
   searchParams: Promise<{ error?: string; message?: string; next?: string }>;
@@ -22,81 +15,50 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <AuthGuard>
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-                <FileText className="w-6 h-6 text-white" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl">Welcome back</CardTitle>
-            <CardDescription>Sign in to your Softmaple account</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {message && (
-              <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
-                {message}
-              </div>
-            )}
-            {error === undefined ? null : (
-              <div
-                className="rounded-sm bg-destructive/10 p-3 text-sm text-destructive"
-                role="alert"
-              >
-                {error}
-              </div>
-            )}
-            <LoginForm next={params.next} />
+      <AuthShell
+        description="Sign in to your Softmaple account"
+        title="Welcome back"
+      >
+        {message === undefined ? null : (
+          <p
+            className="mb-5 border-l-2 border-primary bg-muted px-3 py-2 text-sm text-foreground"
+            role="status"
+          >
+            {message}
+          </p>
+        )}
+        {error === undefined ? null : (
+          <p
+            className="mb-5 border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
 
-            <div className="text-right">
-              <Link
-                href="/reset-password"
-                className="text-sm text-muted-foreground hover:text-primary transition-colors"
-              >
-                Forgot password?
-              </Link>
-            </div>
+        <LoginForm next={params.next} />
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  Or continue with
-                </span>
-              </div>
-            </div>
+        <div className="mt-3 text-right">
+          <Link
+            className="text-sm text-muted-foreground transition-colors hover:text-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="/reset-password"
+          >
+            Forgot password?
+          </Link>
+        </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Button aria-describedby="oauth-note" disabled variant="outline">
-                <Github className="mr-2 h-4 w-4" />
-                GitHub
-              </Button>
-              <Button aria-describedby="oauth-note" disabled variant="outline">
-                <Mail className="mr-2 h-4 w-4" />
-                Google
-              </Button>
-            </div>
-            <p
-              className="text-center text-xs text-muted-foreground"
-              id="oauth-note"
-            >
-              GitHub and Google sign-in are coming soon.
-            </p>
+        <AuthOAuthOptions mode="sign-in" />
 
-            <div className="text-center text-sm">
-              <span className="text-muted-foreground">
-                Don&apos;t have an account?{" "}
-              </span>
-              <Link href="/signup" className="text-primary hover:underline">
-                Sign up
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{" "}
+          <Link
+            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="/signup"
+          >
+            Sign up
+          </Link>
+        </p>
+      </AuthShell>
     </AuthGuard>
   );
 }

@@ -44,12 +44,12 @@ export function DemoPageShell({
               </div>
             ) : null}
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="pg-action-cluster flex shrink-0 flex-wrap items-center gap-2">
             {actions}
             {showBackLink ? (
               <Link
                 to="/"
-                className="inline-flex items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-elevated)] px-3 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] transition-colors hover:border-[var(--pg-ink-muted)] hover:text-[var(--pg-ink)]"
+                className="pg-focus-ring inline-flex min-h-11 items-center gap-1.5 border border-[var(--pg-line)] bg-[var(--pg-elevated)] px-3 py-2 text-xs font-semibold text-[var(--pg-ink-muted)] transition-colors hover:border-[var(--pg-ink-muted)] hover:text-[var(--pg-ink)] active:translate-y-px"
               >
                 <ArrowLeft className="size-3.5" aria-hidden />
                 Playground

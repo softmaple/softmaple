@@ -2,6 +2,7 @@ import {
   Sheet,
   SheetClose,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
@@ -36,7 +37,7 @@ export default function Header() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         <Link
           to="/"
-          className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.03em] text-[var(--pg-ink)]"
+          className="pg-focus-ring rounded-sm font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.03em] text-[var(--pg-ink)] active:translate-y-px"
         >
           SoftMaple
           <span className="ml-1.5 font-normal text-[var(--pg-ink-muted)]">
@@ -48,7 +49,7 @@ export default function Header() {
           {isHome ? (
             <button
               type="button"
-              className="text-sm text-[var(--pg-ink-muted)] transition-colors hover:text-[var(--pg-ink)]"
+              className="pg-focus-ring rounded-sm px-1 py-2 text-sm text-[var(--pg-ink-muted)] transition-colors hover:text-[var(--pg-ink)] active:translate-y-px"
               onClick={() => {
                 document.getElementById("demos")?.scrollIntoView({
                   behavior: reduceMotion ? "auto" : "smooth",
@@ -61,7 +62,7 @@ export default function Header() {
             <Link
               to="/"
               hash="demos"
-              className="text-sm text-[var(--pg-ink-muted)] transition-colors hover:text-[var(--pg-ink)]"
+              className="pg-focus-ring rounded-sm px-1 py-2 text-sm text-[var(--pg-ink-muted)] transition-colors hover:text-[var(--pg-ink)] active:translate-y-px"
             >
               Demos
             </Link>
@@ -70,14 +71,14 @@ export default function Header() {
             href="https://docs.softmaple.ink"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-[var(--pg-ink-muted)] transition-colors hover:text-[var(--pg-ink)]"
+            className="pg-focus-ring rounded-sm px-1 py-2 text-sm text-[var(--pg-ink-muted)] transition-colors hover:text-[var(--pg-ink)] active:translate-y-px"
           >
             Docs
           </a>
           {!isHome ? (
             <Link
               to="/demo/lexical-eg-walker"
-              className="bg-[var(--pg-ink)] px-3.5 py-1.5 text-sm font-medium text-[var(--pg-paper)] transition-opacity hover:opacity-90"
+              className="pg-focus-ring bg-[var(--pg-ink)] px-3.5 py-2 text-sm font-medium text-[var(--pg-paper)] transition-opacity hover:opacity-90 active:translate-y-px"
             >
               Open Lexical demo
             </Link>
@@ -88,7 +89,7 @@ export default function Header() {
           <SheetTrigger asChild>
             <button
               type="button"
-              className="rounded-sm p-2 text-[var(--pg-ink)] transition-colors hover:bg-[var(--pg-elevated)] md:hidden"
+              className="pg-focus-ring min-h-11 min-w-11 rounded-sm p-2 text-[var(--pg-ink)] transition-colors hover:bg-[var(--pg-elevated)] active:translate-y-px md:hidden"
               aria-label="Open menu"
             >
               <Menu size={22} />
@@ -102,6 +103,9 @@ export default function Header() {
               <SheetTitle className="font-[family-name:var(--font-display)] font-semibold tracking-[-0.02em] text-[var(--pg-ink)]">
                 Navigate
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                Browse Playground demos and documentation.
+              </SheetDescription>
             </SheetHeader>
 
             <nav className="flex-1 overflow-y-auto p-4">
@@ -124,7 +128,7 @@ export default function Header() {
                   <SheetClose asChild>
                     <Link
                       to="/"
-                      className="mb-1 block rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-[var(--pg-elevated)]"
+                      className="pg-focus-ring mb-1 block rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-[var(--pg-elevated)] active:translate-y-px"
                     >
                       Home
                     </Link>
@@ -141,7 +145,7 @@ export default function Header() {
                     <SheetClose asChild>
                       <Link
                         to={demo.link}
-                        className="mb-1 block rounded-sm px-3 py-2.5 text-sm hover:bg-[var(--pg-elevated)]"
+                        className="pg-focus-ring mb-1 block rounded-sm px-3 py-2.5 text-sm hover:bg-[var(--pg-elevated)] active:translate-y-px"
                       >
                         <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--pg-ink-muted)]">
                           {demo.id}
@@ -164,7 +168,7 @@ export default function Header() {
                       href="https://docs.softmaple.ink"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-4 block rounded-sm border border-[var(--pg-line)] px-3 py-2.5 text-sm font-medium"
+                      className="pg-focus-ring mt-4 block rounded-sm border border-[var(--pg-line)] px-3 py-2.5 text-sm font-medium hover:border-[var(--pg-ink-muted)] hover:bg-[var(--pg-elevated)] active:translate-y-px"
                     >
                       Documentation
                     </a>

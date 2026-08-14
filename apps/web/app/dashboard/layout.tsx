@@ -1,6 +1,7 @@
-import { FileText } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@softmaple/ui/components/button";
 import { logout } from "@/app/actions/auth";
+import { SoftmapleWordmark } from "@/components/BrandMark";
 import { SettingsDropdown } from "@/modules/settings/settings-dropdown";
 
 export default function DashboardLayout({
@@ -9,16 +10,17 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-              <FileText className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-semibold text-xl">Softmaple</span>
-          </div>
-          <div className="flex items-center space-x-4">
+    <div className="min-h-dvh bg-background">
+      <header className="border-b bg-background/85 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+          <Link
+            aria-label="Softmaple dashboard"
+            className="inline-flex min-w-0 items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            href="/dashboard"
+          >
+            <SoftmapleWordmark className="text-lg" />
+          </Link>
+          <div className="flex shrink-0 items-center gap-2">
             <SettingsDropdown />
 
             <Button

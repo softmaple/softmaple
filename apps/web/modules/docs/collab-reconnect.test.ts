@@ -8,12 +8,17 @@ import {
   RECONNECT_MIN_DELAY_MS,
 } from "./collab-reconnect";
 
-/** Deterministic [0, 1) source so jitter assertions can never flake. */
+/**
+ * Deterministic [0, 1) source so jitter assertions can never flake. Lehmer's
+ * minimal standard generator: 48_271 * (2 ** 31 - 2) stays well inside the
+ * safe-integer range, so no intermediate product loses precision.
+ */
 const createRandomSequence = (seed: number): (() => number) => {
-  let state = seed % 2_147_483_647;
+  const modulus = 2_147_483_647;
+  let state = (seed % (modulus - 1)) + 1;
   return () => {
-    state = (state * 1_103_515_245 + 12_345) % 2_147_483_647;
-    return state / 2_147_483_647;
+    state = (state * 48_271) % modulus;
+    return state / modulus;
   };
 };
 

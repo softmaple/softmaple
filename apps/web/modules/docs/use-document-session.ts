@@ -26,6 +26,7 @@ import { createOutgoingBatchQueue } from "@/modules/docs/collab-outgoing-queue";
 import {
   getReconnectDelay,
   isBrowserOffline,
+  RECONNECT_ACCELERATION_INTERVAL_MS,
 } from "@/modules/docs/collab-reconnect";
 import type { CollabTarget } from "@/modules/docs/collab-target";
 import {
@@ -143,6 +144,8 @@ const createSessionController = ({
   let wsGeneration = 0;
   /** True from the start of a connect attempt until its socket exists. */
   let connectPending = false;
+  /** Timestamp of the last reconnect a browser signal triggered immediately. */
+  let lastAcceleratedAt: number | null = null;
   let synced = false;
   let fatalConnectionError = false;
   let activeRepairRequestId: string | null = null;
@@ -389,6 +392,18 @@ const createSessionController = ({
     if (cancelled || transport !== "ws" || fatalConnectionError) return;
     if (socket !== null || connectPending) return;
     if (isBrowserOffline()) return;
+    const now = Date.now();
+    if (
+      lastAcceleratedAt !== null &&
+      now - lastAcceleratedAt < RECONNECT_ACCELERATION_INTERVAL_MS
+    ) {
+      // A flapping interface or a user switching tabs must not turn into a
+      // retry per event. Fall back to the jittered schedule rather than
+      // dropping the signal, so a loop suppressed while offline still resumes.
+      scheduleReconnect();
+      return;
+    }
+    lastAcceleratedAt = now;
     clearReconnectTimer();
     void connectWs();
   };
@@ -637,6 +652,7 @@ const createSessionController = ({
   const startWsTransport = async (): Promise<void> => {
     transport = "ws";
     reconnectAttempt = 0;
+    lastAcceleratedAt = null;
     fatalConnectionError = false;
     onCollaborationStatus("connecting");
     await connectWs();

@@ -16,6 +16,14 @@ export const RECONNECT_BASE_DELAY_MS = 500;
 export const RECONNECT_MAX_DELAY_MS = 10_000;
 
 /**
+ * Minimum spacing between reconnects triggered immediately by a browser
+ * signal. `online` fires on every interface flap and `visibilitychange` on
+ * every focus change, so without a floor those signals would replace the
+ * backoff with a retry per event.
+ */
+export const RECONNECT_ACCELERATION_INTERVAL_MS = 5_000;
+
+/**
  * Floor for a jittered delay. Full jitter can draw a value close to zero, and
  * a server that rejects connections immediately would turn that into a hot
  * retry loop.

@@ -704,6 +704,38 @@ describe("useCollabDocument", () => {
     unmount();
   });
 
+  it("should not let repeated browser signals outpace the backoff", async () => {
+    // Arrange — the first signal is allowed through and opens a socket.
+    const { unmount } = renderCollabHook("doc-signal-flood");
+    const first = await waitForSocket();
+    act(() => {
+      first.emitClose();
+    });
+    emitVisibilityChange("visible");
+    expect(fakeSockets).toHaveLength(2);
+
+    // Act — that retry fails at once and a burst of signals follows.
+    act(() => {
+      fakeSockets[1]?.emitClose();
+    });
+    emitVisibilityChange("hidden");
+    emitVisibilityChange("visible");
+    emitOnline();
+    emitVisibilityChange("visible");
+
+    // Assert — the burst falls back to the jittered schedule instead of
+    // opening a socket per event, and still reconnects exactly once.
+    expect(fakeSockets).toHaveLength(2);
+    advance(499);
+    expect(fakeSockets).toHaveLength(2);
+    advance(1);
+    expect(fakeSockets).toHaveLength(3);
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(3);
+
+    unmount();
+  });
+
   it("should keep one connection attempt while authentication is in flight", async () => {
     // Arrange — hold the session read open so the attempt cannot complete.
     let releaseSession: (() => void) | undefined;

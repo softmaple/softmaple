@@ -10,7 +10,16 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COLLAB_CLIENT_CLOSE_CODE } from "./collab-client-close";
+import { COLLAB_RUNTIME } from "./collab-runtime-routing";
+import type { CollabTarget } from "./collab-target";
 import { useCollabDocument } from "./use-collab-document";
+
+/** Stands in for the target a Server Component resolves for the page. */
+const NITRO_TARGET: CollabTarget = {
+  documentUrl: "ws://localhost:3000/collab/document",
+  presenceUrl: "ws://localhost:3000/collab/presence",
+  runtime: COLLAB_RUNTIME.Nitro,
+};
 
 vi.mock("@/utils/supabase/client", () => ({
   createClient: () => ({
@@ -140,7 +149,7 @@ const renderCollabHook = (
   };
 
   const Capture = (): null => {
-    result.current = useCollabDocument(documentId, sessionMode);
+    result.current = useCollabDocument(NITRO_TARGET, documentId, sessionMode);
     return null;
   };
 

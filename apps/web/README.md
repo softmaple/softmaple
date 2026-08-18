@@ -79,7 +79,10 @@ using the configured Worker URL directly, with the room identifier in the query
 string (`/collab/document?documentId=<id>`, `/collab/presence?roomId=<id>`) so
 the Worker can route the upgrade straight into that room's Durable Object. Those
 ids are identifiers, not credentials — authentication stays in the first
-protocol message, and no access token belongs in a WebSocket URL:
+protocol message, and no access token belongs in a WebSocket URL. Both URLs are
+resolved on the server (see
+[Collaboration runtime routing](#collaboration-runtime-routing)); the browser
+connects to what it is given and derives no endpoint of its own:
 
 ```text
 /collab/** → apps/collab
@@ -112,11 +115,19 @@ runtimes read and write the same Supabase event-history tables, so switching a
 document back and forth needs no document-history migration. Live presence is
 runtime-local and is recreated when the client joins the destination runtime.
 
+The page render then resolves that runtime's endpoints in the same step:
+[`modules/docs/collab-target.server.ts`](./modules/docs/collab-target.server.ts)
+hands the client one `CollabTarget` — a runtime plus its document and presence
+WebSocket URLs — and the client connects to exactly that. See
+[Server-resolved collaboration target](#server-resolved-collaboration-target)
+below.
+
 | Variable | Effect |
 | --- | --- |
-| `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` | Base WS URL for the deployed Cloudflare worker (e.g. `wss://softmaple-collab-cloudflare.<subdomain>.workers.dev`). **Unset by default** — until this is set, every document stays on Nitro regardless of the other variables below. |
+| `COLLAB_CLOUDFLARE_WS_URL` | Base WS URL for the deployed Cloudflare worker (e.g. `wss://softmaple-collab-cloudflare.<subdomain>.workers.dev`). **Unset by default** — until this is set, every document stays on Nitro regardless of the other variables below. Server-only: endpoint resolution happens during the render, so the value never reaches the browser. |
+| `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` | Deprecated alias for the row above, read only when `COLLAB_CLOUDFLARE_WS_URL` is unset, so existing deployments keep working. Being a `NEXT_PUBLIC_*` value, changing it still requires a rebuild. |
 | `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT` | `0`-`100`. Percentage of documents deterministically bucketed onto Cloudflare by a stable hash of the document id. Defaults to `0`. |
-| `COLLAB_RUNTIME_OVERRIDE` | `nitro` or `cloudflare`. Global override applied to any document not on the allow/deny list below — used to test Cloudflare in an internal/preview environment (Stage 1-2), or as a quick rollback lever for the percentage cohort. It does **not** move allow-listed documents: those stay on Cloudflare regardless of this variable, since the allowlist takes precedence. A complete rollback needs to also clear `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` (or move the affected ids to `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST`), or clear `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` entirely. |
+| `COLLAB_RUNTIME_OVERRIDE` | `nitro` or `cloudflare`. Global override applied to any document not on the allow/deny list below — used to test Cloudflare in an internal/preview environment (Stage 1-2), or as a quick rollback lever for the percentage cohort. It does **not** move allow-listed documents: those stay on Cloudflare regardless of this variable, since the allowlist takes precedence. A complete rollback needs to also clear `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` (or move the affected ids to `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST`), or clear the Worker URL entirely. |
 | `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST` | Comma-separated document ids always routed to Cloudflare, regardless of percent/override. |
 | `COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST` | Comma-separated document ids always routed to Nitro. Takes precedence over the allowlist — the strongest per-document rollback lever. |
 
@@ -125,10 +136,36 @@ document always resolves to the same runtime for a stable config, and both
 its document and presence WebSocket connections use that same answer for
 any newly-rendered page load.
 
-That guarantee applies at page-render time only, not to WebSockets a
-browser already has open. `collabRuntime` is resolved once server-side and
+#### Server-resolved collaboration target
+
+Runtime selection is document ownership, so the answer is never re-derived in
+the browser:
+
+```text
+server: resolveCollabRuntime(documentId)   → which runtime owns this document
+server: resolveCollabTarget(runtime, …)    → that runtime's document + presence URLs
+client: connects to exactly those URLs     → no environment reads, no inference
+```
+
+`resolveDocumentCollabTarget` runs both steps together during the render and
+passes the result down as a single prop, so the document socket and the
+presence socket of one page load cannot end up on different runtimes.
+Endpoint resolution can fail, but it can never answer with a runtime other
+than the one it was given: if Cloudflare owns a document while
+`COLLAB_CLOUDFLARE_WS_URL` is missing or malformed, the render throws instead
+of quietly connecting that document to Nitro, which would make two tabs of one
+document write to two backends. A reconnect retries the *same* runtime; there
+is no Cloudflare → Nitro (or reverse) failover, in the client or anywhere else.
+
+Clearing the Worker URL entirely is still a safe rollback lever: with no
+endpoint configured, `decideCollabRuntime` selects Nitro for every document up
+front (`cloudflareConfigured: false`), so nothing is ever selected onto a
+runtime that has no endpoint.
+
+All of this applies at page-render time only, not to WebSockets a
+browser already has open. The `CollabTarget` is resolved once server-side and
 baked into the live session (`useDocumentSession`). Automatic reconnect
-reuses that value; only a newly rendered page (normally a reload or fresh
+reuses those endpoints; only a newly rendered page (normally a reload or fresh
 tab) can pick up changed routing config. Existing tabs therefore remain on
 their original runtime until re-rendered. **Two tabs open on the same
 document across a config change can be on different runtimes for as long
@@ -149,8 +186,8 @@ rendered before and one rendered after the change against the same
 document.
 
 Rolling back is changing `COLLAB_RUNTIME_OVERRIDE`/`COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`
-back to their safe defaults (or clearing `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`
-entirely) and redeploying — no data migration is involved, but per above,
+back to their safe defaults (or clearing `COLLAB_CLOUDFLARE_WS_URL` and its
+deprecated `NEXT_PUBLIC_` alias entirely) and redeploying — no data migration is involved, but per above,
 existing open tabs observe the rollback only after a reload or fresh server
 render; automatic reconnect keeps their original runtime. Deploying
 `apps/collab-cloudflare` itself (secrets, `wrangler deploy`, DNS) is a separate

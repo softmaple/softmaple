@@ -67,14 +67,31 @@ const parseOverride = (raw: string | undefined): CollabRuntime | null =>
     ? raw
     : null;
 
+/**
+ * Single source of truth for the Cloudflare collaboration endpoint, shared by
+ * the runtime decision below and by endpoint resolution
+ * (`collab-target.ts`), so selecting Cloudflare and resolving Cloudflare can
+ * never disagree about whether it is deployed.
+ *
+ * `COLLAB_CLOUDFLARE_WS_URL` is the preferred, server-only name: endpoints are
+ * resolved server-side now, so the value no longer has to reach the browser.
+ * The legacy `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` still works so existing
+ * deployments keep running unchanged.
+ */
+export const readCloudflareCollabBaseUrl = (): string | undefined => {
+  const raw =
+    process.env.COLLAB_CLOUDFLARE_WS_URL ??
+    process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL;
+  const trimmed = raw?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
+
 export const readCollabRuntimeRoutingConfig =
   (): CollabRuntimeRoutingConfig => ({
     allowlist: parseDocumentIdList(
       process.env.COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST,
     ),
-    cloudflareConfigured: Boolean(
-      process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL,
-    ),
+    cloudflareConfigured: readCloudflareCollabBaseUrl() !== undefined,
     denylist: parseDocumentIdList(
       process.env.COLLAB_CLOUDFLARE_DOCUMENT_DENYLIST,
     ),

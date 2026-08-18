@@ -25,8 +25,9 @@ reads environment config for each page render, then calls the pure
 
 **The repository is configured for Cloudflare test-only use.** It contains no
 Cloudflare deployment workflow, and `wrangler.jsonc` declares no route or
-custom domain. `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` is unset by default, so
-the web routing fail-safe keeps every document on Nitro. Repository state
+custom domain. `COLLAB_CLOUDFLARE_WS_URL` (and its deprecated
+`NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` alias) is unset by default, so the web
+routing fail-safe keeps every document on Nitro. Repository state
 cannot prove what has been deployed manually or configured in the Cloudflare
 dashboard; verify the target account before relying on this stage description.
 
@@ -129,8 +130,8 @@ There are two separate rollback levers:
 
 1. **Routing rollback** stops new page renders from selecting Cloudflare.
    Reset `COLLAB_RUNTIME_OVERRIDE` and
-   `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`, or clear
-   `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL`, then rebuild and redeploy
+   `COLLAB_CLOUDFLARE_ROLLOUT_PERCENT`, or clear `COLLAB_CLOUDFLARE_WS_URL`
+   (and its deprecated `NEXT_PUBLIC_` alias), then rebuild and redeploy
    `apps/web`. Resetting only the override or percentage does not move ids on
    `COLLAB_CLOUDFLARE_DOCUMENT_ALLOWLIST`; clear that list, deny the affected
    ids, or clear the Worker URL to stop all new Cloudflare selections. See the
@@ -141,8 +142,11 @@ There are two separate rollback levers:
    subject to Durable Object migration and binding restrictions.
 
 An automatic WebSocket reconnect does **not** re-run routing. The rendered
-page keeps its original `collabRuntime`, and reconnect opens the same runtime
-again. Only a reload or fresh page render can pick up changed routing config.
+page keeps the collaboration target the server resolved for it, and reconnect
+reopens the same runtime's endpoint. There is no cross-runtime failover: a
+Cloudflare page whose endpoint is unreachable retries Cloudflare and never
+falls back to Nitro. Only a reload or fresh page render can pick up changed
+routing config.
 
 This makes tabs split across two runtimes a correctness incident, not only a
 UX issue. The two runtimes share durable event history but have no live

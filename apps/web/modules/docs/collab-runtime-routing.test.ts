@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   COLLAB_RUNTIME,
   decideCollabRuntime,
+  readCloudflareCollabBaseUrl,
   readCollabRuntimeRoutingConfig,
   resolveCollabRuntime,
   type CollabRuntimeRoutingConfig,
@@ -121,6 +122,7 @@ describe("readCollabRuntimeRoutingConfig", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    delete process.env.COLLAB_CLOUDFLARE_WS_URL;
     delete process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL;
     delete process.env.COLLAB_RUNTIME_OVERRIDE;
     delete process.env.COLLAB_CLOUDFLARE_ROLLOUT_PERCENT;
@@ -168,10 +170,54 @@ describe("readCollabRuntimeRoutingConfig", () => {
     expect([...config.allowlist].sort()).toEqual(["doc-1", "doc-2", "doc-3"]);
   });
 
-  it("treats cloudflareConfigured as true only when the public URL is set", () => {
+  it("treats cloudflareConfigured as true only when an endpoint is set", () => {
+    expect(readCollabRuntimeRoutingConfig().cloudflareConfigured).toBe(false);
+
     process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL =
       "wss://example.workers.dev";
     expect(readCollabRuntimeRoutingConfig().cloudflareConfigured).toBe(true);
+
+    delete process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL;
+    process.env.COLLAB_CLOUDFLARE_WS_URL = "wss://example.workers.dev";
+    expect(readCollabRuntimeRoutingConfig().cloudflareConfigured).toBe(true);
+  });
+});
+
+describe("readCloudflareCollabBaseUrl", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.COLLAB_CLOUDFLARE_WS_URL;
+    delete process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it("is undefined when neither variable is set", () => {
+    expect(readCloudflareCollabBaseUrl()).toBeUndefined();
+  });
+
+  it("treats an empty or blank value as unset", () => {
+    process.env.COLLAB_CLOUDFLARE_WS_URL = "";
+    expect(readCloudflareCollabBaseUrl()).toBeUndefined();
+
+    process.env.COLLAB_CLOUDFLARE_WS_URL = "   ";
+    expect(readCloudflareCollabBaseUrl()).toBeUndefined();
+  });
+
+  it("prefers the server-only variable over the legacy public one", () => {
+    process.env.COLLAB_CLOUDFLARE_WS_URL = " wss://server-only.workers.dev ";
+    process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL =
+      "wss://legacy.workers.dev";
+    expect(readCloudflareCollabBaseUrl()).toBe("wss://server-only.workers.dev");
+  });
+
+  it("falls back to the legacy public variable", () => {
+    process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL =
+      "wss://legacy.workers.dev";
+    expect(readCloudflareCollabBaseUrl()).toBe("wss://legacy.workers.dev");
   });
 });
 
@@ -183,6 +229,7 @@ describe("resolveCollabRuntime", () => {
   });
 
   it("resolves to nitro by default with no configuration", () => {
+    delete process.env.COLLAB_CLOUDFLARE_WS_URL;
     delete process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL;
     expect(resolveCollabRuntime("any-doc-id")).toBe(COLLAB_RUNTIME.Nitro);
   });

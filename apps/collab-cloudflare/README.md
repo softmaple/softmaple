@@ -239,12 +239,14 @@ secrets with the real application deployment instead:
    manager. The Worker is now reachable on its `workers.dev` URL. Verify its
    HTTP/WebSocket paths, both event RPCs, Auth, and the required Data API table
    reads before configuring `apps/web` to select it.
-6. Set `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` in `apps/web`'s environment
-   to the resulting Worker URL, then **rebuild and redeploy `apps/web`** —
-   `NEXT_PUBLIC_*` values are inlined at build time, so setting the
-   variable alone does nothing for an already-running deployment; routing
-   stays at 0% (all traffic on Nitro) until the rebuilt bundle ships, per
+6. Set `COLLAB_CLOUDFLARE_WS_URL` in `apps/web`'s environment to the
+   resulting Worker URL, then **redeploy `apps/web`** — setting the variable
+   alone does nothing for an already-running deployment; routing stays at 0%
+   (all traffic on Nitro) until a deployment picks the new environment up, per
    [`apps/web/README.md`'s routing section](../web/README.md#collaboration-runtime-routing).
+   The deprecated `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` alias still works, but
+   as a `NEXT_PUBLIC_*` value it is inlined at build time and needs a full
+   rebuild.
 
 ### Later deployments and secret rotation
 

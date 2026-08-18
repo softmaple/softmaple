@@ -9,8 +9,12 @@ import { config } from "@softmaple/eslint-config/base";
 // symmetrically for the document side. `src/index.ts` and `test/worker.ts`
 // are composition roots that legitimately wire both sides, so neither glob
 // below includes them.
+// `auth-deadline` and `websocket-close` are shared the same way the others
+// are: pure policy/helper functions plus a caller-supplied-storage alarm
+// write. They hold no capability instance and reach neither object's room,
+// so importing them creates no coupling between the two sides.
 const SHARED_UTILITY_FILES =
-  "constants|document-id|origin|message-bytes|supabaseTypes";
+  "auth-deadline|constants|document-id|origin|message-bytes|supabaseTypes|websocket-close";
 const PRESENCE_OWN_FILES =
   "presence-[\\w-]*|awareness-presence-codec|supabase-presence-backend|memory-presence-backend";
 const DOCUMENT_OWN_FILES =

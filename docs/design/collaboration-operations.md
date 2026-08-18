@@ -113,7 +113,11 @@ presence membership in Durable Object storage so it survives hibernation.
 Both rooms are routed on the upgrade request's query string
 (`?documentId=`, `?roomId=`) and answer the browser with the object's own
 upgrade response, so the Worker holds no long-lived collaboration socket and
-every live connection hibernates with its object.
+every live connection hibernates with its object. Because no Worker-side
+socket and no `setTimeout` survives that, both objects arm a Durable Object
+alarm while a socket is still awaiting its first authentication message and
+close it 1008 `Authentication timed out` at the deadline; `PresenceRoomDO`
+shares that alarm with its presence-liveness sweep.
 Neither object uses its storage as durable document-event history; that role
 stays with Supabase Postgres. See
 [`apps/collab-cloudflare/README.md#runtime-shape`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#runtime-shape)

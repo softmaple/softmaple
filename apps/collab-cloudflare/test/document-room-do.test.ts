@@ -23,7 +23,10 @@ import {
 } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MAX_PERSISTED_AUTH_BYTES } from "../src/constants";
+import {
+  INITIAL_AUTH_TIMEOUT_MS,
+  MAX_PERSISTED_AUTH_BYTES,
+} from "../src/constants";
 import { normalizeDocumentId } from "../src/document-id";
 import type { DocumentRoomDO } from "../src/document-room-do";
 import {
@@ -204,6 +207,44 @@ const attachedSocketCount = (documentId: string): Promise<number> =>
     env.DOCUMENT_ROOMS.getByName(documentId),
     (_instance, state) => state.getWebSockets().length,
   );
+
+const alarmAt = (stub: DocumentRoomStub): Promise<number | null> =>
+  runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+
+/**
+ * Runs the alarm the way the runtime does — the scheduled alarm is consumed
+ * before the handler runs — so whatever `getAlarm()` reports afterwards is
+ * exactly what the handler re-armed for itself.
+ */
+const runAlarm = (stub: DocumentRoomStub): Promise<void> =>
+  runInDurableObject(stub, async (instance, state) => {
+    await state.storage.deleteAlarm();
+    await instance.alarm();
+  });
+
+/**
+ * Rewinds every unauthenticated socket's accepted-at instant past the
+ * deadline. The object enforces the attachment rather than a timer, so a test
+ * never has to wait out `INITIAL_AUTH_TIMEOUT_MS`.
+ */
+const expireAuthDeadlines = (stub: DocumentRoomStub): Promise<number> =>
+  runInDurableObject(stub, (_instance, state) => {
+    const pending = state.getWebSockets().flatMap((socket) => {
+      const attachment = parseDocumentWebSocketAttachment(
+        socket.deserializeAttachment(),
+      );
+      return attachment !== null && attachment.phase === "awaiting-auth"
+        ? [{ attachment, socket }]
+        : [];
+    });
+    for (const { attachment, socket } of pending) {
+      socket.serializeAttachment({
+        ...attachment,
+        connectedAt: attachment.connectedAt - INITIAL_AUTH_TIMEOUT_MS - 1,
+      });
+    }
+    return pending.length;
+  });
 
 const sessionAudit = (stub: DocumentRoomStub) =>
   runInDurableObject(stub, (_instance, state) =>
@@ -940,6 +981,80 @@ describe("Cloudflare DocumentRoomDO", () => {
           sessionId: "unauthorized-session",
         }),
       ],
+    });
+  });
+
+  it("closes a socket that never authenticates once its deadline passes", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000c1";
+    const authenticated = await connect(documentId);
+    await expect(
+      authenticate(authenticated, documentId, "deadline-session"),
+    ).resolves.toMatchObject({ type: COLLAB_MESSAGE_TYPE.Ready });
+    const silent = await connect(documentId);
+
+    // The deadline is armed when the socket is accepted, not when it first
+    // sends something — an unauthenticated socket sends nothing by definition.
+    const stub = env.DOCUMENT_ROOMS.getByName(documentId);
+    const scheduled = await alarmAt(stub);
+    expect(scheduled).not.toBeNull();
+    expect(scheduled!).toBeLessThanOrEqual(
+      Date.now() + INITIAL_AUTH_TIMEOUT_MS,
+    );
+
+    // Non-Auth traffic cannot buy more time: the quota window moves with the
+    // message, the accepted-at instant the deadline reads does not.
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      silent.socket.send("{not json");
+      await expect(silent.next()).resolves.toMatchObject({
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: COLLAB_ERROR_CODE.InvalidMessage,
+      });
+    } finally {
+      errorLog.mockRestore();
+    }
+    await expect(alarmAt(stub)).resolves.toBe(scheduled);
+
+    const closed = silent.closed();
+    await expect(expireAuthDeadlines(stub)).resolves.toBe(1);
+    await runAlarm(stub);
+    await expect(closed).resolves.toMatchObject({
+      code: 1008,
+      reason: "Authentication timed out",
+    });
+
+    // The authenticated peer sharing the room is untouched, and with nothing
+    // left awaiting Auth the object re-arms no alarm and hibernates again.
+    expect(authenticated.socket.readyState).toBe(WebSocket.OPEN);
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(documentId)).resolves.toBe(1);
+    });
+    await expect(alarmAt(stub)).resolves.toBeNull();
+  });
+
+  it("enforces the authentication deadline on a hibernation-woken object", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000c2";
+    const silent = await connect(documentId);
+    const stub = env.DOCUMENT_ROOMS.getByName(documentId);
+    await expect(expireAuthDeadlines(stub)).resolves.toBe(1);
+
+    const closed = silent.closed();
+    await evictDurableObject(stub, { webSockets: "hibernate" });
+    expect(silent.socket.readyState).toBe(WebSocket.OPEN);
+
+    // The woken object holds no peer, no room, and no document id in memory,
+    // so the deadline it enforces comes entirely from the socket attachment —
+    // no room restore and no Supabase call are needed to evict the socket.
+    await runAlarm(stub);
+    await expect(closed).resolves.toMatchObject({
+      code: 1008,
+      reason: "Authentication timed out",
+    });
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(documentId)).resolves.toBe(0);
+    });
+    await expect(sessionAudit(stub)).resolves.toMatchObject({
+      authorizations: [],
     });
   });
 });

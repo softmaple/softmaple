@@ -9,8 +9,11 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { INITIAL_AUTH_TIMEOUT_MS } from "../src/constants";
 import { normalizeDocumentId } from "../src/document-id";
+import { parsePresenceWebSocketAttachment } from "../src/presence-attachment";
+import type { PresenceRoomDO } from "../src/presence-room-do";
 import {
   readMemoryPresenceSessionAudit,
   setMemoryPresenceAccessRevoked,
@@ -105,6 +108,52 @@ const connect = async (roomId: string): Promise<TestPresenceSocket> => {
   sockets.push(client);
   return client;
 };
+
+type PresenceRoomStub = DurableObjectStub<PresenceRoomDO>;
+
+const attachedSocketCount = (roomId: string): Promise<number> =>
+  runInDurableObject(
+    env.PRESENCE_ROOMS.getByName(roomId),
+    (_instance, state) => state.getWebSockets().length,
+  );
+
+const alarmAt = (stub: PresenceRoomStub): Promise<number | null> =>
+  runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+
+/**
+ * Runs the alarm the way the runtime does — the scheduled alarm is consumed
+ * before the handler runs — so whatever `getAlarm()` reports afterwards is
+ * exactly what the handler re-armed for itself.
+ */
+const runAlarm = (stub: PresenceRoomStub): Promise<void> =>
+  runInDurableObject(stub, async (instance, state) => {
+    await state.storage.deleteAlarm();
+    await instance.alarm();
+  });
+
+/**
+ * Rewinds every unauthenticated socket's accepted-at instant past the
+ * deadline. The object enforces the attachment rather than a timer, so a test
+ * never has to wait out `INITIAL_AUTH_TIMEOUT_MS`.
+ */
+const expireAuthDeadlines = (stub: PresenceRoomStub): Promise<number> =>
+  runInDurableObject(stub, (_instance, state) => {
+    const pending = state.getWebSockets().flatMap((socket) => {
+      const attachment = parsePresenceWebSocketAttachment(
+        socket.deserializeAttachment(),
+      );
+      return attachment !== null && attachment.phase === "awaiting-auth"
+        ? [{ attachment, socket }]
+        : [];
+    });
+    for (const { attachment, socket } of pending) {
+      socket.serializeAttachment({
+        ...attachment,
+        connectedAt: attachment.connectedAt - INITIAL_AUTH_TIMEOUT_MS - 1,
+      });
+    }
+    return pending.length;
+  });
 
 const authPayload = (
   connectionId: string,
@@ -356,5 +405,82 @@ describe("Cloudflare PresenceRoomDO", () => {
         credential: { kind: "access-token", token: TEST_TOKEN },
       }),
     ]);
+  });
+
+  it("answers the client's close frame so a disconnect completes cleanly", async () => {
+    const roomId = "00000000-0000-4000-8000-000000000071";
+    const client = await connect(roomId);
+    await authenticateAndJoin(client, roomId, "closing-connection");
+    await expect(client.next()).resolves.toMatchObject({
+      type: WS_MESSAGE.JOIN,
+      senderId: "closing-connection",
+    });
+
+    const closed = client.closed();
+    client.close();
+    // A clean 1000/`wasClean` close proves the object answers the client's
+    // close frame itself. Without that answer the browser only ever completes
+    // its half by timing out, and reports the disconnect as 1006.
+    await expect(closed).resolves.toMatchObject({
+      code: 1000,
+      reason: "Test complete",
+      wasClean: true,
+    });
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(roomId)).resolves.toBe(0);
+    });
+  });
+
+  it("closes a socket that never authenticates once its deadline passes", async () => {
+    const roomId = "00000000-0000-4000-8000-000000000081";
+    const joined = await connect(roomId);
+    await authenticateAndJoin(joined, roomId, "deadline-connection");
+    await expect(joined.next()).resolves.toMatchObject({
+      type: WS_MESSAGE.JOIN,
+    });
+    const silent = await connect(roomId);
+
+    // The room already carries the liveness alarm for its joined peer, so
+    // this also proves the sooner deadline pulls that single alarm forward.
+    const stub = env.PRESENCE_ROOMS.getByName(roomId);
+    const scheduled = await alarmAt(stub);
+    expect(scheduled).not.toBeNull();
+    expect(scheduled!).toBeLessThanOrEqual(
+      Date.now() + INITIAL_AUTH_TIMEOUT_MS,
+    );
+
+    const closed = silent.closed();
+    await expect(expireAuthDeadlines(stub)).resolves.toBe(1);
+    await runAlarm(stub);
+    await expect(closed).resolves.toMatchObject({
+      code: 1008,
+      reason: "Authentication timed out",
+    });
+
+    // The joined peer is untouched and still keeps the liveness alarm armed.
+    expect(joined.socket.readyState).toBe(WebSocket.OPEN);
+    await expect(alarmAt(stub)).resolves.not.toBeNull();
+  });
+
+  it("enforces the authentication deadline on a hibernation-woken object", async () => {
+    const roomId = "00000000-0000-4000-8000-000000000091";
+    const silent = await connect(roomId);
+    const stub = env.PRESENCE_ROOMS.getByName(roomId);
+    await expect(expireAuthDeadlines(stub)).resolves.toBe(1);
+
+    const closed = silent.closed();
+    await evictDurableObject(stub, { webSockets: "hibernate" });
+    expect(silent.socket.readyState).toBe(WebSocket.OPEN);
+
+    // The woken object holds no peer, no room, and no room id in memory, so
+    // the deadline it enforces comes entirely from the socket attachment.
+    await runAlarm(stub);
+    await expect(closed).resolves.toMatchObject({
+      code: 1008,
+      reason: "Authentication timed out",
+    });
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(roomId)).resolves.toBe(0);
+    });
   });
 });

@@ -19,8 +19,19 @@ import {
   type RoomPeer,
 } from "@softmaple/collab-runtime";
 import {
+  authDeadlineFrom,
+  AUTH_DEADLINE_CLOSE_CODE,
+  AUTH_DEADLINE_CLOSE_REASON,
+  collectPendingAuthSockets,
+  earliestAuthDeadline,
+  planAuthDeadlineSweep,
+  scheduleAlarmAt,
+  type PendingAuthSocket,
+} from "./auth-deadline";
+import {
   errorMessage,
   logError,
+  logMetric,
   MAX_MESSAGE_BYTES,
   MAX_PERSISTED_AUTH_BYTES,
   MESSAGE_RATE_LIMIT_MAX,
@@ -29,6 +40,7 @@ import {
 import { documentIdFromRequestUrl, normalizeDocumentId } from "./document-id";
 import { messageBytes, textFromMessage } from "./message-bytes";
 import { createRoomServices } from "./room-services";
+import { completeClose } from "./websocket-close";
 import {
   attachmentAfterReady,
   attachmentAfterResume,
@@ -355,20 +367,10 @@ interface RestoredPeer {
   readonly socket: WebSocket;
 }
 
-const NORMAL_CLOSURE = 1000;
-// Reserved codes: a close event may report them, but a close frame must never
-// carry one, so an unclean client close is answered with a normal closure.
-const RESERVED_CLOSE_CODES: ReadonlySet<number> = new Set([
-  1004, 1005, 1006, 1015,
-]);
-
-const echoableCloseCode = (code: number): number =>
-  Number.isInteger(code) &&
-  code >= 1000 &&
-  code <= 4999 &&
-  !RESERVED_CLOSE_CODES.has(code)
-    ? code
-    : NORMAL_CLOSURE;
+const CLOSE_ECHO_FALLBACK = {
+  messageType: "websocket-close-echo",
+  reason: "Collaboration connection closed",
+} as const;
 
 export class DocumentRoomDO extends DurableObject<Env> {
   private documentId: string | null = null;
@@ -421,6 +423,10 @@ export class DocumentRoomDO extends DurableObject<Env> {
       peer = new DurableObjectRoomPeer(room, server, attachment);
       this.peers.set(peer.id, peer);
       await room.join(peer);
+      await scheduleAlarmAt(
+        this.ctx.storage,
+        authDeadlineFrom(attachment.connectedAt),
+      );
     } catch (error) {
       logError(error, { documentId, messageType: "room-join" });
       if (peer !== null) await peer.transportClosed();
@@ -483,7 +489,7 @@ export class DocumentRoomDO extends DurableObject<Env> {
     reason: string,
   ): Promise<void> {
     const peer = this.peerFromSocket(socket);
-    this.completeClose(socket, code, reason);
+    completeClose(socket, code, reason, CLOSE_ECHO_FALLBACK);
     if (peer === null) return;
     await peer.transportClosed();
     this.peers.delete(peer.id);
@@ -499,6 +505,64 @@ export class DocumentRoomDO extends DurableObject<Env> {
       return;
     }
     await peer.transportError(error);
+    this.peers.delete(peer.id);
+  }
+
+  /**
+   * The authentication deadline, and nothing else. A document room needs no
+   * periodic timer — authorization and lease maintenance are message-driven —
+   * so this alarm is scheduled only while a socket is still awaiting `Auth`
+   * and re-arms only while one remains: an idle authenticated room still
+   * hibernates with no timer at all.
+   *
+   * Enforcement reads each socket's attachment rather than in-memory state,
+   * so a woken object evicts exactly the sockets a live one would. That is
+   * what replaces the deadline the removed Worker proxy held in a
+   * `setTimeout` no hibernating object could keep, and it needs no room, no
+   * session revalidation, and no Supabase call to run.
+   */
+  async alarm(): Promise<void> {
+    const { expired, nextDeadline } = planAuthDeadlineSweep(
+      this.pendingAuthSockets(),
+      Date.now(),
+    );
+    await Promise.all(
+      expired.map((socket) => this.closeUnauthenticated(socket)),
+    );
+    await scheduleAlarmAt(this.ctx.storage, nextDeadline);
+  }
+
+  /** Shared with `PresenceRoomDO`; `auth-deadline.ts` owns the policy. */
+  private pendingAuthSockets(): readonly PendingAuthSocket[] {
+    return collectPendingAuthSockets(this.ctx.getWebSockets(), (socket) => {
+      const attachment = this.attachmentFromSocket(socket);
+      return attachment !== null && attachment.phase === "awaiting-auth"
+        ? attachment.connectedAt
+        : null;
+    });
+  }
+
+  private async closeUnauthenticated(socket: WebSocket): Promise<void> {
+    const attachment = this.attachmentFromSocket(socket);
+    logMetric({
+      type: "auth-deadline-expired",
+      documentId: attachment?.documentId ?? this.documentId,
+      peerId: attachment?.peerId ?? null,
+    });
+    const peer = this.peerFromSocket(socket);
+    if (peer === null) {
+      // A woken object holds no peer for a hibernating socket; closing the
+      // transport is the whole cleanup, since an unauthenticated peer never
+      // took a session or a connection lease.
+      try {
+        socket.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
+      } catch (error) {
+        logError(error, { messageType: "auth-deadline-close" });
+      }
+      return;
+    }
+    peer.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
+    await peer.transportClosed();
     this.peers.delete(peer.id);
   }
 
@@ -598,6 +662,13 @@ export class DocumentRoomDO extends DurableObject<Env> {
       this.room = null;
       throw error;
     }
+    // The alarm itself survives hibernation in storage, so this only covers a
+    // deadline left unscheduled by an earlier failed write; a deadline already
+    // past schedules an immediate wake-up rather than closing sockets here.
+    await scheduleAlarmAt(
+      this.ctx.storage,
+      earliestAuthDeadline(this.pendingAuthSockets()),
+    );
   }
 
   private async discardRestoredPeers(
@@ -669,30 +740,6 @@ export class DocumentRoomDO extends DurableObject<Env> {
     return (
       [...this.peers.values()].find((peer) => peer.ownsSocket(socket)) ?? null
     );
-  }
-
-  /**
-   * Answers the client's close frame. A hibernatable socket's handshake is
-   * the object's own responsibility: the runtime reports the client's close
-   * through `webSocketClose` and sends no close frame of its own, so an
-   * unanswered close leaves the browser waiting for its half until it gives
-   * up with 1006. The removed Worker proxy used to terminate the browser
-   * socket in front of the object and completed this handshake there; direct
-   * routing gives the object the whole connection, including its ending.
-   */
-  private completeClose(socket: WebSocket, code: number, reason: string): void {
-    // The socket is already CLOSING here — the client's frame arrived — so
-    // this deliberately does not use `failSocket`'s `< CLOSING` guard.
-    if (socket.readyState === WebSocket.CLOSED) return;
-    const echoed = echoableCloseCode(code);
-    try {
-      socket.close(
-        echoed,
-        echoed === code ? reason : "Collaboration connection closed",
-      );
-    } catch (error) {
-      logError(error, { messageType: "websocket-close-echo" });
-    }
   }
 
   private failSocket(

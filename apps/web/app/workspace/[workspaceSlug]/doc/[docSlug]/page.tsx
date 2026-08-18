@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { resolveCollabRuntime } from "@/modules/docs/collab-runtime-routing";
+import { resolveDocumentCollabTarget } from "@/modules/docs/collab-target.server";
 import { DocumentEditor } from "@/modules/docs/document-editor";
 import { NewDocumentForm } from "@/modules/docs/new-document-form";
 import { cachedGetDocumentBySlug } from "@/app/actions/documents/documents";
@@ -73,11 +73,15 @@ export default async function DocumentPage({ params }: Props) {
     operation: "get_workspace_member_by_user_id",
   });
 
+  // Runtime ownership and its endpoints are decided here, on the server; the
+  // browser connects to exactly this target and never picks another runtime.
+  const collabTarget = await resolveDocumentCollabTarget(document.id);
+
   return (
     <DocumentEditor
       authorId={document.author_id}
       avatarUrl={profile.avatar_src}
-      collabRuntime={resolveCollabRuntime(document.id)}
+      collabTarget={collabTarget}
       currentUserId={user.id}
       docSlug={document.slug}
       documentId={document.id}

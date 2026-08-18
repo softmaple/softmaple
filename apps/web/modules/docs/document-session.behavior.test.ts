@@ -10,6 +10,7 @@ import {
   createBlockReplica,
 } from "@softmaple/block-model";
 import { COLLAB_RUNTIME } from "@/modules/docs/collab-runtime-routing";
+import type { CollabTarget } from "@/modules/docs/collab-target";
 import { isDocumentEditable } from "@/modules/docs/document-editability";
 import { createSaveCoordinator } from "@/modules/docs/document-save-coordinator";
 import {
@@ -37,6 +38,13 @@ const reactActGlobal = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
 reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
+
+/** Stands in for the target a Server Component resolves for the page. */
+const NITRO_TARGET: CollabTarget = {
+  documentUrl: "ws://localhost:3000/collab/document",
+  presenceUrl: "ws://localhost:3000/collab/presence",
+  runtime: COLLAB_RUNTIME.Nitro,
+};
 
 const renderDocumentSession = ({
   documentId,
@@ -66,7 +74,7 @@ const renderDocumentSession = ({
 
   const Capture = (): null => {
     result.current = useDocumentSession({
-      collabRuntime: COLLAB_RUNTIME.Nitro,
+      collabTarget: NITRO_TARGET,
       documentId,
       isShared,
       permission: "editor",

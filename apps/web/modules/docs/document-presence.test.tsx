@@ -4,6 +4,7 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COLLAB_RUNTIME } from "./collab-runtime-routing";
+import type { CollabTarget } from "./collab-target";
 import { DocumentPresence } from "./document-presence";
 import { domPointAtOffset } from "./document-presence-dom";
 
@@ -18,8 +19,9 @@ const fakeAdapter = () => ({
   updatePresence: () => undefined,
 });
 const connectResolvers: Array<() => void> = [];
-const createWebSocketAdapter = vi.fn(() => ({
+const createWebSocketAdapter = vi.fn((config: { url: string }) => ({
   ...fakeAdapter(),
+  url: config.url,
   connect: vi.fn(
     () =>
       new Promise<void>((resolve) => {
@@ -61,7 +63,8 @@ vi.mock("@softmaple/awareness", async () => {
       return children;
     },
     createNoopAdapter: () => createNoopAdapter(),
-    createWebSocketAdapter: () => createWebSocketAdapter(),
+    createWebSocketAdapter: (config: { url: string }) =>
+      createWebSocketAdapter(config),
     isDirectionalSelectionRange: () => false,
     isStableCursorPosition: () => false,
     useOthers: () => [],
@@ -132,6 +135,19 @@ const reactActGlobal = globalThis as typeof globalThis & {
 };
 reactActGlobal.IS_REACT_ACT_ENVIRONMENT = true;
 
+/** Targets as a Server Component resolves them for one page load. */
+const NITRO_TARGET: CollabTarget = {
+  documentUrl: "ws://localhost:3000/collab/document",
+  presenceUrl: "ws://localhost:3000/collab/presence",
+  runtime: COLLAB_RUNTIME.Nitro,
+};
+const CLOUDFLARE_TARGET: CollabTarget = {
+  documentUrl:
+    "wss://example.workers.dev/collab/document?documentId=00000000-0000-4000-8000-000000000001",
+  presenceUrl: "wss://example.workers.dev/collab/presence",
+  runtime: COLLAB_RUNTIME.Cloudflare,
+};
+
 describe("remote presence DOM mapping", () => {
   it("maps a block offset through nested inline nodes", () => {
     const block = document.createElement("p");
@@ -178,7 +194,7 @@ describe("DocumentPresence auth lifecycle", () => {
       root.render(
         createElement(DocumentPresence, {
           avatarUrl: null,
-          collabRuntime: COLLAB_RUNTIME.Nitro,
+          collabTarget: NITRO_TARGET,
           documentId: "00000000-0000-4000-8000-000000000001",
           name: "Ada",
           presenceEnabled: true,
@@ -221,7 +237,7 @@ describe("DocumentPresence auth lifecycle", () => {
     container.remove();
   });
 
-  it("does not expose a stale adapter as live after collabRuntime changes mid-connect", async () => {
+  it("does not expose a stale adapter as live after the target changes mid-connect", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -238,7 +254,7 @@ describe("DocumentPresence auth lifecycle", () => {
       root.render(
         createElement(DocumentPresence, {
           ...baseProps,
-          collabRuntime: COLLAB_RUNTIME.Nitro,
+          collabTarget: NITRO_TARGET,
         }),
       );
       await Promise.resolve();
@@ -253,14 +269,17 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(createWebSocketAdapter).toHaveBeenCalledTimes(1);
+    expect(createWebSocketAdapter).toHaveBeenLastCalledWith(
+      expect.objectContaining({ url: NITRO_TARGET.presenceUrl }),
+    );
     expect(container.textContent).not.toContain("Connecting presence");
 
-    // Switch to cloudflare before the new connection attempt resolves.
+    // Switch to the cloudflare target before the new connect resolves.
     await act(async () => {
       root.render(
         createElement(DocumentPresence, {
           ...baseProps,
-          collabRuntime: COLLAB_RUNTIME.Cloudflare,
+          collabTarget: CLOUDFLARE_TARGET,
         }),
       );
       await Promise.resolve();
@@ -280,6 +299,11 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(createWebSocketAdapter).toHaveBeenCalledTimes(2);
+    // Presence connects to the endpoint the server resolved for this page,
+    // on the same runtime as the document socket — it derives no URL itself.
+    expect(createWebSocketAdapter).toHaveBeenLastCalledWith(
+      expect.objectContaining({ url: CLOUDFLARE_TARGET.presenceUrl }),
+    );
     expect(container.textContent).not.toContain("Connecting presence");
 
     await act(async () => {
@@ -294,7 +318,7 @@ describe("DocumentPresence auth lifecycle", () => {
     const root = createRoot(container);
     const baseProps = {
       avatarUrl: null,
-      collabRuntime: COLLAB_RUNTIME.Nitro,
+      collabTarget: NITRO_TARGET,
       documentId: "00000000-0000-4000-8000-000000000001",
       name: "Ada",
       presenceEnabled: true,

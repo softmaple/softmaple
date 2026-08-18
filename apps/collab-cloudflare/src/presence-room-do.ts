@@ -411,28 +411,38 @@ export class PresenceRoomDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Never rejects. One socket that resists closing must not cancel the other
+   * evictions, the room sweep that follows, or either re-arm — this object's
+   * liveness rides on that alarm chain, and an `alarm()` that throws has
+   * already been consumed. A socket left open by a failed close is still
+   * awaiting `Auth`, so the next sweep finds it again.
+   */
   private async closeUnauthenticated(socket: WebSocket): Promise<void> {
     const attachment = this.attachmentFromSocket(socket);
-    logMetric({
-      type: "auth-deadline-expired",
+    const identity = {
       peerId: attachment?.peerId ?? null,
       roomId: attachment?.roomId ?? this.roomId,
-    });
-    const peer = this.peerFromSocket(socket);
-    if (peer === null) {
-      // A woken object holds no peer for a hibernating socket; closing the
-      // transport is the whole cleanup, since an unauthenticated peer never
-      // took a membership record or a connection lease.
-      try {
+    };
+    try {
+      logMetric({ ...identity, type: "auth-deadline-expired" });
+      const peer = this.peerFromSocket(socket);
+      if (peer === null) {
+        // A woken object holds no peer for a hibernating socket; closing the
+        // transport is the whole cleanup, since an unauthenticated peer never
+        // took a membership record or a connection lease.
         socket.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
-      } catch (error) {
-        logError(error, { messageType: "presence-auth-deadline-close" });
+        return;
       }
-      return;
+      peer.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
+      await peer.transportClosed();
+      this.peers.delete(peer.id);
+    } catch (error) {
+      logError(error, {
+        ...identity,
+        messageType: "presence-auth-deadline-close",
+      });
     }
-    peer.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
-    await peer.transportClosed();
-    this.peers.delete(peer.id);
   }
 
   private roomIdFromAnySocket(): string | null {

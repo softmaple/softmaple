@@ -155,6 +155,40 @@ const expireAuthDeadlines = (stub: PresenceRoomStub): Promise<number> =>
     return pending.length;
   });
 
+/**
+ * Makes the oldest socket still awaiting `Auth` throw from `close()`, the way
+ * one in a bad transport state would, and reports how many are pending.
+ */
+const breakOnePendingClose = (stub: PresenceRoomStub): Promise<number> =>
+  runInDurableObject(stub, (_instance, state) => {
+    const pending = state.getWebSockets().flatMap((socket) => {
+      const attachment = parsePresenceWebSocketAttachment(
+        socket.deserializeAttachment(),
+      );
+      return attachment !== null && attachment.phase === "awaiting-auth"
+        ? [{ connectedAt: attachment.connectedAt, socket }]
+        : [];
+    });
+    const oldest = pending.toSorted(
+      (left, right) => left.connectedAt - right.connectedAt,
+    )[0];
+    if (oldest === undefined) {
+      throw new Error("Expected a socket awaiting authentication");
+    }
+    oldest.socket.close = () => {
+      throw new Error("test transport refuses to close");
+    };
+    return pending.length;
+  });
+
+/** Undoes `breakOnePendingClose` so teardown does not wait out a 1006. */
+const restorePendingCloses = (stub: PresenceRoomStub): Promise<void> =>
+  runInDurableObject(stub, (_instance, state) => {
+    for (const socket of state.getWebSockets()) {
+      Reflect.deleteProperty(socket, "close");
+    }
+  });
+
 const authPayload = (
   connectionId: string,
   overrides: Partial<{
@@ -482,5 +516,28 @@ describe("Cloudflare PresenceRoomDO", () => {
     await vi.waitFor(async () => {
       await expect(attachedSocketCount(roomId)).resolves.toBe(0);
     });
+  });
+
+  it("contains a socket that refuses to close and still re-arms", async () => {
+    const roomId = "00000000-0000-4000-8000-0000000000a1";
+    const expiring = [await connect(roomId), await connect(roomId)];
+    const stub = env.PRESENCE_ROOMS.getByName(roomId);
+    await expect(expireAuthDeadlines(stub)).resolves.toBe(2);
+    await expect(breakOnePendingClose(stub)).resolves.toBe(2);
+
+    await runAlarm(stub);
+
+    // The failure is contained: the handler runs on to evict the other
+    // socket, sweep the room, and re-arm. An error escaping the sweep would
+    // take this object's whole liveness chain down with it, since the alarm
+    // that fired is already consumed.
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(roomId)).resolves.toBe(1);
+    });
+    expect(
+      expiring.filter((client) => client.socket.readyState === WebSocket.OPEN),
+    ).toHaveLength(1);
+    await expect(alarmAt(stub)).resolves.not.toBeNull();
+    await restorePendingCloses(stub);
   });
 });

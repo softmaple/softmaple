@@ -246,6 +246,40 @@ const expireAuthDeadlines = (stub: DocumentRoomStub): Promise<number> =>
     return pending.length;
   });
 
+/**
+ * Makes the oldest socket still awaiting `Auth` throw from `close()`, the way
+ * one in a bad transport state would, and reports how many are pending.
+ */
+const breakOnePendingClose = (stub: DocumentRoomStub): Promise<number> =>
+  runInDurableObject(stub, (_instance, state) => {
+    const pending = state.getWebSockets().flatMap((socket) => {
+      const attachment = parseDocumentWebSocketAttachment(
+        socket.deserializeAttachment(),
+      );
+      return attachment !== null && attachment.phase === "awaiting-auth"
+        ? [{ connectedAt: attachment.connectedAt, socket }]
+        : [];
+    });
+    const oldest = pending.toSorted(
+      (left, right) => left.connectedAt - right.connectedAt,
+    )[0];
+    if (oldest === undefined) {
+      throw new Error("Expected a socket awaiting authentication");
+    }
+    oldest.socket.close = () => {
+      throw new Error("test transport refuses to close");
+    };
+    return pending.length;
+  });
+
+/** Undoes `breakOnePendingClose` so teardown does not wait out a 1006. */
+const restorePendingCloses = (stub: DocumentRoomStub): Promise<void> =>
+  runInDurableObject(stub, (_instance, state) => {
+    for (const socket of state.getWebSockets()) {
+      Reflect.deleteProperty(socket, "close");
+    }
+  });
+
 const sessionAudit = (stub: DocumentRoomStub) =>
   runInDurableObject(stub, (_instance, state) =>
     readMemorySessionAudit(state.storage),
@@ -1056,5 +1090,33 @@ describe("Cloudflare DocumentRoomDO", () => {
     await expect(sessionAudit(stub)).resolves.toMatchObject({
       authorizations: [],
     });
+  });
+
+  it("contains a socket that refuses to close and still re-arms", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000c3";
+    const expiring = [await connect(documentId), await connect(documentId)];
+    const stub = env.DOCUMENT_ROOMS.getByName(documentId);
+    await expect(expireAuthDeadlines(stub)).resolves.toBe(2);
+    await expect(breakOnePendingClose(stub)).resolves.toBe(2);
+    // Connected after the rewind, so this one's deadline is still ahead and
+    // it is what the handler has left to re-arm for.
+    const pending = await connect(documentId);
+
+    await runAlarm(stub);
+
+    // The failure is contained rather than escaping the sweep. It is also
+    // logged, which is asserted only through behavior: this pool does not
+    // route a Durable Object's console output to the test's spy. An escaping
+    // error would skip the re-arm, and the alarm that fired is already
+    // consumed — leaving exactly the "nothing evicts them" case again.
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(documentId)).resolves.toBe(2);
+    });
+    expect(
+      expiring.filter((client) => client.socket.readyState === WebSocket.OPEN),
+    ).toHaveLength(1);
+    expect(pending.socket.readyState).toBe(WebSocket.OPEN);
+    await expect(alarmAt(stub)).resolves.not.toBeNull();
+    await restorePendingCloses(stub);
   });
 });

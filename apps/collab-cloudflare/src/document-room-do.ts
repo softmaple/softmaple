@@ -542,28 +542,35 @@ export class DocumentRoomDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Never rejects. One socket that resists closing must not cancel the other
+   * evictions or the re-arm that keeps the deadline enforceable at all — an
+   * `alarm()` that throws has already been consumed, so an escaping error is
+   * exactly how "nothing evicts them" would come back. A socket left open by
+   * a failed close is still awaiting `Auth`, so the next sweep finds it again.
+   */
   private async closeUnauthenticated(socket: WebSocket): Promise<void> {
     const attachment = this.attachmentFromSocket(socket);
-    logMetric({
-      type: "auth-deadline-expired",
+    const identity = {
       documentId: attachment?.documentId ?? this.documentId,
       peerId: attachment?.peerId ?? null,
-    });
-    const peer = this.peerFromSocket(socket);
-    if (peer === null) {
-      // A woken object holds no peer for a hibernating socket; closing the
-      // transport is the whole cleanup, since an unauthenticated peer never
-      // took a session or a connection lease.
-      try {
+    };
+    try {
+      logMetric({ ...identity, type: "auth-deadline-expired" });
+      const peer = this.peerFromSocket(socket);
+      if (peer === null) {
+        // A woken object holds no peer for a hibernating socket; closing the
+        // transport is the whole cleanup, since an unauthenticated peer never
+        // took a session or a connection lease.
         socket.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
-      } catch (error) {
-        logError(error, { messageType: "auth-deadline-close" });
+        return;
       }
-      return;
+      peer.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
+      await peer.transportClosed();
+      this.peers.delete(peer.id);
+    } catch (error) {
+      logError(error, { ...identity, messageType: "auth-deadline-close" });
     }
-    peer.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
-    await peer.transportClosed();
-    this.peers.delete(peer.id);
   }
 
   private async ensureRoom(documentId: string): Promise<DocumentRoom | null> {

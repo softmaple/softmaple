@@ -523,21 +523,30 @@ describe("Cloudflare PresenceRoomDO", () => {
     const expiring = [await connect(roomId), await connect(roomId)];
     const stub = env.PRESENCE_ROOMS.getByName(roomId);
     await expect(expireAuthDeadlines(stub)).resolves.toBe(2);
-    await expect(breakOnePendingClose(stub)).resolves.toBe(2);
+    // Everything past the patch runs under `finally`: a socket left refusing
+    // to close outlives the test, and teardown would wait out its 1006 well
+    // into this suite's hook timeout.
+    const patched = await breakOnePendingClose(stub);
+    try {
+      expect(patched).toBe(2);
 
-    await runAlarm(stub);
+      await runAlarm(stub);
 
-    // The failure is contained: the handler runs on to evict the other
-    // socket, sweep the room, and re-arm. An error escaping the sweep would
-    // take this object's whole liveness chain down with it, since the alarm
-    // that fired is already consumed.
-    await vi.waitFor(async () => {
-      await expect(attachedSocketCount(roomId)).resolves.toBe(1);
-    });
-    expect(
-      expiring.filter((client) => client.socket.readyState === WebSocket.OPEN),
-    ).toHaveLength(1);
-    await expect(alarmAt(stub)).resolves.not.toBeNull();
-    await restorePendingCloses(stub);
+      // The failure is contained: the handler runs on to evict the other
+      // socket, sweep the room, and re-arm. An error escaping the sweep would
+      // take this object's whole liveness chain down with it, since the alarm
+      // that fired is already consumed.
+      await vi.waitFor(async () => {
+        await expect(attachedSocketCount(roomId)).resolves.toBe(1);
+      });
+      expect(
+        expiring.filter(
+          (client) => client.socket.readyState === WebSocket.OPEN,
+        ),
+      ).toHaveLength(1);
+      await expect(alarmAt(stub)).resolves.not.toBeNull();
+    } finally {
+      await restorePendingCloses(stub);
+    }
   });
 });

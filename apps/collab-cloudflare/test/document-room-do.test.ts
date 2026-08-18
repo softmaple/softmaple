@@ -1097,26 +1097,35 @@ describe("Cloudflare DocumentRoomDO", () => {
     const expiring = [await connect(documentId), await connect(documentId)];
     const stub = env.DOCUMENT_ROOMS.getByName(documentId);
     await expect(expireAuthDeadlines(stub)).resolves.toBe(2);
-    await expect(breakOnePendingClose(stub)).resolves.toBe(2);
-    // Connected after the rewind, so this one's deadline is still ahead and
-    // it is what the handler has left to re-arm for.
-    const pending = await connect(documentId);
+    // Everything past the patch runs under `finally`: a socket left refusing
+    // to close outlives the test, and teardown would wait out its 1006 well
+    // into this suite's hook timeout.
+    const patched = await breakOnePendingClose(stub);
+    try {
+      expect(patched).toBe(2);
+      // Connected after the rewind, so this one's deadline is still ahead and
+      // it is what the handler has left to re-arm for.
+      const pending = await connect(documentId);
 
-    await runAlarm(stub);
+      await runAlarm(stub);
 
-    // The failure is contained rather than escaping the sweep. It is also
-    // logged, which is asserted only through behavior: this pool does not
-    // route a Durable Object's console output to the test's spy. An escaping
-    // error would skip the re-arm, and the alarm that fired is already
-    // consumed — leaving exactly the "nothing evicts them" case again.
-    await vi.waitFor(async () => {
-      await expect(attachedSocketCount(documentId)).resolves.toBe(2);
-    });
-    expect(
-      expiring.filter((client) => client.socket.readyState === WebSocket.OPEN),
-    ).toHaveLength(1);
-    expect(pending.socket.readyState).toBe(WebSocket.OPEN);
-    await expect(alarmAt(stub)).resolves.not.toBeNull();
-    await restorePendingCloses(stub);
+      // The failure is contained rather than escaping the sweep. It is also
+      // logged, which is asserted only through behavior: this pool does not
+      // route a Durable Object's console output to the test's spy. An
+      // escaping error would skip the re-arm, and the alarm that fired is
+      // already consumed — leaving the "nothing evicts them" case again.
+      await vi.waitFor(async () => {
+        await expect(attachedSocketCount(documentId)).resolves.toBe(2);
+      });
+      expect(
+        expiring.filter(
+          (client) => client.socket.readyState === WebSocket.OPEN,
+        ),
+      ).toHaveLength(1);
+      expect(pending.socket.readyState).toBe(WebSocket.OPEN);
+      await expect(alarmAt(stub)).resolves.not.toBeNull();
+    } finally {
+      await restorePendingCloses(stub);
+    }
   });
 });

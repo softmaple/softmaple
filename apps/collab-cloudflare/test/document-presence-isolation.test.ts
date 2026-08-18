@@ -28,9 +28,11 @@ const ORIGIN = "https://app.example";
 const documentSockets: WebSocket[] = [];
 const presenceSockets: WebSocket[] = [];
 
-const connectDocument = async (): Promise<WebSocket> => {
+const connectDocument = async (documentId: string): Promise<WebSocket> => {
+  const url = new URL("https://collab.example/collab/document");
+  url.searchParams.set("documentId", documentId);
   const response = await exports.default.fetch(
-    new Request("https://collab.example/collab/document", {
+    new Request(url.toString(), {
       headers: { Origin: ORIGIN, Upgrade: "websocket" },
     }),
   );
@@ -138,7 +140,7 @@ afterEach(async () => {
 describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
   it("keeps a document room and a presence room live for the same id with no cross-talk", async () => {
     const roomId = "00000000-0000-4000-8000-0000000000a1";
-    const documentSocket = await connectDocument();
+    const documentSocket = await connectDocument(roomId);
     const presenceSocket = await connectPresence(roomId);
 
     await expect(
@@ -172,7 +174,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
 
   it("revoking document access does not revoke presence access for the same room id", async () => {
     const roomId = "00000000-0000-4000-8000-0000000000a2";
-    const documentSocket = await connectDocument();
+    const documentSocket = await connectDocument(roomId);
     const presenceSocket = await connectPresence(roomId);
     await authenticateDocument(documentSocket, roomId);
     await authenticatePresence(presenceSocket, roomId);
@@ -204,7 +206,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
 
   it("revoking presence access does not revoke document access for the same room id", async () => {
     const roomId = "00000000-0000-4000-8000-0000000000a3";
-    const documentSocket = await connectDocument();
+    const documentSocket = await connectDocument(roomId);
     const presenceSocket = await connectPresence(roomId);
     await authenticateDocument(documentSocket, roomId);
     await authenticatePresence(presenceSocket, roomId);
@@ -236,7 +238,7 @@ describe("DocumentRoomDO / PresenceRoomDO isolation", () => {
 
   it("closing the document socket leaves the presence socket for the same id unaffected", async () => {
     const roomId = "00000000-0000-4000-8000-0000000000a4";
-    const documentSocket = await connectDocument();
+    const documentSocket = await connectDocument(roomId);
     const presenceSocket = await connectPresence(roomId);
     await authenticateDocument(documentSocket, roomId);
     await authenticatePresence(presenceSocket, roomId);

@@ -13,7 +13,6 @@ export const MAX_MESSAGE_BYTES = 256 * 1024;
 // budget for the Ready/session snapshot, quota, structured-clone overhead, and
 // future versioned fields.
 export const MAX_PERSISTED_AUTH_BYTES = 8 * 1024;
-export const INITIAL_AUTH_TIMEOUT_MS = 10_000;
 
 // Presence frames carry no document payload, so the transport limit can stay
 // well below the document room's 256 KiB.

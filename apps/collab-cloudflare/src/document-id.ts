@@ -20,17 +20,14 @@ export const normalizeDocumentId = (documentId: string): string | null => {
   return DOCUMENT_ID_PATTERN.test(formatted) ? formatted : null;
 };
 
-export const documentRoomPath = (documentId: string): string =>
-  `/__document-room/${encodeURIComponent(documentId)}`;
-
-export const documentIdFromRoomPath = (pathname: string): string | null => {
-  const prefix = "/__document-room/";
-  if (!pathname.startsWith(prefix)) return null;
-  const encoded = pathname.slice(prefix.length);
-  if (encoded.length === 0 || encoded.includes("/")) return null;
-  try {
-    return normalizeDocumentId(decodeURIComponent(encoded));
-  } catch {
-    return null;
-  }
+/**
+ * The routed document identity for a `/collab/document` upgrade. Both the
+ * Worker route (to pick the Durable Object) and `DocumentRoomDO.fetch` (to
+ * bind the room it serves) read the same `?documentId=` query parameter from
+ * the same browser request, so the object can never be routed by one id and
+ * bound to another.
+ */
+export const documentIdFromRequestUrl = (url: string): string | null => {
+  const raw = new URL(url).searchParams.get("documentId");
+  return raw === null ? null : normalizeDocumentId(raw);
 };

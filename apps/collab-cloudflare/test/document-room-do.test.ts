@@ -143,12 +143,21 @@ class TestSocket {
 
 const sockets: TestSocket[] = [];
 
-const connect = async (): Promise<TestSocket> => {
-  const response = await exports.default.fetch(
-    new Request("https://collab.example/collab/document", {
+const documentSocketUrl = (documentId: string): string => {
+  const url = new URL("https://collab.example/collab/document");
+  url.searchParams.set("documentId", documentId);
+  return url.toString();
+};
+
+const upgrade = (documentId: string): Promise<Response> =>
+  exports.default.fetch(
+    new Request(documentSocketUrl(documentId), {
       headers: { Origin: ORIGIN, Upgrade: "websocket" },
     }),
   );
+
+const connect = async (documentId: string): Promise<TestSocket> => {
+  const response = await upgrade(documentId);
   expect(response.status).toBe(101);
   expect(response.webSocket).not.toBeNull();
   const client = new TestSocket(response.webSocket!);
@@ -188,6 +197,12 @@ const attachmentSnapshots = async (stub: DocumentRoomStub) =>
         };
       })
       .sort((left, right) => left.sessionId.localeCompare(right.sessionId)),
+  );
+
+const attachedSocketCount = (documentId: string): Promise<number> =>
+  runInDurableObject(
+    env.DOCUMENT_ROOMS.getByName(documentId),
+    (_instance, state) => state.getWebSockets().length,
   );
 
 const sessionAudit = (stub: DocumentRoomStub) =>
@@ -237,8 +252,8 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("authenticates, repairs, commits, acks, and fans out to two clients", async () => {
     const documentId = "00000000-0000-4000-8000-000000000021";
-    const author = await connect();
-    const peer = await connect();
+    const author = await connect(documentId);
+    const peer = await connect(documentId);
 
     await expect(
       authenticate(author, documentId, "author-session"),
@@ -304,7 +319,7 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("preserves public read-only collaboration", async () => {
     const documentId = "00000000-0000-4000-8000-000000000031";
-    const reader = await connect();
+    const reader = await connect(documentId);
     reader.send({
       protocolVersion: COLLAB_PROTOCOL_VERSION,
       type: COLLAB_MESSAGE_TYPE.Auth,
@@ -335,7 +350,7 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("rejects authentication metadata that cannot fit in an attachment", async () => {
     const documentId = "00000000-0000-4000-8000-000000000032";
-    const client = await connect();
+    const client = await connect(documentId);
     const closed = client.closed();
     client.send({
       protocolVersion: COLLAB_PROTOCOL_VERSION,
@@ -355,8 +370,8 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("restores every attached peer and durable history after hibernation", async () => {
     const documentId = "00000000-0000-4000-8000-000000000041";
-    const author = await connect();
-    const reader = await connect();
+    const author = await connect(documentId);
+    const reader = await connect(documentId);
 
     await expect(
       authenticate(author, documentId, "hibernate-author"),
@@ -422,6 +437,9 @@ describe("Cloudflare DocumentRoomDO", () => {
       }),
     ]);
 
+    // Nothing routes again after this point: no upgrade request, no Worker
+    // state. The woken object rebinds itself to this document purely from the
+    // routed id persisted in each restored socket's attachment.
     await evictDurableObject(stub, { webSockets: "hibernate" });
     expect(author.socket.readyState).toBe(WebSocket.OPEN);
     expect(reader.socket.readyState).toBe(WebSocket.OPEN);
@@ -525,7 +543,7 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("revalidates and revokes an attached session when hibernation ends", async () => {
     const documentId = "00000000-0000-4000-8000-000000000051";
-    const author = await connect();
+    const author = await connect(documentId);
     await expect(
       authenticate(author, documentId, "revoked-session"),
     ).resolves.toMatchObject({
@@ -568,14 +586,20 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("releases runtime resources after WebSocket close and error events", async () => {
     const closeDocumentId = "00000000-0000-4000-8000-000000000061";
-    const closing = await connect();
+    const closing = await connect(closeDocumentId);
     await expect(
       authenticate(closing, closeDocumentId, "closing-session"),
     ).resolves.toMatchObject({ type: COLLAB_MESSAGE_TYPE.Ready });
     const closeStub = env.DOCUMENT_ROOMS.getByName(closeDocumentId);
     const closedNormally = closing.closed();
     closing.close();
-    await expect(closedNormally).resolves.toMatchObject({ code: 1000 });
+    // A clean 1000/`wasClean` close proves the object answers the client's
+    // close frame itself now that no Worker socket sits in front of it.
+    await expect(closedNormally).resolves.toMatchObject({
+      code: 1000,
+      reason: "Test complete",
+      wasClean: true,
+    });
     await vi.waitFor(async () => {
       await expect(sessionAudit(closeStub)).resolves.toMatchObject({
         ends: [
@@ -588,7 +612,7 @@ describe("Cloudflare DocumentRoomDO", () => {
     });
 
     const errorDocumentId = "00000000-0000-4000-8000-000000000062";
-    const failing = await connect();
+    const failing = await connect(errorDocumentId);
     await expect(
       authenticate(failing, errorDocumentId, "error-session"),
     ).resolves.toMatchObject({ type: COLLAB_MESSAGE_TYPE.Ready });
@@ -625,7 +649,7 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("removes sockets closed or failed while their room is hibernating", async () => {
     const closeDocumentId = "00000000-0000-4000-8000-000000000071";
-    const closing = await connect();
+    const closing = await connect(closeDocumentId);
     await expect(
       authenticate(closing, closeDocumentId, "hibernating-close"),
     ).resolves.toMatchObject({ type: COLLAB_MESSAGE_TYPE.Ready });
@@ -644,7 +668,7 @@ describe("Cloudflare DocumentRoomDO", () => {
     });
 
     const errorDocumentId = "00000000-0000-4000-8000-000000000072";
-    const failing = await connect();
+    const failing = await connect(errorDocumentId);
     await expect(
       authenticate(failing, errorDocumentId, "hibernating-error"),
     ).resolves.toMatchObject({ type: COLLAB_MESSAGE_TYPE.Ready });
@@ -680,7 +704,7 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("rejects an untrusted browser origin before upgrading", async () => {
     const response = await exports.default.fetch(
-      new Request("https://collab.example/collab/document", {
+      new Request(documentSocketUrl("00000000-0000-4000-8000-000000000081"), {
         headers: {
           Origin: "https://evil.example",
           Upgrade: "websocket",
@@ -695,13 +719,227 @@ describe("Cloudflare DocumentRoomDO", () => {
 
   it("rejects a missing browser origin before upgrading", async () => {
     const response = await exports.default.fetch(
-      new Request("https://collab.example/collab/document", {
+      new Request(documentSocketUrl("00000000-0000-4000-8000-000000000082"), {
         headers: { Upgrade: "websocket" },
       }),
     );
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
       error: "Forbidden origin",
+    });
+  });
+
+  it("routes the upgrade into the Durable Object named by the document id", async () => {
+    const documentId = "00000000-0000-4000-8000-000000000091";
+    const otherDocumentId = "00000000-0000-4000-8000-000000000092";
+    const client = await connect(documentId);
+    await expect(
+      authenticate(client, documentId, "routed-session"),
+    ).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Ready,
+      documentId,
+    });
+
+    await expect(attachedSocketCount(documentId)).resolves.toBe(1);
+    await expect(attachedSocketCount(otherDocumentId)).resolves.toBe(0);
+  });
+
+  it("routes every spelling of one document id to the same Durable Object", async () => {
+    const documentId = "00000000-0000-4000-8000-000000000093";
+    const client = await connect(`{${documentId.toUpperCase()}}`);
+    await expect(
+      authenticate(client, documentId, "normalized-session"),
+    ).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Ready,
+      documentId,
+    });
+
+    await expect(attachedSocketCount(documentId)).resolves.toBe(1);
+  });
+
+  it("rejects a missing or malformed document id before upgrading", async () => {
+    const missing = await exports.default.fetch(
+      new Request("https://collab.example/collab/document", {
+        headers: { Origin: ORIGIN, Upgrade: "websocket" },
+      }),
+    );
+    expect(missing.status).toBe(400);
+    expect(missing.webSocket).toBeNull();
+    await expect(missing.json()).resolves.toEqual({
+      error: "Invalid document id",
+    });
+
+    const malformed = await exports.default.fetch(
+      new Request(documentSocketUrl("not-a-uuid"), {
+        headers: { Origin: ORIGIN, Upgrade: "websocket" },
+      }),
+    );
+    expect(malformed.status).toBe(400);
+    expect(malformed.webSocket).toBeNull();
+    await expect(malformed.json()).resolves.toEqual({
+      error: "Invalid document id",
+    });
+  });
+
+  it("never creates a collaboration socket for a plain HTTP request", async () => {
+    const documentId = "00000000-0000-4000-8000-000000000094";
+    const withoutUpgrade = await exports.default.fetch(
+      new Request(documentSocketUrl(documentId), {
+        headers: { Origin: ORIGIN },
+      }),
+    );
+    expect(withoutUpgrade.status).toBe(426);
+    expect(withoutUpgrade.webSocket).toBeNull();
+
+    const posted = await exports.default.fetch(
+      new Request(documentSocketUrl(documentId), {
+        headers: { Origin: ORIGIN },
+        method: "POST",
+      }),
+    );
+    expect(posted.status).toBe(405);
+    expect(posted.webSocket).toBeNull();
+
+    await expect(attachedSocketCount(documentId)).resolves.toBe(0);
+  });
+
+  it("requires Auth as the first collaboration message", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000b1";
+    const client = await connect(documentId);
+    client.send({
+      protocolVersion: COLLAB_PROTOCOL_VERSION,
+      type: COLLAB_MESSAGE_TYPE.Event,
+      batches: [TEST_BATCH],
+    });
+    await expect(client.next()).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Error,
+      code: COLLAB_ERROR_CODE.AuthenticationFailed,
+      retryable: false,
+    });
+    expect(client.socket.readyState).toBe(WebSocket.OPEN);
+
+    const stub = env.DOCUMENT_ROOMS.getByName(documentId);
+    await expect(sessionAudit(stub)).resolves.toMatchObject({
+      authorizations: [],
+    });
+
+    // The socket stays usable: the same connection can still authenticate.
+    await expect(
+      authenticate(client, documentId, "late-auth-session"),
+    ).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Ready,
+      documentId,
+    });
+  });
+
+  it("answers a malformed first message without dropping the connection", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000b5";
+    const client = await connect(documentId);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      client.socket.send("{not json");
+      await expect(client.next()).resolves.toMatchObject({
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: COLLAB_ERROR_CODE.InvalidMessage,
+        retryable: false,
+      });
+    } finally {
+      errorLog.mockRestore();
+    }
+    expect(client.socket.readyState).toBe(WebSocket.OPEN);
+
+    await expect(
+      authenticate(client, documentId, "recovered-session"),
+    ).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Ready,
+      documentId,
+    });
+  });
+
+  it("releases a connection that disconnects before authenticating", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000b6";
+    const client = await connect(documentId);
+    await expect(attachedSocketCount(documentId)).resolves.toBe(1);
+
+    const closed = client.closed();
+    client.close();
+    await expect(closed).resolves.toMatchObject({
+      code: 1000,
+      wasClean: true,
+    });
+    await vi.waitFor(async () => {
+      await expect(attachedSocketCount(documentId)).resolves.toBe(0);
+    });
+    await expect(
+      sessionAudit(env.DOCUMENT_ROOMS.getByName(documentId)),
+    ).resolves.toMatchObject({ authorizations: [] });
+  });
+
+  it("rejects an Auth message for a document other than the routed one", async () => {
+    const routedDocumentId = "00000000-0000-4000-8000-0000000000b2";
+    const otherDocumentId = "00000000-0000-4000-8000-0000000000b3";
+    const client = await connect(routedDocumentId);
+    const closed = client.closed();
+
+    await expect(
+      authenticate(client, otherDocumentId, "mismatched-session"),
+    ).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Error,
+      code: COLLAB_ERROR_CODE.AuthenticationFailed,
+      message: "Authentication or document membership failed",
+      retryable: false,
+    });
+    await expect(closed).resolves.toMatchObject({
+      code: 1008,
+      reason: "Unauthorized",
+    });
+
+    // Neither document authorized the credential: the routed object rejected
+    // the Auth before its authorization hook, and the object for the named
+    // document was never reached at all.
+    await expect(
+      sessionAudit(env.DOCUMENT_ROOMS.getByName(routedDocumentId)),
+    ).resolves.toMatchObject({ authorizations: [] });
+    await expect(
+      sessionAudit(env.DOCUMENT_ROOMS.getByName(otherDocumentId)),
+    ).resolves.toMatchObject({ authorizations: [] });
+    await expect(attachedSocketCount(otherDocumentId)).resolves.toBe(0);
+  });
+
+  it("rejects an unauthorized credential the same way as a mismatched document", async () => {
+    const documentId = "00000000-0000-4000-8000-0000000000b4";
+    const client = await connect(documentId);
+    const closed = client.closed();
+    client.send({
+      protocolVersion: COLLAB_PROTOCOL_VERSION,
+      type: COLLAB_MESSAGE_TYPE.Auth,
+      credential: { kind: "access-token", token: "not-the-test-token" },
+      documentId,
+      sessionId: "unauthorized-session",
+    });
+
+    await expect(client.next()).resolves.toMatchObject({
+      type: COLLAB_MESSAGE_TYPE.Error,
+      code: COLLAB_ERROR_CODE.AuthenticationFailed,
+      message: "Authentication or document membership failed",
+      retryable: false,
+    });
+    await expect(closed).resolves.toMatchObject({
+      code: 1008,
+      reason: "Unauthorized",
+    });
+
+    // Unlike the mismatch above, this credential did reach the authorization
+    // hook — the client cannot tell the two rejections apart.
+    await expect(
+      sessionAudit(env.DOCUMENT_ROOMS.getByName(documentId)),
+    ).resolves.toMatchObject({
+      authorizations: [
+        expect.objectContaining({
+          documentId,
+          sessionId: "unauthorized-session",
+        }),
+      ],
     });
   });
 });

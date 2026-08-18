@@ -110,6 +110,10 @@ handshake; `/health` alone is not a Redis-readiness check.
 `DocumentRoomDO` owns live document coordination, fan-out, and connection
 limits. `PresenceRoomDO` separately owns live presence coordination and stores
 presence membership in Durable Object storage so it survives hibernation.
+Both rooms are routed on the upgrade request's query string
+(`?documentId=`, `?roomId=`) and answer the browser with the object's own
+upgrade response, so the Worker holds no long-lived collaboration socket and
+every live connection hibernates with its object.
 Neither object uses its storage as durable document-event history; that role
 stays with Supabase Postgres. See
 [`apps/collab-cloudflare/README.md#runtime-shape`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#runtime-shape)

@@ -14,7 +14,7 @@ const SHARED_UTILITY_FILES =
 const PRESENCE_OWN_FILES =
   "presence-[\\w-]*|awareness-presence-codec|supabase-presence-backend|memory-presence-backend";
 const DOCUMENT_OWN_FILES =
-  "document-room-do|do-capabilities|room-services|supabase-backend|websocket-attachment|websocket-proxy|memory-backend";
+  "document-room-do|document-websocket|do-capabilities|room-services|supabase-backend|websocket-attachment|memory-backend";
 
 const denyLocalImportsExcept = (allowedNames) =>
   new RegExp(`^\\.{1,2}/(?:.*/)?(?!(?:${allowedNames})$)[\\w-]+$`);
@@ -58,11 +58,11 @@ export default [
   {
     files: [
       "src/document-room-do.ts",
+      "src/document-websocket.ts",
       "src/do-capabilities.ts",
       "src/room-services.ts",
       "src/supabase-backend.ts",
       "src/websocket-attachment.ts",
-      "src/websocket-proxy.ts",
       "test/document-room-do.test.ts",
       "test/do-capabilities.test.ts",
       "test/memory-backend.ts",

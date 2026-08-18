@@ -13,22 +13,54 @@ for the cross-runtime operational picture and configured rollout stage.
 
 ## Runtime shape
 
-The public Worker keeps the existing `/collab/document` WebSocket endpoint. It
-reads the first protocol `Auth` message, normalizes its document UUID, and
-routes the connection with `DOCUMENT_ROOMS.getByName(documentId)`. Every live
-connection for that document is therefore coordinated by one `DocumentRoomDO`.
-The Worker proxies the unchanged `@softmaple/collab-protocol` messages into the
-object; there is no Cloudflare-specific wire format.
+The public Worker keeps the existing `/collab/document` WebSocket endpoint,
+now with the document UUID on the URL:
+`/collab/document?documentId=<uuid>`. The Worker validates the browser
+Origin, normalizes that id, and returns
+`DOCUMENT_ROOMS.getByName(documentId).fetch(request)` — the object's own
+upgrade response. Every live connection for that document is therefore
+coordinated by one `DocumentRoomDO`, and the Worker never terminates,
+relays, or holds a document socket: it performs HTTP routing and Durable
+Object selection only, exactly like the presence route below. The
+`@softmaple/collab-protocol` messages are unchanged; there is no
+Cloudflare-specific wire format.
+
+The routed document id is an identifier, not a credential: it selects which
+object serves the socket and nothing else. Possessing it authorizes nothing,
+and no access token, JWT, or other secret ever belongs in the query string.
+Authentication and authorization still happen inside the object, driven by
+the connection's first protocol `Auth` message — access token or public
+credential, document existence, workspace membership, and collaboration
+permissions are all still checked before `Ready`. The object additionally
+requires that message's document id (in any UUID spelling) to normalize to
+the routed one, and answers a mismatch with the same `AuthenticationFailed`
+error and 1008 `Unauthorized` close that an unauthorized credential gets, so
+a client cannot open document A's object and authenticate against document
+B. That check runs before the authorization hook, so a mismatched `Auth`
+never reaches Supabase.
 
 `DocumentRoomDO` accepts its server sockets with the Durable Objects WebSocket
-Hibernation API. Each socket has a versioned attachment containing its stable
-peer and session identity, protocol/access metadata, the caller's access token
-as the reauthorization credential (retained for the connection's lifetime), and
-message quota. After constructor re-entry, the object restores all attached
-sockets before processing the wake-up message and revalidates each
+Hibernation API. Each socket has a versioned attachment containing its routed
+document id, stable peer and session identity, protocol/access metadata, the
+caller's access token as the reauthorization credential (retained for the
+connection's lifetime), and message quota. The routed id reaches the object on
+the upgrade request and is persisted in that attachment, which is how a
+hibernation-evicted object rebinds itself to its document without any Worker
+or process-global state. After constructor re-entry, the object restores all
+attached sockets before processing the wake-up message and revalidates each
 authenticated session without sending another protocol `Ready` message. The
 runtime uses message-driven authorization and lease maintenance in this host,
 so no room timer prevents an idle object from hibernating.
+
+Owning the whole connection also means owning its ending: `webSocketClose`
+answers the client's close frame, so a browser disconnect completes as a clean
+1000 instead of the client timing out at 1006. Nothing schedules a document
+alarm, so an idle object still hibernates — including a socket that connects
+and never sends `Auth`. Such a socket holds no session, no connection lease,
+and no isolate; it is simply hibernated until it closes. There is no longer a
+Worker-side authentication deadline, because there is no longer a Worker-side
+socket to hold one.
+
 Expired peers are revalidated on room activity; if a persistence operation
 crosses a validation deadline, repair responses are checked again and expired
 fan-out recipients are closed so the existing reconnect-and-repair flow cannot
@@ -52,15 +84,14 @@ deployment must lower that policy or add batched reauthorization first.
 
 ## Presence room
 
-The public Worker also keeps the existing `/collab/presence?roomId=` endpoint.
-Unlike the document route, presence needs no auth-sniffing proxy in front of
-the object: the room id is already known from the query string at upgrade
-time, so the Worker validates origin and room id, then routes directly with
-`PRESENCE_ROOMS.getByName(roomId)` and returns the object's own upgrade
-response. `PresenceRoomDO` accepts sockets the same hibernatable way as
-`DocumentRoomDO`, with its own versioned attachment (identity, credential,
-rate-limit state, and heartbeat/authorization deadlines — no `Ready`/session
-snapshot, since presence never resends one).
+The public Worker also keeps the existing `/collab/presence?roomId=` endpoint,
+routed exactly like the document endpoint above: the room id is known from the
+query string at upgrade time, so the Worker validates origin and room id, then
+routes directly with `PRESENCE_ROOMS.getByName(roomId)` and returns the
+object's own upgrade response. `PresenceRoomDO` accepts sockets the same
+hibernatable way as `DocumentRoomDO`, with its own versioned attachment
+(identity, credential, rate-limit state, and heartbeat/authorization deadlines
+— no `Ready`/session snapshot, since presence never resends one).
 
 `PresenceRoomDO` is a fully separate Durable Object namespace and shares no
 capability instance or cross-stub call with `DocumentRoomDO`

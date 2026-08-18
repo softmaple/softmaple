@@ -26,7 +26,7 @@ import {
   MESSAGE_RATE_LIMIT_MAX,
   MESSAGE_RATE_LIMIT_WINDOW_MS,
 } from "./constants";
-import { documentIdFromRoomPath } from "./document-id";
+import { documentIdFromRequestUrl, normalizeDocumentId } from "./document-id";
 import { messageBytes, textFromMessage } from "./message-bytes";
 import { createRoomServices } from "./room-services";
 import {
@@ -268,12 +268,27 @@ class DurableObjectRoomPeer implements RoomPeer {
     }
 
     if (message.type === COLLAB_MESSAGE_TYPE.Auth) {
-      if (messageBytes(JSON.stringify(message)) > MAX_PERSISTED_AUTH_BYTES) {
+      const auth = this.authForRoutedDocument(message);
+      if (auth === null) {
+        this.send(
+          errorMessage(
+            COLLAB_ERROR_CODE.AuthenticationFailed,
+            "Authentication or document membership failed",
+            false,
+            message.protocolVersion,
+          ),
+        );
+        this.close(1008, "Unauthorized");
+        await this.cleanupNow();
+        return;
+      }
+      if (messageBytes(JSON.stringify(auth)) > MAX_PERSISTED_AUTH_BYTES) {
         this.close(1009, "Authentication metadata is too large");
         await this.cleanupNow();
         return;
       }
-      this.pendingAuth = message;
+      message = auth;
+      this.pendingAuth = auth;
     }
     try {
       await this.room.receive(this, message);
@@ -281,6 +296,26 @@ class DurableObjectRoomPeer implements RoomPeer {
       this.pendingAuth = null;
     }
     if (this.closeRequested) await this.cleanupNow();
+  }
+
+  /**
+   * Binds an `Auth` message to the document this socket was routed to. The
+   * `?documentId=` the Worker resolved the Durable Object with is the room's
+   * identity, so authenticating against any other document must be rejected
+   * before the authorization hook runs — a client must not be able to open
+   * document A's object and authorize against document B. Normalizing first
+   * preserves the pre-routing wire contract (any UUID spelling is accepted)
+   * and keeps the room, session, and attachment on the canonical id, which
+   * `RuntimeDocumentRoom.authenticate` then re-checks by exact equality.
+   */
+  private authForRoutedDocument(
+    message: AuthMessage | LegacyAuthMessage,
+  ): AuthMessage | LegacyAuthMessage | null {
+    const documentId = normalizeDocumentId(message.documentId);
+    if (documentId === null || documentId !== this.attachment.documentId) {
+      return null;
+    }
+    return { ...message, documentId };
   }
 
   private persistReady(message: LegacyReadyMessage | ReadyMessage): void {
@@ -320,6 +355,21 @@ interface RestoredPeer {
   readonly socket: WebSocket;
 }
 
+const NORMAL_CLOSURE = 1000;
+// Reserved codes: a close event may report them, but a close frame must never
+// carry one, so an unclean client close is answered with a normal closure.
+const RESERVED_CLOSE_CODES: ReadonlySet<number> = new Set([
+  1004, 1005, 1006, 1015,
+]);
+
+const echoableCloseCode = (code: number): number =>
+  Number.isInteger(code) &&
+  code >= 1000 &&
+  code <= 4999 &&
+  !RESERVED_CLOSE_CODES.has(code)
+    ? code
+    : NORMAL_CLOSURE;
+
 export class DocumentRoomDO extends DurableObject<Env> {
   private documentId: string | null = null;
   private initializationPromise: Promise<void> | null = null;
@@ -338,7 +388,7 @@ export class DocumentRoomDO extends DurableObject<Env> {
       return new Response("Expected Upgrade: websocket", { status: 426 });
     }
 
-    const documentId = documentIdFromRoomPath(new URL(request.url).pathname);
+    const documentId = documentIdFromRequestUrl(request.url);
     if (documentId === null) {
       return Response.json({ error: "Invalid document id" }, { status: 400 });
     }
@@ -427,8 +477,13 @@ export class DocumentRoomDO extends DurableObject<Env> {
     }
   }
 
-  async webSocketClose(socket: WebSocket): Promise<void> {
+  async webSocketClose(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
     const peer = this.peerFromSocket(socket);
+    this.completeClose(socket, code, reason);
     if (peer === null) return;
     await peer.transportClosed();
     this.peers.delete(peer.id);
@@ -614,6 +669,30 @@ export class DocumentRoomDO extends DurableObject<Env> {
     return (
       [...this.peers.values()].find((peer) => peer.ownsSocket(socket)) ?? null
     );
+  }
+
+  /**
+   * Answers the client's close frame. A hibernatable socket's handshake is
+   * the object's own responsibility: the runtime reports the client's close
+   * through `webSocketClose` and sends no close frame of its own, so an
+   * unanswered close leaves the browser waiting for its half until it gives
+   * up with 1006. The removed Worker proxy used to terminate the browser
+   * socket in front of the object and completed this handshake there; direct
+   * routing gives the object the whole connection, including its ending.
+   */
+  private completeClose(socket: WebSocket, code: number, reason: string): void {
+    // The socket is already CLOSING here — the client's frame arrived — so
+    // this deliberately does not use `failSocket`'s `< CLOSING` guard.
+    if (socket.readyState === WebSocket.CLOSED) return;
+    const echoed = echoableCloseCode(code);
+    try {
+      socket.close(
+        echoed,
+        echoed === code ? reason : "Collaboration connection closed",
+      );
+    } catch (error) {
+      logError(error, { messageType: "websocket-close-echo" });
+    }
   }
 
   private failSocket(

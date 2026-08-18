@@ -372,7 +372,9 @@ const createSessionController = ({
     }
 
     const nextSocket = new WebSocket(
-      buildCollabWebSocketUrl(collabRuntime, "/collab/document"),
+      buildCollabWebSocketUrl(collabRuntime, "/collab/document", {
+        documentId,
+      }),
     );
     socket = nextSocket;
 

@@ -1,7 +1,7 @@
+import { handleDocumentWebSocket } from "./document-websocket";
 import { DocumentRoomDO } from "./document-room-do";
 import { PresenceRoomDO } from "./presence-room-do";
 import { handlePresenceWebSocket } from "./presence-websocket";
-import { handleDocumentWebSocket } from "./websocket-proxy";
 
 export { DocumentRoomDO, PresenceRoomDO };
 

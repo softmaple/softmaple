@@ -74,7 +74,12 @@ plus bearer secret are present. Never enable it against production.
 
 Same-origin Nitro WebSocket routing is owned by the root
 [`vercel.json`](../../vercel.json) Services configuration. Cloudflare-selected
-documents bypass this mapping and use the configured Worker URL directly:
+documents bypass this mapping for both their document and presence connections,
+using the configured Worker URL directly, with the room identifier in the query
+string (`/collab/document?documentId=<id>`, `/collab/presence?roomId=<id>`) so
+the Worker can route the upgrade straight into that room's Durable Object. Those
+ids are identifiers, not credentials — authentication stays in the first
+protocol message, and no access token belongs in a WebSocket URL:
 
 ```text
 /collab/** → apps/collab

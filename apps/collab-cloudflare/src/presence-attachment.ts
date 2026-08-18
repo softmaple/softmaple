@@ -19,6 +19,13 @@ interface PresenceWebSocketAttachmentBase {
 
 export interface AwaitingAuthPresenceAttachment
   extends PresenceWebSocketAttachmentBase {
+  /**
+   * When the object accepted this socket. The authentication deadline is
+   * derived from it (`auth-deadline.ts`), and it lives in the attachment
+   * rather than in memory so a hibernation-woken object enforces the same
+   * deadline a live one would.
+   */
+  readonly connectedAt: number;
   readonly phase: "awaiting-auth";
 }
 
@@ -76,7 +83,9 @@ const parseIdentity = (value: unknown): PresenceIdentity | null => {
 /** Presence rooms share the document id space; identity is validated the same way. */
 export const createAwaitingAuthAttachment = (
   roomId: string,
+  now = Date.now(),
 ): AwaitingAuthPresenceAttachment => ({
+  connectedAt: now,
   peerId: crypto.randomUUID(),
   phase: "awaiting-auth",
   roomId,
@@ -102,7 +111,13 @@ export const parsePresenceWebSocketAttachment = (
     version: ATTACHMENT_VERSION,
   } as const;
   if (value.phase === "awaiting-auth") {
-    return { ...base, phase: "awaiting-auth" };
+    // A socket whose accepted-at instant is missing or malformed has no
+    // enforceable authentication deadline, so it is rejected like any other
+    // unreadable attachment and closed — which is what an unauthenticated
+    // socket gets at its deadline anyway.
+    return isNonNegativeInteger(value.connectedAt)
+      ? { ...base, connectedAt: value.connectedAt, phase: "awaiting-auth" }
+      : null;
   }
   if (
     value.phase !== "authenticated" ||

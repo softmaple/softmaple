@@ -9,7 +9,18 @@ import {
   type PresenceRoomServices,
 } from "@softmaple/collab-runtime";
 import {
+  authDeadlineFrom,
+  AUTH_DEADLINE_CLOSE_CODE,
+  AUTH_DEADLINE_CLOSE_REASON,
+  collectPendingAuthSockets,
+  earliestAuthDeadline,
+  planAuthDeadlineSweep,
+  scheduleAlarmAt,
+  type PendingAuthSocket,
+} from "./auth-deadline";
+import {
   logError,
+  logMetric,
   MAX_PERSISTED_PRESENCE_BYTES,
   MAX_PRESENCE_MESSAGE_BYTES,
   PRESENCE_ALARM_INTERVAL_MS,
@@ -24,6 +35,12 @@ import {
   type PresenceWebSocketAttachment,
 } from "./presence-attachment";
 import { createPresenceServices } from "./presence-services";
+import { completeClose } from "./websocket-close";
+
+const CLOSE_ECHO_FALLBACK = {
+  messageType: "presence-websocket-close-echo",
+  reason: "Presence connection closed",
+} as const;
 
 const jsonBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -255,6 +272,10 @@ export class PresenceRoomDO extends DurableObject<Env> {
       peer = new DurableObjectPresencePeer(room, server, attachment);
       this.peers.set(peer.id, peer);
       await room.join(peer);
+      await scheduleAlarmAt(
+        this.ctx.storage,
+        authDeadlineFrom(attachment.connectedAt),
+      );
     } catch (error) {
       logError(error, { messageType: "presence-room-join", roomId });
       if (peer !== null) await peer.transportClosed();
@@ -311,8 +332,13 @@ export class PresenceRoomDO extends DurableObject<Env> {
     }
   }
 
-  async webSocketClose(socket: WebSocket): Promise<void> {
+  async webSocketClose(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
     const peer = this.peerFromSocket(socket);
+    completeClose(socket, code, reason, CLOSE_ECHO_FALLBACK);
     if (peer === null) return;
     await peer.transportClosed();
     this.peers.delete(peer.id);
@@ -332,24 +358,90 @@ export class PresenceRoomDO extends DurableObject<Env> {
   }
 
   /**
-   * The only timer mechanism that survives hibernation; drives
-   * `PresenceRoom.sweep()`. A hibernation eviction resets every in-memory
-   * field, including `this.roomId`, so this recovers it from an attached
-   * socket the same way `webSocketMessage` does before falling back to a
-   * no-op (nothing to sweep without a room id or any attached socket).
+   * The only timer mechanism that survives hibernation; drives both
+   * `PresenceRoom.sweep()` and the shared authentication deadline. A
+   * hibernation eviction resets every in-memory field, including
+   * `this.roomId`, so this recovers it from an attached socket the same way
+   * `webSocketMessage` does before falling back to a no-op (nothing to sweep
+   * without a room id or any attached socket).
+   *
+   * The deadline sweep runs first and needs neither the room id nor the room
+   * itself: an unauthenticated socket holds no membership, session, or lease,
+   * so closing its transport is the whole eviction.
    */
   async alarm(): Promise<void> {
+    const now = Date.now();
+    const { expired, nextDeadline } = planAuthDeadlineSweep(
+      this.pendingAuthSockets(),
+      now,
+    );
+    await Promise.all(
+      expired.map((socket) => this.closeUnauthenticated(socket)),
+    );
+
     const roomId = this.roomId ?? this.roomIdFromAnySocket();
     if (roomId !== null) {
       try {
         const room = await this.ensureRoom(roomId);
-        await room?.sweep(Date.now());
+        await room?.sweep(now);
       } catch (error) {
         logError(error, { messageType: "presence-alarm", roomId });
       }
     }
+    // Both re-arms only ever move the object's single alarm earlier, so
+    // whichever of the liveness interval and the next authentication deadline
+    // comes first wins — and neither can push back a deadline armed by a
+    // connection that arrived while this handler was running.
     if (this.ctx.getWebSockets().length > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + PRESENCE_ALARM_INTERVAL_MS);
+      await scheduleAlarmAt(
+        this.ctx.storage,
+        Date.now() + PRESENCE_ALARM_INTERVAL_MS,
+      );
+    }
+    await scheduleAlarmAt(this.ctx.storage, nextDeadline);
+  }
+
+  /** Shared with `DocumentRoomDO`; `auth-deadline.ts` owns the policy. */
+  private pendingAuthSockets(): readonly PendingAuthSocket[] {
+    return collectPendingAuthSockets(this.ctx.getWebSockets(), (socket) => {
+      const attachment = this.attachmentFromSocket(socket);
+      return attachment !== null && attachment.phase === "awaiting-auth"
+        ? attachment.connectedAt
+        : null;
+    });
+  }
+
+  /**
+   * Never rejects. One socket that resists closing must not cancel the other
+   * evictions, the room sweep that follows, or either re-arm — this object's
+   * liveness rides on that alarm chain, and an `alarm()` that throws has
+   * already been consumed. A socket left open by a failed close is still
+   * awaiting `Auth`, so the next sweep finds it again.
+   */
+  private async closeUnauthenticated(socket: WebSocket): Promise<void> {
+    const attachment = this.attachmentFromSocket(socket);
+    const identity = {
+      peerId: attachment?.peerId ?? null,
+      roomId: attachment?.roomId ?? this.roomId,
+    };
+    try {
+      logMetric({ ...identity, type: "auth-deadline-expired" });
+      const peer = this.peerFromSocket(socket);
+      if (peer === null) {
+        // A woken object holds no peer for a hibernating socket; closing the
+        // transport is the whole cleanup, since an unauthenticated peer never
+        // took a membership record or a connection lease.
+        socket.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
+        return;
+      }
+      peer.close(AUTH_DEADLINE_CLOSE_CODE, AUTH_DEADLINE_CLOSE_REASON);
+      await peer.transportClosed();
+      this.peers.delete(peer.id);
+    } catch (error) {
+      logError(error, {
+        ...identity,
+        messageType: "presence-auth-deadline-close",
+      });
     }
   }
 
@@ -457,6 +549,13 @@ export class PresenceRoomDO extends DurableObject<Env> {
       this.room = null;
       throw error;
     }
+    // `ensureAlarmScheduled` only arms the liveness interval when nothing is
+    // scheduled, so a restored socket still awaiting `Auth` pulls the alarm
+    // back to its own, sooner deadline here.
+    await scheduleAlarmAt(
+      this.ctx.storage,
+      earliestAuthDeadline(this.pendingAuthSockets()),
+    );
   }
 
   private async discardRestoredPeers(

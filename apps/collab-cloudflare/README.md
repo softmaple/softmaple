@@ -55,12 +55,30 @@ so no room timer prevents an idle object from hibernating.
 Owning the whole connection also means owning its ending: `webSocketClose`
 answers the client's close frame, echoing valid non-reserved close codes
 and mapping invalid or reserved codes to 1000 so the handshake completes
-cleanly instead of the client timing out at 1006. Nothing schedules a document
-alarm, so an idle object still hibernates — including a socket that connects
-and never sends `Auth`. Such a socket holds no session, no connection lease,
-and no isolate; it is simply hibernated until it closes. There is no longer a
-Worker-side authentication deadline, because there is no longer a Worker-side
-socket to hold one.
+cleanly instead of the client timing out at 1006. `PresenceRoomDO` answers
+its clients' close frames the same way, through the same shared
+`websocket-close.ts`.
+
+A socket that connects and never sends `Auth` is closed 1008
+`Authentication timed out` at `INITIAL_AUTH_TIMEOUT_MS` (`constants.ts`).
+Both room objects enforce that deadline from a Durable Object alarm rather
+than the `setTimeout` the removed Worker proxy used, because no timer
+survives hibernation and no Worker-side socket is left to hold one. The
+accepted-at instant lives in each socket's attachment, so `alarm()` decides
+purely from attachments: a woken object evicts exactly the sockets a live one
+would, without restoring the room, revalidating a session, or calling
+Supabase — an unauthenticated socket holds no session, membership, or
+connection lease, so closing its transport is the whole eviction. The shared
+policy is `auth-deadline.ts`; a Durable Object has one alarm, so an
+authentication deadline may only pull an already-scheduled wake-up forward
+(`PresenceRoomDO`'s liveness sweep keeps its own 30s cadence). The document
+object schedules an alarm only while a socket is still awaiting `Auth` and
+re-arms only while one remains, so an idle authenticated room still
+hibernates with no timer at all. The accepted-at instant is a required
+attachment field, so a socket that was still awaiting `Auth` across a
+deployment fails the attachment parse when its object wakes on the new
+version and is closed like any other unreadable attachment — it has no
+session to lose, and the client reconnects and authenticates again.
 
 Expired peers are revalidated on room activity; if a persistence operation
 crosses a validation deadline, repair responses are checked again and expired
@@ -115,8 +133,9 @@ Cloudflare Durable Object alarm (`PRESENCE_ALARM_INTERVAL_MS`, `constants.ts`)
 is the liveness backstop: it is the only timer mechanism that survives
 hibernation, so it drives `PresenceRoom.sweep()` to close expired heartbeats
 and broadcast Leave for lapsed members even when the room is otherwise idle.
-The alarm reschedules itself only while a WebSocket is still attached, so an
-empty room does not keep waking the object.
+The same alarm also runs the shared authentication-deadline sweep described
+above. The alarm reschedules itself only while a WebSocket is still attached,
+so an empty room does not keep waking the object.
 
 ## Environment
 

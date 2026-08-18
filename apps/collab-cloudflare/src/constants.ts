@@ -14,6 +14,12 @@ export const MAX_MESSAGE_BYTES = 256 * 1024;
 // future versioned fields.
 export const MAX_PERSISTED_AUTH_BYTES = 8 * 1024;
 
+// How long a socket may stay connected without completing authentication.
+// Both room objects enforce it from an alarm (`auth-deadline.ts`) rather than
+// a `setTimeout`, because a timer cannot survive hibernation and no Worker
+// socket sits in front of either object to hold one.
+export const INITIAL_AUTH_TIMEOUT_MS = 10_000;
+
 // Presence frames carry no document payload, so the transport limit can stay
 // well below the document room's 256 KiB.
 export const MAX_PRESENCE_MESSAGE_BYTES = 64 * 1024;

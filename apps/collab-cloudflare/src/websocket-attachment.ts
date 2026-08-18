@@ -36,6 +36,13 @@ interface WebSocketAttachmentBase {
 
 export interface AwaitingAuthWebSocketAttachment
   extends WebSocketAttachmentBase {
+  /**
+   * When the object accepted this socket. The authentication deadline is
+   * derived from it (`auth-deadline.ts`), and it lives in the attachment
+   * rather than in memory so a hibernation-woken object enforces the same
+   * deadline a live one would.
+   */
+  readonly connectedAt: number;
   readonly phase: "awaiting-auth";
 }
 
@@ -119,6 +126,7 @@ export const createAwaitingAuthAttachment = (
   documentId: string,
   now = Date.now(),
 ): AwaitingAuthWebSocketAttachment => ({
+  connectedAt: now,
   documentId,
   peerId: crypto.randomUUID(),
   phase: "awaiting-auth",
@@ -148,7 +156,13 @@ export const parseDocumentWebSocketAttachment = (
     version: ATTACHMENT_VERSION,
   } as const;
   if (value.phase === "awaiting-auth") {
-    return { ...base, phase: "awaiting-auth" };
+    // A socket whose accepted-at instant is missing or malformed has no
+    // enforceable authentication deadline, so it is rejected like any other
+    // unreadable attachment and closed — which is what an unauthenticated
+    // socket gets at its deadline anyway.
+    return isNonNegativeInteger(value.connectedAt)
+      ? { ...base, connectedAt: value.connectedAt, phase: "awaiting-auth" }
+      : null;
   }
   if (
     value.phase !== "authenticated" ||
@@ -269,12 +283,18 @@ export const attachmentAfterReady = (
   validatedAt: number,
 ): AuthenticatedWebSocketAttachment | null => {
   if (!hasConsistentIdentity(attachment.documentId, auth, ready)) return null;
+  // Built field by field rather than spread: an authenticated socket has no
+  // authentication deadline left to enforce, so `connectedAt` must not be
+  // carried into (or persisted in) the authenticated attachment.
   return {
-    ...attachment,
     auth,
+    documentId: attachment.documentId,
+    peerId: attachment.peerId,
     phase: "authenticated",
+    quota: attachment.quota,
     ready,
     validatedAt,
+    version: ATTACHMENT_VERSION,
   };
 };
 

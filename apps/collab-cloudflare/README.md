@@ -53,8 +53,9 @@ runtime uses message-driven authorization and lease maintenance in this host,
 so no room timer prevents an idle object from hibernating.
 
 Owning the whole connection also means owning its ending: `webSocketClose`
-answers the client's close frame, so a browser disconnect completes as a clean
-1000 instead of the client timing out at 1006. Nothing schedules a document
+answers the client's close frame, echoing valid non-reserved close codes
+and mapping invalid or reserved codes to 1000 so the handshake completes
+cleanly instead of the client timing out at 1006. Nothing schedules a document
 alarm, so an idle object still hibernates — including a socket that connects
 and never sends `Auth`. Such a socket holds no session, no connection lease,
 and no isolate; it is simply hibernated until it closes. There is no longer a

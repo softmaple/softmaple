@@ -21,13 +21,33 @@ const NITRO_TARGET: CollabTarget = {
   runtime: COLLAB_RUNTIME.Nitro,
 };
 
+type FakeSessionResult = {
+  readonly data: {
+    readonly session: {
+      readonly access_token: string;
+      readonly user: { readonly id: string };
+    } | null;
+  };
+  readonly error: null;
+};
+
+const signedOutSession = async (): Promise<FakeSessionResult> => ({
+  data: { session: null },
+  error: null,
+});
+
+/** Mutable so a test can hold the session read open mid-connect. */
+const authStub = vi.hoisted(() => ({
+  getSession: async (): Promise<FakeSessionResult> => ({
+    data: { session: null },
+    error: null,
+  }),
+}));
+
 vi.mock("@/utils/supabase/client", () => ({
   createClient: () => ({
     auth: {
-      getSession: async () => ({
-        data: { session: null },
-        error: null,
-      }),
+      getSession: () => authStub.getSession(),
     },
   }),
 }));
@@ -101,6 +121,12 @@ class FakeWebSocket {
     this.emit("open", new Event("open"));
   };
 
+  /** Close event that bypasses readyState, mirroring a stray/duplicate close. */
+  emitClose = (code = 1006): void => {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.emit("close", new CloseEvent("close", { code }));
+  };
+
   emitMessage = (data: unknown): void => {
     this.emit(
       "message",
@@ -124,6 +150,56 @@ class FakeWebSocket {
 
 const fakeSockets: FakeWebSocket[] = [];
 const originalWebSocket = globalThis.WebSocket;
+
+/**
+ * Fixed jitter draw: reconnect delays become base * 2 ** attempt / 2, so the
+ * timeline below is exact (250ms, 500ms, 1s, ...) with no timing tolerance.
+ */
+const FIXED_JITTER = 0.5;
+
+const setBrowserOnline = (online: boolean): void => {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => online,
+  });
+};
+
+const setPageVisibility = (visibility: "hidden" | "visible"): void => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => visibility,
+  });
+};
+
+const emitOnline = (): void => {
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+};
+
+const emitVisibilityChange = (visibility: "hidden" | "visible"): void => {
+  setPageVisibility(visibility);
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+};
+
+const advance = (ms: number): void => {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+};
+
+/** Server hello for a public document session. */
+const publicReadyMessage = (documentId: string) => ({
+  protocolVersion: COLLAB_PROTOCOL_VERSION,
+  type: COLLAB_MESSAGE_TYPE.Ready,
+  accessMode: COLLAB_ACCESS_MODE.Public,
+  documentId,
+  userId: null,
+  role: null,
+  canWrite: false,
+});
 
 type HookState = ReturnType<typeof useCollabDocument>;
 
@@ -184,12 +260,17 @@ describe("useCollabDocument", () => {
     fakeSockets.length = 0;
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(FIXED_JITTER);
+    authStub.getSession = signedOutSession;
   });
 
   afterEach(() => {
     vi.useRealTimers();
     globalThis.WebSocket = originalWebSocket;
     vi.clearAllTimers();
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(window.navigator, "onLine");
+    Reflect.deleteProperty(document, "visibilityState");
   });
 
   it("should close invalid server payloads with an application close code", async () => {
@@ -403,5 +484,321 @@ describe("useCollabDocument", () => {
     unmountRetry();
     unmountFatal();
     unmountApply();
+  });
+
+  it("should back off exponentially with jitter and keep the same endpoint", async () => {
+    // Arrange — a fixed jitter draw halves each attempt's backoff window.
+    const { unmount } = renderCollabHook("doc-backoff");
+    const first = await waitForSocket();
+
+    // Act / Assert — attempt 0 draws from a 500ms window: 250ms here.
+    act(() => {
+      first.emitClose();
+    });
+    advance(249);
+    expect(fakeSockets).toHaveLength(1);
+    advance(1);
+    expect(fakeSockets).toHaveLength(2);
+
+    // attempt 1 doubles the window to 1s: 500ms here.
+    act(() => {
+      fakeSockets[1]?.emitClose();
+    });
+    advance(499);
+    expect(fakeSockets).toHaveLength(2);
+    advance(1);
+    expect(fakeSockets).toHaveLength(3);
+
+    // attempt 2 doubles it again to 2s: 1s here.
+    act(() => {
+      fakeSockets[2]?.emitClose();
+    });
+    advance(999);
+    expect(fakeSockets).toHaveLength(3);
+    advance(1);
+    expect(fakeSockets).toHaveLength(4);
+
+    // Reconnects stay on the runtime the server selected for the document.
+    for (const socket of fakeSockets) {
+      expect(socket.url).toBe(NITRO_TARGET.documentUrl);
+    }
+
+    unmount();
+  });
+
+  it("should reset the backoff after a connection is established", async () => {
+    // Arrange — two failures first, so the window has already grown.
+    const { result, unmount } = renderCollabHook("doc-reset");
+    const first = await waitForSocket();
+    act(() => {
+      first.emitClose();
+    });
+    advance(250);
+    act(() => {
+      fakeSockets[1]?.emitClose();
+    });
+    advance(500);
+    expect(fakeSockets).toHaveLength(3);
+
+    // Act — the third socket completes the collaboration handshake.
+    const connected = fakeSockets[2];
+    if (connected === undefined) throw new Error("expected a third socket");
+    act(() => {
+      connected.emitOpen();
+      connected.emitMessage(publicReadyMessage("doc-reset"));
+    });
+    expect(result.current.collaborationStatus).toBe("connected");
+
+    // Assert — the next disconnect starts from the shortest window again.
+    act(() => {
+      connected.emitClose();
+    });
+    advance(249);
+    expect(fakeSockets).toHaveLength(3);
+    advance(1);
+    expect(fakeSockets).toHaveLength(4);
+
+    unmount();
+  });
+
+  it("should not retry while the browser reports itself offline", async () => {
+    // Arrange
+    const { result, unmount } = renderCollabHook("doc-offline");
+    const first = await waitForSocket();
+    setBrowserOnline(false);
+
+    // Act
+    act(() => {
+      first.emitClose();
+    });
+
+    // Assert — no timer is armed, so no retry can fire while offline.
+    expect(result.current.collaborationStatus).toBe("offline");
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(1);
+
+    // A spurious online event that does not restore connectivity changes nothing.
+    emitOnline();
+    expect(fakeSockets).toHaveLength(1);
+
+    // A visible page cannot reconnect a browser that has no network either.
+    emitVisibilityChange("visible");
+    expect(fakeSockets).toHaveLength(1);
+
+    unmount();
+  });
+
+  it("should resume reconnecting when connectivity returns", async () => {
+    // Arrange
+    const { unmount } = renderCollabHook("doc-online");
+    const first = await waitForSocket();
+    setBrowserOnline(false);
+    act(() => {
+      first.emitClose();
+    });
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(1);
+
+    // Act
+    setBrowserOnline(true);
+    emitOnline();
+
+    // Assert — one reconnect, and no leftover timer adding a second socket.
+    expect(fakeSockets).toHaveLength(2);
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(2);
+    expect(fakeSockets[1]?.url).toBe(NITRO_TARGET.documentUrl);
+
+    unmount();
+  });
+
+  it("should keep one reconnect timer across repeated close events", async () => {
+    // Arrange
+    const { unmount } = renderCollabHook("doc-duplicate-close");
+    const first = await waitForSocket();
+
+    // Act — a close, a stray duplicate close, and an error-driven close.
+    act(() => {
+      first.emitClose();
+      first.emitClose();
+      first.close();
+      first.emitClose();
+    });
+
+    // Assert — exactly one reconnect for the whole burst.
+    advance(250);
+    expect(fakeSockets).toHaveLength(2);
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(2);
+
+    unmount();
+  });
+
+  it("should cancel scheduled reconnect work on unmount", async () => {
+    // Arrange
+    const { unmount } = renderCollabHook("doc-unmount");
+    const first = await waitForSocket();
+    act(() => {
+      first.emitClose();
+    });
+
+    // Act
+    unmount();
+
+    // Assert — neither the armed timer nor a browser signal may open a socket
+    // for the disposed document session.
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(1);
+    setBrowserOnline(true);
+    emitOnline();
+    emitVisibilityChange("visible");
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(1);
+  });
+
+  it("should never disconnect a healthy socket on visibility changes", async () => {
+    // Arrange
+    const { result, unmount } = renderCollabHook("doc-visibility-healthy");
+    const socket = await waitForSocket();
+    act(() => {
+      socket.emitOpen();
+      socket.emitMessage(publicReadyMessage("doc-visibility-healthy"));
+    });
+    expect(result.current.collaborationStatus).toBe("connected");
+
+    // Act
+    emitVisibilityChange("hidden");
+    advance(60_000);
+    emitVisibilityChange("visible");
+    emitOnline();
+
+    // Assert — the live socket is untouched and no second socket appears.
+    expect(socket.closeCalls).toEqual([]);
+    expect(fakeSockets).toHaveLength(1);
+    expect(result.current.collaborationStatus).toBe("connected");
+
+    unmount();
+  });
+
+  it("should accelerate a pending reconnect once the page becomes visible", async () => {
+    // Arrange
+    const { unmount } = renderCollabHook("doc-visibility-retry");
+    const first = await waitForSocket();
+    emitVisibilityChange("hidden");
+    act(() => {
+      first.emitClose();
+    });
+
+    // Act — a hidden page keeps waiting out the backoff.
+    advance(100);
+    emitVisibilityChange("hidden");
+    expect(fakeSockets).toHaveLength(1);
+
+    // Assert — becoming visible retries immediately, exactly once: the
+    // superseded timer must not open a second socket when it would have fired.
+    emitVisibilityChange("visible");
+    expect(fakeSockets).toHaveLength(2);
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(2);
+
+    unmount();
+  });
+
+  it("should keep one connection attempt while authentication is in flight", async () => {
+    // Arrange — hold the session read open so the attempt cannot complete.
+    let releaseSession: (() => void) | undefined;
+    authStub.getSession = () =>
+      new Promise<FakeSessionResult>((resolve) => {
+        releaseSession = () =>
+          resolve({
+            data: {
+              session: { access_token: "token", user: { id: "user-1" } },
+            },
+            error: null,
+          });
+      });
+
+    const { unmount } = renderCollabHook("doc-single-attempt", "authenticated");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fakeSockets).toHaveLength(0);
+
+    // Act — every reconnect trigger lands while the attempt is still pending.
+    setBrowserOnline(true);
+    emitOnline();
+    emitVisibilityChange("visible");
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(0);
+
+    // Assert — completing authentication opens exactly one socket.
+    await act(async () => {
+      releaseSession?.();
+      await Promise.resolve();
+    });
+    expect(fakeSockets).toHaveLength(1);
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(1);
+
+    unmount();
+  });
+
+  it("should not open a socket for a session disposed while authenticating", async () => {
+    // Arrange
+    let releaseSession: (() => void) | undefined;
+    authStub.getSession = () =>
+      new Promise<FakeSessionResult>((resolve) => {
+        releaseSession = () =>
+          resolve({
+            data: {
+              session: { access_token: "token", user: { id: "user-1" } },
+            },
+            error: null,
+          });
+      });
+
+    const { unmount } = renderCollabHook("doc-disposed-auth", "authenticated");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Act — the document session goes away before authentication resolves.
+    unmount();
+    await act(async () => {
+      releaseSession?.();
+      await Promise.resolve();
+    });
+
+    // Assert — a retired attempt can never open a socket for the old document.
+    expect(fakeSockets).toHaveLength(0);
+    advance(60_000);
+    expect(fakeSockets).toHaveLength(0);
+  });
+
+  it("should ignore browser reconnect signals after a fatal server error", async () => {
+    // Arrange
+    const { unmount } = renderCollabHook("doc-fatal-signals");
+    const socket = await waitForSocket();
+    act(() => {
+      socket.emitOpen();
+      socket.emitMessage({
+        protocolVersion: COLLAB_PROTOCOL_VERSION,
+        type: COLLAB_MESSAGE_TYPE.Error,
+        code: COLLAB_ERROR_CODE.Forbidden,
+        message: "Access denied",
+        retryable: false,
+      });
+    });
+
+    // Act
+    setBrowserOnline(true);
+    emitOnline();
+    emitVisibilityChange("visible");
+    advance(60_000);
+
+    // Assert
+    expect(fakeSockets).toHaveLength(1);
+
+    unmount();
   });
 });

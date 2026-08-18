@@ -76,15 +76,19 @@ const parseOverride = (raw: string | undefined): CollabRuntime | null =>
  * `COLLAB_CLOUDFLARE_WS_URL` is the preferred, server-only name: endpoints are
  * resolved server-side now, so the value no longer has to reach the browser.
  * The legacy `NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL` still works so existing
- * deployments keep running unchanged.
+ * deployments keep running unchanged. Each name is normalized before
+ * precedence is applied, so a declared-but-blank preferred variable (what
+ * copying `.env.example` leaves behind) reads as unset rather than shadowing a
+ * configured legacy value.
  */
-export const readCloudflareCollabBaseUrl = (): string | undefined => {
-  const raw =
-    process.env.COLLAB_CLOUDFLARE_WS_URL ??
-    process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL;
+const normalizeEndpoint = (raw: string | undefined): string | undefined => {
   const trimmed = raw?.trim();
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 };
+
+export const readCloudflareCollabBaseUrl = (): string | undefined =>
+  normalizeEndpoint(process.env.COLLAB_CLOUDFLARE_WS_URL) ??
+  normalizeEndpoint(process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL);
 
 export const readCollabRuntimeRoutingConfig =
   (): CollabRuntimeRoutingConfig => ({

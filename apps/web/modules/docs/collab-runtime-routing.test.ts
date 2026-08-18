@@ -219,6 +219,17 @@ describe("readCloudflareCollabBaseUrl", () => {
       "wss://legacy.workers.dev";
     expect(readCloudflareCollabBaseUrl()).toBe("wss://legacy.workers.dev");
   });
+
+  it("does not let a blank preferred variable shadow the legacy one", () => {
+    // Copying .env.example declares the preferred name with an empty value.
+    for (const blank of ["", "   "]) {
+      process.env.COLLAB_CLOUDFLARE_WS_URL = blank;
+      process.env.NEXT_PUBLIC_COLLAB_CLOUDFLARE_WS_URL =
+        "wss://legacy.workers.dev";
+      expect(readCloudflareCollabBaseUrl()).toBe("wss://legacy.workers.dev");
+      expect(readCollabRuntimeRoutingConfig().cloudflareConfigured).toBe(true);
+    }
+  });
 });
 
 describe("resolveCollabRuntime", () => {

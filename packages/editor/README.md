@@ -103,12 +103,18 @@ Stack: React 19, Lexical 0.44, Tailwind CSS v4, shadcn/ui via
 
 ## Adding a component
 
-Run the shadcn CLI from the app directory so aliases resolve into
-`@softmaple/ui` rather than copying files here:
+This package's [`components.json`](./components.json) maps `components`, `lib`,
+and `hooks` to `@softmaple/editor/*`, so running the CLI **here** lands the
+files here — which is what you want for an editor-local part:
 
 ```bash
-pnpm dlx shadcn@latest add [COMPONENT]
+cd packages/editor && pnpm dlx shadcn@latest add [COMPONENT]
 ```
+
+For a primitive every surface should share, add it to `@softmaple/ui` instead;
+see [its README](../ui/README.md#adding-a-component) for which directory puts
+files where. Either way `ui` and `utils` resolve to `@softmaple/ui`, so the
+generated code reuses the shared primitives and `cn()`.
 
 ## Related
 

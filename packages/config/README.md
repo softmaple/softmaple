@@ -1,9 +1,9 @@
 # `@softmaple/config`
 
 Canonical site constants — public URLs, the docs and playground hosts, the
-contact address, and the OpenGraph image. One frozen object, imported directly
-as TypeScript source, so a domain change is a one-line edit rather than a
-grep across every app.
+contact address, and the OpenGraph image. One `as const` object, imported
+directly as TypeScript source, so a domain change is a one-line edit rather than
+a grep across every app.
 
 This package holds **public** values only. Nothing here is a secret: it is
 inlined into client bundles by design.
@@ -47,8 +47,10 @@ const docsHref = SITE_CONFIG.DOCS;
 | `TWITTER` | Project account |
 | `CONTACT_EMAIL` | Public contact address |
 
-`SITE_CONFIG` is `as const`, so `SiteConfig` gives each key a literal type and
-a typo fails at compile time instead of shipping a dead link.
+`SITE_CONFIG` is `as const`, so `SiteConfig` gives each key a readonly literal
+type and a typo fails at compile time instead of shipping a dead link. That is
+a type-level guarantee only — `as const` does not call `Object.freeze`, so the
+object is not frozen at runtime.
 
 ## What does not belong here
 

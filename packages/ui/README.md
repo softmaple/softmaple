@@ -67,17 +67,27 @@ Current components: `avatar`, `badge`, `button`, `card`, `dialog`,
 
 ## Adding a component
 
-Run the shadcn CLI **in the app directory**, not at the repo root — the CLI
-resolves aliases from that app's `components.json`:
+The shadcn CLI resolves aliases from the `components.json` of whatever directory
+you run it in, and those differ across the repo — so the directory decides where
+the generated files land:
+
+| Run from | `components` alias | Result |
+| --- | --- | --- |
+| `packages/ui` | `@softmaple/ui/components` | Lands here — **use this for shared components** |
+| `apps/playground` | `@softmaple/ui/components` | Also lands here |
+| `apps/web` | `@/components` | Lands in the app's own `components/` |
+| `packages/editor` | `@softmaple/editor/components` | Lands in the editor package |
+
+For a component every surface should share, run it from this package:
 
 ```bash
-pnpm dlx shadcn@latest add [COMPONENT]
+cd packages/ui && pnpm dlx shadcn@latest add [COMPONENT]
 ```
 
-Aliases are already configured in [`components.json`](./components.json) to
-point at `@softmaple/ui/components`, `@softmaple/ui/lib`, and
-`@softmaple/ui/hooks`, so generated files land in this package rather than
-being copied into each app.
+Running it from `apps/web` or `packages/editor` is the right move only when the
+component is genuinely local to that surface. Every `components.json` in the
+repo points `ui` and `utils` at `@softmaple/ui`, so generated code picks up the
+shared primitives and `cn()` either way.
 
 Keep components presentational: no data fetching, no Supabase client, no
 collaboration or awareness imports. A component that needs live state takes it

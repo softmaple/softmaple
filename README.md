@@ -37,23 +37,23 @@ the browser to durable storage:
                                 Browser
                       apps/web · apps/playground
                                    │
-         ┌─────────────────────────┼─────────────────────────┐
-         │                         │                         │
- @softmaple/editor    @softmaple/binding-lexical   @softmaple/awareness
- Lexical UI shell        Lexical ↔ block model      ephemeral presence
-                                   │                         │
-                        @softmaple/block-model               │
-                    blocks · marks · event batches           │
-                                   │                         │
-                         @softmaple/eg-walker                │
-                    event graph · CRDT convergence           │
-                                   │                         │
-                    RichTextEventBatch on the wire           │
-                                   │                         │
-                      @softmaple/collab-protocol             │
-                        versioned wire messages              │
-                                   │                         │
-                       @softmaple/collab-runtime ────────────┘
+         ┌─────────────────────────┼──────────────────────────────┐
+         │                         │                              │
+ @softmaple/editor    @softmaple/binding-lexical        @softmaple/awareness
+ Lexical UI shell        Lexical ↔ block model           ephemeral presence
+                                   │                              │
+                        @softmaple/block-model                    │
+                    blocks · marks · event batches                │
+                                   │                              │
+                         @softmaple/eg-walker                     │
+                    event graph · CRDT convergence                │
+                                   │                              │
+                    RichTextEventBatch on the wire                │
+                                   │                              │
+                      @softmaple/collab-protocol                  │
+                        versioned wire messages                   │
+                                   │                              │
+                       @softmaple/collab-runtime ──PresenceCodec──┘
                  DocumentRoom / PresenceRoom semantics
                       ┌────────────┴────────────┐
                       │                         │
@@ -76,9 +76,13 @@ one — and is enforced by shared ESLint rules
 it only carries the batches the model produces.
 
 Awareness stays independent of every convergent document model and meets the
-bindings only inside an app. Both collaboration runtimes host the *same*
-`@softmaple/collab-runtime` semantics and write the same Postgres event log, so
-a document can move between them without a history migration.
+bindings only inside an app. `@softmaple/collab-runtime` hosts `PresenceRoom`
+but never imports `@softmaple/awareness` — the labelled edge above is the
+payload-opaque `PresenceCodec` seam, and a host app is what binds the two.
+
+Both collaboration runtimes host the *same* `@softmaple/collab-runtime`
+semantics and write the same Postgres event log, so a document can move between
+them without a history migration.
 
 Design source of truth:
 [`docs/design/collaboration-layers.md`](docs/design/collaboration-layers.md) ·

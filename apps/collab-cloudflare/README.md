@@ -46,8 +46,11 @@ for the cross-runtime operational picture and configured rollout stage.
 
 The two Durable Object namespaces are fully separate and share no capability
 instance or cross-stub call, so a presence failure structurally cannot block
-durable document convergence. Postgres remains the only durable store; a
-Durable Object holds live connection state, never the source of truth.
+durable document convergence. Postgres remains the only durable
+**document-history** store; a Durable Object holds live connection state, never
+the source of truth for document events. `PresenceRoomDO` does keep membership
+in `ctx.storage` so it survives hibernation, but that is disposable TTL state
+rebuilt from live connections — not durable history.
 
 The public Worker keeps the existing `/collab/document` WebSocket endpoint,
 now with the document UUID on the URL:

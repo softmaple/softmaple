@@ -68,17 +68,19 @@ pnpm --filter @softmaple/playground dev   # http://localhost:3000
 To build this application for production:
 
 ```bash
-pnpm build
+pnpm --filter @softmaple/playground build
 ```
 
 ## Testing
 
 This project uses [Vitest](https://vitest.dev/) for unit tests and
-[Playwright](https://playwright.dev/) for E2E:
+[Playwright](https://playwright.dev/) for E2E. The repository root defines no
+`test` script, so scope these to the package (or run them from
+`apps/playground`):
 
 ```bash
-pnpm test
-pnpm test:e2e
+pnpm --filter @softmaple/playground test
+pnpm --filter @softmaple/playground test:e2e
 ```
 
 ## Styling
@@ -87,12 +89,15 @@ This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
 
 ## Linting & Formatting
 
-This project uses [Biome](https://biomejs.dev/) for linting and formatting. The following scripts are available:
+This project uses [Biome](https://biomejs.dev/) for linting and formatting —
+unlike the ESLint-based packages elsewhere in the monorepo. Root `pnpm lint` and
+`pnpm format` run repo-wide and do **not** apply this app's Biome config, so
+scope these too (root defines no `check` script at all):
 
 ```bash
-pnpm lint
-pnpm format
-pnpm check
+pnpm --filter @softmaple/playground lint
+pnpm --filter @softmaple/playground format
+pnpm --filter @softmaple/playground check
 ```
 
 ## T3Env

@@ -71,7 +71,7 @@ empty one.
 
 | Markdown | LaTeX |
 | --- | --- |
-| `# … ##### ` | `\section` → `\subparagraph` (5 levels) |
+| `#` through `#####` | `\section` → `\subparagraph` (5 levels) |
 | `**bold**` | `\textbf{…}` |
 | `*italic*` | `\textit{…}` |
 | `***both***` | `\textbf{\textit{…}}` |

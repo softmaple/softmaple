@@ -35,9 +35,11 @@ The package is organized around the paper's prepare/effect model:
 - `core/`: public API and thin walker coordinator.
 - `types/`: public TypeScript types.
 
-Only the event graph is durable state. The engine's replay records are
+The event graph is the canonical durable state. The engine's replay records are
 derived: they can be discarded at a critical version and rebuilt, which is what
-makes partial replay possible. `graph/` never imports `engine/`.
+makes partial replay possible. A native snapshot may additionally persist that
+derived cache for faster restore, but it never replaces the graph as the source
+of truth. `graph/` never imports `engine/`.
 
 ### Position in the wider stack
 

@@ -23,6 +23,11 @@ import {
   loadPendingBatches,
 } from "@/modules/docs/collab-pending-store";
 import { createOutgoingBatchQueue } from "@/modules/docs/collab-outgoing-queue";
+import {
+  getReconnectDelay,
+  isBrowserOffline,
+  RECONNECT_ACCELERATION_INTERVAL_MS,
+} from "@/modules/docs/collab-reconnect";
 import type { CollabTarget } from "@/modules/docs/collab-target";
 import {
   isDocumentEditable,
@@ -130,6 +135,17 @@ const createSessionController = ({
   let localPersistenceFailed = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
+  /**
+   * Bumped by every WebSocket teardown. Callbacks captured under an older
+   * generation — a pending reconnect timer, an awaited auth read, socket
+   * listeners — must never touch the live session or open a socket for a
+   * session that has already been retired.
+   */
+  let wsGeneration = 0;
+  /** True from the start of a connect attempt until its socket exists. */
+  let connectPending = false;
+  /** Timestamp of the last reconnect a browser signal triggered immediately. */
+  let lastAcceleratedAt: number | null = null;
   let synced = false;
   let fatalConnectionError = false;
   let activeRepairRequestId: string | null = null;
@@ -320,17 +336,76 @@ const createSessionController = ({
     return true;
   };
 
+  const clearReconnectTimer = (): void => {
+    if (reconnectTimer === null) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  };
+
   const stopWs = (): void => {
-    if (reconnectTimer !== null) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
+    // Retire every callback captured by the current WebSocket session before
+    // anything can observe the torn-down state.
+    wsGeneration += 1;
+    connectPending = false;
+    clearReconnectTimer();
     const active = socket;
     socket = null;
     synced = false;
     // Preserve pending batch identity; allow exact resend after reconnect.
     outgoing.resetInFlight();
     active?.close();
+  };
+
+  /**
+   * Arm the next reconnect. At most one timer exists per session: a pending
+   * timer, a live socket, or an in-flight connect attempt each mean the
+   * close/online/visibility event that reached here is already covered.
+   */
+  const scheduleReconnect = (): void => {
+    if (cancelled || transport !== "ws" || fatalConnectionError) return;
+    if (reconnectTimer !== null || connectPending || socket !== null) return;
+    if (isBrowserOffline()) {
+      // Retries cannot reach the backend while the browser reports no
+      // connectivity, so the loop stops here and the `online` listener resumes
+      // it. The attempt counter is left untouched: an offline stretch must not
+      // inflate the backoff a real reconnect starts from.
+      return;
+    }
+    const delay = getReconnectDelay(reconnectAttempt);
+    reconnectAttempt += 1;
+    const generation = wsGeneration;
+    const timer = setTimeout(() => {
+      if (reconnectTimer === timer) reconnectTimer = null;
+      if (generation !== wsGeneration) return;
+      void connectWs();
+    }, delay);
+    reconnectTimer = timer;
+  };
+
+  /**
+   * Reconnect now rather than waiting out the armed backoff. Driven by the
+   * browser signals that make a suppressed or pending retry worth attempting
+   * again — connectivity returning, or the page becoming visible. A healthy or
+   * in-flight connection is never disturbed.
+   */
+  const reconnectNow = (): void => {
+    if (cancelled || transport !== "ws" || fatalConnectionError) return;
+    if (socket !== null || connectPending) return;
+    if (isBrowserOffline()) return;
+    const now = Date.now();
+    if (
+      lastAcceleratedAt !== null &&
+      now - lastAcceleratedAt < RECONNECT_ACCELERATION_INTERVAL_MS
+    ) {
+      // A flapping interface or a user switching tabs must not turn into a
+      // retry per event. Fall back to the jittered schedule rather than
+      // dropping the signal, so a loop suppressed while offline still resumes.
+      scheduleReconnect();
+      return;
+    }
+    lastAcceleratedAt = now;
+    clearReconnectTimer();
+    void connectWs();
   };
 
   const stopHttp = async (): Promise<void> => {
@@ -341,8 +416,21 @@ const createSessionController = ({
     await saveCoordinator.flush(persistHttp);
   };
 
+  /**
+   * Open the collaboration socket for the endpoint this session was created
+   * with. `documentUrl` is resolved once by the server and never re-derived
+   * here, so a reconnect can only ever return to the runtime that already owns
+   * the document — runtime handoff is a separate concern that replaces the
+   * whole controller.
+   */
   const connectWs = async (): Promise<void> => {
-    if (cancelled || transport !== "ws") return;
+    if (cancelled || transport !== "ws" || fatalConnectionError) return;
+    // One connection attempt and one socket per session; a close, a timer, an
+    // `online` event and a visibility change can all land at once.
+    if (connectPending || socket !== null) return;
+    const generation = wsGeneration;
+    connectPending = true;
+    clearReconnectTimer();
     if (!localPersistenceFailed) {
       onCollaborationStatus(
         reconnectAttempt === 0 ? "connecting" : "reconnecting",
@@ -354,24 +442,45 @@ const createSessionController = ({
       | { readonly kind: "public" } = { kind: "public" };
 
     if (sessionMode === "authenticated") {
-      if (!(await ensureAuth()) || cancelled || accessToken === null) {
-        if (!cancelled && transport === "ws") {
-          const delay = Math.min(500 * 2 ** reconnectAttempt, 10_000);
-          reconnectAttempt += 1;
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            void connectWs();
-          }, delay);
-        }
+      // A rejected session read (offline Supabase, aborted fetch) is a
+      // transient connect failure; the retry loop must survive it rather than
+      // leave the attempt flag stuck.
+      const authenticated = await ensureAuth().catch(() => false);
+      // Reading the session yields to the event loop: a dispose or a transport
+      // switch may have retired this attempt in the meantime. A retired
+      // attempt must not clear `connectPending`, which a newer attempt may
+      // already own — that is how two sockets would end up open at once.
+      if (generation !== wsGeneration) return;
+      if (cancelled || transport !== "ws") {
+        connectPending = false;
+        return;
+      }
+      if (!authenticated || accessToken === null) {
+        connectPending = false;
+        scheduleReconnect();
         return;
       }
       credential = { kind: "access-token", token: accessToken };
     }
 
-    const nextSocket = new WebSocket(documentUrl);
+    let nextSocket: WebSocket;
+    try {
+      nextSocket = new WebSocket(documentUrl);
+    } catch {
+      // The constructor only throws for an unusable endpoint (invalid URL,
+      // rejected scheme). Retrying cannot change that, so fail the session
+      // instead of spinning the reconnect loop.
+      connectPending = false;
+      fatalConnectionError = true;
+      onError(new Error("The collaboration endpoint could not be opened"));
+      onCollaborationStatus("error");
+      return;
+    }
     socket = nextSocket;
+    connectPending = false;
 
     nextSocket.addEventListener("open", () => {
+      if (generation !== wsGeneration) return;
       if (cancelled || socket !== nextSocket || transport !== "ws") return;
       sendJson(nextSocket, {
         protocolVersion: COLLAB_PROTOCOL_VERSION,
@@ -383,6 +492,7 @@ const createSessionController = ({
     });
 
     nextSocket.addEventListener("message", (event) => {
+      if (generation !== wsGeneration) return;
       if (cancelled || socket !== nextSocket || transport !== "ws") return;
       let message;
       try {
@@ -413,6 +523,9 @@ const createSessionController = ({
             ) {
               throw new Error("The collaboration access mode is invalid");
             }
+            // The connection is proven usable: drop any obsolete backoff so
+            // the next disconnect starts from the shortest window again.
+            clearReconnectTimer();
             reconnectAttempt = 0;
             fatalConnectionError = false;
             if (!localPersistenceFailed) onError(null);
@@ -489,23 +602,19 @@ const createSessionController = ({
     });
 
     nextSocket.addEventListener("close", () => {
+      if (generation !== wsGeneration) return;
       if (cancelled || socket !== nextSocket || transport !== "ws") return;
       socket = null;
       synced = false;
       // Drop in-flight markers only; pending payloads stay for idempotent resend.
       outgoing.resetInFlight();
-      if (!fatalConnectionError) {
-        onCollaborationStatus("offline");
-        const delay = Math.min(500 * 2 ** reconnectAttempt, 10_000);
-        reconnectAttempt += 1;
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          void connectWs();
-        }, delay);
-      }
+      if (fatalConnectionError) return;
+      onCollaborationStatus("offline");
+      scheduleReconnect();
     });
 
     nextSocket.addEventListener("error", () => {
+      if (generation !== wsGeneration) return;
       if (socket === nextSocket) nextSocket.close();
     });
   };
@@ -543,6 +652,7 @@ const createSessionController = ({
   const startWsTransport = async (): Promise<void> => {
     transport = "ws";
     reconnectAttempt = 0;
+    lastAcceleratedAt = null;
     fatalConnectionError = false;
     onCollaborationStatus("connecting");
     await connectWs();
@@ -608,6 +718,24 @@ const createSessionController = ({
     });
   };
 
+  /**
+   * Connectivity returning is the signal that ends an offline suppression, and
+   * a page becoming visible is the signal that a user is waiting on a retry
+   * that is still backing off. Neither ever closes a live socket: a hidden tab
+   * keeps collaborating exactly as before.
+   */
+  const handleOnline = (): void => {
+    reconnectNow();
+  };
+
+  const handleVisibilityChange = (): void => {
+    if (document.visibilityState !== "visible") return;
+    reconnectNow();
+  };
+
+  window.addEventListener("online", handleOnline);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
   void setShared(initialShared);
 
   return {
@@ -616,6 +744,9 @@ const createSessionController = ({
     },
     dispose: () => {
       cancelled = true;
+      // Detach first: no browser signal may reach a session being torn down.
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       saveCoordinator.dispose();
       unsubscribeReplica();
       bindingRef.current = null;

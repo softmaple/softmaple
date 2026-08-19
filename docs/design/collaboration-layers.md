@@ -34,7 +34,7 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
                             @softmaple/collab-runtime
                             - room/session and capability contracts
         ↘                             ↓
-              apps/* and apps/collab adapters
+              apps/* and apps/collab-nitro adapters
     - persistence, transport, identity, routing, UI composition
 
 @softmaple/awareness
@@ -42,7 +42,7 @@ awareness's equivalent Biome rule (see [Enforcement](#enforcement) below).
                  ↓
               apps/*
 
-apps/collab runtime adapters
+apps/collab-nitro runtime adapters
     - Redis Pub/Sub, presence TTLs, connection leases
     - Nitro transport, Prisma event store, Supabase authorization
 ```
@@ -260,10 +260,10 @@ The complete behavioral contract is in
   block-model retain those responsibilities.
 - Own a browser transport or alter the wire protocol.
 
-## Host realtime coordination: `apps/collab` Redis adapters
+## Host realtime coordination: `apps/collab-nitro` Redis adapters
 
 Cross-instance fan-out, presence TTLs, and connection leases live in
-`apps/collab/server/utils/realtime`. They are host-only concerns: model
+`apps/collab-nitro/server/utils/realtime`. They are host-only concerns: model
 packages, awareness, `@softmaple/collab-protocol`, and
 `@softmaple/collab-runtime` must not import Redis clients or deployment
 topology helpers. Browser Origin checks replace the former HMAC web-gateway

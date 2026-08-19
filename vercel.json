@@ -7,8 +7,8 @@
       "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@softmaple/web"
     },
     "collab": {
-      "root": "apps/collab",
-      "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@softmaple/collab"
+      "root": "apps/collab-nitro",
+      "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@softmaple/collab-nitro"
     }
   },
   "rewrites": [

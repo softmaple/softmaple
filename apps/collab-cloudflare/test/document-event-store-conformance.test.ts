@@ -40,7 +40,7 @@ const storeErrorResponse = (error: unknown): Response => {
  * (`append_document_event_batches`, `read_document_event_page`) that
  * `createSupabaseDocumentBackend`'s real adapter calls over HTTP, backed by
  * the same reference `DocumentEventStore` used in
- * packages/collab-runtime's own conformance run and apps/collab's Prisma
+ * packages/collab-runtime's own conformance run and apps/collab-nitro's Prisma
  * wiring — one source of truth for what the store contract requires.
  * `supabase-backend.ts` only calls `admin.rpc(...)`, never `.from()`, so
  * these two endpoints are the entire outbound surface this port exercises.

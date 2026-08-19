@@ -2,7 +2,7 @@
 
 This app started as the issue #871 proof of concept, added the hibernatable
 document room lifecycle from issue #872, and now adds a presence room from
-issue #873 phase 6. It leaves `apps/collab` and its Nitro/Redis deployment
+issue #873 phase 6. It leaves `apps/collab-nitro` and its Nitro/Redis deployment
 unchanged while hosting the same `@softmaple/collab-runtime` `DocumentRoom`
 and `PresenceRoom` semantics in Cloudflare Durable Objects.
 
@@ -142,7 +142,7 @@ so an empty room does not keep waking the object.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `COLLAB_ALLOWED_ORIGINS` | yes | Comma-separated browser Origins allowed to open `/collab/*` |
-| `SUPABASE_URL` | yes | Same Supabase project as `apps/collab` |
+| `SUPABASE_URL` | yes | Same Supabase project as `apps/collab-nitro` |
 | `SUPABASE_PUBLISHABLE_KEY` | yes | Used for the auth-scoped Supabase client |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Elevated, server-only — used for event RPCs and privileged Data API reads of documents, workspace memberships, and user profiles. Never expose to browser code. |
 
@@ -151,7 +151,7 @@ These four are `wrangler.jsonc`'s `secrets.required` list. A normal
 an error listing missing bindings; a first deploy can provide all four with
 `--secrets-file`. `wrangler dev` (and the Vitest suite, which shares this
 check) only warns about missing local values and still starts. Unlike
-`apps/collab`, this app has no direct Postgres connection string. Durable event
+`apps/collab-nitro`, this app has no direct Postgres connection string. Durable event
 append/read use `append_document_event_batches` and
 `read_document_event_page`; session authorization and presence also call
 Supabase Auth and query `documents`, `workspace_members`, and `users` through

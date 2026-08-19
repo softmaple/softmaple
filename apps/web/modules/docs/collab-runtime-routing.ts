@@ -1,8 +1,9 @@
 /**
  * Explicit, reversible, document-scoped decision for which collaboration
- * backend a document connects to: the existing Nitro+Redis runtime
- * (apps/collab) or the Cloudflare Durable Objects runtime
- * (apps/collab-cloudflare). See apps/web/README.md#collaboration-runtime-routing.
+ * backend a document connects to: the Cloudflare Durable Objects runtime
+ * (apps/collab-cloudflare, recommended for production) or the Nitro+Redis
+ * runtime (apps/collab-nitro, local dev and explicit fallback). See
+ * apps/web/README.md#collaboration-runtime-routing.
  */
 
 export const COLLAB_RUNTIME = {

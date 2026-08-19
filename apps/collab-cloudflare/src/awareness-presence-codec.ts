@@ -60,10 +60,10 @@ assertAssignable<PresencePatch>()<AwarenessPresencePatch>();
  * payload shape (cursor, selection, name, color) lives behind this file;
  * `@softmaple/collab-runtime` never imports awareness.
  *
- * Duplicated from `apps/collab/server/adapters/awareness-presence-codec.ts`:
+ * Duplicated from `apps/collab-nitro/server/adapters/awareness-presence-codec.ts`:
  * this file is host-agnostic (no Nitro/Node dependency), but
  * `apps/collab-cloudflare` intentionally does not share adapter modules with
- * `apps/collab` — each host owns a fully independent adapter set.
+ * `apps/collab-nitro` — each host owns a fully independent adapter set.
  */
 export const awarenessPresenceCodec: PresenceCodec = {
   applyPatch(current, patch, now) {

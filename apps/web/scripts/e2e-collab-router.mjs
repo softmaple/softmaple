@@ -4,7 +4,7 @@
  *
  * Stock `next dev` does not forward external WebSocket Upgrade traffic for
  * `/collab/*`. This reverse proxy terminates those upgrades and pipes them to
- * `apps/collab` while preserving the `/collab/*` path. All other traffic is
+ * `apps/collab-nitro` while preserving the `/collab/*` path. All other traffic is
  * proxied to Next.js. Production uses Vercel Services routing instead.
  */
 import http from "node:http";
@@ -228,7 +228,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Match production: `/collab/*` HTTP traffic goes to apps/collab.
+  // Match production: `/collab/*` HTTP traffic goes to apps/collab-nitro.
   // Keep Authorization so private document HTTP persistence can authenticate.
   if (isCollabHttpPath(requestUrl.pathname)) {
     const headers = { ...req.headers, host: collabOrigin.host };

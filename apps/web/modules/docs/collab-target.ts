@@ -135,7 +135,7 @@ const parseCloudflareBaseUrl = (raw: string | undefined): URL => {
 /**
  * Browser-visible same-origin (Nitro) WebSocket base URL for the request being
  * rendered. `vercel.json` maps `/collab/**` on the app's own origin to
- * `apps/collab`, so the request's own origin *is* the Nitro endpoint; reading
+ * `apps/collab-nitro`, so the request's own origin *is* the Nitro endpoint; reading
  * it from the request keeps preview deployments, custom domains and local
  * ports correct without a second environment variable to keep in sync.
  */

@@ -6,10 +6,10 @@ description: When to deploy Nitro vs. Durable Objects, environment/storage respo
 # Collaboration Runtime Operations
 
 This is the cross-runtime operational summary for the collaboration backend:
-`apps/collab` (Nitro + Redis + Supabase Postgres, the repository-configured
+`apps/collab-nitro` (Nitro + Redis + Supabase Postgres, the repository-configured
 default) and `apps/collab-cloudflare` (Cloudflare Durable Objects + Supabase
 Postgres). See the repository docs for the full per-runtime picture:
-[`apps/collab/README.md`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md),
+[`apps/collab-nitro/README.md`](https://github.com/softmaple/softmaple/blob/next/apps/collab-nitro/README.md),
 [`apps/collab-cloudflare/README.md`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md),
 and the runtime-independent
 [`collaboration-runtime.md`](./collaboration-runtime.md) contract.
@@ -42,7 +42,7 @@ dashboard; verify the target account before relying on this stage description.
 Each app owns its authoritative environment-variable table; this is a compact
 summary:
 
-| | Nitro (`apps/collab`) | Cloudflare (`apps/collab-cloudflare`) |
+| | Nitro (`apps/collab-nitro`) | Cloudflare (`apps/collab-cloudflare`) |
 | --- | --- | --- |
 | Durable event store | `DATABASE_URL` (direct Prisma/Postgres) | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (Supabase RPC) |
 | Auth claims | `SUPABASE_URL` + publishable key | `SUPABASE_URL` + publishable key through Supabase Auth |
@@ -51,7 +51,7 @@ summary:
 | Live fan-out and presence | `COLLAB_REALTIME_DRIVER` (+ `REDIS_URL` on Vercel) | Durable Object-local; no Redis configuration |
 
 Full tables:
-[`apps/collab/README.md#environment`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md#environment)
+[`apps/collab-nitro/README.md#environment`](https://github.com/softmaple/softmaple/blob/next/apps/collab-nitro/README.md#environment)
 and
 [`apps/collab-cloudflare/README.md#environment`](https://github.com/softmaple/softmaple/blob/next/apps/collab-cloudflare/README.md#environment).
 
@@ -72,7 +72,7 @@ Both document runtimes append and read the same durable event-history tables:
 `document_event_batches` and `document_event_ids`. Moving a document between
 runtimes therefore needs no **event-history** migration. Browser clients do not
 write those tables. See
-[`apps/collab/README.md#persistence`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md#persistence)
+[`apps/collab-nitro/README.md#persistence`](https://github.com/softmaple/softmaple/blob/next/apps/collab-nitro/README.md#persistence)
 and
 [`packages/db/supabase/README.md`](https://github.com/softmaple/softmaple/blob/next/packages/db/supabase/README.md)
 for the schema and access rules.
@@ -97,7 +97,7 @@ test against the target Supabase project.
 Redis owns distributed realtime pub/sub, presence TTLs, and connection leases,
 never durable event history. Missed realtime messages recover through Postgres
 and the repair/resync protocol. See
-[`apps/collab/README.md#storage-roles`](https://github.com/softmaple/softmaple/blob/next/apps/collab/README.md#storage-roles).
+[`apps/collab-nitro/README.md#storage-roles`](https://github.com/softmaple/softmaple/blob/next/apps/collab-nitro/README.md#storage-roles).
 
 Production and Preview Vercel deployments select Redis and never fall back to
 process-local coordination. However, `REDIS_URL` validation is lazy: a missing

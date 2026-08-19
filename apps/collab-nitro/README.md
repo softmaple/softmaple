@@ -1,25 +1,27 @@
-# `@softmaple/collab`
+# `@softmaple/collab-nitro`
 
 Nitro WebSocket service that authenticates document sessions, persists
 EG-walker event batches to Supabase Postgres, fans committed batches out to
 document peers across instances, and hosts ephemeral awareness rooms.
 
-This is the default Nitro host for durable document collaboration. For
-Nitro-routed documents, the browser host (`apps/web`) connects with a Supabase
-credential over same-origin `/collab/*` URLs. Both this service and
-`apps/collab-cloudflare` can write `document_event_batches`; browser clients
-cannot.
+This is the Nitro host for durable document collaboration when Cloudflare is
+not selected. It suits local development and explicit Nitro fallback; for
+production, route documents to [`apps/collab-cloudflare`](../collab-cloudflare/README.md)
+via `apps/web` collaboration runtime routing. For Nitro-routed documents, the
+browser host (`apps/web`) connects with a Supabase credential over same-origin
+`/collab/*` URLs. Both this service and `apps/collab-cloudflare` can write
+`document_event_batches`; browser clients cannot.
 
 ## Role in the stack
 
-The default Nitro path is:
+The Nitro path (local dev / fallback) is:
 
 ```text
 Browser ──wss──► /collab/document|presence
                     │
               Vercel Services routing
                     │
-               apps/collab (Nitro)
+               apps/collab-nitro (Nitro)
                     │
          +----------+----------+
          │                     │
@@ -132,7 +134,7 @@ From the monorepo root:
 
 ```bash
 pnpm install
-cp apps/collab/.env.example apps/collab/.env.local
+cp apps/collab-nitro/.env.example apps/collab-nitro/.env.local
 # Also configure packages/db/.env (DATABASE_URL) and apps/web/.env
 pnpm --filter @softmaple/db db:generate
 pnpm --filter @softmaple/db db:migrate
@@ -149,20 +151,20 @@ pnpm --filter @softmaple/db db:migrate
 | `COLLAB_REALTIME_DRIVER` | no | `memory` (local default) or `redis` |
 | `REDIS_URL` | on Vercel / when driver=redis | Upstash native Redis URL for ioredis |
 
-`nitro.config.ts` loads `apps/collab/.env.local`, then
+`nitro.config.ts` loads `apps/collab-nitro/.env.local`, then
 `packages/db/.env`, so local Prisma credentials can be shared.
 
 ## Commands
 
 ```bash
 # Dev server (port 3002)
-pnpm --filter @softmaple/collab dev
+pnpm --filter @softmaple/collab-nitro dev
 
 # Typecheck / unit tests / production build
-pnpm --filter @softmaple/collab typecheck
-pnpm --filter @softmaple/collab test
-pnpm --filter @softmaple/collab build
-pnpm --filter @softmaple/collab preview
+pnpm --filter @softmaple/collab-nitro typecheck
+pnpm --filter @softmaple/collab-nitro test
+pnpm --filter @softmaple/collab-nitro build
+pnpm --filter @softmaple/collab-nitro preview
 ```
 
 `pnpm dev` at the repo root also starts this app via Turborepo alongside
@@ -172,7 +174,7 @@ router or `vercel dev` (see [`docs/development.mdx`](../../docs/development.mdx)
 ## Layout
 
 ```text
-apps/collab/
+apps/collab-nitro/
 ├── nitro.config.ts
 ├── server/
 │   ├── routes/

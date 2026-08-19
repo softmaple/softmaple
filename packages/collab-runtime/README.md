@@ -37,4 +37,4 @@ taxonomy before room logic maps them to protocol errors.
 This package deliberately contains no Nitro, Redis, Prisma, Supabase,
 Cloudflare Workers, editor-framework, React, routing, or UI integrations. The
 production collaboration app wires the runtime to those host concerns through
-adapters under `apps/collab/server/adapters`.
+adapters under `apps/collab-nitro/server/adapters`.

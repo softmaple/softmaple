@@ -69,11 +69,14 @@ the browser to durable storage:
                            durable event log
 ```
 
-The import graph runs the same direction — a lower layer never imports a higher
-one — and is enforced by shared ESLint rules
-([`packages/eslint-config/collaboration-layers.js`](packages/eslint-config/collaboration-layers.js)).
-`@softmaple/collab-protocol` reaches the block model, not EG-walker directly;
-it only carries the batches the model produces.
+The diagram is ordered by data flow, not by import direction — a package drawn
+lower is not necessarily the one being imported. The actual import graph is
+enforced by shared ESLint rules
+([`packages/eslint-config/collaboration-layers.js`](packages/eslint-config/collaboration-layers.js)):
+`@softmaple/block-model` imports `@softmaple/eg-walker`, and
+`@softmaple/collab-protocol` imports `@softmaple/block-model` — never
+`@softmaple/eg-walker` directly — so the protocol validates the batches it
+carries without depending on the sequence CRDT.
 
 Awareness stays independent of every convergent document model and meets the
 bindings only inside an app. `@softmaple/collab-runtime` hosts `PresenceRoom`

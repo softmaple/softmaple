@@ -43,7 +43,7 @@ export default defineConfig({
   webServer: [
     {
       command: `pnpm exec nitro dev --port ${collabPort}`,
-      cwd: "../collab",
+      cwd: "../collab-nitro",
       env: {
         ...process.env,
         COLLAB_REALTIME_DRIVER: "memory",

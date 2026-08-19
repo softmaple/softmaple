@@ -1,5 +1,5 @@
 /**
- * Browser Origin validation for direct WebSocket upgrades to apps/collab.
+ * Browser Origin validation for direct WebSocket upgrades to apps/collab-nitro.
  * Replaces the former HMAC gateway trust boundary: user auth remains JWT +
  * membership checks inside each session.
  */

@@ -15,7 +15,7 @@ WebSocket service, Prisma/Supabase migrations, the Lexical editor, and the
 EG-walker collaboration packages.
 
 ```text
-Browser → /collab/* → apps/collab → Redis (realtime) + Supabase Postgres (history)
+Browser → /collab/* → apps/collab-nitro → Redis (realtime) + Supabase Postgres (history)
        ↘ apps/web → Supabase Auth / Data API / Storage
 ```
 
@@ -36,7 +36,7 @@ stored. Markdown, preview, and LaTeX are derived from the current Lexical state.
 ```bash
 pnpm install
 cp apps/web/.env.example apps/web/.env
-cp apps/collab/.env.example apps/collab/.env.local
+cp apps/collab-nitro/.env.example apps/collab-nitro/.env.local
 cp packages/db/.env.example packages/db/.env
 ```
 
@@ -99,8 +99,8 @@ pnpm format:check
 pnpm --filter @softmaple/web lint
 pnpm typecheck
 pnpm --filter @softmaple/web test -- --run
-pnpm --filter @softmaple/collab test
-pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
+pnpm --filter @softmaple/collab-nitro test
+pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab-nitro
 ```
 
 `pnpm dev` starts Web and Collab through Turborepo. Browser WebSockets always
@@ -155,7 +155,7 @@ approval. The regular Chromium smoke suite needs no production credentials.
 4. Confirm root routing:
 
 ```text
-/collab/** → apps/collab
+/collab/** → apps/collab-nitro
 /**        → apps/web
 ```
 

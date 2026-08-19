@@ -87,7 +87,7 @@ event ID samples. On the realtime route, structured conflict details are not
 sent on the WebSocket `Error` payload.
 
 Implementation: `EVENT_CONFLICT_TYPE` / `EventConflictError` in
-`apps/collab/server/utils/event-conflict.ts`.
+`apps/collab-nitro/server/utils/event-conflict.ts`.
 
 ### `DuplicateIncomingEventId`
 
@@ -158,7 +158,7 @@ delivery happens only through the shared bus after durable commit.
 
 ## Conformance coverage
 
-Phase 1 hardening tests live under `apps/collab/test/`:
+Phase 1 hardening tests live under `apps/collab-nitro/test/`:
 
 - `repair-live-interleave.test.ts` — repair ↔ live Event races
 - `multi-instance-collab.test.ts` — write / repair / reconnect across instances
@@ -172,5 +172,5 @@ fan-out, and room lifecycle exercise the same runtime semantics as Nitro.
 Optional soak:
 
 ```bash
-COLLAB_CONVERGENCE_SOAK=1 pnpm --filter @softmaple/collab test
+COLLAB_CONVERGENCE_SOAK=1 pnpm --filter @softmaple/collab-nitro test
 ```

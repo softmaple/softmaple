@@ -64,13 +64,13 @@ Before you begin, make sure you have the following installed:
     ```
   </Accordion>
   <Accordion icon="server" title="4. Configure collaboration">
-    Create `apps/collab/.env.local` from its example, then provide
+    Create `apps/collab-nitro/.env.local` from its example, then provide
     `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and
     `COLLAB_ALLOWED_ORIGINS`. Local development defaults to the in-memory
     realtime adapter; Vercel deployments require `REDIS_URL`.
 
     ```bash
-    cp apps/collab/.env.example apps/collab/.env.local
+    cp apps/collab-nitro/.env.example apps/collab-nitro/.env.local
     ```
 
     ```env
@@ -95,7 +95,7 @@ Before you begin, make sure you have the following installed:
     Next.js on an internal port, and the Upgrade-capable router on port 3000:
 
     ```bash Terminal 1 — collaboration service
-    pnpm --filter @softmaple/collab dev
+    pnpm --filter @softmaple/collab-nitro dev
     ```
 
     ```bash Terminal 2 — Next.js (internal)
@@ -111,10 +111,10 @@ Before you begin, make sure you have the following installed:
 
     Open [http://localhost:3000](http://localhost:3000). Set
     `COLLAB_ALLOWED_ORIGINS="http://localhost:3000"` in
-    `apps/collab/.env.local`.
+    `apps/collab-nitro/.env.local`.
 
     Alternatively, use `vercel dev` from the repository root so the Services
-    routing in `vercel.json` serves `/collab/*` from `apps/collab`.
+    routing in `vercel.json` serves `/collab/*` from `apps/collab-nitro`.
 
     <Note>
       The local router is not a release-equivalent test of Vercel Services

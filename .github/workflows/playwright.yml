@@ -45,7 +45,7 @@ jobs:
       - name: Verify RLS and RPC behavior
         run: pnpm --filter @softmaple/db db:verify:core-behavior
       - name: Build Web and Collab
-        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
+        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab-nitro
       - name: Install Chromium
         run: pnpm --filter @softmaple/web exec playwright install --with-deps chromium
       - name: Run real product E2E

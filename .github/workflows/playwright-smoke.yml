@@ -3,7 +3,7 @@ name: Chromium Smoke
 on:
   pull_request:
     paths:
-      - "apps/collab/**"
+      - "apps/collab-nitro/**"
       - "apps/web/**"
       - "packages/**"
       - "pnpm-lock.yaml"
@@ -40,7 +40,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build Web and Collab
-        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab
+        run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab-nitro
       - name: Install Chromium
         run: pnpm --filter @softmaple/web exec playwright install --with-deps chromium
       - name: Run public-surface smoke

@@ -6,7 +6,7 @@ import { updateSession } from "@/utils/supabase/middleware";
  *
  * Collaboration WebSockets are no longer rewritten through this process.
  * Vercel Services (or the local Upgrade-capable router used by Playwright)
- * routes `/collab/*` directly to `apps/collab`.
+ * routes `/collab/*` directly to `apps/collab-nitro`.
  */
 export async function proxy(request: NextRequest) {
   return await updateSession(request);

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, next]
     paths:
-      - 'apps/collab/**'
+      - 'apps/collab-nitro/**'
       - 'packages/collab-runtime/**'
       - 'apps/web/modules/docs/use-collab-document.ts'
       - 'apps/web/package.json'
@@ -19,7 +19,7 @@ on:
   pull_request:
     branches: [main, next]
     paths:
-      - 'apps/collab/**'
+      - 'apps/collab-nitro/**'
       - 'packages/collab-runtime/**'
       - 'apps/web/modules/docs/use-collab-document.ts'
       - 'apps/web/package.json'
@@ -72,10 +72,10 @@ jobs:
 
       - name: Check Nitro collaboration backend
         run: |
-          pnpm exec turbo run build --filter=@softmaple/collab... --filter=!@softmaple/collab
-          pnpm --filter @softmaple/collab typecheck
-          pnpm --filter @softmaple/collab test
-          pnpm --filter @softmaple/collab build
+          pnpm exec turbo run build --filter=@softmaple/collab-nitro... --filter=!@softmaple/collab-nitro
+          pnpm --filter @softmaple/collab-nitro typecheck
+          pnpm --filter @softmaple/collab-nitro test
+          pnpm --filter @softmaple/collab-nitro build
 
       - name: Check Next.js host routing
         run: |

@@ -1,20 +1,34 @@
 # `@softmaple/web`
 
 Next.js 16 app router host for Softmaple: auth, workspaces, document UI, and
-the Lexical editor. By default, realtime collaboration uses same-origin
-WebSocket paths routed to [`apps/collab`](../collab/README.md);
-Cloudflare-selected documents connect directly to the configured Worker. This
-app does not write `document_event_batches` or proxy WebSocket upgrades.
+the Lexical editor. Realtime collaboration is routed per document to either
+[`apps/collab-cloudflare`](../collab-cloudflare/README.md) (recommended for
+production) or [`apps/collab-nitro`](../collab-nitro/README.md) (local dev and
+Nitro fallback). This app does not write `document_event_batches` or proxy
+WebSocket upgrades.
 
 ## Role in the stack
 
-The default Nitro path is:
+**Production (recommended):** route documents to Cloudflare Durable Objects via
+[`apps/collab-cloudflare`](../collab-cloudflare/README.md). Set
+`COLLAB_CLOUDFLARE_WS_URL` and use the rollout variables in
+[Collaboration runtime routing](#collaboration-runtime-routing) to move traffic
+onto the Worker. See
+[`apps/collab-cloudflare/README.md`](../collab-cloudflare/README.md) for deploy
+and rollback.
+
+**Local dev / Nitro fallback:** when Cloudflare is not configured, or a document
+is explicitly routed to Nitro, same-origin `/collab/*` WebSocket paths are
+served by [`apps/collab-nitro`](../collab-nitro/README.md) through Vercel
+Services:
 
 ```text
 Browser ──► apps/web (Next.js)
               ├── Supabase Auth / Data API (anon / publishable key)
-              └── same-origin /collab/* (routed by Vercel Services)
-                    └── apps/collab ──► Redis + Supabase Postgres
+              ├── Cloudflare Worker (production, per-document routing)
+              │     └── apps/collab-cloudflare ──► Durable Objects + Supabase Postgres
+              └── same-origin /collab/* (Nitro fallback / local dev)
+                    └── apps/collab-nitro ──► Redis + Supabase Postgres
 ```
 
 | Concern | Owner |
@@ -23,7 +37,7 @@ Browser ──► apps/web (Next.js)
 | Lexical UI + editor shell | `@softmaple/editor` + `modules/docs` |
 | Lexical ↔ EG-walker binding | `@softmaple/binding-lexical` |
 | Collab wire protocol | `@softmaple/collab-protocol` |
-| Durable event persistence / realtime fan-out | [`apps/collab`](../collab/README.md) (Prisma + Redis) or [`apps/collab-cloudflare`](../collab-cloudflare/README.md) (Supabase RPC + DO-local fan-out) |
+| Durable event persistence / realtime fan-out | [`apps/collab-cloudflare`](../collab-cloudflare/README.md) (**recommended production**, Supabase RPC + DO-local fan-out) or [`apps/collab-nitro`](../collab-nitro/README.md) (local dev / Nitro fallback, Prisma + Redis) |
 | Schema, RLS, Prisma | [`packages/db`](../../packages/db) |
 
 Layer boundaries:
@@ -36,7 +50,7 @@ From the monorepo root:
 ```bash
 pnpm install
 cp apps/web/.env.example apps/web/.env
-# Also configure packages/db/.env and apps/collab/.env.local
+# Also configure packages/db/.env and apps/collab-nitro/.env.local
 pnpm --filter @softmaple/db db:generate
 pnpm --filter @softmaple/db db:migrate
 ```
@@ -59,11 +73,11 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 Vercel (or any host), redeploy — restarting the running server is not enough.
 
 Collaboration Redis credentials and collab private hosts must never be exposed
-through `NEXT_PUBLIC_*` variables. By default the browser connects to the
-current web origin at `/collab/document` and `/collab/presence` (the Nitro
-runtime); see [Collaboration runtime routing](#collaboration-runtime-routing)
-for how a document can instead be routed to the Cloudflare Durable Objects
-runtime.
+through `NEXT_PUBLIC_*` variables. In production, configure
+[Collaboration runtime routing](#collaboration-runtime-routing) so documents
+connect to the Cloudflare Worker. When Cloudflare is not configured, the
+browser falls back to the current web origin at `/collab/document` and
+`/collab/presence` (the Nitro runtime).
 
 The server-only E2E seed endpoint is disabled by default. It activates only
 when `E2E_ALLOW_REMOTE_SEED=true`, the supplied project ref exactly matches the
@@ -85,7 +99,7 @@ resolved on the server (see
 connects to what it is given and derives no endpoint of its own:
 
 ```text
-/collab/** → apps/collab
+/collab/** → apps/collab-nitro
 /**        → apps/web
 ```
 
@@ -109,8 +123,9 @@ Keys and URL must belong to the **same** Supabase project. Never put a
 `resolveCollabRuntime` in
 [`modules/docs/collab-runtime-routing.ts`](./modules/docs/collab-runtime-routing.ts)
 picks, per document and on the server before the page renders, whether the
-browser connects to the existing Nitro+Redis runtime (`apps/collab`) or the
-Cloudflare Durable Objects runtime (`apps/collab-cloudflare`). Both document
+browser connects to the Cloudflare Durable Objects runtime
+(`apps/collab-cloudflare`, recommended for production) or the Nitro+Redis
+runtime (`apps/collab-nitro`, local dev and explicit fallback). Both document
 runtimes read and write the same Supabase event-history tables, so switching a
 document back and forth needs no document-history migration. Live presence is
 runtime-local and is recreated when the client joins the destination runtime.
@@ -201,7 +216,7 @@ Redis/DO responsibilities, and the current default-runtime decision — see
 ## Commands
 
 ```bash
-# Dev (Turbopack). Repo-root `pnpm dev` also starts apps/collab.
+# Dev (Turbopack). Repo-root `pnpm dev` also starts apps/collab-nitro.
 pnpm --filter @softmaple/web dev
 
 pnpm --filter @softmaple/web typecheck

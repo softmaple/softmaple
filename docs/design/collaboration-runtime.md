@@ -13,7 +13,7 @@ runtime package.
 
 The package supplies the shared `DocumentRoom` and `PresenceRoom`
 implementations as well as their contracts. The production Nitro host in
-`apps/collab` owns only transport and infrastructure adapters: raw WebSocket
+`apps/collab-nitro` owns only transport and infrastructure adapters: raw WebSocket
 ingress, Supabase authorization, Prisma/Postgres history, and Redis-backed
 fan-out and connection leases. `PresenceRoom` is documented separately below
 — it shares no capability instance with `DocumentRoom`.

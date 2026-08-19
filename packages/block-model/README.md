@@ -3,6 +3,40 @@
 Editor-agnostic rich-text convergence on top of `@softmaple/eg-walker`.
 The package has no Lexical, React, or awareness dependency.
 
+## Architecture
+
+```text
+  @softmaple/binding-lexical                     collab host (apps/*)
+     Lexical ⇄ projection                         RichTextEventBatch
+               │                                           │
+         transact(fn)                             applyRemoteEvents()
+               │                                           │
+               └─────────────────────┬─────────────────────┘
+                                     │
+                               BlockReplica
+                    blocks · marks · causal-LWW fields
+                                     │
+               ┌─────────────────────┴─────────────────────┐
+               │                                           │
+       escaped user text                             block markers
+       one flat sequence                       event-backed ids · joins
+               │                                           │
+               └─────────────────────┬─────────────────────┘
+                                     │
+                           @softmaple/eg-walker
+                   convergent sequence · stable anchors
+```
+
+The whole document — text *and* structure — lives in **one** EG-walker
+sequence. Blocks are event-backed markers interleaved with escaped user text,
+so a concurrent split and a concurrent insert converge under the same
+algorithm rather than under a second, hand-written merge rule.
+
+`RichTextEventBatch` is JSON-safe: a batch may be persisted or broadcast
+directly, and the receiving replica needs nothing but the batch to converge.
+
+## Usage
+
 ```ts
 import {
   BOOTSTRAP_BLOCK_ID,

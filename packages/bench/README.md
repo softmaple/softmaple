@@ -4,6 +4,31 @@ Performance harnesses for [`@softmaple/eg-walker`](../eg-walker/README.md).
 This private tooling package keeps benchmark code, fixtures, and dependencies
 out of the production CRDT package.
 
+## Architecture
+
+```text
+      vitest bench                             paper-bench
+ 5 deterministic traces                  egwalker-paper datasets
+            │                                       │
+            └───────────────────┬───────────────────┘
+                                │
+                  fresh EgWalkerReplica per run
+                                │
+                      @softmaple/eg-walker
+                      built first by turbo
+                                │
+            ┌───────────────────┴───────────────────┐
+            │                                       │
+       wall clock                            replay counters
+      per scenario                        full/partial replays
+                                     checkpoint hits · peak records
+```
+
+Wall clock alone hides algorithm regressions: a change that silently turns
+partial replays into full ones can still look fast on a small trace. Reading
+the counters next to the timings is what makes an algorithm-path or
+memory-shape regression visible.
+
 ## Verification
 
 Run tasks through Turborepo so the compiled `@softmaple/eg-walker` dependency

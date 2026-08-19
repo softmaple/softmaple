@@ -13,6 +13,45 @@ for the cross-runtime operational picture and configured rollout stage.
 
 ## Runtime shape
 
+```text
+                             Browser (apps/web)
+                                      │
+                   wss /collab/document?documentId=<uuid>
+                      wss /collab/presence?roomId=<id>
+                                      │
+                          src/index.ts — the Worker
+                  origin check · id normalize · route only
+                                      │
+                ┌─────────────────────┴─────────────────────┐
+                │                                           │
+         DOCUMENT_ROOMS                              PRESENCE_ROOMS
+     .getByName(documentId)                        .getByName(roomId)
+                │                                           │
+         DocumentRoomDO                              PresenceRoomDO
+      hibernatable sockets                        hibernatable sockets
+      versioned attachment                        versioned attachment
+                │                                           │
+          DocumentRoom                                PresenceRoom
+     EventStore · RoomFanout                   PresenceStore (ctx.storage)
+        DO-local fan-out                        PresenceFanout · DO alarm
+                │                                           │
+       supabase-backend.ts                    supabase-presence-backend.ts
+                │                                           │
+                └─────────────────────┬─────────────────────┘
+                                      │
+                    Supabase Postgres — service_role RPC
+                        append_document_event_batches
+                          read_document_event_page
+```
+
+The two Durable Object namespaces are fully separate and share no capability
+instance or cross-stub call, so a presence failure structurally cannot block
+durable document convergence. Postgres remains the only durable
+**document-history** store; a Durable Object holds live connection state, never
+the source of truth for document events. `PresenceRoomDO` does keep membership
+in `ctx.storage` so it survives hibernation, but that is disposable TTL state
+rebuilt from live connections — not durable history.
+
 The public Worker keeps the existing `/collab/document` WebSocket endpoint,
 now with the document UUID on the URL:
 `/collab/document?documentId=<uuid>`. The Worker validates the browser

@@ -7,10 +7,55 @@ Eg-walker implementation for collaborative plain-text editing, based on
 
 The package is organized around the paper's prepare/effect model:
 
+```text
+           local edit                                 remote events
+      applyLocalOperation()                        applyRemoteEvents()
+                │                                           │
+                └─────────────────────┬─────────────────────┘
+                                      │
+                           core/ — EgWalkerReplica
+                      public API · replay coordination
+                                      │
+                ┌─────────────────────┴─────────────────────┐
+                │                                           │
+             graph/                                      engine/
+      persistent event DAG                        prepare/effect state
+        frontier versions                          ranked B-tree index
+    causal diff · topo order                       delete-target index
+      columnar codec (§3.8)                       critical checkpoints
+                │                                           │
+                └─────────────────────┬─────────────────────┘
+                                      │
+                                document text
+                        serialize() · native snapshot
+```
+
 - `graph/`: persistent event graph, frontier versions, causal expansion/diff, columnar codec.
 - `engine/`: prepare/effect replay state, ranked B-tree index mapping, critical checkpoints, partial replay.
 - `core/`: public API and thin walker coordinator.
 - `types/`: public TypeScript types.
+
+The event graph is the canonical durable state. The engine's replay records are
+derived: they can be discarded at a critical version and rebuilt, which is what
+makes partial replay possible. A native snapshot may additionally persist that
+derived cache for faster restore, but it never replaces the graph as the source
+of truth. `graph/` never imports `engine/`.
+
+### Position in the wider stack
+
+```text
+   @softmaple/binding-lexical ──► @softmaple/block-model ──► @softmaple/eg-walker
+        Lexical projection          blocks · marks · text        this package
+                                             │
+                                  RichTextEventBatch on the wire
+                                             │
+                                  @softmaple/collab-protocol
+```
+
+Surfaces never import this package directly — they go through a surface
+binding. This package must not import an editor framework, awareness, or any
+host runtime; see
+[`docs/design/collaboration-layers.md`](../../docs/design/collaboration-layers.md).
 
 The portable `serialize()` format contains plain text plus the event graph and
 does not persist CRDT replay records. `EgWalkerReplica` does cache an engine

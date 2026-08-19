@@ -1,8 +1,58 @@
-Welcome to your new TanStack app!
+# `@softmaple/playground`
+
+The experiment surface for Softmaple's collaboration stack: a TanStack Start +
+Vite app where a binding, an adapter, or a presence idea can be exercised
+end-to-end before it reaches `apps/web`.
 
 [![Formatted with Biome](https://img.shields.io/badge/Formatted_with-Biome-60a5fa?style=flat&logo=biome)](https://biomejs.dev/)
 [![Linted with Biome](https://img.shields.io/badge/Linted_with-Biome-60a5fa?style=flat&logo=biome)](https://biomejs.dev)
 [![Checked with Biome](https://img.shields.io/badge/Checked_with-Biome-60a5fa?style=flat&logo=biome)](https://biomejs.dev)
+
+It imports the workspace packages **from source** (see
+[`workspace-aliases.ts`](./workspace-aliases.ts)), so a change in
+`@softmaple/eg-walker` or `@softmaple/awareness` shows up on the next hot
+reload without a build step.
+
+## Architecture
+
+```text
+                  apps/playground — TanStack Start + Vite
+                                     │
+              ┌──────────────────────┼──────────────────────┐
+              │                      │                      │
+       /demo/lexical-        /demo/awareness-         /demo/online-
+          eg-walker               collab              collab-editor
+              │                      │                      │
+       binding-lexical           awareness          surface-bindings/
+         block-model             adapters           textarea (staged)
+          eg-walker                  │                      │
+              │                      │                      │
+              └──────────────────────┼──────────────────────┘
+                                     │
+                    server/ — Nitro WebSocket handlers
+            /api/collab-doc · /api/presence · /api/collab-sync
+                                     │
+                 in-process rooms · no Supabase, no Redis
+```
+
+The collaboration servers here are **not** `apps/collab-nitro` or
+`apps/collab-cloudflare`. They are deliberately minimal in-process handlers
+that keep an in-memory batch log per room — enough to exercise join, repair,
+and fan-out on one machine, with no database, auth, or deployment story. Nothing
+in `server/` is a production runtime, and nothing here should grow into one.
+
+| Directory | Contents |
+| --- | --- |
+| `src/routes/demo/` | One route per demo |
+| `src/modules/lexical-eg-walker/` | Lexical + EG-walker document demo, presence rail, remote selections |
+| `src/modules/awareness-collab/` | Awareness adapter experiments |
+| `src/modules/collab-transport/` | Transport helpers (WebSocket ⇄ BroadcastChannel) |
+| `src/surface-bindings/` | Staging area for bindings before they earn a package — see its [README](./src/surface-bindings/README.md) |
+| `server/api/` | Nitro WebSocket handlers — see its [README](./server/README.md) |
+
+A binding graduates out of `src/surface-bindings/` into a standalone
+`@softmaple/binding-<surface>` package only on evidence, per the promotion rule
+in [`docs/design/surface-bindings.md`](../../docs/design/surface-bindings.md).
 
 # Getting Started
 
@@ -10,7 +60,7 @@ To run this application:
 
 ```bash
 pnpm install
-pnpm start
+pnpm --filter @softmaple/playground dev   # http://localhost:3000
 ```
 
 # Building For Production
@@ -18,15 +68,19 @@ pnpm start
 To build this application for production:
 
 ```bash
-pnpm build
+pnpm --filter @softmaple/playground build
 ```
 
 ## Testing
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+This project uses [Vitest](https://vitest.dev/) for unit tests and
+[Playwright](https://playwright.dev/) for E2E. The repository root defines no
+`test` script, so scope these to the package (or run them from
+`apps/playground`):
 
 ```bash
-pnpm test
+pnpm --filter @softmaple/playground test
+pnpm --filter @softmaple/playground test:e2e
 ```
 
 ## Styling
@@ -35,12 +89,15 @@ This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
 
 ## Linting & Formatting
 
-This project uses [Biome](https://biomejs.dev/) for linting and formatting. The following scripts are available:
+This project uses [Biome](https://biomejs.dev/) for linting and formatting —
+unlike the ESLint-based packages elsewhere in the monorepo. Root `pnpm lint` and
+`pnpm format` run repo-wide and do **not** apply this app's Biome config, so
+scope these too (root defines no `check` script at all):
 
 ```bash
-pnpm lint
-pnpm format
-pnpm check
+pnpm --filter @softmaple/playground lint
+pnpm --filter @softmaple/playground format
+pnpm --filter @softmaple/playground check
 ```
 
 ## T3Env

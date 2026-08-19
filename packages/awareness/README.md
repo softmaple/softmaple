@@ -9,6 +9,41 @@ This package provides transport-agnostic awareness and presence UI components de
 Based on the design principles outlined in [docs/design/awareness-and-presence.md](../../docs/design/awareness-and-presence.md)
 and the [Surface Binding Contract](docs/surface-binding-contract.md).
 
+## Architecture
+
+```text
+                       apps/web · apps/playground
+            PresenceBar · LiveCursor · BlockActivityIndicator
+                                    │
+                hooks/ — useUpdateCursor, usePresence, …
+                                    │
+                            PresenceProvider
+                                    │
+                         state/ — pure reducers
+                  clock-ordered merge · derived status
+                                    │
+                    AwarenessAdapter (transport seam)
+              ┌─────────────────────┬─────────────────────┐
+              │                     │                     │
+          WebSocket         BroadcastChannel            no-op
+         collab host        same-origin tabs         SSR · tests
+              │                     │                 Storybook
+      apps/collab-nitro        other tabs
+   apps/collab-cloudflare
+        PresenceRoom
+```
+
+Awareness is a **sibling** of the document stack, never a layer inside it. This
+package must not import `@softmaple/eg-walker`, `@softmaple/block-model`, a
+surface binding, or an editor framework — enforced by Biome's
+`style/noRestrictedImports` in [`biome.jsonc`](./biome.jsonc). Presence and the
+convergent document meet only inside an app.
+
+That separation is what makes presence disposable: it is ephemeral, lossy by
+design, and never durable. Losing a cursor costs nothing; losing an event
+batch would be data loss, which is why the two travel over different rooms and
+different stores.
+
 ## Features
 
 - **PresenceBar**: Global awareness of who's online, with keyboard-focusable avatars, hover/focus tooltips, and a `loading` skeleton state for in-flight connections

@@ -27,6 +27,72 @@
 
 # Development
 
+## Architecture
+
+Softmaple is a collaborative $\LaTeX$-flavoured document editor. Each layer
+below is its own workspace package — here is the path a keystroke takes from
+the browser to durable storage:
+
+```text
+                                Browser
+                      apps/web · apps/playground
+                                   │
+         ┌─────────────────────────┼──────────────────────────────┐
+         │                         │                              │
+ @softmaple/editor    @softmaple/binding-lexical        @softmaple/awareness
+ Lexical UI shell        Lexical ↔ block model           ephemeral presence
+                                   │                              │
+                        @softmaple/block-model                    │
+                    blocks · marks · event batches                │
+                                   │                              │
+                         @softmaple/eg-walker                     │
+                    event graph · CRDT convergence                │
+                                   │                              │
+                    RichTextEventBatch on the wire                │
+                                   │                              │
+                      @softmaple/collab-protocol                  │
+                        versioned wire messages                   │
+                                   │                              │
+                       @softmaple/collab-runtime ──PresenceCodec──┘
+                 DocumentRoom / PresenceRoom semantics
+                      ┌────────────┴────────────┐
+                      │                         │
+                 Node/Nitro                Cloudflare
+              apps/collab-nitro      apps/collab-cloudflare
+                      │                         │
+                    Redis                Durable Object
+              pub/sub · leases          hibernatable room
+                      │                         │
+                      └────────────┬────────────┘
+                                   │
+                           Supabase/Postgres
+                           durable event log
+```
+
+The diagram is ordered by data flow, not by import direction — a package drawn
+lower is not necessarily the one being imported. The actual import graph is
+enforced by shared ESLint rules
+([`packages/eslint-config/collaboration-layers.js`](packages/eslint-config/collaboration-layers.js)):
+`@softmaple/block-model` imports `@softmaple/eg-walker`, and
+`@softmaple/collab-protocol` imports `@softmaple/block-model` — never
+`@softmaple/eg-walker` directly — so the protocol validates the batches it
+carries without depending on the sequence CRDT.
+
+Awareness stays independent of every convergent document model and meets the
+bindings only inside an app. `@softmaple/collab-runtime` hosts `PresenceRoom`
+but never imports `@softmaple/awareness` — the labelled edge above is the
+payload-opaque `PresenceCodec` seam, and a host app is what binds the two.
+
+Both collaboration runtimes host the *same* `@softmaple/collab-runtime`
+semantics and write the same Postgres event log, so a document can move between
+them without a history migration.
+
+Design source of truth:
+[`docs/design/collaboration-layers.md`](docs/design/collaboration-layers.md) ·
+[`collaboration-consistency.md`](docs/design/collaboration-consistency.md) ·
+[`collaboration-runtime.md`](docs/design/collaboration-runtime.md) ·
+[`collaboration-operations.md`](docs/design/collaboration-operations.md).
+
 ## shadcn/ui [turborepo](https://turborepo.org/) architecture:
 
 - apps
@@ -34,8 +100,24 @@
     - **Next.js** v16 with `app` folder
     - **EG-walker + WebSocket** for real-time collaboration
     - **Supabase Postgres** for durable history and **Supabase Auth** for authentication
+  - [collab-cloudflare](apps/collab-cloudflare) - Collaboration runtime on Cloudflare (recommended for production)
+    - **Workers + Durable Objects** with WebSocket Hibernation
+    - **Supabase RPC** for durable appends, DO-local fan-out
+  - [collab-nitro](apps/collab-nitro) - Collaboration runtime on Nitro (local dev / fallback)
+    - **Nitro** WebSocket service behind Vercel Services
+    - **Redis** for realtime fan-out, presence TTLs, and connection leases
+  - [playground](apps/playground) - Collaboration and editor demo surface
+    - **TanStack Start** + **Vite**, wired straight to the workspace sources
 
 - packages
+  - [awareness](packages/awareness) - Presence and awareness layer
+    - **Transport-agnostic** adapters (WebSocket, BroadcastChannel, no-op)
+    - Cursors, selections, avatars, and activity indicators
+  - [bench](packages/bench) - Performance harnesses for `@softmaple/eg-walker`
+  - [binding-lexical](packages/binding-lexical) - Lexical ↔ block model binding
+  - [block-model](packages/block-model) - Editor-agnostic rich-text block model
+  - [collab-protocol](packages/collab-protocol) - Versioned collaboration wire protocol
+  - [collab-runtime](packages/collab-runtime) - Host-independent room and session semantics
   - [config](packages/config) - Site configuration
   - [db](packages/db) - Database schema and migrations
     - **Prisma** for ORM [![Made with Prisma](https://made-with.prisma.io/dark.svg)](https://prisma.io)
@@ -43,6 +125,7 @@
   - [editor](packages/editor) - Rich text editor
     - **Lexical** for rich text editing
     - **React** 19 and **Vite**
+  - [eg-walker](packages/eg-walker) - EG-walker CRDT for collaborative editing
   - [md2latex](packages/md2latex) - Markdown to $\LaTeX$ converter
   - [eslint-config](packages/eslint-config) - Shared ESLint configuration
   - [typescript-config](packages/typescript-config) - Shared TypeScript `tsconfig.json`

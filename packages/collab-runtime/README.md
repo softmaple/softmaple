@@ -4,6 +4,41 @@ Runtime-independent semantics and contracts for hosted document collaboration.
 The package owns the concrete room/session state machine while leaving every
 infrastructure choice to a host adapter.
 
+## Architecture
+
+```text
+      apps/collab-nitro                        apps/collab-cloudflare
+   Nitro · Redis · Prisma                      Worker · Durable Object
+              │                                           │
+              └─────────────────────┬─────────────────────┘
+                                    │
+                        @softmaple/collab-runtime
+                                    │
+              ┌─────────────────────┴─────────────────────┐
+              │                                           │
+        DocumentRoom                                PresenceRoom
+     RoomPeer lifecycle                        PresencePeer lifecycle
+    sessions · admission                        payload-opaque codec
+              │                                           │
+         EventStore                                 PresenceStore
+    append · repair pages                          TTL membership
+         RoomFanout                                PresenceFanout
+      committed fan-out                           broadcast fan-out
+              │                                           │
+              └─────────────────────┬─────────────────────┘
+                                    │
+                       @softmaple/collab-protocol
+                     the messages rooms answer with
+```
+
+`EventStore`, `RoomFanout`, `PresenceStore`, and `PresenceFanout` are
+**capability interfaces**, not implementations. Redis and Durable Objects sit
+behind the same four seams, which is why both hosts can be proven equivalent by
+one conformance kit instead of by two parallel test suites.
+
+The two rooms never share a capability instance: presence outages cannot take
+document persistence with them, and vice versa.
+
 The public capabilities cover:
 
 - `DocumentRoom` and transport-neutral `RoomPeer` lifecycle

@@ -1,7 +1,7 @@
 {
   "name": "@softmaple/md2latex",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.3.4",
   "description": "A Markdown Transformer for LaTeX",
   "exports": {
     ".": {

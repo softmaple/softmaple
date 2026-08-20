@@ -1,7 +1,7 @@
 {
   "name": "softmaple",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.3.4",
   "description": "A Paper Typesetting Editor",
   "workspaces": [
     "docs",

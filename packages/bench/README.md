@@ -158,11 +158,10 @@ The dynamically imported builds must retain access to their runtime dependencies
 `node_modules` next to an isolated `dist` copy. Each worker measures five trials;
 the driver requires every final text hash to match across both versions.
 
-The [2026-09-06 comparison](./results/2026-09-06-eg-walker/REPORT.md) includes
-all raw samples, the full persistence lanes, memory measurements, validation
-failures and a follow-up on small-workload timing variation.
+Raw comparison output is not checked in. Write every run to a directory outside
+the repository and keep the raw samples with the report that cites them.
 
 All benchmark tasks disable Turborepo result caching: a timing run must execute
 on the current machine. Library build artifacts can still come from the build
-cache. The A/B measurements in the accompanying report ran the original Vitest
-suite directly, so none of its timings were restored from a task cache.
+cache. Run the Vitest suite directly when collecting A/B measurements, so that
+no timing is restored from a task cache.

@@ -1,6 +1,0 @@
-apply: six full datasets x two versions x three successful samples; A2 failures preserved
-persistence: six full datasets x two versions x three successful samples; A2 failures preserved
-focused: all 200 samples match paired final text hashes
-frozen bundles and all recorded production source checksums match
-all verification commands passed
-A2 whole-batch diagnostics match across versions; expected-text failure remains

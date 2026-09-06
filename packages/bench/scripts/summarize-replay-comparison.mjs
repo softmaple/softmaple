@@ -3,7 +3,10 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
-const root = resolve(process.argv[2] ?? "results/2026-09-06-eg-walker");
+const [output] = process.argv.slice(2);
+if (!output)
+  throw new Error("usage: summarize-replay-comparison.mjs <output-dir>");
+const root = resolve(output);
 const median = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);

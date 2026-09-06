@@ -428,14 +428,8 @@ export class EgWalkerEngine {
    * graph that already contains {@link event}.
    */
   applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
-    this.materializePackedDeleteTargets();
-    if (this.eventIndexesComplete && !this.eventOrder.has(event.id)) {
-      const order = this.eventOrder.size;
-      this.eventOrder.set(event.id, order);
-      this.eventIdsByOrder.push(event.id);
-    }
-    this.graph = graph;
-
+    this.prepareIncrementalGraph(graph);
+    this.registerIncrementalEvent(event);
     const transformed = this.processEvent(event, true);
     // {@link EgWalkerReplica.applyRemoteEvent} reads the returned `text`
     // (and then `getText()`) immediately after this call, so the
@@ -452,6 +446,33 @@ export class EgWalkerEngine {
       textBuffer,
       transformedOperations: transformed,
     };
+  }
+
+  /** @internal Apply an owned receive transaction without per-event text flushes. */
+  applyEventBatch(
+    events: ReadonlyArray<GraphEvent>,
+    graph: EventGraph,
+  ): PersistentUtf16Rope {
+    this.prepareIncrementalGraph(graph);
+    for (const event of events) {
+      this.registerIncrementalEvent(event);
+      this.processEvent(event, false);
+    }
+    this.flushPendingInsert();
+    return this.resultingText;
+  }
+
+  private prepareIncrementalGraph(graph: EventGraph): void {
+    this.materializePackedDeleteTargets();
+    this.graph = graph;
+  }
+
+  private registerIncrementalEvent(event: GraphEvent): void {
+    if (this.eventIndexesComplete && !this.eventOrder.has(event.id)) {
+      const order = this.eventOrder.size;
+      this.eventOrder.set(event.id, order);
+      this.eventIdsByOrder.push(event.id);
+    }
   }
 
   getText(): string {

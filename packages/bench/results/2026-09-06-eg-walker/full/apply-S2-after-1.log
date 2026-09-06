@@ -1,0 +1,6 @@
+paper-bench-config paperRoot=/home/daytona/egwalker-paper datasets=S2 cases=S2-full-operation runs=1 maxTxns=none maxEvents=none granularity=operation applyBatchEvents=4096 applyApi=causal applyOnly=true nativeOnly=false memory=false planPhase0=false phase6Gates=false
+paper-bench-progress phase=converted dataset=S2 label=S2-full-operation run=1 elapsedMs=1394.25 events=1104627 applyBatchEvents=4096 applyCalls=0
+paper-bench-progress phase=applied dataset=S2 label=S2-full-operation run=1 elapsedMs=2483.40 events=1104627 applyBatchEvents=4096 applyCalls=270
+paper-bench-apply dataset=S2 label=S2-full-operation run=1 maxTxns=none maxEvents=none granularity=operation applyBatchEvents=4096 applyApi=causal applyCalls=270 txns=1 patches=67620 events=1104627 text=170307 finalTextValidated=true loadConvertMs=1394.21 applyMs=1089.04 totalMs=2483.39 fullReplays=0 partialReplays=0 incrementalApplies=1104627 retreats=0 advances=0 sequenceRecords=0 peakSequenceRecords=0 sequenceTreeOperations=0
+paper-bench-apply-summary dataset=S2 label=S2-full-operation runs=1 maxTxns=none maxEvents=none granularity=operation applyBatchEvents=4096 applyApi=causal applyCalls=270 events=1104627 finalTextValidated=true meanLoadConvertMs=1394.21 meanApplyMs=1089.04 minApplyMs=1089.04 maxApplyMs=1089.04 meanTotalMs=2483.39 meanEventsPerSecond=1014309.65
+BENCH_MAX_RSS_KIB=935212

@@ -1,0 +1,204 @@
+{
+  "files": [
+    {
+      "filepath": "/home/daytona/softmaple/packages/bench/src/bench/checkpoint-effectiveness.bench.ts",
+      "groups": [
+        {
+          "fullName": "src/bench/checkpoint-effectiveness.bench.ts > checkpoint-effectiveness",
+          "benchmarks": [
+            {
+              "id": "2119171848_0_0",
+              "name": "incremental: applyRemoteEvent per event (checkpoint-aware)",
+              "rank": 1,
+              "rme": 5.229736123217946,
+              "samples": [],
+              "totalTime": 500.1636970000004,
+              "min": 0.18125899999995454,
+              "max": 4.3242930000000115,
+              "hz": 3434.8754423894115,
+              "period": 0.2911313719441213,
+              "mean": 0.2911313719441213,
+              "variance": 0.10366892215146196,
+              "sd": 0.3219765863404697,
+              "sem": 0.007768062512541689,
+              "df": 1717,
+              "critical": 1.96,
+              "moe": 0.01522540252458171,
+              "p75": 0.2613090000000966,
+              "p99": 1.520247999999924,
+              "p995": 3.4659149999999954,
+              "p999": 4.116042999999991,
+              "sampleCount": 1718,
+              "median": 0.20374499999996942
+            },
+            {
+              "id": "2119171848_0_1",
+              "name": "batch-from-graph: single cold-start fullReplay",
+              "rank": 2,
+              "rme": 2.845544271959412,
+              "samples": [],
+              "totalTime": 500.1553239999989,
+              "min": 0.31728900000007343,
+              "max": 3.5268240000000333,
+              "hz": 2581.198155955254,
+              "period": 0.3874169821843524,
+              "mean": 0.3874169821843524,
+              "variance": 0.04084153919852207,
+              "sd": 0.20209289744699607,
+              "sem": 0.005624551910788192,
+              "df": 1290,
+              "critical": 1.96,
+              "moe": 0.011024121745144855,
+              "p75": 0.3660000000002128,
+              "p99": 1.5137879999999768,
+              "p995": 1.74918700000012,
+              "p999": 2.819814999999835,
+              "sampleCount": 1291,
+              "median": 0.34678900000017165
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "filepath": "/home/daytona/softmaple/packages/bench/src/bench/concurrent-same-index-inserts.bench.ts",
+      "groups": [
+        {
+          "fullName": "src/bench/concurrent-same-index-inserts.bench.ts > concurrent-same-index-inserts",
+          "benchmarks": [
+            {
+              "id": "2109892199_0_0",
+              "name": "apply 200 concurrent inserts at index 0",
+              "rank": 1,
+              "rme": 4.596020054427974,
+              "samples": [],
+              "totalTime": 500.12516000000045,
+              "min": 1.1169579999999542,
+              "max": 4.34489300000007,
+              "hz": 621.8443399248295,
+              "period": 1.608119485530548,
+              "mean": 1.608119485530548,
+              "variance": 0.4422305132826897,
+              "sd": 0.6650041453124106,
+              "sem": 0.03770892553783059,
+              "df": 310,
+              "critical": 1.96,
+              "moe": 0.07390949405414796,
+              "p75": 1.4993370000000255,
+              "p99": 3.410775000000001,
+              "p995": 3.9592039999999997,
+              "p999": 4.34489300000007,
+              "sampleCount": 311,
+              "median": 1.2776179999999613
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "filepath": "/home/daytona/softmaple/packages/bench/src/bench/delete-heavy-workload.bench.ts",
+      "groups": [
+        {
+          "fullName": "src/bench/delete-heavy-workload.bench.ts > delete-heavy-workload",
+          "benchmarks": [
+            {
+              "id": "826959606_0_0",
+              "name": "apply 2000 delete-heavy events (~70% deletes)",
+              "rank": 1,
+              "rme": 7.2394109254150445,
+              "samples": [],
+              "totalTime": 500.2534280000003,
+              "min": 2.481865999999968,
+              "max": 8.147647000000006,
+              "hz": 275.8601786133086,
+              "period": 3.6250248405797123,
+              "mean": 3.6250248405797123,
+              "variance": 2.473975390820176,
+              "sd": 1.5728875963717739,
+              "sem": 0.1338930838560903,
+              "df": 137,
+              "critical": 1.96,
+              "moe": 0.262430444357937,
+              "p75": 4.007503999999926,
+              "p99": 7.947917000000075,
+              "p995": 8.147647000000006,
+              "p999": 8.147647000000006,
+              "sampleCount": 138,
+              "median": 2.792115000000024
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "filepath": "/home/daytona/softmaple/packages/bench/src/bench/long-linear-history.bench.ts",
+      "groups": [
+        {
+          "fullName": "src/bench/long-linear-history.bench.ts > long-linear-history",
+          "benchmarks": [
+            {
+              "id": "-1583857672_0_0",
+              "name": "apply 5000 sequential inserts to a fresh replica",
+              "rank": 1,
+              "rme": 9.930051163504203,
+              "samples": [],
+              "totalTime": 507.08158599999956,
+              "min": 9.749922999999967,
+              "max": 31.21361799999994,
+              "hz": 78.8827697639962,
+              "period": 12.677039649999989,
+              "mean": 12.677039649999989,
+              "variance": 15.48688098363907,
+              "sd": 3.9353374675673076,
+              "sem": 0.622231487945585,
+              "df": 39,
+              "critical": 2.0231,
+              "moe": 1.258836523262713,
+              "p75": 12.716159000000061,
+              "p99": 31.21361799999994,
+              "p995": 31.21361799999994,
+              "p999": 31.21361799999994,
+              "sampleCount": 40,
+              "median": 12.129535000000004
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "filepath": "/home/daytona/softmaple/packages/bench/src/bench/long-offline-branch-merge.bench.ts",
+      "groups": [
+        {
+          "fullName": "src/bench/long-offline-branch-merge.bench.ts > long-offline-branch-merge",
+          "benchmarks": [
+            {
+              "id": "-787934323_0_0",
+              "name": "apply 2 branches of 1000 events each, then merge",
+              "rank": 1,
+              "rme": 14.505985628850373,
+              "samples": [],
+              "totalTime": 501.288181,
+              "min": 8.379105999999979,
+              "max": 30.897388999999976,
+              "hz": 73.80983913522589,
+              "period": 13.548329216216217,
+              "mean": 13.548329216216217,
+              "variance": 34.70023213533727,
+              "sd": 5.890690293619014,
+              "sem": 0.9684235188004637,
+              "df": 36,
+              "critical": 2.0294,
+              "moe": 1.965318689053661,
+              "p75": 16.64016300000003,
+              "p99": 30.897388999999976,
+              "p995": 30.897388999999976,
+              "p999": 30.897388999999976,
+              "sampleCount": 37,
+              "median": 10.040513999999916
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

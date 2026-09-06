@@ -12,6 +12,9 @@ export interface PersistenceMetrics {
   readonly portableSnapshotRestoreMs: number;
   readonly portableSnapshotMaterializeMs: number;
   readonly portableSnapshotBytes: number;
+  readonly portableSnapshotValidationReplays: number;
+  readonly portableSnapshotValidationEvents: number;
+  readonly portableSnapshotValidationLinearReplays: number;
   readonly nativeSnapshotEncodeMs: number;
   readonly nativeSnapshotDecodeMs: number;
   readonly nativeSnapshotRestoreMs: number;
@@ -52,6 +55,7 @@ export const measurePersistenceMetrics = (
     throw new Error(`${label}: portable snapshot load mismatch`);
   }
 
+  const portableStats = portableReplica.getReplayStats();
   const nativeCodec = new NativeSnapshotCodec();
   const nativeEncodeStartedAt = performance.now();
   const nativeBinary = nativeCodec.encode(replica.createNativeSnapshot());
@@ -79,6 +83,10 @@ export const measurePersistenceMetrics = (
     portableSnapshotRestoreMs: portableRestoredAt - portableDecodedAt,
     portableSnapshotMaterializeMs: portableMaterializedAt - portableRestoredAt,
     portableSnapshotBytes: portableBinary.byteLength,
+    portableSnapshotValidationReplays: portableStats.snapshotValidationReplays,
+    portableSnapshotValidationEvents: portableStats.snapshotValidationEvents,
+    portableSnapshotValidationLinearReplays:
+      portableStats.snapshotValidationLinearReplays,
     nativeSnapshotEncodeMs: nativeEncodedAt - nativeEncodeStartedAt,
     nativeSnapshotDecodeMs: nativeDecodedAt - nativeEncodedAt,
     nativeSnapshotRestoreMs: nativeRestoredAt - nativeDecodedAt,

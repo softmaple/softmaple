@@ -50,7 +50,7 @@ describe("CriticalCheckpointStore incremental validation", () => {
     const iterateChildren = vi.spyOn(graph, "iterateChildren");
     const validateSuffix = vi.spyOn(graph, "isInsertionSuffixDominatedBy");
 
-    expect(checkpoints.pickFor(graph)).toBe(checkpoint);
+    expect(checkpoints.pickFor(graph)?.version).toEqual(checkpoint.version);
     expect(iterateChildren).not.toHaveBeenCalled();
     expect(validateSuffix).toHaveBeenLastCalledWith(new Set(["alice:0"]), 1, 1);
     expect(
@@ -63,7 +63,7 @@ describe("CriticalCheckpointStore incremental validation", () => {
     });
 
     appendLinearSuffix(graph, firstTip, 1_025, 256);
-    expect(checkpoints.pickFor(graph)).toBe(checkpoint);
+    expect(checkpoints.pickFor(graph)?.version).toEqual(checkpoint.version);
     expect(iterateChildren).not.toHaveBeenCalled();
     expect(validateSuffix).toHaveBeenLastCalledWith(
       new Set(["alice:0"]),
@@ -139,7 +139,7 @@ describe("CriticalCheckpointStore incremental validation", () => {
     graph.addEvent(insertEvent("alice:1", new Set(["root:0", "alice:0"]), 2));
     graph.addEvent(insertEvent("alice:2", new Set(["root:0", "alice:1"]), 3));
 
-    expect(checkpoints.pickFor(graph)).toBe(checkpoint);
+    expect(checkpoints.pickFor(graph)?.version).toEqual(checkpoint.version);
   });
 
   it("validates restored checkpoints directly over packed parent offsets", () => {
@@ -189,7 +189,7 @@ describe("CriticalCheckpointStore incremental validation", () => {
 
     graph.addEvent(insertEvent("merge:0", new Set(["left:0", "right:0"]), 3));
     graph.addEvent(insertEvent("merge:1", new Set(["merge:0"]), 4));
-    expect(checkpoints.pickFor(graph)).toBe(checkpoint);
+    expect(checkpoints.pickFor(graph)?.version).toEqual(checkpoint.version);
 
     graph.addEvent(insertEvent("left:1", new Set(["left:0"]), 5));
     expect(checkpoints.pickFor(graph)).toBeNull();

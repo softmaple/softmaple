@@ -1,0 +1,326 @@
+[
+  {
+    "name": "concurrent-1-detailed-after-1",
+    "scenario": "concurrent",
+    "size": 1,
+    "mode": "detailed",
+    "version": "after",
+    "repeat": 1,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "concurrent",
+      "1",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "concurrent-1-detailed-before-1",
+    "scenario": "concurrent",
+    "size": 1,
+    "mode": "detailed",
+    "version": "before",
+    "repeat": 1,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "concurrent",
+      "1",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "concurrent-1-detailed-before-2",
+    "scenario": "concurrent",
+    "size": 1,
+    "mode": "detailed",
+    "version": "before",
+    "repeat": 2,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "concurrent",
+      "1",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "concurrent-1-detailed-after-2",
+    "scenario": "concurrent",
+    "size": 1,
+    "mode": "detailed",
+    "version": "after",
+    "repeat": 2,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "concurrent",
+      "1",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "concurrent-1-detailed-after-3",
+    "scenario": "concurrent",
+    "size": 1,
+    "mode": "detailed",
+    "version": "after",
+    "repeat": 3,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "concurrent",
+      "1",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "concurrent-1-detailed-before-3",
+    "scenario": "concurrent",
+    "size": 1,
+    "mode": "detailed",
+    "version": "before",
+    "repeat": 3,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "concurrent",
+      "1",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-detailed-after-1",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "detailed",
+    "version": "after",
+    "repeat": 1,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "linear",
+      "4096",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-detailed-before-1",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "detailed",
+    "version": "before",
+    "repeat": 1,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "linear",
+      "4096",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-detailed-before-2",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "detailed",
+    "version": "before",
+    "repeat": 2,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "linear",
+      "4096",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-detailed-after-2",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "detailed",
+    "version": "after",
+    "repeat": 2,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "linear",
+      "4096",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-detailed-after-3",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "detailed",
+    "version": "after",
+    "repeat": 3,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "linear",
+      "4096",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-detailed-before-3",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "detailed",
+    "version": "before",
+    "repeat": 3,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "linear",
+      "4096",
+      "detailed"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-causal-after-1",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "causal",
+    "version": "after",
+    "repeat": 1,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "linear",
+      "4096",
+      "causal"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-causal-before-1",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "causal",
+    "version": "before",
+    "repeat": 1,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "linear",
+      "4096",
+      "causal"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-causal-before-2",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "causal",
+    "version": "before",
+    "repeat": 2,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "linear",
+      "4096",
+      "causal"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-causal-after-2",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "causal",
+    "version": "after",
+    "repeat": 2,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "linear",
+      "4096",
+      "causal"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-causal-after-3",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "causal",
+    "version": "after",
+    "repeat": 3,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/home/daytona/softmaple/packages/eg-walker/dist/index.js",
+      "linear",
+      "4096",
+      "causal"
+    ],
+    "status": 0
+  },
+  {
+    "name": "linear-4096-causal-before-3",
+    "scenario": "linear",
+    "size": 4096,
+    "mode": "causal",
+    "version": "before",
+    "repeat": 3,
+    "command": [
+      "/usr/local/share/nvm/versions/node/v25.9.0/bin/node",
+      "--expose-gc",
+      "/tmp/eg-walker-after/replay-optimization.mjs",
+      "/tmp/eg-walker-before/dist/index.js",
+      "linear",
+      "4096",
+      "causal"
+    ],
+    "status": 0
+  }
+]

@@ -10,7 +10,8 @@
     "paper-bench": "node scripts/run-paper-bench.mjs",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "replay-bench": "node --expose-gc scripts/run-replay-bench.mjs"
   },
   "license": "MIT",
   "dependencies": {

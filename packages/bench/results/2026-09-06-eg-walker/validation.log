@@ -1,0 +1,136 @@
+block-model tests: exit=0
+
+ RUN  v4.1.10 /home/daytona/softmaple/packages/block-model
+
+
+ Test Files  2 passed (2)
+      Tests  28 passed (28)
+   Start at  02:10:10
+   Duration  1.04s (transform 724ms, setup 0ms, import 1.01s, tests 540ms, environment 0ms)
+
+$ vitest run --maxWorkers=2
+
+scoped lint/typecheck: exit=0
+
+   • Packages in scope: @softmaple/bench, @softmaple/block-model, @softmaple/eg-walker
+   • Running lint, typecheck in 3 packages
+   • Remote caching disabled
+
+@softmaple/eg-walker:typecheck: cache hit, replaying logs 7752c392f9ae12d9
+@softmaple/eg-walker:lint: cache hit, replaying logs 9a58eba6654421e6
+@softmaple/eg-walker:build: cache hit, replaying logs 27dca380e8fce532
+@softmaple/eg-walker:typecheck: $ tsc --noEmit
+@softmaple/eg-walker:lint: $ eslint .
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:lint: /home/daytona/softmaple/packages/eg-walker/src/engine/internals/insert-handler.ts
+@softmaple/eg-walker:lint:   134:7  warning  The value assigned to 'originRightPosition' is not used in subsequent statements  no-useless-assignment
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:lint: /home/daytona/softmaple/packages/eg-walker/src/engine/internals/segmented-placeholder.ts
+@softmaple/eg-walker:lint:   424:9  warning  The value assigned to 'visibility' is not used in subsequent statements  no-useless-assignment
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:lint: /home/daytona/softmaple/packages/eg-walker/src/test/convergence-property.test.ts
+@softmaple/eg-walker:lint:   41:10  warning  'OPERATION_TYPE' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:lint: /home/daytona/softmaple/packages/eg-walker/src/test/indexed-sequence-hot-paths.test.ts
+@softmaple/eg-walker:lint:   262:5  warning  'sequence' is never reassigned. Use 'const' instead  prefer-const
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:lint: /home/daytona/softmaple/packages/eg-walker/src/test/packed-critical-replay-plan.test.ts
+@softmaple/eg-walker:lint:   245:31  warning  The value assigned to 'timestamp' is not used in subsequent statements  no-useless-assignment
+@softmaple/eg-walker:build: $ tsup
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:lint: ✖ 5 problems (0 errors, 5 warnings)
+@softmaple/eg-walker:lint:
+@softmaple/eg-walker:build: CLI Building entry: src/anchors.ts, src/index.ts, src/internal.ts
+@softmaple/eg-walker:build: CLI Using tsconfig: tsconfig.json
+@softmaple/eg-walker:build: CLI tsup v8.5.1
+@softmaple/eg-walker:build: CLI Using tsup config: /home/daytona/softmaple/packages/eg-walker/tsup.config.ts
+@softmaple/eg-walker:build: CLI Target: es2022
+@softmaple/eg-walker:build: CLI Cleaning output folder
+@softmaple/eg-walker:build: ESM Build start
+@softmaple/eg-walker:build: ESM dist/anchors.js            10.11 KB
+@softmaple/eg-walker:build: ESM dist/index.js              127.06 KB
+@softmaple/eg-walker:build: ESM dist/chunk-2T5CRB6K.js     94.89 KB
+@softmaple/eg-walker:build: ESM dist/internal.js           29.52 KB
+@softmaple/eg-walker:build: ESM dist/chunk-IVSPTXZB.js     384.05 KB
+@softmaple/eg-walker:build: ESM dist/anchors.js.map        23.53 KB
+@softmaple/eg-walker:build: ESM dist/index.js.map          243.33 KB
+@softmaple/eg-walker:build: ESM dist/chunk-2T5CRB6K.js.map 192.56 KB
+@softmaple/eg-walker:build: ESM dist/internal.js.map       65.90 KB
+@softmaple/eg-walker:build: ESM dist/chunk-IVSPTXZB.js.map 750.92 KB
+@softmaple/eg-walker:build: ESM ⚡️ Build success in 314ms
+@softmaple/eg-walker:build: DTS Build start
+@softmaple/eg-walker:build: DTS ⚡️ Build success in 5348ms
+@softmaple/eg-walker:build: DTS dist/anchors.d.ts          5.47 KB
+@softmaple/eg-walker:build: DTS dist/index.d.ts            2.81 KB
+@softmaple/eg-walker:build: DTS dist/internal.d.ts         13.37 KB
+@softmaple/eg-walker:build: DTS dist/replica-CTKHCIar.d.ts 105.44 KB
+@softmaple/block-model:lint: cache miss, executing b623f56c71859630
+@softmaple/bench:lint: cache miss, executing f478cdf99c5e03f9
+@softmaple/block-model:typecheck: cache miss, executing 5e15233ad39009f4
+@softmaple/bench:typecheck: cache miss, executing 01f3f032639c4fa1
+@softmaple/bench:lint: $ eslint .
+@softmaple/block-model:typecheck: $ tsc --noEmit
+@softmaple/block-model:lint: $ eslint .
+@softmaple/bench:typecheck: $ tsc --noEmit
+@softmaple/bench:lint:
+@softmaple/bench:lint: /home/daytona/softmaple/packages/bench/src/bench/paper-bench.ts
+@softmaple/bench:lint:    731:5  warning  There is no `cause` attached to the symptom error being thrown  preserve-caught-error
+@softmaple/bench:lint:   1001:5  warning  There is no `cause` attached to the symptom error being thrown  preserve-caught-error
+@softmaple/bench:lint:   1386:5  warning  There is no `cause` attached to the symptom error being thrown  preserve-caught-error
+@softmaple/bench:lint:
+@softmaple/bench:lint: ✖ 3 problems (0 errors, 3 warnings)
+@softmaple/bench:lint:
+
+ Tasks:    7 successful, 7 total
+Cached:    3 cached, 7 total
+  Time:    3.338s
+
+• turbo 2.10.7
+
+replay-bench CLI: exit=0
+{"scenario":"checkpoint","size":64,"mode":"detailed","run":1,"events":120,"builderMs":0,"applyMs":5.994819999999947,"materializeMs":0.022399999999947795,"decodeMs":0,"restoreMs":0,"firstEditMs":0,"totalMs":6.017219999999895,"finalTextHash":"bdc1d16caf116b6a9dc6b1de8e032cebd7e040d7c658ef8b18a3b99422da93c7","finalTextValidated":false,"stats":{"snapshotValidationReplays":0,"snapshotValidationEvents":0,"snapshotValidationLinearReplays":0,"fullReplays":0,"partialReplays":1,"incrementalApplies":64,"engineRetreats":19,"engineAdvances":0,"checkpointCount":32,"sequenceRecordCount":22,"peakSequenceRecordCount":22,"criticalCheckpointHits":1,"criticalCheckpointMisses":0,"lastReplaySource":"partial","replayCacheEvents":56,"replayCacheBytes":7664,"replayCacheCoverageChecks":0,"textBufferNodeCount":1,"checkpointUniqueTextBytes":3104,"integrationProbeCount":0,"fugueComparisons":69,"fugueMarkerOperations":66,"fugueRotations":15,"fugueRebuilds":0,"sequenceTreeOperations":1220},"memoryBefore":{"rss":119910400,"heapTotal":40595456,"heapUsed":28510176,"external":15231980,"arrayBuffers":11331479},"memoryAfter":{"rss":120434688,"heapTotal":40595456,"heapUsed":28983840,"external":13696120,"arrayBuffers":11332791},"maxRssKiB":117612}
+{"scenario":"checkpoint","size":64,"mode":"detailed","run":2,"events":120,"builderMs":0,"applyMs":1.3271070000000122,"materializeMs":0.0015599999999835745,"decodeMs":0,"restoreMs":0,"firstEditMs":0,"totalMs":1.3286669999999958,"finalTextHash":"bdc1d16caf116b6a9dc6b1de8e032cebd7e040d7c658ef8b18a3b99422da93c7","finalTextValidated":false,"stats":{"snapshotValidationReplays":0,"snapshotValidationEvents":0,"snapshotValidationLinearReplays":0,"fullReplays":0,"partialReplays":1,"incrementalApplies":64,"engineRetreats":19,"engineAdvances":0,"checkpointCount":32,"sequenceRecordCount":22,"peakSequenceRecordCount":22,"criticalCheckpointHits":1,"criticalCheckpointMisses":0,"lastReplaySource":"partial","replayCacheEvents":56,"replayCacheBytes":7664,"replayCacheCoverageChecks":0,"textBufferNodeCount":1,"checkpointUniqueTextBytes":3104,"integrationProbeCount":0,"fugueComparisons":69,"fugueMarkerOperations":66,"fugueRotations":15,"fugueRebuilds":0,"sequenceTreeOperations":1220},"memoryBefore":{"rss":120434688,"heapTotal":40595456,"heapUsed":28982608,"external":13696120,"arrayBuffers":11332791},"memoryAfter":{"rss":120958976,"heapTotal":40595456,"heapUsed":29011176,"external":13697432,"arrayBuffers":11332791},"maxRssKiB":118124}
+{"scenario":"checkpoint","size":64,"mode":"detailed","run":3,"events":120,"builderMs":0,"applyMs":1.0041579999999612,"materializeMs":0.0013900000000148793,"decodeMs":0,"restoreMs":0,"firstEditMs":0,"totalMs":1.0055479999999761,"finalTextHash":"bdc1d16caf116b6a9dc6b1de8e032cebd7e040d7c658ef8b18a3b99422da93c7","finalTextValidated":false,"stats":{"snapshotValidationReplays":0,"snapshotValidationEvents":0,"snapshotValidationLinearReplays":0,"fullReplays":0,"partialReplays":1,"incrementalApplies":64,"engineRetreats":19,"engineAdvances":0,"checkpointCount":32,"sequenceRecordCount":22,"peakSequenceRecordCount":22,"criticalCheckpointHits":1,"criticalCheckpointMisses":0,"lastReplaySource":"partial","replayCacheEvents":56,"replayCacheBytes":7664,"replayCacheCoverageChecks":0,"textBufferNodeCount":1,"checkpointUniqueTextBytes":3104,"integrationProbeCount":0,"fugueComparisons":69,"fugueMarkerOperations":66,"fugueRotations":15,"fugueRebuilds":0,"sequenceTreeOperations":1220},"memoryBefore":{"rss":120958976,"heapTotal":40595456,"heapUsed":29007312,"external":13696120,"arrayBuffers":11332791},"memoryAfter":{"rss":122531840,"heapTotal":40857600,"heapUsed":29079712,"external":13697432,"arrayBuffers":11332791},"maxRssKiB":119660}
+{"scenario":"checkpoint","size":64,"mode":"detailed","run":4,"events":120,"builderMs":0,"applyMs":1.0712090000000103,"materializeMs":0.0016889999999989413,"decodeMs":0,"restoreMs":0,"firstEditMs":0,"totalMs":1.0728980000000092,"finalTextHash":"bdc1d16caf116b6a9dc6b1de8e032cebd7e040d7c658ef8b18a3b99422da93c7","finalTextValidated":false,"stats":{"snapshotValidationReplays":0,"snapshotValidationEvents":0,"snapshotValidationLinearReplays":0,"fullReplays":0,"partialReplays":1,"incrementalApplies":64,"engineRetreats":19,"engineAdvances":0,"checkpointCount":32,"sequenceRecordCount":22,"peakSequenceRecordCount":22,"criticalCheckpointHits":1,"criticalCheckpointMisses":0,"lastReplaySource":"partial","replayCacheEvents":56,"replayCacheBytes":7664,"replayCacheCoverageChecks":0,"textBufferNodeCount":1,"checkpointUniqueTextBytes":3104,"integrationProbeCount":0,"fugueComparisons":69,"fugueMarkerOperations":66,"fugueRotations":15,"fugueRebuilds":0,"sequenceTreeOperations":1220},"memoryBefore":{"rss":122531840,"heapTotal":40857600,"heapUsed":29072344,"external":13696120,"arrayBuffers":11332791},"memoryAfter":{"rss":122531840,"heapTotal":40857600,"heapUsed":29429736,"external":13697432,"arrayBuffers":11332791},"maxRssKiB":119660}
+{"scenario":"checkpoint","size":64,"mode":"detailed","run":5,"events":120,"builderMs":0,"applyMs":0.9772490000000289,"materializeMs":0.002020000000015898,"decodeMs":0,"restoreMs":0,"firstEditMs":0,"totalMs":0.9792690000000448,"finalTextHash":"bdc1d16caf116b6a9dc6b1de8e032cebd7e040d7c658ef8b18a3b99422da93c7","finalTextValidated":false,"stats":{"snapshotValidationReplays":0,"snapshotValidationEvents":0,"snapshotValidationLinearReplays":0,"fullReplays":0,"partialReplays":1,"incrementalApplies":64,"engineRetreats":19,"engineAdvances":0,"checkpointCount":32,"sequenceRecordCount":22,"peakSequenceRecordCount":22,"criticalCheckpointHits":1,"criticalCheckpointMisses":0,"lastReplaySource":"partial","replayCacheEvents":56,"replayCacheBytes":7664,"replayCacheCoverageChecks":0,"textBufferNodeCount":1,"checkpointUniqueTextBytes":3104,"integrationProbeCount":0,"fugueComparisons":69,"fugueMarkerOperations":66,"fugueRotations":15,"fugueRebuilds":0,"sequenceTreeOperations":1220},"memoryBefore":{"rss":122531840,"heapTotal":40857600,"heapUsed":29087920,"external":13696120,"arrayBuffers":11332791},"memoryAfter":{"rss":122531840,"heapTotal":41119744,"heapUsed":29143744,"external":13697432,"arrayBuffers":11333559},"maxRssKiB":119660}
+$ node --expose-gc scripts/run-replay-bench.mjs /home/daytona/softmaple/packages/eg-walker/dist/index.js checkpoint 64 detailed
+
+diff whitespace: exit=0
+
+eg-walker unit tests
+$ vitest --run --maxWorkers=2
+
+ RUN  v4.1.10 /home/daytona/softmaple/packages/eg-walker
+
+
+ Test Files  92 passed (92)
+      Tests  743 passed (743)
+   Start at  01:04:55
+   Duration  23.83s (transform 1.91s, setup 0ms, import 6.51s, tests 31.09s, environment 7ms)
+
+
+reference conformance
+$ vitest run --config vitest.reference.config.ts
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vitest.config" without a file extension (vitest.reference.config.ts:3:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /home/daytona/softmaple/packages/eg-walker
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  01:07:14
+   Duration  3.23s (transform 392ms, setup 0ms, import 509ms, tests 2.62s, environment 0ms)
+
+
+bench unit tests
+$ vitest --run --maxWorkers=2
+
+ RUN  v4.1.10 /home/daytona/softmaple/packages/bench
+
+
+ Test Files  8 passed (8)
+      Tests  44 passed (44)
+   Start at  01:09:15
+   Duration  1.39s (transform 776ms, setup 0ms, import 1.12s, tests 828ms, environment 1ms)

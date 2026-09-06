@@ -15,6 +15,11 @@
     },
     "typecheck": {
       "dependsOn": ["^build"]
+    },
+    "replay-bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
     }
   }
 }

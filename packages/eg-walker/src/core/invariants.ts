@@ -268,3 +268,49 @@ export function topologicalSort(
 
   return sorted;
 }
+
+/** Minimal document view used for index and Unicode boundary validation. */
+export interface Utf16DocumentView {
+  readonly length: number;
+  readonly hasSurrogateCodeUnits: boolean;
+  codeUnitAt(index: number): number | undefined;
+}
+
+export const assertDocumentIndex = (
+  index: number,
+  allowEnd: boolean,
+  document: Utf16DocumentView,
+): void => {
+  if (!Number.isSafeInteger(index)) {
+    throw new Error(`Index ${index} must be a safe integer`);
+  }
+  const max = allowEnd ? document.length : document.length - 1;
+  if (index < 0 || index > max) {
+    throw new Error(
+      `Index ${index} out of bounds [0, ${max}] for document of length ${document.length}`,
+    );
+  }
+};
+
+export const assertCodePointBoundary = (
+  index: number,
+  document: Utf16DocumentView,
+): void => {
+  if (
+    index <= 0 ||
+    index >= document.length ||
+    !document.hasSurrogateCodeUnits
+  ) {
+    return;
+  }
+  const high = document.codeUnitAt(index - 1)!;
+  if (high < 0xd800 || high > 0xdbff) {
+    return;
+  }
+  const low = document.codeUnitAt(index)!;
+  if (low >= 0xdc00 && low <= 0xdfff) {
+    throw new Error(
+      `Index ${index} falls between surrogate halves of a single code point`,
+    );
+  }
+};

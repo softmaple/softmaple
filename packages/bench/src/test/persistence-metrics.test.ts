@@ -32,9 +32,18 @@ describe("measurePersistenceMetrics", () => {
     const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
 
     try {
-      measurePersistenceMetrics(replica, replica.getText(), "persisted");
+      const metrics = measurePersistenceMetrics(
+        replica,
+        replica.getText(),
+        "persisted",
+      );
 
-      expect(generated).toHaveBeenCalled();
+      expect(metrics.portableSnapshotValidationReplays).toBe(1);
+      expect(metrics.portableSnapshotValidationLinearReplays).toBe(1);
+      expect(metrics.portableSnapshotValidationEvents).toBe(
+        replica.exportEventGraph().length,
+      );
+      expect(generated).not.toHaveBeenCalled();
     } finally {
       generated.mockRestore();
     }

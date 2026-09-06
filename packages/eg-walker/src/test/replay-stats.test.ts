@@ -80,6 +80,8 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
         });
       }
 
+      expect(api.getReplayStats().replayCacheEvents).toBeGreaterThan(4_096);
+      api.insert(api.getText().length, "!"); // A critical cut releases the large cache.
       const after = api.getReplayStats();
       expect(after.replayCacheEvents).toBe(0);
       expect(after.sequenceRecordCount).toBe(0);
@@ -188,7 +190,7 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
       expect(checkpoints.hits).toBe(0);
     });
 
-    it("reports the fresh engine counters after a closed-batch partial replay", () => {
+    it("reports advancing engine counters when a closed batch reuses the cache", () => {
       const api = new EgWalkerReplica("r1");
       const root: GraphEvent = {
         id: "root:0",
@@ -213,8 +215,9 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
       api.applyRemoteEvents([sibling("carol:0", "c"), sibling("dave:0", "d")]);
       const after = api.getReplayStats();
 
-      expect(after.partialReplays).toBe(before.partialReplays + 1);
-      expect(after.lastReplaySource).toBe(REPLAY_SOURCE.PARTIAL);
+      expect(after.partialReplays).toBe(before.partialReplays);
+      expect(after.incrementalApplies).toBe(before.incrementalApplies + 2);
+      expect(after.lastReplaySource).toBe(REPLAY_SOURCE.INCREMENTAL);
       expect(after.engineRetreats).toBeGreaterThan(before.engineRetreats);
       expect(after.sequenceTreeOperations).toBeGreaterThan(
         before.sequenceTreeOperations,

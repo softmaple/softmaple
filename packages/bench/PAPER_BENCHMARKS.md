@@ -799,3 +799,16 @@ Next:
    bounded samples but grows too quickly past the 300-txn smoke test.
 4. Keep `--memory` in the benchmark loop for future snapshot/runtime work; S3
    decode heap and restore heap are the most useful regression signals.
+
+### Portable validation counters
+
+`portableSnapshotValidationReplays`, `portableSnapshotValidationEvents` and
+`portableSnapshotValidationLinearReplays` expose the validation performed
+inside lazy graph materialization. The corresponding replica counters are
+`snapshotValidationReplays`, `snapshotValidationEvents` and
+`snapshotValidationLinearReplays`. They count successful validations performed
+by that replica, separately from `fullReplays`/`partialReplays`; they are not
+persisted and are not rolled back when a later edit fails. A cold copied
+portable payload validates its complete history once. Exact packed chains use
+the same coalesced rope replay as regular linear graph loading; concurrent
+histories still use the engine. Both paths check the complete final text.

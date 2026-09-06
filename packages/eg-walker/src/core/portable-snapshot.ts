@@ -1,3 +1,5 @@
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
+import { replayPackedLinear } from "./internals/replay-packed-linear";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import type { EventGraph } from "../graph/event-graph";
@@ -201,6 +203,7 @@ export const validatePortableSnapshotHeaderOnly = (
 
 export const createPortableSnapshotGraphSource = (
   snapshot: PortableSnapshot,
+  onValidation?: (eventCount: number, linear: boolean) => void,
 ): (() => EventGraph) => {
   let graph: EventGraph | null = null;
   return () => {
@@ -210,6 +213,7 @@ export const createPortableSnapshotGraphSource = (
         decoded,
         snapshot,
         matchingProof(snapshot) === null,
+        onValidation,
       );
       graph = decoded;
     }
@@ -221,6 +225,7 @@ const validatePortableSnapshotGraph = (
   graph: EventGraph,
   snapshot: PortableSnapshot,
   validateMaterializedText: boolean,
+  onValidation?: (eventCount: number, linear: boolean) => void,
 ): void => {
   try {
     if (graph.getEventCount() !== snapshot.eventCount) {
@@ -231,17 +236,27 @@ const validatePortableSnapshotGraph = (
     }
     assertPortableSnapshotMetadata(graph.getMetadata());
     if (validateMaterializedText) {
-      const eventOrder = graph.getBranchPreservingTopologicalOrder();
-      const generated = new EgWalkerEngine().generate(
-        eventOrder,
-        snapshot.initialText,
-        { eventGraph: graph, eventOrder },
-      );
-      if (generated.text !== snapshot.text) {
+      const packed = graph.getPackedLinearReplayView();
+      let text: string;
+      if (packed !== null) {
+        text = replayPackedLinear(
+          packed,
+          PersistentUtf16Rope.from(snapshot.initialText),
+        ).toString();
+      } else {
+        const eventOrder = graph.getBranchPreservingTopologicalOrder();
+        text = new EgWalkerEngine().generate(eventOrder, snapshot.initialText, {
+          eventGraph: graph,
+          eventOrder,
+          collectTransformedOperations: false,
+        }).text;
+      }
+      if (text !== snapshot.text) {
         throw new Error(
           "Invalid portable snapshot: materialized text mismatch",
         );
       }
+      onValidation?.(graph.getEventCount(), packed !== null);
     }
   } finally {
     graph.releaseTraversalCaches();

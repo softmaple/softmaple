@@ -210,6 +210,9 @@ interface BenchResult {
   readonly portableSnapshotRestoreMs: number;
   readonly portableSnapshotMaterializeMs: number;
   readonly portableSnapshotBytes: number;
+  readonly portableSnapshotValidationReplays: number;
+  readonly portableSnapshotValidationEvents: number;
+  readonly portableSnapshotValidationLinearReplays: number;
   readonly nativeSnapshotEncodeMs: number;
   readonly nativeSnapshotDecodeMs: number;
   readonly nativeSnapshotRestoreMs: number;
@@ -550,6 +553,9 @@ const printResult = (result: BenchResult): void => {
       `portableSnapshotRestoreMs=${formatNumber(result.portableSnapshotRestoreMs)}`,
       `portableSnapshotMaterializeMs=${formatNumber(result.portableSnapshotMaterializeMs)}`,
       `portableSnapshotBytes=${result.portableSnapshotBytes}`,
+      `portableSnapshotValidationReplays=${result.portableSnapshotValidationReplays}`,
+      `portableSnapshotValidationEvents=${result.portableSnapshotValidationEvents}`,
+      `portableSnapshotValidationLinearReplays=${result.portableSnapshotValidationLinearReplays}`,
       `nativeSnapshotEncodeMs=${formatNumber(result.nativeSnapshotEncodeMs)}`,
       `nativeSnapshotDecodeMs=${formatNumber(result.nativeSnapshotDecodeMs)}`,
       `nativeSnapshotRestoreMs=${formatNumber(result.nativeSnapshotRestoreMs)}`,

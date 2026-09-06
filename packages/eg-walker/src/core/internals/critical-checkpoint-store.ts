@@ -18,10 +18,10 @@ export type CriticalCheckpoint = ReplayCheckpoint & {
    */
   readonly eventCount: number;
   /** Runtime-only cursor; omitted from native and portable persistence. */
-  criticalityValidation?: {
-    validatedEventCount: number;
-    invalid: boolean;
-    requiresFullValidation: boolean;
+  readonly criticalityValidation?: {
+    readonly validatedEventCount: number;
+    readonly invalid: boolean;
+    readonly requiresFullValidation: boolean;
   };
 };
 
@@ -78,28 +78,14 @@ export class CriticalCheckpointStore {
 
   snapshotForTransaction(): CriticalCheckpointStoreSnapshot {
     return {
-      checkpoints: this.checkpoints.map((checkpoint) => ({
-        ...checkpoint,
-        version: new Set(checkpoint.version),
-        criticalityValidation:
-          checkpoint.criticalityValidation === undefined
-            ? undefined
-            : { ...checkpoint.criticalityValidation },
-      })),
+      checkpoints: this.checkpoints,
       hits: this.hitCount,
       misses: this.missCount,
     };
   }
 
   restoreTransaction(snapshot: CriticalCheckpointStoreSnapshot): void {
-    this.checkpoints = snapshot.checkpoints.map((checkpoint) => ({
-      ...checkpoint,
-      version: new Set(checkpoint.version),
-      criticalityValidation:
-        checkpoint.criticalityValidation === undefined
-          ? undefined
-          : { ...checkpoint.criticalityValidation },
-    }));
+    this.checkpoints = snapshot.checkpoints;
     this.hitCount = snapshot.hits;
     this.missCount = snapshot.misses;
   }
@@ -177,10 +163,13 @@ export class CriticalCheckpointStore {
         !validation.invalid &&
         !validation.requiresFullValidation
       ) {
-        validation.validatedEventCount = Math.max(
-          validation.validatedEventCount,
-          validatedEventCount,
-        );
+        return this.updateValidation(last, {
+          ...validation,
+          validatedEventCount: Math.max(
+            validation.validatedEventCount,
+            validatedEventCount,
+          ),
+        });
       }
       return last;
     }
@@ -220,11 +209,11 @@ export class CriticalCheckpointStore {
     graph: EventGraph,
     candidate: CriticalCheckpoint,
   ): boolean {
-    const validation = (candidate.criticalityValidation ??= {
+    const validation = candidate.criticalityValidation ?? {
       validatedEventCount: candidate.eventCount,
       invalid: false,
       requiresFullValidation: false,
-    });
+    };
     if (validation.invalid) {
       return false;
     }
@@ -235,7 +224,7 @@ export class CriticalCheckpointStore {
       untrusted &&
       graph.expandVersion(candidate.version).size !== candidate.eventCount
     ) {
-      validation.invalid = true;
+      this.updateValidation(candidate, { ...validation, invalid: true });
       return false;
     }
     if (
@@ -250,17 +239,33 @@ export class CriticalCheckpointStore {
       // keeping every internally recorded canonical frontier on the cursor
       // path.
       if (untrusted && this.analyzer.isCritical(graph, candidate.version)) {
-        validation.validatedEventCount = eventCount;
+        this.updateValidation(candidate, {
+          ...validation,
+          validatedEventCount: eventCount,
+        });
         return true;
       }
-      validation.invalid = true;
+      this.updateValidation(candidate, { ...validation, invalid: true });
       return false;
     }
-    if (untrusted) {
-      validation.requiresFullValidation = false;
-    }
-    validation.validatedEventCount = eventCount;
+    this.updateValidation(candidate, {
+      validatedEventCount: eventCount,
+      invalid: false,
+      requiresFullValidation: false,
+    });
     return true;
+  }
+
+  /** Copy only changed cursors; transaction snapshots share immutable roots. */
+  private updateValidation(
+    checkpoint: CriticalCheckpoint,
+    validation: NonNullable<CriticalCheckpoint["criticalityValidation"]>,
+  ): CriticalCheckpoint {
+    const updated = { ...checkpoint, criticalityValidation: validation };
+    this.checkpoints = this.checkpoints.map((entry) =>
+      entry === checkpoint ? updated : entry,
+    );
+    return updated;
   }
 
   private append(checkpoint: CriticalCheckpoint): void {

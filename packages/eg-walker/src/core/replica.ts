@@ -1015,8 +1015,10 @@ export class EgWalkerReplica {
   /**
    * Advance a retained engine within one bounded receive transaction. The graph
    * already contains the closed batch; publish its frontier/checkpoint only
-   * after all effects have been applied. On a coverage/budget miss the caller
-   * replays the complete batch once, never once per remaining event.
+   * after all effects have been applied. On a coverage/size miss the caller
+   * replays the complete batch once, never once per remaining event. Byte
+   * pressure is decided after the batch lands: eviction releases the oversized
+   * cache and keeps the applied document instead of replaying it a second time.
    */
   private tryApplyWarmBatch(
     events: ReadonlyArray<GraphEvent>,
@@ -1033,7 +1035,6 @@ export class EgWalkerReplica {
     this.documentCache = null;
     this.replayCacheEvents += events.length;
     this.refreshReplayCacheMetrics();
-    if (this.replayCacheBytes > MAX_REPLAY_CACHE_BYTES) return false;
     this.currentVersion = graph.getFrontier();
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;

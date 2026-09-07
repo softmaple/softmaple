@@ -8,7 +8,7 @@ import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-sidebar";
 import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
-import { WorkspaceMobileSidebar } from "@/modules/workspaces/workspace-mobile-sidebar";
+import { WorkspaceMobileNav } from "@/modules/workspaces/workspace-mobile-nav";
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
@@ -58,18 +58,6 @@ export default async function WorkspaceLayoutPage(props: Props) {
 
   return (
     <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background md:flex-row">
-      <WorkspaceMobileSidebar
-        canEdit={canEdit}
-        documents={documents}
-        workspaceSlug={workspaceSlug}
-      >
-        <WorkspaceDropdown
-          compact
-          workspaceSlug={workspaceSlug}
-          workspaces={workspaces}
-        />
-      </WorkspaceMobileSidebar>
-
       <WorkspaceDesktopSidebar
         canEdit={canEdit}
         documents={documents}
@@ -84,6 +72,23 @@ export default async function WorkspaceLayoutPage(props: Props) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Suspense>{children}</Suspense>
       </div>
+
+      {/*
+        Last in the column so the mobile bar lands at the bottom of the shell
+        and the content keeps the reading order; `md:hidden` retires it once
+        the desktop sidebar takes over.
+      */}
+      <WorkspaceMobileNav
+        canEdit={canEdit}
+        documents={documents}
+        workspaceSlug={workspaceSlug}
+      >
+        <WorkspaceDropdown
+          compact
+          workspaceSlug={workspaceSlug}
+          workspaces={workspaces}
+        />
+      </WorkspaceMobileNav>
     </div>
   );
 }

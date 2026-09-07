@@ -17,14 +17,19 @@ import { SoftmapleWordmark } from "@/components/BrandMark";
 import { WorkspaceDocsList } from "@/modules/workspaces/workspace-docs-list";
 import { WorkspaceNavigation } from "@/modules/workspaces/workspace-navigation";
 
-export type WorkspaceMobileSidebarProps = {
+export type WorkspaceMobileNavProps = {
   readonly canEdit: boolean;
   readonly children?: ReactNode;
   readonly documents: ReadonlyArray<DocsType["Row"]>;
   readonly workspaceSlug: string;
 };
 
-export const WorkspaceMobileSidebar: FC<WorkspaceMobileSidebarProps> = ({
+/**
+ * Mobile workspace chrome: a bar pinned to the bottom of the shell whose menu
+ * button opens the navigation tree as a bottom sheet, so the trigger and the
+ * surface it reveals both sit under the thumb rather than at arm's reach.
+ */
+export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
   canEdit,
   children,
   documents,
@@ -43,28 +48,47 @@ export const WorkspaceMobileSidebar: FC<WorkspaceMobileSidebarProps> = ({
 
   return (
     <Sheet onOpenChange={setOpen} open={open}>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur md:hidden">
-        <SheetTrigger asChild>
-          <Button
-            aria-label="Open workspace navigation"
-            className="shrink-0"
-            size="icon-sm"
-            variant="outline"
-          >
-            <Menu />
-          </Button>
-        </SheetTrigger>
-        <div className="min-w-0 flex-1">{children}</div>
-      </header>
+      {/*
+        The bar is a flex sibling of the scrolling content rather than a fixed
+        overlay, so the shell reserves its height and nothing hides behind it.
+      */}
+      <nav
+        aria-label="Workspace"
+        className="shrink-0 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+      >
+        {/*
+          Three tracks rather than a flex row: the empty trailing track
+          balances the workspace switcher, so the menu button is centered
+          against the viewport instead of against whatever space is left over.
+          The 0 minimum keeps a long workspace title from stealing that space.
+        */}
+        <div className="grid h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3">
+          <div className="min-w-0">{children}</div>
+          <SheetTrigger asChild>
+            <Button
+              aria-label="Open workspace navigation"
+              size="icon-lg"
+              variant="outline"
+            >
+              <Menu />
+            </Button>
+          </SheetTrigger>
+        </div>
+      </nav>
+      {/*
+        A definite height (not just the side's cap) gives the document list a
+        resolvable flex basis, so it scrolls inside the sheet instead of
+        stretching it. Scrolling stays with that list, hence overflow-y-hidden.
+      */}
       <SheetContent
-        className="flex h-dvh min-h-0 w-[min(20rem,90vw)] flex-col gap-0 p-0"
-        side="left"
+        className="flex h-[85dvh] min-h-0 flex-col gap-0 overflow-y-hidden"
+        side="bottom"
       >
         <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
         <SheetDescription className="sr-only">
           Browse workspace sections and documents.
         </SheetDescription>
-        <div className="shrink-0 border-b p-4">
+        <div className="shrink-0 border-b px-4 pb-3 pt-2">
           <Link
             className="inline-flex rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
             href="/dashboard"

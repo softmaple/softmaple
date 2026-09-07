@@ -131,6 +131,20 @@ export interface CreateNativeSnapshotOptions {
 const REPLAY_CACHE_CRITICAL_RELEASE_EVENTS = 4_096;
 const MAX_WARM_BATCH_EVENTS = 4_096;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
+/**
+ * Ceiling for the adaptive replay-cache budget.
+ *
+ * The base budget is sized for ordinary editing. A concurrent interval that
+ * legitimately spans a whole document needs one sequence record per code unit,
+ * so on merge-heavy histories the base budget can sit *below* the interval's
+ * intrinsic floor: the engine is refused, the next event rebuilds the same
+ * interval from scratch, and the replica thrashes one full replay per batch
+ * while never actually holding less memory. When that happens the budget grows
+ * (see {@link EgWalkerReplica.growReplayCacheBudgetAfterThrash}); this ceiling
+ * stops the growth so a peer streaming an unboundedly large concurrent
+ * interval still releases its cache.
+ */
+const MAX_REPLAY_CACHE_BUDGET_BYTES = 8 * MAX_REPLAY_CACHE_BYTES;
 const ESTIMATED_REPLAY_RECORD_BYTES = 256;
 const ESTIMATED_DELETE_TARGET_BYTES = 32;
 // Keep a short causally-linear gap inside one obsolete nonlinear replay
@@ -249,6 +263,10 @@ export class EgWalkerReplica {
   private snapshotValidationStats = { replays: 0, events: 0, linearReplays: 0 };
   private replayCacheEvents = 0;
   private replayCacheBytes = 0;
+  /** Adaptive budget; grows only after a refusal forced a full rebuild. */
+  private replayCacheBudgetBytes = MAX_REPLAY_CACHE_BYTES;
+  /** True while a byte-budget refusal has not yet been paid for by a replay. */
+  private releasedCacheAtBudget = false;
   private engineRecoveryAnchor: EngineRecoveryAnchor | null = null;
   private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
@@ -1588,6 +1606,10 @@ export class EgWalkerReplica {
 
   private fullReplay(): void {
     const graph = this.ensureEventGraph();
+    // A rebuild from scratch is exactly the cost a released cache was supposed
+    // to avoid. Widen the budget before this replay picks its retention so the
+    // interval can stay warm next time instead of thrashing.
+    this.growReplayCacheBudgetAfterThrash();
     this.captureEnginePeakBeforeSwap();
     if (graph.isExactLinearHistory()) {
       this.fullReplayLinearGraph(graph);
@@ -1670,9 +1692,8 @@ export class EgWalkerReplica {
         if (
           isLastSection &&
           section.endFrontier.size > 1 &&
-          canRetainReplayEngine(
+          this.canRetainReplayEngineWithinBudget(
             section.events.length,
-            this.documentBuffer,
             generated.stats,
           )
         ) {
@@ -1834,9 +1855,8 @@ export class EgWalkerReplica {
         if (
           isLastSection &&
           endVersion.size > 1 &&
-          canRetainReplayEngine(
+          this.canRetainReplayEngineWithinBudget(
             sectionEventCount,
-            this.documentBuffer,
             generated.stats,
           )
         ) {
@@ -2510,6 +2530,42 @@ export class EgWalkerReplica {
     };
   }
 
+  /**
+   * Widen the replay-cache budget when a refusal cost a full rebuild.
+   *
+   * A release is only worth its price when the state can be rebuilt cheaply.
+   * If the previous release happened at the byte budget and the very next thing
+   * the replica had to do was replay from scratch, the budget was too small for
+   * this history: nothing was saved and a whole-graph replay was paid for.
+   */
+  private growReplayCacheBudgetAfterThrash(): void {
+    if (!this.releasedCacheAtBudget) {
+      return;
+    }
+    this.releasedCacheAtBudget = false;
+    this.replayCacheBudgetBytes = Math.min(
+      this.replayCacheBudgetBytes * 2,
+      MAX_REPLAY_CACHE_BUDGET_BYTES,
+    );
+  }
+
+  /** Retention check against the adaptive budget, flagging a refusal. */
+  private canRetainReplayEngineWithinBudget(
+    eventCount: number,
+    stats: EngineStats,
+  ): boolean {
+    const retainable = canRetainReplayEngine(
+      eventCount,
+      this.documentBuffer,
+      stats,
+      this.replayCacheBudgetBytes,
+    );
+    if (!retainable) {
+      this.releasedCacheAtBudget = true;
+    }
+    return retainable;
+  }
+
   private refreshReplayCacheMetrics(): void {
     if (this.engine === null) {
       this.replayCacheEvents = 0;
@@ -2525,12 +2581,16 @@ export class EgWalkerReplica {
   }
 
   private evictReplayCacheIfNeeded(): void {
+    const overBudget = this.replayCacheBytes > this.replayCacheBudgetBytes;
     if (
-      this.replayCacheBytes <= MAX_REPLAY_CACHE_BYTES &&
+      !overBudget &&
       (this.replayCacheEvents <= REPLAY_CACHE_CRITICAL_RELEASE_EVENTS ||
         this.currentVersion.size > 1)
     ) {
       return;
+    }
+    if (overBudget && this.engine !== null) {
+      this.releasedCacheAtBudget = true;
     }
     this.captureEnginePeakBeforeSwap();
     this.engine = null;
@@ -2908,11 +2968,12 @@ const canRetainReplayEngine = (
   eventCount: number,
   document: PersistentUtf16Rope,
   stats: EngineStats,
+  budgetBytes: number,
 ): boolean =>
   document.length * 2 +
     stats.sequenceRecordCount * ESTIMATED_REPLAY_RECORD_BYTES +
     eventCount * ESTIMATED_DELETE_TARGET_BYTES <=
-  MAX_REPLAY_CACHE_BYTES;
+  budgetBytes;
 
 const mergeEngineStats = (
   aggregate: EngineStats | null,

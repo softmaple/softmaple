@@ -271,11 +271,56 @@ export class CriticalCheckpointStore {
   private append(checkpoint: CriticalCheckpoint): void {
     const next = [...this.checkpoints, checkpoint];
     this.checkpoints =
-      next.length <= MAX_RETAINED_CHECKPOINTS
-        ? next
-        : next.slice(next.length - MAX_RETAINED_CHECKPOINTS);
+      next.length <= MAX_RETAINED_CHECKPOINTS ? next : thinCheckpoints(next);
   }
 }
+
+/**
+ * Thin the retained ladder instead of keeping the newest cuts.
+ *
+ * `maybeAdvance` records one checkpoint per incrementally applied event, so a
+ * plain "keep the newest `MAX_RETAINED_CHECKPOINTS`" window collapses into 32
+ * consecutive cuts: the store ends up covering ~31 events of history and every
+ * divergence reaching further back misses and falls into a full replay.
+ *
+ * Evict the interior cut whose removal costs least instead. Cost is the gap the
+ * removal opens, relative to how far that cut sits behind the head: a wide gap
+ * deep in history is cheap, the same gap next to the head is not. Repeated
+ * application keeps recent cuts dense while old gaps grow geometrically, so a
+ * divergence at depth `d` still finds a checkpoint within a small factor of `d`.
+ * The oldest and newest entries are never evicted — they anchor the ladder.
+ */
+const thinCheckpoints = (
+  checkpoints: ReadonlyArray<CriticalCheckpoint>,
+): ReadonlyArray<CriticalCheckpoint> => {
+  const last = checkpoints[checkpoints.length - 1];
+  if (checkpoints.length < 3 || last === undefined) {
+    return checkpoints.slice(checkpoints.length - MAX_RETAINED_CHECKPOINTS);
+  }
+  const head = last.eventCount;
+  let victim = 1;
+  let lowestCost = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < checkpoints.length - 1; index++) {
+    const previous = checkpoints[index - 1];
+    const current = checkpoints[index];
+    const following = checkpoints[index + 1];
+    if (
+      previous === undefined ||
+      current === undefined ||
+      following === undefined
+    ) {
+      continue;
+    }
+    const gap = following.eventCount - previous.eventCount;
+    const depth = head - current.eventCount + 1;
+    const cost = gap / depth;
+    if (cost < lowestCost) {
+      lowestCost = cost;
+      victim = index;
+    }
+  }
+  return checkpoints.filter((_, index) => index !== victim);
+};
 
 const versionsEqual = (
   left: ReadonlySet<EventId>,

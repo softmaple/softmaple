@@ -55,6 +55,21 @@ describe("search keyboard shortcuts", () => {
     expect(container.querySelector("kbd")?.textContent).toBe("/");
   });
 
+  it("keeps its query when Escape ends an IME composition", () => {
+    const search = container.querySelector("input")!;
+    act(() =>
+      search.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(search.value).toBe("notes");
+  });
+
   it("does not steal slash from a document editor or form field", () => {
     for (const tag of ["input", "textarea", "div"]) {
       const editor = document.createElement(tag);

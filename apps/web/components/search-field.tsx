@@ -67,7 +67,13 @@ export function SearchField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape" && value) {
+          // Escape during IME composition commits/cancels the candidate
+          // window; it must not clear the query.
+          if (
+            event.key === "Escape" &&
+            !event.nativeEvent.isComposing &&
+            value
+          ) {
             event.preventDefault();
             event.stopPropagation();
             onChange("");

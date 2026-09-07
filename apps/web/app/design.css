@@ -1,68 +1,62 @@
 :root {
-  --background: #f5f5f2;
-  --foreground: #17171a;
+  --background: #f7f8fc;
+  --foreground: #20263f;
   --card: #ffffff;
-  --card-foreground: #17171a;
+  --card-foreground: #20263f;
   --popover: #ffffff;
-  --popover-foreground: #17171a;
-  --primary: #c9184a;
+  --popover-foreground: #20263f;
+  --primary: #4859b8;
   --primary-foreground: #ffffff;
-  --secondary: #ecece8;
-  --secondary-foreground: #17171a;
-  --muted: #ecece8;
-  --muted-foreground: #66666f;
-  --accent: #ecece8;
-  --accent-foreground: #17171a;
+  --secondary: #edeff9;
+  --secondary-foreground: #20263f;
+  --muted: #edeff9;
+  --muted-foreground: #656d85;
+  --accent: #edeff9;
+  --accent-foreground: #20263f;
   --destructive: #b42335;
   --destructive-foreground: #ffffff;
-  --border: #d8d8d2;
-  --input: #d8d8d2;
-  --ring: #c9184a;
+  --border: #dce0ed;
+  --input: #dce0ed;
+  --ring: #4859b8;
   --sidebar: #ffffff;
-  --sidebar-foreground: #17171a;
-  --sidebar-primary: #c9184a;
+  --sidebar-foreground: #20263f;
+  --sidebar-primary: #4859b8;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ecece8;
-  --sidebar-accent-foreground: #17171a;
-  --sidebar-border: #d8d8d2;
-  --sidebar-ring: #c9184a;
-  --radius: 0.3rem;
-  --ambient-rose: rgb(201 24 74 / 10%);
-  --ambient-teal: rgb(14 116 110 / 8%);
-  --ambient-orange: rgb(234 88 12 / 7%);
+  --sidebar-accent: #edeff9;
+  --sidebar-accent-foreground: #20263f;
+  --sidebar-border: #dce0ed;
+  --sidebar-ring: #4859b8;
+  --radius: 0.75rem;
 }
 
 .dark {
-  --background: #050505;
-  --foreground: #ededed;
-  --card: #121216;
-  --card-foreground: #ededed;
-  --popover: #121216;
-  --popover-foreground: #ededed;
-  --primary: #f43f75;
-  --primary-foreground: #ffffff;
-  --secondary: #1a1a20;
-  --secondary-foreground: #ededed;
-  --muted: #1a1a20;
-  --muted-foreground: #a1a1aa;
-  --accent: #1a1a20;
-  --accent-foreground: #ededed;
+  --background: #141827;
+  --foreground: #eef0fa;
+  --card: #1c2235;
+  --card-foreground: #eef0fa;
+  --popover: #1c2235;
+  --popover-foreground: #eef0fa;
+  --primary: #acb8ff;
+  --primary-foreground: #141827;
+  --secondary: #252d45;
+  --secondary-foreground: #eef0fa;
+  --muted: #252d45;
+  --muted-foreground: #aab3cc;
+  --accent: #252d45;
+  --accent-foreground: #eef0fa;
   --destructive: #fb7185;
-  --destructive-foreground: #050505;
-  --border: #2a2a31;
-  --input: #2a2a31;
-  --ring: #f43f75;
-  --sidebar: #121216;
-  --sidebar-foreground: #ededed;
-  --sidebar-primary: #f43f75;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1a1a20;
-  --sidebar-accent-foreground: #ededed;
-  --sidebar-border: #2a2a31;
-  --sidebar-ring: #f43f75;
-  --ambient-rose: rgb(244 63 117 / 13%);
-  --ambient-teal: rgb(45 212 191 / 8%);
-  --ambient-orange: rgb(251 146 60 / 7%);
+  --destructive-foreground: #141827;
+  --border: #353e59;
+  --input: #353e59;
+  --ring: #acb8ff;
+  --sidebar: #1c2235;
+  --sidebar-foreground: #eef0fa;
+  --sidebar-primary: #acb8ff;
+  --sidebar-primary-foreground: #141827;
+  --sidebar-accent: #252d45;
+  --sidebar-accent-foreground: #eef0fa;
+  --sidebar-border: #353e59;
+  --sidebar-ring: #acb8ff;
 }
 
 @theme inline {
@@ -80,11 +74,6 @@
     min-width: 320px;
     min-height: 100dvh;
     overflow-x: clip;
-    background-image:
-      radial-gradient(circle at 8% 6%, var(--ambient-rose), transparent 24rem),
-      radial-gradient(circle at 91% 18%, var(--ambient-teal), transparent 23rem),
-      radial-gradient(circle at 76% 92%, var(--ambient-orange), transparent 25rem);
-    background-attachment: fixed;
   }
 
   ::selection {
@@ -93,6 +82,38 @@
 }
 
 @layer components {
+  .manuscript-stage {
+    position: relative;
+    padding: 2rem 1.2rem 2.5rem;
+    border-radius: 2rem;
+    background: var(--secondary);
+  }
+
+  .manuscript-sheet {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    background: var(--card);
+    box-shadow: 0 22px 45px -25px color-mix(in srgb, var(--primary) 35%, transparent);
+    transform: rotate(-2deg);
+  }
+
+  .manuscript-note {
+    position: absolute;
+    right: 1.5rem;
+    bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.7rem;
+    background: var(--card);
+    padding: 0.8rem 1rem;
+    color: var(--primary);
+    font-size: 0.75rem;
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--foreground) 6%, transparent);
+  }
+
   .markdown-preview {
     color: var(--foreground);
     line-height: 1.75;

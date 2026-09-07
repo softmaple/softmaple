@@ -12,13 +12,13 @@ export default function DashboardLayout({
   return (
     <div className="min-h-dvh bg-background">
       <header className="border-b bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-5 sm:px-8">
           <Link
             aria-label="Softmaple dashboard"
             className="inline-flex min-w-0 items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
             href="/dashboard"
           >
-            <SoftmapleWordmark className="text-lg" />
+            <SoftmapleWordmark className="text-2xl" />
           </Link>
           <div className="flex shrink-0 items-center gap-2">
             <SettingsDropdown />
@@ -31,7 +31,7 @@ export default function DashboardLayout({
                 await logout();
               }}
             >
-              Logout
+              Sign out
             </Button>
           </div>
         </div>

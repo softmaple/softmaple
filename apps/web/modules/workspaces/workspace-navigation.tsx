@@ -20,7 +20,7 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
   const isActive = (path: string) => pathname === path;
 
   return (
-    <div className="p-4 space-y-2">
+    <nav aria-label="Workspace sections" className="flex flex-col gap-1 p-4">
       <Button
         asChild
         className="w-full justify-start"
@@ -28,8 +28,14 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           isActive(`/workspace/${workspaceSlug}`) ? "secondary" : "ghost"
         }
       >
-        <Link href={`/workspace/${workspaceSlug}`} onClick={onNavigate}>
-          <Home className="mr-2 h-4 w-4" />
+        <Link
+          href={`/workspace/${workspaceSlug}`}
+          onClick={onNavigate}
+          aria-current={
+            isActive(`/workspace/${workspaceSlug}`) ? "page" : undefined
+          }
+        >
+          <Home data-icon="inline-start" />
           Overview
         </Link>
       </Button>
@@ -52,7 +58,7 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           onClick={onNavigate}
           prefetch={false}
         >
-          <Users className="mr-2 h-4 w-4" />
+          <Users data-icon="inline-start" />
           Members
         </Link>
       </Button>
@@ -70,10 +76,10 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           onClick={onNavigate}
           prefetch={false}
         >
-          <Settings className="mr-2 h-4 w-4" />
+          <Settings data-icon="inline-start" />
           Settings
         </Link>
       </Button>
-    </div>
+    </nav>
   );
 };

@@ -1,7 +1,7 @@
 "use client";
 
 import type { FC, ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Menu } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
@@ -32,10 +32,18 @@ export const WorkspaceMobileSidebar: FC<WorkspaceMobileSidebarProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const close = (): void => setOpen(false);
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeOnDesktop = () => {
+      if (desktop.matches) setOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
 
   return (
     <Sheet onOpenChange={setOpen} open={open}>
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur md:hidden">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur md:hidden">
         <SheetTrigger asChild>
           <Button
             aria-label="Open workspace navigation"
@@ -43,7 +51,7 @@ export const WorkspaceMobileSidebar: FC<WorkspaceMobileSidebarProps> = ({
             size="icon-sm"
             variant="outline"
           >
-            <Menu className="size-4" />
+            <Menu />
           </Button>
         </SheetTrigger>
         <div className="min-w-0 flex-1">{children}</div>

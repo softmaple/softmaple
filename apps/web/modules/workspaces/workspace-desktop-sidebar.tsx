@@ -18,13 +18,13 @@ export const WorkspaceDesktopSidebar: FC<WorkspaceDesktopSidebarProps> = ({
   documents,
   workspaceSlug,
 }) => (
-  <aside className="hidden w-72 shrink-0 flex-col border-r bg-sidebar md:flex xl:w-80">
-    <div className="border-b p-4">
+  <aside className="hidden w-64 shrink-0 flex-col border-r bg-sidebar md:flex xl:w-72">
+    <div className="p-5">
       <Link
         className="mb-4 inline-flex rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
         href="/dashboard"
       >
-        <SoftmapleWordmark className="text-lg" />
+        <SoftmapleWordmark className="text-xl" />
       </Link>
       {children}
     </div>

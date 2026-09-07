@@ -74,8 +74,8 @@ export function SiteHeader() {
                 <Menu />
               </Button>
             </SheetTrigger>
-            <SheetContent className="w-[min(22rem,90vw)] overflow-y-auto">
-              <SheetHeader>
+            <SheetContent className="gap-0" side="bottom">
+              <SheetHeader className="pb-2">
                 <SheetTitle>
                   <SoftmapleWordmark className="text-xl" />
                 </SheetTitle>
@@ -83,31 +83,34 @@ export function SiteHeader() {
               </SheetHeader>
               <nav
                 aria-label="Mobile navigation"
-                className="flex flex-col gap-2 px-4"
+                className="flex flex-col gap-1 px-4"
               >
                 {links.map((link) => (
                   <Button
                     asChild
                     variant="ghost"
-                    className="justify-start"
+                    className="h-11 justify-between px-3 text-base"
                     key={link.label}
                   >
                     <a href={link.href} onClick={() => setOpen(false)}>
                       {link.label}
-                      <ArrowUpRight data-icon="inline-end" />
+                      <ArrowUpRight
+                        className="text-muted-foreground"
+                        data-icon="inline-end"
+                      />
                     </a>
                   </Button>
                 ))}
               </nav>
-              <div className="mt-auto flex flex-col gap-3 p-4">
-                <Button asChild variant="outline">
-                  <Link href="/login" onClick={() => setOpen(false)}>
-                    Sign in
+              <div className="mt-4 flex flex-col gap-3 border-t p-4">
+                <Button asChild size="lg">
+                  <Link href="/signup" onClick={() => setOpen(false)}>
+                    Start writing <ArrowUpRight data-icon="inline-end" />
                   </Link>
                 </Button>
-                <Button asChild>
-                  <Link href="/signup" onClick={() => setOpen(false)}>
-                    Start writing
+                <Button asChild size="lg" variant="outline">
+                  <Link href="/login" onClick={() => setOpen(false)}>
+                    Sign in
                   </Link>
                 </Button>
               </div>

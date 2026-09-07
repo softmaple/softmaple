@@ -56,12 +56,17 @@ export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
         aria-label="Workspace"
         className="shrink-0 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
       >
-        <div className="flex h-16 items-center gap-2 px-3">
-          <div className="min-w-0 flex-1">{children}</div>
+        {/*
+          Three tracks rather than a flex row: the empty trailing track
+          balances the workspace switcher, so the menu button is centered
+          against the viewport instead of against whatever space is left over.
+          The 0 minimum keeps a long workspace title from stealing that space.
+        */}
+        <div className="grid h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3">
+          <div className="min-w-0">{children}</div>
           <SheetTrigger asChild>
             <Button
               aria-label="Open workspace navigation"
-              className="shrink-0"
               size="icon-lg"
               variant="outline"
             >

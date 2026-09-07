@@ -17,14 +17,23 @@ vi.mock("next/link", () => ({
   default: ({
     children,
     href,
-    prefetch: _prefetch,
+    prefetch,
     ...props
   }: {
     readonly children: ReactNode;
     readonly href: string;
     readonly onClick?: () => void;
     readonly prefetch?: boolean;
-  }) => createElement("a", { href, ...props }, children),
+  }) =>
+    createElement(
+      "a",
+      {
+        href,
+        "data-prefetch": prefetch === undefined ? "default" : String(prefetch),
+        ...props,
+      },
+      children,
+    ),
 }));
 
 const documents: ReadonlyArray<DocsType["Row"]> = [

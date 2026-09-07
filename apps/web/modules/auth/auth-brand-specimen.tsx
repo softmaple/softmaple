@@ -10,7 +10,7 @@ export const AuthBrandSpecimen = () => (
     <div className="flex items-center gap-2 border-b px-3 py-2 font-mono text-[10px] text-muted-foreground">
       <Circle className="size-2.5 fill-primary text-primary" />
       field-notes / carbon-cycle
-      <span className="ml-auto flex items-center gap-1 text-teal-600 dark:text-teal-400">
+      <span className="ml-auto flex items-center gap-1 text-success">
         <Check className="size-3" /> Saved
       </span>
     </div>
@@ -37,8 +37,8 @@ export const AuthBrandSpecimen = () => (
         <blockquote className="mt-4 border-l-2 border-primary pl-4 text-xs italic xl:text-sm">
           Make room for a new idea.
         </blockquote>
-        <span className="absolute right-12 top-[6.8rem] h-5 border-l-2 border-teal-500" />
-        <span className="absolute right-3 top-[7rem] bg-teal-600 px-1.5 py-0.5 font-mono text-[9px] text-white">
+        <span className="absolute right-12 top-[6.8rem] h-5 border-l-2 border-success" />
+        <span className="absolute right-3 top-[7rem] bg-success px-1.5 py-0.5 font-mono text-[9px] text-success-foreground">
           Lina
         </span>
       </div>

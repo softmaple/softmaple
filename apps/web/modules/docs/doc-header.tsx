@@ -56,7 +56,7 @@ const STATUS_COPY: Readonly<
   connecting: { label: "Connecting", tone: "text-muted-foreground" },
   syncing: { label: "Syncing", tone: "text-amber-600 dark:text-amber-400" },
   saving: { label: "Saving", tone: "text-amber-600 dark:text-amber-400" },
-  saved: { label: "Saved", tone: "text-teal-600 dark:text-teal-400" },
+  saved: { label: "Saved", tone: "text-success" },
   offline: { label: "Offline", tone: "text-orange-600 dark:text-orange-400" },
   error: { label: "Error", tone: "text-destructive" },
 };

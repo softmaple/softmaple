@@ -1,62 +1,88 @@
+/**
+ * Softmaple autumn theme.
+ *
+ * Light — "Parchment & Maple": warm paper stock, bark-brown ink, burnt maple
+ * accents. Dark — "Ember & Bark": deep bark ground lit by an amber ember.
+ * Every surface in the app reads from these tokens, so the season lives here
+ * and nowhere else.
+ */
+
 :root {
-  --background: #f7f8fc;
-  --foreground: #20263f;
-  --card: #ffffff;
-  --card-foreground: #20263f;
-  --popover: #ffffff;
-  --popover-foreground: #20263f;
-  --primary: #4859b8;
-  --primary-foreground: #ffffff;
-  --secondary: #edeff9;
-  --secondary-foreground: #20263f;
-  --muted: #edeff9;
-  --muted-foreground: #656d85;
-  --accent: #edeff9;
-  --accent-foreground: #20263f;
-  --destructive: #b42335;
-  --destructive-foreground: #ffffff;
-  --border: #dce0ed;
-  --input: #dce0ed;
-  --ring: #4859b8;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #20263f;
-  --sidebar-primary: #4859b8;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #edeff9;
-  --sidebar-accent-foreground: #20263f;
-  --sidebar-border: #dce0ed;
-  --sidebar-ring: #4859b8;
+  --background: #fbf6ee;
+  --foreground: #2b2019;
+  --card: #fffdf9;
+  --card-foreground: #2b2019;
+  --popover: #fffdf9;
+  --popover-foreground: #2b2019;
+  --primary: #b1451c;
+  --primary-foreground: #fff8f1;
+  --secondary: #f2e6d6;
+  --secondary-foreground: #2b2019;
+  --muted: #f2e6d6;
+  --muted-foreground: #6c574a;
+  --accent: #f7ded0;
+  --accent-foreground: #2b2019;
+  --destructive: #a3123a;
+  --destructive-foreground: #fff8f1;
+  --success: #4d6b2f;
+  --success-foreground: #fff8f1;
+  --border: #e5d3bd;
+  --input: #e0cab1;
+  --ring: #b1451c;
+  --sidebar: #fdf8f1;
+  --sidebar-foreground: #2b2019;
+  --sidebar-primary: #b1451c;
+  --sidebar-primary-foreground: #fff8f1;
+  --sidebar-accent: #f2e6d6;
+  --sidebar-accent-foreground: #2b2019;
+  --sidebar-border: #e5d3bd;
+  --sidebar-ring: #b1451c;
   --radius: 0.75rem;
+
+  /* Seasonal accents, for atmosphere rather than semantics. */
+  --autumn-ember: #c2521f;
+  --autumn-gold: #d59a2c;
+  --autumn-canopy: #8c3f1d;
+  --autumn-wash-strength: 14%;
+  --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
 }
 
 .dark {
-  --background: #141827;
-  --foreground: #eef0fa;
-  --card: #1c2235;
-  --card-foreground: #eef0fa;
-  --popover: #1c2235;
-  --popover-foreground: #eef0fa;
-  --primary: #acb8ff;
-  --primary-foreground: #141827;
-  --secondary: #252d45;
-  --secondary-foreground: #eef0fa;
-  --muted: #252d45;
-  --muted-foreground: #aab3cc;
-  --accent: #252d45;
-  --accent-foreground: #eef0fa;
-  --destructive: #fb7185;
-  --destructive-foreground: #141827;
-  --border: #353e59;
-  --input: #353e59;
-  --ring: #acb8ff;
-  --sidebar: #1c2235;
-  --sidebar-foreground: #eef0fa;
-  --sidebar-primary: #acb8ff;
-  --sidebar-primary-foreground: #141827;
-  --sidebar-accent: #252d45;
-  --sidebar-accent-foreground: #eef0fa;
-  --sidebar-border: #353e59;
-  --sidebar-ring: #acb8ff;
+  --background: #17120f;
+  --foreground: #f4e9dc;
+  --card: #211a15;
+  --card-foreground: #f4e9dc;
+  --popover: #241c17;
+  --popover-foreground: #f4e9dc;
+  --primary: #ef9a5c;
+  --primary-foreground: #24150c;
+  --secondary: #2d231c;
+  --secondary-foreground: #f4e9dc;
+  --muted: #2d231c;
+  --muted-foreground: #bda695;
+  --accent: #3a2a20;
+  --accent-foreground: #f7e2d0;
+  --destructive: #f2657f;
+  --destructive-foreground: #24150c;
+  --success: #a3c46a;
+  --success-foreground: #1b2410;
+  --border: #3b2f26;
+  --input: #47382d;
+  --ring: #ef9a5c;
+  --sidebar: #1c1611;
+  --sidebar-foreground: #f4e9dc;
+  --sidebar-primary: #ef9a5c;
+  --sidebar-primary-foreground: #24150c;
+  --sidebar-accent: #2d231c;
+  --sidebar-accent-foreground: #f4e9dc;
+  --sidebar-border: #3b2f26;
+  --sidebar-ring: #ef9a5c;
+
+  --autumn-ember: #e2703a;
+  --autumn-gold: #e0a94a;
+  --autumn-canopy: #f0a86a;
+  --autumn-wash-strength: 10%;
+  --autumn-shadow: #000000;
 }
 
 @theme inline {
@@ -74,10 +100,24 @@
     min-width: 320px;
     min-height: 100dvh;
     overflow-x: clip;
+    /* A low canopy light: ember from the left, late gold from the right. */
+    background-image:
+      radial-gradient(
+        58rem 38rem at 8% -14%,
+        color-mix(in srgb, var(--autumn-ember) var(--autumn-wash-strength), transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        46rem 32rem at 102% -6%,
+        color-mix(in srgb, var(--autumn-gold) var(--autumn-wash-strength), transparent),
+        transparent 58%
+      );
+    background-repeat: no-repeat;
+    background-attachment: fixed;
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--primary) 28%, transparent);
+    background: color-mix(in srgb, var(--autumn-gold) 34%, transparent);
   }
 }
 
@@ -86,7 +126,18 @@
     position: relative;
     padding: 2rem 1.2rem 2.5rem;
     border-radius: 2rem;
-    background: var(--secondary);
+    background:
+      radial-gradient(
+        120% 90% at 85% 0%,
+        color-mix(in srgb, var(--autumn-gold) 22%, transparent),
+        transparent 58%
+      ),
+      radial-gradient(
+        95% 80% at 0% 100%,
+        color-mix(in srgb, var(--autumn-ember) 16%, transparent),
+        transparent 60%
+      ),
+      var(--secondary);
   }
 
   .manuscript-sheet {
@@ -94,7 +145,7 @@
     border: 1px solid var(--border);
     border-radius: 0.9rem;
     background: var(--card);
-    box-shadow: 0 22px 45px -25px color-mix(in srgb, var(--primary) 35%, transparent);
+    box-shadow: 0 24px 48px -26px var(--autumn-shadow);
     transform: rotate(-2deg);
   }
 
@@ -111,7 +162,7 @@
     padding: 0.8rem 1rem;
     color: var(--primary);
     font-size: 0.75rem;
-    box-shadow: 0 4px 16px color-mix(in srgb, var(--foreground) 6%, transparent);
+    box-shadow: 0 6px 18px -6px var(--autumn-shadow);
   }
 
   .markdown-preview {

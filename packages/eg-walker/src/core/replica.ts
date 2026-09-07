@@ -209,6 +209,8 @@ interface RemoteBatchSnapshot {
   readonly replayCacheCoverageChecks: number;
   readonly replayCacheEvents: number;
   readonly replayCacheBytes: number;
+  readonly replayCacheBudgetBytes: number;
+  readonly releasedCacheAtBudget: boolean;
   readonly engineRecoveryAnchor: EngineRecoveryAnchor | null;
 }
 
@@ -1058,6 +1060,7 @@ export class EgWalkerReplica {
     this.restoredDeleteTargets = null;
     this.incrementalApplyCount += events.length;
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
+    this.clearSupersededReplayCacheRefusal();
     this.evictReplayCacheIfNeeded();
     this.maybeAdvanceCheckpoint();
     return true;
@@ -1391,6 +1394,8 @@ export class EgWalkerReplica {
       replayCacheCoverageChecks: this.replayCacheCoverageChecks,
       replayCacheEvents: this.replayCacheEvents,
       replayCacheBytes: this.replayCacheBytes,
+      replayCacheBudgetBytes: this.replayCacheBudgetBytes,
+      releasedCacheAtBudget: this.releasedCacheAtBudget,
       engineRecoveryAnchor: this.engineRecoveryAnchor,
     };
   }
@@ -1420,6 +1425,11 @@ export class EgWalkerReplica {
     this.replayCacheCoverageChecks = snapshot.replayCacheCoverageChecks;
     this.replayCacheEvents = snapshot.replayCacheEvents;
     this.replayCacheBytes = snapshot.replayCacheBytes;
+    // A batch that failed and rolled back never paid for its refusal, so the
+    // adaptive budget and the pending refusal both belong to the discarded
+    // attempt.
+    this.replayCacheBudgetBytes = snapshot.replayCacheBudgetBytes;
+    this.releasedCacheAtBudget = snapshot.releasedCacheAtBudget;
     this.engineRecoveryAnchor = snapshot.engineRecoveryAnchor;
 
     if (snapshot.engineStats === null) {
@@ -2404,6 +2414,7 @@ export class EgWalkerReplica {
       this.currentVersion = graph.getFrontier();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
+      this.clearSupersededReplayCacheRefusal();
       this.maybeAdvanceCheckpoint();
       return toRemoteIntegrationEffect(operation === null ? [] : [operation]);
     }
@@ -2420,6 +2431,7 @@ export class EgWalkerReplica {
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.replayCacheEvents++;
+      this.clearSupersededReplayCacheRefusal();
       this.refreshReplayCacheMetrics();
       this.evictReplayCacheIfNeeded();
       this.maybeAdvanceCheckpoint();
@@ -2538,6 +2550,18 @@ export class EgWalkerReplica {
    * the replica had to do was replay from scratch, the budget was too small for
    * this history: nothing was saved and a whole-graph replay was paid for.
    */
+  /**
+   * Drop a pending budget refusal once a cheaper path re-established state.
+   *
+   * A refusal only justifies growing the budget when the replica had to rebuild
+   * from scratch straight afterwards. An incremental apply or a partial replay
+   * from a checkpoint absorbed it instead, so it must not be carried forward
+   * and charged to some later, unrelated full replay.
+   */
+  private clearSupersededReplayCacheRefusal(): void {
+    this.releasedCacheAtBudget = false;
+  }
+
   private growReplayCacheBudgetAfterThrash(): void {
     if (!this.releasedCacheAtBudget) {
       return;
@@ -2603,6 +2627,7 @@ export class EgWalkerReplica {
 
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
     const graph = this.ensureEventGraph();
+    this.clearSupersededReplayCacheRefusal();
     this.captureEnginePeakBeforeSwap();
     const frontier = graph.getFrontier();
     const result = this.partialReplayer.replayFromCheckpoint(

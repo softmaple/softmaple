@@ -5,7 +5,7 @@ const LINE_NUMBERS = ["01", "02", "03", "04", "05", "06"] as const;
 export const AuthBrandSpecimen = () => (
   <div
     aria-hidden="true"
-    className="mt-10 hidden w-full max-w-2xl border bg-card/75 shadow-[0_24px_80px_-48px_rgba(201,24,74,0.65)] lg:block"
+    className="mt-10 hidden w-full max-w-2xl rounded-xl border bg-card shadow-sm lg:block"
   >
     <div className="flex items-center gap-2 border-b px-3 py-2 font-mono text-[10px] text-muted-foreground">
       <Circle className="size-2.5 fill-primary text-primary" />
@@ -31,12 +31,11 @@ export const AuthBrandSpecimen = () => (
           A shared record of change
         </p>
         <p className="mt-3 max-w-lg text-xs leading-6 text-muted-foreground xl:text-sm">
-          Each insertion becomes a durable event. When Lina reconnects, repair
-          resumes after the last acknowledged cursor—without overwriting
-          Marco&apos;s concurrent paragraph.
+          A place for unfinished sentences, questions worth sitting with, and
+          ideas that get better together.
         </p>
         <blockquote className="mt-4 border-l-2 border-primary pl-4 text-xs italic xl:text-sm">
-          The document converges; the writers keep their context.
+          Make room for a new idea.
         </blockquote>
         <span className="absolute right-12 top-[6.8rem] h-5 border-l-2 border-teal-500" />
         <span className="absolute right-3 top-[7rem] bg-teal-600 px-1.5 py-0.5 font-mono text-[9px] text-white">

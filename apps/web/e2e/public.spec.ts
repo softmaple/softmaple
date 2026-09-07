@@ -7,7 +7,7 @@ test.describe("public product surface", () => {
     await page.goto("/");
     await expect(page).toHaveTitle(/Softmaple/);
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "Ideas move",
+      "A little space",
     );
     await page.getByRole("link", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/login$/);
@@ -54,6 +54,30 @@ test.describe("public product surface", () => {
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus-visible")).toBeVisible();
+  });
+
+  test("mobile Sheet supports dismissal, resize, and sign-in navigation", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    const trigger = page.getByRole("button", { name: "Open navigation" });
+    await trigger.click();
+    const sheet = page.getByRole("dialog");
+    await expect(
+      sheet.getByRole("navigation", { name: "Mobile navigation" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(sheet).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(sheet).not.toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await trigger.click();
+    await sheet.getByRole("link", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByLabel("Email")).toBeInViewport();
   });
 
   test("coming-soon redirects to signup", async ({ page }) => {

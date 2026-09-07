@@ -1,12 +1,12 @@
 "use client";
 
 import type { FC } from "react";
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, Plus, Search } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
-import { Input } from "@softmaple/ui/components/input";
+import { SearchField } from "@/components/search-field";
 import { ScrollArea } from "@softmaple/ui/components/scroll-area";
 import type { DocsType } from "@/types/model";
 
@@ -26,7 +26,6 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
   workspaceSlug,
 }) => {
   const pathname = usePathname();
-  const searchId = useId();
   const [query, setQuery] = useState("");
   const filteredDocuments = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -39,19 +38,12 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b p-4">
-        <label className="relative block" htmlFor={searchId}>
-          <span className="sr-only">Search documents</span>
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            id={searchId}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search documents"
-            type="search"
-            value={query}
-          />
-        </label>
+      <div className="px-4 pb-3">
+        <SearchField
+          label="Search documents"
+          value={query}
+          onChange={setQuery}
+        />
       </div>
 
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
@@ -72,7 +64,7 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
               href={`/workspace/${workspaceSlug}/doc/new`}
               onClick={onNavigate}
             >
-              <Plus className="size-4" />
+              <Plus data-icon="inline-start" />
             </Link>
           </Button>
         ) : null}
@@ -86,7 +78,7 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
               : "No document matches this search."}
           </p>
         ) : (
-          <div className="space-y-0.5">
+          <div className="flex flex-col gap-1">
             {filteredDocuments.map((document) => {
               const path = `/workspace/${workspaceSlug}/doc/${document.slug}`;
               return (
@@ -96,7 +88,11 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
                   key={document.id}
                   variant={pathname === path ? "secondary" : "ghost"}
                 >
-                  <Link href={path} onClick={onNavigate}>
+                  <Link
+                    href={path}
+                    onClick={onNavigate}
+                    aria-current={pathname === path ? "page" : undefined}
+                  >
                     <FileText className="size-4 shrink-0 text-primary" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">

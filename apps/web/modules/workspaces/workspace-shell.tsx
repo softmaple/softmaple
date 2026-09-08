@@ -26,13 +26,17 @@ export type WorkspaceShellProps = {
   readonly documents: ReadonlyArray<DocsType["Row"]>;
   /** The workspace switcher, shown at the top of the navigator. */
   readonly switcher?: ReactNode;
+  readonly initialCursor?: string | null;
+  readonly workspaceId: number;
   readonly workspaceSlug: string;
 };
 
 export const WorkspaceShell: FC<WorkspaceShellProps> = ({
   canEdit,
   documents,
+  initialCursor = null,
   switcher,
+  workspaceId,
   workspaceSlug,
 }) => {
   const pathname = usePathname();
@@ -92,6 +96,8 @@ export const WorkspaceShell: FC<WorkspaceShellProps> = ({
         <WorkspaceDocsList
           canEdit={canEdit}
           documents={documents}
+          initialCursor={initialCursor}
+          workspaceId={workspaceId}
           workspaceSlug={workspaceSlug}
         />
       </AppNavigator>

@@ -25,6 +25,8 @@ export type WorkspaceMobileNavProps = {
   readonly canEdit: boolean;
   readonly children?: ReactNode;
   readonly documents: ReadonlyArray<DocsType["Row"]>;
+  readonly initialCursor?: string | null;
+  readonly workspaceId: number;
   readonly workspaceSlug: string;
 };
 
@@ -37,6 +39,8 @@ export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
   canEdit,
   children,
   documents,
+  initialCursor = null,
+  workspaceId,
   workspaceSlug,
 }) => {
   const [open, setOpen] = useState(false);
@@ -128,7 +132,9 @@ export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
         <WorkspaceDocsList
           canEdit={canEdit}
           documents={documents}
+          initialCursor={initialCursor}
           onNavigate={close}
+          workspaceId={workspaceId}
           workspaceSlug={workspaceSlug}
         />
       </SheetContent>

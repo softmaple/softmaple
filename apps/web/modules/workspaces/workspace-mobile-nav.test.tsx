@@ -58,6 +58,7 @@ const renderNav = (container: HTMLDivElement) => {
       createElement(WorkspaceMobileNav, {
         canEdit: true,
         documents,
+        workspaceId: 1,
         workspaceSlug: "acme",
       }),
     );

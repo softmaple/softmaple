@@ -5,6 +5,13 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { DocsType, PublicDocumentRow } from "@/types/model";
 import { createStableSlug } from "@/lib/slug";
+import {
+  decodeDocumentPageCursor,
+  documentPageFilter,
+  encodeDocumentPageCursor,
+  escapeTitleFilter,
+  nextDocumentPageCursor,
+} from "@/modules/workspaces/document-page-cursor";
 import { getAuthenticatedContext } from "@/lib/actions/authenticated";
 import { createClient } from "@/utils/supabase/server";
 import {
@@ -106,6 +113,75 @@ export const listWorkspaceDocuments = async (
     return fromDatabaseError(error, "Could not load workspace documents.");
   }
   return actionSuccess(data);
+};
+
+export type DocumentPage = {
+  readonly documents: ReadonlyArray<DocumentRow>;
+  /** Opaque cursor for the next page, or `null` when this is the last. */
+  readonly nextCursor: string | null;
+};
+
+const documentPageSchema = z.object({
+  cursor: z.string().trim().max(200).optional(),
+  limit: z.number().int().min(1).max(100),
+  title: z.string().trim().max(160).optional(),
+  workspaceId: z.number().int().positive(),
+});
+
+export type ListWorkspaceDocumentPageInput = z.input<typeof documentPageSchema>;
+
+/**
+ * One page of a workspace's documents, optionally filtered by title.
+ *
+ * This replaces "load the first hundred and filter them in the browser", which
+ * silently lied twice: a workspace with more than a hundred documents was
+ * missing some, and searching only ever looked at the ones already loaded.
+ * Filtering and paging both happen in the database now, so a match in the
+ * thousandth document is still found.
+ *
+ * The filter is explicitly title-only. There is no full-text index here, and
+ * pretending otherwise would set an expectation the query cannot meet.
+ */
+export const listWorkspaceDocumentPage = async (
+  input: ListWorkspaceDocumentPageInput,
+): Promise<ActionResult<DocumentPage>> => {
+  const parsed = documentPageSchema.safeParse(input);
+  if (!parsed.success) return fromZodError(parsed.error);
+
+  const context = await getAuthenticatedContext();
+  if (!context.ok) return context;
+
+  let query = context.data.supabase
+    .from("documents")
+    .select("*")
+    .eq("workspace_id", parsed.data.workspaceId);
+
+  const title = parsed.data.title;
+  if (title !== undefined && title.length > 0) {
+    query = query.ilike("title", `%${escapeTitleFilter(title)}%`);
+  }
+
+  // A malformed cursor shows the first page rather than an error: a stale URL
+  // should not be a dead end.
+  const cursor = decodeDocumentPageCursor(parsed.data.cursor);
+  if (cursor !== null) {
+    query = query.or(documentPageFilter(cursor));
+  }
+
+  const { data, error } = await query
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
+    .limit(parsed.data.limit);
+
+  if (error !== null) {
+    return fromDatabaseError(error, "Could not load workspace documents.");
+  }
+
+  const next = nextDocumentPageCursor(data, parsed.data.limit);
+  return actionSuccess({
+    documents: data,
+    nextCursor: next === null ? null : encodeDocumentPageCursor(next),
+  });
 };
 
 export const countWorkspaceDocuments = async (

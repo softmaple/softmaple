@@ -8,6 +8,7 @@ import {
   InputGroupInput,
 } from "@softmaple/ui/components/input-group";
 import { Kbd } from "@softmaple/ui/components/kbd";
+import { opensSearch } from "@/components/search-shortcut";
 
 export function SearchField({
   label,
@@ -22,27 +23,10 @@ export function SearchField({
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
-      if (
-        event.key !== "/" ||
-        event.defaultPrevented ||
-        event.isComposing ||
-        event.repeat ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey
-      )
-        return;
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest(
-          "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']",
-        )
-      )
-        return;
+      if (!opensSearch(event)) return;
       const input = inputRef.current;
-      // Both workspace sidebars are mounted; only the visible, non-modal-hidden
-      // search field can own the shortcut.
+      // Both workspace navigators can be mounted at once; only the visible,
+      // non-modal-hidden search field may own the shortcut.
       if (
         !input ||
         input.getClientRects().length === 0 ||
@@ -61,7 +45,7 @@ export function SearchField({
       <InputGroupInput
         ref={inputRef}
         aria-label={label}
-        aria-keyshortcuts="/"
+        aria-keyshortcuts="/ Meta+K Control+K"
         placeholder={label}
         type="search"
         value={value}

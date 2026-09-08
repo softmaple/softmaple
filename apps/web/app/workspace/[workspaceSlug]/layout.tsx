@@ -2,13 +2,16 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
-import { listWorkspaceDocuments } from "@/app/actions/documents/documents";
+import { listWorkspaceDocumentPage } from "@/app/actions/documents/documents";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 import { WorkspaceShell } from "@/modules/workspaces/workspace-shell";
 import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
 import { WorkspaceMobileNav } from "@/modules/workspaces/workspace-mobile-nav";
+
+/** First page only; the navigator pages and searches from the database. */
+const WORKSPACE_DOCUMENT_PAGE_SIZE = 25;
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
@@ -35,16 +38,21 @@ export default async function WorkspaceLayoutPage(props: Props) {
     currentWorkspace === undefined
       ? [null, null]
       : await Promise.all([
-          listWorkspaceDocuments(currentWorkspace.id, 100),
+          listWorkspaceDocumentPage({
+            limit: WORKSPACE_DOCUMENT_PAGE_SIZE,
+            workspaceId: currentWorkspace.id,
+          }),
           getWorkspaceMemberByUserId(currentWorkspace.id),
         ]);
-  const documents =
+  const documentPage =
     documentsResource === null
-      ? []
+      ? null
       : requireWorkspaceRouteData(documentsResource, {
           ...failureContext,
           operation: "list_workspace_documents",
         });
+  const documents = documentPage?.documents ?? [];
+  const initialCursor = documentPage?.nextCursor ?? null;
   const membership =
     membershipResource === null
       ? null
@@ -61,12 +69,14 @@ export default async function WorkspaceLayoutPage(props: Props) {
       <WorkspaceShell
         canEdit={canEdit}
         documents={documents}
+        initialCursor={initialCursor}
         switcher={
           <WorkspaceDropdown
             workspaceSlug={workspaceSlug}
             workspaces={workspaces}
           />
         }
+        workspaceId={currentWorkspace?.id ?? 0}
         workspaceSlug={workspaceSlug}
       />
 
@@ -82,6 +92,8 @@ export default async function WorkspaceLayoutPage(props: Props) {
       <WorkspaceMobileNav
         canEdit={canEdit}
         documents={documents}
+        initialCursor={initialCursor}
+        workspaceId={currentWorkspace?.id ?? 0}
         workspaceSlug={workspaceSlug}
       >
         <WorkspaceDropdown

@@ -93,7 +93,7 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
                     onClick={onNavigate}
                     aria-current={pathname === path ? "page" : undefined}
                   >
-                    <FileText className="size-4 shrink-0 text-primary" />
+                    <FileText className="size-4 shrink-0 text-emphasis" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">
                         {document.title}

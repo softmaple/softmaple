@@ -116,10 +116,10 @@ export const Dashboard = ({
                 key={workspace.id}
               >
                 <div className="flex items-center justify-between">
-                  <span className="grid size-12 place-items-center rounded-xl bg-secondary font-display text-xl font-semibold text-primary">
+                  <span className="grid size-12 place-items-center rounded-xl bg-secondary font-display text-xl font-semibold text-emphasis">
                     {workspace.title.slice(0, 1).toUpperCase()}
                   </span>
-                  <ArrowUpRight className="size-5 text-muted-foreground transition-colors group-hover:text-primary" />
+                  <ArrowUpRight className="size-5 text-muted-foreground transition-colors group-hover:text-emphasis" />
                 </div>
                 <h3 className="mt-7 truncate font-display text-xl font-semibold tracking-tight">
                   {workspace.title}

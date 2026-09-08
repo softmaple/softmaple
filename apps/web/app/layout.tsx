@@ -1,9 +1,10 @@
 import { DM_Sans, JetBrains_Mono, Syne } from "next/font/google";
 import type { Metadata } from "next";
 
-import "@softmaple/ui/globals.css";
-import "@softmaple/awareness/styles.css";
+// design.css imports the design system and then overrides its palette, so it
+// is the only Tailwind entry the app has.
 import "./design.css";
+import "@softmaple/awareness/styles.css";
 import { Providers } from "@/components/providers";
 import { FeatureFlagsProvider } from "@/components/system/feature-flags-provider";
 import { resolveFeatureFlags } from "@/lib/feature-flags";

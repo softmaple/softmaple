@@ -78,7 +78,7 @@ export const WorkspaceSettings: FC<{
   return (
     <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-4xl">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
           Workspace control room
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold">Settings</h1>

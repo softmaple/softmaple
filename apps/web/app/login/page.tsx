@@ -40,7 +40,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
         <div className="mt-3 text-right">
           <Link
-            className="text-sm text-muted-foreground transition-colors hover:text-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="text-sm text-muted-foreground transition-colors hover:text-link focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             href="/reset-password"
           >
             Forgot password?
@@ -52,7 +52,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{" "}
           <Link
-            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="text-link underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             href="/signup"
           >
             Sign up

@@ -88,7 +88,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     return (
       <main className="min-h-dvh bg-background text-foreground">
         <header className="border-b px-5 py-5 sm:px-8">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
             Shared read-only document
           </p>
           <h1 className="mt-2 font-display text-2xl font-semibold sm:text-3xl">

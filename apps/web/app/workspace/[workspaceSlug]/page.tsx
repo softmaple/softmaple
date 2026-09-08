@@ -89,7 +89,7 @@ export default async function WorkspacePage({ params }: Props) {
       <header className="border-b bg-card/50 px-4 py-8 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emphasis">
               Workspace / {membership.role.toLowerCase()}
             </p>
             <h1 className="font-display mt-2 truncate text-3xl font-semibold">
@@ -154,7 +154,7 @@ export default async function WorkspacePage({ params }: Props) {
                   href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
                   key={document.id}
                 >
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border bg-background text-primary">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border bg-background text-emphasis">
                     <FileText className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">

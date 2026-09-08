@@ -28,8 +28,13 @@ import type {
   LexicalBinding,
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
+import { useTheme } from "next-themes";
+import { usePreferences } from "@/components/shell/preferences";
 import { createClient } from "@/utils/supabase/client";
-import { documentPresenceColor } from "@/modules/docs/document-presence-color";
+import {
+  collaboratorColor,
+  documentPresenceColor,
+} from "@/modules/docs/document-presence-color";
 import { DocEditor, type DocEditorProps } from "@/modules/docs/doc-editor";
 import {
   domPointAtOffset,
@@ -39,6 +44,7 @@ import {
   mapPresenceUsers,
   resolveRemotePresenceSelection,
 } from "@/modules/docs/document-presence-geometry";
+import { rankPresence } from "@/modules/docs/presence-relevance";
 
 type ProfileIdentity = {
   readonly avatarUrl: string | null;
@@ -139,8 +145,22 @@ const geometryForUser = (
 const RemotePresenceOverlay: FC<{
   readonly binding: LexicalBinding | null;
   readonly container: HTMLElement | null;
-}> = ({ binding, container }) => {
-  const others = useOthers();
+  readonly onOverflowChange?: (overflowCount: number) => void;
+}> = ({ binding, container, onOverflowChange }) => {
+  const remote = useOthers();
+  const { resolvedTheme } = useTheme();
+  const theme = resolvedTheme === "dark" ? "dark" : "light";
+  // Colour arrives from the wire as the light-theme value, because the sender
+  // has no idea which theme this client is in. Repaint each identity into the
+  // local pair so a caret reads the same way on paper and on charcoal.
+  const others = useMemo(
+    () =>
+      remote.map((user) => ({
+        ...user,
+        color: collaboratorColor(user.userId, theme).color,
+      })),
+    [remote, theme],
+  );
   const { connectionState } = usePresence();
   const host = useMemo(() => ({ current: container }), [container]);
   const [geometries, setGeometries] = useState<ReadonlyArray<RemoteGeometry>>(
@@ -156,8 +176,15 @@ const RemotePresenceOverlay: FC<{
     const refresh = (): void => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        // Rank and cut *before* measuring: geometry costs a layout per peer,
+        // so a busy room must never turn into a per-frame layout storm.
+        const ranked = rankPresence(others, {
+          now: Date.now(),
+          visibleBlockIds: null,
+        });
+        onOverflowChange?.(ranked.overflowCount);
         setGeometries(
-          mapPresenceUsers(others, (user) =>
+          mapPresenceUsers(ranked.detailed, (user) =>
             geometryForUser(binding, container, user),
           ),
         );
@@ -180,7 +207,7 @@ const RemotePresenceOverlay: FC<{
       window.removeEventListener("scroll", refresh, true);
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [binding, container, others]);
+  }, [binding, container, onOverflowChange, others]);
 
   // Cached positions stop being trustworthy while the room is disconnected.
   if (connectionState !== "connected") return null;
@@ -219,28 +246,61 @@ const RemotePresenceOverlay: FC<{
   );
 };
 
+/**
+ * One update per selection change, coalesced to at most 20 per second.
+ *
+ * 50ms is a deliberate ceiling rather than a tuning knob: it is the point at
+ * which a remote caret still reads as continuous, and publishing faster costs
+ * every peer in the room a re-render for motion nobody can perceive.
+ */
+const LOCATION_PUBLISH_INTERVAL_MS = 50;
+
 const PresenceSelectionPublisher: FC<{
+  /** Publish a precise caret and selection, not just presence. */
+  readonly detailed: boolean;
   readonly enabled: boolean;
   readonly selection: StableBlockSelection | null;
-}> = ({ enabled, selection }) => {
-  const updateCursor = useUpdateCursor(50);
-  const updateSelection = useUpdateSelection(50);
+}> = ({ detailed, enabled, selection }) => {
+  const updateCursor = useUpdateCursor(LOCATION_PUBLISH_INTERVAL_MS);
+  const updateSelection = useUpdateSelection(LOCATION_PUBLISH_INTERVAL_MS);
   const { updatePresence } = usePresence();
+  const [foreground, setForeground] = useState(
+    () => typeof document === "undefined" || !document.hidden,
+  );
 
   useEffect(() => {
     if (!enabled) return;
     const clearPosition = (): void => {
       updatePresence({ cursor: undefined, selection: undefined });
     };
+    // A backgrounded tab keeps its membership — the person has not left — but
+    // its caret is stale the moment they look away, and a stale caret is worse
+    // than none. Liveness is the transport's job; position is ours.
+    const syncForeground = (): void => {
+      const visible = !document.hidden;
+      setForeground(visible);
+      if (!visible) clearPosition();
+    };
+    document.addEventListener("visibilitychange", syncForeground);
     window.addEventListener("blur", clearPosition);
+    syncForeground();
     return () => {
+      document.removeEventListener("visibilitychange", syncForeground);
       window.removeEventListener("blur", clearPosition);
       clearPosition();
     };
   }, [enabled, updatePresence]);
 
+  const publishing = enabled && detailed && foreground;
+
   useLayoutEffect(() => {
-    if (!enabled) return;
+    if (!publishing) {
+      // Withdraw a position that is no longer being kept up to date, rather
+      // than leaving the last one behind to go quietly wrong.
+      updateCursor(null);
+      updateSelection(null);
+      return;
+    }
     if (selection === null) {
       updateCursor(null);
       updateSelection(null);
@@ -252,7 +312,7 @@ const PresenceSelectionPublisher: FC<{
         JSON.stringify(selection.focus.anchor);
     updateCursor(selection.focus);
     updateSelection(collapsed ? null : selection);
-  }, [enabled, selection, updateCursor, updateSelection]);
+  }, [publishing, selection, updateCursor, updateSelection]);
 
   return null;
 };
@@ -276,6 +336,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
   onSelectionChange,
   ...editorProps
 }) => {
+  const { preferences } = usePreferences();
   const supabase = useMemo(() => createClient(), []);
   const noopAdapter = useMemo(
     () =>
@@ -444,6 +505,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
           />
         ) : null}
         <PresenceSelectionPublisher
+          detailed={preferences.detailedLocation}
           enabled={presenceLive}
           selection={selection}
         />

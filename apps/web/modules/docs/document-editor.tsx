@@ -4,11 +4,11 @@ import dynamic from "next/dynamic";
 import { type FC, useCallback, useDeferredValue, useState } from "react";
 import { Code, Edit3, Eye, FileText } from "lucide-react";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@softmaple/ui/components/tabs";
+  ViewPanel,
+  ViewSwitcher,
+  useViewSwitcherId,
+  type ViewOption,
+} from "@/components/shell/view-switcher";
 import type { CollabTarget } from "@/modules/docs/collab-target";
 import { DocEditor } from "@/modules/docs/doc-editor";
 import { DocHeader } from "@/modules/docs/doc-header";
@@ -59,6 +59,38 @@ export type DocumentEditorProps =
   | AuthenticatedDocumentEditorProps
   | PublicDocumentEditorProps;
 
+export const DOCUMENT_VIEW = {
+  Editor: "editor",
+  Preview: "preview",
+  Markdown: "markdown",
+  Latex: "latex",
+} as const;
+
+export type DocumentView = (typeof DOCUMENT_VIEW)[keyof typeof DOCUMENT_VIEW];
+
+const VIEW_OPTIONS: ReadonlyArray<ViewOption> = [
+  {
+    icon: <Edit3 className="size-3.5" />,
+    label: "Editor",
+    value: DOCUMENT_VIEW.Editor,
+  },
+  {
+    icon: <Eye className="size-3.5" />,
+    label: "Preview",
+    value: DOCUMENT_VIEW.Preview,
+  },
+  {
+    icon: <FileText className="size-3.5" />,
+    label: "Markdown",
+    value: DOCUMENT_VIEW.Markdown,
+  },
+  {
+    icon: <Code className="size-3.5" />,
+    label: "LaTeX",
+    value: DOCUMENT_VIEW.Latex,
+  },
+];
+
 const EditorLoading = () => (
   <div className="grid min-h-64 place-items-center font-mono text-xs text-muted-foreground">
     Preparing view…
@@ -72,9 +104,13 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     props.publicView === true ? true : props.isPublic,
   );
   const [session, setSession] = useState<DocumentSessionState | null>(null);
+  const [view, setView] = useState<DocumentView>(DOCUMENT_VIEW.Editor);
+  // Preview and LaTeX are heavy and lazily loaded; remember which ones have
+  // ever been opened so returning to one does not show the loader again.
   const [openedViews, setOpenedViews] = useState<ReadonlySet<string>>(
-    () => new Set(["editor"]),
+    () => new Set<string>([DOCUMENT_VIEW.Editor]),
   );
+  const viewId = useViewSwitcherId();
   const deferredMarkdown = useDeferredValue(markdown);
   const handleMarkdownChange = useCallback((nextMarkdown: string) => {
     setMarkdown(nextMarkdown);
@@ -83,6 +119,12 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     (state: DocumentSessionState) => setSession(state),
     [],
   );
+  const handleViewChange = useCallback((next: string) => {
+    setView(next as DocumentView);
+    setOpenedViews((current) =>
+      current.has(next) ? current : new Set([...current, next]),
+    );
+  }, []);
 
   if (props.publicView === true) {
     return (
@@ -121,11 +163,12 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
   const permission: DocumentPermission | null = permissionFromRole(props.role);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-document">
       <DocHeader
         canDelete={canDelete}
         canEdit={canEdit}
         canShare={canShareDocument(props.role)}
+        collaborationStatus={session?.collaborationStatus ?? "connecting"}
         docSlug={props.docSlug}
         documentId={props.documentId}
         flushDocument={session?.flush}
@@ -133,37 +176,32 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         markdown={deferredMarkdown}
         onSharingChange={setIsPublic}
         role={props.role}
+        saveStatus={session?.saveStatus ?? "idle"}
         setTitle={setTitle}
-        status={session?.status ?? "connecting"}
         title={title}
         workspaceSlug={props.workspaceSlug}
       />
-      <Tabs
-        className="flex min-h-0 flex-1 flex-col"
-        defaultValue="editor"
-        onValueChange={(value) =>
-          setOpenedViews((current) => new Set([...current, value]))
-        }
-      >
-        <div className="border-b px-3 sm:px-5">
-          <TabsList className="h-10 max-w-full justify-start overflow-x-auto rounded-none bg-transparent p-0">
-            <TabsTrigger value="editor">
-              <Edit3 className="size-3.5" /> Editor
-            </TabsTrigger>
-            <TabsTrigger value="preview">
-              <Eye className="size-3.5" /> Preview
-            </TabsTrigger>
-            <TabsTrigger value="markdown">
-              <FileText className="size-3.5" /> Markdown
-            </TabsTrigger>
-            <TabsTrigger value="latex">
-              <Code className="size-3.5" /> LaTeX
-            </TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent
-          className="m-0 min-h-0 flex-1 overflow-auto"
-          value="editor"
+      <div className="border-b border-divider px-2 sm:px-3">
+        <ViewSwitcher
+          baseId={viewId}
+          label="Document views"
+          onValueChange={handleViewChange}
+          options={VIEW_OPTIONS}
+          value={view}
+        />
+      </div>
+      {/*
+        Every panel is mounted for the life of the document. The editor panel
+        in particular owns the Lexical instance, the collaborative replica and
+        the presence connection; unmounting it to look at the Markdown would
+        drop unacknowledged edits and reset undo history.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <ViewPanel
+          active={view === DOCUMENT_VIEW.Editor}
+          baseId={viewId}
+          className="flex min-h-0 flex-1 flex-col overflow-auto"
+          value={DOCUMENT_VIEW.Editor}
         >
           <DocumentPresence
             avatarUrl={props.avatarUrl}
@@ -177,33 +215,42 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
             presenceEnabled={isPublic}
             userId={props.currentUserId}
           />
-        </TabsContent>
-        <TabsContent
-          className="m-0 min-h-0 flex-1 overflow-auto"
-          value="preview"
+        </ViewPanel>
+        <ViewPanel
+          active={view === DOCUMENT_VIEW.Preview}
+          baseId={viewId}
+          className="min-h-0 flex-1 overflow-auto"
+          value={DOCUMENT_VIEW.Preview}
         >
-          {openedViews.has("preview") ? (
+          {openedViews.has(DOCUMENT_VIEW.Preview) ? (
             <PreviewPane markdown={deferredMarkdown} />
           ) : (
             <EditorLoading />
           )}
-        </TabsContent>
-        <TabsContent
-          className="m-0 min-h-0 flex-1 overflow-auto"
-          value="markdown"
+        </ViewPanel>
+        <ViewPanel
+          active={view === DOCUMENT_VIEW.Markdown}
+          baseId={viewId}
+          className="min-h-0 flex-1 overflow-auto"
+          value={DOCUMENT_VIEW.Markdown}
         >
-          <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words px-5 py-8 font-mono text-xs leading-6 sm:px-8">
+          <pre className="prose-measure min-h-full whitespace-pre-wrap break-words px-5 py-8 font-mono text-xs leading-6 sm:px-8">
             {deferredMarkdown}
           </pre>
-        </TabsContent>
-        <TabsContent className="m-0 min-h-0 flex-1 overflow-auto" value="latex">
-          {openedViews.has("latex") ? (
+        </ViewPanel>
+        <ViewPanel
+          active={view === DOCUMENT_VIEW.Latex}
+          baseId={viewId}
+          className="min-h-0 flex-1 overflow-auto"
+          value={DOCUMENT_VIEW.Latex}
+        >
+          {openedViews.has(DOCUMENT_VIEW.Latex) ? (
             <LatexPane markdown={deferredMarkdown} title={title} />
           ) : (
             <EditorLoading />
           )}
-        </TabsContent>
-      </Tabs>
+        </ViewPanel>
+      </div>
     </div>
   );
 };

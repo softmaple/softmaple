@@ -20,23 +20,32 @@ import {
   Download,
   FileCode2,
   LoaderCircle,
-  Radio,
   Share2,
   Trash2,
-  WifiOff,
 } from "lucide-react";
 import {
   deleteDocument,
   setDocumentPublic,
   updateDocumentTitle,
 } from "@/app/actions/documents/documents";
+import { StatusIndicator } from "@/components/shell/status-indicator";
 import type { WorkspaceRole } from "@/lib/workspace-roles";
-import type { DocumentUiStatus } from "@/modules/docs/use-document-session";
+import type {
+  CollaborationStatus,
+  SaveStatus,
+} from "@/modules/docs/document-save-coordinator";
+import {
+  describeCollaborationStatus,
+  describeSaveStatus,
+  summariseDocumentStatus,
+} from "@/modules/docs/document-status";
 
 export type DocHeaderProps = {
   canDelete: boolean;
   canEdit: boolean;
   canShare: boolean;
+  /** Whether other people are reachable. Says nothing about durability. */
+  collaborationStatus: CollaborationStatus;
   docSlug: string;
   documentId: string;
   flushDocument?: () => Promise<void>;
@@ -44,21 +53,11 @@ export type DocHeaderProps = {
   markdown: string;
   onSharingChange: (isPublic: boolean) => void;
   role: WorkspaceRole;
+  /** How durable the work is. Never affected by the presence transport. */
+  saveStatus: SaveStatus;
   setTitle: Dispatch<SetStateAction<string>>;
-  status: DocumentUiStatus;
   title: string;
   workspaceSlug: string;
-};
-
-const STATUS_COPY: Readonly<
-  Record<DocumentUiStatus, { readonly label: string; readonly tone: string }>
-> = {
-  connecting: { label: "Connecting", tone: "text-muted-foreground" },
-  syncing: { label: "Syncing", tone: "text-amber-600 dark:text-amber-400" },
-  saving: { label: "Saving", tone: "text-amber-600 dark:text-amber-400" },
-  saved: { label: "Saved", tone: "text-success" },
-  offline: { label: "Offline", tone: "text-orange-600 dark:text-orange-400" },
-  error: { label: "Error", tone: "text-destructive" },
 };
 
 const downloadText = (content: string, name: string, type: string): void => {
@@ -82,7 +81,8 @@ export const DocHeader: FC<DocHeaderProps> = ({
   onSharingChange,
   role,
   setTitle,
-  status,
+  collaborationStatus,
+  saveStatus,
   title,
   workspaceSlug,
 }) => {
@@ -92,7 +92,6 @@ export const DocHeader: FC<DocHeaderProps> = ({
   const [copied, setCopied] = useState(false);
   const [isPending, startTransition] = useTransition();
   const lastCommittedTitle = useRef(title);
-  const statusCopy = STATUS_COPY[status];
 
   useEffect(() => {
     setIsPublic(initialIsPublic);
@@ -213,19 +212,19 @@ export const DocHeader: FC<DocHeaderProps> = ({
         <Badge className="shrink-0 font-mono text-[10px]" variant="outline">
           {role.toLowerCase()}
         </Badge>
-        <div
-          aria-live="polite"
-          className={`flex shrink-0 items-center gap-1.5 font-mono text-[11px] ${statusCopy.tone}`}
-          role="status"
-        >
-          {status === "offline" ? (
-            <WifiOff className="size-3.5" />
-          ) : status === "saved" ? (
-            <Check className="size-3.5" />
-          ) : (
-            <Radio className="size-3.5" />
-          )}
-          {statusCopy.label}
+        {/*
+          Two indicators, never one. A person whose connection has dropped
+          needs to know their last paragraph is safe; a single collapsed label
+          cannot tell them that, and "Offline" alone implies it is not.
+        */}
+        <div className="flex shrink-0 items-center gap-1" role="status">
+          <StatusIndicator {...describeSaveStatus(saveStatus)} />
+          <StatusIndicator
+            {...describeCollaborationStatus(collaborationStatus)}
+          />
+          <span className="sr-only">
+            {summariseDocumentStatus({ collaborationStatus, saveStatus })}
+          </span>
         </div>
         <div className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto pb-0.5">
           <Button

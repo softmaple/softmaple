@@ -1,6 +1,14 @@
 import { Check, Circle, FileCode2, Radio, Users } from "lucide-react";
+import { collaboratorColor } from "@/modules/docs/document-presence-color";
 
 const LINE_NUMBERS = ["01", "02", "03", "04", "05", "06"] as const;
+
+/**
+ * The specimen is a still image of the product, so it borrows a real identity
+ * colour rather than inventing one. Light values are used because the specimen
+ * paints its own card; the pair for the current theme is not available here.
+ */
+const SPECIMEN_COLLABORATOR = collaboratorColor("lina", "light");
 
 export const AuthBrandSpecimen = () => (
   <div
@@ -34,11 +42,25 @@ export const AuthBrandSpecimen = () => (
           A place for unfinished sentences, questions worth sitting with, and
           ideas that get better together.
         </p>
-        <blockquote className="mt-4 border-l-2 border-primary pl-4 text-xs italic xl:text-sm">
+        <blockquote className="mt-4 border-l-2 border-action pl-4 text-xs italic xl:text-sm">
           Make room for a new idea.
         </blockquote>
-        <span className="absolute right-12 top-[6.8rem] h-5 border-l-2 border-success" />
-        <span className="absolute right-3 top-[7rem] bg-success px-1.5 py-0.5 font-mono text-[9px] text-success-foreground">
+        {/*
+          A collaborator caret, in a collaborator colour. Feedback colours mean
+          "how did that go"; a person is not a status, and must never be drawn
+          in one — nor in the action yellow.
+        */}
+        <span
+          className="absolute right-12 top-[6.8rem] h-5 border-l-2"
+          style={{ borderColor: SPECIMEN_COLLABORATOR.color }}
+        />
+        <span
+          className="absolute right-3 top-[7rem] px-1.5 py-0.5 font-mono text-[9px]"
+          style={{
+            background: SPECIMEN_COLLABORATOR.color,
+            color: SPECIMEN_COLLABORATOR.onColor,
+          }}
+        >
           Lina
         </span>
       </div>

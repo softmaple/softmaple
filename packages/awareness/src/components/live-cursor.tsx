@@ -34,6 +34,8 @@ export interface LiveCursorProps {
   readonly user: PresenceUser;
   readonly point: LiveCursorPoint;
   readonly labelVisibleMs?: number;
+  /** Measured line height in CSS pixels. Omit to use the themed caret height. */
+  readonly caretHeight?: number;
   /**
    * Controls how the user label is presented.
    * - `true` (default): label shows on mount and after every move, then
@@ -101,6 +103,7 @@ export const LiveCursor = ({
   user,
   point,
   labelVisibleMs = 3000,
+  caretHeight,
   showLabel = true,
   className,
   viewport = "window",
@@ -221,7 +224,11 @@ export const LiveCursor = ({
       // the `focusable` prop (default: `showLabel === "hover"`).
       tabIndex={isFocusable ? 0 : undefined}
     >
-      <span aria-hidden="true" className="awareness-live-cursor__caret" />
+      <span
+        aria-hidden="true"
+        className="awareness-live-cursor__caret"
+        style={{ height: caretHeight }}
+      />
       {renderLabel ? (
         <span className="awareness-live-cursor__label">{user.name}</span>
       ) : null}

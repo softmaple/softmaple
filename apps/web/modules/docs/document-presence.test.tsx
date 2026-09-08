@@ -50,6 +50,19 @@ let resolveGetSession: ((value: SessionResult) => void) | null = null;
 vi.mock("@softmaple/awareness", async () => {
   const { useEffect } = await import("react");
   return {
+    CollaborationBar: ({ state }: { state?: string }) =>
+      createElement(
+        "div",
+        null,
+        state === "error"
+          ? "Presence unavailable"
+          : state === "connecting"
+            ? "Connecting…"
+            : "Connected",
+      ),
+    PresenceLayer: ({ children }: { children: ReactNode }) => children,
+    LiveCursor: () => null,
+    SelectionHighlight: () => null,
     PresenceProvider: ({
       adapter,
       children,
@@ -77,14 +90,6 @@ vi.mock("@softmaple/awareness", async () => {
     useUpdateSelection: () => () => undefined,
   };
 });
-
-vi.mock("@softmaple/ui/components/avatar", () => ({
-  Avatar: ({ children }: { children: ReactNode }) =>
-    createElement("div", null, children),
-  AvatarFallback: ({ children }: { children: ReactNode }) =>
-    createElement("span", null, children),
-  AvatarImage: () => null,
-}));
 
 vi.mock("@/modules/docs/doc-editor", async () => {
   const { useEffect } = await import("react");
@@ -173,6 +178,13 @@ describe("remote presence DOM mapping", () => {
 
 describe("DocumentPresence auth lifecycle", () => {
   beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
     authListener = null;
     resolveGetSession = null;
     connectResolvers.length = 0;
@@ -182,6 +194,7 @@ describe("DocumentPresence auth lifecycle", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     document.body.replaceChildren();
   });
 
@@ -213,7 +226,7 @@ describe("DocumentPresence auth lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("Presence session is unavailable.");
+    expect(container.textContent).toContain("Presence unavailable");
     expect(createWebSocketAdapter).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -229,7 +242,7 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(createWebSocketAdapter).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("Presence session is unavailable.");
+    expect(container.textContent).toContain("Presence unavailable");
 
     await act(async () => {
       root.unmount();
@@ -272,7 +285,7 @@ describe("DocumentPresence auth lifecycle", () => {
     expect(createWebSocketAdapter).toHaveBeenLastCalledWith(
       expect.objectContaining({ url: NITRO_TARGET.presenceUrl }),
     );
-    expect(container.textContent).not.toContain("Connecting presence");
+    expect(container.textContent).not.toContain("Connecting…");
 
     // Switch to the cloudflare target before the new connect resolves.
     await act(async () => {
@@ -288,7 +301,7 @@ describe("DocumentPresence auth lifecycle", () => {
     // The nitro adapter must be disconnected and never shown as live for
     // the new (cloudflare) props while the new connection is in flight.
     expect(disconnect).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Connecting presence");
+    expect(container.textContent).toContain("Connecting…");
 
     await act(async () => {
       resolveGetSession?.({
@@ -304,7 +317,7 @@ describe("DocumentPresence auth lifecycle", () => {
     expect(createWebSocketAdapter).toHaveBeenLastCalledWith(
       expect.objectContaining({ url: CLOUDFLARE_TARGET.presenceUrl }),
     );
-    expect(container.textContent).not.toContain("Connecting presence");
+    expect(container.textContent).not.toContain("Connecting…");
 
     await act(async () => {
       root.unmount();
@@ -347,7 +360,7 @@ describe("DocumentPresence auth lifecycle", () => {
         "expected the user-1 adapter connect() to remain pending",
       );
     }
-    expect(container.textContent).not.toContain("Connecting presence");
+    expect(container.textContent).not.toContain("Connecting…");
 
     // Switch signed-in user before the in-flight user-1 connect resolves.
     await act(async () => {
@@ -358,7 +371,7 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(disconnect).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Connecting presence");
+    expect(container.textContent).toContain("Connecting…");
 
     // Resolving the stale user-1 connection must not restore it as live.
     await act(async () => {
@@ -367,8 +380,8 @@ describe("DocumentPresence auth lifecycle", () => {
     });
 
     expect(disconnect).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Connecting presence");
-    expect(container.textContent).not.toContain("Presence connected");
+    expect(container.textContent).toContain("Connecting…");
+    expect(container.textContent).not.toContain("Connected");
 
     await act(async () => {
       resolveGetSession?.({
@@ -392,7 +405,7 @@ describe("DocumentPresence auth lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).not.toContain("Connecting presence");
+    expect(container.textContent).not.toContain("Connecting…");
 
     await act(async () => {
       root.unmount();

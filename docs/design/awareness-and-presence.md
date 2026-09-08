@@ -149,7 +149,37 @@ missed ACK deadline (default 20s, 2 misses) → force close → reconnect
 
 ## 6. UI Components
 
-### 6.1 Presence Bar (Global Awareness)
+### 6.1 Document roster and presence primitives
+
+`CollaborationBar` is the document-level composition used by the web editor.
+Its compact row names the context, distinguishes presence connection from the
+header's document-save state, and opens an inline roster. The expanded panel
+shows one person per account, live session counts, “You”, and plain activity
+labels. Self stays first, then names stay in alphabetical order while people
+type. Offline sessions do not contribute to the count, and connection loss
+hides the cached roster until presence is ready again.
+
+The cursor visibility checkbox changes the local overlay only. It never stops
+publishing the local selection or changes document editing permissions. The
+panel uses one button in the tab order; Enter/Space toggle it and Escape inside
+the panel closes it and returns focus. On small screens, the roster becomes a
+single column. A scrollable roster bounds the height in crowded rooms.
+
+The web editor uses `PresenceLayer`, `LiveCursor`, and `SelectionHighlight` with
+its measured Lexical geometry. Cursor labels fade, carets match measured line
+heights, and resizing the editor refreshes positions. Neutral name tags and
+soft avatar tints retain readable text for pale participant colors; names
+remain the primary identity when palette colors repeat.
+
+Storybook review captures (the document prose is a preview fixture):
+
+![Expanded document roster](./assets/collaboration/desktop.png)
+
+![Dark document roster](./assets/collaboration/dark.png)
+
+[Mobile capture](./assets/collaboration/mobile.png)
+
+### 6.2 Presence Bar (Global Awareness)
 
 **Purpose**  
 Shows who is currently in the room.
@@ -160,7 +190,7 @@ Shows who is currently in the room.
 - Tooltip reveals name and status
 - Sorted by recent activity (`lastActivityAt`)
 
-### 6.2 Live Cursor (Local Awareness)
+### 6.3 Live Cursor (Local Awareness)
 
 **Purpose**  
 Indicates where another user is editing.
@@ -171,12 +201,12 @@ Indicates where another user is editing.
 - Label fades out after 2-3 seconds
 - Cursor movement is interpolated (no jitter)
 
-### 6.3 Selection Highlight (Block Awareness)
+### 6.4 Selection Highlight (Block Awareness)
 
 **Purpose**  
 Shows which block or range is being edited by others.
 
-### 6.4 Activity Indicator (Action Awareness)
+### 6.5 Activity Indicator (Action Awareness)
 
 **Purpose**  
 Communicates recent activity without distraction.

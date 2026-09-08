@@ -2,6 +2,7 @@ import { DM_Sans, JetBrains_Mono, Syne } from "next/font/google";
 import type { Metadata } from "next";
 
 import "@softmaple/ui/globals.css";
+import "@softmaple/awareness/styles.css";
 import "./design.css";
 import { Providers } from "@/components/providers";
 import { OPENGRAPH_IMAGE_URL, SITE_CONFIG } from "@softmaple/config";

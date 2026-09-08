@@ -10,6 +10,10 @@ import {
   useState,
 } from "react";
 import {
+  CollaborationBar,
+  LiveCursor,
+  PresenceLayer,
+  SelectionHighlight,
   createNoopAdapter,
   createWebSocketAdapter,
   PresenceProvider,
@@ -24,13 +28,8 @@ import type {
   LexicalBinding,
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@softmaple/ui/components/avatar";
-import { Radio } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { documentPresenceColor } from "@/modules/docs/document-presence-color";
 import { DocEditor, type DocEditorProps } from "@/modules/docs/doc-editor";
 import {
   domPointAtOffset,
@@ -62,9 +61,7 @@ type RemoteGeometry = {
     readonly left: number;
     readonly top: number;
   };
-  readonly color: string;
-  readonly connectionId: string;
-  readonly name: string;
+  readonly user: PresenceUser;
   readonly selectionRects: ReadonlyArray<{
     readonly height: number;
     readonly left: number;
@@ -72,14 +69,6 @@ type RemoteGeometry = {
     readonly width: number;
   }>;
 };
-
-const initials = (name: string): string =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
 
 const logicalDomPoint = (
   binding: LexicalBinding,
@@ -142,9 +131,7 @@ const geometryForUser = (
       left: caretRect.left - containerRect.left,
       top: caretRect.top - containerRect.top,
     },
-    color: user.color,
-    connectionId: user.connectionId,
-    name: user.name,
+    user,
     selectionRects,
   };
 };
@@ -154,6 +141,8 @@ const RemotePresenceOverlay: FC<{
   readonly container: HTMLElement | null;
 }> = ({ binding, container }) => {
   const others = useOthers();
+  const { connectionState } = usePresence();
+  const host = useMemo(() => ({ current: container }), [container]);
   const [geometries, setGeometries] = useState<ReadonlyArray<RemoteGeometry>>(
     [],
   );
@@ -179,9 +168,12 @@ const RemotePresenceOverlay: FC<{
     // integration even when a Lexical update is deferred (e.g. composition).
     const unregisterEditor = binding.editor.registerUpdateListener(refresh);
     const unsubscribeReplica = binding.replica.subscribe(refresh);
+    const observer = new ResizeObserver(refresh);
+    observer.observe(container);
     window.addEventListener("resize", refresh);
     window.addEventListener("scroll", refresh, true);
     return () => {
+      observer.disconnect();
       unregisterEditor();
       unsubscribeReplica();
       window.removeEventListener("resize", refresh);
@@ -190,94 +182,39 @@ const RemotePresenceOverlay: FC<{
     };
   }, [binding, container, others]);
 
+  // Cached positions stop being trustworthy while the room is disconnected.
+  if (connectionState !== "connected") return null;
+
   return (
     <div
       aria-hidden
       className="pointer-events-none absolute inset-0 z-30 overflow-hidden"
     >
-      {geometries.map((geometry) => (
-        <Fragment key={geometry.connectionId}>
-          {geometry.selectionRects.map((rect, index) => (
-            <span
-              className="absolute opacity-20"
-              key={`${geometry.connectionId}-selection-${index}`}
-              style={{ ...rect, backgroundColor: geometry.color }}
+      <PresenceLayer host={host}>
+        {geometries.map(({ user, caret, selectionRects }) => (
+          <Fragment key={user.connectionId}>
+            {selectionRects.map((rect, index) => (
+              <SelectionHighlight
+                key={`${user.connectionId}-selection-${index}`}
+                user={user}
+                rect={{
+                  x: rect.left,
+                  y: rect.top,
+                  width: rect.width,
+                  height: rect.height,
+                }}
+              />
+            ))}
+            <LiveCursor
+              user={user}
+              point={{ x: caret.left, y: caret.top }}
+              caretHeight={caret.height}
+              viewport="none"
+              focusable={false}
             />
-          ))}
-          <span
-            className="absolute w-0.5"
-            style={{
-              backgroundColor: geometry.color,
-              height: geometry.caret.height,
-              left: geometry.caret.left,
-              top: geometry.caret.top,
-            }}
-          >
-            <span
-              className="absolute left-0 top-0 -translate-y-full whitespace-nowrap px-1.5 py-0.5 font-mono text-[9px] text-white"
-              style={{ backgroundColor: geometry.color }}
-            >
-              {geometry.name}
-            </span>
-          </span>
-        </Fragment>
-      ))}
-    </div>
-  );
-};
-
-const WorkspacePresenceBar = () => {
-  const { connectionState, presence } = usePresence();
-  const users = [...presence.values()];
-  const grouped = [
-    ...users
-      .reduce((groups, user) => {
-        const current = groups.get(user.userId);
-        const sessions = current?.sessions ?? 0;
-        groups.set(user.userId, { user, sessions: sessions + 1 });
-        return groups;
-      }, new Map<
-        string,
-        { readonly sessions: number; readonly user: PresenceUser }
-      >())
-      .values(),
-  ];
-
-  return (
-    <div className="flex min-h-10 items-center gap-3 border-b bg-muted/35 px-3 sm:px-5">
-      <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-        <Radio className="size-3 text-primary" />
-        Presence {connectionState}
-      </span>
-      <div
-        className="ml-auto flex -space-x-2"
-        aria-label="Active collaborators"
-      >
-        {grouped.slice(0, 5).map(({ sessions, user }) => (
-          <div
-            className="relative"
-            key={user.userId}
-            title={`${user.name} · ${sessions} tab${sessions === 1 ? "" : "s"}`}
-          >
-            <Avatar className="size-7 border-2 border-background">
-              <AvatarImage alt="" src={user.avatarUrl} />
-              <AvatarFallback className="text-[9px]">
-                {initials(user.name)}
-              </AvatarFallback>
-            </Avatar>
-            {sessions > 1 ? (
-              <span className="absolute -bottom-1 -right-1 grid size-3.5 place-items-center rounded-full bg-primary font-mono text-[8px] text-primary-foreground">
-                {sessions}
-              </span>
-            ) : null}
-          </div>
+          </Fragment>
         ))}
-        {grouped.length > 5 ? (
-          <span className="grid size-7 place-items-center rounded-full border-2 border-background bg-secondary font-mono text-[9px]">
-            +{grouped.length - 5}
-          </span>
-        ) : null}
-      </div>
+      </PresenceLayer>
     </div>
   );
 };
@@ -347,7 +284,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
         userInfo: {
           userId,
           name,
-          color: "#c9184a",
+          color: documentPresenceColor(userId),
           ...(avatarUrl === null ? {} : { avatarUrl }),
         },
       }),
@@ -355,6 +292,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
   );
   const [liveAdapterState, setLiveAdapterState] =
     useState<LiveAdapterState>(null);
+  const [cursorsVisible, setCursorsVisible] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [binding, setBinding] = useState<LexicalBinding | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
@@ -401,7 +339,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
         userInfo: {
           userId,
           name,
-          color: "#c9184a",
+          color: documentPresenceColor(userId),
           ...(avatarUrl === null ? {} : { avatarUrl }),
         },
       });
@@ -490,13 +428,21 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
 
   return (
     <PresenceProvider adapter={adapter} statusSweepMs={5_000}>
-      <div className="flex min-h-full flex-col">
-        {presenceEnabled && liveAdapter === null ? (
-          <div className="border-b px-3 py-2 font-mono text-[11px] text-muted-foreground sm:px-5">
-            {error ?? "Connecting presence…"}
-          </div>
+      <div className="document-awareness flex min-h-full flex-col">
+        {presenceEnabled ? (
+          <CollaborationBar
+            state={
+              liveAdapter === null
+                ? error === null
+                  ? "connecting"
+                  : "error"
+                : undefined
+            }
+            selfUserId={userId}
+            cursorsVisible={cursorsVisible}
+            onCursorsVisibleChange={setCursorsVisible}
+          />
         ) : null}
-        {presenceLive ? <WorkspacePresenceBar /> : null}
         <PresenceSelectionPublisher
           enabled={presenceLive}
           selection={selection}
@@ -507,7 +453,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
             onExternalBindingChange={handleBindingChange}
             onSelectionChange={handleSelectionChange}
           />
-          {presenceLive ? (
+          {presenceLive && cursorsVisible ? (
             <RemotePresenceOverlay binding={binding} container={container} />
           ) : null}
         </div>

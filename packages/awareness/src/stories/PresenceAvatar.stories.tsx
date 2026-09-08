@@ -65,7 +65,7 @@ const meta = {
   render: (args) => (
     <StoryShowcase
       eyebrow="Pokédex · Avatar"
-      subtitle="A single trainer's avatar with status ring, color tint, and animated active state."
+      subtitle="A single trainer's avatar with a color tint, static status dot, and resilient image fallback."
       title="Trainer avatar"
     >
       <PresenceAvatar {...args} />
@@ -181,5 +181,17 @@ export const Sizes: Story = {
     await expect(
       canvas.getByRole("img", { name: "Charmander, idle" }),
     ).toHaveClass("awareness-avatar--lg");
+  },
+};
+
+export const UnavailableImage: Story = {
+  args: {
+    user: {
+      ...trainerWithoutSprite,
+      avatarUrl: "data:image/png;base64,broken",
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("PO")).toBeVisible();
   },
 };

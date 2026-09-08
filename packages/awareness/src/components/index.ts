@@ -7,6 +7,10 @@ export {
   type BlockActivityIndicatorProps,
 } from "./block-activity-indicator";
 export {
+  CollaborationBar,
+  type CollaborationBarProps,
+} from "./collaboration-bar";
+export {
   ConnectionIndicator,
   type ConnectionIndicatorLabels,
   type ConnectionIndicatorProps,

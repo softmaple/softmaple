@@ -27,3 +27,36 @@ if (missingTargets.length > 0) {
   }
   process.exit(1);
 }
+
+/*
+ * The published stylesheet must only carry `awareness-*` rules. Re-adding
+ * `@import "tailwindcss/utilities"` to `src/global.css` would ship every class
+ * name Tailwind scans out of this package (`.hidden`, `.flex`, …) to consumer
+ * apps, where it lands after their own Tailwind output and overrides their
+ * responsive variants on source order.
+ */
+const classSelector = /(?:^|[\s,>+~(])\.((?:\\.|[A-Za-z_-])(?:\\.|[\w-])*)/g;
+
+const stylesheet = readFileSync(
+  path.resolve(packageRoot, "dist/styles.css"),
+  "utf8",
+).replace(/\/\*[\s\S]*?\*\//g, "");
+
+const foreignClasses = [
+  ...new Set(
+    Array.from(
+      stylesheet.matchAll(classSelector),
+      (match) => match[1],
+    ).filter((className) => !className.startsWith("awareness-")),
+  ),
+];
+
+if (foreignClasses.length > 0) {
+  console.error(
+    "dist/styles.css leaks non-awareness classes into consumer apps:",
+  );
+  for (const className of foreignClasses) {
+    console.error(`- .${className}`);
+  }
+  process.exit(1);
+}

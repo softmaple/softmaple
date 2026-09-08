@@ -229,3 +229,39 @@ pnpm dev
 ## License
 
 MIT
+
+## Document collaboration chrome
+
+`CollaborationBar` combines connection feedback with a disclosure of everyone in
+the document. Inside `PresenceProvider`, it reads the roster and self identity
+automatically. Standalone previews can pass `users`, `state`, and `selfUserId`.
+
+```tsx
+import { CollaborationBar } from "@softmaple/awareness/components";
+import "@softmaple/awareness/styles.css";
+
+<CollaborationBar
+  cursorsVisible={cursorsVisible}
+  onCursorsVisibleChange={setCursorsVisible}
+/>;
+```
+
+The host owns cursor visibility and uses it to hide its remote overlay. The
+control changes only the local view; keep publishing local presence so others
+can still see where you are. Omit the callback to omit the control.
+
+The roster counts people by account ID, shows additional live sessions, filters
+expired sessions, and keeps self first followed by names. Activity updates do
+not reorder people. Disconnected states hide stale names and counts without
+claiming that the document is saved. The panel supports native keyboard button
+activation and Escape from inside the panel to close and return focus.
+
+`LiveCursor.caretHeight` accepts a measured line height in pixels; omitting it
+preserves the themed default. Initials and name tags use the surface's text
+color, so even pale collaborator colors remain readable. Avatars recover from
+failed image requests using initials.
+
+Host themes can override `--font-awareness`, `--color-awareness-surface`,
+`--color-awareness-border`, `--color-awareness-text`, and
+`--color-awareness-muted` on their editor wrapper. See the web app's
+`.document-awareness` integration for an example.

@@ -149,7 +149,7 @@ export const PresenceBar = ({
       className={cx("awareness-presence-bar", className)}
     >
       {shownUsers.map((user) => {
-        const tooltipId = `${tooltipIdBase}-${user.userId}`;
+        const tooltipId = `${tooltipIdBase}-${user.connectionId}`;
         const summary = formatPresenceSummary(user);
         return (
           <li
@@ -157,7 +157,7 @@ export const PresenceBar = ({
               "awareness-presence-bar__item",
               interactive && "awareness-presence-bar__item--interactive",
             )}
-            key={user.userId}
+            key={user.connectionId}
           >
             {interactive ? (
               // <button> gives us a real focusable element with the

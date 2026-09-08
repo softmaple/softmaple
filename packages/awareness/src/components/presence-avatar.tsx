@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import type { PresenceUser } from "../types/presence";
 import { cx, getInitials, toUserColorStyle } from "./internal-utils";
 
@@ -21,28 +21,36 @@ export const PresenceAvatar = ({
   showStatus = true,
   className,
   style,
-}: PresenceAvatarProps): ReactNode => (
-  <span
-    aria-label={statusLabel(user)}
-    className={cx(
-      "awareness-avatar",
-      `awareness-avatar--${size}`,
-      `awareness-avatar--${user.status}`,
-      className,
-    )}
-    role="img"
-    style={{ ...toUserColorStyle(user.color), ...style }}
-    title={statusLabel(user)}
-  >
-    {user.avatarUrl ? (
-      <img alt="" className="awareness-avatar__image" src={user.avatarUrl} />
-    ) : (
-      <span aria-hidden="true" className="awareness-avatar__initials">
-        {getInitials(user.name)}
-      </span>
-    )}
-    {showStatus ? (
-      <span aria-hidden="true" className="awareness-avatar__status" />
-    ) : null}
-  </span>
-);
+}: PresenceAvatarProps): ReactNode => {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  return (
+    <span
+      aria-label={statusLabel(user)}
+      className={cx(
+        "awareness-avatar",
+        `awareness-avatar--${size}`,
+        `awareness-avatar--${user.status}`,
+        className,
+      )}
+      role="img"
+      style={{ ...toUserColorStyle(user.color), ...style }}
+      title={statusLabel(user)}
+    >
+      {user.avatarUrl && user.avatarUrl !== failedUrl ? (
+        <img
+          alt=""
+          className="awareness-avatar__image"
+          src={user.avatarUrl}
+          onError={() => setFailedUrl(user.avatarUrl ?? null)}
+        />
+      ) : (
+        <span aria-hidden="true" className="awareness-avatar__initials">
+          {getInitials(user.name)}
+        </span>
+      )}
+      {showStatus ? (
+        <span aria-hidden="true" className="awareness-avatar__status" />
+      ) : null}
+    </span>
+  );
+};

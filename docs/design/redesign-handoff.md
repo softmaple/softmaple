@@ -182,15 +182,39 @@ which this environment could not start (§6).
 | `pnpm --filter @softmaple/web lint` | clean, 0 warnings |
 | Responsive spill check | 25/25 route × viewport combinations clean |
 
-### Known failures, both pre-existing and unrelated to this work
+### Known failures, all pre-existing and unrelated to this work
+
+- **Storybook component tests cannot run in this environment.**
+  `packages/awareness` and `packages/editor` each define a Vitest `storybook`
+  project that runs in a real browser through `@vitest/browser-playwright`. It
+  fails deterministically:
+
+  ```
+  browserType.launch: Executable doesn't exist at
+  /opt/pw-browsers/chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell
+  ```
+
+  The image provides `chromium_headless_shell-1194`; the bundled
+  playwright-core wants build 1223. Ten test files in `awareness` and the
+  equivalent in `editor` are therefore not executed, and their launch failure
+  surfaces as an unhandled error that intermittently fails the whole
+  `turbo run test` (this is what appeared as flakiness in `awareness` and
+  `editor`). The non-browser projects run and pass: 661 tests in `awareness`.
+
+  **Consequence for the brief: the required Storybook MCP tests were not run.**
+  Component changes in `@softmaple/ui` and `@softmaple/awareness` need them on a
+  machine with the matching browser build.
 
 - **`@softmaple/playground` typecheck** fails on a missing generated
   `routeTree.gen.ts` (gitignored, produced by the dev server). Fails identically
   on `next` at the branch point.
+
 - **`packages/block-model` property test** (`convergence.property.test.ts`,
   fast-check, random seed) failed twice during this session and passed in the
   twelve runs afterwards, including with `--force` to defeat caching. It is a
-  flake; the counterexample was not captured. `block-model` was not modified.
+  genuine flake; the counterexample was not captured. `block-model` was not
+  modified by this work. `packages/bench` failed once under a parallel turbo run
+  and passed in twelve subsequent runs; it was not characterised.
 
 ### What could not be run here, and why
 
@@ -212,7 +236,7 @@ which this environment could not start (§6).
   2/10/25 editors, and the 100-viewer capacity scenario, need real sessions.
   **No latency numbers were produced, and none should be assumed.** The brief's
   budgets remain unmeasured targets.
-- **Storybook MCP tests.** Not run.
+- **Storybook MCP tests.** Not run — see the browser-build failure above.
 
 ### A bug this work found
 

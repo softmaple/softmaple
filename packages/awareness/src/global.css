@@ -53,21 +53,20 @@
   width: var(--awareness-avatar-size);
   height: var(--awareness-avatar-size);
   flex: 0 0 var(--awareness-avatar-size);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--awareness-user-color) 96%, white),
-    color-mix(in srgb, var(--awareness-user-color) 76%, black)
+  background: color-mix(
+    in srgb,
+    var(--awareness-user-color) 12%,
+    var(--color-awareness-surface)
   );
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--awareness-user-color) 38%, transparent),
-    0 3px 10px color-mix(in srgb, var(--awareness-user-color) 20%, transparent);
-  text-shadow: 0 1px 1px color-mix(in srgb, black 22%, transparent);
+  color: var(--color-awareness-text);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--awareness-user-color) 45%, transparent);
   transition:
     box-shadow 160ms ease,
     filter 160ms ease,
     transform 160ms ease;
 
-  @apply relative inline-flex items-center justify-center overflow-visible rounded-full border-2 border-awareness-surface text-white font-bold tracking-normal leading-none select-none font-awareness align-middle;
+  @apply relative inline-flex items-center justify-center overflow-visible rounded-full border-2 border-awareness-surface font-bold tracking-normal leading-none select-none font-awareness align-middle;
 }
 
 .awareness-avatar::after {
@@ -80,13 +79,6 @@
     opacity 160ms ease,
     transform 160ms ease;
   @apply absolute pointer-events-none;
-}
-
-.awareness-avatar--active::after {
-  opacity: 1;
-  transform: scale(1);
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--awareness-user-color) 14%, transparent);
 }
 
 .awareness-avatar--sm {
@@ -439,7 +431,9 @@
 }
 
 .awareness-live-cursor__label {
-  background: var(--awareness-user-color);
+  background: var(--color-awareness-surface);
+  color: var(--color-awareness-text);
+  border-inline-start: 3px solid var(--awareness-user-color);
   font-weight: 650;
   max-inline-size: min(16rem, calc(100vw - 1rem));
   transform: translate3d(
@@ -451,15 +445,12 @@
     opacity 160ms ease,
     transform 160ms ease;
   box-shadow: var(--shadow-awareness-close);
-  /*
-   * Soft dark shadow gives white text a readable edge over pale user
-   * colors (yellow/pastel) without relying on theme-dependent contrast.
-   */
-  text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
+  /* Neutral tags keep names readable for pale and saturated user colors. */
+  text-shadow: none;
   /* `max-inline-size` above already caps the label width with viewport
    * awareness; the explicit `max-w-64` we used to apply here was dead
    * code (the cascade order put `max-inline-size` last). */
-  @apply absolute bottom-full left-0 mb-[3px] overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none text-white font-awareness text-[11px] tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap;
+  @apply absolute bottom-full left-0 mb-[3px] overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none font-awareness text-[11px] tracking-normal leading-[1.2] opacity-0 text-ellipsis whitespace-nowrap;
 }
 
 .awareness-live-cursor--label-visible .awareness-live-cursor__label {
@@ -588,7 +579,9 @@
 }
 
 .awareness-selection-highlight__label {
-  background: var(--awareness-user-color);
+  background: var(--color-awareness-surface);
+  color: var(--color-awareness-text);
+  border-inline-start: 3px solid var(--awareness-user-color);
   font-weight: 650;
   max-inline-size: min(14rem, calc(100vw - 1rem));
   transform: translate(
@@ -596,8 +589,8 @@
     var(--awareness-selection-label-y)
   );
   box-shadow: var(--shadow-awareness-close);
-  text-shadow: 0 1px 1px color-mix(in srgb, black 38%, transparent);
-  @apply absolute bottom-full left-0 mb-[3px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none text-white font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
+  text-shadow: none;
+  @apply absolute bottom-full left-0 mb-[3px] max-w-56 overflow-hidden px-[7px] py-[3px] rounded-md rounded-bl-none font-awareness text-[11px] tracking-normal leading-[1.2] text-ellipsis whitespace-nowrap;
 }
 
 .awareness-selection-highlight--hoverable {
@@ -842,5 +835,158 @@
   .awareness-live-cursor--hoverable:focus-visible {
     outline: 2px solid CanvasText;
     outline-offset: 2px;
+  }
+}
+
+/* Document chrome uses inherited theme tokens; participant color is attribution. */
+.awareness-collaboration {
+  color: var(--color-awareness-text);
+  background: var(--color-awareness-surface);
+  border-block-end: 1px solid var(--color-awareness-border);
+  font: 13px / 1.5 var(--font-awareness);
+  min-width: 0;
+}
+
+.awareness-collaboration__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 52px;
+  padding: 4px 20px;
+}
+
+.awareness-collaboration__heading {
+  font-weight: 600;
+}
+.awareness-collaboration .awareness-connection-indicator {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  font-size: 12px;
+}
+.awareness-collaboration__trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-inline-start: auto;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.awareness-collaboration__trigger:hover,
+.awareness-collaboration__trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+.awareness-collaboration__trigger:focus-visible,
+.awareness-collaboration__roster:focus-visible,
+.awareness-collaboration__preference input:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.awareness-collaboration__avatars {
+  display: flex;
+  padding-inline-start: 5px;
+}
+.awareness-collaboration__avatars > * {
+  margin-inline-start: -5px;
+}
+.awareness-collaboration__overflow {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-awareness-surface);
+  font-size: 10px;
+}
+.awareness-collaboration__trigger[aria-expanded="true"]
+  .awareness-collaboration__chevron {
+  transform: rotate(180deg);
+}
+.awareness-collaboration__panel {
+  padding: 16px 20px;
+  border-block-start: 1px solid var(--color-awareness-border);
+}
+.awareness-collaboration__panel[hidden] {
+  display: none;
+}
+.awareness-collaboration__roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+  gap: 20px;
+  max-height: 260px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+.awareness-collaboration__person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.awareness-collaboration__identity {
+  display: grid;
+  min-width: 0;
+}
+.awareness-collaboration__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.awareness-collaboration__you {
+  margin-inline-start: 6px;
+  font-size: 11px;
+  font-weight: 400;
+}
+.awareness-collaboration__activity,
+.awareness-collaboration__footer {
+  font-size: 12px;
+}
+.awareness-collaboration__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-block-start: 1px solid var(--color-awareness-border);
+}
+.awareness-collaboration__footer p,
+.awareness-collaboration__notice {
+  margin: 0;
+}
+.awareness-collaboration__preference {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.awareness-collaboration__preference input {
+  accent-color: currentColor;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+@media (max-width: 520px) {
+  .awareness-collaboration__bar {
+    gap: 4px 10px;
+    padding-inline: 12px;
+  }
+  .awareness-collaboration__heading {
+    width: 100%;
+    padding-top: 4px;
+  }
+  .awareness-collaboration__panel {
+    padding: 12px;
   }
 }

@@ -265,3 +265,16 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Keep document presence in the app theme, including manual dark mode. */
+.document-awareness {
+  --font-awareness: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --color-awareness-surface: var(--background);
+  --color-awareness-border: var(--border);
+  --color-awareness-text: var(--foreground);
+  --color-awareness-muted: var(--muted-foreground);
+}
+.document-awareness .awareness-selection-highlight::before {
+  background: color-mix(in srgb, var(--awareness-user-color) 22%, transparent);
+  mix-blend-mode: normal;
+}

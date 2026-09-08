@@ -28,6 +28,8 @@ export {
   type ActivityIndicatorProps,
   BlockActivityIndicator,
   type BlockActivityIndicatorProps,
+  CollaborationBar,
+  type CollaborationBarProps,
   ConnectionIndicator,
   type ConnectionIndicatorLabels,
   type ConnectionIndicatorProps,

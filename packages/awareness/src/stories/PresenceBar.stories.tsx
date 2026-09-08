@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 
 import { PresenceBar } from "../components/presence-bar";
-import { collaborators } from "./awareness-fixtures";
+import { collaborators, pikachu } from "./awareness-fixtures";
 import { StoryShowcase } from "./story-layout";
 
 const meta = {
@@ -115,5 +115,19 @@ export const Loading: Story = {
     await expect(
       canvas.getByText("Loading collaborators…"),
     ).toBeInTheDocument();
+  },
+};
+
+/** A single account can have multiple independently identified sessions. */
+export const MultipleSessions: Story = {
+  args: {
+    users: [pikachu, { ...pikachu, connectionId: "second-session" }],
+  },
+  play: async ({ canvas }) => {
+    const buttons = canvas.getAllByRole("button");
+    await expect(buttons).toHaveLength(2);
+    await expect(buttons[0]?.getAttribute("aria-describedby")).not.toBe(
+      buttons[1]?.getAttribute("aria-describedby"),
+    );
   },
 };

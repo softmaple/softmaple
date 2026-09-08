@@ -129,7 +129,11 @@ test("two authenticated clients converge and show aggregated presence", async ({
 
   const editorContext = await browser.newContext();
   const editorPage = await openAs(editorContext, seed.editor);
-  await expect(ownerPage.getByLabel("Active collaborators")).toBeVisible({
+  await expect(
+    ownerPage.getByRole("button", {
+      name: "2 people here. Show collaborators",
+    }),
+  ).toBeVisible({
     timeout: 15_000,
   });
   const ownerEditor = ownerPage.locator('[contenteditable="true"]').first();

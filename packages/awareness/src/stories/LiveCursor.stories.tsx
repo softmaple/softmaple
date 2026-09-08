@@ -218,3 +218,8 @@ export const CullingDisabled: Story = {
     ).toBeVisible();
   },
 };
+
+/** Measured heading lines keep the remote caret aligned with the editor. */
+export const HeadingCaret: Story = {
+  args: { caretHeight: 36 },
+};

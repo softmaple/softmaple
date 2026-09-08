@@ -5,6 +5,8 @@ import "@softmaple/ui/globals.css";
 import "@softmaple/awareness/styles.css";
 import "./design.css";
 import { Providers } from "@/components/providers";
+import { FeatureFlagsProvider } from "@/components/system/feature-flags-provider";
+import { resolveFeatureFlags } from "@/lib/feature-flags";
 import { OPENGRAPH_IMAGE_URL, SITE_CONFIG } from "@softmaple/config";
 
 const fontBody = DM_Sans({
@@ -56,6 +58,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Resolved once per server render and handed to the tree as data, so no
+  // client component has to read the environment mid-session.
+  const featureFlags = resolveFeatureFlags();
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -68,7 +74,9 @@ export default function RootLayout({
           disableTransitionOnChange
           enableColorScheme
         >
-          {children}
+          <FeatureFlagsProvider flags={featureFlags}>
+            {children}
+          </FeatureFlagsProvider>
         </Providers>
       </body>
     </html>

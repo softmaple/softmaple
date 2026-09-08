@@ -81,6 +81,7 @@ vi.mock("@softmaple/awareness", async () => {
     isDirectionalSelectionRange: () => false,
     isStableCursorPosition: () => false,
     useOthers: () => [],
+    useSelf: () => null,
     usePresence: () => ({
       connectionState: "connected",
       presence: new Map(),
@@ -106,7 +107,10 @@ vi.mock("@/modules/docs/doc-editor", async () => {
             registerUpdateListener: () => () => undefined,
           },
           getBlockIndex: () => ({ blockIdToNodeKey: new Map() }),
-          replica: { subscribe: () => () => undefined },
+          replica: {
+            getDocument: () => ({ schemaVersion: 1, blocks: [] }),
+            subscribe: () => () => undefined,
+          },
         });
       }, [onExternalBindingChange]);
       return null;

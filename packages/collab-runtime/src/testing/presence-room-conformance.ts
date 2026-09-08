@@ -43,11 +43,46 @@ const authWire = (
   roomId: string,
   connectionId: string,
   userId: string,
+  sessionId?: string,
 ): string =>
   wire(TEST_PRESENCE_WIRE_TYPE.Auth, roomId, connectionId, {
     connectionId,
     credential: { kind: "access-token", token: "test-token" },
     userId,
+    ...(sessionId === undefined ? {} : { sessionId }),
+  });
+
+const attentionWire = (
+  roomId: string,
+  connectionId: string,
+  command: {
+    readonly expiresAt?: number;
+    readonly id: string;
+    readonly recipientSessionIds: ReadonlyArray<string>;
+    readonly requiresPresenter?: boolean;
+    readonly senderSessionId: string;
+    readonly targetSessionId?: string;
+  },
+): string =>
+  wire(TEST_PRESENCE_WIRE_TYPE.Attention, roomId, connectionId, command);
+
+/** Publishes presenting / following state through an ordinary presence update. */
+const attentionStateWire = (
+  roomId: string,
+  connectionId: string,
+  userId: string,
+  clock: number,
+  attention: {
+    readonly followingSessionId?: string | null;
+    readonly presenting?: boolean;
+    readonly sessionId?: string;
+  },
+): string =>
+  wire(TEST_PRESENCE_WIRE_TYPE.Update, roomId, connectionId, {
+    clock,
+    connectionId,
+    userId,
+    ...attention,
   });
 
 const joinWire = (roomId: string, connectionId: string): string =>
@@ -87,10 +122,11 @@ const authenticateAndJoin = async (
   room: PresenceRoom,
   connectionId: string,
   userId = `user-${connectionId}`,
+  sessionId?: string,
 ): Promise<ReturnType<typeof createRecordingPresencePeer>> => {
   const peer = createRecordingPresencePeer(connectionId);
   await room.join(peer);
-  await room.receive(peer, authWire(ROOM_ID, connectionId, userId));
+  await room.receive(peer, authWire(ROOM_ID, connectionId, userId, sessionId));
   check(
     framesOfType(peer, PRESENCE_FRAME.AuthOk).length === 1,
     `expected ${connectionId} to receive exactly one auth-ok`,
@@ -662,6 +698,362 @@ export const presenceRoomConformance = (
         second.closes.length,
         0,
         "expected calling peer to remain open after triggering sweep",
+      );
+    },
+  },
+  {
+    name: "attention reaches only the sessions it is addressed to",
+    async run() {
+      const { room } = factory();
+      const sender = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const addressee = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+      const bystander = await authenticateAndJoin(
+        room,
+        "connection-3",
+        "user-3",
+        "tab-3",
+      );
+
+      await room.receive(
+        sender,
+        attentionWire(ROOM_ID, "connection-1", {
+          id: "cmd-1",
+          recipientSessionIds: ["tab-2"],
+          senderSessionId: "tab-1",
+        }),
+      );
+
+      checkEqual(
+        framesOfType(addressee, PRESENCE_FRAME.Attention).length,
+        1,
+        "expected the addressed session to receive the command",
+      );
+      // The whole point of addressing: a passage, a note, and the fact that
+      // somebody asked, none of which belongs to the rest of the room.
+      checkEqual(
+        framesOfType(bystander, PRESENCE_FRAME.Attention).length,
+        0,
+        "expected an unaddressed session to receive nothing",
+      );
+
+      const outcome = framesOfType(sender, PRESENCE_FRAME.AttentionOutcome)[0];
+      check(
+        isRecord(outcome) &&
+          isRecord(outcome.payload) &&
+          outcome.payload.status === "delivered",
+        "expected the sender to be told the command was delivered",
+      );
+    },
+  },
+  {
+    name: "attention refuses a duplicate command id",
+    async run() {
+      const { room } = factory();
+      const sender = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const addressee = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+
+      const frame = attentionWire(ROOM_ID, "connection-1", {
+        id: "cmd-1",
+        recipientSessionIds: ["tab-2"],
+        senderSessionId: "tab-1",
+      });
+      await room.receive(sender, frame);
+      await room.receive(sender, frame);
+
+      checkEqual(
+        framesOfType(addressee, PRESENCE_FRAME.Attention).length,
+        1,
+        "expected a resent command to be delivered exactly once",
+      );
+      const outcomes = framesOfType(sender, PRESENCE_FRAME.AttentionOutcome);
+      const second = outcomes[1];
+      check(
+        isRecord(second) &&
+          isRecord(second.payload) &&
+          second.payload.status === "refused" &&
+          second.payload.reason === "duplicate",
+        "expected the second delivery to be refused as a duplicate",
+      );
+    },
+  },
+  {
+    name: "attention refuses an already-expired command",
+    async run() {
+      const { room } = factory();
+      const sender = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const addressee = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+
+      await room.receive(
+        sender,
+        attentionWire(ROOM_ID, "connection-1", {
+          expiresAt: Date.now() - 1_000,
+          id: "cmd-stale",
+          recipientSessionIds: ["tab-2"],
+          senderSessionId: "tab-1",
+        }),
+      );
+
+      checkEqual(
+        framesOfType(addressee, PRESENCE_FRAME.Attention).length,
+        0,
+        "expected a stale gesture never to be delivered",
+      );
+      const outcome = framesOfType(sender, PRESENCE_FRAME.AttentionOutcome)[0];
+      check(
+        isRecord(outcome) &&
+          isRecord(outcome.payload) &&
+          outcome.payload.reason === "expired",
+        "expected the sender to be told the command had expired",
+      );
+    },
+  },
+  {
+    name: "attention refuses a session speaking for somebody else",
+    async run() {
+      const { room } = factory();
+      const sender = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const addressee = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+
+      await room.receive(
+        sender,
+        attentionWire(ROOM_ID, "connection-1", {
+          id: "cmd-forged",
+          recipientSessionIds: ["tab-2"],
+          // Claiming to be somebody else's tab would let anyone cancel their
+          // invitations or stop their follow.
+          senderSessionId: "tab-2",
+        }),
+      );
+
+      checkEqual(
+        framesOfType(addressee, PRESENCE_FRAME.Attention).length,
+        0,
+        "expected a forged sender session to deliver nothing",
+      );
+      const outcome = framesOfType(sender, PRESENCE_FRAME.AttentionOutcome)[0];
+      check(
+        isRecord(outcome) &&
+          isRecord(outcome.payload) &&
+          outcome.payload.status === "refused",
+        "expected a forged sender session to be refused",
+      );
+    },
+  },
+  {
+    name: "following requires the presenter to have opted in",
+    async run() {
+      const { room } = factory();
+      const follower = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const presenter = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+
+      const followRequest = attentionWire(ROOM_ID, "connection-1", {
+        id: "follow-1",
+        recipientSessionIds: ["tab-2"],
+        requiresPresenter: true,
+        senderSessionId: "tab-1",
+        targetSessionId: "tab-2",
+      });
+      await room.receive(follower, followRequest);
+
+      const refused = framesOfType(
+        follower,
+        PRESENCE_FRAME.AttentionOutcome,
+      )[0];
+      check(
+        isRecord(refused) &&
+          isRecord(refused.payload) &&
+          refused.payload.reason === "not-presenting",
+        "expected following to be refused before the presenter opts in",
+      );
+
+      // Opt in, then ask again with a fresh command id.
+      await room.receive(
+        presenter,
+        attentionStateWire(ROOM_ID, "connection-2", "user-2", 1, {
+          presenting: true,
+          sessionId: "tab-2",
+        }),
+      );
+      await room.receive(
+        follower,
+        attentionWire(ROOM_ID, "connection-1", {
+          id: "follow-2",
+          recipientSessionIds: ["tab-2"],
+          requiresPresenter: true,
+          senderSessionId: "tab-1",
+          targetSessionId: "tab-2",
+        }),
+      );
+
+      checkEqual(
+        framesOfType(presenter, PRESENCE_FRAME.Attention).length,
+        1,
+        "expected following to reach a presenter who opted in",
+      );
+    },
+  },
+  {
+    name: "following refuses a cycle",
+    async run() {
+      const { room } = factory();
+      const first = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const second = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+
+      // Both present, and tab-2 already follows tab-1.
+      await room.receive(
+        first,
+        attentionStateWire(ROOM_ID, "connection-1", "user-1", 1, {
+          presenting: true,
+          sessionId: "tab-1",
+        }),
+      );
+      await room.receive(
+        second,
+        attentionStateWire(ROOM_ID, "connection-2", "user-2", 1, {
+          followingSessionId: "tab-1",
+          presenting: true,
+          sessionId: "tab-2",
+        }),
+      );
+
+      await room.receive(
+        first,
+        attentionWire(ROOM_ID, "connection-1", {
+          id: "follow-cycle",
+          recipientSessionIds: ["tab-2"],
+          requiresPresenter: true,
+          senderSessionId: "tab-1",
+          targetSessionId: "tab-2",
+        }),
+      );
+
+      const outcome = framesOfType(first, PRESENCE_FRAME.AttentionOutcome)[0];
+      check(
+        isRecord(outcome) &&
+          isRecord(outcome.payload) &&
+          outcome.payload.reason === "cycle",
+        "expected two viewports chasing each other to be refused",
+      );
+    },
+  },
+  {
+    name: "a session id may not be claimed by another account",
+    async run() {
+      const { room } = factory();
+      await authenticateAndJoin(room, "connection-1", "user-1", "tab-1");
+
+      const impostor = createRecordingPresencePeer("connection-2");
+      await room.join(impostor);
+      await room.receive(
+        impostor,
+        authWire(ROOM_ID, "connection-2", "user-2", "tab-1"),
+      );
+
+      checkEqual(
+        framesOfType(impostor, PRESENCE_FRAME.AuthOk).length,
+        0,
+        "expected a claim on another account's session id to be denied",
+      );
+    },
+  },
+  {
+    name: "a reconnecting tab keeps its own session id",
+    async run() {
+      const { room } = factory();
+      const sender = await authenticateAndJoin(
+        room,
+        "connection-1",
+        "user-1",
+        "tab-1",
+      );
+      const first = await authenticateAndJoin(
+        room,
+        "connection-2",
+        "user-2",
+        "tab-2",
+      );
+      await room.leave(first);
+
+      // Same tab, new socket: connectionId changes, sessionId does not.
+      const reconnected = await authenticateAndJoin(
+        room,
+        "connection-3",
+        "user-2",
+        "tab-2",
+      );
+      await room.receive(
+        sender,
+        attentionWire(ROOM_ID, "connection-1", {
+          id: "cmd-after-reconnect",
+          recipientSessionIds: ["tab-2"],
+          senderSessionId: "tab-1",
+        }),
+      );
+
+      checkEqual(
+        framesOfType(reconnected, PRESENCE_FRAME.Attention).length,
+        1,
+        "expected a reconnected tab to still be addressable",
       );
     },
   },

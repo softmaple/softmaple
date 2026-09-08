@@ -35,11 +35,11 @@ export const NewDocumentForm: FC<{
         }}
       >
         <div className="mb-8 flex items-start gap-4">
-          <div className="grid size-10 shrink-0 place-items-center border bg-muted text-primary">
+          <div className="grid size-10 shrink-0 place-items-center border bg-muted text-emphasis">
             <FilePlus2 className="size-5" />
           </div>
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emphasis">
               New document
             </p>
             <h1 className="mt-1 font-display text-2xl font-semibold">

@@ -1,6 +1,14 @@
 import { Check, Circle, FileCode2, Radio, Users } from "lucide-react";
+import { collaboratorColor } from "@/modules/docs/document-presence-color";
 
 const LINE_NUMBERS = ["01", "02", "03", "04", "05", "06"] as const;
+
+/**
+ * The specimen is a still image of the product, so it borrows a real identity
+ * colour rather than inventing one. Light values are used because the specimen
+ * paints its own card; the pair for the current theme is not available here.
+ */
+const SPECIMEN_COLLABORATOR = collaboratorColor("lina", "light");
 
 export const AuthBrandSpecimen = () => (
   <div
@@ -8,7 +16,7 @@ export const AuthBrandSpecimen = () => (
     className="mt-10 hidden w-full max-w-2xl rounded-xl border bg-card shadow-sm lg:block"
   >
     <div className="flex items-center gap-2 border-b px-3 py-2 font-mono text-[10px] text-muted-foreground">
-      <Circle className="size-2.5 fill-primary text-primary" />
+      <Circle className="size-2.5 fill-emphasis text-emphasis" />
       field-notes / carbon-cycle
       <span className="ml-auto flex items-center gap-1 text-success">
         <Check className="size-3" /> Saved
@@ -24,7 +32,7 @@ export const AuthBrandSpecimen = () => (
         ))}
       </div>
       <div className="relative px-5 py-5 xl:px-7">
-        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-primary">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-emphasis">
           Observation / 09:42
         </p>
         <p className="mt-4 font-display text-xl font-semibold">
@@ -34,11 +42,25 @@ export const AuthBrandSpecimen = () => (
           A place for unfinished sentences, questions worth sitting with, and
           ideas that get better together.
         </p>
-        <blockquote className="mt-4 border-l-2 border-primary pl-4 text-xs italic xl:text-sm">
+        <blockquote className="mt-4 border-l-2 border-action pl-4 text-xs italic xl:text-sm">
           Make room for a new idea.
         </blockquote>
-        <span className="absolute right-12 top-[6.8rem] h-5 border-l-2 border-success" />
-        <span className="absolute right-3 top-[7rem] bg-success px-1.5 py-0.5 font-mono text-[9px] text-success-foreground">
+        {/*
+          A collaborator caret, in a collaborator colour. Feedback colours mean
+          "how did that go"; a person is not a status, and must never be drawn
+          in one — nor in the action yellow.
+        */}
+        <span
+          className="absolute right-12 top-[6.8rem] h-5 border-l-2"
+          style={{ borderColor: SPECIMEN_COLLABORATOR.color }}
+        />
+        <span
+          className="absolute right-3 top-[7rem] px-1.5 py-0.5 font-mono text-[9px]"
+          style={{
+            background: SPECIMEN_COLLABORATOR.color,
+            color: SPECIMEN_COLLABORATOR.onColor,
+          }}
+        >
           Lina
         </span>
       </div>
@@ -46,7 +68,7 @@ export const AuthBrandSpecimen = () => (
 
     <div className="flex flex-wrap items-center gap-3 border-t px-3 py-2 font-mono text-[9px] text-muted-foreground">
       <span className="flex items-center gap-1.5">
-        <Radio className="size-3 text-primary" /> 3 active
+        <Radio className="size-3 text-emphasis" /> 3 active
       </span>
       <span className="flex items-center gap-1.5">
         <FileCode2 className="size-3" /> Markdown / LaTeX

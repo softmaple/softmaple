@@ -2,6 +2,13 @@ import { randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  DOCUMENT_FIXTURES,
+  FIXTURE_KIND,
+  fixtureEventBatches,
+} from "@/lib/seeding/seed-fixtures";
+import { resolveSeedConfiguration } from "@/lib/seeding/seed-isolation";
+import type { ServiceRoleDatabase } from "@/lib/seeding/service-role-rpc";
 import type { Database } from "@/types/model";
 
 const requestSchema = z.object({
@@ -9,34 +16,10 @@ const requestSchema = z.object({
   runId: z.string().regex(/^[a-z0-9-]{8,48}$/),
 });
 
-const projectRefFromUrl = (value: string): string | null => {
-  try {
-    const [projectRef, ...rest] = new URL(value).hostname.split(".");
-    return rest.join(".") === "supabase.co" && projectRef ? projectRef : null;
-  } catch {
-    return null;
-  }
-};
-
-const configuration = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const expectedProjectRef = process.env.E2E_SUPABASE_PROJECT_REF;
-  const seedSecret = process.env.E2E_SEED_SECRET;
-  const actualProjectRef = url === undefined ? null : projectRefFromUrl(url);
-  if (
-    process.env.E2E_ALLOW_REMOTE_SEED !== "true" ||
-    url === undefined ||
-    serviceRoleKey === undefined ||
-    seedSecret === undefined ||
-    expectedProjectRef === undefined ||
-    actualProjectRef !== expectedProjectRef ||
-    actualProjectRef === process.env.SUPABASE_PRODUCTION_PROJECT_REF
-  ) {
-    throw new Error("E2E seed configuration is not safely isolated");
-  }
-  return { serviceRoleKey, seedSecret, url };
-};
+const configuration = () =>
+  resolveSeedConfiguration(
+    process.env as Readonly<Record<string, string | undefined>>,
+  );
 
 const runEmails = (runId: string) => ({
   editor: `e2e+${runId}-editor@softmaple.invalid`,
@@ -62,9 +45,21 @@ export async function POST(request: Request) {
     );
   }
 
-  const admin = createClient<Database>(config.url, config.serviceRoleKey, {
+  const clientOptions = {
     auth: { autoRefreshToken: false, persistSession: false },
-  });
+  } as const;
+  const admin = createClient<Database>(
+    config.url,
+    config.serviceRoleKey,
+    clientOptions,
+  );
+  // A second view of the same connection, typed for the service-role-only
+  // functions the Data API never exposes to a browser.
+  const collabRpc = createClient<ServiceRoleDatabase>(
+    config.url,
+    config.serviceRoleKey,
+    clientOptions,
+  );
   const emails = runEmails(parsed.data.runId);
   if (parsed.data.action === "cleanup") {
     const users = await admin.auth.admin.listUsers({ page: 1, perPage: 1_000 });
@@ -158,6 +153,30 @@ export async function POST(request: Request) {
     );
   }
 
+  // A workspace every role can open but that holds no documents, so the empty
+  // state is reachable without deleting seeded content first.
+  const emptyWorkspace = await admin
+    .from("workspaces")
+    .insert({
+      description: `Empty Playwright run ${parsed.data.runId}`,
+      owner_id: owner.data.user.id,
+      slug: `e2e-empty-${parsed.data.runId}-${suffix}`,
+      title: `E2E Empty ${parsed.data.runId}`,
+    })
+    .select("id, slug, title")
+    .single();
+  if (emptyWorkspace.error !== null) {
+    await Promise.all([
+      admin.auth.admin.deleteUser(owner.data.user.id),
+      admin.auth.admin.deleteUser(editor.data.user.id),
+      admin.auth.admin.deleteUser(viewer.data.user.id),
+    ]);
+    return NextResponse.json(
+      { error: "Empty workspace seed failed" },
+      { status: 500 },
+    );
+  }
+
   const membership = await admin.from("workspace_members").insert([
     {
       invited_by: owner.data.user.id,
@@ -171,32 +190,83 @@ export async function POST(request: Request) {
       user_id: viewer.data.user.id,
       workspace_id: workspace.data.id,
     },
+    {
+      invited_by: owner.data.user.id,
+      role: "EDITOR",
+      user_id: editor.data.user.id,
+      workspace_id: emptyWorkspace.data.id,
+    },
   ]);
-  const document = await admin
+  const documents = await admin
     .from("documents")
-    .insert({
-      author_id: owner.data.user.id,
-      slug: `shared-notes-${suffix}`,
-      title: "Shared notes",
-      workspace_id: workspace.data.id,
-    })
-    .select("id, slug, title")
-    .single();
-  if (membership.error !== null || document.error !== null) {
+    .insert(
+      DOCUMENT_FIXTURES.map((fixture) => ({
+        author_id: owner.data.user.id,
+        is_public: fixture.isPublic,
+        slug: `${fixture.slug}-${suffix}`,
+        title: fixture.title,
+        workspace_id: workspace.data.id,
+      })),
+    )
+    .select("id, slug, title, is_public");
+
+  const removeSeededUsers = async () => {
     await Promise.all([
       admin.auth.admin.deleteUser(owner.data.user.id),
       admin.auth.admin.deleteUser(editor.data.user.id),
       admin.auth.admin.deleteUser(viewer.data.user.id),
     ]);
+  };
+
+  if (membership.error !== null || documents.error !== null) {
+    await removeSeededUsers();
     return NextResponse.json(
       { error: "Workspace data seed failed" },
       { status: 500 },
     );
   }
 
+  // Rows come back in insert order, so a fixture and its row stay paired.
+  const seeded = DOCUMENT_FIXTURES.map((fixture, index) => ({
+    fixture,
+    row: documents.data[index],
+  }));
+
+  for (const { fixture, row } of seeded) {
+    if (row === undefined) {
+      await removeSeededUsers();
+      return NextResponse.json(
+        { error: "Document seed failed" },
+        { status: 500 },
+      );
+    }
+    const batches = fixtureEventBatches(fixture, `seed-${suffix}`);
+    // The same RPC the collaboration runtime uses, so seeded history is
+    // indistinguishable from history a browser wrote.
+    const appended = await collabRpc.rpc("append_document_event_batches", {
+      p_actor_id: owner.data.user.id,
+      p_batches: batches,
+      p_document_id: row.id,
+    });
+    if (appended.error !== null) {
+      await removeSeededUsers();
+      return NextResponse.json(
+        { error: "Document content seed failed" },
+        { status: 500 },
+      );
+    }
+  }
+
+  const documentByKind = Object.fromEntries(
+    seeded.map(({ fixture, row }) => [fixture.kind, row]),
+  );
+
   return NextResponse.json({
-    document: document.data,
+    /** Kept for existing specs: the private draft in the shared workspace. */
+    document: documentByKind[FIXTURE_KIND.Draft],
+    documents: documentByKind,
     editor: { email: emails.editor, password },
+    emptyWorkspace: emptyWorkspace.data,
     owner: { email: emails.owner, password },
     ownerOnlyWorkspace: ownerOnlyWorkspace.data,
     viewer: { email: emails.viewer, password },

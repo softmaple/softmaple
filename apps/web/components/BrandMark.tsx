@@ -32,7 +32,7 @@ export function SoftmapleWordmark({
       )}
       {...props}
     >
-      softmaple<span className="text-primary">.</span>
+      softmaple<span className="text-emphasis">.</span>
     </span>
   );
 }

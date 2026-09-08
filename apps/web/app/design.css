@@ -1,94 +1,170 @@
+@import "@softmaple/ui/globals.css";
+
 /**
- * Softmaple autumn theme.
+ * Softmaple semantic tokens.
  *
- * Light — "Parchment & Maple": warm paper stock, bark-brown ink, burnt maple
- * accents. Dark — "Ember & Bark": deep bark ground lit by an amber ember.
- * Every surface in the app reads from these tokens, so the season lives here
- * and nowhere else.
+ * This file is the app's single Tailwind entry: it pulls in the design system
+ * (which owns `@import "tailwindcss"`) and then restates the palette. That
+ * order matters. A `@theme` block only registers utilities inside the pass
+ * that imported Tailwind, so tokens declared in a *separate* stylesheet
+ * produce variables and no classes — which is exactly how `font-display`
+ * silently stopped working.
+ *
+ * Every colour in the product is named for the job it does, not for the hue it
+ * happens to be. Two surfaces carry the whole layout — the workspace you move
+ * around in and the document you write on — and everything else is stated
+ * relative to those.
+ *
+ * Rules that the palette depends on and that reviews should enforce:
+ *
+ * 1. `--action` is yellow and is only ever a *fill*. Yellow at this lightness
+ *    has roughly 1.3:1 contrast against the light workspace, so yellow text or
+ *    a yellow focus ring would be invisible. Text on yellow is
+ *    `--action-contrast`; readable accent *text* is `--emphasis`, and links are
+ *    `--link`.
+ * 2. Focus is `--focus`, never `--action`, for the same reason.
+ * 3. Collaborator identity colours are assigned in the awareness package and
+ *    deliberately exclude yellow, so a person is never confused for an action.
+ *
+ * The shadcn variables underneath are aliases onto these tokens so that
+ * `@softmaple/ui` keeps working unchanged.
  */
 
 :root {
-  --background: #fbf6ee;
-  --foreground: #2b2019;
-  --card: #fffdf9;
-  --card-foreground: #2b2019;
-  --popover: #fffdf9;
-  --popover-foreground: #2b2019;
-  --primary: #b1451c;
-  --primary-foreground: #fff8f1;
-  --secondary: #f2e6d6;
-  --secondary-foreground: #2b2019;
-  --muted: #f2e6d6;
-  --muted-foreground: #6c574a;
-  --accent: #f7ded0;
-  --accent-foreground: #2b2019;
-  --destructive: #a3123a;
-  --destructive-foreground: #fff8f1;
-  --success: #4d6b2f;
-  --success-foreground: #fff8f1;
-  --border: #e5d3bd;
-  --input: #e0cab1;
-  --ring: #b1451c;
-  --sidebar: #fdf8f1;
-  --sidebar-foreground: #2b2019;
-  --sidebar-primary: #b1451c;
-  --sidebar-primary-foreground: #fff8f1;
-  --sidebar-accent: #f2e6d6;
-  --sidebar-accent-foreground: #2b2019;
-  --sidebar-border: #e5d3bd;
-  --sidebar-ring: #b1451c;
-  --radius: 0.75rem;
+  /* Surfaces --------------------------------------------------------- */
+  --surface-workspace: #f4f3ee;
+  --surface-document: #fffefa;
+  --surface-raised: #ffffff;
+  --surface-quiet: #eae8e1;
 
-  /* Seasonal accents, for atmosphere rather than semantics. */
-  --autumn-ember: #c2521f;
-  --autumn-gold: #d59a2c;
-  --autumn-canopy: #8c3f1d;
-  --autumn-wash-strength: 14%;
-  --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
+  /* Content ---------------------------------------------------------- */
+  --content: #191a17;
+  --content-secondary: #63645c;
+
+  /* Lines ------------------------------------------------------------ */
+  --divider: #dedcd3;
+  --input-boundary: #c9c7bc;
+
+  /* Action, attention, focus, link ----------------------------------- */
+  --action: #ffd523;
+  --action-hover: #f5c800;
+  --action-contrast: #1f1a00;
+  --attention: #ffd523;
+  --attention-surface: #fdf3cd;
+  --attention-contrast: #4a3b00;
+  --emphasis: #7a5a00;
+  --focus: #1b57e0;
+  --link: #1f4fd8;
+  --link-hover: #163cae;
+
+  /* Feedback --------------------------------------------------------- */
+  --feedback-positive: #2e6b3e;
+  --feedback-caution: #8a5a00;
+  --feedback-critical: #b3261e;
+  --feedback-contrast: #fffefa;
+
+  /* Geometry --------------------------------------------------------- */
+  --radius: 0.5rem; /* 8px controls; panels are radius-xl = 12px */
+  --rail-width: 4rem; /* 64px */
+  --navigator-width: 16rem; /* 240–280px band */
+  --document-header-height: 3.5rem; /* 56px */
+  --prose-measure: 45rem; /* ~720px */
+  --touch-target: 2.75rem; /* 44px */
+
+  /* shadcn aliases ---------------------------------------------------- */
+  --background: var(--surface-workspace);
+  --foreground: var(--content);
+  --card: var(--surface-document);
+  --card-foreground: var(--content);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--content);
+  --primary: var(--action);
+  --primary-foreground: var(--action-contrast);
+  --secondary: var(--surface-quiet);
+  --secondary-foreground: var(--content);
+  --muted: var(--surface-quiet);
+  --muted-foreground: var(--content-secondary);
+  --accent: var(--attention-surface);
+  --accent-foreground: var(--attention-contrast);
+  --destructive: var(--feedback-critical);
+  --destructive-foreground: var(--feedback-contrast);
+  --success: var(--feedback-positive);
+  --success-foreground: var(--feedback-contrast);
+  --border: var(--divider);
+  --input: var(--input-boundary);
+  --ring: var(--focus);
+  --sidebar: var(--surface-workspace);
+  --sidebar-foreground: var(--content);
+  --sidebar-primary: var(--action);
+  --sidebar-primary-foreground: var(--action-contrast);
+  --sidebar-accent: var(--surface-quiet);
+  --sidebar-accent-foreground: var(--content);
+  --sidebar-border: var(--divider);
+  --sidebar-ring: var(--focus);
 }
 
 .dark {
-  --background: #17120f;
-  --foreground: #f4e9dc;
-  --card: #211a15;
-  --card-foreground: #f4e9dc;
-  --popover: #241c17;
-  --popover-foreground: #f4e9dc;
-  --primary: #ef9a5c;
-  --primary-foreground: #24150c;
-  --secondary: #2d231c;
-  --secondary-foreground: #f4e9dc;
-  --muted: #2d231c;
-  --muted-foreground: #bda695;
-  --accent: #3a2a20;
-  --accent-foreground: #f7e2d0;
-  --destructive: #f2657f;
-  --destructive-foreground: #24150c;
-  --success: #a3c46a;
-  --success-foreground: #1b2410;
-  --border: #3b2f26;
-  --input: #47382d;
-  --ring: #ef9a5c;
-  --sidebar: #1c1611;
-  --sidebar-foreground: #f4e9dc;
-  --sidebar-primary: #ef9a5c;
-  --sidebar-primary-foreground: #24150c;
-  --sidebar-accent: #2d231c;
-  --sidebar-accent-foreground: #f4e9dc;
-  --sidebar-border: #3b2f26;
-  --sidebar-ring: #ef9a5c;
+  --surface-workspace: #111315;
+  --surface-document: #191c1f;
+  --surface-raised: #22262a;
+  --surface-quiet: #1d2124;
 
-  --autumn-ember: #e2703a;
-  --autumn-gold: #e0a94a;
-  --autumn-canopy: #f0a86a;
-  --autumn-wash-strength: 10%;
-  --autumn-shadow: #000000;
+  --content: #ecedea;
+  --content-secondary: #a2a7a5;
+
+  --divider: #2c3135;
+  --input-boundary: #3c4247;
+
+  --action: #ffd94a;
+  --action-hover: #ffe173;
+  --action-contrast: #1a1600;
+  --attention: #ffd94a;
+  --attention-surface: #2e2712;
+  --attention-contrast: #ffe9a3;
+  --emphasis: #ffd94a;
+  --focus: #9cc0ff;
+  --link: #8fb6ff;
+  --link-hover: #b4cfff;
+
+  --feedback-positive: #7fd196;
+  --feedback-caution: #f0b44a;
+  --feedback-critical: #ff9a92;
+  --feedback-contrast: #111315;
 }
 
 @theme inline {
   --font-sans: var(--font-body);
   --font-display: var(--font-syne);
   --font-mono: var(--font-utility);
+
+  --color-workspace: var(--surface-workspace);
+  --color-document: var(--surface-document);
+  --color-raised: var(--surface-raised);
+  --color-quiet: var(--surface-quiet);
+  --color-content: var(--content);
+  --color-content-secondary: var(--content-secondary);
+  --color-divider: var(--divider);
+  --color-input-boundary: var(--input-boundary);
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-action-contrast: var(--action-contrast);
+  --color-attention: var(--attention);
+  --color-attention-surface: var(--attention-surface);
+  --color-attention-contrast: var(--attention-contrast);
+  --color-emphasis: var(--emphasis);
+  --color-focus: var(--focus);
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
+  --color-positive: var(--feedback-positive);
+  --color-caution: var(--feedback-caution);
+  --color-critical: var(--feedback-critical);
+  --color-feedback-contrast: var(--feedback-contrast);
+
+  --spacing-rail: var(--rail-width);
+  --spacing-navigator: var(--navigator-width);
+  --spacing-doc-header: var(--document-header-height);
+  --spacing-measure: var(--prose-measure);
+  --spacing-touch: var(--touch-target);
 }
 
 @layer base {
@@ -100,73 +176,70 @@
     min-width: 320px;
     min-height: 100dvh;
     overflow-x: clip;
-    /* A low canopy light: ember from the left, late gold from the right. */
-    background-image:
-      radial-gradient(
-        58rem 38rem at 8% -14%,
-        color-mix(in srgb, var(--autumn-ember) var(--autumn-wash-strength), transparent),
-        transparent 60%
-      ),
-      radial-gradient(
-        46rem 32rem at 102% -6%,
-        color-mix(in srgb, var(--autumn-gold) var(--autumn-wash-strength), transparent),
-        transparent 58%
-      );
-    background-repeat: no-repeat;
-    background-attachment: fixed;
+    /* The workspace is a flat, calm ground. No washes, no gradients: the only
+       thing that should attract the eye is somebody else's attention. */
+    background: var(--surface-workspace);
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--autumn-gold) 34%, transparent);
+    background: color-mix(in srgb, var(--action) 42%, transparent);
+    color: var(--content);
+  }
+
+  /* One visible focus treatment everywhere, on every surface. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) - 2px);
   }
 }
 
 @layer components {
-  .manuscript-stage {
+  /*
+   * The landing page's demonstration of a shared document. It is a static
+   * mock-up, not a live session, and is labelled as such in the markup — a
+   * fake presence indicator that reads as real is a lie about the product.
+   */
+  .demo-stage {
     position: relative;
     padding: 2rem 1.2rem 2.5rem;
-    border-radius: 2rem;
-    background:
-      radial-gradient(
-        120% 90% at 85% 0%,
-        color-mix(in srgb, var(--autumn-gold) 22%, transparent),
-        transparent 58%
-      ),
-      radial-gradient(
-        95% 80% at 0% 100%,
-        color-mix(in srgb, var(--autumn-ember) 16%, transparent),
-        transparent 60%
-      ),
-      var(--secondary);
+    border-radius: 1.5rem;
+    background: var(--surface-quiet);
   }
 
-  .manuscript-sheet {
+  .demo-sheet {
     position: relative;
-    border: 1px solid var(--border);
-    border-radius: 0.9rem;
-    background: var(--card);
-    box-shadow: 0 24px 48px -26px var(--autumn-shadow);
-    transform: rotate(-2deg);
+    border: 1px solid var(--divider);
+    border-radius: 0.75rem;
+    background: var(--surface-document);
+    box-shadow: 0 24px 48px -30px rgb(0 0 0 / 0.35);
   }
 
-  .manuscript-note {
+  .demo-note {
     position: absolute;
     right: 1.5rem;
     bottom: 1.25rem;
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    border: 1px solid var(--border);
+    border: 1px solid var(--divider);
     border-radius: 0.7rem;
-    background: var(--card);
+    background: var(--surface-raised);
     padding: 0.8rem 1rem;
-    color: var(--primary);
+    color: var(--content-secondary);
     font-size: 0.75rem;
-    box-shadow: 0 6px 18px -6px var(--autumn-shadow);
+    box-shadow: 0 6px 18px -8px rgb(0 0 0 / 0.35);
+  }
+
+  /* A reading measure that stays honest at every width. */
+  .prose-measure {
+    width: 100%;
+    max-width: var(--prose-measure);
+    margin-inline: auto;
   }
 
   .markdown-preview {
-    color: var(--foreground);
+    color: var(--content);
     line-height: 1.75;
   }
 
@@ -178,13 +251,12 @@
   .markdown-preview h2,
   .markdown-preview h3 {
     margin-top: 2rem;
-    font-family: var(--font-syne);
     font-weight: 650;
     line-height: 1.2;
   }
 
   .markdown-preview h1 {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider);
     padding-bottom: 0.65rem;
     font-size: 2rem;
   }
@@ -211,13 +283,13 @@
   }
 
   .markdown-preview blockquote {
-    border-left: 2px solid var(--primary);
+    border-left: 2px solid var(--divider);
     padding-left: 1rem;
-    color: var(--muted-foreground);
+    color: var(--content-secondary);
   }
 
   .markdown-preview code {
-    background: var(--muted);
+    background: var(--surface-quiet);
     padding: 0.12rem 0.3rem;
     font-family: var(--font-utility);
     font-size: 0.88em;
@@ -225,8 +297,8 @@
 
   .markdown-preview pre {
     overflow-x: auto;
-    border: 1px solid var(--border);
-    background: var(--card);
+    border: 1px solid var(--divider);
+    background: var(--surface-quiet);
     padding: 1rem;
   }
 
@@ -236,9 +308,13 @@
   }
 
   .markdown-preview a {
-    color: var(--primary);
+    color: var(--link);
     text-decoration: underline;
     text-underline-offset: 0.2em;
+  }
+
+  .markdown-preview a:hover {
+    color: var(--link-hover);
   }
 
   .markdown-preview table {
@@ -249,12 +325,19 @@
 
   .markdown-preview th,
   .markdown-preview td {
-    border: 1px solid var(--border);
+    border: 1px solid var(--divider);
     padding: 0.55rem 0.7rem;
     text-align: left;
   }
 }
 
+/*
+ * Motion.
+ *
+ * `data-motion="reduced"` is the account preference; the media query is the
+ * operating system's. Either one is enough — a person who asked for less
+ * motion in one place should not have to ask again in the other.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -266,13 +349,37 @@
   }
 }
 
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/*
+ * Forced colours.
+ *
+ * Windows high-contrast replaces our palette wholesale. Everything that
+ * carried meaning through colour alone needs a border to carry it instead.
+ */
+@media (forced-colors: active) {
+  .surface-raised,
+  .app-rail,
+  .app-navigator,
+  .document-header {
+    border: 1px solid CanvasText;
+  }
+}
+
 /* Keep document presence in the app theme, including manual dark mode. */
 .document-awareness {
   --font-awareness: var(--font-body), ui-sans-serif, system-ui, sans-serif;
-  --color-awareness-surface: var(--background);
-  --color-awareness-border: var(--border);
-  --color-awareness-text: var(--foreground);
-  --color-awareness-muted: var(--muted-foreground);
+  --color-awareness-surface: var(--surface-raised);
+  --color-awareness-border: var(--divider);
+  --color-awareness-text: var(--content);
+  --color-awareness-muted: var(--content-secondary);
 }
 .document-awareness .awareness-selection-highlight::before {
   background: color-mix(in srgb, var(--awareness-user-color) 22%, transparent);

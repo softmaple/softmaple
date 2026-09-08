@@ -26,7 +26,7 @@ export function RouteLoading({
         <div className="flex items-center gap-3 border-b pb-5">
           <RaspberryRecordMark />
           <div className="min-w-0 flex-1">
-            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
               Retrieving record
             </p>
             <Skeleton className="mt-2 h-5 w-44 max-w-full rounded-sm" />

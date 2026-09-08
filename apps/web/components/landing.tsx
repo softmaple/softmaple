@@ -49,14 +49,16 @@ export default function LandingPage() {
       <SiteHeader />
       <main id="main">
         <section className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.95fr_1.05fr] lg:gap-10 lg:py-24">
-          <div>
+          {/* min-w-0: a grid item defaults to min-content width, so a long
+              headline would push the column past the viewport. */}
+          <div className="min-w-0">
             <Badge variant="secondary">
               <PenLine data-icon="inline-start" /> A shared space for your words
             </Badge>
-            <h1 className="mt-7 font-display text-[clamp(3.25rem,6.6vw,6rem)] font-semibold leading-[1.02] tracking-[-0.065em]">
+            <h1 className="mt-7 font-display text-[clamp(2rem,6.6vw,6rem)] font-semibold leading-[1.02] tracking-[-0.065em]">
               A little space.
               <br />
-              For <span className="text-primary">big ideas.</span>
+              For <span className="text-emphasis">big ideas.</span>
             </h1>
             <p className="mt-7 max-w-md text-lg leading-8 text-muted-foreground">
               From the first rough note to the final paper. Write, shape, and
@@ -79,16 +81,16 @@ export default function LandingPage() {
             </p>
           </div>
           <div
-            className="manuscript-stage"
-            aria-label="Example of a shared Softmaple document"
+            className="demo-stage min-w-0"
+            aria-label="Simulated example of a shared Softmaple document"
           >
-            <div className="manuscript-sheet">
+            <div className="demo-sheet">
               <div className="flex items-center gap-2 border-b px-5 py-4 text-xs text-muted-foreground">
-                <FileText className="size-4 text-primary" />
+                <FileText className="size-4 text-emphasis" />
                 <span className="truncate">
                   Field notes / A slower kind of progress
                 </span>
-                <Check className="ml-auto size-4 shrink-0 text-primary" />
+                <Check className="ml-auto size-4 shrink-0 text-emphasis" />
                 <span className="hidden sm:inline">Saved</span>
               </div>
               <div className="px-6 py-9 sm:px-10 sm:py-12">
@@ -115,23 +117,26 @@ export default function LandingPage() {
                 </p>
                 <Separator className="my-7" />
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="grid size-7 place-items-center rounded-full bg-secondary text-primary">
+                  <span className="grid size-7 place-items-center rounded-full bg-secondary text-emphasis">
                     L
                   </span>
                   <span>Lina is writing…</span>
-                  <PenLine className="ml-auto size-4 text-primary" />
+                  <span className="sr-only">
+                    Simulated demonstration, not a live session.
+                  </span>
+                  <PenLine className="ml-auto size-4 text-emphasis" />
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-4 border-t px-5 py-3 text-[11px] text-muted-foreground">
-                <span className="font-medium text-primary">Rich text</span>
+                <span className="font-medium text-emphasis">Rich text</span>
                 <span>Preview</span>
                 <span>Markdown</span>
                 <span>LaTeX</span>
               </div>
             </div>
-            <div className="manuscript-note">
-              <Users className="size-4" />
-              <span>A shared thought starts here.</span>
+            <div className="demo-note">
+              <Users className="size-4" aria-hidden />
+              <span>Simulated demonstration</span>
             </div>
           </div>
         </section>
@@ -159,7 +164,7 @@ export default function LandingPage() {
                 key={feature.title}
               >
                 <div className="mb-8 flex items-center gap-3">
-                  <span className="grid size-10 place-items-center rounded-xl bg-secondary text-primary">
+                  <span className="grid size-10 place-items-center rounded-xl bg-secondary text-emphasis">
                     <Icon className="size-5" />
                   </span>
                   <p className="text-xs text-muted-foreground">

@@ -1,0 +1,93 @@
+# Local development stack for Softmaple.
+#
+# Prisma migrations remain the single schema source of truth: this file only
+# describes the containers. Bring the stack up with
+# `pnpm --filter @softmaple/db db:local:start`, which starts these services and
+# then applies `prisma/migrations` with `prisma migrate deploy`.
+#
+# Every port below is bound to loopback by the Supabase CLI. Nothing here is a
+# credential: local anon/service-role keys are printed by `supabase status` and
+# are the well-known development keys, never production ones.
+#
+# Reference: https://supabase.com/docs/guides/local-development
+
+project_id = "softmaple"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[api.tls]
+enabled = false
+
+[db]
+port = 54322
+shadow_port = 54320
+health_timeout = "2m"
+# Matches the hosted project. `SHOW server_version;` before changing this.
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[db.migrations]
+# Prisma owns the ledger; the Supabase CLI must not apply a second one.
+enabled = false
+
+[db.seed]
+enabled = false
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+# Captures every outbound mail so that signup and password-recovery flows can be
+# exercised end to end without sending real email.
+[local_smtp]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[storage.buckets.avatars]
+public = true
+file_size_limit = "5MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/webp"]
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000", "http://localhost:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 8
+password_requirements = "lower_upper_letters_digits"
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+# Local only: seeded accounts must be able to sign in without a mail round trip.
+enable_confirmations = false
+secure_password_change = false
+max_frequency = "1s"
+otp_length = 6
+otp_expiry = 3600
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false

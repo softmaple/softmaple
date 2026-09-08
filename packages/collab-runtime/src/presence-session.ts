@@ -11,6 +11,13 @@ export interface PresenceSession {
   readonly connectionId: string;
   readonly identity: PresenceIdentity;
   readonly roomId: string;
+  /**
+   * Tab-scoped identity, when the client claimed one. Survives reconnects,
+   * unlike `connectionId`, which is why shared attention is addressed to it:
+   * binding a follow to a connection would end the relationship on every
+   * network blip.
+   */
+  readonly sessionId?: string;
 }
 
 export interface PresenceSessionAuthorizationRequest {

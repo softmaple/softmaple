@@ -23,6 +23,10 @@ export {
   type WebSocketAdapterConfig,
   webSocketAdapterFactory,
 } from "./adapters/websocket";
+// Shared attention: session identity, invitations, follow relationships and
+// the version-3 capability handshake. Also available as
+// `@softmaple/awareness/attention` for consumers that only need the contracts.
+export * from "./attention";
 export {
   ActivityIndicator,
   type ActivityIndicatorProps,

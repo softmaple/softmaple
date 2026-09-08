@@ -68,7 +68,7 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
           <ModeToggle />
         </div>
         <div className="mt-9">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
             Personal settings
           </p>
           <h1 className="mt-2 font-display text-3xl font-semibold">Account</h1>

@@ -9,6 +9,10 @@ import type {
 } from "./version";
 
 export const WS_MESSAGE = {
+  /** Version 3: a deliberate shared-attention act, in either direction. */
+  ATTENTION: "attention",
+  /** Version 3: what became of a command, returned to its sender. */
+  ATTENTION_OUTCOME: "attention:outcome",
   JOIN: "join",
   LEAVE: "leave",
   PRESENCE_UPDATE: "presence:update",

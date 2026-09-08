@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, Plus, Settings2, Users } from "lucide-react";
+import { Plus, Settings2, Users } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import { Badge } from "@softmaple/ui/components/badge";
 import {
@@ -11,7 +11,7 @@ import {
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import {
   countWorkspaceDocuments,
-  listWorkspaceDocuments,
+  listWorkspaceDocumentPage,
 } from "@/app/actions/documents/documents";
 import {
   getWorkspaceMemberByUserId,
@@ -19,6 +19,7 @@ import {
 } from "@/app/actions/workspaceMembers";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
+import { WorkspaceHome } from "@/modules/workspaces/workspace-home";
 
 type Props = { params: Promise<{ workspaceSlug: string }> };
 
@@ -57,12 +58,14 @@ export default async function WorkspacePage({ params }: Props) {
   );
   const [documentsResult, documentCountResult, membersResult, roleResult] =
     await Promise.all([
-      listWorkspaceDocuments(workspace.id, 5),
+      // The whole first page, not five: home groups documents rather than
+      // truncating them, so the groups need something to group.
+      listWorkspaceDocumentPage({ limit: 50, workspaceId: workspace.id }),
       countWorkspaceDocuments(workspace.id),
       listWorkspaceMembers(workspace.id),
       getWorkspaceMemberByUserId(workspace.id),
     ]);
-  const documents = requireWorkspaceRouteData(documentsResult, {
+  const documentPage = requireWorkspaceRouteData(documentsResult, {
     ...failureContext,
     operation: "list_workspace_documents",
   });
@@ -89,7 +92,7 @@ export default async function WorkspacePage({ params }: Props) {
       <header className="border-b bg-card/50 px-4 py-8 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emphasis">
               Workspace / {membership.role.toLowerCase()}
             </p>
             <h1 className="font-display mt-2 truncate text-3xl font-semibold">
@@ -123,55 +126,21 @@ export default async function WorkspacePage({ params }: Props) {
 
       <main className="mx-auto grid max-w-6xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:px-8">
         <section className="min-w-0">
-          <div className="mb-4 flex items-end justify-between border-b pb-3">
+          <div className="mb-4 flex items-end justify-between border-b border-divider pb-3">
             <div>
-              <h2 className="text-lg font-semibold">Recent documents</h2>
-              <p className="text-sm text-muted-foreground">
+              <h2 className="text-lg font-semibold">Documents</h2>
+              <p className="text-sm text-content-secondary">
                 {documentCount} total
+                {documentPage.nextCursor === null
+                  ? ""
+                  : `, ${documentPage.documents.length} shown`}
               </p>
             </div>
           </div>
-          {documents.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-10 text-center">
-              <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
-              <h3 className="mt-4 font-medium">No documents yet</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Give your next idea a page of its own.
-              </p>
-              {canEdit ? (
-                <Button asChild className="mt-5" size="sm">
-                  <Link href={`/workspace/${workspaceSlug}/doc/new`}>
-                    Create document
-                  </Link>
-                </Button>
-              ) : null}
-            </div>
-          ) : (
-            <div className="divide-y rounded-xl border bg-card">
-              {documents.map((document) => (
-                <Link
-                  className="flex min-w-0 items-center gap-4 p-4 transition-colors hover:bg-accent"
-                  href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
-                  key={document.id}
-                >
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border bg-background text-primary">
-                    <FileText className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-medium">{document.title}</h3>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {document.updated_at === null
-                        ? "Created just now"
-                        : `Edited ${new Date(document.updated_at).toLocaleString()}`}
-                    </p>
-                  </div>
-                  {document.is_public ? (
-                    <Badge variant="secondary">Public</Badge>
-                  ) : null}
-                </Link>
-              ))}
-            </div>
-          )}
+          <WorkspaceHome
+            documents={documentPage.documents}
+            workspaceSlug={workspaceSlug}
+          />
         </section>
 
         <aside>

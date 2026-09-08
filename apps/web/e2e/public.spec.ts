@@ -34,6 +34,47 @@ test.describe("public product surface", () => {
     await expect(page.getByLabel("Email")).toBeVisible();
   });
 
+  /**
+   * `overflow-x: clip` on the body means `scrollWidth` never exceeds the
+   * viewport, however far content spills — so a scrollWidth check passes while
+   * a headline is being sliced in half. This measures the elements themselves.
+   */
+  test("no element spills past the viewport at any supported width", async ({
+    page,
+  }) => {
+    const sizes = [
+      { name: "320", width: 320, height: 800 },
+      { name: "390", width: 390, height: 844 },
+      { name: "1024", width: 1024, height: 900 },
+      // 200% zoom halves the CSS viewport; the layout must survive it.
+      { name: "zoom-200", width: 720, height: 500 },
+      { name: "1440", width: 1440, height: 1000 },
+    ];
+    const routes = ["/", "/login", "/signup", "/reset-password"];
+
+    for (const size of sizes) {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      for (const route of routes) {
+        await page.goto(route);
+        const spilling = await page.evaluate(() => {
+          const limit = document.documentElement.clientWidth;
+          return [...document.querySelectorAll("body *")]
+            .filter((element) => {
+              const rect = element.getBoundingClientRect();
+              // A 1px tolerance for sub-pixel layout rounding.
+              return rect.width > 0 && rect.right > limit + 1;
+            })
+            .slice(0, 5)
+            .map(
+              (element) =>
+                `${element.tagName.toLowerCase()}.${String(element.className).slice(0, 60)}`,
+            );
+        });
+        expect(spilling, `${route} at ${size.name}`).toEqual([]);
+      }
+    }
+  });
+
   test("theme and 320px layout remain usable", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 720 });
     await page.goto("/");

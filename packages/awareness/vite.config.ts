@@ -74,6 +74,7 @@ export default defineConfig({
         ),
         "mapping/index": path.resolve(rootDir, "src/mapping/index.ts"),
         "protocol/index": path.resolve(rootDir, "src/protocol/index.ts"),
+        "attention/index": path.resolve(rootDir, "src/attention/index.ts"),
         "testing/index": path.resolve(rootDir, "src/testing/index.ts"),
         "hooks/index": path.resolve(rootDir, "src/hooks/index.ts"),
         "adapters/index": path.resolve(rootDir, "src/adapters/index.ts"),

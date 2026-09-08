@@ -55,6 +55,10 @@
       "types": "./dist/protocol/index.d.ts",
       "import": "./dist/protocol/index.js"
     },
+    "./attention": {
+      "types": "./dist/attention/index.d.ts",
+      "import": "./dist/attention/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"

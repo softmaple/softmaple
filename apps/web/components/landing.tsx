@@ -49,11 +49,13 @@ export default function LandingPage() {
       <SiteHeader />
       <main id="main">
         <section className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.95fr_1.05fr] lg:gap-10 lg:py-24">
-          <div>
+          {/* min-w-0: a grid item defaults to min-content width, so a long
+              headline would push the column past the viewport. */}
+          <div className="min-w-0">
             <Badge variant="secondary">
               <PenLine data-icon="inline-start" /> A shared space for your words
             </Badge>
-            <h1 className="mt-7 font-display text-[clamp(3.25rem,6.6vw,6rem)] font-semibold leading-[1.02] tracking-[-0.065em]">
+            <h1 className="mt-7 font-display text-[clamp(2rem,6.6vw,6rem)] font-semibold leading-[1.02] tracking-[-0.065em]">
               A little space.
               <br />
               For <span className="text-emphasis">big ideas.</span>
@@ -79,7 +81,7 @@ export default function LandingPage() {
             </p>
           </div>
           <div
-            className="demo-stage"
+            className="demo-stage min-w-0"
             aria-label="Simulated example of a shared Softmaple document"
           >
             <div className="demo-sheet">

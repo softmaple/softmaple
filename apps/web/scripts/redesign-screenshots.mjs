@@ -7,9 +7,18 @@
 import { chromium } from "@playwright/test";
 
 const OUT = "/home/user/softmaple/docs/design/assets/redesign";
+/**
+ * The two review viewports, plus the three responsive checks: the tablet
+ * breakpoint where the navigator collapses, the narrowest supported width, and
+ * 200% zoom (emulated as half the CSS viewport at twice the scale, which is
+ * what a browser zoom actually does to layout).
+ */
 const VIEWPORTS = [
-  { name: "desktop", width: 1440, height: 1000 },
-  { name: "mobile", width: 390, height: 844 },
+  { name: "desktop", width: 1440, height: 1000, scale: 1 },
+  { name: "mobile", width: 390, height: 844, scale: 1 },
+  { name: "tablet-1024", width: 1024, height: 900, scale: 1 },
+  { name: "narrow-320", width: 320, height: 800, scale: 1 },
+  { name: "zoom-200", width: 720, height: 500, scale: 2 },
 ];
 const ROUTES = process.argv.slice(2);
 
@@ -21,7 +30,7 @@ for (const viewport of VIEWPORTS) {
     const context = await browser.newContext({
       viewport: { width: viewport.width, height: viewport.height },
       colorScheme: theme,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: viewport.scale,
     });
     const page = await context.newPage();
     for (const route of ROUTES) {

@@ -321,6 +321,7 @@ export const createStubPresenceSessionHooks = (): StubPresenceSessionHooks => {
 
 /** The wire type strings `createOpaqueTestCodec` understands. */
 export const TEST_PRESENCE_WIRE_TYPE = {
+  Attention: "test:attention",
   Auth: "test:auth",
   Heartbeat: "test:heartbeat",
   Join: "test:join",
@@ -331,7 +332,10 @@ export const TEST_PRESENCE_WIRE_TYPE = {
 
 interface TestMemberRecord extends PresenceMemberRecord {
   readonly extra?: unknown;
+  readonly followingSessionId?: string | null;
   readonly name: string;
+  readonly presenting?: boolean;
+  readonly sessionId?: string | null;
 }
 
 interface TestPatchPayload {
@@ -352,12 +356,26 @@ export const createOpaqueTestCodec = (): PresenceCodec => ({
       typeof currentAsTestMember.name === "string"
         ? currentAsTestMember.name
         : current.userId;
+    const attention = patch as PresencePatch & {
+      readonly followingSessionId?: string | null;
+      readonly presenting?: boolean;
+      readonly sessionId?: string | null;
+    };
     const member: TestMemberRecord = {
       clock: patch.clock,
       connectionId: current.connectionId,
       name: currentName,
       userId: current.userId,
       ...(extra === undefined ? {} : { extra }),
+      ...(attention.presenting === undefined
+        ? {}
+        : { presenting: attention.presenting }),
+      ...(attention.followingSessionId === undefined
+        ? {}
+        : { followingSessionId: attention.followingSessionId }),
+      ...(attention.sessionId === undefined
+        ? {}
+        : { sessionId: attention.sessionId }),
     };
     return {
       broadcastPayload: {
@@ -381,6 +399,8 @@ export const createOpaqueTestCodec = (): PresenceCodec => ({
         return PRESENCE_MESSAGE.Heartbeat;
       case TEST_PRESENCE_WIRE_TYPE.Update:
         return PRESENCE_MESSAGE.Update;
+      case TEST_PRESENCE_WIRE_TYPE.Attention:
+        return PRESENCE_MESSAGE.Attention;
       default:
         throw new Error(`unsupported presence wire type: ${envelope.type}`);
     }
@@ -422,6 +442,44 @@ export const createOpaqueTestCodec = (): PresenceCodec => ({
       typeof value.clock === "number"
     );
   },
+  memberAttention(member) {
+    const record = member as TestMemberRecord;
+    return {
+      followingSessionId:
+        typeof record.followingSessionId === "string"
+          ? record.followingSessionId
+          : null,
+      presenting: record.presenting === true,
+      sessionId: typeof record.sessionId === "string" ? record.sessionId : null,
+    };
+  },
+  parseAttention(payload) {
+    if (
+      !isRecord(payload) ||
+      typeof payload.id !== "string" ||
+      payload.id.length === 0 ||
+      typeof payload.senderSessionId !== "string" ||
+      !Array.isArray(payload.recipientSessionIds) ||
+      payload.recipientSessionIds.length === 0 ||
+      !payload.recipientSessionIds.every(
+        (entry): entry is string => typeof entry === "string",
+      )
+    ) {
+      throw new Error("invalid test attention command");
+    }
+    return {
+      expiresAt:
+        typeof payload.expiresAt === "number" ? payload.expiresAt : null,
+      id: payload.id,
+      recipientSessionIds: payload.recipientSessionIds,
+      requiresPresenter: payload.requiresPresenter === true,
+      senderSessionId: payload.senderSessionId,
+      targetSessionId:
+        typeof payload.targetSessionId === "string"
+          ? payload.targetSessionId
+          : null,
+    };
+  },
   parseAuth(payload) {
     if (
       !isRecord(payload) ||
@@ -437,6 +495,9 @@ export const createOpaqueTestCodec = (): PresenceCodec => ({
       connectionId: payload.connectionId,
       credential: payload.credential as CollabCredential,
       userId: payload.userId,
+      ...(typeof payload.sessionId === "string"
+        ? { sessionId: payload.sessionId }
+        : {}),
     };
   },
   parseEnvelope(value) {
@@ -484,6 +545,15 @@ export const createOpaqueTestCodec = (): PresenceCodec => ({
       connectionId: payload.connectionId,
       userId: payload.userId,
       ...(payload.extra === undefined ? {} : { extra: payload.extra }),
+      ...(payload.presenting === undefined
+        ? {}
+        : { presenting: payload.presenting }),
+      ...(payload.followingSessionId === undefined
+        ? {}
+        : { followingSessionId: payload.followingSessionId }),
+      ...(payload.sessionId === undefined
+        ? {}
+        : { sessionId: payload.sessionId }),
     } as PresencePatch & TestPatchPayload;
   },
 });

@@ -43,6 +43,15 @@ export {
   supports,
 } from "./negotiation";
 export {
+  ATTENTION_META_KEY,
+  ATTENTION_WIRE_TYPE,
+  attentionMeta,
+  type RoomAttentionCommand,
+  type RoomMemberAttention,
+  roomAttentionCommand,
+  roomMemberAttention,
+} from "./room-projection";
+export {
   ATTENTION_COMMAND,
   ATTENTION_INVITATION_TTL_MS,
   ATTENTION_REFUSAL,

@@ -61,12 +61,17 @@ export {
   type RoomFanoutSubscription,
 } from "./room-fanout";
 export {
+  PRESENCE_ATTENTION_REFUSAL,
   PRESENCE_FRAME,
   PRESENCE_MESSAGE,
+  type PresenceAttentionCommand,
+  type PresenceAttentionOutcome,
+  type PresenceAttentionRefusal,
   type PresenceAuthPayload,
   type PresenceCodec,
   type PresenceEnvelope,
   type PresenceFrameKind,
+  type PresenceMemberAttention,
   type PresenceMessageKind,
   type PresencePatch,
   type PresencePatchApplication,

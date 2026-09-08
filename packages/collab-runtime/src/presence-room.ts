@@ -34,6 +34,12 @@ export interface PresencePeerSnapshot {
   readonly identity: PresenceIdentity;
   readonly joined: boolean;
   readonly rateLimit: PresenceRateLimitState | null;
+  /**
+   * The tab this connection belongs to. A hibernating host that dropped it
+   * would come back unaddressable, and every follow pointed at this session
+   * would silently stop resolving.
+   */
+  readonly sessionId?: string;
 }
 
 /** Server-owned session metadata restored by a hibernating transport host. */
@@ -45,6 +51,8 @@ export interface PresenceRoomResumeState {
   readonly identity: PresenceIdentity;
   readonly joined: boolean;
   readonly rateLimit: PresenceRateLimitState | null;
+  /** Restores addressability for shared attention; see the snapshot. */
+  readonly sessionId?: string;
 }
 
 export const PRESENCE_ROOM_REFRESH_MODE = {

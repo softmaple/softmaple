@@ -21,6 +21,10 @@ import {
   type PresencePatch as AwarenessPresencePatch,
   type PresenceRateLimit,
 } from "@softmaple/awareness/protocol";
+import {
+  roomAttentionCommand,
+  roomMemberAttention,
+} from "@softmaple/awareness/attention";
 import type { PresenceUser } from "@softmaple/awareness/types/presence";
 
 const WIRE_TO_ROOM_MESSAGE: Partial<Record<string, PresenceMessageKind>> = {
@@ -30,6 +34,7 @@ const WIRE_TO_ROOM_MESSAGE: Partial<Record<string, PresenceMessageKind>> = {
   [WS_MESSAGE.LEAVE]: PRESENCE_MESSAGE.Leave,
   [WS_MESSAGE.PRESENCE_SYNC]: PRESENCE_MESSAGE.Sync,
   [WS_MESSAGE.PRESENCE_UPDATE]: PRESENCE_MESSAGE.Update,
+  [WS_MESSAGE.ATTENTION]: PRESENCE_MESSAGE.Attention,
 };
 
 const ROOM_FRAME_TO_WIRE: Record<PresenceFrameKind, string> = {
@@ -41,6 +46,8 @@ const ROOM_FRAME_TO_WIRE: Record<PresenceFrameKind, string> = {
   [PRESENCE_FRAME.Leave]: WS_MESSAGE.LEAVE,
   [PRESENCE_FRAME.SyncResponse]: WS_MESSAGE.PRESENCE_SYNC_RESPONSE,
   [PRESENCE_FRAME.Update]: WS_MESSAGE.PRESENCE_UPDATE,
+  [PRESENCE_FRAME.Attention]: WS_MESSAGE.ATTENTION,
+  [PRESENCE_FRAME.AttentionOutcome]: WS_MESSAGE.ATTENTION_OUTCOME,
 };
 
 /** Compile-time check that a wider awareness type structurally satisfies a narrower runtime one. */
@@ -113,6 +120,14 @@ export const awarenessPresenceCodec: PresenceCodec = {
     return isPresenceUser(value);
   },
 
+  memberAttention(member) {
+    return roomMemberAttention(member);
+  },
+
+  parseAttention(payload) {
+    return roomAttentionCommand(payload);
+  },
+
   parseAuth(payload) {
     const parsed = parsePresenceAuth(payload);
     return {
@@ -122,6 +137,9 @@ export const awarenessPresenceCodec: PresenceCodec = {
         token: parsed.token,
       } satisfies CollabCredential,
       userId: parsed.userId,
+      ...(parsed.sessionId === undefined
+        ? {}
+        : { sessionId: parsed.sessionId }),
     };
   },
 

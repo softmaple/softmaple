@@ -2,8 +2,12 @@ import type { CollabCredential } from "@softmaple/collab-protocol";
 import type { ConnectionLease } from "./connection-limiter";
 import { ROOM_LEAVE_REASON, type RoomLeaveReason } from "./document-room";
 import {
+  PRESENCE_ATTENTION_REFUSAL,
   PRESENCE_FRAME,
   PRESENCE_MESSAGE,
+  type PresenceAttentionCommand,
+  type PresenceAttentionOutcome,
+  type PresenceAttentionRefusal,
   type PresenceEnvelope,
   type PresenceMessageKind,
   type PresencePatch,
@@ -25,6 +29,9 @@ import {
   type PresenceSessionEndReason,
 } from "./presence-session";
 import type { PresenceMemberRecord } from "./presence-store";
+
+/** How many attention command ids a room remembers for duplicate detection. */
+const SEEN_ATTENTION_LIMIT = 256;
 
 const PEER_PHASE = {
   Authenticated: "authenticated",
@@ -52,6 +59,8 @@ interface PeerState {
   queue: Promise<void>;
   queuePending: number;
   rateLimit: unknown;
+  /** Tab-scoped identity claimed at auth; null for a client without attention. */
+  sessionId: string | null;
 }
 
 const createPeerState = (peer: PresencePeer): PeerState => ({
@@ -70,6 +79,7 @@ const createPeerState = (peer: PresencePeer): PeerState => ({
   queue: Promise.resolve(),
   queuePending: 0,
   rateLimit: null,
+  sessionId: null,
 });
 
 const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
@@ -100,6 +110,21 @@ class RuntimePresenceRoom implements PresenceRoom {
   private fanoutSubscription: PresenceFanoutSubscription | null = null;
   private messageMaintenanceQueue: Promise<void> = Promise.resolve();
   private readonly peers = new Map<PresencePeer, PeerState>();
+  /**
+   * Live tab-scoped sessions in this room instance, for addressed delivery.
+   * A session id is held by at most one connection: a reconnecting tab
+   * replaces its own entry, and a claim on another account's session id is
+   * refused at auth.
+   */
+  private readonly sessionPeers = new Map<string, PeerState>();
+  /**
+   * Command ids already applied, oldest first, so a retry or a reconnect
+   * cannot deliver the same deliberate act twice. Bounded because a room runs
+   * for hours and the duplicates worth catching arrive close behind the
+   * original.
+   */
+  private readonly seenAttentionIds: string[] = [];
+  private readonly seenAttentionIdSet = new Set<string>();
   private readonly refreshMode: PresenceRoomRefreshMode;
   private readonly services: PresenceRoomServices;
 
@@ -308,6 +333,9 @@ class RuntimePresenceRoom implements PresenceRoom {
         case PRESENCE_MESSAGE.Leave:
           await this.receiveLeave(state);
           return;
+        case PRESENCE_MESSAGE.Attention:
+          await this.receiveAttention(state, envelope);
+          return;
       }
     });
   }
@@ -431,6 +459,21 @@ class RuntimePresenceRoom implements PresenceRoom {
         return;
       }
 
+      // A session id is a tab, not a credential: the client picks it. Binding
+      // it to the authenticated account here is what stops one person naming
+      // another person's session and receiving their invitations.
+      if (auth.sessionId !== undefined) {
+        const holder = this.sessionPeers.get(auth.sessionId);
+        if (
+          holder !== undefined &&
+          holder !== state &&
+          holder.identity !== null &&
+          holder.identity.userId !== identity.userId
+        ) {
+          throw new Error("presence session id belongs to another account");
+        }
+      }
+
       // Set before admission so a concurrent cleanup can identify the peer.
       state.connectionId = auth.connectionId;
       const admission = await this.services.connections.acquire({
@@ -491,6 +534,9 @@ class RuntimePresenceRoom implements PresenceRoom {
 
       state.credential = auth.credential;
       state.identity = identity;
+      if (auth.sessionId !== undefined) {
+        this.bindSession(state, auth.sessionId);
+      }
       state.authorizationExpiresAt =
         Date.now() + this.services.policy.authorizationRefreshIntervalMs;
       state.phase = PEER_PHASE.Authenticated;
@@ -531,6 +577,12 @@ class RuntimePresenceRoom implements PresenceRoom {
     state: PeerState,
     resumed: PresenceRoomResumeState,
   ): Promise<PresenceSession | null> {
+    // Restore addressability up front. A resumed tab must be reachable by the
+    // same session id it had before eviction, or every follow aimed at it
+    // resolves to nothing while the connection looks perfectly healthy.
+    if (resumed.sessionId !== undefined) {
+      this.bindSession(state, resumed.sessionId);
+    }
     let refreshed: PresenceIdentity | null;
     try {
       refreshed = await this.services.sessions.refresh({
@@ -540,6 +592,9 @@ class RuntimePresenceRoom implements PresenceRoom {
           connectionId: resumed.connectionId,
           identity: resumed.identity,
           roomId: this.roomId,
+          ...(resumed.sessionId === undefined
+            ? {}
+            : { sessionId: resumed.sessionId }),
         },
       });
     } catch (error) {
@@ -662,7 +717,12 @@ class RuntimePresenceRoom implements PresenceRoom {
       refreshed = await this.services.sessions.refresh({
         connectionId,
         credential,
-        session: { connectionId, identity, roomId: this.roomId },
+        session: {
+          connectionId,
+          identity,
+          roomId: this.roomId,
+          ...(state.sessionId === null ? {} : { sessionId: state.sessionId }),
+        },
       });
     } catch (error) {
       this.report(error, state, "authorization-recheck");
@@ -933,6 +993,271 @@ class RuntimePresenceRoom implements PresenceRoom {
     }
   }
 
+  /** Records a live tab-scoped session, replacing this peer's previous claim. */
+  private bindSession(state: PeerState, sessionId: string): void {
+    if (state.sessionId !== null && state.sessionId !== sessionId) {
+      this.releaseSession(state);
+    }
+    state.sessionId = sessionId;
+    this.sessionPeers.set(sessionId, state);
+  }
+
+  /** Removes a session claim, but only if this peer still owns it. */
+  private releaseSession(state: PeerState): void {
+    const sessionId = state.sessionId;
+    if (sessionId === null) return;
+    if (this.sessionPeers.get(sessionId) === state) {
+      this.sessionPeers.delete(sessionId);
+    }
+  }
+
+  /**
+   * Remembers a command id. Returns false when it was already seen, which is
+   * the duplicate check: a retry and a reconnect both resend, and a deliberate
+   * act must land exactly once.
+   */
+  private rememberAttentionId(commandId: string): boolean {
+    if (this.seenAttentionIdSet.has(commandId)) return false;
+    this.seenAttentionIdSet.add(commandId);
+    this.seenAttentionIds.push(commandId);
+    while (this.seenAttentionIds.length > SEEN_ATTENTION_LIMIT) {
+      const evicted = this.seenAttentionIds.shift();
+      if (evicted !== undefined) this.seenAttentionIdSet.delete(evicted);
+    }
+    return true;
+  }
+
+  /**
+   * Would following `targetSessionId` bring us back to `followerSessionId`?
+   *
+   * Walks the follow relationships recorded in stored presence. Two viewports
+   * chasing each other is not a state anybody can leave, so the request is
+   * refused before it can be created.
+   */
+  private async wouldFollowCycle(
+    followerSessionId: string,
+    targetSessionId: string,
+  ): Promise<boolean> {
+    const attentionOf = this.services.codec.memberAttention;
+    if (attentionOf === undefined) return false;
+    if (followerSessionId === targetSessionId) return true;
+
+    const bySession = new Map<string, string | null>();
+    for (const [sessionId, peer] of this.sessionPeers) {
+      const member = peer.joined ? await this.readMember(peer) : null;
+      bySession.set(
+        sessionId,
+        member === null
+          ? null
+          : attentionOf.call(this.services.codec, member).followingSessionId,
+      );
+    }
+
+    const seen = new Set<string>([followerSessionId]);
+    let current: string | null | undefined = targetSessionId;
+    while (current !== null && current !== undefined) {
+      if (seen.has(current)) return true;
+      seen.add(current);
+      current = bySession.get(current) ?? null;
+    }
+    return false;
+  }
+
+  /**
+   * The stored member for a peer, or null when it has none.
+   *
+   * A store failure answers null rather than throwing: presence is not allowed
+   * to take an attention command down with it, and null already means "cannot
+   * confirm", which refuses the command on the safe side.
+   */
+  private async readMember(
+    state: PeerState,
+  ): Promise<PresenceMemberRecord | null> {
+    if (state.connectionId === null) return null;
+    try {
+      const value = await this.services.store.getMember(
+        this.roomId,
+        state.connectionId,
+      );
+      return value !== null && this.services.codec.isMember(value)
+        ? value
+        : null;
+    } catch (error) {
+      this.report(error, state, "attention-member-read");
+      return null;
+    }
+  }
+
+  /**
+   * Deliver one deliberate act.
+   *
+   * The order is: can we speak this at all, is it fresh, is it allowed, and
+   * only then who gets it. The sender always learns the answer — a command
+   * that quietly evaporates is indistinguishable from one that worked.
+   */
+  private async receiveAttention(
+    state: PeerState,
+    envelope: PresenceEnvelope,
+  ): Promise<void> {
+    const parse = this.services.codec.parseAttention;
+    if (
+      parse === undefined ||
+      this.services.codec.memberAttention === undefined
+    ) {
+      await this.sendAttentionOutcome(state, {
+        commandId: "",
+        reason: PRESENCE_ATTENTION_REFUSAL.Unsupported,
+        status: "refused",
+      });
+      return;
+    }
+
+    let command: PresenceAttentionCommand;
+    try {
+      command = parse.call(this.services.codec, envelope.payload);
+    } catch (error) {
+      // A malformed attention frame is a protocol error, not a refusal: it
+      // never had an id to refuse under.
+      this.report(error, state, "attention-parse");
+      state.leaveRequested = true;
+      await this.closePeer(state.peer, 1008, "Invalid attention command");
+      await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
+      return;
+    }
+
+    const refuse = async (reason: PresenceAttentionRefusal): Promise<void> => {
+      await this.sendAttentionOutcome(state, {
+        commandId: command.id,
+        reason,
+        status: "refused",
+      });
+    };
+
+    // A session may only speak for itself. Without this, anyone could cancel
+    // anyone else's invitation or stop their follow.
+    if (
+      state.sessionId === null ||
+      command.senderSessionId !== state.sessionId
+    ) {
+      await refuse(PRESENCE_ATTENTION_REFUSAL.NoSuchSession);
+      return;
+    }
+
+    const now = Date.now();
+    if (command.expiresAt !== null && command.expiresAt <= now) {
+      await refuse(PRESENCE_ATTENTION_REFUSAL.Expired);
+      return;
+    }
+
+    if (!this.rememberAttentionId(command.id)) {
+      await refuse(PRESENCE_ATTENTION_REFUSAL.Duplicate);
+      return;
+    }
+
+    const target = command.targetSessionId;
+    if (target !== null) {
+      const targetPeer = this.sessionPeers.get(target);
+      if (targetPeer === undefined) {
+        await refuse(PRESENCE_ATTENTION_REFUSAL.NoSuchSession);
+        return;
+      }
+      if (command.requiresPresenter) {
+        const member = await this.readMember(targetPeer);
+        const presenting =
+          member !== null &&
+          this.services.codec.memberAttention.call(this.services.codec, member)
+            .presenting;
+        // Being watched is a decision. No amount of activity implies consent.
+        if (!presenting) {
+          await refuse(PRESENCE_ATTENTION_REFUSAL.NotPresenting);
+          return;
+        }
+        if (await this.wouldFollowCycle(state.sessionId, target)) {
+          await refuse(PRESENCE_ATTENTION_REFUSAL.Cycle);
+          return;
+        }
+      }
+    }
+
+    const frame = this.services.codec.encode(
+      PRESENCE_FRAME.Attention,
+      this.roomId,
+      state.connectionId ?? state.sessionId,
+      envelope.payload,
+    );
+
+    // Addressed, never broadcast: the fan-out carries the recipient list so
+    // each instance narrows it to its own addressed sessions. Delivery goes
+    // through fan-out for local peers too — publish is contractually
+    // observable by the publisher's own subscription, so sending here as well
+    // would deliver the same command twice.
+    const deliveredTo = this.addressableSessionIds(command.recipientSessionIds);
+    try {
+      await this.services.fanout.publish({
+        frame,
+        recipientSessionIds: command.recipientSessionIds,
+        roomId: this.roomId,
+      });
+    } catch (error) {
+      this.report(error, state, "attention-publish");
+      await this.sendAttentionOutcome(state, {
+        commandId: command.id,
+        reason: PRESENCE_ATTENTION_REFUSAL.Unsupported,
+        status: "refused",
+      });
+      return;
+    }
+
+    // "Delivered to nobody" is a real answer: every addressee had closed
+    // their tab. It is not a refusal, and the sender should see the
+    // difference.
+    await this.sendAttentionOutcome(state, {
+      commandId: command.id,
+      deliveredToSessionIds: deliveredTo,
+      status: "delivered",
+    });
+  }
+
+  /**
+   * Which of the addressed sessions this instance can actually reach.
+   *
+   * Best effort by construction: an addressee held by another instance is not
+   * counted, because counting it would require an acknowledgement protocol
+   * this does not have. Under-reporting is the safe direction — the sender
+   * learns at least who definitely got it.
+   */
+  private addressableSessionIds(
+    recipientSessionIds: ReadonlyArray<string>,
+  ): ReadonlyArray<string> {
+    return recipientSessionIds.filter((sessionId) => {
+      const peer = this.sessionPeers.get(sessionId);
+      return (
+        peer !== undefined &&
+        !peer.leaveRequested &&
+        peer.phase === PEER_PHASE.Joined
+      );
+    });
+  }
+
+  private async sendAttentionOutcome(
+    state: PeerState,
+    outcome: PresenceAttentionOutcome,
+  ): Promise<void> {
+    let frame: unknown;
+    try {
+      frame = this.services.codec.encode(
+        PRESENCE_FRAME.AttentionOutcome,
+        this.roomId,
+        state.connectionId ?? "",
+        outcome,
+      );
+    } catch (error) {
+      this.report(error, state, "attention-outcome-encode");
+      return;
+    }
+    await this.sendIgnoringFailure(state.peer, frame, "attention-outcome");
+  }
+
   private async receiveLeave(state: PeerState): Promise<void> {
     state.leaveRequested = true;
     await this.closePeer(state.peer, 1000, "Presence left");
@@ -1063,6 +1388,7 @@ class RuntimePresenceRoom implements PresenceRoom {
         identity: state.identity,
         joined: state.joined,
         rateLimit: state.rateLimit,
+        ...(state.sessionId === null ? {} : { sessionId: state.sessionId }),
       });
     } catch (error) {
       this.report(error, state, "persist");
@@ -1085,10 +1411,19 @@ class RuntimePresenceRoom implements PresenceRoom {
           this.roomId,
           async (broadcast) => {
             if (broadcast.roomId !== this.roomId) return;
+            // An addressed broadcast reaches only the sessions it names. This
+            // is what makes an invitation an invitation rather than an
+            // announcement: another instance publishes to everyone's
+            // subscription, and each instance narrows it to its own
+            // addressees.
+            const addressed = broadcast.recipientSessionIds;
             const recipients = [...this.peers.values()].filter(
               (candidate) =>
                 candidate.phase === PEER_PHASE.Joined &&
-                !candidate.leaveRequested,
+                !candidate.leaveRequested &&
+                (addressed === undefined ||
+                  (candidate.sessionId !== null &&
+                    addressed.includes(candidate.sessionId))),
             );
             await Promise.all(
               recipients.map(async (recipient) => {
@@ -1142,6 +1477,13 @@ class RuntimePresenceRoom implements PresenceRoom {
     endReason: PresenceSessionEndReason,
   ): Promise<void> {
     this.clearHeartbeatTimer(state);
+    // Release the session claim first: a peer being torn down must stop being
+    // an addressable recipient before anything else can await. The id itself
+    // is kept for the end hook, which should still be able to say which tab
+    // left.
+    const sessionId = state.sessionId;
+    this.releaseSession(state);
+    state.sessionId = null;
     await this.releaseFanout(state);
 
     const lease = state.lease;
@@ -1172,7 +1514,12 @@ class RuntimePresenceRoom implements PresenceRoom {
     const session: PresenceSession | null =
       identity === null || connectionId === null
         ? null
-        : { connectionId, identity, roomId: this.roomId };
+        : {
+            connectionId,
+            identity,
+            roomId: this.roomId,
+            ...(sessionId === null ? {} : { sessionId }),
+          };
 
     state.identity = null;
     state.credential = null;

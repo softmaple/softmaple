@@ -24,6 +24,8 @@ export type MobileNavigationItem = {
 export type MobileNavigationProps = {
   readonly items: ReadonlyArray<MobileNavigationItem>;
   readonly label?: string;
+  /** A leading control, e.g. the workspace switcher. */
+  readonly leading?: ReactNode;
   /** A trailing control, e.g. a sheet trigger for the document list. */
   readonly trailing?: ReactNode;
 };
@@ -31,6 +33,7 @@ export type MobileNavigationProps = {
 export const MobileNavigation: FC<MobileNavigationProps> = ({
   items,
   label = "Workspace destinations",
+  leading,
   trailing,
 }) => (
   <nav
@@ -40,6 +43,9 @@ export const MobileNavigation: FC<MobileNavigationProps> = ({
       "pb-[env(safe-area-inset-bottom)]",
     )}
   >
+    {leading !== undefined ? (
+      <div className="flex min-w-0 shrink items-center">{leading}</div>
+    ) : null}
     {items.map((item) => (
       <Link
         aria-current={item.current === true ? "page" : undefined}
@@ -56,6 +62,8 @@ export const MobileNavigation: FC<MobileNavigationProps> = ({
         <span className="truncate">{item.label}</span>
       </Link>
     ))}
-    {trailing}
+    {trailing !== undefined ? (
+      <div className="flex shrink-0 items-center">{trailing}</div>
+    ) : null}
   </nav>
 );

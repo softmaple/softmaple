@@ -29,6 +29,7 @@ describe("parsePreferences", () => {
       motion: MOTION_PREFERENCE.Reduced,
       focusMode: DEFAULT_PREFERENCES.focusMode,
       detailedLocation: false,
+      navigatorExpanded: DEFAULT_PREFERENCES.navigatorExpanded,
     });
   });
 

@@ -43,12 +43,15 @@ export type Preferences = {
    * Off means collaborators still see that this person is here and active.
    */
   readonly detailedLocation: boolean;
+  /** Whether the workspace navigator is open beside the rail. */
+  readonly navigatorExpanded: boolean;
 };
 
 export const DEFAULT_PREFERENCES: Preferences = Object.freeze({
   motion: MOTION_PREFERENCE.System,
   focusMode: false,
   detailedLocation: true,
+  navigatorExpanded: true,
 });
 
 const STORAGE_KEY = "softmaple.preferences.v1";
@@ -83,6 +86,10 @@ export const parsePreferences = (raw: string | null): Preferences => {
       typeof record.detailedLocation === "boolean"
         ? record.detailedLocation
         : DEFAULT_PREFERENCES.detailedLocation,
+    navigatorExpanded:
+      typeof record.navigatorExpanded === "boolean"
+        ? record.navigatorExpanded
+        : DEFAULT_PREFERENCES.navigatorExpanded,
   });
 };
 

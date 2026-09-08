@@ -3,7 +3,8 @@
 import type { FC, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Menu } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Home, Menu, Settings, Users } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import {
   Sheet,
@@ -14,8 +15,11 @@ import {
 } from "@softmaple/ui/components/sheet";
 import type { DocsType } from "@/types/model";
 import { SoftmapleWordmark } from "@/components/BrandMark";
+import {
+  MobileNavigation,
+  type MobileNavigationItem,
+} from "@/components/shell/mobile-navigation";
 import { WorkspaceDocsList } from "@/modules/workspaces/workspace-docs-list";
-import { WorkspaceNavigation } from "@/modules/workspaces/workspace-navigation";
 
 export type WorkspaceMobileNavProps = {
   readonly canEdit: boolean;
@@ -37,6 +41,36 @@ export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const close = (): void => setOpen(false);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const home = `/workspace/${workspaceSlug}`;
+  const settings = `${home}/settings`;
+  const onSettings = pathname === settings;
+  const membersTab = searchParams.get("tab") === "members";
+  // The same destinations as the desktop rail: moving between devices should
+  // not mean learning a second map.
+  const destinations: ReadonlyArray<MobileNavigationItem> = [
+    {
+      current: pathname === home,
+      href: home,
+      icon: <Home className="size-5" />,
+      label: "Home",
+    },
+    {
+      current: onSettings && membersTab,
+      href: `${settings}?tab=members`,
+      icon: <Users className="size-5" />,
+      label: "People",
+      prefetch: false,
+    },
+    {
+      current: onSettings && !membersTab,
+      href: settings,
+      icon: <Settings className="size-5" />,
+      label: "Settings",
+      prefetch: false,
+    },
+  ];
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 768px)");
     const closeOnDesktop = () => {
@@ -52,29 +86,23 @@ export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
         The bar is a flex sibling of the scrolling content rather than a fixed
         overlay, so the shell reserves its height and nothing hides behind it.
       */}
-      <nav
-        aria-label="Workspace"
-        className="shrink-0 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
-      >
-        {/*
-          Three tracks rather than a flex row: the empty trailing track
-          balances the workspace switcher, so the menu button is centered
-          against the viewport instead of against whatever space is left over.
-          The 0 minimum keeps a long workspace title from stealing that space.
-        */}
-        <div className="grid h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3">
-          <div className="min-w-0">{children}</div>
+      <MobileNavigation
+        items={destinations}
+        label="Workspace"
+        leading={<div className="min-w-0 max-w-[9rem]">{children}</div>}
+        trailing={
           <SheetTrigger asChild>
             <Button
               aria-label="Open workspace navigation"
+              className="min-h-touch"
               size="icon-lg"
               variant="outline"
             >
               <Menu />
             </Button>
           </SheetTrigger>
-        </div>
-      </nav>
+        }
+      />
       {/*
         A definite height (not just the side's cap) gives the document list a
         resolvable flex basis, so it scrolls inside the sheet instead of
@@ -97,7 +125,6 @@ export const WorkspaceMobileNav: FC<WorkspaceMobileNavProps> = ({
             <SoftmapleWordmark className="text-lg" />
           </Link>
         </div>
-        <WorkspaceNavigation onNavigate={close} workspaceSlug={workspaceSlug} />
         <WorkspaceDocsList
           canEdit={canEdit}
           documents={documents}

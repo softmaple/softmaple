@@ -6,7 +6,7 @@ import { listWorkspaceDocuments } from "@/app/actions/documents/documents";
 import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
-import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-sidebar";
+import { WorkspaceShell } from "@/modules/workspaces/workspace-shell";
 import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
 import { WorkspaceMobileNav } from "@/modules/workspaces/workspace-mobile-nav";
 
@@ -57,17 +57,18 @@ export default async function WorkspaceLayoutPage(props: Props) {
     membership?.role === WORKSPACE_ROLE.Editor;
 
   return (
-    <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background md:flex-row">
-      <WorkspaceDesktopSidebar
+    <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-workspace md:flex-row">
+      <WorkspaceShell
         canEdit={canEdit}
         documents={documents}
+        switcher={
+          <WorkspaceDropdown
+            workspaceSlug={workspaceSlug}
+            workspaces={workspaces}
+          />
+        }
         workspaceSlug={workspaceSlug}
-      >
-        <WorkspaceDropdown
-          workspaceSlug={workspaceSlug}
-          workspaces={workspaces}
-        />
-      </WorkspaceDesktopSidebar>
+      />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Suspense>{children}</Suspense>

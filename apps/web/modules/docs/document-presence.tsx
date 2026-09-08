@@ -19,6 +19,7 @@ import {
   PresenceProvider,
   useOthers,
   usePresence,
+  useSelf,
   useUpdateCursor,
   useUpdateSelection,
   type PresenceAdapter,
@@ -29,6 +30,7 @@ import type {
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
 import { useTheme } from "next-themes";
+import { Button } from "@softmaple/ui/components/button";
 import { usePreferences } from "@/components/shell/preferences";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -44,7 +46,10 @@ import {
   mapPresenceUsers,
   resolveRemotePresenceSelection,
 } from "@/modules/docs/document-presence-geometry";
+import { ContextSlot } from "@/components/shell/context-slot";
+import { PeopleAndActivity } from "@/modules/docs/people-and-activity";
 import { rankPresence } from "@/modules/docs/presence-relevance";
+import { useBlockDocument } from "@/modules/docs/use-block-document";
 
 type ProfileIdentity = {
   readonly avatarUrl: string | null;
@@ -317,6 +322,27 @@ const PresenceSelectionPublisher: FC<{
   return null;
 };
 
+/**
+ * The complete roster, for the context slot.
+ *
+ * The overlay is capped at five carets because the page can only carry so
+ * many; this list is uncapped because "who is here" has one correct answer.
+ */
+const PeoplePanel: FC<{
+  readonly binding: LexicalBinding | null;
+}> = ({ binding }) => {
+  const others = useOthers();
+  const self = useSelf();
+  const document = useBlockDocument(binding);
+  return (
+    <PeopleAndActivity
+      document={document}
+      people={self === null ? others : [self, ...others]}
+      selfConnectionId={self?.connectionId ?? null}
+    />
+  );
+};
+
 export type DocumentPresenceProps = DocEditorProps &
   ProfileIdentity & {
     /** Presence WebSocket is only opened for shared/collaborative documents. */
@@ -354,6 +380,9 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
   const [liveAdapterState, setLiveAdapterState] =
     useState<LiveAdapterState>(null);
   const [cursorsVisible, setCursorsVisible] = useState(true);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  // Peers present but past the overlay cap. Counted, never hidden.
+  const [overflowCount, setOverflowCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [binding, setBinding] = useState<LexicalBinding | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
@@ -491,32 +520,69 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     <PresenceProvider adapter={adapter} statusSweepMs={5_000}>
       <div className="document-awareness flex min-h-full flex-col">
         {presenceEnabled ? (
-          <CollaborationBar
-            state={
-              liveAdapter === null
-                ? error === null
-                  ? "connecting"
-                  : "error"
-                : undefined
-            }
-            selfUserId={userId}
-            cursorsVisible={cursorsVisible}
-            onCursorsVisibleChange={setCursorsVisible}
-          />
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <CollaborationBar
+                state={
+                  liveAdapter === null
+                    ? error === null
+                      ? "connecting"
+                      : "error"
+                    : undefined
+                }
+                selfUserId={userId}
+                cursorsVisible={cursorsVisible}
+                onCursorsVisibleChange={setCursorsVisible}
+              />
+            </div>
+            <Button
+              aria-expanded={peopleOpen}
+              className="mr-2 shrink-0"
+              onClick={() => setPeopleOpen((open) => !open)}
+              size="sm"
+              variant="ghost"
+            >
+              People
+              {overflowCount > 0 ? (
+                <span className="text-content-secondary">
+                  {` +${overflowCount}`}
+                </span>
+              ) : null}
+            </Button>
+          </div>
         ) : null}
         <PresenceSelectionPublisher
           detailed={preferences.detailedLocation}
           enabled={presenceLive}
           selection={selection}
         />
-        <div className="relative min-h-0 flex-1" ref={setContainer}>
-          <DocEditor
-            {...editorProps}
-            onExternalBindingChange={handleBindingChange}
-            onSelectionChange={handleSelectionChange}
-          />
-          {presenceLive && cursorsVisible ? (
-            <RemotePresenceOverlay binding={binding} container={container} />
+        {/*
+          The context slot is a sibling of the editor, never a wrapper around
+          it: opening or closing it must not touch the editor's DOM.
+        */}
+        <div className="flex min-h-0 flex-1">
+          <div className="relative min-h-0 flex-1" ref={setContainer}>
+            <DocEditor
+              {...editorProps}
+              onExternalBindingChange={handleBindingChange}
+              onSelectionChange={handleSelectionChange}
+            />
+            {presenceLive && cursorsVisible ? (
+              <RemotePresenceOverlay
+                binding={binding}
+                container={container}
+                onOverflowChange={setOverflowCount}
+              />
+            ) : null}
+          </div>
+          {presenceEnabled ? (
+            <ContextSlot
+              onClose={() => setPeopleOpen(false)}
+              open={peopleOpen}
+              title="People and activity"
+            >
+              <PeoplePanel binding={binding} />
+            </ContextSlot>
           ) : null}
         </div>
       </div>

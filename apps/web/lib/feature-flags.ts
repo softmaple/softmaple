@@ -42,7 +42,11 @@ const FLAG_SOURCES: Readonly<
   },
   [FEATURE_FLAG.SharedAttention]: {
     variable: "NEXT_PUBLIC_FEATURE_SHARED_ATTENTION",
-    fallback: true,
+    // Off by default until attention commands are fanned out by the server.
+    // The contracts and the client state machine exist; the transport does
+    // not, and a "Look here" that never reaches a colleague is worse than no
+    // button at all.
+    fallback: false,
   },
   [FEATURE_FLAG.FieldView]: {
     variable: "NEXT_PUBLIC_FEATURE_FIELD_VIEW",

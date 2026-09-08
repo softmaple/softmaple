@@ -12,15 +12,15 @@ describe("resolveFeatureFlags", () => {
   });
 
   it("reads each documented truthy and falsy spelling", () => {
-    const variable = featureFlagVariable(FEATURE_FLAG.SharedAttention);
+    const variable = featureFlagVariable(FEATURE_FLAG.DetailedPresence);
     for (const raw of ["0", "false", "OFF", " no ", "disabled"]) {
       expect(
-        resolveFeatureFlags({ [variable]: raw })[FEATURE_FLAG.SharedAttention],
+        resolveFeatureFlags({ [variable]: raw })[FEATURE_FLAG.DetailedPresence],
       ).toBe(false);
     }
     for (const raw of ["1", "true", "ON", " yes ", "enabled"]) {
       expect(
-        resolveFeatureFlags({ [variable]: raw })[FEATURE_FLAG.SharedAttention],
+        resolveFeatureFlags({ [variable]: raw })[FEATURE_FLAG.DetailedPresence],
       ).toBe(true);
     }
   });
@@ -32,7 +32,7 @@ describe("resolveFeatureFlags", () => {
     expect(flags[FEATURE_FLAG.FieldView]).toBe(false);
     expect(flags[FEATURE_FLAG.Shell]).toBe(true);
     expect(flags[FEATURE_FLAG.DetailedPresence]).toBe(true);
-    expect(flags[FEATURE_FLAG.SharedAttention]).toBe(true);
+    expect(flags[FEATURE_FLAG.SharedAttention]).toBe(false);
   });
 
   it("treats an unrecognised value as the default rather than failing", () => {

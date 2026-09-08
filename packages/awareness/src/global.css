@@ -1,16 +1,27 @@
 /*
- * Tailwind v4 split imports — keep theme tokens and utilities, skip preflight.
- * Preflight is a global reset (margin: 0 on *, list-style: none on ul/ol, etc.)
- * that would clobber consumer apps' baseline styles when this stylesheet is
- * imported as a library. By dropping it here, downstream apps can import
- * `@softmaple/awareness/styles.css` without unexpected resets.
+ * Tailwind v4 theme-only import — no preflight, no scanned utilities.
+ * `tailwindcss/theme` gives `@apply` below the theme it needs and emits just
+ * the design tokens this stylesheet actually references. Two things are
+ * deliberately left out:
+ *   - Preflight (`tailwindcss/preflight`), a global reset (margin: 0 on *,
+ *     list-style: none on ul/ol, etc.) that would clobber consumer apps'
+ *     baseline styles.
+ *   - Generated utilities (`tailwindcss/utilities`). Emitting them shipped
+ *     every class name Tailwind scanned out of this package — `.hidden`,
+ *     `.flex`, `.container` and friends, mostly false positives read out of
+ *     inline-style values in the stories — into consumer apps, where they
+ *     land after the app's own Tailwind output and win on source order: an
+ *     unprefixed `.hidden` from here silently beat the web app's
+ *     `md:inline-flex`, collapsing its desktop header into the mobile one.
+ * Awareness components style themselves with `awareness-*` class names only,
+ * so nothing here depends on those utilities being emitted.
  */
 @import "tailwindcss/theme";
-@import "tailwindcss/utilities";
 
 /*
- * Register awareness design tokens with Tailwind v4 so they generate utilities
- * (e.g. `--color-awareness-surface` → `bg-awareness-surface`, `border-awareness-surface`).
+ * Register awareness design tokens with Tailwind v4 so the rules below can
+ * `@apply` them (e.g. `--color-awareness-surface` → `border-awareness-surface`)
+ * and so the tokens themselves are emitted for the `var()` references here.
  * The per-user color stays a runtime CSS variable (`--awareness-user-color`) set
  * via inline style, since each user's tint is dynamic.
  */

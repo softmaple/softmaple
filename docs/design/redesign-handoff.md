@@ -107,9 +107,11 @@ existing v2 clients working.
 
 ### Open
 
-- **No server fan-out for attention commands.** `packages/collab-runtime`
-  presence rooms and both host codecs are unchanged. This is the single
-  blocking item for Phase 4.
+- **No client half for attention.** The wire is live — presence rooms and both
+  host codecs route, expire, deduplicate and authorise attention commands — but
+  `apps/web` does not yet mint a session id, publish attention state, send a
+  command or render an invitation. This is the remaining blocking item for
+  Phase 4, and why `sharedAttention` is still off.
 - **No batch presence-overview interface** for the workspace home, so home
   shows no coarse presence summaries yet.
 - **`deriveDocumentUiStatus` still exists** and is still used by the public
@@ -119,8 +121,9 @@ existing v2 clients working.
 
 ## 4. Shared-attention walkthrough
 
-Contracts and client state exist; the transport does not, so the journey is not
-yet exercisable end to end. The intended sequence, and where each step lives:
+Contracts, client state and the transport exist; the browser does not yet
+speak, so the journey is not yet exercisable end to end. The intended sequence,
+and where each step lives:
 
 1. **Look here** — `createInvitation` builds an addressed invitation with a
    30-second expiry from the sender's caret or selection plus a
@@ -139,8 +142,10 @@ yet exercisable end to end. The intended sequence, and where each step lives:
 8. **Return** — the section the block was in, then the remembered section index
    clamped to a shortened document, then the start; never an invented position.
 
-Steps 1–8 are implemented as pure, tested logic. What is missing between them
-is delivery.
+Steps 1–8 are implemented as pure, tested logic, and the server routes and
+authorises them. What is missing is the browser end: minting a session id,
+publishing attention state, sending commands, and rendering an invitation that
+never steals focus.
 
 ---
 
@@ -266,10 +271,11 @@ presentation rollback.
 
 ## 8. What to do next, in order
 
-1. Carry `AttentionCommand` and `AttentionState` through
-   `packages/collab-runtime` presence rooms and both host codecs together,
-   honouring `capableSessionIds` so v2 clients are skipped rather than sent
-   frames they will drop. Then turn `sharedAttention` on.
+1. Wire the client half: mint a tab-scoped session id and send it with auth,
+   publish `AttentionState` into presence meta (`attentionMeta`), send commands
+   over the `attention` wire type, and render an incoming invitation that moves
+   neither focus, selection, viewport nor the mobile keyboard. Then turn
+   `sharedAttention` on.
 2. Build the read-only projection pane over the same replica — no second
    transport session, no outbound operations — and "Edit here", deferring the
    transfer during IME composition.

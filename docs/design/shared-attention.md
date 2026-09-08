@@ -204,6 +204,52 @@ naming the field that failed. Bounded strings (a 140-character note, a
 200-character section title) are truncated rather than rejected, because a long
 title should not cost somebody their invitation.
 
+## Transport
+
+Commands cross the presence seam without `collab-runtime` learning anything
+about awareness. The room reads only what it needs to route:
+
+```ts
+// packages/collab-runtime/src/presence-codec.ts
+interface PresenceAttentionCommand {
+  id: string;                         // duplicate detection
+  expiresAt: number | null;           // the room enforces expiry
+  recipientSessionIds: string[];      // where it goes
+  requiresPresenter: boolean;         // follow requests only
+  senderSessionId: string;
+  targetSessionId: string | null;     // presenter and cycle checks
+}
+```
+
+The anchor, the note and the selection stay codec-owned and opaque, exactly
+like a presence patch. `packages/awareness/src/attention/room-projection.ts` is
+where a full command is narrowed to that view; both host codecs use it, so
+Nitro and Cloudflare cannot drift apart.
+
+**Addressing.** `PresenceBroadcast` carries an optional recipient list. Each
+instance narrows a published frame to its own addressed sessions, so an
+invitation stays an invitation rather than becoming an announcement. Local
+peers are served through fan-out too — publish is contractually observable by
+the publisher's own subscription, so delivering locally *as well* sends every
+command twice.
+
+**Outcomes.** The sender always hears back. "Delivered to nobody" is reported
+as delivered, not refused: every addressee had closed their tab, which is a
+different fact from a rejection. Addressees on another instance are not
+counted; counting them would need an acknowledgement protocol that does not
+exist, and under-reporting is the safe direction.
+
+**What the room refuses.** A session speaking for another session; an
+already-expired command; a repeated command id; a follow whose target has not
+opted into presenting; and a follow that would form a cycle.
+
+**Session binding.** A session id is a tab, not a credential — the client picks
+it — so the room binds it to the authenticated account at auth and refuses a
+claim on an id another account already holds. It survives reconnects,
+hibernation snapshots and resume; a resumed tab that came back unaddressable
+would leave every follow aimed at it resolving to nothing while the connection
+looked perfectly healthy.
+
 ## Status
 
 Implemented and tested:
@@ -212,13 +258,17 @@ Implemented and tested:
 - The follow state machine, invitation registry, capability negotiation and
   wire parsers, with tests covering expiry, duplicate and out-of-order
   delivery, cycles, and version-2 fallback.
+- Server fan-out: addressed delivery, session binding, expiry, deduplication,
+  presenter opt-in and cycle refusal, in `packages/collab-runtime` and both
+  host codecs. Eight presence-room conformance cases cover it, and both
+  runtimes run the same suite.
 - Section-relative location and the People and activity view in `apps/web`.
 
 Not yet implemented:
 
-- **Server fan-out.** Attention commands are not yet carried by the presence
-  rooms in `packages/collab-runtime`, nor by the Nitro and Cloudflare codecs.
-  Until they are, the `sharedAttention` feature flag defaults to off: a "Look
-  here" that never reaches a colleague is worse than no button.
+- **The client half.** `apps/web` does not yet mint a session id, publish
+  attention state, send commands, or render an invitation. The
+  `sharedAttention` flag stays off until it does: the wire is live, but nothing
+  speaks on it.
 - The shared-context projection pane, "Edit here" transfer, and the mobile
-  preview sheet, which depend on that transport.
+  preview sheet.

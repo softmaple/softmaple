@@ -1,3 +1,9 @@
+/**
+ * Capture redesign screenshots against a running server.
+ *
+ * Usage: node scripts/redesign-screenshots.mjs <route> [route...]
+ * Writes to docs/design/assets/redesign, one file per route/viewport/theme.
+ */
 import { chromium } from "@playwright/test";
 
 const OUT = "/home/user/softmaple/docs/design/assets/redesign";
@@ -23,9 +29,8 @@ for (const viewport of VIEWPORTS) {
       await page.goto(`http://127.0.0.1:3000${route}`, {
         waitUntil: "networkidle",
       });
-      await page.evaluate((mode) => {
-        document.documentElement.classList.toggle("dark", mode === "dark");
-      }, theme);
+      // next-themes runs with `defaultTheme="system"`, so the context's
+      // colorScheme is what selects the theme; nothing is injected here.
       await page.waitForTimeout(250);
       const file = `${OUT}/${slug}--${viewport.name}-${theme}.png`;
       await page.screenshot({ path: file });

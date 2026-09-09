@@ -181,3 +181,182 @@
   [data-redesign="true"] .document-awareness .awareness-collaboration__heading { display: none; }
   [data-redesign="true"] .document-awareness .awareness-collaboration__bar { flex-wrap: nowrap; padding-block: 0; min-height: 44px; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Landing page.
+ *
+ * The marketing surface is a lit sheet of paper: an editorial serif voice, a
+ * margin-note hand, and a shader that adds grain and two soft light pools
+ * behind the content. Depth here is measured in a couple of degrees and a few
+ * pixels of parallax — enough to feel like paper and glass, never enough to
+ * compete with the words.
+ * ------------------------------------------------------------------------ */
+
+:root {
+  --atmosphere-paper: 244 243 238;
+  --atmosphere-warm: 255 213 35;
+  --atmosphere-cool: 23 91 181;
+  --atmosphere-strength: 0.55;
+  --landing-shadow: 220 15% 25%;
+  --landing-shadow-strength: 22%;
+}
+
+/* The landing page uses the person palette whether or not the redesign shell
+ * flag is on, so it carries its own defaults. */
+:root {
+  --person-blue: #175bb5;
+  --person-teal: #08796f;
+  --person-plum: #943b77;
+  --person-coral: #b63f38;
+  --person-violet: #7050b4;
+}
+
+:root.dark {
+  --atmosphere-paper: 17 19 21;
+  --atmosphere-warm: 255 217 74;
+  --atmosphere-cool: 131 181 255;
+  --atmosphere-strength: 0.85;
+  --landing-shadow: 0 0% 0%;
+  --landing-shadow-strength: 55%;
+}
+
+:root.dark {
+  --person-blue: #83b5ff;
+  --person-teal: #6ad3c1;
+  --person-plum: #eaa0ce;
+  --person-coral: #ff9e96;
+  --person-violet: #b8a2f4;
+}
+
+@layer components {
+  .type-editorial {
+    font-family: var(--font-editorial), "Iowan Old Style", Georgia, serif;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+  }
+
+  .type-hand {
+    font-family: var(--font-marginalia), "Segoe Script", cursive;
+    color: var(--muted-foreground);
+    line-height: 1.35;
+  }
+
+  /* Shader canvas and its no-WebGL understudy. */
+  .landing-atmosphere {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .landing-atmosphere::before {
+    content: "";
+    position: absolute;
+    inset: -10%;
+    background:
+      radial-gradient(
+        30rem 22rem at 20% 32%,
+        rgb(var(--atmosphere-warm) / calc(0.05 * var(--atmosphere-strength))),
+        transparent 68%
+      ),
+      radial-gradient(
+        26rem 20rem at 82% 56%,
+        rgb(var(--atmosphere-cool) / calc(0.045 * var(--atmosphere-strength))),
+        transparent 68%
+      );
+  }
+
+  .landing-atmosphere canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Pointer parallax. --px and --py stay 0 until a fine pointer moves. */
+  .landing-stage {
+    --px: 0;
+    --py: 0;
+    perspective: 1600px;
+    perspective-origin: 60% 40%;
+  }
+
+  .landing-window {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    overflow: hidden;
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 6%) inset,
+      0 30px 60px -32px hsl(var(--landing-shadow) / var(--landing-shadow-strength)),
+      0 8px 20px -14px hsl(var(--landing-shadow) / var(--landing-shadow-strength));
+    transform: rotateX(calc(var(--py) * -1.4deg))
+      rotateY(calc(var(--px) * 1.8deg));
+    transition: transform 220ms ease-out;
+    will-change: transform;
+  }
+
+  /* Paper tooth on the writing surface, at the edge of perception. */
+  .landing-paper {
+    position: relative;
+  }
+
+  .landing-paper::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image:
+      repeating-linear-gradient(
+        90deg,
+        rgb(var(--atmosphere-paper) / 0%) 0 2px,
+        rgb(128 128 128 / 3.5%) 2px 3px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        rgb(var(--atmosphere-paper) / 0%) 0 3px,
+        rgb(128 128 128 / 2.5%) 3px 4px
+      );
+  }
+
+  /* Things that sit a little above the page. */
+  .landing-float {
+    transform: translate3d(
+      calc(var(--px) * var(--lift, 6) * 1px),
+      calc(var(--py) * var(--lift, 6) * 1px),
+      0
+    );
+    transition: transform 220ms ease-out;
+  }
+
+  .landing-chip {
+    box-shadow: 0 10px 24px -12px
+      hsl(var(--landing-shadow) / var(--landing-shadow-strength));
+  }
+
+  .landing-rule {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--border) 12%,
+      var(--border) 88%,
+      transparent
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-window,
+  .landing-float {
+    transform: none;
+    transition: none;
+  }
+}
+
+[data-reduced-motion="true"] .landing-window,
+[data-reduced-motion="true"] .landing-float {
+  transform: none;
+}

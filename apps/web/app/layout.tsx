@@ -1,4 +1,10 @@
-import { DM_Sans, JetBrains_Mono, Syne } from "next/font/google";
+import {
+  Caveat,
+  DM_Sans,
+  JetBrains_Mono,
+  Playfair_Display,
+  Syne,
+} from "next/font/google";
 import type { Metadata } from "next";
 
 import "@softmaple/ui/globals.css";
@@ -22,6 +28,18 @@ const fontDisplay = Syne({
 const fontUtility = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-utility",
+});
+
+/** Editorial serif for the marketing voice; the product shell keeps Syne. */
+const fontEditorial = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-editorial",
+});
+
+/** Margin-note hand for the annotations that frame the landing page. */
+const fontHand = Caveat({
+  subsets: ["latin"],
+  variable: "--font-marginalia",
 });
 
 export const metadata: Metadata = {
@@ -66,7 +84,7 @@ export default function RootLayout({
       data-redesign={String(flags.shell)}
     >
       <body
-        className={`${fontBody.variable} ${fontDisplay.variable} ${fontUtility.variable} font-sans antialiased`}
+        className={`${fontBody.variable} ${fontDisplay.variable} ${fontUtility.variable} ${fontEditorial.variable} ${fontHand.variable} font-sans antialiased`}
       >
         <Providers
           attribute="class"

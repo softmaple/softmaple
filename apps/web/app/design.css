@@ -255,14 +255,14 @@
     inset: -10%;
     background:
       radial-gradient(
-        30rem 22rem at 20% 32%,
-        rgb(var(--atmosphere-warm) / calc(0.05 * var(--atmosphere-strength))),
-        transparent 68%
+        24rem 18rem at 18% 34%,
+        rgb(var(--atmosphere-warm) / calc(0.035 * var(--atmosphere-strength))),
+        transparent 66%
       ),
       radial-gradient(
-        26rem 20rem at 82% 56%,
-        rgb(var(--atmosphere-cool) / calc(0.045 * var(--atmosphere-strength))),
-        transparent 68%
+        22rem 17rem at 82% 54%,
+        rgb(var(--atmosphere-cool) / calc(0.032 * var(--atmosphere-strength))),
+        transparent 66%
       );
   }
 

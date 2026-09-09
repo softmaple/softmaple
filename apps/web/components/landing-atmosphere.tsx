@@ -51,8 +51,8 @@ void main() {
   // Light pools breathe on a ~30s cycle: present, never animated-looking.
   vec2 warmAt = vec2(0.27 * aspect, 0.74 + 0.010 * sin(uTime * 0.21));
   vec2 coolAt = vec2(0.79 * aspect, 0.47 + 0.013 * cos(uTime * 0.17));
-  float warm = exp(-dot(p - warmAt, p - warmAt) * 9.0);
-  float cool = exp(-dot(p - coolAt, p - coolAt) * 11.0);
+  float warm = exp(-dot(p - warmAt, p - warmAt) * 15.0);
+  float cool = exp(-dot(p - coolAt, p - coolAt) * 16.0);
 
   // Laid-paper fibre: two stretched noise fields crossing at right angles.
   float fibre =
@@ -66,7 +66,7 @@ void main() {
   colour += (fibre - 0.5) * 0.22;
   colour += grain * 0.16;
 
-  float alpha = (0.035 + warm * 0.05 + cool * 0.035) * uStrength;
+  float alpha = (0.032 + warm * 0.035 + cool * 0.026) * uStrength;
   gl_FragColor = vec4(clamp(colour, 0.0, 1.0), alpha);
 }
 `;

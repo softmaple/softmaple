@@ -4,7 +4,8 @@ import { useEffect, useRef, type CSSProperties } from "react";
 import {
   Bold,
   ChevronLeft,
-  Ellipsis,
+  EllipsisVertical,
+  FileText,
   Image as ImageIcon,
   Italic,
   Link2,
@@ -45,14 +46,9 @@ const people = [
 ];
 
 const toolbar = [
-  Type,
-  Bold,
-  Italic,
-  Underline,
-  List,
-  ListOrdered,
-  Link2,
-  ImageIcon,
+  [Type, Bold, Italic, Underline],
+  [List, ListOrdered],
+  [Link2, ImageIcon],
 ];
 
 function Avatar({
@@ -146,14 +142,14 @@ export function LandingWorkspacePreview() {
           <span className="size-2.5 rounded-full bg-[#61c554]" />
         </div>
 
-        <div className="grid sm:grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)]">
+        <div className="grid sm:grid-cols-[minmax(0,0.46fr)_minmax(0,1fr)]">
           <div className="hidden flex-col gap-3 border-r bg-workspace p-4 sm:flex">
             <div className="flex items-center gap-2">
-              <span className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap rounded-md border bg-surface px-2.5 py-1.5 text-[11px] text-muted-foreground">
-                <Search size={12} className="shrink-0" />
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap rounded-md border bg-surface px-2 py-1.5 text-[10px] text-muted-foreground">
+                <Search size={11} className="shrink-0" />
                 <span className="truncate">Search notes…</span>
               </span>
-              <span className="grid size-7 shrink-0 place-items-center rounded-md border bg-surface text-sm">
+              <span className="grid size-6 shrink-0 place-items-center rounded-md border bg-surface text-xs">
                 +
               </span>
             </div>
@@ -161,14 +157,20 @@ export function LandingWorkspacePreview() {
               {notes.map((note) => (
                 <li
                   key={note.title}
-                  className={`rounded-md px-2.5 py-2 ${note.active ? "bg-accent" : ""}`}
+                  className={`flex items-start gap-2 rounded-md px-2 py-1.5 ${note.active ? "bg-accent" : ""}`}
                 >
-                  <p className="truncate text-[11px] font-medium">
-                    {note.title}
-                  </p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">
-                    {note.when}
-                  </p>
+                  <FileText
+                    size={11}
+                    className="mt-0.5 shrink-0 text-muted-foreground"
+                  />
+                  <span className="min-w-0 leading-tight">
+                    <span className="block truncate text-[11px] font-medium">
+                      {note.title}
+                    </span>
+                    <span className="mt-0.5 block text-[9px] text-muted-foreground">
+                      {note.when}
+                    </span>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -199,7 +201,7 @@ export function LandingWorkspacePreview() {
                   <Share size={11} />
                   Share
                 </span>
-                <Ellipsis size={13} />
+                <EllipsisVertical size={13} />
               </span>
             </div>
 
@@ -208,9 +210,13 @@ export function LandingWorkspacePreview() {
                 A small idea for Saturday
               </p>
 
-              <div className="mt-3 flex items-center gap-3 rounded-md border bg-workspace px-3 py-2 text-muted-foreground">
-                {toolbar.map((Icon, index) => (
-                  <Icon key={index} size={12} />
+              <div className="mt-3 flex items-center gap-4 rounded-md border bg-workspace px-3 py-2 text-muted-foreground">
+                {toolbar.map((group, groupIndex) => (
+                  <span key={groupIndex} className="flex items-center gap-2">
+                    {group.map((Icon, index) => (
+                      <Icon key={index} size={12} />
+                    ))}
+                  </span>
                 ))}
                 <span className="ml-auto flex items-center gap-1 whitespace-nowrap text-[10px] text-emphasis">
                   <Sparkles size={11} />
@@ -218,9 +224,9 @@ export function LandingWorkspacePreview() {
                 </span>
               </div>
 
-              <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.44fr)_minmax(0,1fr)]">
+              <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)]">
                 <div
-                  className="hidden h-40 rounded-md border lg:block"
+                  className="hidden rounded-md border lg:block"
                   style={{
                     background:
                       "linear-gradient(160deg, #2f4a35 0%, #6f8f52 42%, #cfd9a8 72%, #7e9ec0 100%)",
@@ -232,25 +238,25 @@ export function LandingWorkspacePreview() {
                     Somewhere close. No packed schedule. Just a little room to
                     wander.
                   </p>
-                  <p className="relative mt-2">
-                    <span className="rounded-[2px] bg-[color-mix(in_srgb,var(--person-violet)_22%,transparent)] px-0.5 outline outline-1 outline-[var(--person-violet)]">
+                  <p className="mt-2 mb-3.5">
+                    <span className="relative inline-block rounded-[2px] bg-[color-mix(in_srgb,var(--person-violet)_22%,transparent)] px-0.5 outline outline-1 outline-[var(--person-violet)]">
                       Take the scenic route
-                    </span>
-                    <span
-                      className="landing-float landing-chip ml-1 inline-block rounded px-1.5 py-px text-[9px] text-surface"
-                      style={
-                        {
-                          background: "var(--person-violet)",
-                          "--lift": 14,
-                        } as CSSProperties
-                      }
-                    >
-                      Lina
+                      <span
+                        className="landing-float landing-chip absolute right-0 top-full z-10 rounded-b-[3px] rounded-tl-[3px] px-1.5 py-px text-[9px] leading-tight text-surface"
+                        style={
+                          {
+                            background: "var(--person-violet)",
+                            "--lift": 14,
+                          } as CSSProperties
+                        }
+                      >
+                        Lina
+                      </span>
                     </span>
                   </p>
 
                   <div
-                    className="landing-float landing-chip mt-2 flex items-start gap-2 rounded-lg border bg-raised px-2.5 py-2"
+                    className="landing-float landing-chip relative z-10 ml-6 -mr-2 flex items-start gap-2 rounded-lg border bg-raised px-2.5 py-2"
                     style={{ "--lift": 18 } as CSSProperties}
                   >
                     <Avatar initial="K" colour="var(--person-plum)" />
@@ -267,15 +273,16 @@ export function LandingWorkspacePreview() {
                     </span>
                   </div>
 
-                  <p className="relative mt-2 text-muted-foreground">
+                  <p className="mt-3 mb-3.5 text-muted-foreground">
                     Maybe we can stop at that little lake on the way and see
                     where the day takes us.
-                    <span className="ml-px inline-block h-3 w-px translate-y-0.5 bg-primary align-middle" />
-                    <span
-                      className="landing-float landing-chip ml-1 inline-block rounded bg-primary px-1.5 py-px text-[9px] text-primary-foreground"
-                      style={{ "--lift": 14 } as CSSProperties}
-                    >
-                      You
+                    <span className="relative ml-px inline-block h-3 w-px translate-y-0.5 bg-primary align-middle">
+                      <span
+                        className="landing-float landing-chip absolute left-0 top-full z-10 rounded-b-[3px] rounded-tr-[3px] bg-primary px-1.5 py-px text-[9px] leading-tight text-primary-foreground"
+                        style={{ "--lift": 14 } as CSSProperties}
+                      >
+                        You
+                      </span>
                     </span>
                   </p>
 

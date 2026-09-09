@@ -35,7 +35,7 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur-md">
-      <div className="relative mx-auto flex h-20 max-w-[88rem] items-center gap-3 px-5 sm:px-8">
+      <div className="relative mx-auto flex h-16 max-w-[88rem] items-center gap-3 px-5 sm:px-8">
         <Link
           href="/"
           aria-label="Softmaple home"

@@ -45,7 +45,7 @@ export default function LandingPage() {
       <main id="main">
         <section className="relative isolate overflow-hidden">
           <LandingAtmosphere />
-          <div className="relative mx-auto grid max-w-[88rem] gap-12 px-5 pb-16 pt-14 sm:px-8 lg:grid-cols-[minmax(0,0.5fr)_minmax(0,1fr)] lg:items-center lg:gap-8 lg:pb-14 lg:pt-20">
+          <div className="relative mx-auto grid max-w-[88rem] gap-10 px-5 pb-10 pt-8 sm:px-8 lg:grid-cols-[minmax(0,0.5fr)_minmax(0,1fr)] lg:items-center lg:gap-8 lg:pb-4 lg:pt-5">
             <div>
               <p className="mb-6 font-mono text-[10px] uppercase tracking-[.28em] text-muted-foreground">
                 A place for shared thoughts
@@ -98,7 +98,7 @@ export default function LandingPage() {
         </section>
 
         <section
-          className="mx-auto grid max-w-[88rem] gap-10 px-5 pb-16 pt-10 sm:px-8 md:grid-cols-3 lg:gap-12 lg:pb-24 lg:pt-14"
+          className="mx-auto grid max-w-[88rem] gap-10 px-5 pb-12 pt-8 sm:px-8 md:grid-cols-3 lg:gap-12 lg:pb-8 lg:pt-5"
           aria-label="How Softmaple works"
         >
           <article className="flex flex-col">
@@ -106,17 +106,17 @@ export default function LandingPage() {
             <h2 className="type-editorial mt-3 text-2xl">
               Capture the thought
             </h2>
-            <p className="mt-3 text-sm leading-7 text-muted-foreground">
+            <p className="mt-3 text-sm leading-7 text-muted-foreground md:min-h-14">
               A clean, calm space to get ideas down before they slip away.
             </p>
             <div
-              className="landing-paper mt-7 rounded-xl border bg-surface p-4 md:mt-auto md:pt-4"
+              className="landing-paper mt-7 rounded-xl border bg-surface p-4"
               aria-hidden="true"
             >
               <p className="text-sm text-muted-foreground">
                 What&rsquo;s on your mind?
               </p>
-              <div className="mt-12 flex items-center gap-3 text-muted-foreground">
+              <div className="mt-8 flex items-center gap-3 text-muted-foreground">
                 <Plus size={15} />
                 <ImageIcon size={15} />
                 <AtSign size={15} />
@@ -136,11 +136,11 @@ export default function LandingPage() {
           <article className="flex flex-col">
             <p className="font-mono text-xs text-emphasis">02</p>
             <h2 className="type-editorial mt-3 text-2xl">Think together</h2>
-            <p className="mt-3 text-sm leading-7 text-muted-foreground">
+            <p className="mt-3 text-sm leading-7 text-muted-foreground md:min-h-14">
               Write, react, and build on each other&rsquo;s ideas in real time.
             </p>
             <div
-              className="landing-paper mt-7 rounded-xl border bg-surface p-4 md:mt-auto md:pt-4"
+              className="landing-paper mt-7 rounded-xl border bg-surface p-4"
               aria-hidden="true"
             >
               <div className="flex items-center gap-3">
@@ -182,12 +182,12 @@ export default function LandingPage() {
           <article className="flex flex-col">
             <p className="font-mono text-xs text-emphasis">03</p>
             <h2 className="type-editorial mt-3 text-2xl">Pick up anywhere</h2>
-            <p className="mt-3 text-sm leading-7 text-muted-foreground">
+            <p className="mt-3 text-sm leading-7 text-muted-foreground md:min-h-14">
               Your notes stay in sync, on every device, whenever inspiration
               returns.
             </p>
             <div
-              className="landing-paper mt-7 divide-y rounded-xl border bg-surface md:mt-auto"
+              className="landing-paper mt-7 divide-y rounded-xl border bg-surface"
               aria-hidden="true"
             >
               {devices.map(({ icon: Icon, label, when }) => (
@@ -218,7 +218,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t">
-        <div className="mx-auto flex max-w-[88rem] flex-wrap items-center gap-x-6 gap-y-4 px-5 py-8 sm:px-8">
+        <div className="mx-auto flex max-w-[88rem] flex-wrap items-center gap-x-6 gap-y-4 px-5 py-5 sm:px-8">
           <div className="flex items-center gap-2">
             <SoftmapleLeaf className="size-5" />
             <SoftmapleWordmark className="text-lg" />

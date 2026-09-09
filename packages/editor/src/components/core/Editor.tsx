@@ -91,7 +91,7 @@ export const Editor: FC<EditorProps> = (props) => {
         setIsLinkEditMode={setIsLinkEditMode}
       />
 
-      <div className="bg-background relative block rounded-b-[10px]">
+      <div className="relative block rounded-b-[10px]">
         {isLocalEditorHistoryEnabled(historyMode) ? (
           <HistoryPlugin externalHistoryState={historyState} />
         ) : null}
@@ -105,7 +105,7 @@ export const Editor: FC<EditorProps> = (props) => {
               )}
               {...rest}
             >
-              <div className="flex-auto max-w-full relative resize-y z-[-1]">
+              <div className="flex-auto max-w-full relative">
                 <LexicalContentEditable
                   placeholder={"Enter some rich text..."}
                 />

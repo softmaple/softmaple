@@ -685,3 +685,270 @@ describe("Reconnect Utilities", () => {
     });
   });
 });
+
+describe("WebSocket adapter shared attention", () => {
+  const attentionConfig = {
+    roomId: "room-1",
+    url: "ws://localhost:1234",
+    connectionId: "self-user",
+    userInfo: { userId: "self-user", name: "Self User", color: "#2563eb" },
+    authToken: "token",
+    sharedAttention: true,
+    sessionId: "session-self",
+    connectionTimeoutMs: 1000,
+    heartbeatIntervalMs: 60_000,
+    reconnect: {
+      enabled: false,
+      maxAttempts: 0,
+      baseDelayMs: 1,
+      maxDelayMs: 1,
+    },
+  };
+
+  const authOk = (
+    socket: FakeWebSocket,
+    extensions: unknown = { sharedAttention: 1 },
+    roomId = "room-1",
+  ): void => {
+    socket.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.AUTH_OK, roomId, "server", { extensions }),
+      ),
+    );
+    socket.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, roomId, "server", {
+          users: [],
+        }),
+      ),
+    );
+  };
+
+  const negotiate = async (
+    config: Parameters<typeof createWebSocketAdapter>[0] = attentionConfig,
+    extensions: unknown = { sharedAttention: 1 },
+  ) => {
+    const adapter = createWebSocketAdapter(config);
+    const connecting = adapter.connect();
+    const socket = fakeSockets[0]!;
+    socket.emitOpen();
+    authOk(socket, extensions);
+    await connecting;
+    return { adapter, socket };
+  };
+
+  const lastCommand = (socket: FakeWebSocket) =>
+    parseMessage(
+      socket.sentMessages.filter((raw) =>
+        raw.includes(WS_MESSAGE.ATTENTION_COMMAND),
+      )[0]!,
+    );
+
+  beforeEach(() => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    fakeSockets.length = 0;
+    globalThis.WebSocket = originalWebSocket;
+  });
+
+  it("offers the extension during auth and enables it once the server agrees", async () => {
+    const { adapter, socket } = await negotiate();
+    const auth = parseMessage(
+      socket.sentMessages.find((raw) => raw.includes('"auth"'))!,
+    );
+    expect(auth?.payload).toMatchObject({
+      extensions: { sharedAttention: 1, sessionId: "session-self" },
+    });
+    expect(adapter.supportsAttention?.()).toBe(true);
+    expect(adapter.getServerTime?.()).toBeGreaterThan(0);
+    await adapter.disconnect();
+  });
+
+  it("stays disabled when the server withholds the extension", async () => {
+    const { adapter } = await negotiate(attentionConfig, {});
+    expect(adapter.supportsAttention?.()).toBe(false);
+    const result = await adapter.sendAttention?.({
+      type: "present",
+      enabled: true,
+    });
+    expect(result).toMatchObject({ ok: false });
+    expect(result?.message).toContain("unavailable");
+    await adapter.disconnect();
+  });
+
+  it("stays disabled when the client never asked for it", async () => {
+    const { adapter } = await negotiate({
+      ...attentionConfig,
+      sharedAttention: false,
+    });
+    expect(adapter.supportsAttention?.()).toBe(false);
+    await adapter.disconnect();
+  });
+
+  it("resolves a command with the server outcome and stops retrying", async () => {
+    vi.useFakeTimers();
+    const { adapter, socket } = await negotiate();
+    const pending = adapter.sendAttention?.({ type: "present", enabled: true });
+    const command = lastCommand(socket);
+    expect(command?.payload).toMatchObject({
+      action: { type: "present", enabled: true },
+    });
+    const id = (command?.payload as { id: string }).id;
+    socket.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", "server", {
+          id,
+          ok: true,
+        }),
+      ),
+    );
+    await expect(pending).resolves.toEqual({ id, ok: true });
+    vi.advanceTimersByTime(5_000);
+    expect(
+      socket.sentMessages.filter((raw) =>
+        raw.includes(WS_MESSAGE.ATTENTION_COMMAND),
+      ),
+    ).toHaveLength(1);
+    await adapter.disconnect();
+  });
+
+  it("surfaces a refusal message from the server", async () => {
+    const { adapter, socket } = await negotiate();
+    const pending = adapter.sendAttention?.({
+      type: "follow",
+      sessionId: "session-peer",
+    });
+    const id = (lastCommand(socket)?.payload as { id: string }).id;
+    socket.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", "server", {
+          id,
+          ok: false,
+          message: "This person is not presenting.",
+        }),
+      ),
+    );
+    await expect(pending).resolves.toEqual({
+      id,
+      ok: false,
+      message: "This person is not presenting.",
+    });
+    await adapter.disconnect();
+  });
+
+  it("retries once and then reports an unconfirmed delivery", async () => {
+    vi.useFakeTimers();
+    const { adapter, socket } = await negotiate();
+    const pending = adapter.sendAttention?.({ type: "stop" });
+    vi.advanceTimersByTime(1_000);
+    expect(
+      socket.sentMessages.filter((raw) =>
+        raw.includes(WS_MESSAGE.ATTENTION_COMMAND),
+      ),
+    ).toHaveLength(2);
+    vi.advanceTimersByTime(3_000);
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining("could not be confirmed"),
+    });
+    await adapter.disconnect();
+  });
+
+  it("fails pending commands when the connection drops", async () => {
+    vi.useFakeTimers();
+    const { adapter, socket } = await negotiate();
+    const pending = adapter.sendAttention?.({ type: "stop" });
+    socket.emitClose();
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Connection interrupted"),
+    });
+    expect(adapter.supportsAttention?.()).toBe(false);
+    await adapter.disconnect();
+  });
+
+  it("refuses more than four commands in flight", async () => {
+    vi.useFakeTimers();
+    const { adapter } = await negotiate();
+    const inflight = [0, 1, 2, 3].map(() =>
+      adapter.sendAttention?.({ type: "stop" }),
+    );
+    const refused = await adapter.sendAttention?.({ type: "stop" });
+    expect(refused).toMatchObject({ ok: false });
+    vi.advanceTimersByTime(5_000);
+    await Promise.all(inflight);
+    await adapter.disconnect();
+  });
+
+  it("adopts a newer collaboration revision announced by its owner", async () => {
+    const peer = createPresenceUser({
+      connectionId: "conn-peer",
+      userId: "peer",
+      name: "Peer",
+      color: "#000",
+    });
+    const { adapter, socket } = await negotiate();
+    socket.emitMessage(
+      serializeMessage(
+        createMessage(WS_MESSAGE.JOIN, "room-1", "conn-peer", { user: peer }),
+      ),
+    );
+    const announce = (revision: number, senderId = "conn-peer") =>
+      socket.emitMessage(
+        serializeMessage(
+          createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", senderId, {
+            member: {
+              connectionId: "conn-peer",
+              collaboration: {
+                revision,
+                presenting: true,
+                following: null,
+                invitation: null,
+                response: null,
+              },
+            },
+          }),
+        ),
+      );
+    announce(4);
+    expect(
+      adapter.getPresence().get("conn-peer")?.collaboration?.revision,
+    ).toBe(4);
+    announce(2);
+    expect(
+      adapter.getPresence().get("conn-peer")?.collaboration?.revision,
+    ).toBe(4);
+    announce(9, "someone-else");
+    expect(
+      adapter.getPresence().get("conn-peer")?.collaboration?.revision,
+    ).toBe(4);
+    await adapter.disconnect();
+  });
+
+  it("ignores attention frames that are malformed or from another room", async () => {
+    const { adapter, socket } = await negotiate();
+    for (const frame of [
+      createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", "server", "nope"),
+      createMessage(WS_MESSAGE.ATTENTION_STATE, "other-room", "server", {
+        id: "x",
+        ok: true,
+      }),
+      createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", "server", {
+        member: "nope",
+      }),
+      createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", "server", {
+        id: "unknown-command",
+        ok: true,
+      }),
+      createMessage(WS_MESSAGE.ATTENTION_STATE, "room-1", "conn-ghost", {
+        member: { connectionId: "conn-ghost", collaboration: null },
+      }),
+    ])
+      expect(() => socket.emitMessage(serializeMessage(frame))).not.toThrow();
+    expect(adapter.supportsAttention?.()).toBe(true);
+    await adapter.disconnect();
+  });
+});

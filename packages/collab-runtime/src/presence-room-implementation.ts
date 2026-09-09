@@ -37,6 +37,7 @@ const PEER_PHASE = {
 type PeerPhase = (typeof PEER_PHASE)[keyof typeof PEER_PHASE];
 
 interface PeerState {
+  protocolContext?: unknown;
   authorizationExpiresAt: number;
   connectionId: string | null;
   credential: CollabCredential | null;
@@ -305,6 +306,9 @@ class RuntimePresenceRoom implements PresenceRoom {
         case PRESENCE_MESSAGE.Update:
           await this.receiveUpdate(state, envelope);
           return;
+        case PRESENCE_MESSAGE.Command:
+          await this.receiveCommand(state, envelope);
+          return;
         case PRESENCE_MESSAGE.Leave:
           await this.receiveLeave(state);
           return;
@@ -490,6 +494,7 @@ class RuntimePresenceRoom implements PresenceRoom {
       }
 
       state.credential = auth.credential;
+      state.protocolContext = auth.protocolContext;
       state.identity = identity;
       state.authorizationExpiresAt =
         Date.now() + this.services.policy.authorizationRefreshIntervalMs;
@@ -576,6 +581,7 @@ class RuntimePresenceRoom implements PresenceRoom {
     state.identity = refreshed;
     state.joined = resumed.joined;
     state.rateLimit = resumed.rateLimit;
+    state.protocolContext = resumed.protocolContext;
     state.heartbeatExpiresAt = resumed.heartbeatExpiresAt;
 
     try {
@@ -709,7 +715,12 @@ class RuntimePresenceRoom implements PresenceRoom {
     const now = Date.now();
     let member: PresenceMemberRecord;
     try {
-      member = this.services.codec.createMember(identity, connectionId, now);
+      member = this.services.codec.createMember(
+        identity,
+        connectionId,
+        now,
+        state.protocolContext,
+      );
     } catch (error) {
       this.report(error, state, "create-member");
       state.leaveRequested = true;
@@ -939,6 +950,62 @@ class RuntimePresenceRoom implements PresenceRoom {
     await this.resetState(state, true, PRESENCE_SESSION_END_REASON.PeerLeft);
   }
 
+  private async receiveCommand(
+    state: PeerState,
+    envelope: PresenceEnvelope,
+  ): Promise<void> {
+    const codec = this.services.codec;
+    const connectionId = state.connectionId;
+    if (!state.joined || connectionId === null || codec.command === undefined)
+      return;
+    try {
+      const current = await this.services.store.getMember(
+        this.roomId,
+        connectionId,
+      );
+      if (!codec.isMember(current))
+        throw new Error("Presence session is unavailable.");
+      const page = await this.services.store.listMembers(this.roomId);
+      const members = page.members.filter((member) => codec.isMember(member));
+      const result = codec.command(
+        current,
+        members,
+        envelope.payload,
+        Date.now(),
+        state.protocolContext,
+      );
+      await this.services.store.setMember(
+        this.roomId,
+        result.member,
+        this.services.policy.memberTtlMs,
+      );
+      // Persisted ephemeral state before fanout: hibernation and cross-instance
+      // sync see the same authoritative transition. Cursor clocks are unchanged.
+      await this.services.fanout.publish({
+        roomId: this.roomId,
+        frame: codec.encode(
+          PRESENCE_FRAME.Extension,
+          this.roomId,
+          connectionId,
+          result.payload,
+        ),
+      });
+    } catch (error) {
+      await this.sendIgnoringFailure(
+        state.peer,
+        codec.encode(PRESENCE_FRAME.Extension, this.roomId, "server", {
+          request: envelope.payload,
+          ok: false,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Attention action is unavailable.",
+        }),
+        "attention-command",
+      );
+    }
+  }
+
   private async publishLeave(
     connectionId: string,
     userId: string,
@@ -1056,6 +1123,9 @@ class RuntimePresenceRoom implements PresenceRoom {
     }
     try {
       await persist.call(state.peer, {
+        ...(state.protocolContext === undefined
+          ? {}
+          : { protocolContext: state.protocolContext }),
         authorizationExpiresAt: state.authorizationExpiresAt,
         connectionId: state.connectionId,
         credential: state.credential,
@@ -1238,7 +1308,14 @@ class RuntimePresenceRoom implements PresenceRoom {
     messageType: string,
   ): Promise<void> {
     try {
-      await peer.send(frame);
+      const filtered =
+        this.services.codec.filterFrame === undefined
+          ? frame
+          : this.services.codec.filterFrame(
+              frame,
+              this.peers.get(peer)?.protocolContext,
+            );
+      if (filtered !== null) await peer.send(filtered);
     } catch (error) {
       this.report(error, this.peers.get(peer) ?? null, messageType);
     }

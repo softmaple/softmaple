@@ -772,6 +772,31 @@ describe("BlockReplica", () => {
     });
   });
 
+  it("should resolve repeated anchors against each local and remote revision", () => {
+    // Arrange
+    const author = new BlockReplica("alice");
+    author.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "AB");
+    });
+    const receiver = BlockReplica.deserialize(author.serialize(), "bob");
+    const anchor = receiver.captureBlockAnchor(BOOTSTRAP_BLOCK_ID, 1, "after");
+    expect(receiver.resolveBlockAnchor(anchor).offset).toBe(1);
+
+    // Act / Assert: a remote insert and local delete replace the lookup revision.
+    const insert = author.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "界");
+    })!;
+    receiver.applyRemoteEvents(insert);
+    expect(receiver.resolveBlockAnchor(anchor).offset).toBe(2);
+    expect(receiver.tryResolveBlockAnchor(anchor)?.offset).toBe(2);
+    receiver.transact((transaction) => {
+      transaction.deleteText(BOOTSTRAP_BLOCK_ID, 0, 1);
+    });
+    expect(receiver.resolveBlockAnchor(anchor).offset).toBe(1);
+    const latest = receiver.captureBlockAnchor(BOOTSTRAP_BLOCK_ID, 2, "before");
+    expect(receiver.tryResolveBlockAnchor(latest)?.offset).toBe(2);
+  });
+
   it("should preserve directional block anchors across a split", () => {
     // Arrange
     const replica = new BlockReplica("alice");

@@ -15,6 +15,7 @@ node_modules
 
 # Testing
 coverage
+/.artifacts/
 
 # Turbo
 .turbo

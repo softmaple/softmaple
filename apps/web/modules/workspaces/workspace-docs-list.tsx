@@ -1,7 +1,6 @@
 "use client";
 
 import type { FC } from "react";
-import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FileText, Plus } from "lucide-react";
@@ -9,6 +8,8 @@ import { Button } from "@softmaple/ui/components/button";
 import { SearchField } from "@/components/search-field";
 import { ScrollArea } from "@softmaple/ui/components/scroll-area";
 import type { DocsType } from "@/types/model";
+
+import { useWorkspaceDocuments } from "./use-workspace-documents";
 
 type DocumentRow = DocsType["Row"];
 
@@ -26,15 +27,16 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
   workspaceSlug,
 }) => {
   const pathname = usePathname();
-  const [query, setQuery] = useState("");
-  const filteredDocuments = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    return normalizedQuery.length === 0
-      ? documents
-      : documents.filter((document) =>
-          document.title.toLocaleLowerCase().includes(normalizedQuery),
-        );
-  }, [documents, query]);
+  const {
+    documents: filteredDocuments,
+    query,
+    setQuery,
+    pending,
+    error,
+    hasMore,
+    loadMore,
+    retry,
+  } = useWorkspaceDocuments(workspaceSlug, documents);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -71,6 +73,17 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 pb-4">
+        <p className="px-2 pb-2 text-xs text-muted-foreground">
+          Title search across this workspace
+        </p>
+        {error !== null ? (
+          <div role="alert" className="p-2 text-sm">
+            {error}
+            <Button variant="ghost" onClick={retry}>
+              Retry
+            </Button>
+          </div>
+        ) : null}
         {filteredDocuments.length === 0 ? (
           <p className="px-2 py-5 text-sm text-muted-foreground">
             {documents.length === 0
@@ -93,7 +106,7 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
                     onClick={onNavigate}
                     aria-current={pathname === path ? "page" : undefined}
                   >
-                    <FileText className="size-4 shrink-0 text-primary" />
+                    <FileText className="size-4 shrink-0 text-emphasis" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">
                         {document.title}
@@ -108,6 +121,16 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
             })}
           </div>
         )}
+        {hasMore ? (
+          <Button
+            className="mt-3 w-full"
+            variant="ghost"
+            disabled={pending}
+            onClick={loadMore}
+          >
+            {pending ? "Loading…" : "Load more"}
+          </Button>
+        ) : null}
       </ScrollArea>
     </div>
   );

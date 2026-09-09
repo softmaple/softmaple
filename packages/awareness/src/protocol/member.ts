@@ -76,6 +76,16 @@ export const applyPresencePatch = (
     patch.hasSelection && patch.selection === null
       ? withoutSelection(cursorBase)
       : cursorBase;
+  const hasMeta =
+    patch.isTyping !== undefined ||
+    patch.foreground !== undefined ||
+    patch.activity !== undefined;
+  const meta = {
+    ...current.meta,
+    ...(patch.isTyping === undefined ? {} : { isTyping: patch.isTyping }),
+    ...(patch.foreground === undefined ? {} : { foreground: patch.foreground }),
+    ...(patch.activity === undefined ? {} : { activity: patch.activity }),
+  };
   const member: PresenceUser = {
     ...selectionBase,
     ...(patch.cursor === null || patch.cursor === undefined
@@ -84,9 +94,7 @@ export const applyPresencePatch = (
     ...(patch.selection === null || patch.selection === undefined
       ? {}
       : { selection: patch.selection }),
-    ...(patch.isTyping === undefined
-      ? {}
-      : { meta: { ...current.meta, isTyping: patch.isTyping } }),
+    ...(hasMeta ? { meta } : {}),
     status: "active",
     clock: patch.clock,
     lastActivityAt: now,
@@ -95,9 +103,7 @@ export const applyPresencePatch = (
   const updates: Record<string, unknown> = {
     ...(patch.hasCursor ? { cursor: patch.cursor ?? null } : {}),
     ...(patch.hasSelection ? { selection: patch.selection ?? null } : {}),
-    ...(patch.isTyping === undefined
-      ? {}
-      : { meta: { ...current.meta, isTyping: patch.isTyping } }),
+    ...(hasMeta ? { meta } : {}),
     lastActivityAt: now,
     lastSeenAt: now,
     status: "active",

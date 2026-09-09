@@ -16,6 +16,7 @@ const ROOM_ID = "00000000-0000-4000-8000-000000000001";
 const mocks = vi.hoisted(() => ({
   authorizeDocument: vi.fn(),
   findUniqueUser: vi.fn(),
+  findSharedDocument: vi.fn(),
 }));
 
 vi.mock("nitro", () => ({
@@ -27,7 +28,10 @@ vi.mock("../server/utils/auth", () => ({
 }));
 
 vi.mock("../server/utils/prisma", () => ({
-  prisma: { user: { findUnique: mocks.findUniqueUser } },
+  prisma: {
+    user: { findUnique: mocks.findUniqueUser },
+    document: { findFirst: mocks.findSharedDocument },
+  },
 }));
 
 import presenceRoute from "../server/routes/collab/presence";
@@ -170,6 +174,7 @@ describe("collaboration presence route", () => {
     currentProfile = DEFAULT_PROFILE;
     mocks.authorizeDocument.mockImplementation(async () => currentAccess);
     mocks.findUniqueUser.mockImplementation(async () => currentProfile);
+    mocks.findSharedDocument.mockResolvedValue({ id: ROOM_ID });
     vi.stubEnv("COLLAB_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     await setRealtimeForTests(createMemoryRealtime());
     await resetTopicBridgesForTests();
@@ -381,6 +386,13 @@ describe("collaboration presence route", () => {
   });
 
   describe("authorization failures", () => {
+    it("rejects a workspace member when public-link collaboration is disabled", async () => {
+      mocks.findSharedDocument.mockResolvedValue(null);
+      const peer = await upgradedPeer();
+      await route.message(peer, authMessage(ROOM_ID, "connection-1"));
+      expect(peer.close).toHaveBeenCalledWith(1008, "Unauthorized");
+      await route.close(peer);
+    });
     it("rejects when authorizeDocument returns null", async () => {
       currentAccess = null;
       const peer = await upgradedPeer();

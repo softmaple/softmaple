@@ -1,9 +1,6 @@
 import { EgWalkerReplica, type GraphEvent } from "@softmaple/eg-walker";
 import {
-  captureAnchor,
   createSequenceAnchorProjection,
-  resolveAnchor,
-  tryResolveAnchor,
   type AnchorAffinity,
 } from "@softmaple/eg-walker/anchors";
 
@@ -220,12 +217,12 @@ export class BlockReplica {
     const rawIndex = rawBoundary(projected, offset);
     return Object.freeze({
       blockId,
-      anchor: captureAnchor(this.egWalker, rawIndex, affinity),
+      anchor: this.state.sequenceProjection.captureAnchor(rawIndex, affinity),
     });
   }
 
   resolveBlockAnchor(anchor: BlockAnchor): ResolvedBlockAnchor {
-    const rawIndex = resolveRawAnchor(this.egWalker, anchor);
+    const rawIndex = this.state.sequenceProjection.resolveAnchor(anchor.anchor);
     const resolved = nearestBlockBoundary(
       this.state.projectedBlocks,
       rawIndex,
@@ -242,7 +239,9 @@ export class BlockReplica {
    * has not been integrated yet. Invalid anchors still throw.
    */
   tryResolveBlockAnchor(anchor: BlockAnchor): ResolvedBlockAnchor | null {
-    const rawIndex = tryResolveRawAnchor(this.egWalker, anchor);
+    const rawIndex = this.state.sequenceProjection.tryResolveAnchor(
+      anchor.anchor,
+    );
     if (rawIndex === null) {
       return null;
     }
@@ -926,20 +925,6 @@ const diffText = (before: string, after: string): TextChange | null => {
     insert: after.slice(from, after.length - newSuffixLength),
   };
 };
-
-const resolveRawAnchor = (
-  egWalker: EgWalkerReplica,
-  anchor: BlockAnchor,
-): number => {
-  // Kept behind a tiny helper so a future batch resolver can replace the
-  // current on-demand EG replay without changing the public block API.
-  return resolveAnchor(egWalker, anchor.anchor);
-};
-
-const tryResolveRawAnchor = (
-  egWalker: EgWalkerReplica,
-  anchor: BlockAnchor,
-): number | null => tryResolveAnchor(egWalker, anchor.anchor);
 
 const nearestBlockBoundary = (
   projectedBlocks: ReadonlyArray<ProjectedBlock>,

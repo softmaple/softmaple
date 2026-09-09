@@ -10,6 +10,11 @@ import {
 } from "@softmaple/collab-runtime";
 import {
   applyPresencePatch,
+  applyAttentionCommand,
+  parseAttentionCommand,
+  parseAttentionContext,
+  emptyCollaborationState,
+  filterAttentionFrame,
   consumePresenceQuota,
   createPresenceMember,
   isPresenceUser,
@@ -24,6 +29,7 @@ import {
 import type { PresenceUser } from "@softmaple/awareness/types/presence";
 
 const WIRE_TO_ROOM_MESSAGE: Partial<Record<string, PresenceMessageKind>> = {
+  [WS_MESSAGE.ATTENTION_COMMAND]: PRESENCE_MESSAGE.Command,
   [WS_MESSAGE.AUTH]: PRESENCE_MESSAGE.Auth,
   [WS_MESSAGE.HEARTBEAT]: PRESENCE_MESSAGE.Heartbeat,
   [WS_MESSAGE.JOIN]: PRESENCE_MESSAGE.Join,
@@ -33,6 +39,7 @@ const WIRE_TO_ROOM_MESSAGE: Partial<Record<string, PresenceMessageKind>> = {
 };
 
 const ROOM_FRAME_TO_WIRE: Record<PresenceFrameKind, string> = {
+  [PRESENCE_FRAME.Extension]: WS_MESSAGE.ATTENTION_STATE,
   [PRESENCE_FRAME.AuthError]: WS_MESSAGE.AUTH_ERROR,
   [PRESENCE_FRAME.AuthOk]: WS_MESSAGE.AUTH_OK,
   [PRESENCE_FRAME.Error]: WS_MESSAGE.ERROR,
@@ -61,6 +68,21 @@ assertAssignable<PresencePatch>()<AwarenessPresencePatch>();
  * `@softmaple/collab-runtime` never imports awareness.
  */
 export const awarenessPresenceCodec: PresenceCodec = {
+  filterFrame: filterAttentionFrame,
+  command(current, members, payload, now, context) {
+    if (parseAttentionContext(context) === undefined)
+      throw new Error("Shared attention is not supported.");
+    const command = parseAttentionCommand(payload);
+    if (!isPresenceUser(current))
+      throw new Error("Presence session is unavailable.");
+    const member = applyAttentionCommand(
+      current,
+      members.filter(isPresenceUser),
+      command,
+      now,
+    );
+    return { member, payload: { id: command.id, ok: true, member } };
+  },
   applyPatch(current, patch, now) {
     const result = applyPresencePatch(
       current as unknown as PresenceUser,
@@ -85,12 +107,16 @@ export const awarenessPresenceCodec: PresenceCodec = {
     return consumePresenceQuota(current as PresenceRateLimit | null, now);
   },
 
-  createMember(identity, connectionId, now) {
-    return createPresenceMember(
-      identity,
-      connectionId,
-      now,
-    ) as unknown as PresenceMemberRecord;
+  createMember(identity, connectionId, now, context) {
+    const member = createPresenceMember(identity, connectionId, now);
+    const extension = parseAttentionContext(context);
+    return extension === undefined
+      ? member
+      : {
+          ...member,
+          sessionId: extension.sessionId,
+          collaboration: emptyCollaborationState(),
+        };
   },
 
   encode(kind, roomId, senderId, payload) {
@@ -116,6 +142,15 @@ export const awarenessPresenceCodec: PresenceCodec = {
   parseAuth(payload) {
     const parsed = parsePresenceAuth(payload);
     return {
+      ...(parsed.protocolContext === undefined ||
+      parsed.userId.length + 1 + parsed.protocolContext.sessionId.length > 128
+        ? {}
+        : {
+            protocolContext: {
+              ...parsed.protocolContext,
+              sessionId: `${parsed.userId}:${parsed.protocolContext.sessionId}`,
+            },
+          }),
       connectionId: parsed.connectionId,
       credential: {
         kind: "access-token",

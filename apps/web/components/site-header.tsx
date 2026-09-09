@@ -13,7 +13,7 @@ import {
   SheetTrigger,
 } from "@softmaple/ui/components/sheet";
 import { SITE_CONFIG } from "@softmaple/config";
-import { SoftmapleWordmark } from "@/components/BrandMark";
+import { SoftmapleLeaf, SoftmapleWordmark } from "@/components/BrandMark";
 import { ModeToggle } from "@/components/mode-toggle";
 
 const links = [
@@ -34,14 +34,19 @@ export function SiteHeader() {
   }, []);
 
   return (
-    <header className="border-b border-border/60 bg-background">
-      <div className="mx-auto flex h-20 max-w-7xl items-center gap-3 px-5 sm:px-8">
-        <Link href="/" aria-label="Softmaple home">
+    <header className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur-md">
+      <div className="relative mx-auto flex h-16 max-w-[88rem] items-center gap-3 px-5 sm:px-8">
+        <Link
+          href="/"
+          aria-label="Softmaple home"
+          className="flex items-center gap-2"
+        >
+          <SoftmapleLeaf className="size-7" />
           <SoftmapleWordmark className="text-2xl" />
         </Link>
         <nav
           aria-label="Main navigation"
-          className="ml-12 hidden items-center gap-7 text-sm text-muted-foreground md:flex"
+          className="ml-10 hidden items-center gap-7 text-sm text-muted-foreground md:flex lg:absolute lg:left-1/2 lg:ml-0 lg:-translate-x-1/2 lg:gap-9"
         >
           {links.map((link) => (
             <a

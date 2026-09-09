@@ -27,6 +27,7 @@ export interface PresencePeer {
 
 /** Everything a hibernating transport must persist to survive eviction. */
 export interface PresencePeerSnapshot {
+  readonly protocolContext?: unknown;
   readonly authorizationExpiresAt: number;
   readonly connectionId: string;
   readonly credential: CollabCredential;
@@ -38,6 +39,7 @@ export interface PresencePeerSnapshot {
 
 /** Server-owned session metadata restored by a hibernating transport host. */
 export interface PresenceRoomResumeState {
+  readonly protocolContext?: unknown;
   readonly connectionId: string;
   readonly credential: CollabCredential;
   /** Preserved as-is; the room does not recompute it on resume. */

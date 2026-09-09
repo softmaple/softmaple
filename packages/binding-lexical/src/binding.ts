@@ -43,6 +43,8 @@ export interface StableBlockSelection {
 }
 
 export interface LexicalBindingOptions {
+  /** A projection observes the replica but never captures editor mutations. */
+  readonly mode?: "editable" | "read-only";
   readonly editor: LexicalEditor;
   readonly replica: BlockReplica;
   readonly enableEditingOnReady?: boolean;
@@ -66,6 +68,7 @@ export type ResolveSelectionResult =
     };
 
 export interface LexicalBinding {
+  restoreSelection(selection: StableBlockSelection): boolean;
   readonly editor: LexicalEditor;
   readonly replica: BlockReplica;
   applyRemoteEvents(
@@ -493,6 +496,7 @@ const blockIndexForProjection = (
 };
 
 export const createLexicalBinding = ({
+  mode = "editable",
   editor,
   replica,
   enableEditingOnReady = true,
@@ -527,6 +531,7 @@ export const createLexicalBinding = ({
   };
 
   const publishSelection = (): void => {
+    if (mode === "read-only") return;
     if (onSelectionChange === undefined || destroyed) return;
     const selection = captureSelection();
     const serialized = JSON.stringify(selection);
@@ -630,10 +635,12 @@ export const createLexicalBinding = ({
   } catch (error) {
     reportError(error);
   }
-  if (enableEditingOnReady) editor.setEditable(true);
+  if (mode === "read-only") editor.setEditable(false);
+  else if (enableEditingOnReady) editor.setEditable(true);
 
   const unregisterUpdate = editor.registerUpdateListener(
     ({ dirtyElements, dirtyLeaves, tags }) => {
+      if (mode === "read-only") return;
       if (destroyed || isApplyingRemote || tags.has(COLLABORATION_TAG)) return;
       const contentChanged = dirtyElements.size > 0 || dirtyLeaves.size > 0;
       if (isComposing) {
@@ -700,7 +707,8 @@ export const createLexicalBinding = ({
   });
 
   const unsubscribeReplica = replica.subscribe((change) => {
-    if (destroyed || change.origin !== "remote") return;
+    if (destroyed || (mode !== "read-only" && change.origin !== "remote"))
+      return;
     if (isComposing) {
       hasPendingRemoteMaterialize = true;
       return;
@@ -714,6 +722,16 @@ export const createLexicalBinding = ({
   });
 
   return {
+    restoreSelection: (selection) => {
+      if (mode === "read-only" || isComposing) return false;
+      const resolved = tryResolveStableSelection(selection, replica);
+      if (resolved.status !== "resolved") return false;
+      editor.update(
+        () => restoreLogicalSelection(resolved.selection, blockIndex),
+        { discrete: true },
+      );
+      return true;
+    },
     editor,
     replica,
     applyRemoteEvents: (input) => {

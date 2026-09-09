@@ -8,8 +8,8 @@ export const AuthBrandSpecimen = () => (
     className="mt-10 hidden w-full max-w-2xl rounded-xl border bg-card shadow-sm lg:block"
   >
     <div className="flex items-center gap-2 border-b px-3 py-2 font-mono text-[10px] text-muted-foreground">
-      <Circle className="size-2.5 fill-primary text-primary" />
-      field-notes / carbon-cycle
+      <Circle className="size-2.5 fill-primary text-emphasis" />
+      Illustrative workspace · simulated people
       <span className="ml-auto flex items-center gap-1 text-success">
         <Check className="size-3" /> Saved
       </span>
@@ -24,7 +24,7 @@ export const AuthBrandSpecimen = () => (
         ))}
       </div>
       <div className="relative px-5 py-5 xl:px-7">
-        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-primary">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-emphasis">
           Observation / 09:42
         </p>
         <p className="mt-4 font-display text-xl font-semibold">
@@ -46,7 +46,7 @@ export const AuthBrandSpecimen = () => (
 
     <div className="flex flex-wrap items-center gap-3 border-t px-3 py-2 font-mono text-[9px] text-muted-foreground">
       <span className="flex items-center gap-1.5">
-        <Radio className="size-3 text-primary" /> 3 active
+        <Radio className="size-3 text-emphasis" /> 3 active
       </span>
       <span className="flex items-center gap-1.5">
         <FileCode2 className="size-3" /> Markdown / LaTeX

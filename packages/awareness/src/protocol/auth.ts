@@ -2,6 +2,10 @@
  * Auth and heartbeat wire payload parsing.
  */
 
+import {
+  type AttentionProtocolContext,
+  parseAttentionContext,
+} from "./attention";
 import { isRecord, isShortString } from "./envelope";
 import { PRESENCE_CAPABILITIES, PRESENCE_PROTOCOL_VERSION } from "./version";
 
@@ -14,6 +18,7 @@ import { PRESENCE_CAPABILITIES, PRESENCE_PROTOCOL_VERSION } from "./version";
 const MAX_PRESENCE_TOKEN_LENGTH = 4_096;
 
 export interface PresenceAuthPayload {
+  readonly protocolContext?: AttentionProtocolContext;
   readonly connectionId: string;
   readonly token: string;
   readonly userId: string;
@@ -36,6 +41,9 @@ export const parsePresenceAuth = (payload: unknown): PresenceAuthPayload => {
     }
   }
   return {
+    ...(parseAttentionContext(payload.extensions) === undefined
+      ? {}
+      : { protocolContext: parseAttentionContext(payload.extensions) }),
     connectionId: payload.connectionId,
     token: payload.token,
     userId: payload.userId,

@@ -8,6 +8,7 @@ import type { PresenceMemberRecord } from "./presence-store";
  * closed set; the room dispatches on it without ever reading the wire type.
  */
 export const PRESENCE_MESSAGE = {
+  Command: "command",
   Auth: "auth",
   Heartbeat: "heartbeat",
   Join: "join",
@@ -21,6 +22,7 @@ export type PresenceMessageKind =
 
 /** Outbound frame kinds the room asks the codec to encode. */
 export const PRESENCE_FRAME = {
+  Extension: "extension",
   AuthError: "auth-error",
   AuthOk: "auth-ok",
   Error: "error",
@@ -43,6 +45,7 @@ export interface PresenceEnvelope {
 }
 
 export interface PresenceAuthPayload {
+  readonly protocolContext?: unknown;
   readonly connectionId: string;
   readonly credential: CollabCredential;
   /** Client-claimed userId, verified against the resolved identity by `PresenceSessionHooks`. */
@@ -88,6 +91,16 @@ export interface PresenceQuotaResult {
  *   calls on error-path flows where host failures are possible.
  */
 export interface PresenceCodec {
+  /** Optional negotiated application commands, separate from latest-value updates. */
+  command?(
+    current: PresenceMemberRecord,
+    members: ReadonlyArray<PresenceMemberRecord>,
+    payload: unknown,
+    now: number,
+    context: unknown,
+  ): { readonly member: PresenceMemberRecord; readonly payload: unknown };
+  /** Strip unsupported extensions and private recipient data before delivery. */
+  filterFrame?(frame: unknown, context: unknown): unknown | null;
   applyPatch(
     current: PresenceMemberRecord,
     patch: PresencePatch,
@@ -103,6 +116,7 @@ export interface PresenceCodec {
     identity: PresenceIdentity,
     connectionId: string,
     now: number,
+    context?: unknown,
   ): PresenceMemberRecord;
   encode(
     kind: PresenceFrameKind,

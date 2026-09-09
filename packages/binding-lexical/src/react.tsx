@@ -8,6 +8,7 @@ import {
 } from "./binding";
 
 export interface LexicalEgWalkerPluginProps {
+  readonly mode?: "editable" | "read-only";
   readonly replica: BlockReplica;
   readonly enableEditingOnReady?: boolean;
   readonly onBindingChange?: (binding: LexicalBinding | null) => void;
@@ -17,6 +18,7 @@ export interface LexicalEgWalkerPluginProps {
 
 /** React lifecycle wrapper around the framework-free Lexical binding. */
 export function LexicalEgWalkerPlugin({
+  mode,
   replica,
   enableEditingOnReady,
   onBindingChange,
@@ -40,6 +42,7 @@ export function LexicalEgWalkerPlugin({
 
   useEffect(() => {
     const binding = createLexicalBinding({
+      mode,
       editor,
       replica,
       enableEditingOnReady,
@@ -57,7 +60,7 @@ export function LexicalEgWalkerPlugin({
       callbacksRef.current.onBindingChange?.(null);
       binding.destroy();
     };
-  }, [editor, enableEditingOnReady, replica]);
+  }, [editor, enableEditingOnReady, mode, replica]);
 
   return null;
 }

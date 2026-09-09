@@ -124,7 +124,9 @@ test("two authenticated clients converge and show aggregated presence", async ({
   // Collaboration WebSockets are only enabled after a document is shared.
   await ownerPage.getByRole("button", { name: "Share" }).click();
   await expect(
-    ownerPage.getByText("Public collaboration link enabled."),
+    ownerPage.getByText(
+      "Public read-only link enabled. Workspace members can now collaborate live.",
+    ),
   ).toBeVisible();
 
   const editorContext = await browser.newContext();
@@ -159,9 +161,24 @@ test("preview, export, public sharing, and revocation use live content", async (
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: /Markdown/i }).click();
   await expect((await download).suggestedFilename()).toMatch(/\.md$/);
+  // This serial fixture was shared in the prior collaboration scenario.
+  if (
+    await page
+      .getByRole("button", { name: "Disable link", exact: true })
+      .count()
+  ) {
+    await page
+      .getByRole("button", { name: "Disable link", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Share", exact: true }),
+    ).toBeVisible();
+  }
   await page.getByRole("button", { name: "Share" }).click();
   await expect(
-    page.getByText("Public collaboration link enabled."),
+    page.getByText(
+      "Public read-only link enabled. Workspace members can now collaborate live.",
+    ),
   ).toBeVisible();
 
   const anonymous = await page.context().browser()?.newContext();
@@ -173,8 +190,11 @@ test("preview, export, public sharing, and revocation use live content", async (
     shared.locator('[contenteditable="false"]').first(),
   ).toContainText("Public observation");
   await page.getByRole("button", { name: "Disable link" }).click();
+  await expect(
+    page.getByRole("button", { name: "Share", exact: true }),
+  ).toBeVisible();
   await shared.reload();
-  await expect(shared.getByText(/not found/i)).toBeVisible();
+  await expect(shared.getByText(/could not be found|not found/i)).toBeVisible();
   await anonymous.close();
 });
 

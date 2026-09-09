@@ -9,6 +9,8 @@
  * - idle: Connected but no recent activity
  * - offline: Disconnected or heartbeat expired
  */
+import type { CollaborationState } from "../protocol/attention";
+
 export type PresenceStatus = "active" | "idle" | "offline";
 
 /**
@@ -266,6 +268,8 @@ export const normalizeCursorPosition = (
  * Additional metadata about user activity
  */
 export interface PresenceMeta {
+  readonly foreground?: boolean;
+  readonly activity?: "viewing" | "editing";
   /** Whether user is currently typing */
   readonly isTyping?: boolean;
   /** Custom metadata for extensibility */
@@ -279,7 +283,13 @@ export interface PresenceMeta {
 export type PresenceUserPatch = Partial<
   Omit<
     PresenceUser,
-    "connectionId" | "userId" | "lastActivityAt" | "lastSeenAt" | "clock"
+    | "connectionId"
+    | "userId"
+    | "sessionId"
+    | "collaboration"
+    | "lastActivityAt"
+    | "lastSeenAt"
+    | "clock"
   >
 >;
 
@@ -297,6 +307,10 @@ export type PresenceUserPatch = Partial<
  * - `status` is derived from those two clocks (see `derivePresenceStatus`)
  */
 export interface PresenceUser {
+  /** Optional negotiated tab identity, distinct from the transport connection. */
+  readonly sessionId?: string;
+  /** Server-authoritative shared attention; independent of cursor revision. */
+  readonly collaboration?: CollaborationState;
   /** Ephemeral per-connection session identifier */
   readonly connectionId: string;
   /** Persistent user identifier */

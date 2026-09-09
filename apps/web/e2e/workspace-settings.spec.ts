@@ -64,7 +64,13 @@ test("missing workspace Settings slug returns 404", async ({ page }) => {
   const response = await page.goto(
     "/workspace/does-not-exist-zzzzzzzzzzzz/settings",
   );
-  expect(response?.status()).toBe(404);
+  // Next returns 200 for streamed not-found responses; both render resource hiding.
+  expect([200, 404]).toContain(response?.status());
+  if (response?.status() === 200)
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+      "content",
+      /noindex/,
+    );
   await expect(page.getByText(/This page could not be found/i)).toBeVisible();
 });
 
@@ -75,7 +81,13 @@ test("authenticated viewer gets 404 for a missing workspace Settings slug", asyn
   const response = await page.goto(
     "/workspace/does-not-exist-zzzzzzzzzzzz/settings",
   );
-  expect(response?.status()).toBe(404);
+  // Next returns 200 for streamed not-found responses; both render resource hiding.
+  expect([200, 404]).toContain(response?.status());
+  if (response?.status() === 200)
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+      "content",
+      /noindex/,
+    );
   await expect(page.getByText(/This page could not be found/i)).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
 });
@@ -88,7 +100,13 @@ test("non-member viewer gets 404 for an owner-only workspace Settings route", as
   const response = await page.goto(
     `/workspace/${seed.ownerOnlyWorkspace.slug}/settings`,
   );
-  expect(response?.status()).toBe(404);
+  // Next returns 200 for streamed not-found responses; both render resource hiding.
+  expect([200, 404]).toContain(response?.status());
+  if (response?.status() === 200)
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+      "content",
+      /noindex/,
+    );
   await expect(page.getByText(/This page could not be found/i)).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
 });

@@ -1,3 +1,4 @@
+import { summarizePresence } from "@softmaple/awareness/protocol";
 import { DurableObject } from "cloudflare:workers";
 import {
   createPresenceRoom,
@@ -233,6 +234,28 @@ export class PresenceRoomDO extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== "GET") {
       return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (new URL(request.url).pathname === "/collab/presence-summary-room") {
+      const url = new URL(request.url);
+      const roomId = normalizeDocumentId(url.searchParams.get("roomId") ?? "");
+      const userId = normalizeDocumentId(url.searchParams.get("userId") ?? "");
+      const token = /^Bearer (\S+)$/i.exec(
+        request.headers.get("authorization") ?? "",
+      )?.[1];
+      if (roomId === null || userId === null || token === undefined)
+        return new Response("Forbidden", { status: 403 });
+      const services = this.createServices();
+      const identity = await services.sessions.authorize({
+        roomId,
+        userId,
+        connectionId: "overview",
+        credential: { kind: "access-token", token },
+      });
+      if (identity === null) return new Response("Forbidden", { status: 403 });
+      const page = await services.store.listMembers(roomId);
+      return Response.json(summarizePresence(page.members, Date.now()), {
+        headers: { "Cache-Control": "private, no-store" },
+      });
     }
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("Expected Upgrade: websocket", { status: 426 });

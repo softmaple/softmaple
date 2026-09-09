@@ -19,6 +19,11 @@ const resolveIdentity = async (
   ) {
     return null;
   }
+  const shared = await prisma.document.findFirst({
+    where: { id: roomId, is_public: true },
+    select: { id: true },
+  });
+  if (shared === null) return null;
   const profile = await prisma.user.findUnique({
     where: { id: access.userId },
     select: { avatar_src: true, full_name: true },

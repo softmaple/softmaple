@@ -3,10 +3,12 @@
 import {
   Fragment,
   type FC,
+  type ComponentProps,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -19,8 +21,6 @@ import {
   PresenceProvider,
   useOthers,
   usePresence,
-  useUpdateCursor,
-  useUpdateSelection,
   type PresenceAdapter,
   type PresenceUser,
 } from "@softmaple/awareness";
@@ -29,7 +29,10 @@ import type {
   StableBlockSelection,
 } from "@softmaple/binding-lexical";
 import { createClient } from "@/utils/supabase/client";
-import { documentPresenceColor } from "@/modules/docs/document-presence-color";
+import {
+  documentPresenceColor,
+  documentPresenceThemeColor,
+} from "@/modules/docs/document-presence-color";
 import { DocEditor, type DocEditorProps } from "@/modules/docs/doc-editor";
 import {
   domPointAtOffset,
@@ -39,6 +42,11 @@ import {
   mapPresenceUsers,
   resolveRemotePresenceSelection,
 } from "@/modules/docs/document-presence-geometry";
+
+import { useRedesignFlags } from "@/components/redesign-provider";
+import { useCollaborationPreferences } from "@/lib/collaboration-preferences";
+import { SharedAttention } from "./shared-attention";
+import { relevantParticipants } from "./presence-relevance";
 
 type ProfileIdentity = {
   readonly avatarUrl: string | null;
@@ -113,11 +121,19 @@ const geometryForUser = (
 
   const containerRect = container.getBoundingClientRect();
   const caretRect = collapsedRange(focusPoint).getBoundingClientRect();
+  if (caretRect.width === 0 && caretRect.height === 0) return null;
+  if (caretRect.bottom < 0 || caretRect.top > window.innerHeight) return null;
   const selectionRange = orderedRange(anchorPoint, focusPoint);
   const selectionRects = selectionRange.collapsed
     ? []
     : [...selectionRange.getClientRects()]
-        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .filter(
+          (rect) =>
+            rect.width > 0 &&
+            rect.height > 0 &&
+            rect.bottom >= 0 &&
+            rect.top <= window.innerHeight,
+        )
         .slice(0, 100)
         .map((rect) => ({
           height: rect.height,
@@ -131,7 +147,7 @@ const geometryForUser = (
       left: caretRect.left - containerRect.left,
       top: caretRect.top - containerRect.top,
     },
-    user,
+    user: { ...user, color: documentPresenceThemeColor(user.userId) },
     selectionRects,
   };
 };
@@ -156,11 +172,25 @@ const RemotePresenceOverlay: FC<{
     const refresh = (): void => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        const started = performance.now();
         setGeometries(
-          mapPresenceUsers(others, (user) =>
-            geometryForUser(binding, container, user),
+          mapPresenceUsers(
+            relevantParticipants(
+              others,
+              binding.replica.getDocument().blocks.map((block) => block.id),
+              binding.captureSelection()?.focus.blockId,
+            ),
+            (user) => geometryForUser(binding, container, user),
           ),
         );
+        if (typeof performance.measure === "function") {
+          performance.measure("softmaple.presence.geometry", {
+            start: started,
+            end: performance.now(),
+          });
+          // Observers receive the measure; the page does not retain an activity log.
+          performance.clearMeasures("softmaple.presence.geometry");
+        }
       });
     };
     refresh();
@@ -191,7 +221,7 @@ const RemotePresenceOverlay: FC<{
       className="pointer-events-none absolute inset-0 z-30 overflow-hidden"
     >
       <PresenceLayer host={host}>
-        {geometries.map(({ user, caret, selectionRects }) => (
+        {geometries.map(({ user, caret, selectionRects }, participantIndex) => (
           <Fragment key={user.connectionId}>
             {selectionRects.map((rect, index) => (
               <SelectionHighlight
@@ -209,6 +239,7 @@ const RemotePresenceOverlay: FC<{
               user={user}
               point={{ x: caret.left, y: caret.top }}
               caretHeight={caret.height}
+              showLabel={participantIndex < 3}
               viewport="none"
               focusable={false}
             />
@@ -222,38 +253,70 @@ const RemotePresenceOverlay: FC<{
 const PresenceSelectionPublisher: FC<{
   readonly enabled: boolean;
   readonly selection: StableBlockSelection | null;
-}> = ({ enabled, selection }) => {
-  const updateCursor = useUpdateCursor(50);
-  const updateSelection = useUpdateSelection(50);
+  readonly binding: LexicalBinding | null;
+}> = ({ enabled, selection, binding }) => {
   const { updatePresence } = usePresence();
-
-  useEffect(() => {
-    if (!enabled) return;
-    const clearPosition = (): void => {
-      updatePresence({ cursor: undefined, selection: undefined });
-    };
-    window.addEventListener("blur", clearPosition);
-    return () => {
-      window.removeEventListener("blur", clearPosition);
-      clearPosition();
-    };
+  const latest = useRef(selection);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editing = useRef(false);
+  const publish = useCallback(() => {
+    timer.current = null;
+    const visible =
+      enabled && document.visibilityState === "visible" && document.hasFocus();
+    const position = visible ? latest.current : null;
+    updatePresence({
+      cursor: position?.focus,
+      selection: position ?? undefined,
+      meta: {
+        foreground: visible,
+        activity: visible && editing.current ? "editing" : "viewing",
+      },
+    });
   }, [enabled, updatePresence]);
-
   useLayoutEffect(() => {
-    if (!enabled) return;
-    if (selection === null) {
-      updateCursor(null);
-      updateSelection(null);
-      return;
-    }
-    const collapsed =
-      selection.anchor.blockId === selection.focus.blockId &&
-      JSON.stringify(selection.anchor.anchor) ===
-        JSON.stringify(selection.focus.anchor);
-    updateCursor(selection.focus);
-    updateSelection(collapsed ? null : selection);
-  }, [enabled, selection, updateCursor, updateSelection]);
-
+    latest.current = selection;
+    if (timer.current === null) timer.current = setTimeout(publish, 50);
+  }, [selection, publish]);
+  useEffect(() => {
+    let idle: ReturnType<typeof setTimeout> | null = null;
+    const input = () => {
+      editing.current = true;
+      if (timer.current === null) timer.current = setTimeout(publish, 50);
+      if (idle !== null) clearTimeout(idle);
+      idle = setTimeout(() => {
+        editing.current = false;
+        publish();
+      }, 2_000);
+    };
+    const visibility = () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+      publish();
+    };
+    const unregister = binding?.editor.registerRootListener(
+      (root, previous) => {
+        previous?.removeEventListener("input", input);
+        root?.addEventListener("input", input);
+      },
+    );
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("blur", visibility);
+    window.addEventListener("focus", visibility);
+    return () => {
+      unregister?.();
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+      if (idle !== null) clearTimeout(idle);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("blur", visibility);
+      window.removeEventListener("focus", visibility);
+      updatePresence({
+        cursor: undefined,
+        selection: undefined,
+        meta: { foreground: false, activity: "viewing" },
+      });
+    };
+  }, [binding, publish, updatePresence]);
   return null;
 };
 
@@ -261,7 +324,23 @@ export type DocumentPresenceProps = DocEditorProps &
   ProfileIdentity & {
     /** Presence WebSocket is only opened for shared/collaborative documents. */
     readonly presenceEnabled?: boolean;
+    readonly surfaceActive?: boolean;
   };
+
+const ThemedCollaborationBar: FC<ComponentProps<typeof CollaborationBar>> = (
+  props,
+) => {
+  const { presence } = usePresence();
+  return (
+    <CollaborationBar
+      {...props}
+      users={[...presence.values()].map((user) => ({
+        ...user,
+        color: documentPresenceThemeColor(user.userId),
+      }))}
+    />
+  );
+};
 
 /**
  * Keeps DocEditor mounted across private→shared transitions by always wrapping
@@ -271,11 +350,15 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
   avatarUrl,
   name,
   presenceEnabled = true,
+  surfaceActive = true,
   userId,
   onExternalBindingChange,
   onSelectionChange,
   ...editorProps
 }) => {
+  const flags = useRedesignFlags();
+  const preferences = useCollaborationPreferences();
+  const sessionId = useRef<string | null>(null);
   const supabase = useMemo(() => createClient(), []);
   const noopAdapter = useMemo(
     () =>
@@ -332,7 +415,10 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     };
     const configure = (token: string): void => {
       if (cancelled) return;
+      sessionId.current ??= crypto.randomUUID();
       const next = createWebSocketAdapter({
+        sessionId: sessionId.current,
+        sharedAttention: flags.attention,
         authToken: token,
         roomId: documentId,
         url: presenceUrl,
@@ -384,6 +470,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     };
   }, [
     avatarUrl,
+    flags.attention,
     editorProps.collabTarget.presenceUrl,
     editorProps.documentId,
     name,
@@ -430,7 +517,7 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
     <PresenceProvider adapter={adapter} statusSweepMs={5_000}>
       <div className="document-awareness flex min-h-full flex-col">
         {presenceEnabled ? (
-          <CollaborationBar
+          <ThemedCollaborationBar
             state={
               liveAdapter === null
                 ? error === null
@@ -444,19 +531,33 @@ export const DocumentPresence: FC<DocumentPresenceProps> = ({
           />
         ) : null}
         <PresenceSelectionPublisher
-          enabled={presenceLive}
+          enabled={presenceLive && surfaceActive && preferences.shareLocation}
+          binding={binding}
           selection={selection}
         />
-        <div className="relative min-h-0 flex-1" ref={setContainer}>
-          <DocEditor
-            {...editorProps}
-            onExternalBindingChange={handleBindingChange}
-            onSelectionChange={handleSelectionChange}
-          />
-          {presenceLive && cursorsVisible ? (
-            <RemotePresenceOverlay binding={binding} container={container} />
-          ) : null}
-        </div>
+        <SharedAttention
+          accountId={userId}
+          documentId={editorProps.documentId}
+          enabled={presenceLive && flags.attention}
+          binding={binding}
+          selection={selection}
+          surfaceActive={surfaceActive}
+        >
+          <div className="relative min-h-0 flex-1" ref={setContainer}>
+            <DocEditor
+              {...editorProps}
+              onExternalBindingChange={handleBindingChange}
+              onSelectionChange={handleSelectionChange}
+            />
+            {presenceLive &&
+            flags.presence &&
+            surfaceActive &&
+            cursorsVisible &&
+            !preferences.focusMode ? (
+              <RemotePresenceOverlay binding={binding} container={container} />
+            ) : null}
+          </div>
+        </SharedAttention>
       </div>
     </PresenceProvider>
   );

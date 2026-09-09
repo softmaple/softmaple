@@ -9,7 +9,7 @@ describe("deterministicPresenceColor", () => {
   });
 
   it("returns one of the fixed palette colors", () => {
-    const palette = ["#e11d48", "#0f766e", "#c2410c", "#7c3aed", "#0369a1"];
+    const palette = ["#175bb5", "#08796f", "#943b77", "#b63f38", "#7050b4"];
     for (const userId of ["a", "b", "c", "user-42", ""]) {
       expect(palette).toContain(deterministicPresenceColor(userId));
     }

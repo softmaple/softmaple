@@ -23,6 +23,7 @@ import {
   Radio,
   Share2,
   Trash2,
+  Users,
   WifiOff,
 } from "lucide-react";
 import {
@@ -32,8 +33,14 @@ import {
 } from "@/app/actions/documents/documents";
 import type { WorkspaceRole } from "@/lib/workspace-roles";
 import type { DocumentUiStatus } from "@/modules/docs/use-document-session";
+import type {
+  SaveStatus,
+  CollaborationStatus,
+} from "@/modules/docs/use-document-session";
 
 export type DocHeaderProps = {
+  saveStatus?: SaveStatus;
+  collaborationStatus?: CollaborationStatus;
   canDelete: boolean;
   canEdit: boolean;
   canShare: boolean;
@@ -54,10 +61,10 @@ const STATUS_COPY: Readonly<
   Record<DocumentUiStatus, { readonly label: string; readonly tone: string }>
 > = {
   connecting: { label: "Connecting", tone: "text-muted-foreground" },
-  syncing: { label: "Syncing", tone: "text-amber-600 dark:text-amber-400" },
-  saving: { label: "Saving", tone: "text-amber-600 dark:text-amber-400" },
+  syncing: { label: "Syncing", tone: "text-warning" },
+  saving: { label: "Saving", tone: "text-warning" },
   saved: { label: "Saved", tone: "text-success" },
-  offline: { label: "Offline", tone: "text-orange-600 dark:text-orange-400" },
+  offline: { label: "Offline", tone: "text-warning" },
   error: { label: "Error", tone: "text-destructive" },
 };
 
@@ -83,6 +90,8 @@ export const DocHeader: FC<DocHeaderProps> = ({
   role,
   setTitle,
   status,
+  saveStatus,
+  collaborationStatus,
   title,
   workspaceSlug,
 }) => {
@@ -90,9 +99,26 @@ export const DocHeader: FC<DocHeaderProps> = ({
   const [isPublic, setIsPublic] = useState(initialIsPublic);
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const lastCommittedTitle = useRef(title);
-  const statusCopy = STATUS_COPY[status];
+  const statusCopy =
+    saveStatus === undefined
+      ? STATUS_COPY[status]
+      : {
+          label:
+            saveStatus === "error"
+              ? "Save failed"
+              : saveStatus === "saving"
+                ? "Saving…"
+                : saveStatus === "saved"
+                  ? "Saved"
+                  : "Loading…",
+          tone:
+            saveStatus === "error"
+              ? "text-destructive"
+              : "text-muted-foreground",
+        };
 
   useEffect(() => {
     setIsPublic(initialIsPublic);
@@ -153,18 +179,23 @@ export const DocHeader: FC<DocHeaderProps> = ({
       onSharingChange(result.data.enabled);
       setMessage(
         result.data.enabled
-          ? "Public collaboration link enabled."
+          ? "Public read-only link enabled. Workspace members can now collaborate live."
           : "Public link disabled.",
       );
     });
   };
 
   const copyShareLink = async (): Promise<void> => {
-    await navigator.clipboard.writeText(
-      `${window.location.origin}/share/${docSlug}`,
-    );
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1_500);
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/share/${docSlug}`,
+      );
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1_500);
+    } catch {
+      setMessage("Copy is unavailable. Select and copy the public link below.");
+      setSharingOpen(true);
+    }
   };
 
   const removeDocument = (): void => {
@@ -227,6 +258,13 @@ export const DocHeader: FC<DocHeaderProps> = ({
           )}
           {statusCopy.label}
         </div>
+        {collaborationStatus === "reconnecting" ||
+        collaborationStatus === "offline" ||
+        collaborationStatus === "error" ? (
+          <span className="text-xs text-warning" role="status">
+            Live sync interrupted
+          </span>
+        ) : null}
         <div className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto pb-0.5">
           <Button
             aria-label="Download Markdown"
@@ -243,13 +281,30 @@ export const DocHeader: FC<DocHeaderProps> = ({
             <Download className="size-4" />
             <span className="hidden sm:inline">Markdown</span>
           </Button>
-          <Button onClick={exportLatex} size="sm" variant="ghost">
+          <Button
+            aria-label="Download LaTeX"
+            onClick={exportLatex}
+            size="sm"
+            variant="ghost"
+          >
             <FileCode2 className="size-4" />
             <span className="hidden sm:inline">LaTeX</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={sharingOpen}
+            aria-label="Access"
+            onClick={() => setSharingOpen(!sharingOpen)}
+          >
+            <Users className="size-4 sm:hidden" />
+            <span className="hidden sm:inline">Access</span>
           </Button>
           {canShare ? (
             <>
               <Button
+                aria-label={isPublic ? "Disable link" : "Share"}
+                title={isPublic ? "Disable public link" : "Enable public link"}
                 disabled={
                   isPending || (!isPublic && flushDocument === undefined)
                 }
@@ -262,7 +317,9 @@ export const DocHeader: FC<DocHeaderProps> = ({
                 ) : (
                   <Share2 className="size-4" />
                 )}
-                {isPublic ? "Disable link" : "Share"}
+                <span className="hidden sm:inline">
+                  {isPublic ? "Disable link" : "Share"}
+                </span>
               </Button>
               {isPublic ? (
                 <Button
@@ -292,9 +349,80 @@ export const DocHeader: FC<DocHeaderProps> = ({
           ) : null}
         </div>
       </div>
+      {sharingOpen ? (
+        <section
+          className="mt-3 rounded-xl border bg-surface p-4 text-sm"
+          aria-label="Document access"
+        >
+          <h2 className="font-medium">Workspace access</h2>
+          <p className="mt-1 text-muted-foreground">
+            Owners and editors can edit. Viewers can read and export.
+          </p>
+          <a
+            className="mt-2 inline-flex text-link underline"
+            href={`/workspace/${workspaceSlug}/settings?tab=members`}
+          >
+            View workspace members
+          </a>
+          <h2 className="mt-4 font-medium">
+            Public read-only link · {isPublic ? "enabled" : "disabled"}
+          </h2>
+          <p className="mt-1 text-muted-foreground">
+            Anyone with the link can read this document. Enabling it also starts
+            live collaboration for workspace members.
+          </p>
+          {isPublic ? (
+            <Input
+              className="mt-3"
+              aria-label="Public read-only URL"
+              readOnly
+              value={
+                typeof window === "undefined"
+                  ? `/share/${docSlug}`
+                  : `${window.location.origin}/share/${docSlug}`
+              }
+              onFocus={(event) => event.target.select()}
+            />
+          ) : null}
+        </section>
+      ) : null}
       {message === null ? null : (
         <p className="mt-1 text-xs text-muted-foreground">{message}</p>
       )}
+      {saveStatus === "error" ? (
+        <div
+          className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-destructive p-3 text-sm"
+          role="alert"
+        >
+          <span>Your latest changes could not be saved.</span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void flushDocument?.().catch(() =>
+                setMessage(
+                  "Saving is still unavailable. Download Markdown to keep a copy.",
+                ),
+              );
+            }}
+          >
+            Retry save
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              downloadText(
+                markdown,
+                `${docSlug}.md`,
+                "text/markdown;charset=utf-8",
+              )
+            }
+          >
+            Download a copy
+          </Button>
+        </div>
+      ) : null}
     </header>
   );
 };

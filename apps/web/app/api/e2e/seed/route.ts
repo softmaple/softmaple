@@ -3,10 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Database } from "@/types/model";
+import { allowsLocalSeed } from "@/lib/e2e-seed-config";
 
 const requestSchema = z.object({
   action: z.union([z.literal("seed"), z.literal("cleanup")]),
   runId: z.string().regex(/^[a-z0-9-]{8,48}$/),
+  documentCount: z.number().int().min(1).max(60).optional(),
 });
 
 const projectRefFromUrl = (value: string): string | null => {
@@ -18,20 +20,23 @@ const projectRefFromUrl = (value: string): string | null => {
   }
 };
 
-const configuration = () => {
+const configuration = (requestUrl: string) => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const expectedProjectRef = process.env.E2E_SUPABASE_PROJECT_REF;
   const seedSecret = process.env.E2E_SEED_SECRET;
   const actualProjectRef = url === undefined ? null : projectRefFromUrl(url);
+  const local = allowsLocalSeed(process.env, requestUrl);
+  const remote =
+    process.env.E2E_ALLOW_REMOTE_SEED === "true" &&
+    expectedProjectRef !== undefined &&
+    actualProjectRef === expectedProjectRef &&
+    actualProjectRef !== process.env.SUPABASE_PRODUCTION_PROJECT_REF;
   if (
-    process.env.E2E_ALLOW_REMOTE_SEED !== "true" ||
+    (!local && !remote) ||
     url === undefined ||
     serviceRoleKey === undefined ||
-    seedSecret === undefined ||
-    expectedProjectRef === undefined ||
-    actualProjectRef !== expectedProjectRef ||
-    actualProjectRef === process.env.SUPABASE_PRODUCTION_PROJECT_REF
+    seedSecret === undefined
   ) {
     throw new Error("E2E seed configuration is not safely isolated");
   }
@@ -47,7 +52,7 @@ const runEmails = (runId: string) => ({
 export async function POST(request: Request) {
   let config;
   try {
-    config = configuration();
+    config = configuration(request.url);
   } catch {
     return new NextResponse("Not found", { status: 404 });
   }
@@ -58,6 +63,15 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Invalid seed request" },
+      { status: 400 },
+    );
+  }
+  if (
+    (parsed.data.documentCount ?? 1) > 1 &&
+    !allowsLocalSeed(process.env, request.url)
+  ) {
+    return NextResponse.json(
+      { error: "Extended fixtures require local seeding" },
       { status: 400 },
     );
   }
@@ -83,6 +97,19 @@ export async function POST(request: Request) {
       if (result.error !== null) {
         return NextResponse.json({ error: "Cleanup failed" }, { status: 500 });
       }
+    }
+    // Auth deletion may leave profile rows in the existing schema. Remove only
+    // this explicitly named local fixture; remote cleanup keeps its old policy.
+    if (allowsLocalSeed(process.env, request.url)) {
+      const profiles = await admin
+        .from("users")
+        .delete()
+        .in("email", [...exactEmails]);
+      if (profiles.error !== null)
+        return NextResponse.json(
+          { error: "Local profile cleanup failed" },
+          { status: 500 },
+        );
     }
     return NextResponse.json({ deletedUsers: targets.length });
   }
@@ -194,6 +221,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const additionalCount = (parsed.data.documentCount ?? 1) - 1;
+  if (additionalCount > 0) {
+    const additional = await admin.from("documents").insert(
+      Array.from({ length: additionalCount }, (_, index) => ({
+        author_id: owner.data.user.id,
+        workspace_id: workspace.data.id,
+        slug: `fixture-${index}-${suffix}`,
+        title: `Fixture ${String(index).padStart(2, "0")}`,
+      })),
+    );
+    if (additional.error !== null)
+      return NextResponse.json(
+        { error: "Extended fixture creation failed" },
+        { status: 500 },
+      );
+  }
   return NextResponse.json({
     document: document.data,
     editor: { email: emails.editor, password },

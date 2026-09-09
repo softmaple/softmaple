@@ -3,6 +3,10 @@ export {
   type ActivityIndicatorProps,
 } from "./activity-indicator";
 export {
+  AttentionInvitation,
+  type AttentionInvitationProps,
+} from "./attention-invitation";
+export {
   BlockActivityIndicator,
   type BlockActivityIndicatorProps,
 } from "./block-activity-indicator";

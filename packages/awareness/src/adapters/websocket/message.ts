@@ -177,11 +177,23 @@ const processPresenceSync = (
   for (const user of payload.users) {
     newPresence.set(user.connectionId, user);
   }
-  if (state.self !== null) {
-    newPresence.set(state.self.connectionId, state.self);
-  }
+  const serverSelf =
+    state.self === null ? undefined : newPresence.get(state.self.connectionId);
+  const self =
+    state.self === null
+      ? null
+      : {
+          ...state.self,
+          ...(serverSelf?.sessionId === undefined
+            ? {}
+            : { sessionId: serverSelf.sessionId }),
+          ...(serverSelf?.collaboration === undefined
+            ? {}
+            : { collaboration: serverSelf.collaboration }),
+        };
+  if (self !== null) newPresence.set(self.connectionId, self);
   return {
-    state: updateState(state, { presence: newPresence }),
+    state: updateState(state, { presence: newPresence, self }),
     shouldNotifyPresence: true,
     syncCompleted,
   };

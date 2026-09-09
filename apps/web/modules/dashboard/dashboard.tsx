@@ -43,12 +43,13 @@ export const Dashboard = ({
     <main className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-14">
       <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">Your writing studio</p>
+          <p className="text-sm text-muted-foreground">Your shared spaces</p>
           <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight sm:text-5xl">
-            Room for your next idea.
+            Pick up the thread.
           </h1>
           <p className="mt-4 text-muted-foreground">
-            Pick up a shared project, or give a new thought a home.
+            Choose a workspace and return to the people and ideas you’re working
+            with.
           </p>
         </div>
         <Button onClick={() => setShowCreateDialog(true)}>
@@ -111,17 +112,17 @@ export const Dashboard = ({
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {filteredWorkspaces.map((workspace) => (
               <Link
-                className="group flex min-w-0 flex-col rounded-2xl border bg-card p-6 transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+                className="group flex min-w-0 flex-col rounded-xl border bg-card p-6 transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
                 href={`/workspace/${workspace.slug}`}
                 key={workspace.id}
               >
                 <div className="flex items-center justify-between">
-                  <span className="grid size-12 place-items-center rounded-xl bg-secondary font-display text-xl font-semibold text-primary">
+                  <span className="grid size-12 place-items-center rounded-xl bg-secondary text-xl font-semibold text-emphasis">
                     {workspace.title.slice(0, 1).toUpperCase()}
                   </span>
-                  <ArrowUpRight className="size-5 text-muted-foreground transition-colors group-hover:text-primary" />
+                  <ArrowUpRight className="size-5 text-muted-foreground transition-colors group-hover:text-emphasis" />
                 </div>
-                <h3 className="mt-7 truncate font-display text-xl font-semibold tracking-tight">
+                <h3 className="mt-7 truncate text-xl font-semibold tracking-tight">
                   {workspace.title}
                 </h3>
                 <p className="mt-2 line-clamp-2 min-h-12 text-sm leading-6 text-muted-foreground">

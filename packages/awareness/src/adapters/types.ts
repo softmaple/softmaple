@@ -90,6 +90,12 @@ export type Unsubscribe = () => void;
  * Implementations: WebSocketAdapter, BroadcastChannelAdapter, SupabaseAdapter
  */
 export interface PresenceAdapter {
+  /** Optional negotiated attention channel. Unsupported adapters retain basic presence. */
+  supportsAttention?(): boolean;
+  sendAttention?(
+    action: import("../protocol/attention").AttentionAction,
+  ): Promise<import("../protocol/attention").AttentionResult>;
+  getServerTime?(): number;
   /**
    * Connect to the presence channel
    * @returns Promise that resolves when connected

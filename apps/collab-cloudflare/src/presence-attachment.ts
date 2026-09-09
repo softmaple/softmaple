@@ -31,6 +31,7 @@ export interface AwaitingAuthPresenceAttachment
 
 export interface AuthenticatedPresenceAttachment
   extends PresenceWebSocketAttachmentBase {
+  readonly protocolContext?: unknown;
   readonly authorizationExpiresAt: number;
   readonly connectionId: string;
   readonly credential: CollabCredential;
@@ -133,6 +134,9 @@ export const parsePresenceWebSocketAttachment = (
   if (credential === null || identity === null) return null;
   return {
     ...base,
+    ...(value.protocolContext === undefined
+      ? {}
+      : { protocolContext: value.protocolContext }),
     authorizationExpiresAt: value.authorizationExpiresAt,
     connectionId: value.connectionId,
     credential,
@@ -154,6 +158,9 @@ export const attachmentAfterSnapshot = (
   attachment: PresenceWebSocketAttachment,
   snapshot: PresencePeerSnapshot,
 ): AuthenticatedPresenceAttachment => ({
+  ...(snapshot.protocolContext === undefined
+    ? {}
+    : { protocolContext: snapshot.protocolContext }),
   authorizationExpiresAt: snapshot.authorizationExpiresAt,
   connectionId: snapshot.connectionId,
   credential: snapshot.credential,
@@ -170,6 +177,9 @@ export const attachmentAfterSnapshot = (
 export const resumeStateFromAttachment = (
   attachment: AuthenticatedPresenceAttachment,
 ): PresenceRoomResumeState => ({
+  ...(attachment.protocolContext === undefined
+    ? {}
+    : { protocolContext: attachment.protocolContext }),
   connectionId: attachment.connectionId,
   credential: attachment.credential,
   heartbeatExpiresAt: attachment.heartbeatExpiresAt,

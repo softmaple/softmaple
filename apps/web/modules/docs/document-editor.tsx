@@ -1,6 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
+import { ModeToggle } from "@/components/mode-toggle";
+import { SoftmapleWordmark } from "@/components/BrandMark";
 import { type FC, useCallback, useDeferredValue, useState } from "react";
 import { Code, Edit3, Eye, FileText } from "lucide-react";
 import {
@@ -67,6 +70,7 @@ const EditorLoading = () => (
 
 export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
   const [title, setTitle] = useState(props.title);
+  const [activeView, setActiveView] = useState("editor");
   const [markdown, setMarkdown] = useState("");
   const [isPublic, setIsPublic] = useState(
     props.publicView === true ? true : props.isPublic,
@@ -88,14 +92,20 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
     return (
       <main className="min-h-dvh bg-background text-foreground">
         <header className="border-b px-5 py-5 sm:px-8">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+          <div className="mb-7 flex items-center justify-between">
+            <Link href="/">
+              <SoftmapleWordmark className="text-xl" />
+            </Link>
+            <ModeToggle />
+          </div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
             Shared read-only document
           </p>
           <h1 className="mt-2 font-display text-2xl font-semibold sm:text-3xl">
             {props.title}
           </h1>
         </header>
-        <div className="mx-auto min-h-[calc(100dvh-7rem)] max-w-5xl overflow-hidden">
+        <div className="document-surface mx-auto min-h-[calc(100dvh-7rem)] max-w-5xl overflow-hidden">
           <DocEditor
             collabTarget={props.collabTarget}
             documentId={props.documentId}
@@ -121,7 +131,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
   const permission: DocumentPermission | null = permissionFromRole(props.role);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <DocHeader
         canDelete={canDelete}
         canEdit={canEdit}
@@ -135,35 +145,39 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
         role={props.role}
         setTitle={setTitle}
         status={session?.status ?? "connecting"}
+        saveStatus={session?.saveStatus}
+        collaborationStatus={session?.collaborationStatus}
         title={title}
         workspaceSlug={props.workspaceSlug}
       />
       <Tabs
         className="flex min-h-0 flex-1 flex-col"
-        defaultValue="editor"
-        onValueChange={(value) =>
-          setOpenedViews((current) => new Set([...current, value]))
-        }
+        value={activeView}
+        onValueChange={(value) => {
+          setActiveView(value);
+          setOpenedViews((current) => new Set([...current, value]));
+        }}
       >
         <div className="border-b px-3 sm:px-5">
-          <TabsList className="h-10 max-w-full justify-start overflow-x-auto rounded-none bg-transparent p-0">
+          <TabsList className="h-11 max-w-full justify-start overflow-x-auto rounded-none bg-transparent p-0 sm:h-10">
             <TabsTrigger value="editor">
-              <Edit3 className="size-3.5" /> Editor
+              <Edit3 className="hidden size-3.5 sm:block" /> Editor
             </TabsTrigger>
             <TabsTrigger value="preview">
-              <Eye className="size-3.5" /> Preview
+              <Eye className="hidden size-3.5 sm:block" /> Preview
             </TabsTrigger>
             <TabsTrigger value="markdown">
-              <FileText className="size-3.5" /> Markdown
+              <FileText className="hidden size-3.5 sm:block" /> Markdown
             </TabsTrigger>
             <TabsTrigger value="latex">
-              <Code className="size-3.5" /> LaTeX
+              <Code className="hidden size-3.5 sm:block" /> LaTeX
             </TabsTrigger>
           </TabsList>
         </div>
         <TabsContent
-          className="m-0 min-h-0 flex-1 overflow-auto"
+          className="document-surface m-0 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
           value="editor"
+          forceMount
         >
           <DocumentPresence
             avatarUrl={props.avatarUrl}
@@ -175,6 +189,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
             onMarkdownChange={handleMarkdownChange}
             permission={permission}
             presenceEnabled={isPublic}
+            surfaceActive={activeView === "editor"}
             userId={props.currentUserId}
           />
         </TabsContent>
@@ -204,6 +219,6 @@ export const DocumentEditor: FC<DocumentEditorProps> = (props) => {
           )}
         </TabsContent>
       </Tabs>
-    </div>
+    </main>
   );
 };

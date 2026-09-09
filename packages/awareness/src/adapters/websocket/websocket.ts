@@ -13,6 +13,12 @@ import {
   PRESENCE_PROTOCOL_VERSION,
 } from "../../core/protocol";
 import {
+  type AttentionAction,
+  type AttentionResult,
+  normalizeCollaborationState,
+} from "../../protocol/attention";
+import { isRecord } from "../../protocol/envelope";
+import {
   PRESENCE_EVENT,
   type PresenceEvent,
   type PresenceEventPayload,
@@ -163,6 +169,29 @@ export const createWebSocketAdapter = (
     config.requireAuthAck ?? config.authToken !== undefined;
 
   const internal = createInternalState(reconnectConfig);
+  let attentionSupported = false;
+  let serverOffset = 0;
+  const pendingAttention = new Map<
+    string,
+    {
+      readonly finish: (result: AttentionResult) => void;
+      readonly timer: ReturnType<typeof setTimeout>;
+      readonly retry: ReturnType<typeof setTimeout>;
+    }
+  >();
+  const clearAttention = () => {
+    attentionSupported = false;
+    for (const [id, pending] of pendingAttention) {
+      clearTimeout(pending.timer);
+      clearTimeout(pending.retry);
+      pending.finish({
+        id,
+        ok: false,
+        message: "Connection interrupted. The action could not be confirmed.",
+      });
+    }
+    pendingAttention.clear();
+  };
 
   const setState = (
     updates: Parameters<typeof updateState>[1],
@@ -233,6 +262,9 @@ export const createWebSocketAdapter = (
         capabilities: PRESENCE_CAPABILITIES,
         connectionId,
         userId: config.userInfo.userId,
+        ...(config.sharedAttention && config.sessionId
+          ? { extensions: { sharedAttention: 1, sessionId: config.sessionId } }
+          : {}),
       });
       return;
     }
@@ -243,6 +275,67 @@ export const createWebSocketAdapter = (
   const handleMessage = (event: MessageEvent): void => {
     const message = parseMessage(event.data as string);
     if (message === null) return;
+    if (message.roomId !== config.roomId) return;
+    if (
+      message.type === WS_MESSAGE.AUTH_OK &&
+      message.senderId === "server" &&
+      internal.state.connectionState === "authenticating"
+    ) {
+      attentionSupported =
+        config.sharedAttention === true &&
+        isRecord(message.payload) &&
+        isRecord(message.payload.extensions) &&
+        message.payload.extensions.sharedAttention === 1;
+      serverOffset = message.timestamp - Date.now();
+    }
+    if (message.type === WS_MESSAGE.ATTENTION_STATE) {
+      if (!attentionSupported || !isRecord(message.payload)) return;
+      const payload = message.payload;
+      const incoming = isRecord(payload.member) ? payload.member : null;
+      if (
+        incoming !== null &&
+        typeof incoming.connectionId === "string" &&
+        incoming.connectionId === message.senderId
+      ) {
+        const current = internal.state.presence.get(incoming.connectionId);
+        const collaboration = normalizeCollaborationState(
+          incoming.collaboration,
+        );
+        if (
+          current !== undefined &&
+          collaboration !== null &&
+          collaboration.revision > (current.collaboration?.revision ?? -1)
+        ) {
+          const next: PresenceUser = { ...current, collaboration };
+          setState(
+            {
+              presence: setPresenceUser(internal.state.presence, next),
+              ...(next.connectionId === connectionId ? { self: next } : {}),
+            },
+            true,
+          );
+        }
+      }
+      if (
+        typeof payload.id === "string" &&
+        (message.senderId === connectionId || message.senderId === "server")
+      ) {
+        const pending = pendingAttention.get(payload.id);
+        if (pending !== undefined) {
+          clearTimeout(pending.timer);
+          clearTimeout(pending.retry);
+          pendingAttention.delete(payload.id);
+          pending.finish({
+            id: payload.id,
+            ok: payload.ok === true,
+            ...(typeof payload.message === "string"
+              ? { message: payload.message }
+              : {}),
+          });
+        }
+      }
+      return;
+    }
 
     const result = processMessage(internal.state, message, connectionId);
 
@@ -294,6 +387,7 @@ export const createWebSocketAdapter = (
   };
 
   const handleClose = (): void => {
+    clearAttention();
     stopHeartbeat(internal);
     clearConnectionTimeout(internal);
     internal.handshakeComplete = false;
@@ -378,6 +472,7 @@ export const createWebSocketAdapter = (
       }),
 
     disconnect: async (): Promise<void> => {
+      clearAttention();
       cancelReconnect(internal);
 
       if (
@@ -408,6 +503,46 @@ export const createWebSocketAdapter = (
 
     getConnectionState: (): AdapterConnectionState =>
       internal.state.connectionState,
+
+    supportsAttention: () =>
+      attentionSupported && internal.state.connectionState === "connected",
+    getServerTime: () => Date.now() + serverOffset,
+    sendAttention: (action: AttentionAction): Promise<AttentionResult> => {
+      const id = crypto.randomUUID();
+      if (
+        !attentionSupported ||
+        internal.state.connectionState !== "connected" ||
+        pendingAttention.size >= 4
+      ) {
+        return Promise.resolve({
+          id,
+          ok: false,
+          message:
+            "Shared attention is unavailable. Check your connection and try again.",
+        });
+      }
+      return new Promise((finish) => {
+        const command = { id, action };
+        const timer = setTimeout(() => {
+          const pending = pendingAttention.get(id);
+          if (pending === undefined) return;
+          clearTimeout(pending.retry);
+          pendingAttention.delete(id);
+          finish({
+            id,
+            ok: false,
+            message:
+              "Delivery could not be confirmed. Try again when connected.",
+          });
+        }, 4_000);
+        const retry = setTimeout(() => {
+          if (internal.state.connectionState === "connected")
+            sendMessage(WS_MESSAGE.ATTENTION_COMMAND, command);
+        }, 1_000);
+        pendingAttention.set(id, { finish, timer, retry });
+        sendMessage(WS_MESSAGE.ATTENTION_COMMAND, command);
+      });
+    },
 
     updatePresence: (updates: PresenceUserPatch): void => {
       if (internal.state.self === null) return;

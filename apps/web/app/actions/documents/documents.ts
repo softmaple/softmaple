@@ -84,28 +84,63 @@ export const cachedGetDocumentBySlug = cache(getDocumentBySlug);
 export const listWorkspaceDocuments = async (
   workspaceId: number,
   limit = 25,
+  options: { readonly offset?: number; readonly title?: string } = {},
 ): Promise<ActionResult<DocumentRow[]>> => {
   const parsed = z
     .object({
       limit: z.number().int().min(1).max(100),
+      offset: z.number().int().min(0).max(100_000),
+      title: z.string().trim().max(160),
       workspaceId: z.number().int().positive(),
     })
-    .safeParse({ limit, workspaceId });
+    .safeParse({
+      limit,
+      workspaceId,
+      offset: options.offset ?? 0,
+      title: options.title ?? "",
+    });
   if (!parsed.success) return fromZodError(parsed.error);
 
   const context = await getAuthenticatedContext();
   if (!context.ok) return context;
-  const { data, error } = await context.data.supabase
+  let query = context.data.supabase
     .from("documents")
     .select("*")
-    .eq("workspace_id", parsed.data.workspaceId)
-    .order("updated_at", { ascending: false, nullsFirst: false })
+    .eq("workspace_id", parsed.data.workspaceId);
+  if (parsed.data.title.length > 0)
+    query = query.ilike(
+      "title",
+      `%${parsed.data.title.replace(/[\\%_]/g, "\\$&")}%`,
+    );
+  const { data, error } = await query
+    .order("created_at", { ascending: false, nullsFirst: false })
     .order("id", { ascending: false })
-    .limit(parsed.data.limit);
+    .range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1);
   if (error !== null) {
     return fromDatabaseError(error, "Could not load workspace documents.");
   }
   return actionSuccess(data);
+};
+
+/** Title-only search over authorized workspace documents; never filters a partial cache. */
+export const searchWorkspaceDocuments = async (
+  workspaceSlug: string,
+  options: { readonly offset?: number; readonly title?: string } = {},
+): Promise<ActionResult<DocumentRow[]>> => {
+  const parsed = z.string().trim().min(1).max(200).safeParse(workspaceSlug);
+  if (!parsed.success) return fromZodError(parsed.error);
+  const context = await getAuthenticatedContext();
+  if (!context.ok) return context;
+  const { data, error } = await context.data.supabase
+    .from("workspaces")
+    .select("id")
+    .eq("slug", parsed.data)
+    .maybeSingle();
+  if (error !== null)
+    return fromDatabaseError(error, "Could not search this workspace.");
+  if (data === null)
+    return actionFailure(ACTION_ERROR_CODE.NotFound, "Workspace not found.");
+  return listWorkspaceDocuments(data.id, 25, options);
 };
 
 export const countWorkspaceDocuments = async (

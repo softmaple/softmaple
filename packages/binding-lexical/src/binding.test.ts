@@ -235,6 +235,30 @@ describe("createLexicalBinding", () => {
     secondRoot.remove();
   });
 
+  it("projects local replica changes without producing writes or enabling editing", () => {
+    const replica = createBlockReplica("projection");
+    const sourceEditor = createTestEditor();
+    const source = createLexicalBinding({ editor: sourceEditor, replica });
+    const projectionEditor = createTestEditor();
+    const projection = createLexicalBinding({
+      editor: projectionEditor,
+      replica,
+      mode: "read-only",
+    });
+    const changes = vi.fn();
+    const unsubscribe = replica.subscribe(changes);
+    replaceFirstBlock(sourceEditor, "Shared passage");
+    expect(getProjectedText(projectionEditor)).toBe("Shared passage");
+    expect(projectionEditor.isEditable()).toBe(false);
+    expect(changes).toHaveBeenCalledTimes(1);
+    replaceFirstBlock(projectionEditor, "Attempted projection write");
+    expect(replica.getDocument().blocks[0]?.text).toBe("Shared passage");
+    expect(changes).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    projection.destroy();
+    source.destroy();
+  });
+
   it("restores read-only state only when the binding enabled editing", () => {
     const readOnlyEditor = createTestEditor();
     readOnlyEditor.setEditable(false);

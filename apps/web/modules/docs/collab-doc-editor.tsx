@@ -136,6 +136,7 @@ export const CollabDocEditor: FC<CollabDocEditorProps> = ({
   return (
     <div className="relative h-full">
       <CoreEditor
+        layoutClassName="mx-0 my-0 max-w-none"
         activeEditor={activeEditor}
         setActiveEditor={setActiveEditor}
         historyMode="disabled"

@@ -666,7 +666,7 @@ describe("WebSocket adapter extra branches", () => {
 
   const finishHandshake = (
     socket: FakeWebSocket | undefined,
-    roomId = "room-x",
+    roomId = wsConfig.roomId,
     opts: { authOk?: boolean; skipOpen?: boolean } = {},
   ): void => {
     if (!socket) return;
@@ -835,7 +835,10 @@ describe("WebSocket adapter extra branches", () => {
       (m) => JSON.parse(m).type as string,
     );
     expect(types?.[0]).toBe("auth");
-    finishHandshake(fakeSockets[0], "room-x", { authOk: true, skipOpen: true });
+    finishHandshake(fakeSockets[0], wsConfig.roomId, {
+      authOk: true,
+      skipOpen: true,
+    });
     await connectPromise;
   });
 

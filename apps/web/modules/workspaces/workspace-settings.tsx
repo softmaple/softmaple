@@ -1,6 +1,6 @@
 "use client";
 
-import { type FC, useState, useTransition } from "react";
+import { type FC, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Crown, LoaderCircle, Plus, Trash2, UserMinus } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
@@ -50,6 +50,8 @@ export const WorkspaceSettings: FC<{
   readonly workspace: Workspace;
 }> = ({ initialTab, members, role, workspace }) => {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  useEffect(() => setActiveTab(initialTab), [initialTab]);
   const isOwner = role === WORKSPACE_ROLE.Owner;
   const [title, setTitle] = useState(workspace.title);
   const [description, setDescription] = useState(workspace.description ?? "");
@@ -78,7 +80,7 @@ export const WorkspaceSettings: FC<{
   return (
     <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-4xl">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
           Workspace control room
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold">Settings</h1>
@@ -96,7 +98,7 @@ export const WorkspaceSettings: FC<{
           </p>
         )}
 
-        <Tabs className="mt-8" defaultValue={initialTab}>
+        <Tabs className="mt-8" value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="max-w-full justify-start overflow-x-auto">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="members">

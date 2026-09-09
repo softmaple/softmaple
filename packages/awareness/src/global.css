@@ -1001,3 +1001,51 @@
     padding: 12px;
   }
 }
+
+.awareness-attention-invitation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border, #777);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--attention, Canvas);
+  color: var(--foreground, CanvasText);
+  font-family: inherit;
+  font-size: 14px;
+}
+.awareness-attention-invitation output {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+}
+.awareness-attention-invitation output span {
+  color: var(--muted-foreground, CanvasText);
+}
+.awareness-attention-invitation > div {
+  display: flex;
+  gap: 8px;
+}
+.awareness-attention-invitation button {
+  min-height: 44px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.awareness-attention-invitation button:first-child {
+  background: var(--primary, ButtonFace);
+  color: var(--primary-foreground, ButtonText);
+  border-color: transparent;
+}
+.awareness-attention-invitation button:focus-visible {
+  outline: 2px solid var(--ring, Highlight);
+  outline-offset: 3px;
+}
+.awareness-attention-invitation button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

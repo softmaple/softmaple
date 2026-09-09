@@ -27,6 +27,9 @@ export {
  * WebSocket adapter configuration
  */
 export interface WebSocketAdapterConfig extends AdapterConfig {
+  /** Opt-in extension. Keep stable when refreshing credentials in the same tab. */
+  readonly sessionId?: string;
+  readonly sharedAttention?: boolean;
   /** WebSocket server URL */
   readonly url: string;
   /** Optional authentication token */

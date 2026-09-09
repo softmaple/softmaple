@@ -5,6 +5,8 @@ import "@softmaple/ui/globals.css";
 import "@softmaple/awareness/styles.css";
 import "./design.css";
 import { Providers } from "@/components/providers";
+import { RedesignProvider } from "@/components/redesign-provider";
+import { getRedesignFlags } from "@/lib/redesign-flags";
 import { OPENGRAPH_IMAGE_URL, SITE_CONFIG } from "@softmaple/config";
 
 const fontBody = DM_Sans({
@@ -56,8 +58,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const flags = getRedesignFlags();
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      data-redesign={String(flags.shell)}
+    >
       <body
         className={`${fontBody.variable} ${fontDisplay.variable} ${fontUtility.variable} font-sans antialiased`}
       >
@@ -68,7 +75,7 @@ export default function RootLayout({
           disableTransitionOnChange
           enableColorScheme
         >
-          {children}
+          <RedesignProvider flags={flags}>{children}</RedesignProvider>
         </Providers>
       </body>
     </html>

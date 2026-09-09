@@ -54,6 +54,10 @@ export {
   usePresenceLayerOffset,
 } from "./components";
 export {
+  AttentionInvitation,
+  type AttentionInvitationProps,
+} from "./components/attention-invitation";
+export {
   createPresenceStore,
   createSelfSession,
   derivePresenceStatus,

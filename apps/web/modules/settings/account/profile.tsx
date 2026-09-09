@@ -19,6 +19,7 @@ import { Input } from "@softmaple/ui/components/input";
 import { Label } from "@softmaple/ui/components/label";
 import type { UsersType } from "@/types/model";
 import { ModeToggle } from "@/components/mode-toggle";
+import { CollaborationPreferencesPanel } from "@/components/collaboration-preferences";
 import { removeAvatar, updateProfile, uploadAvatar } from "@/app/actions/users";
 
 type ProfileRow = UsersType["Row"];
@@ -68,7 +69,7 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
           <ModeToggle />
         </div>
         <div className="mt-9">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
             Personal settings
           </p>
           <h1 className="mt-2 font-display text-3xl font-semibold">Account</h1>
@@ -86,7 +87,8 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
           </p>
         )}
 
-        <section className="mt-7 border bg-card p-5 sm:p-7">
+        <CollaborationPreferencesPanel />
+        <section className="mt-7 rounded-xl border bg-card p-5 sm:p-7">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
             <Avatar className="size-20 border">
               <AvatarImage

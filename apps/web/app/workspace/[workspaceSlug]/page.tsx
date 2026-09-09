@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, Plus, Settings2, Users } from "lucide-react";
+import { Plus, Settings2, Users } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import { Badge } from "@softmaple/ui/components/badge";
 import {
@@ -19,6 +19,9 @@ import {
 } from "@/app/actions/workspaceMembers";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
+
+import { getAuthenticatedContext } from "@/lib/actions/authenticated";
+import { WorkspaceField } from "@/modules/workspaces/workspace-field";
 
 type Props = { params: Promise<{ workspaceSlug: string }> };
 
@@ -57,7 +60,7 @@ export default async function WorkspacePage({ params }: Props) {
   );
   const [documentsResult, documentCountResult, membersResult, roleResult] =
     await Promise.all([
-      listWorkspaceDocuments(workspace.id, 5),
+      listWorkspaceDocuments(workspace.id, 25),
       countWorkspaceDocuments(workspace.id),
       listWorkspaceMembers(workspace.id),
       getWorkspaceMemberByUserId(workspace.id),
@@ -83,16 +86,17 @@ export default async function WorkspacePage({ params }: Props) {
     membership.role === WORKSPACE_ROLE.Owner ||
     membership.role === WORKSPACE_ROLE.Editor;
   const isOwner = membership.role === WORKSPACE_ROLE.Owner;
+  const identity = await getAuthenticatedContext();
 
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
       <header className="border-b bg-card/50 px-4 py-8 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
-              Workspace / {membership.role.toLowerCase()}
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emphasis">
+              Workspace · {documentCount} documents
             </p>
-            <h1 className="font-display mt-2 truncate text-3xl font-semibold">
+            <h1 className="mt-2 break-words text-3xl font-semibold tracking-tight sm:text-4xl">
               {workspace.title}
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
@@ -121,65 +125,20 @@ export default async function WorkspacePage({ params }: Props) {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:px-8">
-        <section className="min-w-0">
-          <div className="mb-4 flex items-end justify-between border-b pb-3">
-            <div>
-              <h2 className="text-lg font-semibold">Recent documents</h2>
-              <p className="text-sm text-muted-foreground">
-                {documentCount} total
-              </p>
-            </div>
-          </div>
-          {documents.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-10 text-center">
-              <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
-              <h3 className="mt-4 font-medium">No documents yet</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Give your next idea a page of its own.
-              </p>
-              {canEdit ? (
-                <Button asChild className="mt-5" size="sm">
-                  <Link href={`/workspace/${workspaceSlug}/doc/new`}>
-                    Create document
-                  </Link>
-                </Button>
-              ) : null}
-            </div>
-          ) : (
-            <div className="divide-y rounded-xl border bg-card">
-              {documents.map((document) => (
-                <Link
-                  className="flex min-w-0 items-center gap-4 p-4 transition-colors hover:bg-accent"
-                  href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
-                  key={document.id}
-                >
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border bg-background text-primary">
-                    <FileText className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-medium">{document.title}</h3>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {document.updated_at === null
-                        ? "Created just now"
-                        : `Edited ${new Date(document.updated_at).toLocaleString()}`}
-                    </p>
-                  </div>
-                  {document.is_public ? (
-                    <Badge variant="secondary">Public</Badge>
-                  ) : null}
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
+      <main className="mx-auto grid min-w-0 grid-cols-1 max-w-6xl gap-8 px-4 py-8 sm:px-6 xl:grid-cols-[minmax(0,1fr)_15rem] lg:px-8">
+        <WorkspaceField
+          documents={documents}
+          workspaceSlug={workspaceSlug}
+          accountId={identity.ok ? identity.data.user.id : "unavailable"}
+          canEdit={canEdit}
+        />
 
-        <aside>
+        <aside className="min-w-0 rounded-xl border bg-surface p-5 self-start">
           <div className="mb-4 flex items-center justify-between border-b pb-3">
             <div>
-              <h2 className="text-lg font-semibold">Members</h2>
+              <h2 className="text-base font-semibold">Your people</h2>
               <p className="text-sm text-muted-foreground">
-                {members.length} people
+                {members.length} workspace members
               </p>
             </div>
             <Users className="h-4 w-4 text-muted-foreground" />

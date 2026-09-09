@@ -1,0 +1,280 @@
+/**
+ * Softmaple autumn theme.
+ *
+ * Light — "Parchment & Maple": warm paper stock, bark-brown ink, burnt maple
+ * accents. Dark — "Ember & Bark": deep bark ground lit by an amber ember.
+ * Every surface in the app reads from these tokens, so the season lives here
+ * and nowhere else.
+ */
+
+:root {
+  --background: #fbf6ee;
+  --foreground: #2b2019;
+  --card: #fffdf9;
+  --card-foreground: #2b2019;
+  --popover: #fffdf9;
+  --popover-foreground: #2b2019;
+  --primary: #b1451c;
+  --primary-foreground: #fff8f1;
+  --secondary: #f2e6d6;
+  --secondary-foreground: #2b2019;
+  --muted: #f2e6d6;
+  --muted-foreground: #6c574a;
+  --accent: #f7ded0;
+  --accent-foreground: #2b2019;
+  --destructive: #a3123a;
+  --destructive-foreground: #fff8f1;
+  --success: #4d6b2f;
+  --success-foreground: #fff8f1;
+  --border: #e5d3bd;
+  --input: #e0cab1;
+  --ring: #b1451c;
+  --sidebar: #fdf8f1;
+  --sidebar-foreground: #2b2019;
+  --sidebar-primary: #b1451c;
+  --sidebar-primary-foreground: #fff8f1;
+  --sidebar-accent: #f2e6d6;
+  --sidebar-accent-foreground: #2b2019;
+  --sidebar-border: #e5d3bd;
+  --sidebar-ring: #b1451c;
+  --radius: 0.75rem;
+
+  /* Seasonal accents, for atmosphere rather than semantics. */
+  --autumn-ember: #c2521f;
+  --autumn-gold: #d59a2c;
+  --autumn-canopy: #8c3f1d;
+  --autumn-wash-strength: 14%;
+  --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
+}
+
+.dark {
+  --background: #17120f;
+  --foreground: #f4e9dc;
+  --card: #211a15;
+  --card-foreground: #f4e9dc;
+  --popover: #241c17;
+  --popover-foreground: #f4e9dc;
+  --primary: #ef9a5c;
+  --primary-foreground: #24150c;
+  --secondary: #2d231c;
+  --secondary-foreground: #f4e9dc;
+  --muted: #2d231c;
+  --muted-foreground: #bda695;
+  --accent: #3a2a20;
+  --accent-foreground: #f7e2d0;
+  --destructive: #f2657f;
+  --destructive-foreground: #24150c;
+  --success: #a3c46a;
+  --success-foreground: #1b2410;
+  --border: #3b2f26;
+  --input: #47382d;
+  --ring: #ef9a5c;
+  --sidebar: #1c1611;
+  --sidebar-foreground: #f4e9dc;
+  --sidebar-primary: #ef9a5c;
+  --sidebar-primary-foreground: #24150c;
+  --sidebar-accent: #2d231c;
+  --sidebar-accent-foreground: #f4e9dc;
+  --sidebar-border: #3b2f26;
+  --sidebar-ring: #ef9a5c;
+
+  --autumn-ember: #e2703a;
+  --autumn-gold: #e0a94a;
+  --autumn-canopy: #f0a86a;
+  --autumn-wash-strength: 10%;
+  --autumn-shadow: #000000;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --font-display: var(--font-syne);
+  --font-mono: var(--font-utility);
+}
+
+@layer base {
+  html {
+    overflow-x: clip;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100dvh;
+    overflow-x: clip;
+    /* A low canopy light: ember from the left, late gold from the right. */
+    background-image:
+      radial-gradient(
+        58rem 38rem at 8% -14%,
+        color-mix(in srgb, var(--autumn-ember) var(--autumn-wash-strength), transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        46rem 32rem at 102% -6%,
+        color-mix(in srgb, var(--autumn-gold) var(--autumn-wash-strength), transparent),
+        transparent 58%
+      );
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--autumn-gold) 34%, transparent);
+  }
+}
+
+@layer components {
+  .manuscript-stage {
+    position: relative;
+    padding: 2rem 1.2rem 2.5rem;
+    border-radius: 2rem;
+    background:
+      radial-gradient(
+        120% 90% at 85% 0%,
+        color-mix(in srgb, var(--autumn-gold) 22%, transparent),
+        transparent 58%
+      ),
+      radial-gradient(
+        95% 80% at 0% 100%,
+        color-mix(in srgb, var(--autumn-ember) 16%, transparent),
+        transparent 60%
+      ),
+      var(--secondary);
+  }
+
+  .manuscript-sheet {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    background: var(--card);
+    box-shadow: 0 24px 48px -26px var(--autumn-shadow);
+    transform: rotate(-2deg);
+  }
+
+  .manuscript-note {
+    position: absolute;
+    right: 1.5rem;
+    bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.7rem;
+    background: var(--card);
+    padding: 0.8rem 1rem;
+    color: var(--primary);
+    font-size: 0.75rem;
+    box-shadow: 0 6px 18px -6px var(--autumn-shadow);
+  }
+
+  .markdown-preview {
+    color: var(--foreground);
+    line-height: 1.75;
+  }
+
+  .markdown-preview > * + * {
+    margin-top: 1rem;
+  }
+
+  .markdown-preview h1,
+  .markdown-preview h2,
+  .markdown-preview h3 {
+    margin-top: 2rem;
+    font-family: var(--font-syne);
+    font-weight: 650;
+    line-height: 1.2;
+  }
+
+  .markdown-preview h1 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.65rem;
+    font-size: 2rem;
+  }
+
+  .markdown-preview h2 {
+    font-size: 1.45rem;
+  }
+
+  .markdown-preview h3 {
+    font-size: 1.15rem;
+  }
+
+  .markdown-preview ul,
+  .markdown-preview ol {
+    padding-left: 1.5rem;
+  }
+
+  .markdown-preview ul {
+    list-style: disc;
+  }
+
+  .markdown-preview ol {
+    list-style: decimal;
+  }
+
+  .markdown-preview blockquote {
+    border-left: 2px solid var(--primary);
+    padding-left: 1rem;
+    color: var(--muted-foreground);
+  }
+
+  .markdown-preview code {
+    background: var(--muted);
+    padding: 0.12rem 0.3rem;
+    font-family: var(--font-utility);
+    font-size: 0.88em;
+  }
+
+  .markdown-preview pre {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    background: var(--card);
+    padding: 1rem;
+  }
+
+  .markdown-preview pre code {
+    background: transparent;
+    padding: 0;
+  }
+
+  .markdown-preview a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .markdown-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .markdown-preview th,
+  .markdown-preview td {
+    border: 1px solid var(--border);
+    padding: 0.55rem 0.7rem;
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Keep document presence in the app theme, including manual dark mode. */
+.document-awareness {
+  --font-awareness: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --color-awareness-surface: var(--background);
+  --color-awareness-border: var(--border);
+  --color-awareness-text: var(--foreground);
+  --color-awareness-muted: var(--muted-foreground);
+}
+.document-awareness .awareness-selection-highlight::before {
+  background: color-mix(in srgb, var(--awareness-user-color) 22%, transparent);
+  mix-blend-mode: normal;
+}

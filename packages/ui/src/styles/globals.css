@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@source "../../../apps/**/*.{ts,tsx}";
+@source "../../../../apps/**/*.{ts,tsx}";
 @source "../../../editor/**/*.{ts,tsx}";
 @source "../../../components/**/*.{ts,tsx}";
 @source "../**/*.{ts,tsx}";
@@ -84,6 +84,13 @@
 }
 
 @theme inline {
+  --color-emphasis: var(--emphasis, var(--primary));
+  --color-link: var(--link, var(--primary));
+  --color-workspace: var(--workspace, var(--background));
+  --color-surface: var(--surface, var(--card));
+  --color-raised: var(--raised, var(--popover));
+  --color-attention: var(--attention, var(--accent));
+  --color-warning: var(--warning, var(--foreground));
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

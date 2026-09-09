@@ -3,6 +3,7 @@
  */
 
 import { PRESENCE_PROTOCOL_VERSION } from "../../core/protocol";
+import { normalizeCollaborationState } from "../../protocol/attention";
 import type { PresenceUser } from "../../types/presence";
 import { isCursorPosition, isPresenceSelection } from "../../types/presence";
 import type {
@@ -26,6 +27,16 @@ const isFiniteNumber = (value: unknown): value is number =>
  */
 export const isPresenceUser = (value: unknown): value is PresenceUser => {
   if (!isRecord(value)) return false;
+  if (
+    value.collaboration !== undefined &&
+    normalizeCollaborationState(value.collaboration) === null
+  )
+    return false;
+  if (
+    value.sessionId !== undefined &&
+    (typeof value.sessionId !== "string" || value.sessionId.length > 128)
+  )
+    return false;
   if (typeof value.connectionId !== "string") return false;
   if (typeof value.userId !== "string") return false;
   if (typeof value.name !== "string") return false;

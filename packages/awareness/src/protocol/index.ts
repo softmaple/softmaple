@@ -1,3 +1,4 @@
+export * from "./attention";
 export {
   type PresenceAuthPayload,
   parsePresenceAuth,
@@ -30,6 +31,7 @@ export {
 } from "./messages";
 export { type PresencePatch, parsePresencePatch } from "./patch";
 export { consumePresenceQuota, type PresenceRateLimit } from "./quota";
+export { type PresenceSummary, summarizePresence } from "./summary";
 export {
   PRESENCE_CAPABILITIES,
   PRESENCE_PROTOCOL_VERSION,

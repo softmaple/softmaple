@@ -1,3 +1,4 @@
+import { handlePresenceSummary } from "./presence-summary";
 import { handleDocumentWebSocket } from "./document-websocket";
 import { DocumentRoomDO } from "./document-room-do";
 import { PresenceRoomDO } from "./presence-room-do";
@@ -14,6 +15,8 @@ export default {
     if (pathname === "/collab/document") {
       return handleDocumentWebSocket(request, env);
     }
+    if (pathname === "/collab/presence-summary")
+      return handlePresenceSummary(request, env);
     if (pathname === "/collab/presence") {
       return handlePresenceWebSocket(request, env);
     }

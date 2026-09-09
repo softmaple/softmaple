@@ -39,7 +39,7 @@ export default async function UpdatePasswordPage({
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
         <Link
-          className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="text-emphasis underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           href="/login"
         >
           Back to sign in

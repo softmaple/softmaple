@@ -78,6 +78,8 @@ export interface ProjectedBlock {
 export interface MaterializedBlockState {
   readonly document: BlockDocument;
   readonly projectedBlocks: ReadonlyArray<ProjectedBlock>;
+  /** Immutable anchor lookup for exactly this materialized revision. */
+  readonly sequenceProjection: SequenceAnchorProjection;
 }
 
 interface MutableProjectedBlock {
@@ -301,6 +303,7 @@ export const materializeBlockState = (
   });
   return Object.freeze({
     document,
+    sequenceProjection,
     projectedBlocks: Object.freeze(projectedBlocks),
   });
 };

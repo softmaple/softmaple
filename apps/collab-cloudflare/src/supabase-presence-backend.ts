@@ -126,6 +126,7 @@ const resolveIdentity = async (
     .from("documents")
     .select("id,workspace_id")
     .eq("id", roomId)
+    .eq("is_public", true)
     .maybeSingle();
   if (documentError !== null) throw documentError;
   const document = documentRow(rawDocument as unknown);

@@ -9,6 +9,8 @@ import type {
 } from "./version";
 
 export const WS_MESSAGE = {
+  ATTENTION_COMMAND: "attention:command",
+  ATTENTION_STATE: "attention:state",
   JOIN: "join",
   LEAVE: "leave",
   PRESENCE_UPDATE: "presence:update",

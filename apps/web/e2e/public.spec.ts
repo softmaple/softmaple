@@ -7,9 +7,9 @@ test.describe("public product surface", () => {
     await page.goto("/");
     await expect(page).toHaveTitle(/Softmaple/);
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "A little space",
+      "Make room",
     );
-    await page.getByRole("link", { name: "Sign in" }).click();
+    await page.getByRole("link", { name: "Sign in" }).first().click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("button", { name: "GitHub" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Google" })).toBeDisabled();

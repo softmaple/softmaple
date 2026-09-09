@@ -36,7 +36,7 @@ export function RouteError({
       <section className="w-full max-w-xl border bg-card shadow-sm">
         <div className="flex items-center gap-3 border-b px-5 py-3">
           <RaspberryRecordMark className="size-8" />
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-emphasis">
             Record interrupted
           </p>
         </div>

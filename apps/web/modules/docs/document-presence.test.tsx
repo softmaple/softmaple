@@ -91,6 +91,10 @@ vi.mock("@softmaple/awareness", async () => {
   };
 });
 
+vi.mock("./shared-attention", () => ({
+  SharedAttention: ({ children }: { children: ReactNode }) => children,
+}));
+
 vi.mock("@/modules/docs/doc-editor", async () => {
   const { useEffect } = await import("react");
   return {
@@ -103,6 +107,7 @@ vi.mock("@/modules/docs/doc-editor", async () => {
         onExternalBindingChange?.({
           editor: {
             getElementByKey: () => null,
+            registerRootListener: () => () => undefined,
             registerUpdateListener: () => () => undefined,
           },
           getBlockIndex: () => ({ blockIdToNodeKey: new Map() }),

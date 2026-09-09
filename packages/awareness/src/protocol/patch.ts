@@ -17,6 +17,8 @@ export type PresencePatch = {
   readonly hasCursor: boolean;
   readonly hasSelection: boolean;
   readonly isTyping?: boolean;
+  readonly foreground?: boolean;
+  readonly activity?: "viewing" | "editing";
   readonly selection?: PresenceSelection | null;
   readonly userId: string;
 };
@@ -57,11 +59,22 @@ export const parsePresencePatch = (payload: unknown): PresencePatch => {
   if (
     meta !== undefined &&
     (!isRecord(meta) ||
-      (meta.isTyping !== undefined && typeof meta.isTyping !== "boolean"))
+      (meta.isTyping !== undefined && typeof meta.isTyping !== "boolean") ||
+      (meta.foreground !== undefined && typeof meta.foreground !== "boolean") ||
+      (meta.activity !== undefined &&
+        meta.activity !== "viewing" &&
+        meta.activity !== "editing"))
   ) {
     throw new Error("invalid presence metadata");
   }
   return {
+    ...(isRecord(meta) && typeof meta.foreground === "boolean"
+      ? { foreground: meta.foreground }
+      : {}),
+    ...(isRecord(meta) &&
+    (meta.activity === "viewing" || meta.activity === "editing")
+      ? { activity: meta.activity }
+      : {}),
     clock: payload.clock as number,
     connectionId: payload.connectionId,
     hasCursor,

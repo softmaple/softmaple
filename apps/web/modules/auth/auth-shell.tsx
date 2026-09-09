@@ -31,17 +31,17 @@ export const AuthShell = ({ children, description, title }: AuthShellProps) => (
 
         <div className="flex flex-1 flex-col justify-center py-12 sm:py-16 lg:py-12">
           <div className="h-px w-12 bg-primary" />
-          <p className="mt-8 font-mono text-[10px] uppercase tracking-[0.24em] text-primary sm:text-xs">
+          <p className="mt-8 font-mono text-[10px] uppercase tracking-[0.24em] text-emphasis sm:text-xs">
             A shared space for your words
           </p>
           <p className="mt-10 max-w-3xl font-display text-[clamp(2.75rem,11vw,5.5rem)] font-semibold leading-[0.88] tracking-[-0.055em]">
-            A little space.
+            Your own place.
             <br />
-            For big ideas.
+            Better together.
           </p>
           <p className="mt-8 hidden max-w-xl text-sm leading-7 text-muted-foreground lg:block xl:text-base">
-            From the first rough note to the final paper. Write, shape, and
-            share your thinking, together.
+            Keep a calm place to write, with a direct way to bring others into
+            the work.
           </p>
           <AuthBrandSpecimen />
         </div>

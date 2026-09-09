@@ -21,7 +21,11 @@ export type E2ESeed = {
   readonly workspace: SeedWorkspace;
 };
 
-const seedRequest = async (action: "cleanup" | "seed", runId: string) => {
+const seedRequest = async (
+  action: "cleanup" | "seed",
+  runId: string,
+  documentCount?: number,
+) => {
   const baseUrl = process.env.E2E_BASE_URL;
   const secret = process.env.E2E_SEED_SECRET;
   if (baseUrl === undefined || secret === undefined) {
@@ -33,7 +37,7 @@ const seedRequest = async (action: "cleanup" | "seed", runId: string) => {
       authorization: `Bearer ${secret}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ action, runId }),
+    body: JSON.stringify({ action, runId, documentCount }),
   });
   if (!response.ok) {
     throw new Error(`E2E ${action} failed with ${response.status}`);
@@ -41,8 +45,11 @@ const seedRequest = async (action: "cleanup" | "seed", runId: string) => {
   return response;
 };
 
-export const createSeed = async (runId: string): Promise<E2ESeed> =>
-  (await (await seedRequest("seed", runId)).json()) as E2ESeed;
+export const createSeed = async (
+  runId: string,
+  documentCount?: number,
+): Promise<E2ESeed> =>
+  (await (await seedRequest("seed", runId, documentCount)).json()) as E2ESeed;
 
 export const cleanupSeed = async (runId: string): Promise<void> => {
   await seedRequest("cleanup", runId);

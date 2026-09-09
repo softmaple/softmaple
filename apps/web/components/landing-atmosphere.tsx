@@ -19,7 +19,11 @@ void main() {
 `;
 
 const FRAGMENT_SHADER = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 
 uniform vec2 uResolution;
 uniform float uTime;
@@ -28,8 +32,14 @@ uniform vec3 uWarm;
 uniform vec3 uCool;
 uniform float uStrength;
 
+/**
+ * Hash on a wrapped cell rather than raw coordinates. mediump tops out at
+ * 65504, and dot(gl_FragCoord.xy, ...) on a wide viewport runs past that into
+ * Inf, which makes sin() NaN and paints the whole layer opaque. Wrapping first
+ * keeps the sine argument under 100 on every driver.
+ */
 float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  return fract(sin(dot(fract(p * 0.0009765625), vec2(12.9898, 78.233))) * 43758.5453);
 }
 
 float valueNoise(vec2 p) {
@@ -48,9 +58,12 @@ void main() {
   float aspect = uResolution.x / uResolution.y;
   vec2 p = vec2(uv.x * aspect, uv.y);
 
+  // Wrapped so the clock never grows into the range where precision fails.
+  float t = mod(uTime, 256.0);
+
   // Light pools breathe on a ~30s cycle: present, never animated-looking.
-  vec2 warmAt = vec2(0.27 * aspect, 0.74 + 0.010 * sin(uTime * 0.21));
-  vec2 coolAt = vec2(0.79 * aspect, 0.47 + 0.013 * cos(uTime * 0.17));
+  vec2 warmAt = vec2(0.27 * aspect, 0.74 + 0.010 * sin(t * 0.21));
+  vec2 coolAt = vec2(0.79 * aspect, 0.47 + 0.013 * cos(t * 0.17));
   float warm = exp(-dot(p - warmAt, p - warmAt) * 15.0);
   float cool = exp(-dot(p - coolAt, p - coolAt) * 16.0);
 
@@ -58,7 +71,7 @@ void main() {
   float fibre =
     valueNoise(vec2(uv.x * 380.0, uv.y * 80.0)) * 0.6 +
     valueNoise(vec2(uv.x * 80.0, uv.y * 380.0)) * 0.4;
-  float grain = hash(gl_FragCoord.xy + floor(uTime * 8.0)) - 0.5;
+  float grain = hash(gl_FragCoord.xy + floor(t * 8.0)) - 0.5;
 
   vec3 colour = uPaper;
   colour += uWarm * warm * 0.45;
@@ -67,7 +80,11 @@ void main() {
   colour += grain * 0.16;
 
   float alpha = (0.032 + warm * 0.035 + cool * 0.026) * uStrength;
-  gl_FragColor = vec4(clamp(colour, 0.0, 1.0), alpha);
+
+  // Premultiplied: the canvas composites with premultipliedAlpha (the default),
+  // so full-intensity RGB behind a small alpha reads as super-luminous and
+  // washes the page out. Multiply through and it composites as plain alpha-over.
+  gl_FragColor = vec4(clamp(colour, 0.0, 1.0) * alpha, alpha);
 }
 `;
 
@@ -112,7 +129,9 @@ export function LandingAtmosphere() {
       stencil: false,
       powerPreference: "low-power",
     });
-    if (gl === null) return;
+    // A remount can hand back a context that is already gone; the CSS gradient
+    // underneath is the whole effect in that case.
+    if (gl === null || gl.isContextLost()) return;
 
     const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
     const fragment = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
@@ -135,7 +154,8 @@ export function LandingAtmosphere() {
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0, 0, 0, 0);
 
     const uniform = (name: string) => gl.getUniformLocation(program, name);
     const uResolution = uniform("uResolution");
@@ -161,20 +181,40 @@ export function LandingAtmosphere() {
       const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
       const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
       const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
-      if (canvas.width === width && canvas.height === height) return;
-      canvas.width = width;
-      canvas.height = height;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      // The viewport and the resolution belong to the program, not the element,
+      // so they are uploaded every pass. A remount reuses the same canvas at the
+      // same size with a fresh program: skipping these leaves uResolution at
+      // (0, 0), every uv divides by zero, and the sheet paints NaN-white.
       gl.viewport(0, 0, width, height);
       gl.uniform2f(uResolution, width, height);
     };
 
     let frame = 0;
     let visible = true;
+    let checked = false;
     const start = performance.now();
+
+    /**
+     * A layer this quiet is never worth a broken page: if the driver cannot
+     * draw it, drop the canvas and let the CSS gradient underneath be the
+     * whole effect rather than leaving a mispainted sheet over the content.
+     */
+    const abandon = () => {
+      stop();
+      canvas.hidden = true;
+    };
 
     const draw = (time: number) => {
       gl.uniform1f(uTime, (time - start) / 1000);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (checked) return;
+      checked = true;
+      if (gl.getError() !== gl.NO_ERROR || gl.isContextLost()) abandon();
     };
 
     const loop = (time: number) => {
@@ -182,13 +222,14 @@ export function LandingAtmosphere() {
       frame = requestAnimationFrame(loop);
     };
 
-    const stop = () => {
+    function stop() {
       if (frame !== 0) cancelAnimationFrame(frame);
       frame = 0;
-    };
+    }
 
     const render = () => {
       stop();
+      if (canvas.hidden || gl.isContextLost()) return;
       applyPalette();
       resize();
       if (!visible || document.hidden) return;
@@ -219,6 +260,7 @@ export function LandingAtmosphere() {
     const sizes = new ResizeObserver(render);
     sizes.observe(canvas);
     document.addEventListener("visibilitychange", render);
+    canvas.addEventListener("webglcontextlost", abandon);
 
     render();
 
@@ -229,11 +271,11 @@ export function LandingAtmosphere() {
       motion.removeEventListener("change", render);
       sizes.disconnect();
       document.removeEventListener("visibilitychange", render);
+      canvas.removeEventListener("webglcontextlost", abandon);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
       gl.deleteShader(vertex);
       gl.deleteShader(fragment);
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
     };
   }, []);
 

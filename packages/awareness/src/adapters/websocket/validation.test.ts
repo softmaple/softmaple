@@ -480,3 +480,65 @@ describe("WebSocket clear-cursor wire semantics", () => {
     expect(result.state.presence.get("c-peer")?.cursor).toBeUndefined();
   });
 });
+
+describe("shared attention fields on the presence wire", () => {
+  const collaboration = {
+    revision: 2,
+    presenting: true,
+    following: null,
+    invitation: null,
+    response: null,
+  };
+
+  it("accepts a bounded session id and a well-formed collaboration state", () => {
+    expect(
+      isJoinPayload({
+        user: { ...validUser(), sessionId: "session-1", collaboration },
+      }),
+    ).toBe(true);
+    expect(isJoinPayload({ user: validUser() })).toBe(true);
+  });
+
+  it("rejects an unusable session id or collaboration state", () => {
+    for (const patch of [
+      { sessionId: 7 },
+      { sessionId: "s".repeat(129) },
+      { collaboration: { ...collaboration, revision: -1 } },
+      { collaboration: "presenting" },
+    ])
+      expect(isJoinPayload({ user: { ...validUser(), ...patch } })).toBe(false);
+  });
+
+  it("carries the server's view of shared attention onto self during sync", () => {
+    const self = { ...validUser(), connectionId: "c-self", userId: "self" };
+    const state = {
+      ...createInitialState(),
+      self,
+      presence: new Map([[self.connectionId, self]]),
+    };
+    const synced = processMessage(
+      state,
+      createMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, "room-1", "server", {
+        users: [{ ...self, sessionId: "session-self", collaboration }],
+      }),
+      "c-self",
+    );
+    expect(synced.state.self).toMatchObject({
+      sessionId: "session-self",
+      collaboration,
+    });
+    expect(synced.state.presence.get("c-self")).toBe(synced.state.self);
+
+    const withoutExtension = processMessage(
+      synced.state,
+      createMessage(WS_MESSAGE.PRESENCE_SYNC_RESPONSE, "room-1", "server", {
+        users: [],
+      }),
+      "c-self",
+    );
+    expect(withoutExtension.state.self).toMatchObject({
+      sessionId: "session-self",
+      collaboration,
+    });
+  });
+});

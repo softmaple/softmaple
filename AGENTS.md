@@ -21,6 +21,8 @@ Turborepo monorepo with `apps/web/` (Next.js 16), `packages/` (shared code), and
 - **Utilities:** camelCase filenames; kebab-case is also fine for multi-word
   modules when that matches the local package convention (e.g. `apps/collab-cloudflare`)
 - **Routes:** lowercase-hyphenated
+- **Styling:** Prefer Tailwind CSS utility classes over CSS modules (`*.module.css`),
+  following the existing patterns in `apps/web/`.
 - **Linting:** ESLint configs in `packages/eslint-config/`
 - Husky pre-commit hooks auto-format staged files
 

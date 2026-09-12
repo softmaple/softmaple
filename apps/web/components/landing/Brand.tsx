@@ -1,4 +1,4 @@
-import styles from "./landing.module.css";
+import { cn } from "@softmaple/ui/lib/utils";
 
 export function MapleMark() {
   return (
@@ -10,7 +10,17 @@ export function MapleMark() {
 
 export function LandingBrand() {
   return (
-    <span className={styles.brand}>
+    <span
+      className={cn(
+        "inline-flex items-center gap-[15px] text-[clamp(24px,_2.2vw,_32px)] tracking-[-1.4px] font-medium",
+        "whitespace-nowrap [&_svg]:w-9 [&_svg]:h-[42px]",
+        "min-[768px]:max-[1024px]:gap-2.5 min-[768px]:max-[1024px]:text-[25px] min-[768px]:max-[1024px]:[&_svg]:w-7",
+        "min-[768px]:max-[1024px]:[&_svg]:h-[34px]",
+        "max-[768px]:text-[24px] max-[768px]:gap-2.5 max-[768px]:tracking-[-1px] max-[768px]:[&_svg]:w-[26px]",
+        "max-[768px]:[&_svg]:h-8",
+        "leading-[1]",
+      )}
+    >
       <MapleMark />
       <span>softmaple</span>
     </span>

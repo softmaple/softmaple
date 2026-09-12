@@ -63,6 +63,12 @@
   --sheet-shadow: 0 1px 1px rgb(34 31 27 / 4%), 0 18px 44px -28px rgb(34 31 27 / 34%);
   --sheet-shadow-lifted: 0 1px 1px rgb(34 31 27 / 5%), 0 34px 70px -30px rgb(34 31 27 / 42%);
 
+  /* A felt-tip swipe, drawn by hand rather than a rounded rectangle. Used as
+   * a mask so the ink colour stays a theme token. */
+  --marker-swipe: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 36' preserveAspectRatio='none'%3E%3Cpath d='M4,10 C52,4 132,1 192,2 C222,3 237,4 238,10 C239,17 237,27 232,31 C181,35 90,36 38,33 C17,32 1,29 2,20 C2,15 3,12 4,10 Z' fill='%23000'/%3E%3C/svg%3E");
+  --marker-ink: color-mix(in srgb, var(--autumn-highlight) 62%, transparent);
+  --autumn-highlight: #f0a860;
+
   /* One easing curve for the whole product: a page settling onto a desk. */
   --ease-settle: cubic-bezier(0.22, 0.68, 0.24, 1);
   --ease-exit: cubic-bezier(0.55, 0, 0.66, 0.28);
@@ -105,6 +111,8 @@
   --bark-muted: #8d8478;
   --bark-border: #2a2521;
   --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.016'/%3E%3C/svg%3E");
+  --autumn-highlight: #b8641f;
+  --marker-ink: color-mix(in srgb, var(--autumn-highlight) 58%, transparent);
   --sheet-shadow: 0 1px 1px rgb(0 0 0 / 32%), 0 18px 44px -28px rgb(0 0 0 / 82%);
   --sheet-shadow-lifted: 0 1px 1px rgb(0 0 0 / 36%), 0 34px 70px -30px rgb(0 0 0 / 88%);
 }
@@ -235,6 +243,98 @@
   .stroke-link:hover,
   .stroke-link:focus-visible {
     background-size: 100% 1px;
+  }
+
+  /* --------------------------------------------------- annotated sentence */
+
+  /**
+   * A sentence that wears the marks it describes: the word "highlight" gets a
+   * highlighter, the shareable things get a rule drawn under them, and the
+   * word LaTeX typesets itself. The marks arrive in reading order, scrubbed by
+   * the reader's own scrolling, so the paragraph annotates itself as it is
+   * read. Timing lives in the @supports block near the end of this file.
+   *
+   * `isolation` keeps the highlighter's negative z-index behind the words and
+   * nothing else.
+   */
+  .annotated {
+    isolation: isolate;
+    text-wrap: balance;
+  }
+
+  .mark {
+    position: relative;
+    white-space: nowrap;
+  }
+
+  /* A felt-tip swipe, laid over the paper and under the ink. */
+  .mark-swipe::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset-inline: -0.3em;
+    bottom: -0.04em;
+    height: 0.94em;
+    background-color: var(--marker-ink);
+    -webkit-mask-image: var(--marker-swipe);
+    mask-image: var(--marker-swipe);
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
+
+  /* A rule drawn under a word, the way you would underline it by hand. */
+  .mark-rule::after {
+    content: "";
+    position: absolute;
+    inset-inline: -0.03em;
+    bottom: -0.01em;
+    height: 0.045em;
+    min-height: 1px;
+    background: currentColor;
+    transform-origin: left;
+  }
+
+  /* An icon standing in front of the word it belongs to. */
+  .mark-icon {
+    display: inline-block;
+    width: 0.82em;
+    height: 0.82em;
+    margin-inline-end: 0.2em;
+    color: var(--primary);
+    vertical-align: -0.03em;
+  }
+
+  /* Markdown shown wearing its own syntax. */
+  .mark-syntax-token {
+    display: inline-block;
+    font-family: var(--font-utility);
+    font-size: 0.62em;
+    color: var(--primary);
+    vertical-align: 0.12em;
+  }
+
+  /**
+   * The LaTeX lockup — the one piece of typesetting every reader of this
+   * product recognises. The letters are laid out in their final positions and
+   * only slide into place, so the word never reflows.
+   */
+  .latex-lockup > * {
+    display: inline-block;
+  }
+
+  .latex-lockup .latex-a {
+    margin-inline-start: -0.3em;
+    margin-inline-end: -0.11em;
+    transform: translateY(-0.42em) scale(0.76);
+    transform-origin: 50% 100%;
+  }
+
+  .latex-lockup .latex-e {
+    margin-inline-start: -0.09em;
+    margin-inline-end: -0.04em;
+    transform: translateY(0.2em);
   }
 
   /* ------------------------------------------------------------ app cards */
@@ -493,6 +593,62 @@
   }
 }
 
+@keyframes swipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes draw-rule {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes mark-appear {
+  from {
+    opacity: 0;
+    transform: translateY(0.25em) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The two letters that drop and lift to make the LaTeX lockup. */
+@keyframes latex-set-a {
+  from {
+    margin-inline-start: 0;
+    margin-inline-end: 0;
+    transform: none;
+  }
+  to {
+    margin-inline-start: -0.3em;
+    margin-inline-end: -0.11em;
+    transform: translateY(-0.42em) scale(0.76);
+  }
+}
+
+@keyframes latex-set-e {
+  from {
+    margin-inline-start: 0;
+    margin-inline-end: 0;
+    transform: none;
+  }
+  to {
+    margin-inline-start: -0.09em;
+    margin-inline-end: -0.04em;
+    transform: translateY(0.2em);
+  }
+}
+
 @keyframes rail-fill {
   from {
     transform: scaleX(0);
@@ -695,6 +851,78 @@
         display: flex;
       }
 
+      /* ----------------------------------------------- annotated sentence */
+
+      /**
+       * All five marks read from one timeline on the paragraph, so they land
+       * in reading order regardless of how the sentence happens to wrap. Each
+       * window is 12% wide and steps by 6%, which overlaps them just enough to
+       * feel like a hand moving down the page rather than five separate cues.
+       *
+       * The sequence finishes around the point where the paragraph reaches the
+       * middle of the viewport: the marks are drawn on while it rises into
+       * reading position, so a reader settling on the sentence sees it
+       * finished rather than waiting on gaps where a mark will be.
+       */
+      .annotated {
+        view-timeline-name: --annotated;
+        view-timeline-axis: block;
+      }
+
+      [data-mark-step="1"] {
+        --mark-from: 18%;
+        --mark-to: 30%;
+      }
+      [data-mark-step="2"] {
+        --mark-from: 24%;
+        --mark-to: 36%;
+      }
+      [data-mark-step="3"] {
+        --mark-from: 30%;
+        --mark-to: 42%;
+      }
+      [data-mark-step="4"] {
+        --mark-from: 36%;
+        --mark-to: 48%;
+      }
+      [data-mark-step="5"] {
+        --mark-from: 42%;
+        --mark-to: 56%;
+      }
+
+      .mark-swipe::before,
+      .mark-rule::after,
+      .mark-icon,
+      .mark-syntax-token,
+      .latex-lockup .latex-a,
+      .latex-lockup .latex-e {
+        animation: mark-appear linear both;
+        animation-timeline: --annotated;
+        animation-range: cover var(--mark-from) cover var(--mark-to);
+      }
+
+      .mark-swipe::before {
+        animation-name: swipe;
+      }
+
+      .mark-rule::after {
+        animation-name: draw-rule;
+      }
+
+      .latex-lockup .latex-a {
+        animation-name: latex-set-a;
+      }
+
+      .latex-lockup .latex-e {
+        animation-name: latex-set-e;
+      }
+
+      /* The closing asterisk lands just after the opening one. */
+      .mark-syntax-token:last-child {
+        animation-range: cover calc(var(--mark-from) + 3%) cover
+          calc(var(--mark-to) + 3%);
+      }
+
       /* ------------------------------------------------- presence typing */
 
       .caret-line {
@@ -838,7 +1066,9 @@
   [data-drift],
   .stage-view,
   .caret-line,
-  .presence-flag {
+  .presence-flag,
+  .mark-icon,
+  .mark-syntax-token {
     opacity: 1 !important;
     transform: none !important;
     filter: none !important;
@@ -847,6 +1077,23 @@
 
   .site-header::after {
     opacity: 1 !important;
+  }
+
+  /* Marks are part of the sentence's meaning, so they stay drawn. */
+  .mark-swipe::before {
+    clip-path: none !important;
+  }
+
+  .mark-rule::after {
+    transform: scaleX(1) !important;
+  }
+
+  .latex-lockup .latex-a {
+    transform: translateY(-0.42em) scale(0.76) !important;
+  }
+
+  .latex-lockup .latex-e {
+    transform: translateY(0.2em) !important;
   }
 }
 

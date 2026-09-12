@@ -11,6 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
+import { Latex, Rule, Swipe, Syntax } from "@/components/inline-marks";
 import { SITE_CONFIG } from "@softmaple/config";
 import { SiteHeader } from "@/components/site-header";
 import { SoftmapleWordmark } from "@/components/BrandMark";
@@ -74,27 +75,6 @@ const StageView = ({ children, label, note }: StageViewProps) => (
     {children}
   </article>
 );
-
-const CAPABILITIES = [
-  {
-    body: "Edits from every writer land in the same order on every screen, so two people can work the same paragraph without stepping on each other.",
-    icon: Users,
-    label: "Shared editing",
-    title: "Two people, one sentence.",
-  },
-  {
-    body: "Close the laptop mid-thought. Your work is kept locally and replayed into the document the moment you are back on a network.",
-    icon: CloudOff,
-    label: "Offline drafts",
-    title: "Leave, and pick it back up.",
-  },
-  {
-    body: "Publish a read-only link when a draft is ready to be seen. Keep editing in your workspace, and switch the link off whenever you want it back.",
-    icon: Link2,
-    label: "Sharing",
-    title: "Show it when you choose.",
-  },
-] as const;
 
 export default function LandingPage() {
   return (
@@ -422,49 +402,35 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ---------------------------------------------------- capabilities */}
+        {/* --------------------------------------------- annotated sentence */}
+        {/*
+          The sentence carries the marks it is describing, and scroll draws
+          them on in reading order — so the paragraph demonstrates the product
+          instead of listing it. See `components/inline-marks.tsx`.
+        */}
         <section
-          aria-labelledby="capabilities-heading"
+          aria-labelledby="marks-heading"
           className="border-t bg-secondary/40"
         >
-          <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:py-28">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <h2
-                className="max-w-[18ch] font-display text-[clamp(1.9rem,3.4vw,2.75rem)] font-semibold leading-[1.06] tracking-[-0.03em]"
-                data-reveal="line"
-                id="capabilities-heading"
-              >
-                Less between you and the next sentence.
-              </h2>
-              <p
-                className="prose-editorial max-w-[30ch] text-sm text-muted-foreground"
-                data-reveal="line"
-              >
-                The rest of the toolkit, kept deliberately small.
-              </p>
-            </div>
-
-            <div className="mt-14 grid gap-px overflow-hidden rounded-sm border bg-border md:grid-cols-3">
-              {CAPABILITIES.map(({ icon: Icon, ...capability }, index) => (
-                <article
-                  className="bg-card p-7 sm:p-9"
-                  data-reveal
-                  data-reveal-step={index + 1}
-                  key={capability.title}
-                >
-                  <div className="flex items-center gap-3">
-                    <Icon className="size-4 text-primary" />
-                    <p className="eyebrow">{capability.label}</p>
-                  </div>
-                  <h3 className="mt-10 font-display text-xl font-semibold tracking-[-0.02em]">
-                    {capability.title}
-                  </h3>
-                  <p className="prose-editorial mt-3 text-sm text-muted-foreground">
-                    {capability.body}
-                  </p>
-                </article>
-              ))}
-            </div>
+          <div className="mx-auto max-w-4xl px-5 py-28 text-center sm:px-8 lg:py-40">
+            <p className="eyebrow eyebrow-maple" data-reveal="line">
+              The rest of the toolkit
+            </p>
+            <h2 className="sr-only" id="marks-heading">
+              What else Softmaple does
+            </h2>
+            <p className="annotated mx-auto mt-12 max-w-[22ch] font-display text-[clamp(1.9rem,4.6vw,3.25rem)] font-medium leading-[1.42] tracking-[-0.02em]">
+              <Swipe step={1}>Highlight</Swipe> a line. Keep writing with the{" "}
+              <Rule icon={CloudOff} step={2}>
+                network off
+              </Rule>
+              . Paste <Syntax step={3}>Markdown</Syntax> straight in, share a{" "}
+              <Rule icon={Link2} step={4}>
+                read-only link
+              </Rule>{" "}
+              when a draft is ready, and hand over <Latex step={5} /> when the
+              journal asks.
+            </p>
           </div>
         </section>
 

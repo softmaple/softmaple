@@ -11,8 +11,10 @@ export default function DashboardLayout({
 }) {
   return (
     <div className="min-h-dvh bg-background">
-      <header className="border-b bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-5 sm:px-8">
+      {/* App chrome always carries its surface; only the marketing header
+          grows one on scroll. */}
+      <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex h-18 max-w-7xl items-center justify-between gap-4 px-5 sm:px-8">
           <Link
             aria-label="Softmaple dashboard"
             className="inline-flex min-w-0 items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"

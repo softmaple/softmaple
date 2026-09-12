@@ -22,6 +22,12 @@ const links = [
   { label: "GitHub", href: SITE_CONFIG.GITHUB_REPO },
 ];
 
+/**
+ * The header carries no surface over the hero and grows one as the reader
+ * leaves it. That reaction is a scroll-driven CSS animation on
+ * `.site-header::after` (see `app/design.css`) rather than a scroll listener,
+ * so it costs nothing on the main thread and stays in step with a flick.
+ */
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -34,18 +40,22 @@ export function SiteHeader() {
   }, []);
 
   return (
-    <header className="border-b border-border/60 bg-background">
-      <div className="mx-auto flex h-20 max-w-7xl items-center gap-3 px-5 sm:px-8">
-        <Link href="/" aria-label="Softmaple home">
+    <header className="site-header">
+      <div className="mx-auto flex h-18 max-w-7xl items-center gap-3 px-5 sm:px-8">
+        <Link
+          aria-label="Softmaple home"
+          className="rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+          href="/"
+        >
           <SoftmapleWordmark className="text-2xl" />
         </Link>
         <nav
           aria-label="Main navigation"
-          className="ml-12 hidden items-center gap-7 text-sm text-muted-foreground md:flex"
+          className="ml-12 hidden items-center gap-8 text-sm text-muted-foreground md:flex"
         >
           {links.map((link) => (
             <a
-              className="transition-colors hover:text-foreground"
+              className="stroke-link rounded-sm transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
               href={link.href}
               key={link.label}
             >
@@ -66,10 +76,10 @@ export function SiteHeader() {
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
+                aria-label="Open navigation"
                 className="md:hidden"
                 size="icon"
                 variant="outline"
-                aria-label="Open navigation"
               >
                 <Menu />
               </Button>
@@ -88,9 +98,9 @@ export function SiteHeader() {
                 {links.map((link) => (
                   <Button
                     asChild
-                    variant="ghost"
                     className="h-11 justify-between px-3 text-base"
                     key={link.label}
+                    variant="ghost"
                   >
                     <a href={link.href} onClick={() => setOpen(false)}>
                       {link.label}

@@ -1,94 +1,112 @@
 /**
- * Softmaple autumn theme.
+ * Softmaple — "Late autumn".
  *
- * Light — "Parchment & Maple": warm paper stock, bark-brown ink, burnt maple
- * accents. Dark — "Ember & Bark": deep bark ground lit by an amber ember.
- * Every surface in the app reads from these tokens, so the season lives here
- * and nowhere else.
+ * The brand is a maple, but not the pumpkin-spice kind: this is late autumn,
+ * when the sky has gone grey, the paper is cold-pressed, and exactly one leaf
+ * is still red. Light — cold stone paper, bark ink, a single lacquer accent.
+ * Dark — wet bark at night, lit by one ember.
+ *
+ * Three typographic registers, and the split is a rule you can see:
+ *   serif (display)  — what you wrote.
+ *   sans  (body)     — what you press.
+ *   mono  (utility)  — what the machine sees.
+ *
+ * Motion lives at the bottom of this file. It is entirely scroll-driven CSS:
+ * no animation library, no scroll listeners, no main-thread work. Every
+ * enhancement sits behind `@supports (animation-timeline: view())` and
+ * `prefers-reduced-motion: no-preference`, so a browser without scroll
+ * timelines — or a reader who asked for stillness — gets the same page,
+ * fully legible, standing still.
  */
 
 :root {
-  --background: #fbf6ee;
-  --foreground: #2b2019;
-  --card: #fffdf9;
-  --card-foreground: #2b2019;
-  --popover: #fffdf9;
-  --popover-foreground: #2b2019;
-  --primary: #b1451c;
-  --primary-foreground: #fff8f1;
-  --secondary: #f2e6d6;
-  --secondary-foreground: #2b2019;
-  --muted: #f2e6d6;
-  --muted-foreground: #6c574a;
-  --accent: #f7ded0;
-  --accent-foreground: #2b2019;
-  --destructive: #a3123a;
-  --destructive-foreground: #fff8f1;
-  --success: #4d6b2f;
-  --success-foreground: #fff8f1;
-  --border: #e5d3bd;
-  --input: #e0cab1;
-  --ring: #b1451c;
-  --sidebar: #fdf8f1;
-  --sidebar-foreground: #2b2019;
-  --sidebar-primary: #b1451c;
-  --sidebar-primary-foreground: #fff8f1;
-  --sidebar-accent: #f2e6d6;
-  --sidebar-accent-foreground: #2b2019;
-  --sidebar-border: #e5d3bd;
-  --sidebar-ring: #b1451c;
-  --radius: 0.75rem;
+  --background: #efede8;
+  --foreground: #1b1917;
+  --card: #faf9f6;
+  --card-foreground: #1b1917;
+  --popover: #faf9f6;
+  --popover-foreground: #1b1917;
+  --primary: #a5301c;
+  --primary-foreground: #fbf7f2;
+  --secondary: #e4e0d8;
+  --secondary-foreground: #1b1917;
+  --muted: #e4e0d8;
+  --muted-foreground: #6c665d;
+  --accent: #f0ddd4;
+  --accent-foreground: #1b1917;
+  --destructive: #99122f;
+  --destructive-foreground: #fbf7f2;
+  --success: #47632c;
+  --success-foreground: #fbf7f2;
+  --border: #dbd6cd;
+  --input: #cdc6ba;
+  --ring: #a5301c;
+  --sidebar: #eae7e0;
+  --sidebar-foreground: #1b1917;
+  --sidebar-primary: #a5301c;
+  --sidebar-primary-foreground: #fbf7f2;
+  --sidebar-accent: #e4e0d8;
+  --sidebar-accent-foreground: #1b1917;
+  --sidebar-border: #dbd6cd;
+  --sidebar-ring: #a5301c;
+  /* Crisp corners: this is printed matter, not a bubble. */
+  --radius: 0.375rem;
 
-  /* Seasonal accents, for atmosphere rather than semantics. */
-  --autumn-ember: #c2521f;
-  --autumn-gold: #d59a2c;
-  --autumn-canopy: #8c3f1d;
-  --autumn-wash-strength: 14%;
-  --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
+  /* Atmosphere, not semantics. */
+  --maple: #a5301c;
+  --bark: #221f1b;
+  --bark-foreground: #eee9e0;
+  --bark-muted: #9b9283;
+  --bark-border: #38332c;
+  /* One tile of fractal noise, tuned per theme. */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.028'/%3E%3C/svg%3E");
+  --sheet-shadow: 0 1px 1px rgb(34 31 27 / 4%), 0 18px 44px -28px rgb(34 31 27 / 34%);
+  --sheet-shadow-lifted: 0 1px 1px rgb(34 31 27 / 5%), 0 34px 70px -30px rgb(34 31 27 / 42%);
+
+  /* One easing curve for the whole product: a page settling onto a desk. */
+  --ease-settle: cubic-bezier(0.22, 0.68, 0.24, 1);
+  --ease-exit: cubic-bezier(0.55, 0, 0.66, 0.28);
 }
 
 .dark {
-  --background: #17120f;
-  --foreground: #f4e9dc;
-  --card: #211a15;
-  --card-foreground: #f4e9dc;
-  --popover: #241c17;
-  --popover-foreground: #f4e9dc;
-  --primary: #ef9a5c;
-  --primary-foreground: #24150c;
-  --secondary: #2d231c;
-  --secondary-foreground: #f4e9dc;
-  --muted: #2d231c;
-  --muted-foreground: #bda695;
-  --accent: #3a2a20;
-  --accent-foreground: #f7e2d0;
-  --destructive: #f2657f;
-  --destructive-foreground: #24150c;
-  --success: #a3c46a;
-  --success-foreground: #1b2410;
-  --border: #3b2f26;
-  --input: #47382d;
-  --ring: #ef9a5c;
-  --sidebar: #1c1611;
-  --sidebar-foreground: #f4e9dc;
-  --sidebar-primary: #ef9a5c;
-  --sidebar-primary-foreground: #24150c;
-  --sidebar-accent: #2d231c;
-  --sidebar-accent-foreground: #f4e9dc;
-  --sidebar-border: #3b2f26;
-  --sidebar-ring: #ef9a5c;
+  --background: #131210;
+  --foreground: #ede8df;
+  --card: #1c1a17;
+  --card-foreground: #ede8df;
+  --popover: #201d1a;
+  --popover-foreground: #ede8df;
+  --primary: #e9683e;
+  --primary-foreground: #1a0f09;
+  --secondary: #272320;
+  --secondary-foreground: #ede8df;
+  --muted: #272320;
+  --muted-foreground: #a89e91;
+  --accent: #33291f;
+  --accent-foreground: #f3e3d6;
+  --destructive: #ef5f77;
+  --destructive-foreground: #1a0f09;
+  --success: #9dbd63;
+  --success-foreground: #141a0c;
+  --border: #322c26;
+  --input: #3e372f;
+  --ring: #e9683e;
+  --sidebar: #171512;
+  --sidebar-foreground: #ede8df;
+  --sidebar-primary: #e9683e;
+  --sidebar-primary-foreground: #1a0f09;
+  --sidebar-accent: #272320;
+  --sidebar-accent-foreground: #ede8df;
+  --sidebar-border: #322c26;
+  --sidebar-ring: #e9683e;
 
-  --autumn-ember: #e2703a;
-  --autumn-gold: #e0a94a;
-  --autumn-canopy: #f0a86a;
-  --autumn-wash-strength: 10%;
-  --autumn-shadow: #000000;
-}
-
-@theme inline {
-  --font-sans: var(--font-body);
-  --font-display: var(--font-syne);
-  --font-mono: var(--font-utility);
+  --maple: #e9683e;
+  --bark: #211d19;
+  --bark-foreground: #ede8df;
+  --bark-muted: #8d8478;
+  --bark-border: #2a2521;
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.016'/%3E%3C/svg%3E");
+  --sheet-shadow: 0 1px 1px rgb(0 0 0 / 32%), 0 18px 44px -28px rgb(0 0 0 / 82%);
+  --sheet-shadow-lifted: 0 1px 1px rgb(0 0 0 / 36%), 0 34px 70px -30px rgb(0 0 0 / 88%);
 }
 
 @layer base {
@@ -100,74 +118,614 @@
     min-width: 320px;
     min-height: 100dvh;
     overflow-x: clip;
-    /* A low canopy light: ember from the left, late gold from the right. */
-    background-image:
-      radial-gradient(
-        58rem 38rem at 8% -14%,
-        color-mix(in srgb, var(--autumn-ember) var(--autumn-wash-strength), transparent),
-        transparent 60%
-      ),
-      radial-gradient(
-        46rem 32rem at 102% -6%,
-        color-mix(in srgb, var(--autumn-gold) var(--autumn-wash-strength), transparent),
-        transparent 58%
-      );
-    background-repeat: no-repeat;
+    /* Both text families carry an optical-size axis; let it do its job. */
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    /*
+     * Cold-pressed stock. The grain is painted straight onto the ground rather
+     * than through an overlay, so nothing has to be lifted above it and no
+     * stacking context is introduced for dialogs and portals to fight.
+     */
+    background-image: var(--paper-grain);
     background-attachment: fixed;
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--autumn-gold) 34%, transparent);
+    background: color-mix(in srgb, var(--maple) 22%, transparent);
+  }
+
+  /**
+   * Display type is the product's own material: typeset, not decorated.
+   * `opsz` is deliberately left to the browser so one heading class re-cuts
+   * itself between a 96px hero and a 20px card title — which is what a real
+   * typesetter would do, and what the product's own LaTeX output does.
+   */
+  .font-display {
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
   }
 }
 
 @layer components {
-  .manuscript-stage {
-    position: relative;
-    padding: 2rem 1.2rem 2.5rem;
-    border-radius: 2rem;
-    background:
-      radial-gradient(
-        120% 90% at 85% 0%,
-        color-mix(in srgb, var(--autumn-gold) 22%, transparent),
-        transparent 58%
-      ),
-      radial-gradient(
-        95% 80% at 0% 100%,
-        color-mix(in srgb, var(--autumn-ember) 16%, transparent),
-        transparent 60%
-      ),
-      var(--secondary);
-  }
+  /* ---------------------------------------------------------------- sheets */
 
-  .manuscript-sheet {
+  /**
+   * A sheet is a page lying on the desk. It is the only elevated surface in
+   * the product, so elevation always means "this is a document".
+   */
+  .sheet {
     position: relative;
     border: 1px solid var(--border);
-    border-radius: 0.9rem;
+    border-radius: 0.35rem;
     background: var(--card);
-    box-shadow: 0 24px 48px -26px var(--autumn-shadow);
-    transform: rotate(-2deg);
+    /* A sheet brings its own ink, so it stays readable on the bark acts. */
+    color: var(--card-foreground);
+    box-shadow: var(--sheet-shadow);
   }
 
-  .manuscript-note {
-    position: absolute;
-    right: 1.5rem;
-    bottom: 1.25rem;
+  .sheet-chrome {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.7rem;
-    background: var(--card);
-    padding: 0.8rem 1rem;
-    color: var(--primary);
-    font-size: 0.75rem;
-    box-shadow: 0 6px 18px -6px var(--autumn-shadow);
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    padding: 0.7rem 1rem;
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    letter-spacing: 0.02em;
+    color: var(--muted-foreground);
   }
 
+  /* Prose set the way the editor sets it. */
+  .prose-editorial {
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 26, "WONK" 0;
+    line-height: 1.65;
+  }
+
+  /* The mono register: line numbers, syntax, status. */
+  .eyebrow {
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .eyebrow-maple {
+    color: var(--maple);
+  }
+
+  /* ------------------------------------------------------------- dark acts */
+
+  /**
+   * Two acts of the landing page sit on bark instead of paper, the way a
+   * printed book drops to a full-bleed plate. It is the only place the
+   * palette inverts, which is what makes the one red leaf read as red.
+   */
+  .bark-act {
+    position: relative;
+    isolation: isolate;
+    border-block: 1px solid var(--bark-border);
+    /* The plate paints its own ground, so it carries its own grain too. */
+    background-color: var(--bark);
+    background-image: var(--paper-grain);
+    color: var(--bark-foreground);
+  }
+
+  .bark-act ::selection {
+    background: color-mix(in srgb, var(--maple) 34%, transparent);
+  }
+
+  /* ------------------------------------------------------- link underlines */
+
+  /**
+   * An underline that draws itself left-to-right — a pen stroke, not a
+   * text-decoration toggle.
+   */
+  .stroke-link {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1px;
+    transition: background-size 340ms var(--ease-settle);
+  }
+
+  .stroke-link:hover,
+  .stroke-link:focus-visible {
+    background-size: 100% 1px;
+  }
+
+  /* ------------------------------------------------------------ app cards */
+
+  /**
+   * A workspace card lifts like a sheet on the desk and draws a maple rule
+   * along its top edge — the same pen stroke as `.stroke-link`, applied to a
+   * whole card instead of a word.
+   */
+  .workspace-card {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+    transition:
+      box-shadow 320ms var(--ease-settle),
+      transform 320ms var(--ease-settle);
+  }
+
+  .workspace-card::before {
+    content: "";
+    position: absolute;
+    inset-inline: -1px;
+    top: -1px;
+    height: 2px;
+    background: var(--primary);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 380ms var(--ease-settle);
+  }
+
+  .workspace-card:hover,
+  .workspace-card:focus-visible {
+    box-shadow: var(--sheet-shadow);
+    transform: translateY(-2px);
+  }
+
+  .workspace-card:hover::before,
+  .workspace-card:focus-visible::before {
+    transform: scaleX(1);
+  }
+
+  /* ---------------------------------------------------- icon affordances */
+
+  /**
+   * `data-icon` already marked which side of a label an icon sits on. Give it
+   * a job: the trailing icon leans toward wherever the control is taking you.
+   */
+  [data-icon="inline-end"] {
+    transition: transform 260ms var(--ease-settle);
+  }
+
+  :is(a, button):hover [data-icon="inline-end"] {
+    transform: translateX(0.2rem);
+  }
+
+  /* ---------------------------------------------------------------- header */
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  /**
+   * The header has no surface over the hero; it grows one as you leave. The
+   * surface is a pseudo-element so the scroll animation only ever touches
+   * opacity, which the compositor can do for free.
+   */
+  .site-header::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: 0;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--background) 82%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+  }
+
+  /* ------------------------------------------------------ four-view stage */
+
+  /**
+   * The signature. A single paragraph, held still, while scroll changes the
+   * clothing it is wearing: rich text, preview, Markdown, LaTeX.
+   *
+   * Baseline (here) is an honest vertical stack — every view visible, no
+   * pinning. The pinned scrub is layered on further down, only where the
+   * browser supports scroll timelines.
+   */
+  .stage {
+    position: relative;
+  }
+
+  /**
+   * Baseline: four separate sheets, stacked. `.stage-frame` is a plain wrapper
+   * until the pinned mode below turns it into the one persistent sheet.
+   */
+  .stage-views {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  .stage-view {
+    min-width: 0;
+  }
+
+  .stage-rail {
+    /* Only meaningful while the stage is pinned; see the @supports block. */
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.75rem;
+    border-top: 1px solid var(--bark-border);
+    padding-top: 1.25rem;
+  }
+
+  .stage-rail-item {
+    position: relative;
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--bark-muted);
+  }
+
+  /* The fill that tracks which view you are looking at. */
+  .stage-rail-item::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -1.25rem;
+    height: 1px;
+    background: var(--maple);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  /* ------------------------------------------------------- presence caret */
+
+  /**
+   * A line of text being typed. The line is set in the mono register, so `ch`
+   * measures it exactly and the caret can ride the clip edge instead of
+   * floating somewhere near it.
+   */
+  .caret-line {
+    position: relative;
+    display: inline-block;
+    overflow: hidden;
+    width: var(--line-length);
+    max-width: 100%;
+    white-space: pre;
+    vertical-align: bottom;
+  }
+
+  .caret-line::after {
+    content: "";
+    position: absolute;
+    top: 0.12em;
+    bottom: 0.12em;
+    right: 0;
+    width: 2px;
+    background: var(--caret-color, var(--maple));
+  }
+
+  /**
+   * A collaborator's name rides the end of their own caret, the way it does in
+   * the editor — so as the line types itself, the flag travels with it.
+   */
+  .presence-flag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 0 0.2rem 0.2rem 0;
+    padding: 0.05rem 0.32rem;
+    font-family: var(--font-utility);
+    font-size: 0.625rem;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    vertical-align: bottom;
+    background: var(--caret-color, var(--maple));
+  }
+}
+
+/* ====================================================================== */
+/*  Motion                                                                */
+/* ====================================================================== */
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(2rem) rotate(-1.2deg) scale(0.97);
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.75rem);
+    filter: blur(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes wipe-up {
+  from {
+    opacity: 0;
+    transform: translateY(0.9em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translateY(2.5%);
+  }
+  to {
+    transform: translateY(-2.5%);
+  }
+}
+
+@keyframes surface {
+  to {
+    opacity: 1;
+  }
+}
+
+/* One view of the stage: arrives, holds, leaves. */
+@keyframes stage-swap {
+  0% {
+    opacity: 0;
+    transform: translateY(1.25rem);
+    filter: blur(7px);
+  }
+  26%,
+  74% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-1.25rem);
+    filter: blur(7px);
+  }
+}
+
+@keyframes rail-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes rail-lit {
+  from {
+    color: var(--bark-muted);
+  }
+  to {
+    color: var(--bark-foreground);
+  }
+}
+
+@keyframes type-in {
+  from {
+    width: 0;
+  }
+  to {
+    width: var(--line-length);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  46% {
+    opacity: 1;
+  }
+  47%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/**
+ * Page-load entrance. Time-based and once only — this is the only motion on
+ * the page that is not driven by the reader's own scrolling.
+ */
+@layer components {
+  @media (prefers-reduced-motion: no-preference) {
+    [data-enter] {
+      animation: rise 900ms var(--ease-settle) both;
+      animation-delay: calc(var(--enter-step, 0) * 90ms);
+    }
+
+    [data-enter="sheet"] {
+      animation-name: settle;
+      animation-duration: 1200ms;
+    }
+  }
+}
+
+@layer components {
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      /* ------------------------------------------------------ scroll reveal */
+
+      /**
+       * Reveals are scrubbed by the reader's own scrolling, not fired by a
+       * threshold, so scrolling back up un-reveals in step with the hand.
+       * A "stagger" here is a different scroll offset per child rather than a
+       * timed delay, which is the only kind of stagger that stays honest when
+       * the reader flicks the page.
+       */
+      [data-reveal] {
+        animation: rise linear both;
+        animation-timeline: view();
+        animation-range: entry 6% cover 26%;
+      }
+
+      [data-reveal="line"] {
+        animation-name: wipe-up;
+        animation-range: entry 12% cover 22%;
+      }
+
+      [data-reveal-step="1"] {
+        animation-range: entry 6% cover 30%;
+      }
+
+      [data-reveal-step="2"] {
+        animation-range: entry 6% cover 38%;
+      }
+
+      [data-reveal-step="3"] {
+        animation-range: entry 6% cover 46%;
+      }
+
+      [data-drift] {
+        animation: drift linear both;
+        animation-timeline: view();
+        animation-range: cover 0% cover 100%;
+      }
+
+      /* ------------------------------------------------------------ header */
+
+      .site-header::after {
+        animation: surface linear both;
+        animation-timeline: scroll(root block);
+        animation-range: 0 5rem;
+      }
+
+      /* ------------------------------------------------- four-view stage */
+
+      /**
+       * The runway is 400vh, which makes the arithmetic below viewport
+       * independent: the `cover` range spans runway + viewport = 5x the
+       * viewport, the sticky pin engages at 1/5 (20%) and releases at 4/5
+       * (80%), and the 60% in between splits into four equal 15% views.
+       */
+      .stage {
+        height: 400vh;
+        view-timeline-name: --stage;
+        view-timeline-axis: block;
+      }
+
+      /*
+       * Only the pin itself. Column layout stays in the markup's utilities so
+       * the responsive grid is not fighting a rule from this file.
+       */
+      .stage-pin {
+        position: sticky;
+        top: 0;
+        min-height: 100svh;
+      }
+
+      /**
+       * One sheet, four sets of clothes. The frame carries the paper — border,
+       * background, shadow — so the page itself never dissolves as the views
+       * cross; only what is printed on it does.
+       */
+      .stage-frame {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 0.35rem;
+        background: var(--card);
+        color: var(--card-foreground);
+        box-shadow: var(--sheet-shadow-lifted);
+      }
+
+      /* All four views occupy one cell, so the words never move. */
+      .stage-view {
+        grid-area: 1 / 1;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        animation: stage-swap linear both;
+        animation-timeline: --stage;
+      }
+
+      /*
+       * Each window spans 18% of the cover range but steps by only 14%, so a
+       * view starts arriving before the previous one has finished leaving.
+       */
+      .stage-view:nth-child(1) {
+        animation-range: cover 20% cover 38%;
+      }
+      .stage-view:nth-child(2) {
+        animation-range: cover 34% cover 52%;
+      }
+      .stage-view:nth-child(3) {
+        animation-range: cover 48% cover 66%;
+      }
+      .stage-view:nth-child(4) {
+        animation-range: cover 62% cover 80%;
+      }
+
+      .stage-rail-item {
+        animation: rail-lit linear both;
+        animation-timeline: --stage;
+      }
+
+      .stage-rail-item::after {
+        animation: rail-fill linear both;
+        animation-timeline: --stage;
+      }
+
+      .stage-rail-item:nth-child(1),
+      .stage-rail-item:nth-child(1)::after {
+        animation-range: cover 20% cover 26%;
+      }
+      .stage-rail-item:nth-child(2),
+      .stage-rail-item:nth-child(2)::after {
+        animation-range: cover 34% cover 40%;
+      }
+      .stage-rail-item:nth-child(3),
+      .stage-rail-item:nth-child(3)::after {
+        animation-range: cover 48% cover 54%;
+      }
+      .stage-rail-item:nth-child(4),
+      .stage-rail-item:nth-child(4)::after {
+        animation-range: cover 62% cover 68%;
+      }
+
+      .stage-rail {
+        display: flex;
+      }
+
+      /* ------------------------------------------------- presence typing */
+
+      .caret-line {
+        animation: type-in linear both;
+        animation-timeline: view();
+        animation-range: entry 30% cover 34%;
+      }
+
+      .caret-line[data-line="2"] {
+        animation-range: entry 55% cover 46%;
+      }
+
+      /* Only the caret you are driving blinks. */
+      .caret-line[data-caret]::after {
+        animation: caret-blink 1100ms steps(1, end) infinite;
+      }
+    }
+  }
+}
+
+/* ====================================================================== */
+/*  Markdown preview                                                      */
+/* ====================================================================== */
+
+@layer components {
   .markdown-preview {
     color: var(--foreground);
-    line-height: 1.75;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 26, "WONK" 0;
+    line-height: 1.7;
   }
 
   .markdown-preview > * + * {
@@ -178,9 +736,12 @@
   .markdown-preview h2,
   .markdown-preview h3 {
     margin-top: 2rem;
-    font-family: var(--font-syne);
-    font-weight: 650;
-    line-height: 1.2;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
+    font-weight: 600;
+    line-height: 1.18;
+    letter-spacing: -0.015em;
   }
 
   .markdown-preview h1 {
@@ -244,6 +805,7 @@
   .markdown-preview table {
     width: 100%;
     border-collapse: collapse;
+    font-family: var(--font-body);
     font-size: 0.9rem;
   }
 
@@ -255,6 +817,10 @@
   }
 }
 
+/* ====================================================================== */
+/*  Stillness                                                             */
+/* ====================================================================== */
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -262,7 +828,25 @@
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-timeline: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* Nothing may be left mid-reveal when motion is switched off. */
+  [data-enter],
+  [data-reveal],
+  [data-drift],
+  .stage-view,
+  .caret-line,
+  .presence-flag {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    width: auto !important;
+  }
+
+  .site-header::after {
+    opacity: 1 !important;
   }
 }
 

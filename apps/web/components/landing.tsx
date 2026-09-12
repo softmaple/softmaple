@@ -1,214 +1,178 @@
+import Image from "next/image";
 import Link from "next/link";
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Check,
-  FileCode2,
-  FileText,
-  Link2,
-  Users,
-  PenLine,
-} from "lucide-react";
-import { Button } from "@softmaple/ui/components/button";
-import { Badge } from "@softmaple/ui/components/badge";
-import { Separator } from "@softmaple/ui/components/separator";
+import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
 import { SITE_CONFIG } from "@softmaple/config";
-import { SiteHeader } from "@/components/site-header";
-import { SoftmapleWordmark } from "@/components/BrandMark";
+import { LandingBrand } from "./landing/Brand";
+import {
+  LandingHeader,
+  Narrative,
+  CollaborationDemo,
+  HeroMotion,
+} from "./landing/Interactions";
+import styles from "./landing/landing.module.css";
 
-const features = [
-  {
-    icon: Users,
-    title: "Good ideas have company.",
-    body: "Write together in the same document. See who’s here and pick up where you left off, even after reconnecting.",
-    label: "Made for collaboration",
-  },
-  {
-    icon: FileCode2,
-    title: "Your words. More possibilities.",
-    body: "Move between rich text, Preview, Markdown, and LaTeX. Keep your attention on the idea while the format falls into place.",
-    label: "One document, four views",
-  },
-  {
-    icon: Link2,
-    title: "Share when you’re ready.",
-    body: "Give your work a read-only public link. Keep editing in your workspace, and turn off the link whenever you need to.",
-    label: "Sharing on your terms",
-  },
-];
+function StartWriting() {
+  return (
+    <Link className={styles.primary} href="/signup">
+      Start writing <ArrowRight aria-hidden="true" />
+    </Link>
+  );
+}
 
 export default function LandingPage() {
   return (
-    <div className="min-h-dvh bg-background text-foreground">
-      <a
-        className="sr-only focus:not-sr-only focus:absolute focus:bg-card focus:p-4"
-        href="#main"
-      >
+    <div className={styles.landing}>
+      <a className={styles.skip} href="#main">
         Skip to content
       </a>
-      <SiteHeader />
       <main id="main">
-        <section className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.95fr_1.05fr] lg:gap-10 lg:py-24">
-          <div>
-            <Badge variant="secondary">
-              <PenLine data-icon="inline-start" /> A shared space for your words
-            </Badge>
-            <h1 className="mt-7 font-display text-[clamp(3.25rem,6.6vw,6rem)] font-semibold leading-[1.02] tracking-[-0.065em]">
-              A little space.
-              <br />
-              For <span className="text-primary">big ideas.</span>
-            </h1>
-            <p className="mt-7 max-w-md text-lg leading-8 text-muted-foreground">
-              From the first rough note to the final paper. Write, shape, and
-              share your thinking, together.
-            </p>
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Button asChild size="lg">
-                <Link href="/signup">
-                  Start writing <ArrowRight data-icon="inline-end" />
-                </Link>
-              </Button>
-              <Button asChild size="lg" variant="outline">
-                <a href={SITE_CONFIG.PLAYGROUND}>
-                  Explore the editor <ArrowUpRight data-icon="inline-end" />
-                </a>
-              </Button>
-            </div>
-            <p className="mt-5 text-sm text-muted-foreground">
-              Rich text. Markdown. LaTeX. Room to think.
-            </p>
-          </div>
-          <div
-            className="manuscript-stage"
-            aria-label="Example of a shared Softmaple document"
-          >
-            <div className="manuscript-sheet">
-              <div className="flex items-center gap-2 border-b px-5 py-4 text-xs text-muted-foreground">
-                <FileText className="size-4 text-primary" />
-                <span className="truncate">
-                  Field notes / A slower kind of progress
-                </span>
-                <Check className="ml-auto size-4 shrink-0 text-primary" />
-                <span className="hidden sm:inline">Saved</span>
-              </div>
-              <div className="px-6 py-9 sm:px-10 sm:py-12">
-                <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Field notes · Working draft
-                </p>
-                <h2 className="mt-5 font-display text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
-                  A slower kind
-                  <br />
-                  of progress
-                </h2>
-                <p className="mt-6 text-sm leading-7 text-muted-foreground">
-                  What if the most useful thing we could make was a little more
-                  room to think?
-                </p>
-                <p className="mt-4 text-sm leading-7">
-                  A place for unfinished sentences.
-                  <br />
-                  For questions worth sitting with.
-                  <br />
-                  <span className="bg-accent text-accent-foreground">
-                    For ideas that get better together.
-                  </span>
-                </p>
-                <Separator className="my-7" />
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="grid size-7 place-items-center rounded-full bg-secondary text-primary">
-                    L
-                  </span>
-                  <span>Lina is writing…</span>
-                  <PenLine className="ml-auto size-4 text-primary" />
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-4 border-t px-5 py-3 text-[11px] text-muted-foreground">
-                <span className="font-medium text-primary">Rich text</span>
-                <span>Preview</span>
-                <span>Markdown</span>
-                <span>LaTeX</span>
-              </div>
-            </div>
-            <div className="manuscript-note">
-              <Users className="size-4" />
-              <span>A shared thought starts here.</span>
-            </div>
-          </div>
-        </section>
         <section
-          className="mx-auto max-w-7xl px-5 pb-20 sm:px-8 lg:pb-28"
-          aria-labelledby="features-heading"
+          className={styles.hero}
+          id="product"
+          aria-labelledby="hero-title"
         >
-          <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <h2
-              id="features-heading"
-              className="max-w-lg font-display text-3xl font-semibold tracking-tight sm:text-4xl"
+          <LandingHeader />
+          <HeroMotion>
+            <Image
+              className={styles.ribbon}
+              src="/landing/paper-ribbon.webp"
+              alt=""
+              width={1448}
+              height={1086}
+              sizes="100vw"
+              preload
+            />
+            <div className={styles.paperWords}>
+              <p className={styles.paperEyebrow}>01 / NOTES</p>
+              <h2>A brighter tomorrow</h2>
+              <p>
+                Ideas grow stronger when we share them. Softmaple is a{" "}
+                <mark>place for curious minds</mark> to write together, think
+                more clearly, and make progress — side by side.
+              </p>
+              <p>
+                Small steps, shared openly, can lead to extraordinary things.
+                Let’s build a kinder, more thoughtful internet.
+              </p>
+              <span
+                className={`${styles.cursor} ${styles.mia} ${styles.paperMia}`}
+                aria-hidden="true"
+              >
+                Mia
+              </span>
+              <span
+                className={`${styles.cursor} ${styles.adam} ${styles.paperAdam}`}
+                aria-hidden="true"
+              >
+                Adam
+              </span>
+              <span
+                className={`${styles.cursor} ${styles.leo} ${styles.paperLeo}`}
+                aria-hidden="true"
+              >
+                Leo
+              </span>
+            </div>
+            <span
+              className={`${styles.handwritten} ${styles.noteOne}`}
+              aria-hidden="true"
             >
-              Less between you
+              Better
               <br />
-              and the next sentence.
+              ideas
+              <br />
+              together.
+              <i />
+            </span>
+            <span
+              className={`${styles.handwritten} ${styles.noteTwo}`}
+              aria-hidden="true"
+            >
+              A<br />
+              kinder
+              <br />
+              internet.
+              <br />
+              Perhaps.
+              <i />
+            </span>
+            <span
+              className={`${styles.handwritten} ${styles.noteThree}`}
+              aria-hidden="true"
+            >
+              This feels
+              <br />
+              right. <b>✧</b>
+            </span>
+          </HeroMotion>
+          <div className={styles.heroCopy}>
+            <h1 id="hero-title">
+              Good ideas
+              <br />
+              come together.
+            </h1>
+            <p>A thoughtful space to write, connect, and create. Together.</p>
+            <div className={styles.actions}>
+              <StartWriting />
+              <a className={styles.secondary} href="#experience">
+                Explore the experience
+              </a>
+            </div>
+          </div>
+          <a className={styles.scrollCue} href="#collaboration">
+            Scroll to unfold
+            <ArrowDown aria-hidden="true" />
+          </a>
+          <span className={styles.heroDemoLabel}>
+            Collaboration, illustrated
+          </span>
+        </section>
+        <Narrative />
+        <div className={styles.divider}>
+          <span>Made for the way ideas happen</span>
+        </div>
+        <section
+          className={styles.feature}
+          id="experience"
+          aria-labelledby="feature-title"
+        >
+          <CollaborationDemo />
+          <div className={styles.featureCopy}>
+            <h2 id="feature-title">
+              Follow the thought.
+              <br />
+              Stay in the flow.
             </h2>
-            <p className="max-w-xs text-sm leading-6 text-muted-foreground">
-              A focused toolkit for the way ideas actually take shape.
+            <p>
+              Write, refine, and explore ideas together
+              <br className={styles.desktopBreak} /> in a space that feels as
+              natural as a conversation, but keeps everything in one place.
+            </p>
+            <StartWriting />
+            <p
+              className={`${styles.handwritten} ${styles.featureNote}`}
+              aria-hidden="true"
+            >
+              Better ideas
+              <br />
+              belong together.
+              <i />
             </p>
           </div>
-          <div className="grid gap-5 md:grid-cols-3">
-            {features.map(({ icon: Icon, ...feature }) => (
-              <article
-                className="rounded-2xl border bg-card p-7"
-                key={feature.title}
-              >
-                <div className="mb-8 flex items-center gap-3">
-                  <span className="grid size-10 place-items-center rounded-xl bg-secondary text-primary">
-                    <Icon className="size-5" />
-                  </span>
-                  <p className="text-xs text-muted-foreground">
-                    {feature.label}
-                  </p>
-                </div>
-                <h3 className="font-display text-xl font-semibold tracking-tight">
-                  {feature.title}
-                </h3>
-                <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                  {feature.body}
-                </p>
-              </article>
-            ))}
-          </div>
-        </section>
-        <section className="bg-secondary px-5 py-16 text-center sm:px-8 sm:py-20">
-          <p className="font-mono text-xs text-muted-foreground">
-            THE NEXT PAGE IS YOURS
-          </p>
-          <h2 className="mt-5 font-display text-4xl font-semibold tracking-tight sm:text-5xl">
-            Make room for a new idea.
-          </h2>
-          <p className="mt-4 text-muted-foreground">
-            Open a workspace. Invite your people. Find your words.
-          </p>
-          <Button asChild className="mt-7" size="lg">
-            <Link href="/signup">
-              Create your workspace <ArrowRight data-icon="inline-end" />
-            </Link>
-          </Button>
         </section>
       </main>
-      <footer className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-9 sm:flex-row sm:items-center sm:px-8">
+      <footer className={styles.footer}>
         <Link href="/" aria-label="Softmaple home">
-          <SoftmapleWordmark className="text-xl" />
+          <LandingBrand />
         </Link>
-        <span className="text-xs text-muted-foreground">
+        <span className={styles.copyright}>
           © {new Date().getFullYear()} Softmaple
         </span>
-        <nav
-          aria-label="Footer"
-          className="flex flex-wrap gap-6 text-sm text-muted-foreground sm:ml-auto"
-        >
-          <a href={SITE_CONFIG.DOCS}>Docs</a>
-          <a href={SITE_CONFIG.GITHUB_REPO}>GitHub</a>
-          <a href={`mailto:${SITE_CONFIG.CONTACT_EMAIL}`}>
-            Say hello <span aria-hidden="true">↗</span>
+        <nav aria-label="Footer">
+          <a href={SITE_CONFIG.GITHUB_REPO}>
+            GitHub <ArrowUpRight aria-hidden="true" />
           </a>
+          <a href={SITE_CONFIG.DOCS}>Docs</a>
         </nav>
       </footer>
     </div>

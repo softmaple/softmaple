@@ -86,16 +86,16 @@ export default async function WorkspacePage({ params }: Props) {
 
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
-      <header className="border-b bg-card/50 px-4 py-8 sm:px-6 lg:px-8">
+      <header className="border-b bg-card/50 px-4 py-10 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+            <p className="eyebrow eyebrow-maple">
               Workspace / {membership.role.toLowerCase()}
             </p>
-            <h1 className="font-display mt-2 truncate text-3xl font-semibold">
+            <h1 className="mt-4 truncate font-display text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">
               {workspace.title}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            <p className="prose-editorial mt-2.5 max-w-[52ch] text-sm text-muted-foreground">
               {workspace.description || "A shared space for focused writing."}
             </p>
           </div>
@@ -125,17 +125,21 @@ export default async function WorkspacePage({ params }: Props) {
         <section className="min-w-0">
           <div className="mb-4 flex items-end justify-between border-b pb-3">
             <div>
-              <h2 className="text-lg font-semibold">Recent documents</h2>
-              <p className="text-sm text-muted-foreground">
+              <h2 className="font-display text-lg font-semibold tracking-[-0.02em]">
+                Recent documents
+              </h2>
+              <p className="font-mono text-[11px] text-muted-foreground">
                 {documentCount} total
               </p>
             </div>
           </div>
           {documents.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-10 text-center">
-              <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
-              <h3 className="mt-4 font-medium">No documents yet</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
+            <div className="rounded-sm border border-dashed p-12 text-center">
+              <FileText className="mx-auto size-8 text-muted-foreground" />
+              <h3 className="mt-5 font-display text-lg font-semibold tracking-[-0.02em]">
+                No documents yet
+              </h3>
+              <p className="prose-editorial mt-1.5 text-sm text-muted-foreground">
                 Give your next idea a page of its own.
               </p>
               {canEdit ? (
@@ -147,19 +151,21 @@ export default async function WorkspacePage({ params }: Props) {
               ) : null}
             </div>
           ) : (
-            <div className="divide-y rounded-xl border bg-card">
+            <div className="divide-y rounded-sm border bg-card">
               {documents.map((document) => (
                 <Link
-                  className="flex min-w-0 items-center gap-4 p-4 transition-colors hover:bg-accent"
+                  className="group flex min-w-0 items-center gap-4 p-4 transition-colors hover:bg-accent"
                   href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
                   key={document.id}
                 >
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border bg-background text-primary">
-                    <FileText className="h-4 w-4" />
+                  <div className="grid size-9 shrink-0 place-items-center rounded-sm border bg-background text-primary">
+                    <FileText className="size-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-medium">{document.title}</h3>
-                    <p className="font-mono text-xs text-muted-foreground">
+                    <h3 className="truncate font-display font-semibold tracking-[-0.01em]">
+                      {document.title}
+                    </h3>
+                    <p className="font-mono text-[11px] text-muted-foreground">
                       {document.updated_at === null
                         ? "Created just now"
                         : `Edited ${new Date(document.updated_at).toLocaleString()}`}
@@ -177,8 +183,10 @@ export default async function WorkspacePage({ params }: Props) {
         <aside>
           <div className="mb-4 flex items-center justify-between border-b pb-3">
             <div>
-              <h2 className="text-lg font-semibold">Members</h2>
-              <p className="text-sm text-muted-foreground">
+              <h2 className="font-display text-lg font-semibold tracking-[-0.02em]">
+                Members
+              </h2>
+              <p className="font-mono text-[11px] text-muted-foreground">
                 {members.length} people
               </p>
             </div>
@@ -187,7 +195,7 @@ export default async function WorkspacePage({ params }: Props) {
           <div className="flex flex-col gap-1">
             {members.slice(0, 8).map((member) => (
               <div
-                className="flex items-center gap-3 rounded-xl px-2 py-2"
+                className="flex items-center gap-3 rounded-sm px-2 py-2"
                 key={member.member_id}
               >
                 <Avatar className="h-8 w-8">

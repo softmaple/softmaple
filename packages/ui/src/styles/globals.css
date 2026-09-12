@@ -83,6 +83,26 @@
   --sidebar-ring: oklch(0.439 0 0);
 }
 
+/**
+ * Typography roles. The design system owns the three roles; each app supplies
+ * the actual families by defining `--font-body`, `--font-editorial`, and
+ * `--font-utility` (see `apps/web/app/layout.tsx`). The fallbacks keep an app
+ * that defines none of them readable.
+ *
+ * These must live here, in the Tailwind entry point, for the `font-sans`,
+ * `font-display`, and `font-mono` utilities to be generated at all — a
+ * `@theme` block in a stylesheet that is merely imported alongside this one is
+ * inert.
+ */
+@theme inline {
+  --font-sans: var(--font-body, ui-sans-serif, system-ui, sans-serif);
+  --font-display: var(
+    --font-editorial,
+    var(--font-body, ui-serif, Georgia, serif)
+  );
+  --font-mono: var(--font-utility, ui-monospace, SFMono-Regular, monospace);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

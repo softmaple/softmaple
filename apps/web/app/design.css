@@ -1,94 +1,107 @@
 /**
- * Softmaple autumn theme.
+ * Softmaple — "Late autumn".
  *
- * Light — "Parchment & Maple": warm paper stock, bark-brown ink, burnt maple
- * accents. Dark — "Ember & Bark": deep bark ground lit by an amber ember.
- * Every surface in the app reads from these tokens, so the season lives here
- * and nowhere else.
+ * The brand is a maple, but not the pumpkin-spice kind: this is late autumn,
+ * when the sky has gone grey, the paper is cold-pressed, and exactly one leaf
+ * is still red. Light — cold stone paper, bark-black ink, a single lacquer
+ * accent. Dark — the same paper at night.
+ *
+ * Three typographic registers, and the split is a rule you can see:
+ *   serif (display)  — what you wrote.
+ *   sans  (body)     — what you press.
+ *   mono  (utility)  — what the machine sees.
+ *
+ * The landing page is a document: see `components/paper/`. Its layout is the
+ * `.paper` grid below — a hanging gutter for section numbers, a measured
+ * column of prose, and a right margin for a co-author's comments.
+ *
+ * Motion lives at the bottom of this file and is entirely scroll-driven CSS:
+ * no animation library, no scroll listeners, no main-thread work. Every
+ * enhancement sits behind `@supports (animation-timeline: view())` and
+ * `prefers-reduced-motion: no-preference`, so a browser without scroll
+ * timelines — or a reader who asked for stillness — gets the same page,
+ * fully legible, standing still.
  */
 
 :root {
-  --background: #fbf6ee;
-  --foreground: #2b2019;
-  --card: #fffdf9;
-  --card-foreground: #2b2019;
-  --popover: #fffdf9;
-  --popover-foreground: #2b2019;
-  --primary: #b1451c;
-  --primary-foreground: #fff8f1;
-  --secondary: #f2e6d6;
-  --secondary-foreground: #2b2019;
-  --muted: #f2e6d6;
-  --muted-foreground: #6c574a;
-  --accent: #f7ded0;
-  --accent-foreground: #2b2019;
-  --destructive: #a3123a;
-  --destructive-foreground: #fff8f1;
-  --success: #4d6b2f;
-  --success-foreground: #fff8f1;
-  --border: #e5d3bd;
-  --input: #e0cab1;
-  --ring: #b1451c;
-  --sidebar: #fdf8f1;
-  --sidebar-foreground: #2b2019;
-  --sidebar-primary: #b1451c;
-  --sidebar-primary-foreground: #fff8f1;
-  --sidebar-accent: #f2e6d6;
-  --sidebar-accent-foreground: #2b2019;
-  --sidebar-border: #e5d3bd;
-  --sidebar-ring: #b1451c;
-  --radius: 0.75rem;
+  --background: #efede8;
+  --foreground: #1b1917;
+  --card: #faf9f6;
+  --card-foreground: #1b1917;
+  --popover: #faf9f6;
+  --popover-foreground: #1b1917;
+  --primary: #a5301c;
+  --primary-foreground: #fbf7f2;
+  --secondary: #e4e0d8;
+  --secondary-foreground: #1b1917;
+  --muted: #e4e0d8;
+  --muted-foreground: #6c665d;
+  --accent: #f0ddd4;
+  --accent-foreground: #1b1917;
+  --destructive: #99122f;
+  --destructive-foreground: #fbf7f2;
+  --success: #47632c;
+  --success-foreground: #fbf7f2;
+  --border: #dbd6cd;
+  --input: #cdc6ba;
+  --ring: #a5301c;
+  --sidebar: #eae7e0;
+  --sidebar-foreground: #1b1917;
+  --sidebar-primary: #a5301c;
+  --sidebar-primary-foreground: #fbf7f2;
+  --sidebar-accent: #e4e0d8;
+  --sidebar-accent-foreground: #1b1917;
+  --sidebar-border: #dbd6cd;
+  --sidebar-ring: #a5301c;
+  /* Crisp corners: this is printed matter, not a bubble. */
+  --radius: 0.375rem;
 
-  /* Seasonal accents, for atmosphere rather than semantics. */
-  --autumn-ember: #c2521f;
-  --autumn-gold: #d59a2c;
-  --autumn-canopy: #8c3f1d;
-  --autumn-wash-strength: 14%;
-  --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
+  /* Atmosphere, not semantics. */
+  --maple: #a5301c;
+  /* One tile of fractal noise, tuned per theme. */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.028'/%3E%3C/svg%3E");
+  --sheet-shadow: 0 1px 1px rgb(34 31 27 / 4%), 0 18px 44px -28px rgb(34 31 27 / 34%);
+
+
+  /* One easing curve for the whole product: a page settling onto a desk. */
+  --ease-settle: cubic-bezier(0.22, 0.68, 0.24, 1);
+  --ease-exit: cubic-bezier(0.55, 0, 0.66, 0.28);
 }
 
 .dark {
-  --background: #17120f;
-  --foreground: #f4e9dc;
-  --card: #211a15;
-  --card-foreground: #f4e9dc;
-  --popover: #241c17;
-  --popover-foreground: #f4e9dc;
-  --primary: #ef9a5c;
-  --primary-foreground: #24150c;
-  --secondary: #2d231c;
-  --secondary-foreground: #f4e9dc;
-  --muted: #2d231c;
-  --muted-foreground: #bda695;
-  --accent: #3a2a20;
-  --accent-foreground: #f7e2d0;
-  --destructive: #f2657f;
-  --destructive-foreground: #24150c;
-  --success: #a3c46a;
-  --success-foreground: #1b2410;
-  --border: #3b2f26;
-  --input: #47382d;
-  --ring: #ef9a5c;
-  --sidebar: #1c1611;
-  --sidebar-foreground: #f4e9dc;
-  --sidebar-primary: #ef9a5c;
-  --sidebar-primary-foreground: #24150c;
-  --sidebar-accent: #2d231c;
-  --sidebar-accent-foreground: #f4e9dc;
-  --sidebar-border: #3b2f26;
-  --sidebar-ring: #ef9a5c;
+  --background: #131210;
+  --foreground: #ede8df;
+  --card: #1c1a17;
+  --card-foreground: #ede8df;
+  --popover: #201d1a;
+  --popover-foreground: #ede8df;
+  --primary: #e9683e;
+  --primary-foreground: #1a0f09;
+  --secondary: #272320;
+  --secondary-foreground: #ede8df;
+  --muted: #272320;
+  --muted-foreground: #a89e91;
+  --accent: #33291f;
+  --accent-foreground: #f3e3d6;
+  --destructive: #ef5f77;
+  --destructive-foreground: #1a0f09;
+  --success: #9dbd63;
+  --success-foreground: #141a0c;
+  --border: #322c26;
+  --input: #3e372f;
+  --ring: #e9683e;
+  --sidebar: #171512;
+  --sidebar-foreground: #ede8df;
+  --sidebar-primary: #e9683e;
+  --sidebar-primary-foreground: #1a0f09;
+  --sidebar-accent: #272320;
+  --sidebar-accent-foreground: #ede8df;
+  --sidebar-border: #322c26;
+  --sidebar-ring: #e9683e;
 
-  --autumn-ember: #e2703a;
-  --autumn-gold: #e0a94a;
-  --autumn-canopy: #f0a86a;
-  --autumn-wash-strength: 10%;
-  --autumn-shadow: #000000;
-}
-
-@theme inline {
-  --font-sans: var(--font-body);
-  --font-display: var(--font-syne);
-  --font-mono: var(--font-utility);
+  --maple: #e9683e;
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.016'/%3E%3C/svg%3E");
+  --sheet-shadow: 0 1px 1px rgb(0 0 0 / 32%), 0 18px 44px -28px rgb(0 0 0 / 82%);
 }
 
 @layer base {
@@ -100,74 +113,915 @@
     min-width: 320px;
     min-height: 100dvh;
     overflow-x: clip;
-    /* A low canopy light: ember from the left, late gold from the right. */
-    background-image:
-      radial-gradient(
-        58rem 38rem at 8% -14%,
-        color-mix(in srgb, var(--autumn-ember) var(--autumn-wash-strength), transparent),
-        transparent 60%
-      ),
-      radial-gradient(
-        46rem 32rem at 102% -6%,
-        color-mix(in srgb, var(--autumn-gold) var(--autumn-wash-strength), transparent),
-        transparent 58%
-      );
-    background-repeat: no-repeat;
+    /* Both text families carry an optical-size axis; let it do its job. */
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    /*
+     * Cold-pressed stock. The grain is painted straight onto the ground rather
+     * than through an overlay, so nothing has to be lifted above it and no
+     * stacking context is introduced for dialogs and portals to fight.
+     */
+    background-image: var(--paper-grain);
     background-attachment: fixed;
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--autumn-gold) 34%, transparent);
+    background: color-mix(in srgb, var(--maple) 22%, transparent);
+  }
+
+  /**
+   * Display type is the product's own material: typeset, not decorated.
+   * `opsz` is deliberately left to the browser so one heading class re-cuts
+   * itself between a 96px hero and a 20px card title — which is what a real
+   * typesetter would do, and what the product's own LaTeX output does.
+   */
+  .font-display {
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
   }
 }
 
 @layer components {
-  .manuscript-stage {
-    position: relative;
-    padding: 2rem 1.2rem 2.5rem;
-    border-radius: 2rem;
-    background:
-      radial-gradient(
-        120% 90% at 85% 0%,
-        color-mix(in srgb, var(--autumn-gold) 22%, transparent),
-        transparent 58%
-      ),
-      radial-gradient(
-        95% 80% at 0% 100%,
-        color-mix(in srgb, var(--autumn-ember) 16%, transparent),
-        transparent 60%
-      ),
-      var(--secondary);
+  /* ------------------------------------------------------------ document bar */
+
+  /**
+   * The page's chrome is the product's chrome: a document is open, it is
+   * saved, and you are choosing which of its views to read. The marketing nav
+   * that used to live here has moved into the sheet and the footer, because a
+   * document toolbar is not a place for a nav.
+   */
+  .doc-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--background) 88%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
   }
 
-  .manuscript-sheet {
-    position: relative;
-    border: 1px solid var(--border);
-    border-radius: 0.9rem;
-    background: var(--card);
-    box-shadow: 0 24px 48px -26px var(--autumn-shadow);
-    transform: rotate(-2deg);
-  }
-
-  .manuscript-note {
-    position: absolute;
-    right: 1.5rem;
-    bottom: 1.25rem;
+  .doc-bar-inner {
     display: flex;
+    height: 3.5rem;
+    max-width: 84rem;
+    align-items: center;
+    gap: 0.75rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+
+  .doc-bar-rule {
+    display: none;
+    width: 1px;
+    height: 1.25rem;
+    background: var(--border);
+  }
+
+  .doc-bar-file {
+    display: none;
+    min-width: 0;
     align-items: center;
     gap: 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.7rem;
-    background: var(--card);
-    padding: 0.8rem 1rem;
-    color: var(--primary);
+    font-family: var(--font-utility);
     font-size: 0.75rem;
-    box-shadow: 0 6px 18px -6px var(--autumn-shadow);
+    color: var(--muted-foreground);
   }
 
+  .doc-bar-saved {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--success);
+  }
+
+  @media (min-width: 48rem) {
+    .doc-bar-rule,
+    .doc-bar-file {
+      display: flex;
+    }
+  }
+
+  /* ------------------------------------------------------ segmented control */
+
+  .segmented {
+    display: inline-flex;
+    padding: 0.125rem;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) + 2px);
+    background: var(--muted);
+  }
+
+  .segmented-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.55rem;
+    border-radius: var(--radius);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    transition:
+      background-color 180ms var(--ease-settle),
+      color 180ms var(--ease-settle);
+  }
+
+  .segmented-option:hover {
+    color: var(--foreground);
+  }
+
+  .segmented-option[aria-checked="true"] {
+    background: var(--card);
+    color: var(--foreground);
+    box-shadow: 0 1px 2px -1px var(--border);
+  }
+
+  .segmented-option:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
+  /* ================================================================= paper */
+
+  /**
+   * The paper's grid.
+   *
+   * Three tracks rather than a centred column: section numbers hang in the
+   * left gutter, the prose keeps a measured column, and a co-author's comments
+   * sit in the right margin where they would sit on a printed draft. Below the
+   * breakpoint there is only room for the measure, so the gutter collapses and
+   * the notes fall inline.
+   */
+  .paper {
+    --paper-gutter: 3.25rem;
+    --paper-measure: 34rem;
+    --paper-margin: 13rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 1.25rem;
+    padding-bottom: 4rem;
+    counter-reset: paper-section;
+  }
+
+  @media (min-width: 70rem) {
+    .paper {
+      grid-template-columns:
+        [gut] var(--paper-gutter)
+        [txt] var(--paper-measure)
+        [mrg] var(--paper-margin) [end];
+      justify-content: center;
+      column-gap: 2.25rem;
+    }
+
+    .paper-p,
+    .paper-list,
+    .paper-quote {
+      grid-column: txt;
+    }
+
+    .paper-section {
+      display: grid;
+      grid-column: gut / mrg;
+      grid-template-columns: subgrid;
+    }
+
+    .paper-note {
+      grid-column: mrg / end;
+    }
+
+    .paper-figure,
+    .paper-source {
+      grid-column: txt / end;
+    }
+
+    .paper-masthead,
+    .paper-end {
+      grid-column: gut / end;
+    }
+  }
+
+  /* --------------------------------------------------------------- masthead */
+
+  .paper-masthead {
+    padding-block: 4.5rem 2.25rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.75rem;
+  }
+
+  .paper-title {
+    max-width: 20ch;
+    margin-top: 1.5rem;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
+    font-size: clamp(2.5rem, 6vw, 4.5rem);
+    font-weight: 600;
+    line-height: 1.02;
+    letter-spacing: -0.038em;
+    text-wrap: balance;
+  }
+
+  .paper-byline {
+    margin-top: 1.75rem;
+    font-family: var(--font-utility);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+  }
+
+  /* ------------------------------------------------------------- paper body */
+
+  .paper-body {
+    display: contents;
+  }
+
+  .paper-p {
+    max-width: 100%;
+    margin-top: 1.15rem;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 26, "WONK" 0;
+    font-size: 1.0625rem;
+    line-height: 1.72;
+  }
+
+  /* A paper's opening statement carries more weight than its body. */
+  .paper-body > .paper-p:nth-child(-n + 2) {
+    font-size: 1.25rem;
+    line-height: 1.62;
+  }
+
+  .paper-section {
+    margin-top: 3.75rem;
+    counter-increment: paper-section;
+  }
+
+  .paper-section::before {
+    content: "§" counter(paper-section);
+    font-family: var(--font-utility);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--primary);
+    white-space: nowrap;
+  }
+
+  .paper-section-text {
+    display: block;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+  }
+
+  /* Below the breakpoint the number sits in front of the title, not beside. */
+  @media (max-width: 69.99rem) {
+    .paper-section::before {
+      display: block;
+      margin-bottom: 0.6rem;
+    }
+  }
+
+  .paper-list {
+    margin-top: 1.15rem;
+    padding-left: 1.1rem;
+    list-style: none;
+  }
+
+  .paper-item {
+    position: relative;
+    margin-top: 0.5rem;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 26, "WONK" 0;
+    font-size: 1.0625rem;
+    line-height: 1.65;
+  }
+
+  .paper-item::before {
+    content: "—";
+    position: absolute;
+    left: -1.1rem;
+    color: var(--primary);
+  }
+
+  .paper-quote {
+    margin-top: 1.75rem;
+    padding: 1.1rem 0 1.1rem 1.25rem;
+    border-left: 2px solid var(--primary);
+  }
+
+  .paper-quote .paper-p {
+    margin-top: 0;
+    font-size: 1.15rem;
+    font-style: italic;
+    line-height: 1.6;
+  }
+
+  .paper-code {
+    padding: 0.1rem 0.3rem;
+    border-radius: 0.2rem;
+    background: var(--muted);
+    font-family: var(--font-utility);
+    font-size: 0.86em;
+  }
+
+  .paper-link {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  /* ------------------------------------------------------------ margin note */
+
+  /**
+   * A comment is an annotation on a document, not part of its text — which is
+   * why these live here and not in `PAPER_SOURCE`, and why they are absent
+   * from the Markdown and LaTeX views.
+   */
+  .paper-note {
+    align-self: start;
+    margin-top: 1.6rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--success);
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--muted-foreground);
+  }
+
+  .paper-note-author {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    color: var(--success);
+  }
+
+  @media (max-width: 69.99rem) {
+    .paper-note {
+      max-width: var(--paper-measure);
+      margin-top: 1.25rem;
+    }
+  }
+
+  /* ---------------------------------------------------------------- figures */
+
+  .paper-figure {
+    margin-top: 2.5rem;
+  }
+
+  .paper-caption {
+    margin-top: 0.75rem;
+    font-family: var(--font-utility);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+  }
+
+  .fig-frame {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--card);
+    color: var(--card-foreground);
+    box-shadow: var(--sheet-shadow);
+  }
+
+  .fig-chrome {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    color: var(--muted-foreground);
+  }
+
+  .fig-dot {
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: var(--primary);
+  }
+
+  /* Figure 1 — two writers in one sentence. */
+
+  /*
+   * The runs are measured in `ch` so the caret lands on the last glyph, which
+   * means the whole sentence has to fit one line at every width — hence a
+   * fluid size rather than a wrap that would strand the name flags.
+   */
+  .fig-line {
+    padding: 1.75rem 0.85rem 2.25rem;
+    font-family: var(--font-utility);
+    font-size: clamp(0.6rem, 2.55vw, 1rem);
+    line-height: 2.6;
+    white-space: nowrap;
+  }
+
+  /* The group shrink-wraps the run as it types, so the flag rides the caret;
+     the flag sits outside the run because the run clips its own overflow. */
+  .writer-group {
+    position: relative;
+    display: inline-block;
+    vertical-align: bottom;
+  }
+
+  .writer {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    width: var(--line-length);
+    max-width: 100%;
+    color: var(--writer);
+    white-space: pre;
+  }
+
+  .writer::after {
+    content: "";
+    position: absolute;
+    top: 0.15em;
+    bottom: 0.15em;
+    right: 0;
+    width: 2px;
+    background: var(--writer);
+  }
+
+  .writer-flag {
+    position: absolute;
+    left: 100%;
+    bottom: calc(100% - 0.4em);
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.2rem;
+    background: var(--writer);
+    color: var(--card);
+    font-size: 0.62em;
+    letter-spacing: 0.03em;
+    transform: translateX(-1px);
+  }
+
+  /* Figure 2 — three strands of one history. */
+
+  .fig-graph {
+    padding: 1.5rem 1rem 1.25rem;
+  }
+
+  .fig-svg {
+    display: block;
+    width: 100%;
+    max-width: 26rem;
+    height: auto;
+    margin-inline: auto;
+    aspect-ratio: 320 / 120;
+  }
+
+  .fig-strands path {
+    fill: none;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+
+  .fig-strands [data-strand="1"] {
+    stroke: var(--primary);
+  }
+  .fig-strands [data-strand="2"],
+  .fig-strands [data-strand="4"] {
+    stroke: var(--success);
+  }
+
+  /* Offline reads as offline by weight; a dash pattern cannot share a path
+     with the dash-offset draw that reveals it. */
+  .fig-strands [data-strand="3"] {
+    stroke: var(--muted-foreground);
+    opacity: 0.5;
+  }
+
+  .fig-strands [data-strand="5"] {
+    stroke: var(--foreground);
+  }
+
+  .fig-events [data-strand="1"] {
+    fill: var(--primary);
+  }
+  .fig-events [data-strand="2"] {
+    fill: var(--success);
+  }
+  .fig-events [data-strand="3"] {
+    fill: var(--muted-foreground);
+    opacity: 0.5;
+  }
+
+  .fig-events [data-strand="5"] {
+    fill: var(--foreground);
+  }
+
+  .fig-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.1rem;
+    margin-top: 0.5rem;
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    color: var(--muted-foreground);
+  }
+
+  .fig-legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .fig-legend li::before {
+    content: "";
+    width: 0.75rem;
+    height: 2px;
+    background: var(--writer);
+  }
+
+  .fig-result {
+    margin-top: 0.5rem;
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    color: var(--foreground);
+    text-align: center;
+  }
+
+  /* ------------------------------------------------------------ source view */
+
+  /**
+   * The Markdown and LaTeX views. Same document, shown as what it is made of —
+   * the LaTeX is `markdownToLatex()` output, not a picture of some.
+   */
+  .paper-source {
+    overflow-x: auto;
+    margin-top: 1rem;
+    padding: 1.25rem 0;
+    border-block: 1px solid var(--border);
+    font-family: var(--font-utility);
+    font-size: 0.78rem;
+    line-height: 1.85;
+  }
+
+  .paper-source-line {
+    display: grid;
+    grid-template-columns: 2.75rem minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .paper-source-line code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .paper-source-number {
+    text-align: right;
+    color: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+    user-select: none;
+  }
+
+  .paper-source-line[data-tone="accent"] code {
+    color: var(--primary);
+  }
+
+  .paper-source-line[data-tone="muted"] code {
+    color: var(--muted-foreground);
+  }
+
+  /* ------------------------------------------------------------- paper end */
+
+  .paper-end {
+    margin-top: 5rem;
+    padding-top: 3.5rem;
+    border-top: 1px solid var(--border);
+    text-align: center;
+  }
+
+  .paper-end-line {
+    margin-bottom: 2rem;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
+    font-size: clamp(1.65rem, 3.6vw, 2.5rem);
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+
+  .paper-end-note {
+    margin-top: 1.5rem;
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
+  }
+
+  /* ------------------------------------------------------- icon affordances */
+
+  [data-icon="inline-end"] {
+    transition: transform 260ms var(--ease-settle);
+  }
+
+  :is(a, button):hover [data-icon="inline-end"] {
+    transform: translateX(0.2rem);
+  }
+
+  .stroke-link {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1px;
+    transition: background-size 340ms var(--ease-settle);
+  }
+
+  .stroke-link:hover,
+  .stroke-link:focus-visible {
+    background-size: 100% 1px;
+  }
+
+  /* The mono register: line numbers, syntax, status. */
+  .eyebrow {
+    font-family: var(--font-utility);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .eyebrow-maple {
+    color: var(--maple);
+  }
+
+  /* A page lying on the desk — still used by the sign-in specimen. */
+  .sheet {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--card);
+    color: var(--card-foreground);
+    box-shadow: var(--sheet-shadow);
+  }
+
+  .prose-editorial {
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 26, "WONK" 0;
+    line-height: 1.65;
+  }
+
+  /* -------------------------------------------------------------- app cards */
+
+  .workspace-card {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+    transition:
+      box-shadow 320ms var(--ease-settle),
+      transform 320ms var(--ease-settle);
+  }
+
+  .workspace-card::before {
+    content: "";
+    position: absolute;
+    inset-inline: -1px;
+    top: -1px;
+    height: 2px;
+    background: var(--primary);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 380ms var(--ease-settle);
+  }
+
+  .workspace-card:hover,
+  .workspace-card:focus-visible {
+    box-shadow: var(--sheet-shadow);
+    transform: translateY(-2px);
+  }
+
+  .workspace-card:hover::before,
+  .workspace-card:focus-visible::before {
+    transform: scaleX(1);
+  }
+}
+
+/* ====================================================================== */
+/*  Motion                                                                */
+/* ====================================================================== */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.25rem);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes lift {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes type-in {
+  from {
+    width: 0;
+  }
+  to {
+    width: var(--line-length);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  46% {
+    opacity: 1;
+  }
+  47%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes draw-strand {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer components {
+  /* The paper's entrance, and the swap between its three views. */
+  @media (prefers-reduced-motion: no-preference) {
+    .paper-masthead > * {
+      animation: lift 760ms var(--ease-settle) both;
+      animation-delay: calc(var(--enter-step, 0) * 90ms);
+    }
+
+    .paper-body > * {
+      animation: lift 460ms var(--ease-settle) both;
+    }
+  }
+
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      /*
+       * Sections and figures are scrubbed by the reader's own scrolling rather
+       * than fired at a threshold, so scrolling back up un-reveals in step
+       * with the hand.
+       */
+      .paper-section,
+      .paper-figure,
+      .paper-note {
+        animation: rise linear both;
+        animation-timeline: view();
+        animation-range: entry 10% cover 24%;
+      }
+
+      .paper-note {
+        animation-name: slide-in;
+        animation-range: entry 25% cover 32%;
+      }
+
+      /* Figure 1: both writers type at once, on overlapping ranges — which is
+         the claim the figure exists to make. */
+      .writer {
+        animation: type-in linear both;
+        animation-timeline: view();
+      }
+
+      .writer[data-writer="1"] {
+        animation-range: entry 55% cover 40%;
+      }
+
+      .writer[data-writer="2"] {
+        animation-range: entry 65% cover 48%;
+      }
+
+      .writer::after {
+        animation: caret-blink 1100ms steps(1, end) infinite;
+      }
+
+      /* Figure 2: the strands draw, the events land, the result arrives. */
+      .fig-strands path {
+        stroke-dashoffset: 1;
+        animation: draw-strand linear both;
+        animation-timeline: view();
+      }
+
+      .fig-strands [data-strand="2"] {
+        animation-range: entry 45% cover 34%;
+      }
+      .fig-strands [data-strand="1"] {
+        animation-range: entry 50% cover 38%;
+      }
+      .fig-strands [data-strand="3"] {
+        animation-range: entry 58% cover 42%;
+      }
+      .fig-strands [data-strand="4"] {
+        animation-range: entry 68% cover 48%;
+      }
+      .fig-strands [data-strand="5"] {
+        animation-range: entry 76% cover 52%;
+      }
+
+      .fig-events circle {
+        animation: pop linear both;
+        animation-timeline: view();
+        animation-range: entry 55% cover 44%;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .fig-result {
+        animation: rise linear both;
+        animation-timeline: view();
+        animation-range: entry 78% cover 52%;
+      }
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-timeline: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Nothing may be left mid-reveal when motion is switched off. */
+  .paper-masthead > *,
+  .paper-body > *,
+  .paper-section,
+  .paper-figure,
+  .paper-note,
+  .fig-result,
+  .fig-events circle {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .writer {
+    width: auto !important;
+  }
+
+  .fig-strands path {
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/* ====================================================================== */
+/*  Markdown preview                                                      */
+/* ====================================================================== */
+
+@layer components {
   .markdown-preview {
     color: var(--foreground);
-    line-height: 1.75;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 26, "WONK" 0;
+    line-height: 1.7;
   }
 
   .markdown-preview > * + * {
@@ -178,9 +1032,12 @@
   .markdown-preview h2,
   .markdown-preview h3 {
     margin-top: 2rem;
-    font-family: var(--font-syne);
-    font-weight: 650;
-    line-height: 1.2;
+    font-family: var(--font-editorial);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 14, "WONK" 0;
+    font-weight: 600;
+    line-height: 1.18;
+    letter-spacing: -0.015em;
   }
 
   .markdown-preview h1 {
@@ -244,6 +1101,7 @@
   .markdown-preview table {
     width: 100%;
     border-collapse: collapse;
+    font-family: var(--font-body);
     font-size: 0.9rem;
   }
 
@@ -255,16 +1113,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
+/* ====================================================================== */
+/*  Stillness                                                             */
+/* ====================================================================== */
 
 /* Keep document presence in the app theme, including manual dark mode. */
 .document-awareness {

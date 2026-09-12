@@ -7,8 +7,17 @@ test.describe("public product surface", () => {
     await page.goto("/");
     await expect(page).toHaveTitle(/Softmaple/);
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "A little space",
+      "Writing together without taking turns",
     );
+    // The landing page is the product's own output: the same source rendered
+    // three ways, with the LaTeX produced by @softmaple/md2latex.
+    await page.getByRole("radio", { name: "LaTeX" }).click();
+    await expect(page.getByText("\\documentclass{article}")).toBeVisible();
+    await page.getByRole("radio", { name: "Markdown" }).click();
+    await expect(
+      page.getByText("# Turn-taking is a storage decision, not a social one"),
+    ).toBeVisible();
+    await page.getByRole("radio", { name: "Read" }).click();
     await page.getByRole("link", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("button", { name: "GitHub" })).toBeDisabled();

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { Check, Circle, FileCode2, Radio, Users } from "lucide-react";
 
 const LINE_NUMBERS = ["01", "02", "03", "04", "05", "06"] as const;
@@ -5,7 +6,9 @@ const LINE_NUMBERS = ["01", "02", "03", "04", "05", "06"] as const;
 export const AuthBrandSpecimen = () => (
   <div
     aria-hidden="true"
-    className="mt-10 hidden w-full max-w-2xl rounded-xl border bg-card shadow-sm lg:block"
+    className="sheet mt-10 hidden w-full max-w-2xl lg:block"
+    data-enter="sheet"
+    style={{ "--enter-step": 4 } as CSSProperties}
   >
     <div className="flex items-center gap-2 border-b px-3 py-2 font-mono text-[10px] text-muted-foreground">
       <Circle className="size-2.5 fill-primary text-primary" />
@@ -27,14 +30,14 @@ export const AuthBrandSpecimen = () => (
         <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-primary">
           Observation / 09:42
         </p>
-        <p className="mt-4 font-display text-xl font-semibold">
+        <p className="mt-4 font-display text-xl font-semibold tracking-[-0.02em]">
           A shared record of change
         </p>
-        <p className="mt-3 max-w-lg text-xs leading-6 text-muted-foreground xl:text-sm">
+        <p className="prose-editorial mt-3 max-w-lg text-xs text-muted-foreground xl:text-sm">
           A place for unfinished sentences, questions worth sitting with, and
           ideas that get better together.
         </p>
-        <blockquote className="mt-4 border-l-2 border-primary pl-4 text-xs italic xl:text-sm">
+        <blockquote className="prose-editorial mt-4 border-l-2 border-primary pl-4 text-xs italic xl:text-sm">
           Make room for a new idea.
         </blockquote>
         <span className="absolute right-12 top-[6.8rem] h-5 border-l-2 border-success" />

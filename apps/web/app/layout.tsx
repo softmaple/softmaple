@@ -1,4 +1,4 @@
-import { DM_Sans, JetBrains_Mono, Syne } from "next/font/google";
+import { DM_Sans, Fraunces, JetBrains_Mono } from "next/font/google";
 import type { Metadata } from "next";
 
 import "@softmaple/ui/globals.css";
@@ -7,16 +7,29 @@ import "./design.css";
 import { Providers } from "@/components/providers";
 import { OPENGRAPH_IMAGE_URL, SITE_CONFIG } from "@softmaple/config";
 
+/**
+ * Three registers, three jobs. Serif is what you wrote, sans is what you
+ * press, mono is what the machine sees — see `app/design.css`.
+ */
+
+/** What you press: every control, label, and form in the product. */
 const fontBody = DM_Sans({
   subsets: ["latin"],
   variable: "--font-body",
 });
 
-const fontDisplay = Syne({
+/**
+ * What you wrote. Fraunces carries an optical-size axis, so a single family
+ * re-cuts itself between a hero headline and a card title the way a typesetter
+ * would — the same thing this product does when it hands a draft to LaTeX.
+ */
+const fontEditorial = Fraunces({
+  axes: ["SOFT", "WONK", "opsz"],
   subsets: ["latin"],
-  variable: "--font-syne",
+  variable: "--font-editorial",
 });
 
+/** What the machine sees: Markdown source, LaTeX, line numbers, status. */
 const fontUtility = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-utility",
@@ -59,7 +72,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${fontBody.variable} ${fontDisplay.variable} ${fontUtility.variable} font-sans antialiased`}
+        className={`${fontBody.variable} ${fontEditorial.variable} ${fontUtility.variable} font-sans antialiased`}
       >
         <Providers
           attribute="class"

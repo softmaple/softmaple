@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -25,6 +26,13 @@ import { SearchField } from "@/components/search-field";
 import { CreateWorkspaceDialog } from "@/modules/workspaces/create-workspace-dialog";
 import type { WorkspaceSummary } from "@/app/actions/workspaces";
 
+/**
+ * The dashboard is a tool, not a page to be read, so the only motion here is a
+ * short entrance on first paint. No scroll choreography — see `app/design.css`.
+ */
+const enterStep = (step: number): CSSProperties =>
+  ({ "--enter-step": step }) as CSSProperties;
+
 export const Dashboard = ({
   workspaces,
 }: {
@@ -41,24 +49,41 @@ export const Dashboard = ({
 
   return (
     <main className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-14">
-      <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">Your writing studio</p>
-          <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight sm:text-5xl">
+      <div className="mb-12 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="eyebrow eyebrow-maple" data-enter style={enterStep(0)}>
+            Your writing studio
+          </p>
+          <h1
+            className="mt-5 font-display text-4xl font-semibold tracking-[-0.035em] sm:text-5xl"
+            data-enter
+            style={enterStep(1)}
+          >
             Room for your next idea.
           </h1>
-          <p className="mt-4 text-muted-foreground">
+          <p
+            className="prose-editorial mt-4 max-w-[44ch] text-muted-foreground"
+            data-enter
+            style={enterStep(2)}
+          >
             Pick up a shared project, or give a new thought a home.
           </p>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)}>
+        <Button
+          data-enter
+          onClick={() => setShowCreateDialog(true)}
+          style={enterStep(3)}
+        >
           <Plus data-icon="inline-start" /> New workspace
         </Button>
       </div>
       <section aria-labelledby="workspaces-heading">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <h2 id="workspaces-heading" className="text-lg font-semibold">
+            <h2
+              className="font-display text-lg font-semibold tracking-[-0.02em]"
+              id="workspaces-heading"
+            >
               Your workspaces
             </h2>
             <Badge variant="secondary">{workspaces.length}</Badge>
@@ -111,24 +136,27 @@ export const Dashboard = ({
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {filteredWorkspaces.map((workspace) => (
               <Link
-                className="group flex min-w-0 flex-col rounded-2xl border bg-card p-6 transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+                className="workspace-card group flex min-w-0 flex-col p-6 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
                 href={`/workspace/${workspace.slug}`}
                 key={workspace.id}
               >
                 <div className="flex items-center justify-between">
-                  <span className="grid size-12 place-items-center rounded-xl bg-secondary font-display text-xl font-semibold text-primary">
+                  <span className="grid size-11 place-items-center rounded-sm bg-secondary font-display text-lg font-semibold text-primary">
                     {workspace.title.slice(0, 1).toUpperCase()}
                   </span>
-                  <ArrowUpRight className="size-5 text-muted-foreground transition-colors group-hover:text-primary" />
+                  <ArrowUpRight
+                    className="size-5 text-muted-foreground transition-colors group-hover:text-primary"
+                    data-icon="inline-end"
+                  />
                 </div>
-                <h3 className="mt-7 truncate font-display text-xl font-semibold tracking-tight">
+                <h3 className="mt-7 truncate font-display text-xl font-semibold tracking-[-0.02em]">
                   {workspace.title}
                 </h3>
-                <p className="mt-2 line-clamp-2 min-h-12 text-sm leading-6 text-muted-foreground">
+                <p className="prose-editorial mt-2 line-clamp-2 min-h-12 text-sm text-muted-foreground">
                   {workspace.description ||
                     "A shared space for your next chapter."}
                 </p>
-                <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[11px] text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <FileText className="size-3.5" />
                     {workspace.documentCount} documents
@@ -138,7 +166,7 @@ export const Dashboard = ({
                     {workspace.memberCount} members
                   </span>
                 </div>
-                <p className="mt-5 flex items-center gap-1.5 border-t pt-4 text-xs text-muted-foreground">
+                <p className="mt-5 flex items-center gap-1.5 border-t pt-4 font-mono text-[11px] text-muted-foreground">
                   <Clock3 className="size-3.5" />
                   {workspace.lastEditedAt === null
                     ? "Ready for the first word"

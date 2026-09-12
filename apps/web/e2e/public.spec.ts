@@ -7,9 +7,9 @@ test.describe("public product surface", () => {
     await page.goto("/");
     await expect(page).toHaveTitle(/Softmaple/);
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "A little space",
+      "Good ideas",
     );
-    await page.getByRole("link", { name: "Sign in" }).click();
+    await page.getByRole("link", { name: "Log in", exact: true }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("button", { name: "GitHub" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Google" })).toBeDisabled();
@@ -43,39 +43,40 @@ test.describe("public product surface", () => {
         document.documentElement.clientWidth,
     );
     expect(initialOverflow).toBeLessThanOrEqual(0);
-    const themeToggle = page.getByRole("button", { name: "Toggle theme" });
-    // Wait for the client dropdown trigger to hydrate, then open via keyboard
-    // to avoid Radix pointerdown/mouseup dismiss races in headless CI.
-    await expect(themeToggle).toHaveAttribute("aria-haspopup", "menu");
+    const themeToggle = page.getByRole("button", {
+      name: "Toggle color theme",
+    });
+    await page.emulateMedia({ colorScheme: "light" });
     await themeToggle.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("menuitem", { name: "Dark" })).toBeVisible();
-    await page.getByRole("menuitem", { name: "Dark" }).click();
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus-visible")).toBeVisible();
   });
 
-  test("mobile Sheet supports dismissal, resize, and sign-in navigation", async ({
+  test("mobile navigation supports dismissal, resize, and login", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
-    const trigger = page.getByRole("button", { name: "Open navigation" });
+    const trigger = page.getByRole("button", {
+      name: "Open navigation",
+      includeHidden: true,
+    });
     await trigger.click();
-    const sheet = page.getByRole("dialog");
-    await expect(
-      sheet.getByRole("navigation", { name: "Mobile navigation" }),
-    ).toBeVisible();
+    const navigation = page.getByRole("navigation", {
+      name: "Main navigation",
+    });
+    await expect(navigation).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(sheet).not.toBeVisible();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
     await expect(trigger).toBeFocused();
     await trigger.click();
     await page.setViewportSize({ width: 1280, height: 900 });
-    await expect(sheet).not.toBeVisible();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
     await page.setViewportSize({ width: 390, height: 844 });
     await trigger.click();
-    await sheet.getByRole("link", { name: "Sign in", exact: true }).click();
+    await navigation.getByRole("link", { name: "Log in", exact: true }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByLabel("Email")).toBeInViewport();
   });

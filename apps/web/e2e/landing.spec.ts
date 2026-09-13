@@ -51,13 +51,20 @@ test("narrative comments work with the keyboard", async ({ page }) => {
     name: "write together",
     exact: true,
   });
+  await expect(page.locator("#story-comment")).toContainText(
+    "Let’s build on this.",
+  );
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
   await trigger.focus();
   await page.keyboard.press("Enter");
-  await expect(trigger).toHaveAttribute("aria-expanded", "true");
-  await expect(page.locator("#story-comment")).toBeVisible();
-  await page.keyboard.press("Space");
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator("#story-comment")).toBeHidden();
+  await page.keyboard.press("Space");
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#story-comment")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(trigger).toBeFocused();
 });
 
 test("reduced motion retains readable content and suppresses automatic animation", async ({
@@ -110,3 +117,79 @@ for (const width of [390, 768, 1440]) {
     await expect(page.getByLabel("Email")).toBeVisible();
   });
 }
+
+test("narrative annotations enter once and pause in the background", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    }),
+  );
+  await page.goto("/");
+  const narrative = page.locator("#collaboration");
+  await narrative.scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.fonts.ready);
+  await expect(narrative).toHaveAttribute("data-entrance", "waiting");
+  const heading = narrative.getByRole("heading");
+  const bounds = await heading.boundingBox();
+  await expect(narrative.locator(".story-note")).toHaveCSS("opacity", "0");
+  await expect(narrative.locator(".story-pointer")).toHaveCSS("opacity", "0");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(narrative).toHaveAttribute("data-entrance", "playing");
+  await page.waitForTimeout(650);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(narrative).toHaveAttribute("data-entrance", "paused");
+  const noteOpacity = await narrative
+    .locator(".story-note")
+    .evaluate((el) => getComputedStyle(el).opacity);
+  expect(Number(noteOpacity)).toBeGreaterThan(0);
+  const times = await narrative.evaluate((el) =>
+    el
+      .getAnimations({ subtree: true })
+      .map((animation) => animation.currentTime),
+  );
+  await page.waitForTimeout(450);
+  expect(
+    await narrative.evaluate((el) =>
+      el
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.currentTime),
+    ),
+  ).toEqual(times);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(narrative).toHaveAttribute("data-entrance", "complete");
+  await expect(narrative.locator(".story-note")).toHaveCSS("opacity", "1");
+  await expect(narrative.locator(".story-pointer")).toHaveCSS("opacity", "1");
+  await expect(narrative.locator(".story-adam")).toHaveCSS("opacity", "1");
+  expect(await heading.boundingBox()).toEqual(bounds);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await narrative.scrollIntoViewIfNeeded();
+  await expect(narrative).toHaveAttribute("data-entrance", "complete");
+  expect(
+    await narrative.evaluate(
+      (el) => el.getAnimations({ subtree: true }).length,
+    ),
+  ).toBe(0);
+});

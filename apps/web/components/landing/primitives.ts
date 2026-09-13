@@ -13,7 +13,7 @@ export const iconButtonClasses = [
 ].join(" ");
 
 export const cursorClasses = [
-  "[--cursor-color:#9660c8] absolute text-white bg-(--cursor-color) [font-family:var(--font-body),_sans-serif]",
+  "[--cursor-color:#8846aa] absolute text-white bg-(--cursor-color) [font-family:var(--font-body),_sans-serif]",
   "font-semibold not-italic text-[12px] tracking-[-0.2px] leading-[1] py-2 px-2.5 rounded-[4px] whitespace-nowrap",
   "shadow-[0_2px_6px_#0000000d] before:content-[''] before:absolute before:-top-3 before:bottom-0 before:-left-1.5",
   "before:w-0.5 before:bg-(--cursor-color)",

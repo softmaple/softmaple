@@ -5,23 +5,23 @@ import {
   primaryClasses,
 } from "./landing/primitives";
 import "./landing/animations.css";
-import {
-  HeroEffects,
-  TogetherBrush,
-  PaperGlow,
-  DecorativeMaple,
-} from "./landing/HeroEffects";
+import { HeroEffects, DecorativeMaple } from "./landing/HeroEffects";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
 import { SITE_CONFIG } from "@softmaple/config";
 import { LandingBrand } from "./landing/Brand";
+import { LandingHeader } from "./landing/Interactions";
+import { Narrative } from "./landing/Narrative";
+import { CollaborationDemo } from "./landing/CollaborationDemo";
 import {
-  LandingHeader,
-  Narrative,
-  CollaborationDemo,
   HeroMotion,
-} from "./landing/Interactions";
+  PaperArtwork,
+  PaperNote,
+  HeroCopy,
+} from "./landing/motion/HeroMotion";
+import { TogetherBrush } from "./landing/motion/TogetherBrush";
+import { PaperGlow } from "./landing/effects/PaperGlow";
 
 function StartWriting({ hero = false }: { hero?: boolean }) {
   return (
@@ -89,7 +89,7 @@ export default function LandingPage() {
         >
           <LandingHeader />
           <HeroMotion>
-            <div className="absolute inset-0 [transform:translateY(calc(var(--unfold)_*_-32px))] opacity-[calc(1_-_var(--unfold)_*_0.25)] motion-reduce:transform-none">
+            <PaperArtwork>
               <Image
                 className={cn(
                   "absolute w-full h-full object-cover object-center",
@@ -106,17 +106,15 @@ export default function LandingPage() {
                 preload
               />
               <PaperGlow />
-            </div>
-            <div
+            </PaperArtwork>
+            <PaperNote
               className={cn(
                 "absolute top-[52%] left-[43%] w-[36.5%] text-[#424341] [font-family:Georgia,_'Times_New_Roman',_serif]",
-                "text-[1.4cqw] [transform:translateY(calc(var(--unfold)_*_-24px))_rotate(calc(12deg_-_var(--unfold)_*_10deg))]",
-                "origin-center before:content-[''] before:absolute before:[inset:-25px_-32px] before:-z-1 before:bg-[#fffefc]",
-                "before:border before:border-[#d6d6d4] before:shadow-[0_14px_40px_#1a191014]",
-                "before:opacity-[calc(var(--unfold)_*_0.9)] [&_h2]:text-[3.5cqw] [&_h2]:font-medium [&_h2]:italic",
+                "text-[1.4cqw]",
+                "origin-center [&_h2]:text-[3.5cqw] [&_h2]:font-medium [&_h2]:italic",
                 "[&_h2]:tracking-[-0.08em] [&_h2]:mt-0 [&_h2]:mx-0 [&_h2]:mb-[1.5cqw] [&_h2]:whitespace-nowrap",
                 "[&_p_+_p]:mt-[1cqw] [&_mark]:bg-[#f6df686b] [&_mark]:text-inherit",
-                "dark:text-[#fffbed] dark:[text-shadow:0_1px_2px_#0003] dark:before:bg-[#282923] dark:before:border-[#626357]",
+                "dark:text-[#fffbed] dark:[text-shadow:0_1px_2px_#0003]",
                 "max-[768px]:top-[53%] max-[768px]:left-[40%] max-[768px]:w-[39%] max-[768px]:text-[1.85cqw]",
                 "max-[768px]:[&_h2]:text-[3.7cqw]",
                 "leading-[1.65] [&_h2]:leading-[1]",
@@ -138,7 +136,7 @@ export default function LandingPage() {
               <span
                 className={cn(
                   cursorClasses,
-                  "[--cursor-color:#af67d2]",
+                  "[--cursor-color:#8846aa]",
                   "left-[-11%] top-[41%] [transform:rotate(-12deg)] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5 max-[768px]:left-[-6%]",
                 )}
                 aria-hidden="true"
@@ -148,7 +146,7 @@ export default function LandingPage() {
               <span
                 className={cn(
                   cursorClasses,
-                  "[--cursor-color:#087bea]",
+                  "[--cursor-color:#0867c2]",
                   "right-[-9%] top-[24%] [transform:rotate(-12deg)] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5 max-[768px]:right-[-4%]",
                 )}
                 aria-hidden="true"
@@ -158,14 +156,14 @@ export default function LandingPage() {
               <span
                 className={cn(
                   cursorClasses,
-                  "[--cursor-color:#249e70]",
+                  "[--cursor-color:#16754f]",
                   "right-[18%] bottom-[-30%] [transform:rotate(-12deg)] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5 max-[768px]:bottom-[-19%]",
                 )}
                 aria-hidden="true"
               >
                 Leo
               </span>
-            </div>
+            </PaperNote>
             <span
               className={cn(
                 handwrittenClasses,
@@ -211,10 +209,10 @@ export default function LandingPage() {
             </span>
           </HeroMotion>
           <DecorativeMaple position="hero" />
-          <div
+          <HeroCopy
             className={cn(
               "relative w-[90%] max-w-[1320px] mt-[85px] mx-auto mb-0 pointer-events-none",
-              "animate-[landing-copy-enter_850ms_ease-out_both] [&_h1]:m-0 [&_h1]:text-[clamp(72px,_7.6vw,_113px)]",
+              "[&_h1]:m-0 [&_h1]:text-[clamp(72px,_7.6vw,_113px)]",
               "[&_h1]:font-[650] [&_h1]:tracking-[-0.077em] [&>p]:text-(--muted-ink) [&>p]:mt-[29px] [&>p]:mx-0 [&>p]:mb-6",
               "[&>p]:text-[clamp(18px,_2vw,_28px)] [&>p]:tracking-[-1px]",
               "max-[1200px]:mt-[75px] max-[1200px]:[&_h1]:text-[7.6vw] max-[1200px]:[&>p]:my-[22px] max-[1200px]:[&>p]:mx-0",
@@ -255,7 +253,7 @@ export default function LandingPage() {
                 Explore the experience
               </a>
             </div>
-          </div>
+          </HeroCopy>
           <a
             className={cn(
               "absolute left-[5.2%] bottom-[5.5%] flex flex-col items-start gap-[15px] text-[12px] text-(--muted-ink)",

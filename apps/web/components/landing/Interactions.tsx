@@ -14,6 +14,7 @@ import {
   Sun,
   RotateCcw,
   MessageSquare,
+  MousePointer2,
   Pencil,
   Check,
   ChevronDown,
@@ -26,6 +27,7 @@ import {
 import { useTheme } from "next-themes";
 import { SITE_CONFIG } from "@softmaple/config";
 import { LandingBrand, MapleMark } from "./Brand";
+import { DecorativeMaple } from "./HeroEffects";
 
 export function LandingHeader() {
   const [open, setOpen] = useState(false);
@@ -181,40 +183,87 @@ export function HeroMotion({ children }: { children: ReactNode }) {
 }
 
 export function Narrative() {
-  const ref = useRef<HTMLElement>(null);
+  const section = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const [selected, setSelected] = useState(false);
+  const finishEntrance = useRef(() => {});
+  const [selected, setSelected] = useState(true);
   useEffect(() => {
+    const element = section.current;
+    if (!element) return;
     const media = matchMedia("(prefers-reduced-motion: reduce)");
+    let visible = false;
+    let started = false;
+    let finished = false;
+    const complete = () => {
+      finished = true;
+      element.dataset.entrance = "complete";
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", sync);
+    };
+    const sync = () => {
+      if (finished) return;
+      if (media.matches) return complete();
+      const playing = visible && !document.hidden;
+      started ||= playing;
+      element.style.setProperty(
+        "--story-play-state",
+        playing ? "running" : "paused",
+      );
+      element.dataset.entrance = playing
+        ? "playing"
+        : started
+          ? "paused"
+          : "waiting";
+    };
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry?.isIntersecting) {
-          ref.current?.setAttribute("data-revealed", "true");
-          if (!media.matches) setSelected(true);
-          observer.disconnect();
-        }
+        visible = Boolean(entry?.isIntersecting);
+        sync();
       },
-      { threshold: 0.55 },
+      { threshold: 0.35 },
     );
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
+    const ended = (event: AnimationEvent) => {
+      if (event.animationName === "landing-adam-label") complete();
+    };
+    finishEntrance.current = complete;
+    element.addEventListener("animationend", ended);
+    document.addEventListener("visibilitychange", sync);
+    media.addEventListener("change", sync);
+    observer.observe(element);
+    sync();
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("animationend", ended);
+      document.removeEventListener("visibilitychange", sync);
+      media.removeEventListener("change", sync);
+      finishEntrance.current = () => {};
+    };
   }, []);
   return (
     <section
-      ref={ref}
+      ref={section}
+      data-entrance="waiting"
       className={cn(
-        "group/narrative relative w-[94%] max-w-[1380px] m-auto pt-[145px] px-0 pb-[94px] scroll-mt-[30px] [&_h2]:m-0",
+        "relative w-[94%] max-w-[1380px] m-auto pt-[145px] px-0 pb-[55px] scroll-mt-[30px] [&_h2]:m-0",
         "[&_h2]:font-normal [&_h2]:text-[clamp(44px,_6.25vw,_92px)] [&_h2]:tracking-[-0.063em] [&_h2]:text-center",
-        "max-[1200px]:pt-[100px] max-[1200px]:pb-[85px]",
-        "max-[768px]:w-[calc(100%_-_40px)] max-[768px]:pt-[70px] max-[768px]:px-0 max-[768px]:pb-[105px]",
+        "max-[1200px]:pt-[100px] max-[1200px]:pb-[40px]",
+        "max-[768px]:w-[calc(100%_-_40px)] max-[768px]:pt-[90px] max-[768px]:px-0 max-[768px]:pb-[70px]",
         "max-[768px]:[&_h2]:text-[clamp(34px,_8.8vw,_60px)] max-[768px]:[&_h2]:tracking-[-0.06em]",
         "[&_h2]:leading-[1.5]",
         "max-[768px]:[&_h2]:leading-[1.65]",
       )}
       id="collaboration"
       aria-label="A place to think out loud, write together, and turn little ideas into something shared."
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && selected) {
+          finishEntrance.current();
+          setSelected(false);
+          trigger.current?.focus();
+        }
+      }}
     >
-      <h2>
+      <DecorativeMaple position="story" />
+      <h2 aria-label="A place to think out loud, write together, and turn little ideas into something shared.">
         <span className="block whitespace-nowrap max-[768px]:inline max-[768px]:whitespace-normal max-[768px]:after:content-['_']">
           A place to{" "}
           <a
@@ -224,49 +273,82 @@ export function Narrative() {
           >
             <FileText aria-hidden="true" />
           </a>{" "}
-          think out loud,
+          <span className="relative isolate inline-block font-medium">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute -z-1 inset-x-[-0.1em] top-[0.14em] bottom-[0.12em] -rotate-3 bg-[url('/landing/together-brush.svg')] bg-size-[100%_100%] bg-no-repeat opacity-55 dark:opacity-25"
+            />
+            think
+            <span
+              id="story-comment"
+              role="note"
+              aria-label="Illustrated comment from Mia on think"
+              hidden={!selected}
+              className="pointer-events-none absolute left-[calc(100%_+_1em)] bottom-[calc(100%_-_0.1em)] z-3 w-max text-left text-[clamp(12px,_1.5vw,_20px)] max-[768px]:text-[11px] leading-[1.35] tracking-[-0.02em] hidden:hidden max-[768px]:left-1/2 max-[768px]:bottom-[calc(100%_+_1.1em)] max-[768px]:-translate-x-1/2"
+            >
+              <svg
+                viewBox="0 0 80 66"
+                fill="none"
+                aria-hidden="true"
+                className="absolute right-[calc(100%_-_2px)] top-[0.8em] h-[3.7em] w-[4.5em] overflow-visible max-[768px]:right-auto max-[768px]:left-[16%] max-[768px]:top-[calc(100%_-_0.2em)] max-[768px]:h-[1.4em] max-[768px]:w-[1.7em]"
+              >
+                <path
+                  className="story-motion story-line"
+                  pathLength="1"
+                  d="M5 57L61 1H79"
+                  stroke="#f5d747"
+                  strokeWidth="2"
+                />
+                <circle
+                  className="story-motion story-pin"
+                  cx="5"
+                  cy="57"
+                  r="6"
+                  fill="#ffdf48"
+                  stroke="#fffdf4"
+                  strokeWidth="2"
+                />
+              </svg>
+              <span className="story-motion story-note block">
+                <span className="block rounded-[0.45em] bg-[#ffe991] px-[0.85em] py-[0.45em] font-medium text-[#242216]">
+                  Let’s build on this.
+                </span>
+                <span className="mt-[0.35em] flex gap-[0.85em] px-[0.85em] text-[0.72em] font-medium text-(--ink)">
+                  <span>Mia</span>
+                  <span>10:24 AM</span>
+                </span>
+              </span>
+            </span>
+          </span>{" "}
+          out loud,
         </span>
         <span className="block whitespace-nowrap max-[768px]:inline max-[768px]:whitespace-normal max-[768px]:after:content-['_']">
           <UsersRound
             className="inline w-[1.03em] h-[1.03em] align-[-0.13em] stroke-[1.45] mr-[0.1em] max-[768px]:w-[0.9em] max-[768px]:h-[0.9em]"
             aria-hidden="true"
           />{" "}
-          <span className="relative inline-block">
+          <span className="relative inline-block leading-[1.05]">
             <button
               type="button"
               ref={trigger}
-              className={cn(
-                "relative tracking-[inherit] text-inherit bg-transparent border-b-[0.055em] border-b-(--ink) p-0 isolate",
-                "before:absolute before:content-[''] before:[inset:55%_-0.025em_-0.06em] before:-z-1 before:bg-(--yellow)",
-                "before:opacity-60 before:[transform:scaleX(0)] before:origin-left",
-                "before:[transition:transform_850ms_cubic-bezier(0.22,_1,_0.36,_1)]",
-                "group-data-[revealed=true]/narrative:before:[transform:scaleX(1)]",
-                "[&:hover::before]:opacity-100",
-                "dark:before:opacity-28",
-                "leading-[1.05]",
-              )}
+              className="block relative tracking-[inherit] text-inherit bg-transparent border-b-[0.045em] border-b-(--ink) p-0 leading-[1.05]"
               aria-expanded={selected}
               aria-controls="story-comment"
               onClick={() => {
-                ref.current?.setAttribute("data-interacted", "true");
+                finishEntrance.current();
                 setSelected(!selected);
               }}
             >
               write together
             </button>
             <span
-              className={cn(
-                "absolute -bottom-2 -right-5 z-2 bg-[#087bea] text-[#fff] text-[11px] tracking-[0] py-[3px] px-[7px]",
-                "rounded-[3px] leading-[1.7] opacity-0 [transform:translate(30px,_15px)]",
-                "[transition:transform_600ms_600ms,_opacity_300ms_600ms] before:content-[''] before:absolute before:w-0.5",
-                "before:bg-[#087bea] before:h-[35px] before:bottom-0 before:left-[-5px]",
-                "max-[768px]:right-0 max-[768px]:-bottom-2.5",
-                "motion-reduce:transform-none",
-                selected && "opacity-100 [transform:none]",
-              )}
+              className="pointer-events-none absolute left-[83%] top-[calc(100%_-_0.1em)] z-2 text-[clamp(11px,_1.35vw,_18px)] max-[768px]:text-[10px] leading-none tracking-normal"
               aria-hidden="true"
             >
-              Adam
+              <MousePointer2 className="story-motion story-pointer absolute -left-[0.85em] -top-[0.15em] size-[2em] fill-(--ink) stroke-(--paper) stroke-[1.5]" />
+              <span className="story-motion story-adam block translate-x-[0.65em] translate-y-[0.7em] rounded-[0.3em] bg-[#e5e0d4] px-[0.7em] py-[0.35em] text-[#302f29]">
+                Adam
+              </span>
             </span>
           </span>
           , and turn
@@ -285,45 +367,6 @@ export function Narrative() {
           </em>
         </span>
       </h2>
-      <div
-        id="story-comment"
-        className={cn(
-          "absolute left-1/2 bottom-6 [transform:translateX(-50%)] flex items-center gap-2.5 text-[14px]",
-          "text-(--muted-ink) whitespace-nowrap animate-[landing-comment-enter_400ms_1200ms_ease-out_both] hidden:hidden",
-          "[&_strong]:font-semibold [&_strong]:text-(--ink) [&_strong]:mr-2",
-          "max-[768px]:bottom-[27px] max-[768px]:w-full max-[768px]:text-[11px] max-[768px]:gap-[7px]",
-          "max-[768px]:whitespace-normal max-[768px]:[&_strong]:mr-1",
-          "group-data-[interacted=true]/narrative:[animation-delay:0ms]",
-        )}
-        hidden={!selected}
-      >
-        <span
-          className="inline-grid place-items-center w-[23px] h-[23px] bg-[#c1e5d2] text-[#185b45] rounded-[50%] [font:600_11px_var(--font-body),_sans-serif] shrink-0"
-          aria-hidden="true"
-        >
-          L
-        </span>
-        <span>
-          <strong>Leo</strong> What if we tried this together?
-        </span>
-        <span className="text-[10px] uppercase tracking-[0.1em] ml-[5px] max-[768px]:hidden">
-          Demo
-        </span>
-        <button
-          type="button"
-          className={cn(
-            iconButtonClasses,
-            "max-[768px]:ml-auto max-[768px]:w-11",
-          )}
-          aria-label="Close narrative comment"
-          onClick={() => {
-            setSelected(false);
-            trigger.current?.focus();
-          }}
-        >
-          <X aria-hidden="true" />
-        </button>
-      </div>
     </section>
   );
 }

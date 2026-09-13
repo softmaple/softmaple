@@ -5,6 +5,12 @@ import {
   primaryClasses,
 } from "./landing/primitives";
 import "./landing/animations.css";
+import {
+  HeroEffects,
+  TogetherBrush,
+  PaperGlow,
+  DecorativeMaple,
+} from "./landing/HeroEffects";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
@@ -34,9 +40,9 @@ function StartWriting({ hero = false }: { hero?: boolean }) {
 
 export default function LandingPage() {
   return (
-    <div
+    <HeroEffects
       className={cn(
-        "[--paper:#faf9f6] [--ink:#0c0c0b] [--muted-ink:#596273] [--line:#d6d6d4] [--surface:#fffefc] [--yellow:#ffe128]",
+        "[--paper:#faf9f6] [--ink:#0c0c0b] [--muted-ink:#596273] [--line:#d6d6d4] [--surface:#fffefc] [--yellow:#ffe128] [--brand-gold:#ffc800]",
         "bg-(--paper) text-(--ink) [font-family:var(--font-body),_Arial,_sans-serif] overflow-clip",
         "[&_:where(a,_button,_textarea,_input):focus-visible]:[outline:3px_solid_#967200]",
         "[&_:where(a,_button,_textarea,_input):focus-visible]:[outline-offset:5px] [&_button]:cursor-pointer",
@@ -51,6 +57,15 @@ export default function LandingPage() {
         "motion-reduce:[&_*::after]:[scroll-behavior:auto]!",
       )}
     >
+      <noscript>
+        <style>{`
+          /* Reveal this route's streamed HTML without React's boundary-reveal script. */
+          @layer base {
+            body:has(#hero-title) [hidden]:has(#hero-title) { display: contents !important; }
+          }
+          body:has(#hero-title) main[aria-busy="true"] { display: none; }
+        `}</style>
+      </noscript>
       <a
         className={cn(
           "absolute w-[1px] h-[1px] overflow-hidden [clip-path:inset(50%)] whitespace-nowrap focus:z-50 focus:top-3",
@@ -74,22 +89,24 @@ export default function LandingPage() {
         >
           <LandingHeader />
           <HeroMotion>
-            <Image
-              className={cn(
-                "absolute w-full h-full object-cover object-center [transform:translateY(calc(var(--unfold)_*_-32px))]",
-                "opacity-[calc(1_-_var(--unfold)_*_0.25)]",
-                "dark:[filter:brightness(0.53)_saturate(0.65)]",
-                "dark:[mask-image:linear-gradient(to_right,_transparent,_#000_65%)]",
-                "max-[768px]:object-contain max-[768px]:dark:[mask-image:linear-gradient(to_bottom,_transparent,_#000_22%)]",
-                "motion-reduce:transform-none",
-              )}
-              src="/landing/paper-ribbon.webp"
-              alt=""
-              width={1448}
-              height={1086}
-              sizes="100vw"
-              preload
-            />
+            <div className="absolute inset-0 [transform:translateY(calc(var(--unfold)_*_-32px))] opacity-[calc(1_-_var(--unfold)_*_0.25)] motion-reduce:transform-none">
+              <Image
+                className={cn(
+                  "absolute w-full h-full object-cover object-center",
+                  "dark:[filter:brightness(0.53)_saturate(0.65)]",
+                  "dark:[mask-image:linear-gradient(to_right,_transparent,_#000_65%)]",
+                  "max-[768px]:object-contain max-[768px]:dark:[mask-image:linear-gradient(to_bottom,_transparent,_#000_22%)]",
+                  "motion-reduce:transform-none",
+                )}
+                src="/landing/paper-ribbon.webp"
+                alt=""
+                width={1448}
+                height={1086}
+                sizes="100vw"
+                preload
+              />
+              <PaperGlow />
+            </div>
             <div
               className={cn(
                 "absolute top-[52%] left-[43%] w-[36.5%] text-[#424341] [font-family:Georgia,_'Times_New_Roman',_serif]",
@@ -193,6 +210,7 @@ export default function LandingPage() {
               right. <b>✧</b>
             </span>
           </HeroMotion>
+          <DecorativeMaple position="hero" />
           <div
             className={cn(
               "relative w-[90%] max-w-[1320px] mt-[85px] mx-auto mb-0 pointer-events-none",
@@ -215,7 +233,7 @@ export default function LandingPage() {
             <h1 id="hero-title">
               Good ideas
               <br />
-              come together.
+              come <TogetherBrush />
             </h1>
             <p>A thoughtful space to write, connect, and create. Together.</p>
             <div className="flex flex-wrap gap-4 pointer-events-auto w-fit max-[768px]:flex-col max-[768px]:items-start max-[768px]:gap-3">
@@ -370,6 +388,6 @@ export default function LandingPage() {
           <a href={SITE_CONFIG.DOCS}>Docs</a>
         </nav>
       </footer>
-    </div>
+    </HeroEffects>
   );
 }

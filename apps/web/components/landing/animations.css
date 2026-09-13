@@ -40,3 +40,71 @@
     clip-path: inset(0);
   }
 }
+
+/* The final dry-brush shape is independent of its slanted reveal mask. */
+.landing-brush {
+  background: url("/landing/together-brush.svg") center / 100% 100% no-repeat;
+  clip-path: polygon(0 0, -12% 0, -21% 100%, 0 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-brush { clip-path: none; }
+}
+
+/* Annotations enter once when the narrative is visible. Without scripting or
+   with reduced motion, their ordinary styles already describe the final frame. */
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  #collaboration:not([data-entrance="complete"]) .story-motion {
+    animation-fill-mode: both;
+    animation-play-state: var(--story-play-state, paused);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  #collaboration:not([data-entrance="complete"]) .story-pin {
+    animation-name: landing-story-pin;
+    animation-duration: 200ms;
+    animation-delay: 120ms;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  #collaboration:not([data-entrance="complete"]) .story-line {
+    stroke-dasharray: 1;
+    animation-name: landing-story-line;
+    animation-duration: 460ms;
+    animation-delay: 200ms;
+    animation-timing-function: ease-in-out;
+  }
+  #collaboration:not([data-entrance="complete"]) .story-note {
+    animation-name: landing-story-note;
+    animation-duration: 380ms;
+    animation-delay: 500ms;
+  }
+  #collaboration:not([data-entrance="complete"]) .story-pointer {
+    animation-name: landing-story-pointer;
+    animation-duration: 560ms;
+    animation-delay: 740ms;
+  }
+  #collaboration:not([data-entrance="complete"]) .story-adam {
+    animation-name: landing-adam-label;
+    animation-duration: 250ms;
+    animation-delay: 1300ms;
+  }
+}
+@keyframes landing-story-pin {
+  from { opacity: 0; transform: scale(0.65); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes landing-story-line {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes landing-story-note {
+  from { opacity: 0; transform: translate(-6px, 5px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes landing-story-pointer {
+  from { opacity: 0; transform: translate(26px, 16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes landing-adam-label {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}

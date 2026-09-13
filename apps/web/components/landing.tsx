@@ -230,7 +230,7 @@ export default function LandingPage() {
               "max-[768px]:[&_h1]:leading-[0.98] max-[768px]:[&>p]:leading-[1.5]",
             )}
           >
-            <h1 id="hero-title">
+            <h1 id="hero-title" aria-label="Good ideas come together.">
               Good ideas
               <br />
               come <TogetherBrush />

@@ -209,11 +209,12 @@ export function PaperGlow() {
 export function DecorativeMaple({ position }: { position: "hero" | "story" }) {
   return (
     <Image
-      src="/landing/veined-maple.png"
+      src="/landing/veined-maple.webp"
       alt=""
       width={1297}
       height={1213}
-      sizes="(max-width: 768px) 110px, 240px"
+      loading={position === "hero" ? "eager" : "lazy"}
+      sizes={`(width < 768px) 110px, (width < 1200px) 180px, ${position === "hero" ? 240 : 235}px`}
       className={
         position === "hero"
           ? "pointer-events-none absolute left-[-45px] top-[54%] w-[240px] h-auto opacity-65 -rotate-12 max-[1200px]:w-[180px] max-[768px]:w-[110px] max-[768px]:left-[-35px] max-[768px]:top-[48%] max-[361px]:hidden"

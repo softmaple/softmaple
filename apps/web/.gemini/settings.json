@@ -1,12 +1,5 @@
 {
   "mcpServers": {
-    "next-devtools": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "next-devtools-mcp@latest"
-      ]
-    },
     "motion": {
       "type": "http",
       "url": "https://mcp.motion.dev"

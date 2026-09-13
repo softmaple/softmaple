@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   ArrowUpRight,
   RotateCcw,
@@ -27,7 +27,7 @@ export function CollaborationDemo() {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const commentInput = useRef<HTMLInputElement>(null);
   const editButton = useRef<HTMLButtonElement>(null);
-  const addCommentButton = useRef<HTMLButtonElement>(null);
+  const activeCommentTrigger = useRef<HTMLButtonElement>(null);
   const [run, setRun] = useState(0);
   const [step, setStep] = useState(3);
   const [editing, setEditing] = useState(false);
@@ -45,6 +45,17 @@ export function CollaborationDemo() {
   useEffect(() => {
     if (commenting) commentInput.current?.focus();
   }, [commenting]);
+
+  const toggleComment = (event: MouseEvent<HTMLButtonElement>) => {
+    const trigger = event.currentTarget;
+    const close = commenting && activeCommentTrigger.current === trigger;
+    activeCommentTrigger.current = trigger;
+    setAutomatic(false);
+    setStep(3);
+    setCommenting(!close);
+    // Switching triggers keeps the existing form and draft available.
+    if (commenting && !close) commentInput.current?.focus();
+  };
 
   const edit = () => {
     setAutomatic(false);
@@ -178,7 +189,7 @@ export function CollaborationDemo() {
                 <span
                   className={cn(
                     cursorClasses,
-                    "[--cursor-color:#087bea]",
+                    "[--cursor-color:#0867c2]",
                     "demo-adam left-[calc(100%_+_12px)] top-2.5",
                     "max-[1200px]:text-[10px] max-[1200px]:py-1.5 max-[1200px]:px-2",
                     "max-[768px]:top-[19px] max-[768px]:left-[70%] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5",
@@ -242,7 +253,7 @@ export function CollaborationDemo() {
                 <span
                   className={cn(
                     cursorClasses,
-                    "[--cursor-color:#af67d2]",
+                    "[--cursor-color:#8846aa]",
                     "demo-mia relative inline-block align-[-0.8em] ml-3",
                     "max-[768px]:text-[9px] max-[768px]:py-1.5 max-[768px]:px-2 max-[768px]:align-[-0.65em]",
                   )}
@@ -293,11 +304,9 @@ export function CollaborationDemo() {
           <button
             className="flex w-full justify-between items-center min-h-[30px] text-left hover:text-(--ink) [&_svg]:w-4 [&_svg]:h-4"
             type="button"
-            onClick={() => {
-              setAutomatic(false);
-              setStep(3);
-              setCommenting(!commenting);
-            }}
+            onClick={toggleComment}
+            aria-expanded={commenting}
+            aria-controls="demo-comment-form"
           >
             Reply <MessageSquare aria-hidden="true" />
           </button>
@@ -330,12 +339,7 @@ export function CollaborationDemo() {
         </button>
         <button
           type="button"
-          onClick={() => {
-            setAutomatic(false);
-            setStep(3);
-            setCommenting(!commenting);
-          }}
-          ref={addCommentButton}
+          onClick={toggleComment}
           aria-expanded={commenting}
           aria-controls="demo-comment-form"
         >
@@ -357,7 +361,7 @@ export function CollaborationDemo() {
               setReply(comment.trim());
               setComment("");
               setCommenting(false);
-              addCommentButton.current?.focus();
+              activeCommentTrigger.current?.focus();
               setStatus("Your comment was added to the demo.");
             }
           }}

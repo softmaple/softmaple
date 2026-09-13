@@ -136,7 +136,7 @@ export default function LandingPage() {
               <span
                 className={cn(
                   cursorClasses,
-                  "[--cursor-color:#af67d2]",
+                  "[--cursor-color:#8846aa]",
                   "left-[-11%] top-[41%] [transform:rotate(-12deg)] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5 max-[768px]:left-[-6%]",
                 )}
                 aria-hidden="true"
@@ -146,7 +146,7 @@ export default function LandingPage() {
               <span
                 className={cn(
                   cursorClasses,
-                  "[--cursor-color:#087bea]",
+                  "[--cursor-color:#0867c2]",
                   "right-[-9%] top-[24%] [transform:rotate(-12deg)] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5 max-[768px]:right-[-4%]",
                 )}
                 aria-hidden="true"
@@ -156,7 +156,7 @@ export default function LandingPage() {
               <span
                 className={cn(
                   cursorClasses,
-                  "[--cursor-color:#249e70]",
+                  "[--cursor-color:#16754f]",
                   "right-[18%] bottom-[-30%] [transform:rotate(-12deg)] max-[768px]:text-[8px] max-[768px]:py-[5px] max-[768px]:px-1.5 max-[768px]:bottom-[-19%]",
                 )}
                 aria-hidden="true"

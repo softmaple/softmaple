@@ -321,3 +321,108 @@ test("dark mode and mobile navigation retain usable controls", async ({
     ),
   ).toBe(true);
 });
+
+for (const opener of ["Reply", "Add comment"]) {
+  test(`comment disclosures retain drafts and restore focus after opening with ${opener}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    const first = page.getByRole("button", { name: opener, exact: true });
+    const other = page.getByRole("button", {
+      name: opener === "Reply" ? "Add comment" : "Reply",
+      exact: true,
+    });
+    const form = page.locator("#demo-comment-form");
+    const input = page.getByRole("textbox", { name: "Your reply to Leo" });
+    for (const trigger of [first, other]) {
+      await expect(trigger).toHaveAttribute(
+        "aria-controls",
+        "demo-comment-form",
+      );
+      await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    }
+    await first.focus();
+    await page.keyboard.press("Enter");
+    await expect(input).toBeFocused();
+    await input.fill("A shared idea");
+    await first.focus();
+    await page.keyboard.press("Space");
+    await expect(form).toBeHidden();
+    for (const trigger of [first, other]) {
+      await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    }
+    await first.press("Enter");
+    await expect(input).toHaveValue("A shared idea");
+    await other.focus();
+    await page.keyboard.press("Enter");
+    await expect(form).toBeVisible();
+    await expect(input).toHaveValue("A shared idea");
+    await expect(input).toBeFocused();
+    for (const trigger of [first, other]) {
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    }
+    await page.getByRole("button", { name: "Add reply", exact: true }).click();
+    await expect(form).toBeHidden();
+    await expect(other).toBeFocused();
+    await expect(
+      page
+        .getByRole("complementary", { name: "Demo comment" })
+        .getByText("A shared idea"),
+    ).toBeVisible();
+    for (const trigger of [first, other]) {
+      await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    }
+  });
+}
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`collaborator names have readable contrast in ${colorScheme} mode`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce", colorScheme });
+    await page.goto("/");
+    await expect(page.locator(".landing-art")).toHaveAttribute(
+      "data-hero-entrance",
+      "complete",
+    );
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const names = page.getByText(/^(Adam|Mia|Leo)$/);
+      await expect(names).toHaveCount(8);
+      for (const name of await names.all()) {
+        const contrast = await name.evaluate((element) => {
+          const rgb = (color: string) => color.match(/[\d.]+/g)!.map(Number);
+          const luminance = (color: number[]) => {
+            const [r, g, b] = color.slice(0, 3).map((channel) => {
+              const value = channel / 255;
+              return value <= 0.04045
+                ? value / 12.92
+                : ((value + 0.055) / 1.055) ** 2.4;
+            });
+            return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+          };
+          let background = element;
+          while (
+            background.parentElement &&
+            getComputedStyle(background).backgroundColor === "rgba(0, 0, 0, 0)"
+          ) {
+            background = background.parentElement;
+          }
+          const foreground = luminance(rgb(getComputedStyle(element).color));
+          const behind = luminance(
+            rgb(getComputedStyle(background).backgroundColor),
+          );
+          return (
+            (Math.max(foreground, behind) + 0.05) /
+            (Math.min(foreground, behind) + 0.05)
+          );
+        });
+        expect(
+          contrast,
+          `${await name.textContent()} at ${width}px`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+}

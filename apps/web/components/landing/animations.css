@@ -1,4 +1,3 @@
-/* Font source and keyframes used by the landing page Tailwind utilities. */
 @font-face {
   font-family: "Softmaple Hand";
   src: url("/landing/caveat-latin.woff2") format("woff2");
@@ -6,105 +5,37 @@
   font-style: normal;
   font-display: swap;
 }
-@keyframes landing-copy-enter {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes landing-art-enter {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-@keyframes landing-comment-enter {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-@keyframes landing-type-phrase {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0);
-  }
-}
 
-/* The final dry-brush shape is independent of its slanted reveal mask. */
+/* The artwork is never scaled by the reveal. Without JS this is the final brush. */
 .landing-brush {
   background: url("/landing/together-brush.svg") center / 100% 100% no-repeat;
-  clip-path: polygon(0 0, -12% 0, -21% 100%, 0 100%);
 }
-@media (prefers-reduced-motion: reduce) {
-  .landing-brush { clip-path: none; }
+.story-pin {
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
-/* Annotations enter once when the narrative is visible. Without scripting or
-   with reduced motion, their ordinary styles already describe the final frame. */
+/* Initial frames before hydration only. Motion owns all timing and playback. */
 @media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
-  #collaboration:not([data-entrance="complete"]) .story-motion {
-    animation-fill-mode: both;
-    animation-play-state: var(--story-play-state, paused);
-    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  #collaboration:not([data-entrance="complete"]) .story-pin {
-    animation-name: landing-story-pin;
-    animation-duration: 200ms;
-    animation-delay: 120ms;
-    transform-box: fill-box;
-    transform-origin: center;
-  }
-  #collaboration:not([data-entrance="complete"]) .story-line {
-    stroke-dasharray: 1;
-    animation-name: landing-story-line;
-    animation-duration: 460ms;
-    animation-delay: 200ms;
-    animation-timing-function: ease-in-out;
-  }
-  #collaboration:not([data-entrance="complete"]) .story-note {
-    animation-name: landing-story-note;
-    animation-duration: 380ms;
-    animation-delay: 500ms;
-  }
-  #collaboration:not([data-entrance="complete"]) .story-pointer {
-    animation-name: landing-story-pointer;
-    animation-duration: 560ms;
-    animation-delay: 740ms;
-  }
-  #collaboration:not([data-entrance="complete"]) .story-adam {
-    animation-name: landing-adam-label;
-    animation-duration: 250ms;
-    animation-delay: 1300ms;
+  #collaboration[data-entrance="waiting"] :is(.story-pin, .story-line, .story-note, .story-pointer, .story-adam) {
+    opacity: 0;
   }
 }
-@keyframes landing-story-pin {
-  from { opacity: 0; transform: scale(0.65); }
-  to { opacity: 1; transform: scale(1); }
+
+/* A MotionValue supplies the brush mask during hydration. Keep the final
+   artwork visible when scripting is disabled. */
+@media (scripting: none) {
+  .landing-brush { clip-path: none !important; }
 }
-@keyframes landing-story-line {
-  from { stroke-dashoffset: 1; }
-  to { stroke-dashoffset: 0; }
-}
-@keyframes landing-story-note {
-  from { opacity: 0; transform: translate(-6px, 5px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes landing-story-pointer {
-  from { opacity: 0; transform: translate(26px, 16px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes landing-adam-label {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
+
+/* Covers preference changes immediately, before React commits its static state. */
+@media (prefers-reduced-motion: reduce) {
+  .landing-brush, .demo-phrase { clip-path: none !important; }
+  .landing-copy, .landing-art { opacity: 1 !important; transform: none !important; }
+  :is(.story-pin, .story-note, .story-pointer, .story-adam, .demo-adam, .demo-mia, .demo-comment) {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .demo-highlight { transform: none !important; }
+  .demo-comment { visibility: visible !important; }
 }

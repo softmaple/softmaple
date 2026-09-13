@@ -159,6 +159,21 @@ test("narrative annotations enter once and pause in the background", async ({
     .locator(".story-note")
     .evaluate((el) => getComputedStyle(el).opacity);
   expect(Number(noteOpacity)).toBeGreaterThan(0);
+  // Finite positional choreography should use native transform animations.
+  // This also ensures the pause checks exercise real browser animations.
+  expect(
+    await narrative
+      .locator(".story-note")
+      .evaluate((el) =>
+        el
+          .getAnimations()
+          .some((animation) =>
+            (animation.effect as KeyframeEffect)
+              .getKeyframes()
+              .some((frame) => "transform" in frame),
+          ),
+      ),
+  ).toBe(true);
   const times = await narrative.evaluate((el) =>
     el
       .getAnimations({ subtree: true })
@@ -192,4 +207,117 @@ test("narrative annotations enter once and pause in the background", async ({
       (el) => el.getAnimations({ subtree: true }).length,
     ),
   ).toBe(0);
+});
+
+test("keyboard interaction finishes a pending narrative and restores focus", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    }),
+  );
+  await page.goto("/");
+  const narrative = page.locator("#collaboration");
+  await narrative.scrollIntoViewIfNeeded();
+  await expect(narrative).toHaveAttribute("data-entrance", "waiting");
+  const trigger = page.getByRole("button", {
+    name: "write together",
+    exact: true,
+  });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(narrative).toHaveAttribute("data-entrance", "complete");
+  await expect(page.locator("#story-comment")).toBeHidden();
+  await page.keyboard.press("Space");
+  await expect(page.locator("#story-comment")).toBeVisible();
+  await expect(narrative.locator(".story-note")).toHaveCSS("opacity", "1");
+  await expect(narrative.locator(".story-adam")).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+});
+
+test("demo pauses in the background and reduced motion completes a pending narrative", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const demo = page.locator("[data-step]");
+  await demo.scrollIntoViewIfNeeded();
+  await expect(demo).toHaveAttribute("data-step", "1");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForTimeout(100);
+  const phrase = page.locator(".demo-phrase");
+  const paused = await phrase.evaluate((el) => getComputedStyle(el).clipPath);
+  await page.waitForTimeout(1800);
+  await expect(demo).toHaveAttribute("data-step", "1");
+  expect(await phrase.evaluate((el) => getComputedStyle(el).clipPath)).toBe(
+    paused,
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(demo).toHaveAttribute("data-step", "3");
+  await expect(
+    page.getByRole("complementary", { name: "Demo comment" }),
+  ).toBeVisible();
+  await page.locator("#collaboration").scrollIntoViewIfNeeded();
+  await expect(page.locator("#collaboration")).toHaveAttribute(
+    "data-entrance",
+    "complete",
+  );
+  await expect(page.locator(".story-note")).toHaveCSS("opacity", "1");
+  await expect(page.locator(".story-pointer")).toHaveCSS("opacity", "1");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForTimeout(500);
+  await expect(page.locator(".story-note")).toHaveCSS("opacity", "1");
+  expect(
+    await page
+      .locator("#collaboration")
+      .evaluate((el) => el.getAnimations({ subtree: true }).length),
+  ).toBe(0);
+});
+
+test("dark mode and mobile navigation retain usable controls", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Toggle color theme" }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(page.locator("#hero-title")).toHaveCSS(
+    "color",
+    "rgb(246, 245, 240)",
+  );
+  await expect(page.locator("canvas")).toHaveCSS("opacity", "0.4");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(
+    page.getByRole("navigation", { name: "Main navigation" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("button", { name: "Open navigation" }),
+  ).toBeFocused();
+  await page.locator("#collaboration").scrollIntoViewIfNeeded();
+  await expect(page.locator("#story-comment")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });

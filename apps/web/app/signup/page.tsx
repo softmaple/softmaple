@@ -8,19 +8,42 @@ export default function SignupPage() {
   return (
     <AuthGuard>
       <AuthShell
-        description="Start writing with Softmaple today"
+        artTitle={
+          <>
+            Good ideas start <span className="auth-brush">with you.</span>
+          </>
+        }
+        description="Make room for your next good idea."
         title="Create your account"
       >
-        <SignupForm />
         <AuthOAuthOptions mode="sign-up" />
+        <SignupForm />
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-5 text-xs leading-5 text-[#777973]">
+          By continuing, you agree to our{" "}
+          <Link
+            className="underline underline-offset-4 hover:text-[#8a6d00]"
+            href="/terms"
+          >
+            Terms
+          </Link>{" "}
+          and{" "}
+          <Link
+            className="underline underline-offset-4 hover:text-[#8a6d00]"
+            href="/privacy"
+          >
+            Privacy Policy
+          </Link>
+          .
+        </p>
+
+        <p className="mt-7 text-center text-sm text-[#676963]">
           Already have an account?{" "}
           <Link
-            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="text-[#8a6d00] underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#967200]"
             href="/login"
           >
-            Sign in
+            Log in
           </Link>
         </p>
       </AuthShell>

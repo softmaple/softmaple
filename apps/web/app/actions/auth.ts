@@ -28,18 +28,10 @@ const loginSchema = z.object({
   email: z.email("Enter a valid email address.").trim().toLowerCase(),
   password: z.string().min(1, "Password is required."),
 });
-const signupSchema = z
-  .object({
-    confirmPassword: z.string(),
-    email: z.email("Enter a valid email address.").trim().toLowerCase(),
-    firstName: z.string().trim().min(1, "First name is required.").max(60),
-    lastName: z.string().trim().min(1, "Last name is required.").max(60),
-    password: passwordSchema,
-  })
-  .refine((value) => value.password === value.confirmPassword, {
-    message: "Passwords do not match.",
-    path: ["confirmPassword"],
-  });
+const signupSchema = z.object({
+  email: z.email("Enter a valid email address.").trim().toLowerCase(),
+  password: passwordSchema,
+});
 const resetSchema = z.object({
   email: z.email("Enter a valid email address.").trim().toLowerCase(),
 });
@@ -92,24 +84,18 @@ export const signup = async (
   formData: FormData,
 ): Promise<ActionResult<AuthActionData>> => {
   const parsed = signupSchema.safeParse({
-    confirmPassword: formData.get("confirmPassword"),
     email: formData.get("email"),
-    firstName: formData.get("firstName"),
-    lastName: formData.get("lastName"),
     password: formData.get("password"),
   });
   if (!parsed.success) return fromZodError(parsed.error);
 
   const supabase = await createClient();
-  const fullName = `${parsed.data.firstName} ${parsed.data.lastName}`;
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
       data: {
-        first_name: parsed.data.firstName,
-        full_name: fullName,
-        last_name: parsed.data.lastName,
+        full_name: parsed.data.email.split("@")[0],
       },
       emailRedirectTo: `${appOrigin()}/auth/confirm?next=/dashboard`,
     },

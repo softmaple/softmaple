@@ -45,6 +45,8 @@
   --autumn-canopy: #8c3f1d;
   --autumn-wash-strength: 14%;
   --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
+  --auth-paper: #faf9f5;
+  --auth-ink: #171714;
 }
 
 .dark {
@@ -83,6 +85,42 @@
   --autumn-canopy: #f0a86a;
   --autumn-wash-strength: 10%;
   --autumn-shadow: #000000;
+  --auth-paper: #1b1c19;
+  --auth-ink: #f5f1e7;
+}
+
+.auth-page {
+  --brand-gold: #f1b900;
+  background-image: radial-gradient(circle at 13% 10%, rgba(255, 219, 82, 0.12), transparent 25rem), repeating-linear-gradient(0deg, rgba(102, 83, 48, 0.025) 0, rgba(102, 83, 48, 0.025) 1px, transparent 1px, transparent 4px);
+}
+
+.auth-brand-panel {
+  background: linear-gradient(135deg, rgba(255, 249, 220, 0.42), transparent 58%);
+}
+
+.auth-brush {
+  background: url("/landing/together-brush.svg") center / 100% 100% no-repeat;
+  padding-inline: 0.08em;
+  margin-inline: -0.08em;
+}
+
+.auth-page input {
+  border-color: #d8d5cd;
+}
+
+.auth-page input:focus-visible {
+  border-color: #967200;
+  --tw-ring-color: rgb(150 114 0 / 25%);
+}
+
+.auth-page form [data-slot="button"][type="submit"] {
+  background: #ffc629;
+  color: #171714;
+  box-shadow: none;
+}
+
+.auth-page form [data-slot="button"][type="submit"]:hover {
+  background: #f2b800;
 }
 
 @theme inline {

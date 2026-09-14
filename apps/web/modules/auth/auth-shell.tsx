@@ -1,61 +1,90 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Home } from "lucide-react";
-import { SoftmapleWordmark } from "@/components/BrandMark";
-import { AuthBrandSpecimen } from "@/modules/auth/auth-brand-specimen";
+import { LandingBrand } from "@/components/landing/Brand";
 
 export type AuthShellProps = {
   readonly children: ReactNode;
   readonly description: string;
   readonly title: string;
+  readonly artTitle?: ReactNode;
 };
 
-export const AuthShell = ({ children, description, title }: AuthShellProps) => (
-  <main className="min-h-dvh bg-background text-foreground">
-    <div className="mx-auto grid min-h-dvh w-full max-w-[96rem] lg:grid-cols-[minmax(0,1.08fr)_minmax(27rem,0.92fr)] lg:border-x">
-      <section className="hidden min-w-0 flex-col px-5 py-6 sm:px-8 lg:flex lg:min-h-dvh lg:px-12 lg:py-8 xl:px-16">
+export const AuthShell = ({
+  children,
+  description,
+  title,
+  artTitle,
+}: AuthShellProps) => (
+  <main className="auth-page min-h-dvh overflow-hidden bg-[var(--auth-paper)] text-[var(--auth-ink)]">
+    <div className="mx-auto grid min-h-dvh w-full max-w-[1440px] lg:grid-cols-[minmax(0,1.12fr)_minmax(27rem,0.88fr)]">
+      <section className="auth-brand-panel relative hidden min-w-0 flex-col overflow-hidden px-8 py-7 sm:px-12 lg:flex lg:min-h-dvh xl:px-16">
+        <Image
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-[13%] top-[6%] w-[76%] max-w-[44rem] rotate-[8deg] opacity-90"
+          src="/landing/paper-ribbon.webp"
+          alt=""
+          width={1448}
+          height={1086}
+          sizes="55vw"
+          priority
+        />
+        <Image
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-10 -left-12 w-64 -rotate-12 opacity-60 xl:w-80"
+          src="/landing/veined-maple.webp"
+          alt=""
+          width={1297}
+          height={1213}
+          sizes="320px"
+          priority
+        />
         <div className="flex items-center justify-between gap-4">
           <Link
-            className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="relative z-10 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#967200]"
             href="/"
           >
-            <SoftmapleWordmark className="text-xl font-bold" />
+            <LandingBrand />
           </Link>
           <Link
-            className="inline-flex items-center gap-2 rounded-sm px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="relative z-10 inline-flex items-center gap-2 rounded-sm px-2 py-1 text-sm text-[#5f625e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#967200]"
             href="/"
           >
             <Home className="size-4" /> Back home
           </Link>
         </div>
 
-        <div className="flex flex-1 flex-col justify-center py-12 sm:py-16 lg:py-12">
-          <div className="h-px w-12 bg-primary" />
-          <p className="mt-8 font-mono text-[10px] uppercase tracking-[0.24em] text-primary sm:text-xs">
-            A shared space for your words
-          </p>
-          <p className="mt-10 max-w-3xl font-display text-[clamp(2.75rem,11vw,5.5rem)] font-semibold leading-[0.88] tracking-[-0.055em]">
-            A little space.
-            <br />
-            For big ideas.
-          </p>
-          <p className="mt-8 hidden max-w-xl text-sm leading-7 text-muted-foreground lg:block xl:text-base">
-            From the first rough note to the final paper. Write, shape, and
-            share your thinking, together.
-          </p>
-          <AuthBrandSpecimen />
+        <div className="relative z-10 flex flex-1 flex-col justify-center py-12 sm:py-16 lg:py-12">
+          <h2 className="max-w-[38rem] font-serif text-[clamp(3.8rem,7.2vw,7.2rem)] leading-[0.9] tracking-[-0.065em] text-[#10100e]">
+            {artTitle ?? <>Make room for good ideas.</>}
+          </h2>
+          <div
+            className="mt-12 flex items-center gap-5 text-xs text-[#666862]"
+            aria-hidden="true"
+          >
+            <span className="flex items-center gap-2">
+              <span className="size-2 rounded-full bg-[#a76dba]" /> Mia
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="size-2 rounded-full bg-[#3d82bd]" /> Adam
+            </span>
+            <span className="rounded-sm bg-[#ffcc3a] px-2 py-1 text-[#4a3a05]">
+              Let&apos;s build on this.
+            </span>
+          </div>
         </div>
       </section>
 
-      <section className="flex min-h-dvh min-w-0 items-center bg-card px-5 py-10 sm:px-8 sm:py-14 lg:border-l lg:px-12 xl:px-16">
-        <div className="mx-auto w-full max-w-md">
-          <Link href="/" className="mb-10 inline-flex lg:hidden">
-            <SoftmapleWordmark className="text-2xl" />
+      <section className="flex min-h-dvh min-w-0 items-center px-5 py-10 sm:px-8 sm:py-14 lg:border-l lg:border-[#e9e2d5] lg:px-12 xl:px-16">
+        <div className="mx-auto w-full max-w-[27rem]">
+          <Link href="/" className="mb-12 inline-flex lg:hidden">
+            <LandingBrand />
           </Link>
-          <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h1 className="font-serif text-[2.5rem] leading-[1] tracking-[-0.045em] sm:text-[3.15rem]">
             {title}
           </h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground sm:text-base">
+          <p className="mt-4 max-w-sm text-[0.98rem] leading-6 text-[#676963] sm:text-base">
             {description}
           </p>
           <div className="mt-8">{children}</div>

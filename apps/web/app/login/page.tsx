@@ -16,7 +16,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <AuthGuard>
       <AuthShell
-        description="Sign in to your Softmaple account"
+        artTitle={
+          <>
+            Good to have <span className="auth-brush">you back.</span>
+          </>
+        }
+        description="Pick up where your ideas left off."
         title="Welcome back"
       >
         {message === undefined ? null : (
@@ -36,23 +41,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </p>
         )}
 
+        <AuthOAuthOptions mode="sign-in" />
         <LoginForm next={params.next} />
 
-        <div className="mt-3 text-right">
+        <p className="mt-7 text-center text-sm text-[#676963]">
+          New to Softmaple?{" "}
           <Link
-            className="text-sm text-muted-foreground transition-colors hover:text-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/reset-password"
-          >
-            Forgot password?
-          </Link>
-        </div>
-
-        <AuthOAuthOptions mode="sign-in" />
-
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{" "}
-          <Link
-            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="text-[#8a6d00] underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#967200]"
             href="/signup"
           >
             Sign up

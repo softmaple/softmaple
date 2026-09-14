@@ -20,13 +20,12 @@ test.describe("public product surface", () => {
 
   test("email forms expose validation and recovery paths", async ({ page }) => {
     await page.goto("/signup");
-    await page.getByLabel("First name").fill("Ada");
-    await page.getByLabel("Last name").fill("Lovelace");
     await page.getByLabel("Email").fill("ada@example.invalid");
-    await page.getByLabel("Password", { exact: true }).fill("password123");
-    await page.getByLabel("Confirm password").fill("different123");
+    await page.getByLabel("Password", { exact: true }).fill("short");
     await page.getByRole("button", { name: /Create account/i }).click();
-    await expect(page.getByText("Passwords do not match.")).toBeVisible();
+    await expect(
+      page.getByText("Password must be at least 8 characters."),
+    ).toBeVisible();
 
     await page.goto("/login");
     await page.getByRole("link", { name: /Forgot password/i }).click();

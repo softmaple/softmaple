@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { LandingBrand } from "@/components/landing/Brand";
+import { paperBrandTheme } from "@/components/brand-theme";
 import { cn } from "@softmaple/ui/lib/utils";
 import { AuthBrandPanel } from "./auth-brand-panel";
 import { authLinkClass } from "./auth-styles";
@@ -21,8 +22,7 @@ export function AuthPageShell({
     <main
       className={cn(
         "relative isolate min-h-dvh overflow-clip bg-(--paper) text-(--ink) [font-family:var(--font-body),_Arial,_sans-serif]",
-        "[--paper:#faf9f6] [--ink:#0c0c0b] [--muted-ink:#62656b] [--line:#cccdd0] [--surface:#f3f3f1] [--brand-gold:#ffc800]",
-        "dark:[--paper:#201e1a] dark:[--ink:#f7f2e8] dark:[--muted-ink:#b9b8b5] dark:[--line:#5c5952] dark:[--surface:#191815] dark:[--brand-gold:#ffcc32]",
+        paperBrandTheme,
       )}
     >
       <div className="relative mx-auto flex min-h-dvh max-w-[1536px] flex-col min-[56.25rem]:min-h-[max(100dvh,calc(min(100vw,1536px)*0.76))] min-[56.25rem]:dark:bg-[linear-gradient(90deg,#191815_56%,#201e1a_56%)]">

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="110" viewBox="0 0 640 110" preserveAspectRatio="none">
+  <defs>
+    <filter id="dry" x="-5%" y="-20%" width="110%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency=".045 .48" numOctaves="3" seed="14" result="grain"/>
+      <feDisplacementMap in="SourceGraphic" in2="grain" scale="5" xChannelSelector="R" yChannelSelector="G" result="bristles"/>
+      <feColorMatrix in="grain" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2.8 -1" result="pores"/>
+      <feComposite in="bristles" in2="pores" operator="in"/>
+    </filter>
+    <mask id="gaps">
+      <path fill="white" d="M0 0H640V110H0Z"/>
+      <g fill="none" stroke="black">
+        <path stroke-width="1.6" d="m9 36 90-6 53 1m271-11 111 1 46-3M21 74l54-4 91 2m154 15 114-6 106 2M506 50l119-6"/>
+        <path stroke-width=".8" d="m59 43 68-2 70 1m43 22 116-3m-27-18 137-6M153 91l107-7m217-16 95-1"/>
+      </g>
+    </mask>
+  </defs>
+  <g fill="#f5c534" filter="url(#dry)" mask="url(#gaps)">
+    <path opacity=".28" d="m31 27 37-8 76 2 59-9 75 4 85-8 94 8 80-7 58 8-26 7 48 5-34 8 31 6-47 8 42 7-35 10 21 7-39 7-75-1-79 11-72-4-94 10-63-5-65 7-57-7 18-8-30-3 27-10-33-2 24-9-17-5 29-12-20-5Z"/>
+    <path opacity=".4" d="m24 43 36-14 91-1 69-6 61 2 89-5 81 7 73-5 66 9-32 6 47 3-20 7 26 4-57 8 23 6-80 6-72-2-101 9-62-1-84 7-72-4-70 5 31-11-45 1 31-11-32 1 39-13Z"/>
+    <path opacity=".48" d="m42 51 62-13 97 1 93-8 80 6 97-5 82 7 36-2-17 7 43 1-45 9-55 2-79 8-77-2-103 9-76-1-71 8-57-4 24-9-47 2Z"/>
+    <path opacity=".25" d="m62 22 105-6 83 1 135-9 83 7 53-3-37 7-101-4-118 10-91-2-125 7ZM18 82l94-6 88 4 113-8 98 3 106-5-32 9-74 2-112-2-100 10-90-7-96 7Z"/>
+  </g>
+</svg>

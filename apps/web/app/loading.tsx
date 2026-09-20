@@ -1,5 +1,5 @@
-import { RouteLoading } from "@/components/RouteLoading";
+import { GlobalLoading } from "@/components/loading/GlobalLoading";
 
 export default function Loading() {
-  return <RouteLoading className="min-h-dvh" label="Loading Softmaple" />;
+  return <GlobalLoading />;
 }

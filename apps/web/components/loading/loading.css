@@ -1,0 +1,121 @@
+/* Layout stays in flow on unusually short screens; decoration is always below
+   the content. The normal composition centers the identity above the ribbon. */
+.global-loading {
+  grid-template-rows: minmax(min-content, 1fr) clamp(110px, 23dvh, 240px);
+  padding-top: max(24px, env(safe-area-inset-top));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.loading-content {
+  align-self: center;
+  padding-block: 24px 40px;
+}
+
+.loading-maple {
+  background: url("/landing/veined-maple.webp") center / contain no-repeat;
+}
+
+.dark .loading-maple {
+  background-image: url("/auth/veined-maple-dark.webp");
+}
+
+.loading-brush {
+  background: url("/loading/brush.svg") center / 100% 100% no-repeat;
+}
+
+.loading-ribbon {
+  height: clamp(110px, 23dvh, 240px);
+  background: url("/auth/paper-login-cutout.webp") center 43% / cover no-repeat;
+  /* Fade only the distant upper edge, keeping the foreground paper tactile. */
+  mask-image: linear-gradient(to bottom, transparent, #000 18%);
+}
+
+.dark .loading-ribbon {
+  background-image: url("/auth/paper-login-dark.webp");
+}
+
+@media (min-width: 640px) {
+  .global-loading {
+    grid-template-rows: minmax(min-content, 1fr) clamp(160px, 27dvh, 360px);
+  }
+  .loading-ribbon {
+    height: clamp(160px, 27dvh, 360px);
+    background-size: 100% 180%;
+    background-position: center 40%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .global-loading {
+    grid-template-rows: minmax(min-content, 1fr) 30dvh;
+  }
+  .loading-ribbon {
+    height: 30dvh;
+  }
+}
+
+@media (max-height: 600px) {
+  .global-loading {
+    grid-template-rows: minmax(min-content, 1fr) 18dvh;
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+  .loading-content {
+    padding-block: 12px 24px;
+  }
+  .loading-logo {
+    width: 28px;
+    height: 32px;
+  }
+  .loading-wordmark {
+    font-size: 34px;
+  }
+  .loading-thought {
+    margin-top: 20px;
+    font-size: 14px;
+  }
+  .loading-status {
+    margin-top: 24px;
+  }
+  .loading-ribbon {
+    height: 18dvh;
+  }
+  .loading-maple {
+    opacity: 0.15;
+  }
+}
+
+@media (max-width: 360px) {
+  .loading-maple {
+    display: none;
+  }
+}
+
+/* The texture is independent of its reveal. Only the clipping front moves;
+   staggered bristle tips keep the leading edge from becoming a vertical wipe. */
+@keyframes loading-paint {
+  from {
+    clip-path: polygon(0 0, -12% 0, -5% 22%, -9% 43%, -2% 65%, -7% 83%, -11% 100%, 0 100%);
+  }
+  to {
+    clip-path: polygon(0 0, 110% 0, 117% 22%, 113% 43%, 120% 65%, 115% 83%, 111% 100%, 0 100%);
+  }
+}
+
+@keyframes loading-travel {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(275%); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .loading-brush {
+    animation: loading-paint 760ms 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  }
+  .loading-segment {
+    animation: loading-travel 2400ms ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-brush { clip-path: none; }
+  .loading-segment { transform: translateX(82%); }
+}

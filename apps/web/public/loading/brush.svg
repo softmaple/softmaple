@@ -3,7 +3,7 @@
     <filter id="dry" x="-5%" y="-20%" width="110%" height="140%">
       <feTurbulence type="fractalNoise" baseFrequency=".045 .48" numOctaves="3" seed="14" result="grain"/>
       <feDisplacementMap in="SourceGraphic" in2="grain" scale="5" xChannelSelector="R" yChannelSelector="G" result="bristles"/>
-      <feColorMatrix in="grain" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2.8 -1" result="pores"/>
+      <feColorMatrix in="grain" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.2 .25" result="pores"/>
       <feComposite in="bristles" in2="pores" operator="in"/>
     </filter>
     <mask id="gaps">

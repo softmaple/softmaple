@@ -1,6 +1,7 @@
 import { cn } from "@softmaple/ui/lib/utils";
 import { paperBrandTheme } from "@/components/brand-theme";
 import { MapleMark } from "@/components/landing/Brand";
+import { PaperRibbon } from "@/components/PaperRibbon";
 
 /** Shared route Suspense fallback: no hydration, timers, or synthetic route progress. */
 export function RouteLoading() {
@@ -69,14 +70,7 @@ export function RouteLoading() {
       {/* These existing cutouts include the textured paper and edge light. CSS selects
           only the current theme's asset, before hydration, without a second
           theme observer or downloading both images. */}
-      <div
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-0 h-(--loading-ribbon-height)",
-          "bg-[url('/auth/paper-login-cutout.webp')] bg-cover bg-position-[center_43%] bg-no-repeat dark:bg-[url('/auth/paper-login-dark.webp')]",
-          "sm:bg-size-[100%_180%] sm:bg-position-[center_40%] [mask-image:linear-gradient(to_bottom,transparent,#000_18%)]",
-        )}
-      />
+      <PaperRibbon className="h-(--loading-ribbon-height)" />
     </main>
   );
 }

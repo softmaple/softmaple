@@ -1,5 +1,5 @@
-import { GlobalLoading } from "@/components/loading/GlobalLoading";
+import { RouteLoading } from "@/components/RouteLoading";
 
 export default function Loading() {
-  return <GlobalLoading />;
+  return <RouteLoading />;
 }

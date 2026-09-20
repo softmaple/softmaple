@@ -1,7 +1,8 @@
+import { authLinkClass } from "@/modules/auth/auth-styles";
 import Link from "next/link";
 import { LoginForm } from "@/modules/auth/login-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
-import { AuthShell } from "@/modules/auth/auth-shell";
+import { AuthPageShell } from "@/modules/auth/auth-page-shell";
 import { AuthOAuthOptions } from "@/modules/auth/auth-oauth-options";
 
 interface LoginPageProps {
@@ -15,8 +16,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <AuthGuard>
-      <AuthShell
-        description="Sign in to your Softmaple account"
+      <AuthPageShell
+        mode="login"
+        description="Pick up where your ideas left off."
         title="Welcome back"
       >
         {message === undefined ? null : (
@@ -37,28 +39,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         )}
 
         <LoginForm next={params.next} />
-
-        <div className="mt-3 text-right">
-          <Link
-            className="text-sm text-muted-foreground transition-colors hover:text-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/reset-password"
-          >
+        <div className="mt-3 text-right text-sm">
+          <Link className={authLinkClass} href="/reset-password">
             Forgot password?
           </Link>
         </div>
+        <AuthOAuthOptions />
 
-        <AuthOAuthOptions mode="sign-in" />
-
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{" "}
-          <Link
-            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/signup"
-          >
+        <p className="mt-6 text-center text-sm text-(--muted-ink)">
+          New to Softmaple?{" "}
+          <Link className={authLinkClass} href="/signup">
             Sign up
           </Link>
         </p>
-      </AuthShell>
+      </AuthPageShell>
     </AuthGuard>
   );
 }

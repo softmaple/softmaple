@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { PasswordInput } from "./password-input";
+import { authInputClass, authSubmitClass } from "./auth-styles";
 import { useRouter } from "next/navigation";
 import { login } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
@@ -8,7 +10,9 @@ import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
 
 export const LoginForm = ({ next }: { readonly next?: string }) => {
-  const [state, action] = useActionState(login, null);
+  const [state, action, pending] = useActionState(login, null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const router = useRouter();
   const emailError =
     state !== null && !state.ok ? state.fieldErrors?.email?.[0] : undefined;
@@ -22,7 +26,14 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
   }, [router, state]);
 
   return (
-    <form action={action} className="space-y-4">
+    <form
+      action={action}
+      aria-busy={pending}
+      onSubmit={(event) => {
+        if (pending) event.preventDefault();
+      }}
+      className="space-y-5 min-[56.25rem]:max-xl:space-y-4"
+    >
       {next === undefined ? null : (
         <input name="next" type="hidden" value={next} />
       )}
@@ -41,6 +52,10 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
             emailError === undefined ? undefined : "email-error"
           }
           aria-invalid={emailError === undefined ? undefined : true}
+          className={authInputClass}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          readOnly={pending}
           autoComplete="email"
           id="email"
           name="email"
@@ -56,15 +71,17 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
-        <Input
+        <PasswordInput
           aria-describedby={
             passwordError === undefined ? undefined : "password-error"
           }
           aria-invalid={passwordError === undefined ? undefined : true}
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          readOnly={pending}
           autoComplete="current-password"
           id="password"
           name="password"
-          type="password"
           required
         />
         {passwordError === undefined ? null : (
@@ -73,7 +90,11 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
           </p>
         )}
       </div>
-      <SubmitButton />
+      <SubmitButton
+        text="Log in"
+        loadingText="Logging in..."
+        className={authSubmitClass}
+      />
     </form>
   );
 };

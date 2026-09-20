@@ -91,6 +91,22 @@
   --font-mono: var(--font-utility);
 }
 
+/* Custom motion primitives used by the loading screen's Tailwind utilities.
+   The pigment stays fixed while the irregular clipping front reveals it. */
+@keyframes loading-paint {
+  from {
+    clip-path: polygon(0 0, -12% 0, -5% 22%, -9% 43%, -2% 65%, -7% 83%, -11% 100%, 0 100%);
+  }
+  to {
+    clip-path: polygon(0 0, 110% 0, 117% 22%, 113% 43%, 120% 65%, 115% 83%, 111% 100%, 0 100%);
+  }
+}
+
+@keyframes loading-travel {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(275%); }
+}
+
 @layer base {
   html {
     overflow-x: clip;

@@ -58,6 +58,99 @@ function Brush() {
   );
 }
 
+function NoteBrush() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 360 46"
+      preserveAspectRatio="none"
+      className="absolute -inset-x-[1%] inset-y-0 -z-10 h-full w-[102%] text-[#ffe38c] dark:text-[#e2bd4b]"
+    >
+      <defs>
+        <filter
+          id="auth-note-grain"
+          x="-5%"
+          y="-15%"
+          width="110%"
+          height="130%"
+        >
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency=".035 .6"
+            numOctaves="3"
+            seed="12"
+            result="grain"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="grain"
+            scale="3.5"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </defs>
+      <g filter="url(#auth-note-grain)" fill="currentColor">
+        <path
+          opacity=".6"
+          d="M16 6C58 1 96 7 140 4L225 3 299 5 338 2Q354 3 357 17L355 28Q351 41 337 41L287 40 215 43 142 41 67 44 20 43Q4 41 3 29L5 16Q6 9 16 6Z"
+        />
+        <path
+          opacity=".7"
+          d="M21 10 79 8 130 10 196 7 267 9 329 7Q347 5 349 20L347 30Q344 37 328 37L249 37 177 38 110 37 49 40 19 38Q8 35 10 24L12 16Z"
+        />
+        <path
+          fill="none"
+          stroke="#fff1ae"
+          strokeWidth="1.5"
+          opacity=".22"
+          d="M17 13 108 11 161 13 238 10 338 12M10 30 95 32 165 29 252 31 345 28M35 38 119 35 202 38 310 35"
+        />
+        <path
+          fill="none"
+          stroke="#946b1b"
+          strokeWidth=".7"
+          opacity=".14"
+          d="M15 18 83 17M116 8 181 9M207 34 303 32M265 15 343 16M28 35 84 36"
+        />
+      </g>
+    </svg>
+  );
+}
+
+function CommentStem() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 32 32"
+      className="absolute -left-[2.7cqw] -top-[1.7cqw] h-[4cqw] w-[4cqw] overflow-visible drop-shadow-[.2cqw_.35cqw_.25cqw_#0005]"
+    >
+      <defs>
+        <linearGradient id="auth-comment-gold" x1="0" y1="0" x2="1" y2="1">
+          <stop stopColor="#fff0a0" />
+          <stop offset=".45" stopColor="#f5cf43" />
+          <stop offset="1" stopColor="#b78112" />
+        </linearGradient>
+      </defs>
+      <path
+        d="m2 2 28 22-5 6Z"
+        fill="#8c610e"
+        opacity=".6"
+        transform="translate(.6 1)"
+      />
+      <path d="m2 2 28 22-5 6Z" fill="url(#auth-comment-gold)" />
+      <path
+        d="M2 2 25 24"
+        fill="none"
+        stroke="#fff2a6"
+        strokeWidth=".9"
+        strokeLinecap="round"
+        opacity=".75"
+      />
+    </svg>
+  );
+}
+
 function Collaborator({
   name,
   className,
@@ -66,17 +159,40 @@ function Collaborator({
   readonly className: string;
 }) {
   const isAdam = name === "Adam";
+  const gradientId = `auth-cursor-${name.toLowerCase()}`;
   return (
     <div className={cn("absolute z-20", className)}>
       <svg
         aria-hidden="true"
         viewBox="0 0 24 30"
-        className={cn(
-          "h-[4.8cqw] w-[3.8cqw] drop-shadow-[0_2px_2px_#0002]",
-          isAdam ? "text-[#ffcc19]" : "text-[#848889]",
-        )}
+        className="h-[4.8cqw] w-[3.8cqw] overflow-visible drop-shadow-[.4cqw_.65cqw_.4cqw_#0005]"
       >
-        <path fill="currentColor" d="m2 1 20 17-11 1-5 10Z" />
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+            <stop stopColor={isAdam ? "#fff2a0" : "#cbd0d1"} />
+            <stop offset=".4" stopColor={isAdam ? "#ffcc19" : "#a5aaac"} />
+            <stop offset="1" stopColor={isAdam ? "#d69b0b" : "#717779"} />
+          </linearGradient>
+        </defs>
+        <path
+          fill={isAdam ? "#9c6b08" : "#44494b"}
+          d="m2 1 20 17-11 1-5 10Z"
+          transform="translate(.6 1)"
+        />
+        <path fill={`url(#${gradientId})`} d="m2 1 20 17-11 1-5 10Z" />
+        <path
+          fill={isAdam ? "#9a6500" : "#42484a"}
+          opacity=".15"
+          d="M2 1 11 19 6 29Z"
+        />
+        <path
+          d="M6 28 2 1 21 17.5"
+          fill="none"
+          stroke={isAdam ? "#fff2aa" : "#ecf0ef"}
+          strokeWidth=".7"
+          strokeLinejoin="round"
+          opacity=".65"
+        />
       </svg>
       <span
         className={cn(
@@ -144,13 +260,13 @@ export function AuthBrandPanel({ mode }: AuthBrandPanelProps) {
         />
         <div
           className={cn(
-            "absolute z-10 -rotate-[15deg] [font-family:Courier_New,_Courier,_monospace] text-[2.85cqw] leading-[1.9] tracking-[.025em] text-[#504c42] dark:text-[#e6e0d4]",
+            "absolute z-10 -rotate-[15deg] [font-family:Courier_New,_Courier,_monospace] font-semibold text-[2.85cqw] leading-[1.9] tracking-[.025em] text-[#504c42] dark:text-[#e6e0d4]",
             signup ? "left-[21%] top-[22%]" : "left-[33%] top-[23%]",
           )}
         >
           <p>A little thought.</p>
-          <p className="-ml-[1.9cqw] rounded-[1.7cqw] bg-[#ffe38c]/60 px-[1.9cqw] dark:bg-[#ebc14c]/90 dark:text-[#17130a]">
-            A shared beginning.
+          <p className="relative isolate -ml-[1.9cqw] px-[1.9cqw] dark:text-[#17130a]">
+            <NoteBrush />A shared beginning.
           </p>
         </div>
         <Collaborator
@@ -167,12 +283,13 @@ export function AuthBrandPanel({ mode }: AuthBrandPanelProps) {
         />
         <div
           className={cn(
-            "absolute z-20 whitespace-nowrap rounded-[1.5cqw] border border-[#f4ddaa] bg-[#fff6df] px-[2.7cqw] py-[2.5cqw] text-[#92540a] shadow-[0_3px_6px_#aa7b161a] before:absolute before:-left-[2.5cqw] before:top-[.8cqw] before:h-px before:w-[3.5cqw] before:rotate-45 before:bg-[#efce68] dark:border-[#a57719] dark:bg-[#3c3018] dark:text-[#ffedbb] dark:shadow-[0_3px_10px_#0003] dark:before:bg-[#d8a92c]",
+            "absolute z-20 whitespace-nowrap rounded-[1.5cqw] border border-[#f4ddaa] bg-[#fff6df] px-[2.7cqw] py-[2.5cqw] text-[#92540a] shadow-[0_3px_6px_#aa7b161a] dark:border-[#a57719] dark:bg-[#3c3018] dark:text-[#ffedbb] dark:shadow-[0_3px_10px_#0003]",
             signup
               ? "left-[55%] top-[38.5%] text-[1.95cqw]"
               : "left-[67%] top-[43.5%] min-w-[26cqw] text-[2.25cqw]",
           )}
         >
+          <CommentStem />
           Let&apos;s build on this.
         </div>
         <AuthArtworkImage

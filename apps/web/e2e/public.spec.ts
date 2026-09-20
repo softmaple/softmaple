@@ -20,13 +20,38 @@ test.describe("public product surface", () => {
 
   test("email forms expose validation and recovery paths", async ({ page }) => {
     await page.goto("/signup");
-    await page.getByLabel("First name").fill("Ada");
-    await page.getByLabel("Last name").fill("Lovelace");
+    await page.getByLabel("First name", { exact: true }).fill("Ada");
+    await page.getByLabel("Last name", { exact: true }).fill("Lovelace");
     await page.getByLabel("Email").fill("ada@example.invalid");
-    await page.getByLabel("Password", { exact: true }).fill("password123");
-    await page.getByLabel("Confirm password").fill("different123");
+    await page.getByLabel("Password", { exact: true }).fill("abcdefgh");
+    await page.getByLabel("Confirm password", { exact: true }).fill("abcdefgh");
     await page.getByRole("button", { name: /Create account/i }).click();
-    await expect(page.getByText("Passwords do not match.")).toBeVisible();
+    await expect(
+      page.getByText("Password must contain a number."),
+    ).toBeVisible();
+
+    await expect(page.getByLabel("Email")).toHaveValue("ada@example.invalid");
+    await expect(page.getByLabel("Password", { exact: true })).toHaveValue(
+      "abcdefgh",
+    );
+    await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    await page
+      .getByRole("button", { name: "Show password", exact: true })
+      .click();
+    await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute(
+      "type",
+      "text",
+    );
+    await page
+      .getByRole("button", { name: "Hide password", exact: true })
+      .click();
+    await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute(
+      "type",
+      "password",
+    );
 
     await page.goto("/login");
     await page.getByRole("link", { name: /Forgot password/i }).click();

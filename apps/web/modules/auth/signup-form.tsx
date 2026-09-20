@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { PasswordInput } from "./password-input";
+import { authInputClass, authSubmitClass } from "./auth-styles";
 import { useRouter } from "next/navigation";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
@@ -9,11 +11,11 @@ import { SubmitButton } from "@/modules/auth/submit-button";
 
 type SignupState = Awaited<ReturnType<typeof signup>> | null;
 type SignupField =
-  | "confirmPassword"
-  | "email"
   | "firstName"
   | "lastName"
-  | "password";
+  | "email"
+  | "password"
+  | "confirmPassword";
 
 const getFieldError = (
   state: SignupState,
@@ -29,13 +31,18 @@ const FieldError = ({ id, message }: { id: string; message?: string }) =>
   );
 
 export const SignupForm = () => {
-  const [state, action] = useActionState(signup, null);
+  const [state, action, pending] = useActionState(signup, null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const router = useRouter();
-  const confirmPasswordError = getFieldError(state, "confirmPassword");
   const emailError = getFieldError(state, "email");
+  const passwordError = getFieldError(state, "password");
   const firstNameError = getFieldError(state, "firstName");
   const lastNameError = getFieldError(state, "lastName");
-  const passwordError = getFieldError(state, "password");
+  const confirmPasswordError = getFieldError(state, "confirmPassword");
 
   useEffect(() => {
     if (state?.ok && state.data.redirectTo !== undefined) {
@@ -44,7 +51,14 @@ export const SignupForm = () => {
   }, [router, state]);
 
   return (
-    <form action={action} className="space-y-4">
+    <form
+      action={action}
+      aria-busy={pending}
+      onSubmit={(event) => {
+        if (pending) event.preventDefault();
+      }}
+      className="space-y-5 min-[56.25rem]:max-xl:space-y-4"
+    >
       {state !== null && !state.ok ? (
         <p
           className="rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -61,9 +75,14 @@ export const SignupForm = () => {
               firstNameError === undefined ? undefined : "firstName-error"
             }
             aria-invalid={firstNameError === undefined ? undefined : true}
+            className={authInputClass}
+            value={firstName}
+            onChange={(event) => setFirstName(event.target.value)}
+            readOnly={pending}
             autoComplete="given-name"
             id="firstName"
             name="firstName"
+            type="text"
             required
           />
           <FieldError id="firstName-error" message={firstNameError} />
@@ -75,9 +94,14 @@ export const SignupForm = () => {
               lastNameError === undefined ? undefined : "lastName-error"
             }
             aria-invalid={lastNameError === undefined ? undefined : true}
+            className={authInputClass}
+            value={lastName}
+            onChange={(event) => setLastName(event.target.value)}
+            readOnly={pending}
             autoComplete="family-name"
             id="lastName"
             name="lastName"
+            type="text"
             required
           />
           <FieldError id="lastName-error" message={lastNameError} />
@@ -90,6 +114,11 @@ export const SignupForm = () => {
             emailError === undefined ? undefined : "email-error"
           }
           aria-invalid={emailError === undefined ? undefined : true}
+          className={authInputClass}
+          placeholder="you@example.com"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          readOnly={pending}
           autoComplete="email"
           id="email"
           name="email"
@@ -100,37 +129,54 @@ export const SignupForm = () => {
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
-        <Input
+        <PasswordInput
           aria-describedby={
-            passwordError === undefined ? undefined : "password-error"
+            passwordError === undefined
+              ? "password-requirements"
+              : "password-requirements password-error"
           }
           aria-invalid={passwordError === undefined ? undefined : true}
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          readOnly={pending}
           autoComplete="new-password"
           id="password"
           name="password"
-          type="password"
           required
         />
+        <p
+          id="password-requirements"
+          className="text-xs leading-5 text-(--muted-ink) min-[56.25rem]:max-xl:leading-4"
+        >
+          8–128 characters, including a letter and a number.
+        </p>
         <FieldError id="password-error" message={passwordError} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="confirmPassword">Confirm password</Label>
-        <Input
+        <PasswordInput
           aria-describedby={
             confirmPasswordError === undefined
               ? undefined
               : "confirmPassword-error"
           }
           aria-invalid={confirmPasswordError === undefined ? undefined : true}
+          value={confirmPassword}
+          onChange={(event) => setConfirmPassword(event.target.value)}
+          readOnly={pending}
+          visibilityLabel="confirm password"
           autoComplete="new-password"
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
           required
         />
         <FieldError id="confirmPassword-error" message={confirmPasswordError} />
       </div>
-      <SubmitButton text="Create account" loadingText="Creating account..." />
+      <SubmitButton
+        text="Create account"
+        loadingText="Creating account..."
+        className={authSubmitClass}
+      />
     </form>
   );
 };

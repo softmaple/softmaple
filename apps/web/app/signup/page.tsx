@@ -1,29 +1,28 @@
+import { authLinkClass } from "@/modules/auth/auth-styles";
 import Link from "next/link";
 import { SignupForm } from "@/modules/auth/signup-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
-import { AuthShell } from "@/modules/auth/auth-shell";
+import { AuthPageShell } from "@/modules/auth/auth-page-shell";
 import { AuthOAuthOptions } from "@/modules/auth/auth-oauth-options";
 
 export default function SignupPage() {
   return (
     <AuthGuard>
-      <AuthShell
-        description="Start writing with Softmaple today"
+      <AuthPageShell
+        mode="signup"
+        description="Make room for your next good idea."
         title="Create your account"
       >
         <SignupForm />
-        <AuthOAuthOptions mode="sign-up" />
+        <AuthOAuthOptions />
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-center text-sm text-(--muted-ink)">
           Already have an account?{" "}
-          <Link
-            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/login"
-          >
-            Sign in
+          <Link className={authLinkClass} href="/login">
+            Log in
           </Link>
         </p>
-      </AuthShell>
+      </AuthPageShell>
     </AuthGuard>
   );
 }

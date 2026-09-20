@@ -77,22 +77,24 @@ function GlobalRouteError({ retry }: RouteErrorBoundaryProps) {
         className="relative z-10 flex flex-col items-center self-center pl-[max(24px,env(safe-area-inset-left))] pr-[max(24px,env(safe-area-inset-right))] pt-5 pb-9 text-center sm:pt-6 sm:pb-10 [@media(max-height:600px)]:pt-0 [@media(max-height:600px)]:pb-6"
       >
         <ErrorPaper />
-        <h1
-          id="route-error-title"
-          className="mt-1 max-w-2xl text-[38px] leading-[1.13] font-normal tracking-[-0.045em] [font-family:Georgia,_'Times_New_Roman',_serif] sm:text-[46px] lg:text-[52px]"
-        >
-          Something went{" "}
-          <span className="relative isolate inline-block whitespace-nowrap">
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute -inset-x-5 -inset-y-2 -z-10 -rotate-2 bg-[url('/loading/brush.svg')] bg-size-[100%_100%] bg-center bg-no-repeat opacity-90 dark:opacity-45"
-            />
-            wrong.
-          </span>
-        </h1>
-        <p className="mt-5 max-w-[23rem] text-[15px] leading-6 text-(--muted-ink) sm:max-w-none sm:text-base">
-          An unexpected error occurred. Please try again.
-        </p>
+        <div role="alert">
+          <h1
+            id="route-error-title"
+            className="mt-1 max-w-2xl text-[38px] leading-[1.13] font-normal tracking-[-0.045em] [font-family:Georgia,_'Times_New_Roman',_serif] sm:text-[46px] lg:text-[52px]"
+          >
+            Something went{" "}
+            <span className="relative isolate inline-block whitespace-nowrap">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-x-5 -inset-y-2 -z-10 -rotate-2 bg-[url('/loading/brush.svg')] bg-size-[100%_100%] bg-center bg-no-repeat opacity-90 dark:opacity-45"
+              />
+              wrong.
+            </span>
+          </h1>
+          <p className="mt-5 max-w-[23rem] text-[15px] leading-6 text-(--muted-ink) sm:max-w-none sm:text-base">
+            An unexpected error occurred. Please try again.
+          </p>
+        </div>
         <div className="mt-7 flex w-full max-w-[280px] flex-col gap-3 sm:mt-8 sm:w-auto sm:max-w-none sm:flex-row">
           <Button
             type="button"

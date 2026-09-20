@@ -5,6 +5,7 @@ import { resetPassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
+import { authInputClass, authSubmitClass } from "./auth-styles";
 
 export const ResetPasswordForm = () => {
   const [state, action] = useActionState(resetPassword, null);
@@ -12,7 +13,7 @@ export const ResetPasswordForm = () => {
     state !== null && !state.ok ? state.fieldErrors?.email?.[0] : undefined;
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-5 min-[56.25rem]:max-xl:space-y-4">
       {state === null ? null : (
         <p
           className={
@@ -32,6 +33,8 @@ export const ResetPasswordForm = () => {
             emailError === undefined ? undefined : "email-error"
           }
           aria-invalid={emailError === undefined ? undefined : true}
+          className={authInputClass}
+          placeholder="you@example.com"
           autoComplete="email"
           id="email"
           name="email"
@@ -44,7 +47,7 @@ export const ResetPasswordForm = () => {
           </p>
         )}
       </div>
-      <SubmitButton text="Send reset link" />
+      <SubmitButton text="Send reset link" className={authSubmitClass} />
     </form>
   );
 };

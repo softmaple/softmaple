@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ResetPasswordForm } from "@/modules/auth/reset-password-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
-import { AuthShell } from "@/modules/auth/auth-shell";
+import { AuthPageShell } from "@/modules/auth/auth-page-shell";
+import { authLinkClass } from "@/modules/auth/auth-styles";
 
 interface ResetPasswordPageProps {
   searchParams: Promise<{ message?: string; error?: string }>;
@@ -16,7 +17,8 @@ export default async function ResetPasswordPage({
 
   return (
     <AuthGuard>
-      <AuthShell
+      <AuthPageShell
+        mode="login"
         description="Enter your email address and we’ll send you a link to reset your password"
         title="Reset your password"
       >
@@ -39,16 +41,13 @@ export default async function ResetPasswordPage({
 
         <ResetPasswordForm />
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-center text-sm text-(--muted-ink)">
           Remember your password?{" "}
-          <Link
-            className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/login"
-          >
+          <Link className={authLinkClass} href="/login">
             Sign in
           </Link>
         </p>
-      </AuthShell>
+      </AuthPageShell>
     </AuthGuard>
   );
 }

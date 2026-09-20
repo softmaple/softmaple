@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { UpdatePasswordForm } from "@/modules/auth/update-password-form";
-import { AuthShell } from "@/modules/auth/auth-shell";
+import { AuthPageShell } from "@/modules/auth/auth-page-shell";
+import { authLinkClass } from "@/modules/auth/auth-styles";
 
 interface UpdatePasswordPageProps {
   searchParams: Promise<{ message?: string; error?: string }>;
@@ -14,7 +15,8 @@ export default async function UpdatePasswordPage({
   const error = params?.error;
 
   return (
-    <AuthShell
+    <AuthPageShell
+      mode="login"
       description="Enter your new password below"
       title="Create new password"
     >
@@ -37,14 +39,11 @@ export default async function UpdatePasswordPage({
 
       <UpdatePasswordForm />
 
-      <p className="mt-6 text-center text-sm text-muted-foreground">
-        <Link
-          className="text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          href="/login"
-        >
+      <p className="mt-6 text-center text-sm text-(--muted-ink)">
+        <Link className={authLinkClass} href="/login">
           Back to sign in
         </Link>
       </p>
-    </AuthShell>
+    </AuthPageShell>
   );
 }

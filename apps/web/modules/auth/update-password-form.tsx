@@ -6,6 +6,7 @@ import { updatePassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
+import { authInputClass, authSubmitClass } from "./auth-styles";
 
 export const UpdatePasswordForm = () => {
   const [state, action] = useActionState(updatePassword, null);
@@ -24,7 +25,7 @@ export const UpdatePasswordForm = () => {
   }, [router, state]);
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-5 min-[56.25rem]:max-xl:space-y-4">
       {state !== null && !state.ok ? (
         <p
           className="border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -40,6 +41,7 @@ export const UpdatePasswordForm = () => {
             passwordError === undefined ? undefined : "password-error"
           }
           aria-invalid={passwordError === undefined ? undefined : true}
+          className={authInputClass}
           autoComplete="new-password"
           id="password"
           name="password"
@@ -61,6 +63,7 @@ export const UpdatePasswordForm = () => {
               : "confirmPassword-error"
           }
           aria-invalid={confirmPasswordError === undefined ? undefined : true}
+          className={authInputClass}
           autoComplete="new-password"
           id="confirmPassword"
           name="confirmPassword"
@@ -73,7 +76,7 @@ export const UpdatePasswordForm = () => {
           </p>
         )}
       </div>
-      <SubmitButton text="Update password" />
+      <SubmitButton text="Update password" className={authSubmitClass} />
     </form>
   );
 };

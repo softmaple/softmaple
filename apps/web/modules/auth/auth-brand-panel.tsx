@@ -1,5 +1,5 @@
-import Image from "next/image";
 import { cn } from "@softmaple/ui/lib/utils";
+import { AuthArtworkImage } from "./auth-artwork-image";
 
 type AuthBrandPanelProps = { readonly mode: "login" | "signup" };
 
@@ -129,29 +129,14 @@ export function AuthBrandPanel({ mode }: AuthBrandPanelProps) {
         data-auth-artwork={mode}
         className="absolute left-0 top-[28cqw] aspect-square w-full [clip-path:inset(-50%_0_-50%_0)]"
       >
-        <Image
-          src={`/auth/paper-${mode}.webp`}
+        <AuthArtworkImage
+          lightSrc={`/auth/paper-${mode}.webp`}
+          darkSrc={`/auth/paper-${mode}-dark.webp`}
           unoptimized
-          alt=""
           fill
-          loading="eager"
           sizes="(min-width: 1536px) 860px, (min-width: 900px) 56vw, 1px"
           className={cn(
-            "object-contain mix-blend-multiply dark:hidden",
-            signup
-              ? "scale-y-110 -translate-y-[17%]"
-              : "scale-y-105 -translate-y-[8%]",
-          )}
-        />
-        <Image
-          src={`/auth/paper-${mode}-dark.webp`}
-          unoptimized
-          alt=""
-          fill
-          loading="eager"
-          sizes="(min-width: 1536px) 860px, (min-width: 900px) 56vw, 1px"
-          className={cn(
-            "hidden object-contain drop-shadow-[0_18px_24px_#0003] dark:block",
+            "object-contain mix-blend-multiply dark:mix-blend-normal dark:drop-shadow-[0_18px_24px_#0003]",
             signup
               ? "scale-y-110 -translate-y-[17%]"
               : "scale-y-105 -translate-y-[8%]",
@@ -190,29 +175,14 @@ export function AuthBrandPanel({ mode }: AuthBrandPanelProps) {
         >
           Let&apos;s build on this.
         </div>
-        <Image
-          src="/landing/veined-maple.webp"
-          loading="eager"
-          alt=""
+        <AuthArtworkImage
+          lightSrc="/landing/veined-maple.webp"
+          darkSrc="/auth/veined-maple-dark.webp"
           width={500}
           height={463}
           sizes="(min-width: 900px) 32vw, 1px"
           className={cn(
-            "absolute z-10 h-auto opacity-35 dark:hidden",
-            signup
-              ? "left-[47%] top-[55%] w-[66%] -rotate-[20deg]"
-              : "-left-[18%] top-[45%] w-[53%] -rotate-[11deg]",
-          )}
-        />
-        <Image
-          src="/auth/veined-maple-dark.webp"
-          loading="eager"
-          alt=""
-          width={500}
-          height={463}
-          sizes="(min-width: 900px) 32vw, 1px"
-          className={cn(
-            "absolute z-10 hidden h-auto opacity-80 dark:block",
+            "absolute z-10 h-auto opacity-35 dark:opacity-80",
             signup
               ? "left-[47%] top-[55%] w-[66%] -rotate-[20deg]"
               : "-left-[18%] top-[45%] w-[53%] -rotate-[11deg]",

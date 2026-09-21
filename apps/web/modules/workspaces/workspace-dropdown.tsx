@@ -1,3 +1,5 @@
+"use client";
+
 import type { FC } from "react";
 import {
   DropdownMenu,
@@ -8,9 +10,13 @@ import {
   DropdownMenuTrigger,
 } from "@softmaple/ui/components/dropdown-menu";
 import { Button } from "@softmaple/ui/components/button";
-import { ChevronDown, LayoutGrid, Settings } from "lucide-react";
+import { Building2, ChevronDown, LayoutGrid, Settings } from "lucide-react";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@softmaple/ui/components/avatar";
 import type { WorkspaceSummary } from "@/app/actions/workspaces";
-import { RaspberryRecordMark } from "@/components/BrandMark";
 import Link from "next/link";
 
 export type WorkspaceDropdownProps = {
@@ -39,21 +45,24 @@ export const WorkspaceDropdown: FC<WorkspaceDropdownProps> = (props) => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          className={`w-full min-w-0 justify-start gap-2 overflow-hidden p-2 ${
-            compact ? "h-10" : "mb-4 h-auto"
+          variant="outline"
+          className={`workspace-switcher w-full min-w-0 justify-start gap-2.5 overflow-hidden bg-background/55 px-3 shadow-none ${
+            compact ? "h-11" : "mb-1 h-11"
           }`}
         >
-          <RaspberryRecordMark className={compact ? "size-7" : "size-10"} />
+          <Avatar className="size-6 shrink-0 rounded-md border border-sidebar-border bg-background">
+            <AvatarImage
+              alt={currentWorkspace?.avatar_alt ?? ""}
+              src={currentWorkspace?.avatar_src ?? undefined}
+            />
+            <AvatarFallback className="rounded-md bg-transparent">
+              <Building2 className="size-3.5" />
+            </AvatarFallback>
+          </Avatar>
           <div className="min-w-0 flex-1 text-left">
-            <h2 className="truncate font-semibold">
+            <h2 className="truncate text-[0.84rem] font-medium">
               {currentWorkspace?.title ?? "Workspace"}
             </h2>
-            {compact ? null : (
-              <p className="truncate text-sm text-muted-foreground">
-                {currentWorkspace?.description || "Shared writing space"}
-              </p>
-            )}
           </div>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
         </Button>
@@ -68,7 +77,15 @@ export const WorkspaceDropdown: FC<WorkspaceDropdownProps> = (props) => {
           return (
             <DropdownMenuItem asChild key={workspace.key}>
               <Link className="min-w-0" href={`/workspace/${workspace.slug}`}>
-                <RaspberryRecordMark className="size-8" />
+                <Avatar className="size-8 rounded-md border">
+                  <AvatarImage
+                    alt={workspace.avatar_alt ?? ""}
+                    src={workspace.avatar_src ?? undefined}
+                  />
+                  <AvatarFallback className="rounded-md">
+                    <Building2 className="size-4" />
+                  </AvatarFallback>
+                </Avatar>
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{workspace.title}</div>
                   {workspace.description ? (

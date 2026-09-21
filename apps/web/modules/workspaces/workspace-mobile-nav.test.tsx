@@ -58,6 +58,12 @@ const renderNav = (container: HTMLDivElement) => {
       createElement(WorkspaceMobileNav, {
         canEdit: true,
         documents,
+        profile: {
+          avatar_alt: null,
+          avatar_src: null,
+          email: "ada@example.com",
+          full_name: "Ada Lovelace",
+        },
         workspaceSlug: "acme",
       }),
     );
@@ -107,21 +113,21 @@ describe("WorkspaceMobileNav", () => {
     vi.clearAllMocks();
   });
 
-  it("puts the menu button in a bar that closes the shell rather than a header", () => {
+  it("puts the menu button in a compact mobile header", () => {
     const root = renderNav(container);
 
     const bar = menuButton(container).closest("nav");
     expect(bar?.getAttribute("aria-label")).toBe("Workspace");
-    expect(bar?.className).toContain("border-t");
-    expect(bar?.className).toContain("md:hidden");
-    expect(container.querySelector("header")).toBeNull();
+    expect(bar?.closest("header")?.className).toContain("border-b");
+    expect(bar?.closest("header")?.className).toContain("md:hidden");
+    expect(container.querySelector("header")).not.toBeNull();
 
     act(() => {
       root.unmount();
     });
   });
 
-  it("opens the navigation as a bottom sheet with a grabber", () => {
+  it("opens the navigation as a left sheet with a close control", () => {
     const root = renderNav(container);
     expect(sheet()).toBeNull();
 
@@ -129,9 +135,14 @@ describe("WorkspaceMobileNav", () => {
       menuButton(container).click();
     });
 
-    expect(sheet()?.getAttribute("data-side")).toBe("bottom");
+    expect(sheet()?.getAttribute("data-side")).toBe("left");
     expect(
       document.body.querySelector('[data-slot="sheet-handle"]'),
+    ).toBeNull();
+    expect(
+      document.body.querySelector(
+        'button[aria-label="Close workspace navigation"]',
+      ),
     ).not.toBeNull();
 
     act(() => {

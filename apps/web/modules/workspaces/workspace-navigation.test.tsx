@@ -77,4 +77,31 @@ describe("WorkspaceNavigation", () => {
       root.unmount();
     });
   });
+
+  it("marks the matching settings destination as the current page", () => {
+    usePathname.mockReturnValue("/workspace/acme/settings");
+    useSearchParams.mockReturnValue(new URLSearchParams("tab=members"));
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        createElement(WorkspaceNavigation, { workspaceSlug: "acme" }),
+      );
+    });
+
+    expect(
+      container
+        .querySelector('a[href="/workspace/acme/settings?tab=members"]')
+        ?.getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      container
+        .querySelector('a[href="/workspace/acme/settings"]')
+        ?.getAttribute("aria-current"),
+    ).toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+  });
 });

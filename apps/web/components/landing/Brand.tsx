@@ -13,7 +13,7 @@ export function MapleMark() {
   );
 }
 
-export function LandingBrand() {
+export function LandingBrand({ className }: { readonly className?: string }) {
   return (
     <span
       className={cn(
@@ -24,6 +24,7 @@ export function LandingBrand() {
         "max-[768px]:text-[24px] max-[768px]:gap-2.5 max-[768px]:tracking-[-1px] max-[768px]:[&_svg]:w-[26px]",
         "max-[768px]:[&_svg]:h-8",
         "leading-[1]",
+        className,
       )}
     >
       <MapleMark />

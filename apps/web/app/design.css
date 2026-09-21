@@ -7,6 +7,14 @@
  * and nowhere else.
  */
 
+@font-face {
+  font-family: "Workspace Caveat";
+  src: url("/landing/caveat-latin.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400 700;
+}
+
 :root {
   --background: #fbf6ee;
   --foreground: #2b2019;
@@ -45,6 +53,10 @@
   --autumn-canopy: #8c3f1d;
   --autumn-wash-strength: 14%;
   --autumn-shadow: color-mix(in srgb, var(--autumn-canopy) 30%, transparent);
+  --workspace-gold: #f6cf35;
+  --workspace-gold-strong: #edc31f;
+  --workspace-gold-ink: #2d2506;
+  --workspace-nav-active: #f8eaae;
 }
 
 .dark {
@@ -83,6 +95,10 @@
   --autumn-canopy: #f0a86a;
   --autumn-wash-strength: 10%;
   --autumn-shadow: #000000;
+  --workspace-gold: #d9ad28;
+  --workspace-gold-strong: #e5bb36;
+  --workspace-gold-ink: #211a05;
+  --workspace-nav-active: #3a321c;
 }
 
 @theme inline {
@@ -138,6 +154,123 @@
 }
 
 @layer components {
+  .workspace-shell,
+  .workspace-mobile-sheet {
+    --background: #fbfaf6;
+    --foreground: #24211c;
+    --card: #fffefa;
+    --card-foreground: #24211c;
+    --popover: #fffefa;
+    --popover-foreground: #24211c;
+    --primary: #8a6900;
+    --primary-foreground: #fffdf5;
+    --secondary: #f3f0e8;
+    --secondary-foreground: #24211c;
+    --muted: #f1eee6;
+    --muted-foreground: #716d64;
+    --accent: #f3efe2;
+    --accent-foreground: #24211c;
+    --border: #e4e0d6;
+    --input: #ddd8cd;
+    --ring: #b28b08;
+    --sidebar: #f8f6f0;
+    --sidebar-foreground: #24211c;
+    --sidebar-accent: #f1ede1;
+    --sidebar-accent-foreground: #24211c;
+    --sidebar-border: #e2ded4;
+    --workspace-gold: #ffd62f;
+    --workspace-gold-strong: #f2c91c;
+    --workspace-gold-ink: #242006;
+    --workspace-nav-active: #fff0a8;
+    --brand-gold: #efbd00;
+  }
+
+  .workspace-shell {
+    background-image:
+      radial-gradient(
+        34rem 28rem at 88% -12%,
+        color-mix(in srgb, var(--workspace-gold) 6%, transparent),
+        transparent 68%
+      );
+  }
+
+  .dark .workspace-shell,
+  .dark .workspace-mobile-sheet {
+    --background: #171714;
+    --foreground: #f2efe7;
+    --card: #1d1d19;
+    --card-foreground: #f2efe7;
+    --popover: #22221d;
+    --popover-foreground: #f2efe7;
+    --primary: #e3bd3f;
+    --primary-foreground: #201b08;
+    --secondary: #25241f;
+    --secondary-foreground: #f2efe7;
+    --muted: #292822;
+    --muted-foreground: #aaa69b;
+    --accent: #302e25;
+    --accent-foreground: #f5f0df;
+    --border: #383730;
+    --input: #444238;
+    --ring: #d5ae32;
+    --sidebar: #151512;
+    --sidebar-foreground: #f2efe7;
+    --sidebar-accent: #28271f;
+    --sidebar-accent-foreground: #f2efe7;
+    --sidebar-border: #32312b;
+    --workspace-gold: #e6bd37;
+    --workspace-gold-strong: #f0ca4a;
+    --workspace-gold-ink: #211c08;
+    --workspace-nav-active: #41391f;
+    --brand-gold: #e1b82f;
+  }
+
+  .workspace-shell [data-slot="button"][aria-current="page"],
+  .workspace-mobile-sheet [data-slot="button"][aria-current="page"] {
+    background: var(--workspace-nav-active) !important;
+    color: var(--sidebar-accent-foreground) !important;
+  }
+
+  .workspace-shell [data-slot="button"][aria-current="page"] svg,
+  .workspace-mobile-sheet [data-slot="button"][aria-current="page"] svg {
+    color: color-mix(in srgb, var(--foreground) 84%, var(--workspace-gold));
+  }
+
+  .workspace-left-rail,
+  .workspace-right-rail {
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--workspace-gold) 2%, transparent),
+      transparent 32%
+    );
+  }
+
+  .workspace-left-rail [data-slot="input-group"],
+  .workspace-mobile-sheet [data-slot="input-group"] {
+    height: 2.5rem;
+    background: color-mix(in srgb, var(--background) 76%, transparent);
+    box-shadow: none;
+  }
+
+  .workspace-switcher:hover {
+    background: var(--sidebar-accent);
+  }
+
+  .workspace-new-document {
+    border-color: color-mix(in srgb, var(--workspace-gold) 84%, #a57d00) !important;
+    background: var(--workspace-gold) !important;
+    color: var(--workspace-gold-ink) !important;
+    box-shadow: none;
+  }
+
+  .workspace-new-document:hover {
+    background: var(--workspace-gold-strong) !important;
+  }
+
+  .workspace-motto {
+    font-family: "Workspace Caveat", cursive;
+  }
+
   .manuscript-stage {
     position: relative;
     padding: 2rem 1.2rem 2.5rem;

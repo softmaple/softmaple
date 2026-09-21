@@ -16,14 +16,18 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isSettings = pathname === `/workspace/${workspaceSlug}/settings`;
+  const settingsPath = `/workspace/${workspaceSlug}/settings`;
+  const isSettings = pathname.startsWith(settingsPath);
   const isActive = (path: string) => pathname === path;
 
   return (
-    <nav aria-label="Workspace sections" className="flex flex-col gap-1 p-4">
+    <nav
+      aria-label="Workspace sections"
+      className="flex shrink-0 flex-col gap-1 px-3 pb-5 pt-3"
+    >
       <Button
         asChild
-        className="w-full justify-start"
+        className="h-10 w-full justify-start rounded-md px-3 text-[0.86rem] font-normal"
         variant={
           isActive(`/workspace/${workspaceSlug}`) ? "secondary" : "ghost"
         }
@@ -36,7 +40,7 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           }
         >
           <Home data-icon="inline-start" />
-          Overview
+          Home
         </Link>
       </Button>
       {/*
@@ -46,7 +50,7 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
       */}
       <Button
         asChild
-        className="w-full justify-start"
+        className="h-10 w-full justify-start rounded-md px-3 text-[0.86rem] font-normal"
         variant={
           isSettings && searchParams.get("tab") === "members"
             ? "secondary"
@@ -57,6 +61,11 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           href={`/workspace/${workspaceSlug}/settings?tab=members`}
           onClick={onNavigate}
           prefetch={false}
+          aria-current={
+            isSettings && searchParams.get("tab") === "members"
+              ? "page"
+              : undefined
+          }
         >
           <Users data-icon="inline-start" />
           Members
@@ -64,7 +73,7 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
       </Button>
       <Button
         asChild
-        className="w-full justify-start"
+        className="h-10 w-full justify-start rounded-md px-3 text-[0.86rem] font-normal"
         variant={
           isSettings && searchParams.get("tab") !== "members"
             ? "secondary"
@@ -75,6 +84,11 @@ export const WorkspaceNavigation: FC<WorkspaceNavigationProps> = (props) => {
           href={`/workspace/${workspaceSlug}/settings`}
           onClick={onNavigate}
           prefetch={false}
+          aria-current={
+            isSettings && searchParams.get("tab") !== "members"
+              ? "page"
+              : undefined
+          }
         >
           <Settings data-icon="inline-start" />
           Settings

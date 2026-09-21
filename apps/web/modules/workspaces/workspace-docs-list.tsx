@@ -1,6 +1,6 @@
 "use client";
 
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -15,6 +15,7 @@ type DocumentRow = DocsType["Row"];
 export type WorkspaceDocsListProps = {
   readonly canEdit: boolean;
   readonly documents: ReadonlyArray<DocumentRow>;
+  readonly navigation?: ReactNode;
   readonly onNavigate?: () => void;
   readonly workspaceSlug: string;
 };
@@ -22,6 +23,7 @@ export type WorkspaceDocsListProps = {
 export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
   canEdit,
   documents,
+  navigation,
   onNavigate,
   workspaceSlug,
 }) => {
@@ -38,21 +40,16 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-4 pb-3">
-        <SearchField
-          label="Search documents"
-          value={query}
-          onChange={setQuery}
-        />
+      <div className="shrink-0 px-3 pb-1 pt-2">
+        <SearchField label="Search" value={query} onChange={setQuery} />
       </div>
 
-      <div className="flex items-center justify-between px-4 pb-2 pt-4">
-        <div>
-          <h3 className="text-sm font-medium">Documents</h3>
-          <p className="font-mono text-[10px] text-muted-foreground">
-            {filteredDocuments.length} shown
-          </p>
-        </div>
+      {navigation}
+
+      <div className="flex shrink-0 items-center justify-between px-5 pb-2 pt-1">
+        <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          Documents
+        </h3>
         {canEdit ? (
           <Button
             aria-label="New document"
@@ -78,13 +75,13 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
               : "No document matches this search."}
           </p>
         ) : (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5 px-1">
             {filteredDocuments.map((document) => {
               const path = `/workspace/${workspaceSlug}/doc/${document.slug}`;
               return (
                 <Button
                   asChild
-                  className="h-auto w-full justify-start px-2 py-2 text-left"
+                  className="h-10 w-full justify-start rounded-md px-2.5 text-left"
                   key={document.id}
                   variant={pathname === path ? "secondary" : "ghost"}
                 >
@@ -93,13 +90,10 @@ export const WorkspaceDocsList: FC<WorkspaceDocsListProps> = ({
                     onClick={onNavigate}
                     aria-current={pathname === path ? "page" : undefined}
                   >
-                    <FileText className="size-4 shrink-0 text-primary" />
+                    <FileText className="size-[1.05rem] shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">
+                      <span className="block truncate text-[0.84rem] font-normal">
                         {document.title}
-                      </span>
-                      <span className="block font-mono text-[9px] text-muted-foreground">
-                        {document.updated_at?.slice(0, 10) ?? "New"}
                       </span>
                     </span>
                   </Link>

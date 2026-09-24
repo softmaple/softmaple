@@ -33,7 +33,7 @@
   "author": "Yadong Zhang",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@biomejs/biome": "2.3.11",
+    "@biomejs/biome": "2.3.15",
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "eslint": "^10.8.0",

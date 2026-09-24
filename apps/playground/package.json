@@ -28,7 +28,7 @@
     "@softmaple/editor": "workspace:*",
     "@softmaple/eg-walker": "workspace:*",
     "@softmaple/ui": "workspace:*",
-    "@t3-oss/env-core": "^0.13.10",
+    "@t3-oss/env-core": "^0.13.11",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/query-db-collection": "^1.2.1",
     "@tanstack/react-db": "^0.1.95",

@@ -14,6 +14,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@softmaple/ui/components/dropdown-menu";
+import {
+  homeDocumentColumns,
+  homeFold,
+  homePaper,
+  homeSerif,
+  homeSurface,
+} from "./home-styles";
 import { HomeAvatars } from "./home-avatar";
 import { SPACE_EXAMPLES } from "./home-static-data";
 import type { HomeDocument, HomeProps } from "./home-types";
@@ -42,7 +49,7 @@ function DocumentMenu({
       >
         <MoreHorizontal className="size-[18px]" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="workspace-home" align="end">
+      <DropdownMenuContent className={`${homeSurface}`} align="end">
         <DropdownMenuItem asChild>
           <Link href={`/workspace/${workspaceSlug}/doc/${document.slug}`}>
             Open document
@@ -69,7 +76,7 @@ export function HomeContinue({
       <div className="mb-[8px] flex items-center justify-between">
         <h2
           id="continue-title"
-          className="ws-serif text-[23px] leading-[1.25] tracking-[-.045em]"
+          className={`${homeSerif} text-[23px] leading-[1.25] tracking-[-.045em]`}
         >
           Continue writing
         </h2>
@@ -83,17 +90,21 @@ export function HomeContinue({
       <div className="grid grid-cols-3 gap-[18px] max-[1100px]:grid-cols-2">
         {recent.map((document, index) => (
           <article
-            className={`ws-paper relative flex h-[185px] min-w-0 flex-col rounded-md border border-border px-[23px] pt-[23px] pb-[13px] shadow-[var(--ws-shadow)] ${index === 2 ? "ws-fold" : ""}`}
+            className={`${homePaper} relative flex h-[185px] min-w-0 flex-col rounded-md border border-border px-[23px] pt-[23px] pb-[13px] shadow-[var(--ws-shadow)] ${index === 2 ? `${homeFold} [--fold-size:52px]` : ""}`}
             key={document.id}
           >
             <Link
               href={`/workspace/${workspaceSlug}/doc/${document.slug}`}
               className="min-h-0 flex-1 overflow-hidden"
             >
-              <h3 className="ws-serif line-clamp-2 text-[24px] leading-[1.2] tracking-[-.05em]">
+              <h3
+                className={`${homeSerif} line-clamp-2 text-[24px] leading-[1.2] tracking-[-.05em]`}
+              >
                 {document.title}
               </h3>
-              <p className="ws-serif mt-[6px] line-clamp-3 text-[17px] leading-[1.35] text-muted-foreground">
+              <p
+                className={`${homeSerif} mt-[6px] line-clamp-3 text-[17px] leading-[1.35] text-muted-foreground`}
+              >
                 {document.preview ??
                   "Pick up a thought. Make room for what comes next."}
               </p>
@@ -113,7 +124,9 @@ export function HomeContinue({
         ))}
       </div>
       {recent.length === 0 ? (
-        <p className="ws-paper rounded-md border border-border p-8 text-sm text-muted-foreground">
+        <p
+          className={`${homePaper} rounded-md border border-border p-8 text-sm text-muted-foreground`}
+        >
           Give your next idea a page of its own. Create your first document.
         </p>
       ) : null}
@@ -147,7 +160,9 @@ export function HomeDocuments({
       className="scroll-mt-5 pb-5 max-md:mt-3"
     >
       <div className="mb-[10px] flex items-center gap-6 max-md:mb-1">
-        <h2 className="ws-serif text-[23px] leading-[1.25] tracking-[-.045em] max-md:hidden">
+        <h2
+          className={`${homeSerif} text-[23px] leading-[1.25] tracking-[-.045em] max-md:hidden`}
+        >
           All documents
         </h2>
         <h2 className="text-sm md:hidden">Recent documents</h2>
@@ -192,7 +207,9 @@ export function HomeDocuments({
         className={`max-md:overflow-hidden max-md:rounded-md max-md:border max-md:border-border ${grid ? "md:grid md:grid-cols-2 md:gap-3" : ""}`}
       >
         {!grid ? (
-          <div className="ws-document-row hidden border-b border-border pb-[6px] text-[11px] text-muted-foreground md:grid">
+          <div
+            className={`${homeDocumentColumns} hidden border-b border-border pb-[6px] text-[11px] text-muted-foreground md:grid`}
+          >
             <span>Name</span>
             <span>Space</span>
             <span>People</span>
@@ -203,7 +220,7 @@ export function HomeDocuments({
         {filtered.map((document) => (
           <div
             key={document.id}
-            className={`ws-document-row min-w-0 items-center border-b border-border py-[7px] last:max-md:border-0 max-md:flex max-md:gap-2 max-md:px-2 max-md:py-[5px] ${grid ? "md:rounded-md md:border md:p-4" : "md:grid"}`}
+            className={`${homeDocumentColumns} min-w-0 items-center border-b border-border py-[7px] last:max-md:border-0 max-md:flex max-md:gap-2 max-md:px-2 max-md:py-[5px] ${grid ? "md:rounded-md md:border md:p-4" : "md:grid"}`}
           >
             <Link
               href={`/workspace/${workspaceSlug}/doc/${document.slug}`}

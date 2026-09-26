@@ -32,9 +32,11 @@ export function HomeAvatar({
 export function HomeAvatars({
   people,
   large = false,
+  avatarClassName,
 }: {
   people: ReadonlyArray<HomePerson>;
   large?: boolean;
+  avatarClassName?: string;
 }) {
   return (
     <div
@@ -47,7 +49,7 @@ export function HomeAvatars({
           key={`${person.full_name}-${index}`}
           person={person}
           index={index}
-          className={large ? "size-10" : "size-[30px]"}
+          className={avatarClassName ?? (large ? "size-10" : "size-[30px]")}
         />
       ))}
       {people.length > 3 ? (

@@ -16,7 +16,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useTheme } from "next-themes";
-import { LandingBrand } from "@/components/landing/Brand";
+import { MapleMark } from "@/components/landing/Brand";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@softmaple/ui/components/dropdown-menu";
+import { homeNav, homeSurface } from "./home-styles";
 import { HomeAvatar } from "./home-avatar";
 import { SPACE_EXAMPLES } from "./home-static-data";
 import type { HomeProps } from "./home-types";
@@ -49,10 +50,13 @@ export function HomeSidebar({
       <div className="pl-5 pr-[14px] pt-[25px]">
         <Link
           href="/dashboard"
-          className="workspace-wordmark ml-2 inline-flex"
+          className="ml-2 inline-flex"
           aria-label="Softmaple dashboard"
         >
-          <LandingBrand />
+          <span className="inline-flex items-center gap-3 whitespace-nowrap text-2xl font-medium leading-none tracking-[-1.2px] [&_svg]:h-[34px] [&_svg]:w-[30px] [&_svg]:text-primary">
+            <MapleMark />
+            <span>softmaple</span>
+          </span>
         </Link>
         <DropdownMenu>
           <DropdownMenuTrigger className="mt-[23px] flex h-[43px] w-full items-center gap-2 rounded-lg border border-border px-3 text-sm">
@@ -60,7 +64,7 @@ export function HomeSidebar({
             <span className="truncate">{workspace?.title ?? "Workspace"}</span>
             <ChevronDown className="ml-auto size-4 shrink-0" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="workspace-home w-60" align="start">
+          <DropdownMenuContent className={`${homeSurface} w-60`} align="start">
             {workspaces.map((item) => (
               <DropdownMenuItem asChild key={item.id}>
                 <Link href={`/workspace/${item.slug}`} onClick={close}>
@@ -99,7 +103,7 @@ export function HomeSidebar({
           className="mt-6 flex flex-col gap-1"
         >
           <button
-            className="ws-nav bg-secondary font-medium"
+            className={`${homeNav} bg-secondary font-medium`}
             aria-current="page"
             onClick={() => {
               onHome();
@@ -110,7 +114,7 @@ export function HomeSidebar({
             Home
           </button>
           <button
-            className="ws-nav"
+            className={`${homeNav}`}
             onClick={() => {
               onDocuments();
               close?.();
@@ -120,7 +124,7 @@ export function HomeSidebar({
             All documents
           </button>
           <button
-            className="ws-nav"
+            className={`${homeNav}`}
             disabled
             title="Shared document filtering is not available yet"
           >
@@ -128,7 +132,7 @@ export function HomeSidebar({
             Shared with me
           </button>
           <button
-            className="ws-nav"
+            className={`${homeNav}`}
             disabled
             title="Favorites are not available yet"
           >
@@ -152,7 +156,7 @@ export function HomeSidebar({
               key={space.name}
               disabled
               title="Spaces are a visual preview"
-              className="ws-nav h-11 w-full"
+              className={`${homeNav} h-11 w-full`}
             >
               <span
                 className="size-[14px] shrink-0 rounded-full"
@@ -195,7 +199,7 @@ export function HomeSidebar({
             </span>
             <ChevronRight className="size-4 shrink-0" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="workspace-home w-52" align="start">
+          <DropdownMenuContent className={`${homeSurface} w-52`} align="start">
             <DropdownMenuItem asChild>
               <Link href="/settings/account">Account settings</Link>
             </DropdownMenuItem>

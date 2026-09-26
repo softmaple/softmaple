@@ -18,11 +18,28 @@ import {
 import { HomeSidebar } from "./home-sidebar";
 import { HomeActivity, HomePeople, HomeUpdates } from "./home-activity";
 import { HomeContinue, HomeDocuments } from "./home-documents";
+import {
+  homeBrush,
+  homeHand,
+  homeMaple,
+  homePrimary,
+  homeSerif,
+  homeSurface,
+} from "./home-styles";
 import { HomeAvatars } from "./home-avatar";
 import type { HomeProps } from "./home-types";
+import { HomeMotion, HomeActionLink } from "./home-motion";
 import "./workspace-home.css";
 
 export function WorkspaceHome(props: HomeProps) {
+  return (
+    <HomeMotion>
+      <WorkspaceHomeContent {...props} />
+    </HomeMotion>
+  );
+}
+
+function WorkspaceHomeContent(props: HomeProps) {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -77,7 +94,9 @@ export function WorkspaceHome(props: HomeProps) {
     />
   );
   return (
-    <div className="workspace-home flex h-dvh min-w-0 bg-background text-foreground">
+    <div
+      className={`${homeSurface} flex h-dvh min-w-0 bg-background text-foreground`}
+    >
       <aside
         className="hidden w-[242px] shrink-0 border-r border-border md:block max-[1100px]:w-[218px]"
         aria-label="Workspace navigation"
@@ -107,7 +126,7 @@ export function WorkspaceHome(props: HomeProps) {
                   mobileSearch.current?.focus();
                 }
               }}
-              className="workspace-home w-[285px] gap-0 p-0 motion-reduce:animate-none"
+              className={`${homeSurface} w-[285px] gap-0 p-0 motion-reduce:animate-none`}
             >
               <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
               <SheetDescription className="sr-only">
@@ -116,11 +135,13 @@ export function WorkspaceHome(props: HomeProps) {
               {sidebar}
             </SheetContent>
           </Sheet>
-          <span className="ws-serif text-lg font-bold tracking-[-.05em] md:hidden">
+          <span
+            className={`${homeSerif} text-lg font-bold tracking-[-.05em] md:hidden`}
+          >
             softmaple
           </span>
           <div className="ml-auto hidden items-center gap-1 min-[1100px]:flex">
-            <HomeAvatars people={props.members} large />
+            <HomeAvatars people={props.members} avatarClassName="size-9" />
             {props.visualFixture ? (
               <span className="grid size-9 place-items-center rounded-full bg-muted text-xs text-muted-foreground">
                 +2
@@ -136,14 +157,14 @@ export function WorkspaceHome(props: HomeProps) {
             <Search className="size-[23px]" />
           </button>
           {props.canEdit ? (
-            <Link
-              className="ws-primary flex h-[46px] min-w-[210px] items-center justify-center gap-3 text-[18px] font-medium max-md:h-[30px] max-md:min-w-[35px]"
+            <HomeActionLink
+              className={`${homePrimary} flex h-[46px] min-w-[210px] items-center justify-center gap-3 text-[18px] font-medium max-md:h-[30px] max-md:min-w-[35px]`}
               href={`/workspace/${props.workspaceSlug}/doc/new`}
               aria-label="New document"
             >
               <Plus className="size-[22px]" />
               <span className="hidden md:inline">New document</span>
-            </Link>
+            </HomeActionLink>
           ) : (
             <span className="md:hidden size-8" />
           )}
@@ -176,14 +197,18 @@ export function WorkspaceHome(props: HomeProps) {
                 aria-label="Welcome"
               >
                 <div
-                  className="ws-maple pointer-events-none absolute -right-[60px] -top-[80px] h-[420px] w-[450px] rotate-[172deg]"
+                  className={`${homeMaple} pointer-events-none absolute -right-[60px] -top-[80px] h-[420px] w-[450px] rotate-[172deg]`}
                   aria-hidden="true"
                 />
-                <h1 className="ws-serif relative z-10 pt-[10px] text-[72px] font-bold leading-[.9] tracking-[-.055em] max-[1400px]:text-[61px] max-[1150px]:text-[56px]">
+                <h1
+                  className={`${homeSerif} relative z-10 pt-[10px] text-[72px] font-bold leading-[.9] tracking-[-.055em] max-[1400px]:text-[61px] max-[1150px]:text-[56px]`}
+                >
                   A little space for
                   <br />
                   your{" "}
-                  <span className="ws-brush relative isolate whitespace-nowrap">
+                  <span
+                    className={`${homeBrush} relative isolate whitespace-nowrap`}
+                  >
                     next big idea.
                   </span>
                 </h1>
@@ -192,7 +217,7 @@ export function WorkspaceHome(props: HomeProps) {
                 </p>
                 <p
                   aria-hidden="true"
-                  className="ws-hand absolute right-[40px] top-[100px] -rotate-12 text-[24px] leading-[.85] text-muted-foreground max-[1400px]:hidden"
+                  className={`${homeHand} absolute right-[40px] top-[100px] -rotate-12 text-[24px] leading-[.85] text-muted-foreground max-[1400px]:hidden`}
                 >
                   Better
                   <br />
@@ -259,7 +284,7 @@ export function WorkspaceHome(props: HomeProps) {
             event.preventDefault();
             updatesTrigger.current?.focus();
           }}
-          className="workspace-home overflow-y-auto px-6 motion-reduce:animate-none"
+          className={`${homeSurface} overflow-y-auto px-6 motion-reduce:animate-none`}
         >
           <SheetTitle className="sr-only">Updates</SheetTitle>
           <SheetDescription className="sr-only">
@@ -269,7 +294,9 @@ export function WorkspaceHome(props: HomeProps) {
         </SheetContent>
       </Sheet>
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
-        <DialogContent className="workspace-home max-h-[80dvh] overflow-y-auto">
+        <DialogContent
+          className={`${homeSurface} max-h-[80dvh] overflow-y-auto`}
+        >
           <DialogTitle>Search documents</DialogTitle>
           <DialogDescription>
             Find a document in this workspace.

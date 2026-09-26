@@ -22,6 +22,7 @@ function edited(document: HomeDocument) {
   if (document.displayTime) return document.displayTime;
   if (!document.updated_at) return "Just created";
   return new Date(document.updated_at).toLocaleDateString("en-US", {
+    timeZone: "UTC",
     month: "short",
     day: "numeric",
   });

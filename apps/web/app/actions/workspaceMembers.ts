@@ -1,5 +1,6 @@
 "use server";
 
+import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { WorkspaceMembersType } from "@/types/model";
@@ -80,6 +81,10 @@ export const getWorkspaceMemberByUserId = async (
   }
   return actionSuccess(data);
 };
+
+export const cachedGetWorkspaceMemberByUserId = cache(
+  getWorkspaceMemberByUserId,
+);
 
 export const listWorkspaceMembers = async (
   workspaceId: number,

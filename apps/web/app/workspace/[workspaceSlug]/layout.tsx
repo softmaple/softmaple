@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
-import { listWorkspaceDocuments } from "@/app/actions/documents/documents";
-import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
+import { cachedListWorkspaceDocuments } from "@/app/actions/documents/documents";
+import { cachedGetWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-sidebar";
@@ -37,8 +37,8 @@ export default async function WorkspaceLayoutPage(props: Props) {
     currentWorkspace === undefined
       ? [null, null]
       : await Promise.all([
-          listWorkspaceDocuments(currentWorkspace.id, 100),
-          getWorkspaceMemberByUserId(currentWorkspace.id),
+          cachedListWorkspaceDocuments(currentWorkspace.id, 100),
+          cachedGetWorkspaceMemberByUserId(currentWorkspace.id),
         ]);
   const documents =
     documentsResource === null

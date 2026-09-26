@@ -5,10 +5,10 @@ import {
 } from "@/app/actions/workspaces";
 import {
   countWorkspaceDocuments,
-  listWorkspaceDocuments,
+  cachedListWorkspaceDocuments,
 } from "@/app/actions/documents/documents";
 import {
-  getWorkspaceMemberByUserId,
+  cachedGetWorkspaceMemberByUserId,
   listWorkspaceMembers,
 } from "@/app/actions/workspaceMembers";
 import { getCurrentProfile } from "@/app/actions/users";
@@ -46,10 +46,10 @@ export default async function WorkspacePage({ params }: Props) {
     profileResult,
     workspacesResult,
   ] = await Promise.all([
-    listWorkspaceDocuments(workspace.id, 100),
+    cachedListWorkspaceDocuments(workspace.id, 100),
     countWorkspaceDocuments(workspace.id),
     listWorkspaceMembers(workspace.id),
-    getWorkspaceMemberByUserId(workspace.id),
+    cachedGetWorkspaceMemberByUserId(workspace.id),
     getCurrentProfile(),
     cachedGetWorkspaces(),
   ]);

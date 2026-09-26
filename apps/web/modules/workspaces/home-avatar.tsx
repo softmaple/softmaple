@@ -39,6 +39,7 @@ export function HomeAvatars({
   return (
     <div
       className="flex shrink-0 -space-x-1"
+      role="group"
       aria-label={people.map((person) => person.full_name).join(", ")}
     >
       {people.slice(0, 3).map((person, index) => (

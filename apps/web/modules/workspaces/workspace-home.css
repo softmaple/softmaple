@@ -1,0 +1,88 @@
+/* Workspace-only paper tokens. Layout and spacing live in Tailwind utilities. */
+.workspace-home {
+  --background: #fff;
+  --foreground: #101017;
+  --muted: #f1f2f5;
+  --muted-foreground: #4c5b87;
+  --border: #e7e6e7;
+  --secondary: #fff0ba;
+  --accent: #f6f3e9;
+  --primary: #ffdb24;
+  --primary-foreground: #10100d;
+  --popover: var(--background);
+  --popover-foreground: var(--foreground);
+  --ring: #a67b09;
+  --ws-sidebar: #fcfbf9;
+  --ws-paper: #fbfaf7;
+  --ws-purple: #b675f3;
+  --ws-blue: #2c6fff;
+  --ws-green: #34b780;
+  --ws-avatar-purple: #d7abf6;
+  --ws-avatar-green: #a1dfd0;
+  --ws-avatar-sand: #e7d6be;
+  --ws-shadow: 0 7px 18px #16141309;
+  color: var(--foreground);
+  background-color: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+}
+.dark .workspace-home {
+  --background: #1b1b19;
+  --foreground: #f7f4ee;
+  --muted: #292925;
+  --muted-foreground: #bdbbb5;
+  --border: #363630;
+  --secondary: #3f371a;
+  --accent: #302f28;
+  --primary: #ffda1f;
+  --ws-sidebar: #141412;
+  --ws-paper: #252520;
+  --ws-avatar-purple: #6a427a;
+  --ws-avatar-green: #2b6b5a;
+  --ws-avatar-sand: #705e47;
+  --ws-shadow: none;
+  --ring: #e6c55a;
+}
+.workspace-home :where(button, a, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.workspace-home :where(button, a) { -webkit-tap-highlight-color: transparent; }
+.workspace-home button:not(:disabled), .workspace-home a { cursor: pointer; }
+.workspace-home button:disabled { cursor: not-allowed; }
+.workspace-home .ws-serif { font-family: "Times New Roman", Georgia, serif; }
+.workspace-home .workspace-wordmark > span { font-size: 24px; letter-spacing: -1.2px; gap: 12px; }
+.workspace-home .workspace-wordmark svg { width: 30px; height: 34px; color: var(--primary); }
+.ws-nav { display: flex; min-height: 41px; align-items: center; gap: 17px; padding: 8px 13px; border-radius: 6px; font-size: 14px; text-align: left; }
+.ws-nav svg { width: 22px; height: 22px; stroke-width: 1.6; flex-shrink: 0; }
+.ws-nav:not(:disabled):hover { background-color: var(--secondary); }
+.ws-primary { border-radius: 6px; background: linear-gradient(110deg, var(--primary), #ffe137); color: var(--primary-foreground); }
+.ws-primary:hover { box-shadow: 0 2px 8px #be960022; }
+.ws-maple { background: url('/landing/veined-maple.webp') center/contain no-repeat; opacity: .19; }
+.dark .ws-maple { background-image: url('/auth/veined-maple-dark.webp'); opacity: .48; }
+.ws-brush::before { content: ""; position: absolute; z-index: -1; inset: .07em -.27em -.12em -.1em; background: url('/workspace/idea-brush.svg') center/100% 100% no-repeat; }
+.ws-brush { color: #090b07; margin-left: -.07em; letter-spacing: -.065em; }
+.dark .ws-brush::before { opacity: .9; }
+.ws-paper { background-color: var(--ws-paper); background-image: url('/workspace/paper-grain.svg'); }
+
+.workspace-home mark { background: var(--secondary); color: var(--foreground); padding: 1px 3px; }
+.ws-caret { display: inline-block; position: relative; width: 2px; height: 17px; vertical-align: text-bottom; margin: 0 2px; background: var(--caret); }
+.ws-caret::before { content: ""; position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--caret); top: -2px; left: -1px; }
+.ws-caret span { position: absolute; top: 20px; left: 2px; border-radius: 3px; padding: 3px 7px; background: var(--caret); color: #fff; font: 12px var(--font-body), sans-serif; }
+.ws-caret-purple { --caret: #b653ec; }
+.ws-caret-green { --caret: #32bf9d; }
+.ws-caret-blue { --caret: #527eff; }
+.ws-document-row { grid-template-columns: minmax(0, 43%) minmax(0, 18%) minmax(0, 17%) minmax(0, 15%) 7%; }
+@font-face { font-family: "Workspace Hand"; src: url('/landing/caveat-latin.woff2') format('woff2'); font-weight: 400 500; font-display: swap; }
+.ws-hand { font-family: "Workspace Hand", cursive; }
+@media (min-width: 768px) { .ws-activity { min-height: 244px; } }
+@media (min-width: 1280px) and (max-width: 1430px) {
+  .ws-activity > div { gap: 12px; }
+  .ws-activity > div > div:last-child { width: 200px; padding-left: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .workspace-home *, .workspace-home *::before, .workspace-home *::after { scroll-behavior: auto; animation: none; transition: none; } }
+
+/* A curved paper curl; the warm edge follows the crease only. */
+.ws-fold { --fold-size: 52px; clip-path: polygon(0 0, calc(100% - var(--fold-size)) 0, 100% var(--fold-size), 100% 100%, 0 100%); }
+.ws-activity .ws-fold { --fold-size: 42px; }
+.ws-fold::after { content: ""; position: absolute; top: -1px; right: -1px; pointer-events: none; width: var(--fold-size); height: var(--fold-size); border-radius: 0; background: url('/workspace/fold-light.svg') center/100% 100% no-repeat; box-shadow: none; }
+.dark .ws-fold::after { background-image: url('/workspace/fold-dark.svg'); box-shadow: none; }
+.workspace-home > div > header [data-slot='avatar'] { width: 36px; height: 36px; }
+
+@media (max-width: 1430px) { .ws-caret span { display: none; } }

@@ -263,6 +263,7 @@ function FixtureCaret({
   } as const;
   return (
     <span
+      aria-hidden="true"
       className={`${colors[color]} relative mx-[2px] inline-block h-[17px] w-[2px] bg-[var(--caret)] align-text-bottom before:absolute before:-left-px before:-top-[2px] before:size-1 before:rounded-full before:bg-[var(--caret)] before:content-['']`}
     >
       {name ? (

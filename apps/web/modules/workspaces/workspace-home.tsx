@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, Home, Menu, Plus, Search } from "lucide-react";
 import {
@@ -52,12 +52,14 @@ function WorkspaceHomeContent(props: HomeProps) {
     document
       .getElementById("workspace-documents")
       ?.scrollIntoView({ block: "start" });
-  const search = () => {
+  const search = useCallback(() => {
     if (window.innerWidth < 768) {
-      if (navigationOpen) focusSearchAfterClose.current = true;
-      else mobileSearch.current?.focus();
+      if (navigationOpen) {
+        focusSearchAfterClose.current = true;
+        setNavigationOpen(false);
+      } else mobileSearch.current?.focus();
     } else setSearchOpen(true);
-  };
+  }, [navigationOpen]);
   const home = () => {
     setQuery("");
     scroll.current?.scrollTo({ top: 0 });
@@ -66,8 +68,7 @@ function WorkspaceHomeContent(props: HomeProps) {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
         event.preventDefault();
-        if (window.innerWidth < 768) mobileSearch.current?.focus();
-        else setSearchOpen(true);
+        search();
       }
     };
     const desktop = window.matchMedia("(min-width: 768px)");
@@ -83,7 +84,7 @@ function WorkspaceHomeContent(props: HomeProps) {
       document.removeEventListener("keydown", onKey);
       desktop.removeEventListener("change", onDesktop);
     };
-  }, []);
+  }, [search]);
   const sidebar = (
     <HomeSidebar
       {...props}
@@ -299,7 +300,7 @@ function WorkspaceHomeContent(props: HomeProps) {
         >
           <DialogTitle>Search documents</DialogTitle>
           <DialogDescription>
-            Find a document in this workspace.
+            Search loaded workspace documents.
           </DialogDescription>
           <input
             aria-label="Search workspace documents"
@@ -333,7 +334,7 @@ function WorkspaceHomeContent(props: HomeProps) {
               .includes(query.trim().toLocaleLowerCase()),
           ).length === 0 ? (
             <p className="text-sm text-muted-foreground" role="status">
-              No documents match your search.
+              No loaded documents match your search.
             </p>
           ) : null}
         </DialogContent>

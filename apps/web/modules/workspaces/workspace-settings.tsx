@@ -600,6 +600,7 @@ export function WorkspaceSettings({
                         disabled={!isOwner || isPending}
                         onClick={() => {
                           setConfirmation("");
+                          setFeedback(null);
                           setDeleteOpen(true);
                         }}
                       >

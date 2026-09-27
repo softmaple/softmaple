@@ -165,7 +165,7 @@ export function PaperEntrance({
     <LazyMotion features={domAnimation}>
       <m.div
         className={className}
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         transition={{ duration: reduced ? 0 : 0.16, ease: "easeOut" }}
       >
@@ -186,7 +186,7 @@ export function WorkspaceIcon({
   return (
     <Avatar className={cn("size-16 shrink-0 rounded-lg", className)}>
       <AvatarImage className="object-cover" src={src ?? undefined} alt="" />
-      <AvatarFallback className="rounded-lg bg-(--workspace-icon) text-white [&_svg]:size-9 [&_svg]:text-white">
+      <AvatarFallback className="rounded-lg bg-(--workspace-icon) text-primary-foreground [&_svg]:size-9 [&_svg]:text-current">
         <span className="sr-only">{title}</span>
         <MapleMark />
       </AvatarFallback>

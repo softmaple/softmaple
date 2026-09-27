@@ -182,7 +182,7 @@ export function MobileWorkspaceHome(props: HomeProps) {
               <h1
                 className={`${paperSerif} max-w-[85%] text-[34px] leading-[1.08] tracking-tight`}
               >
-                Good morning,
+                Hello,
                 <br />
                 <BrushUnderline>
                   <span className="inline-block max-w-full truncate align-bottom">

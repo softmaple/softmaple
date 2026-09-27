@@ -1,8 +1,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceSettings } from "./workspace-settings";
 import { homeFixture } from "./home-fixture";
+import { PaperEntrance } from "./workspace-paper";
 
 const actions = vi.hoisted(() => ({
   update: vi.fn(),
@@ -81,6 +83,21 @@ const render = (role: "OWNER" | "VIEWER" = "OWNER", preview = false) =>
   });
 
 describe("Workspace settings editing", () => {
+  it("keeps server-rendered paper content visible before hydration", () => {
+    const markup = renderToStaticMarkup(
+      <PaperEntrance>
+        <h1>Workspace content</h1>
+      </PaperEntrance>,
+    );
+    const serverContent = document.createElement("div");
+    serverContent.innerHTML = markup;
+    const heading = serverContent.querySelector("h1");
+    expect(heading?.textContent).toBe("Workspace content");
+    for (let node = heading?.parentElement; node; node = node.parentElement) {
+      expect(node.style.opacity).not.toBe("0");
+      expect(node.hidden).toBe(false);
+    }
+  });
   it("disables pristine/invalid saves and Cancel restores the saved value", () => {
     render();
     expect(button("Save changes").disabled).toBe(true);
@@ -136,6 +153,11 @@ describe("Workspace settings editing", () => {
     );
     expect(name().value).toBe("Keep this draft");
     expect(actions.refresh).not.toHaveBeenCalled();
+    act(() => button("Delete workspace").click());
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.querySelector('[role="alert"]')).toBeNull();
+    expect(name().value).toBe("Keep this draft");
   });
   it("guards category navigation and reload while edits are unsaved", () => {
     render();

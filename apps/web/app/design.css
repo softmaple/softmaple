@@ -319,6 +319,7 @@
   --brand-gold: #d6a03f;
   --workspace-link: #946008;
   --workspace-icon: #cbb8e6;
+  --workspace-live: #2f9e6e;
   --radius: .6rem;
 }
 .dark .workspace-paper {
@@ -341,4 +342,5 @@
   --brand-gold: #daba65;
   --workspace-link: #ffda70;
   --workspace-icon: #b8a0d6;
+  --workspace-live: #45c28c;
 }

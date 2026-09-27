@@ -180,6 +180,38 @@ test("preview, export, public sharing, and revocation use live content", async (
   await anonymous.close();
 });
 
+test("workspace home shows where teammates are writing", async ({
+  browser,
+}) => {
+  const ownerContext = await browser.newContext();
+  const ownerPage = await openAs(ownerContext, seed.owner);
+  await ownerPage
+    .locator('[contenteditable="true"]')
+    .first()
+    .fill("A line the whole workspace can follow.");
+  await expect(ownerPage.getByRole("status")).toContainText("Saved", {
+    timeout: 20_000,
+  });
+
+  const editorContext = await browser.newContext();
+  const editorPage = await editorContext.newPage();
+  await login(editorPage, seed.editor);
+  const happening = editorPage.getByRole("region", { name: "Happening now" });
+  // Activity comes from durable history, so retry until the write has landed.
+  await expect(async () => {
+    await editorPage.goto(`/workspace/${seed.workspace.slug}`);
+    await expect(
+      happening.getByRole("heading", { name: seed.document.title }),
+    ).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  await expect(happening).toContainText("E2E Owner");
+  await expect(
+    happening.getByRole("link", { name: "Join document" }),
+  ).toHaveAttribute("href", documentUrl());
+  await ownerContext.close();
+  await editorContext.close();
+});
+
 test("account profile supports theme, avatar entry, and password reset", async ({
   page,
 }) => {

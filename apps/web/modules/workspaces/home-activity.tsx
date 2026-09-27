@@ -1,6 +1,8 @@
 import { HomeAction, HomeActionLink } from "./home-motion";
 import Link from "next/link";
+import { useId } from "react";
 import { ArrowUpRight } from "lucide-react";
+import { documentPresenceColor } from "@/modules/docs/document-presence-color";
 import {
   homeFold,
   homeHand,
@@ -8,21 +10,33 @@ import {
   homePrimary,
   homeSerif,
 } from "./home-styles";
-import { HomeAvatar, HomeAvatars } from "./home-avatar";
+import { HomeAvatar, HomeAvatars, writersAsPeople } from "./home-avatar";
 import { UPDATE_EXAMPLES } from "./home-static-data";
 import type { HomeProps } from "./home-types";
+import {
+  describeHappeningNow,
+  describeLatestWords,
+  describeWriterCount,
+  hasOtherWriters,
+  type ActiveWriter,
+} from "./writing-activity";
+
+/** Writer tags beyond this many collapse into a "+N" count. */
+const VISIBLE_WRITER_TAGS = 3;
 
 export function HomeActivity({
+  activity,
   visualFixture,
-  members,
   workspaceSlug,
-  documents,
   onBrowse,
-}: Pick<
-  HomeProps,
-  "visualFixture" | "members" | "workspaceSlug" | "documents"
-> & { onBrowse: () => void }) {
-  const active = visualFixture ? documents[0] : undefined;
+}: Pick<HomeProps, "activity" | "visualFixture" | "workspaceSlug"> & {
+  onBrowse: () => void;
+}) {
+  const titleId = useId();
+  const featured = activity?.documents[0];
+  const href = featured
+    ? `/workspace/${workspaceSlug}/doc/${featured.slug}`
+    : undefined;
   return (
     <section
       aria-label="Happening now"
@@ -33,47 +47,76 @@ export function HomeActivity({
       </h2>
       <div className="flex min-w-0 gap-[15px] min-[1280px]:max-[1430px]:gap-3">
         <div
-          className={`relative min-w-0 flex-1 md:h-[194px] md:max-lg:h-auto md:rounded-md md:border md:border-border md:p-[23px] md:pt-[14px] ${active ? `${homePaper} ${homeFold} [--fold-size:42px]` : ""}`}
+          className={`relative min-w-0 flex-1 md:h-[194px] md:max-lg:h-auto md:rounded-md md:border md:border-border md:p-[23px] md:pt-[14px] ${featured ? `${homePaper} ${homeFold} [--fold-size:42px]` : ""}`}
         >
           <p className="flex items-center gap-3 text-xs text-muted-foreground max-md:leading-none">
             <span
-              className={`size-[11px] rounded-full ${active ? "bg-[var(--ws-green)]" : "bg-muted-foreground/50"}`}
+              className={`size-[11px] shrink-0 rounded-full ${featured ? "bg-[var(--ws-green)]" : "bg-muted-foreground/50"}`}
             />
-            {active ? (
+            {featured ? (
               <>
-                3 people{" "}
+                {describeWriterCount(featured.writers.length)}{" "}
                 <span className="-ml-2 text-[var(--ws-green)]">writing</span>
               </>
+            ) : activity === null ? (
+              "Live activity is unavailable"
             ) : (
-              "No live activity to show"
+              "No one is writing right now"
             )}
           </p>
           <h3
-            className={`${homeSerif} mt-2 text-[35px] leading-[1.1] tracking-[-.045em] max-md:mt-1 max-md:text-[18px]`}
+            id={titleId}
+            title={featured?.title}
+            className={`${homeSerif} mt-2 line-clamp-2 break-words text-[35px] leading-[1.1] tracking-[-.045em] max-md:mt-1 max-md:text-[18px] md:line-clamp-1`}
           >
-            {active?.title ?? "A little room to keep writing"}
+            {featured?.title ?? "A little room to keep writing"}
           </h3>
           <div className="relative mt-[8px] hidden max-w-[510px] md:block">
-            <p
-              className={`${homeSerif} max-[1430px]:line-clamp-3 text-[17px] leading-[1.38] text-muted-foreground`}
-            >
-              {active ? (
-                <>
-                  Ideas grow stronger when we share them. Softmaple is a place
-                  for curious <mark>minds to write together,</mark> think more
-                  clearly, and make progress — <FixtureCaret color="blue" />
-                  <br className="hidden min-[1450px]:block" /> side by side.{" "}
-                  <FixtureCaret color="purple" name="Mia" />
-                  Small steps, shared openly, can lead{" "}
-                  <FixtureCaret color="green" name="Leo" /> extraordinary
-                  things.
-                </>
-              ) : (
-                "Open a document and pick up a thought. Your next idea starts with a little space."
-              )}
-            </p>
+            {visualFixture && featured ? (
+              <p
+                className={`${homeSerif} max-[1430px]:line-clamp-3 text-[17px] leading-[1.38] text-muted-foreground`}
+              >
+                Ideas grow stronger when we share them. Softmaple is a place for
+                curious <mark>minds to write together,</mark> think more
+                clearly, and make progress — <FixtureCaret color="blue" />
+                <br className="hidden min-[1450px]:block" /> side by side.{" "}
+                <FixtureCaret color="purple" name="Mia" />
+                Small steps, shared openly, can lead{" "}
+                <FixtureCaret color="green" name="Leo" /> extraordinary things.
+              </p>
+            ) : featured && activity ? (
+              <>
+                <p
+                  className={`${homeSerif} text-[17px] leading-[1.38] text-muted-foreground`}
+                >
+                  {describeLatestWords(featured, activity.observedAt)}
+                </p>
+                <ul
+                  aria-label="People writing"
+                  className="mt-[14px] flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"
+                >
+                  {featured.writers
+                    .slice(0, VISIBLE_WRITER_TAGS)
+                    .map((writer) => (
+                      <WriterTag key={writer.userId} writer={writer} />
+                    ))}
+                  {featured.writers.length > VISIBLE_WRITER_TAGS ? (
+                    <li className="text-xs text-muted-foreground">
+                      +{featured.writers.length - VISIBLE_WRITER_TAGS} more
+                    </li>
+                  ) : null}
+                </ul>
+              </>
+            ) : (
+              <p
+                className={`${homeSerif} text-[17px] leading-[1.38] text-muted-foreground`}
+              >
+                Open a document and pick up a thought. Your next idea starts
+                with a little space.
+              </p>
+            )}
           </div>
-          {active ? (
+          {visualFixture && featured ? (
             <p
               aria-hidden="true"
               className={`${homeHand} absolute right-5 top-9 hidden -rotate-12 text-[25px] leading-[.85] text-muted-foreground min-[1450px]:block`}
@@ -85,17 +128,18 @@ export function HomeActivity({
             </p>
           ) : null}
           <div className="mt-1 flex items-center justify-between md:mt-4 min-[1024px]:hidden">
-            {active ? (
-              <HomeAvatars people={members} />
+            {featured ? (
+              <HomeAvatars people={writersAsPeople(featured.writers)} />
             ) : (
               <span className="text-xs text-muted-foreground">
                 Pick up where you left off.
               </span>
             )}
-            {active ? (
+            {href ? (
               <HomeActionLink
+                aria-describedby={titleId}
                 className={`${homePrimary} px-7 py-[6px] text-sm`}
-                href={`/workspace/${workspaceSlug}/doc/${active.slug}`}
+                href={href}
               >
                 Join
               </HomeActionLink>
@@ -110,20 +154,24 @@ export function HomeActivity({
           </div>
         </div>
         <div className="hidden w-[252px] shrink-0 flex-col justify-center border-l border-border pl-6 pr-2 min-[1024px]:flex max-[1150px]:w-[210px] min-[1280px]:max-[1430px]:w-[200px] min-[1280px]:max-[1430px]:pl-4">
-          {active ? <HomeAvatars people={members} large /> : null}
+          {featured ? (
+            <HomeAvatars people={writersAsPeople(featured.writers)} large />
+          ) : null}
           <p
             className={`${homeSerif} mb-4 mt-4 text-[21px] leading-[1.25] tracking-[-.02em]`}
           >
-            {active
-              ? "Mia and Leo are shaping the introduction."
+            {featured
+              ? describeHappeningNow(featured)
               : "Good ideas begin with a first line."}
           </p>
-          {active ? (
+          {featured && href ? (
             <Link
+              aria-describedby={titleId}
               className="flex h-[50px] items-center justify-center gap-3 rounded border border-foreground/70 font-medium"
-              href={`/workspace/${workspaceSlug}/doc/${active.slug}`}
+              href={href}
             >
-              Join document <ArrowUpRight className="size-5" />
+              {hasOtherWriters(featured) ? "Join document" : "Keep writing"}{" "}
+              <ArrowUpRight className="size-5" />
             </Link>
           ) : (
             <button
@@ -136,6 +184,26 @@ export function HomeActivity({
         </div>
       </div>
     </section>
+  );
+}
+
+/** A writer's name on a caret in their editor cursor color. */
+function WriterTag({ writer }: { writer: ActiveWriter }) {
+  const color = documentPresenceColor(writer.userId);
+  return (
+    <li className="flex min-w-0 items-center gap-[3px] text-xs leading-none">
+      <span
+        aria-hidden="true"
+        className="h-[18px] w-[2px] shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <span
+        className="max-w-[140px] truncate rounded-[3px] px-[7px] py-[4px] text-white"
+        style={{ backgroundColor: color }}
+      >
+        {writer.isViewer ? "You" : writer.fullName}
+      </span>
+    </li>
   );
 }
 

@@ -44,12 +44,36 @@ const previews = [
   "It’s often the small steps that lead to meaningful change. A kinder internet, perhaps....",
   "Some thoughts from our conversation today. There’s a real opportunity here to...",
 ];
+const writingAt = (lastWrittenAt: string, index: number) => ({
+  avatarSrc: members[index]?.avatar_src ?? null,
+  fullName: members[index]?.full_name ?? "Member",
+  isViewer: false,
+  lastWrittenAt,
+  userId: members[index]?.user_id ?? `member-${index}`,
+});
 export const homeFixture: HomeProps = {
   canEdit: true,
   visualFixture: true,
   documentCount: 3,
+  workspaceId: 1,
   workspaceSlug: "design-review",
   members,
+  activity: {
+    observedAt: "2026-09-22T08:03:00Z",
+    documents: [
+      {
+        id: "fixture-0",
+        slug: "note-0",
+        title: titles[0] ?? "",
+        lastWrittenAt: "2026-09-22T08:02:40Z",
+        writers: [
+          writingAt("2026-09-22T08:02:40Z", 0),
+          writingAt("2026-09-22T08:02:15Z", 1),
+          writingAt("2026-09-22T08:00:05Z", 2),
+        ],
+      },
+    ],
+  },
   profile: {
     id: "adam",
     full_name: "Adam",

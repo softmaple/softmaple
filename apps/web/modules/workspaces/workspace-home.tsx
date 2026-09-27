@@ -31,15 +31,21 @@ import type { HomeProps } from "./home-types";
 import { HomeMotion, HomeActionLink } from "./home-motion";
 import "./workspace-home.css";
 import { MobileWorkspaceHome } from "./mobile-workspace-home";
+import { useWritingActivity } from "./use-writing-activity";
 
 export function WorkspaceHome(props: HomeProps) {
+  // Both layouts stay mounted and are toggled by CSS, so they share one poll.
+  const activity = useWritingActivity(props.workspaceId, props.activity, {
+    enabled: !props.visualFixture,
+  });
+  const live = { ...props, activity };
   return (
     <HomeMotion>
       <div className="md:hidden">
-        <MobileWorkspaceHome {...props} />
+        <MobileWorkspaceHome {...live} />
       </div>
       <div className="hidden md:block">
-        <WorkspaceHomeContent {...props} />
+        <WorkspaceHomeContent {...live} />
       </div>
     </HomeMotion>
   );

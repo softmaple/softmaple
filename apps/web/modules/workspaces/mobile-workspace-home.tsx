@@ -28,7 +28,7 @@ import {
 } from "@softmaple/ui/components/sheet";
 import { cn } from "@softmaple/ui/lib/utils";
 import type { HomeDocument, HomeProps } from "./home-types";
-import { HomeAvatars } from "./home-avatar";
+import { HomeAvatars, writersAsPeople } from "./home-avatar";
 import { homeMaple } from "./home-styles";
 import { HomeActionLink } from "./home-motion";
 import {
@@ -40,6 +40,12 @@ import {
   WorkspaceBrand,
 } from "./workspace-paper";
 import { ModeToggle } from "@/components/mode-toggle";
+import {
+  describeHappeningNow,
+  describeLatestWords,
+  describeWriterCount,
+  hasOtherWriters,
+} from "./writing-activity";
 
 type Section = "Home" | "Documents" | "Shared";
 export function MobileWorkspaceHome(props: HomeProps) {
@@ -62,8 +68,7 @@ export function MobileWorkspaceHome(props: HomeProps) {
         .includes(query.trim().toLocaleLowerCase()) &&
       (filter !== "Shared" || doc.is_public),
   );
-  // Workspace-wide presence is unavailable. Fixtures are explicitly dev-only.
-  const active = props.visualFixture ? props.documents[0] : undefined;
+  const featured = props.activity?.documents[0];
   const navigate = (next: Section) => {
     setSection(next);
     setFilter(next === "Shared" ? "Shared" : "Recent");
@@ -215,43 +220,65 @@ export function MobileWorkspaceHome(props: HomeProps) {
                 >
                   Happening now
                 </h2>
-                {active ? (
+                {props.visualFixture ? (
                   <span className="text-xs text-muted-foreground">Preview</span>
+                ) : featured ? (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span
+                      aria-hidden="true"
+                      className="size-2 rounded-full bg-(--workspace-live)"
+                    />
+                    {describeWriterCount(featured.writers.length)} writing
+                  </span>
                 ) : null}
               </div>
               <article className="flex gap-4 rounded-xl border border-border bg-card/80 p-3 shadow-sm">
                 <DocumentThumbnail large />
                 <div className="min-w-0 flex-1">
                   <h3
-                    className={`${paperSerif} line-clamp-2 text-lg font-semibold leading-tight`}
+                    id="mobile-activity-title"
+                    className={`${paperSerif} line-clamp-2 break-words text-lg font-semibold leading-tight`}
                   >
-                    {active?.title ?? "A place for good ideas"}
+                    {featured?.title ?? "A place for good ideas"}
                   </h3>
                   <p
                     className={`${paperSerif} mt-1 text-sm leading-5 text-muted-foreground`}
                   >
-                    {active
-                      ? "Building a more thoughtful future together, one idea at a time."
-                      : "Open a document to write together. Live activity is shown inside the editor."}
+                    {featured && props.activity
+                      ? `${describeHappeningNow(featured)} ${describeLatestWords(featured, props.activity.observedAt)}`
+                      : props.activity === null
+                        ? "Live activity is unavailable right now. Open a document to keep writing."
+                        : "No one is writing right now. Open a document to write together."}
                   </p>
                   <div className="mt-2 flex items-center justify-between gap-2">
-                    {active ? (
+                    {featured ? (
                       <HomeAvatars
-                        people={active.people ?? []}
+                        people={writersAsPeople(featured.writers)}
                         avatarClassName="size-7"
                       />
                     ) : (
                       <span className="text-[11px] text-muted-foreground">
-                        Workspace activity unavailable
+                        Quiet for now
                       </span>
                     )}
-                    <button
-                      className="flex min-h-11 items-center gap-1 text-sm text-(--workspace-link)"
-                      onClick={() => navigate("Documents")}
-                    >
-                      Browse
-                      <ArrowRight className="size-4" />
-                    </button>
+                    {featured ? (
+                      <Link
+                        aria-describedby="mobile-activity-title"
+                        className="flex min-h-11 items-center gap-1 text-sm text-(--workspace-link)"
+                        href={`/workspace/${props.workspaceSlug}/doc/${featured.slug}`}
+                      >
+                        {hasOtherWriters(featured) ? "Join" : "Keep writing"}
+                        <ArrowRight className="size-4" />
+                      </Link>
+                    ) : (
+                      <button
+                        className="flex min-h-11 items-center gap-1 text-sm text-(--workspace-link)"
+                        onClick={() => navigate("Documents")}
+                      >
+                        Browse
+                        <ArrowRight className="size-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </article>

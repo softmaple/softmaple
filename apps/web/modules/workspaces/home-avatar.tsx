@@ -4,6 +4,15 @@ import {
   AvatarImage,
 } from "@softmaple/ui/components/avatar";
 import type { HomePerson } from "./home-types";
+import type { ActiveWriter } from "./writing-activity";
+
+export const writersAsPeople = (
+  writers: ReadonlyArray<ActiveWriter>,
+): ReadonlyArray<HomePerson> =>
+  writers.map((writer) => ({
+    full_name: writer.fullName,
+    avatar_src: writer.avatarSrc,
+  }));
 
 export function HomeAvatar({
   person,

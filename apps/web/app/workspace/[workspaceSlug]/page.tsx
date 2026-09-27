@@ -12,6 +12,7 @@ import {
   listWorkspaceMembers,
 } from "@/app/actions/workspaceMembers";
 import { getCurrentProfile } from "@/app/actions/users";
+import { loadWorkspaceWritingActivity } from "@/app/actions/workspaceActivity";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 import { WorkspaceHome } from "@/modules/workspaces/workspace-home";
@@ -45,6 +46,7 @@ export default async function WorkspacePage({ params }: Props) {
     roleResult,
     profileResult,
     workspacesResult,
+    activityResult,
   ] = await Promise.all([
     cachedListWorkspaceDocuments(workspace.id, 100),
     countWorkspaceDocuments(workspace.id),
@@ -52,6 +54,7 @@ export default async function WorkspacePage({ params }: Props) {
     cachedGetWorkspaceMemberByUserId(workspace.id),
     getCurrentProfile(),
     cachedGetWorkspaces(),
+    loadWorkspaceWritingActivity(workspace.id),
   ]);
   const membership = requireWorkspaceRouteData(roleResult, {
     ...context,
@@ -63,6 +66,10 @@ export default async function WorkspacePage({ params }: Props) {
   });
   return (
     <WorkspaceHome
+      // Live activity is supplementary: when it cannot be read, the home
+      // still renders and says so instead of failing the whole workspace.
+      activity={activityResult.ok ? activityResult.data : null}
+      workspaceId={workspace.id}
       workspaceSlug={workspaceSlug}
       documents={requireWorkspaceRouteData(documentsResult, {
         ...context,

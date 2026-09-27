@@ -213,6 +213,26 @@ For the cross-runtime picture — when to deploy which runtime, Supabase/
 Redis/DO responsibilities, and the current default-runtime decision — see
 [`docs/design/collaboration-operations.md`](../../docs/design/collaboration-operations.md).
 
+## Workspace activity ("Happening now")
+
+The workspace home features the document where members are writing right
+now. It reads durable event history rather than live presence: the
+members-only `list_workspace_writing_activity` RPC reports who appended event
+batches to which documents in the last five minutes, so the answer is the same
+whichever collaboration runtime owns a document, and it includes private
+documents saved over HTTP. Cursors and rosters stay inside the editor.
+
+```text
+page render           ──► loadWorkspaceWritingActivity ──► rpc list_workspace_writing_activity
+visible tab, every 30s ──► GET /api/workspaces/<id>/activity  (private, no-store)
+```
+
+[`modules/workspaces/writing-activity.ts`](./modules/workspaces/writing-activity.ts)
+ranks documents for the viewer: documents other members are writing in come
+first, then more writers, then the most recent change. When the RPC cannot be
+read (for example, before `pnpm --filter @softmaple/db db:deploy` has applied
+it), the home still renders and says live activity is unavailable.
+
 ## Commands
 
 ```bash

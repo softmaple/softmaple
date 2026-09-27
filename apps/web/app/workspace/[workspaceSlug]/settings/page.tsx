@@ -1,3 +1,4 @@
+import { getCurrentProfile } from "@/app/actions/users";
 import { cachedGetWorkspaceBySlug } from "@/app/actions/workspaces";
 import {
   getWorkspaceMemberByUserId,
@@ -34,9 +35,10 @@ export default async function WorkspaceSettingsPage({
     },
   );
 
-  const [membershipResult, membersResult] = await Promise.all([
+  const [membershipResult, membersResult, profileResult] = await Promise.all([
     getWorkspaceMemberByUserId(workspace.id),
     listWorkspaceMembers(workspace.id),
+    getCurrentProfile(),
   ]);
 
   const membership = requireWorkspaceRouteData(membershipResult, {
@@ -50,6 +52,7 @@ export default async function WorkspaceSettingsPage({
 
   return (
     <WorkspaceSettings
+      profile={profileResult.ok ? profileResult.data : undefined}
       members={members}
       role={membership.role}
       initialTab={tab === "members" ? "members" : "general"}

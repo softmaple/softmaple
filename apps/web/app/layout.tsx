@@ -1,5 +1,5 @@
 import { DM_Sans, JetBrains_Mono, Syne } from "next/font/google";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import "@softmaple/ui/globals.css";
 import "@softmaple/awareness/styles.css";
@@ -21,6 +21,13 @@ const fontUtility = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-utility",
 });
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+};
 
 export const metadata: Metadata = {
   title: "Softmaple",

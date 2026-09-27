@@ -294,3 +294,51 @@
   background: color-mix(in srgb, var(--awareness-user-color) 22%, transparent);
   mix-blend-mode: normal;
 }
+
+/* Workspace paper palette, scoped to the new workspace surfaces and portals.
+   Existing desktop home/editor keep their own theme. */
+.workspace-paper {
+  --background: #faf8f3;
+  --foreground: #191919;
+  --card: #fcfaf6;
+  --card-foreground: #191919;
+  --popover: #faf8f3;
+  --popover-foreground: #191919;
+  --muted: #f0ede6;
+  --muted-foreground: #646464;
+  --border: #e5dfd3;
+  --input: #c9c8c4;
+  --primary: #ffd25e;
+  --primary-foreground: #211b0d;
+  --secondary: #fff0c6;
+  --secondary-foreground: #684709;
+  --accent: #f5eedf;
+  --accent-foreground: #191919;
+  --ring: #9d710e;
+  --destructive: #bb2821;
+  --brand-gold: #d6a03f;
+  --workspace-link: #946008;
+  --workspace-icon: #cbb8e6;
+  --radius: .6rem;
+}
+.dark .workspace-paper {
+  --background: #232321;
+  --foreground: #f6f3ec;
+  --card: #2a2a27;
+  --card-foreground: #f6f3ec;
+  --popover: #292a28;
+  --popover-foreground: #f6f3ec;
+  --muted: #343532;
+  --muted-foreground: #bdbdb8;
+  --border: #464640;
+  --input: #686861;
+  --secondary: #52492b;
+  --secondary-foreground: #ffe18a;
+  --accent: #36352f;
+  --accent-foreground: #f6f3ec;
+  --ring: #e9c269;
+  --destructive: #ff7968;
+  --brand-gold: #daba65;
+  --workspace-link: #ffda70;
+  --workspace-icon: #b8a0d6;
+}

@@ -242,3 +242,35 @@ apps/web/
 ├── scripts/             # Local E2E collab router
 └── e2e/                 # Playwright specs
 ```
+
+
+## Workspace interface previews
+
+Run `pnpm --filter @softmaple/web dev`, then open
+`/dev/workspace-design?page=home`, `?page=dashboard`, or `?page=settings`.
+These fixtures return 404 outside development. They use the actual UI components,
+but preview forms never create, save, delete, or change membership. `&stress=1`
+adds long names/URLs for responsive checks. Production URLs remain `/dashboard`,
+`/workspace/[workspaceSlug]`, and `/workspace/[workspaceSlug]/settings?tab=members`.
+
+The workspace UI connects the existing create/update/delete and member actions.
+Workspace URL is immutable. Owner-only writes remain protected by the existing
+Supabase RLS policies; UI disabled states are not an authorization boundary.
+
+Capabilities intentionally unavailable in this UI refresh:
+
+- Invitations/joining, workspace image uploads, and favorites have disabled
+  controls with explicit coming-soon labels. Existing registered-account member
+  management remains available.
+- There is no workspace-wide live activity source. Home explains that live
+  collaboration is available inside documents, without inventing online counts.
+- The model has no workspace-type or last-opened fields. Cards show actual member
+  and document counts and `updated_at`, without claiming personal/team type or
+  access time.
+- Decorative leaf/brush/paper assets reuse the repository artwork. Missing
+  workspace images use a maple fallback; document thumbnails are decorative paper,
+  not rendered document previews.
+
+Unsaved settings guard internal links and browser reload/close. Same-document
+Back/Forward confirmation uses the browser Navigation API where available.
+Sheet handles are clickable close controls, not draggable gesture affordances.

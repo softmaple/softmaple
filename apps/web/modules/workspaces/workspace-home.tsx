@@ -30,11 +30,17 @@ import { HomeAvatars } from "./home-avatar";
 import type { HomeProps } from "./home-types";
 import { HomeMotion, HomeActionLink } from "./home-motion";
 import "./workspace-home.css";
+import { MobileWorkspaceHome } from "./mobile-workspace-home";
 
 export function WorkspaceHome(props: HomeProps) {
   return (
     <HomeMotion>
-      <WorkspaceHomeContent {...props} />
+      <div className="md:hidden">
+        <MobileWorkspaceHome {...props} />
+      </div>
+      <div className="hidden md:block">
+        <WorkspaceHomeContent {...props} />
+      </div>
     </HomeMotion>
   );
 }
@@ -66,7 +72,11 @@ function WorkspaceHomeContent(props: HomeProps) {
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+      if (
+        window.innerWidth >= 768 &&
+        (event.metaKey || event.ctrlKey) &&
+        event.key === "k"
+      ) {
         event.preventDefault();
         search();
       }

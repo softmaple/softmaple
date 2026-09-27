@@ -307,6 +307,18 @@ export type Database = {
           user_id: string;
         }[];
       };
+      list_workspace_writing_activity: {
+        Args: { p_window_seconds: number; p_workspace_id: number };
+        Returns: {
+          avatar_src: string | null;
+          document_id: string;
+          document_slug: string;
+          document_title: string;
+          full_name: string;
+          last_written_at: string;
+          user_id: string;
+        }[];
+      };
       remove_workspace_member: {
         Args: { p_member_id: string; p_workspace_id: number };
         Returns: undefined;

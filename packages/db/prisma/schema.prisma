@@ -128,6 +128,7 @@ model DocumentEventBatch {
   @@unique([document_id, batch_id])
   @@unique([id, document_id])
   @@index([document_id, id])
+  @@index([document_id, created_at])
   @@map("document_event_batches")
 }
 

@@ -27,6 +27,17 @@ VALUES
     ('a1000000-0000-4000-8000-000000000001', -91001, 'aaaaaaaa-0000-4000-8000-000000000001', 'Workspace A document', 'core-v1-doc-a-verify'),
     ('b2000000-0000-4000-8000-000000000002', -91002, 'dddddddd-0000-4000-8000-000000000004', 'Workspace B document', 'core-v1-doc-b-verify');
 
+-- Writing activity: one fresh editor write, one write older than the window,
+-- and a write in another workspace that must stay invisible.
+INSERT INTO public.document_event_batches (
+    document_id, batch_id, schema_version, parent_version, payload,
+    payload_hash, actor_id, created_at
+)
+VALUES
+    ('a1000000-0000-4000-8000-000000000001', 'core-v1-activity-stale', 1, ARRAY[]::TEXT[], '{}', repeat('0', 64), 'aaaaaaaa-0000-4000-8000-000000000001', now() - INTERVAL '1 hour'),
+    ('a1000000-0000-4000-8000-000000000001', 'core-v1-activity-fresh', 1, ARRAY[]::TEXT[], '{}', repeat('0', 64), 'bbbbbbbb-0000-4000-8000-000000000002', now() - INTERVAL '2 minutes'),
+    ('b2000000-0000-4000-8000-000000000002', 'core-v1-activity-other', 1, ARRAY[]::TEXT[], '{}', repeat('0', 64), 'dddddddd-0000-4000-8000-000000000004', now() - INTERVAL '1 minute');
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-4000-8000-000000000001', true);
@@ -48,6 +59,25 @@ BEGIN
     THEN
         RAISE EXCEPTION 'owner member directory or email visibility is incorrect';
     END IF;
+
+    IF (
+        SELECT count(*)
+        FROM public.list_workspace_writing_activity(-91001, 300)
+    ) <> 1 OR NOT EXISTS (
+        SELECT 1
+        FROM public.list_workspace_writing_activity(-91001, 300) AS activity
+        WHERE activity.document_id = 'a1000000-0000-4000-8000-000000000001'
+          AND activity.user_id = 'bbbbbbbb-0000-4000-8000-000000000002'
+    ) THEN
+        RAISE EXCEPTION 'workspace writing activity is incorrect';
+    END IF;
+
+    BEGIN
+        PERFORM public.list_workspace_writing_activity(-91001, 7200);
+        RAISE EXCEPTION 'oversized writing activity window was accepted';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
 
     PERFORM public.set_document_public(
         'a1000000-0000-4000-8000-000000000001', true
@@ -188,6 +218,12 @@ BEGIN
     EXCEPTION WHEN insufficient_privilege THEN
         NULL;
     END;
+    BEGIN
+        PERFORM public.list_workspace_writing_activity(-91001, 300);
+        RAISE EXCEPTION 'outsider loaded another workspace writing activity';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
 END;
 $behavior$;
 
@@ -211,6 +247,13 @@ BEGIN
     BEGIN
         PERFORM id FROM public.documents LIMIT 1;
         RAISE EXCEPTION 'anonymous role can enumerate documents';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+
+    BEGIN
+        PERFORM public.list_workspace_writing_activity(-91001, 300);
+        RAISE EXCEPTION 'anonymous role loaded workspace writing activity';
     EXCEPTION WHEN insufficient_privilege THEN
         NULL;
     END;

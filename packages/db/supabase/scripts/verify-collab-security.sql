@@ -14,7 +14,9 @@ BEGIN
             ('20260808230400_fix_workspace_owner_membership_rls'),
             ('20260809000000_core_v1'),
             ('20260811043830_add_cloudflare_collab_rpc'),
-            ('20260813101534_grant_cloudflare_presence_profile_read')
+            ('20260813101534_grant_cloudflare_presence_profile_read'),
+            ('20260927214500_add_document_event_batches_created_at_index'),
+            ('20260927214600_add_workspace_writing_activity')
     )
     SELECT string_agg(expected.migration_name, ', ' ORDER BY migration_name)
     INTO missing_migrations
@@ -65,6 +67,11 @@ BEGIN
         SELECT 1 FROM pg_index
         WHERE indexrelid = to_regclass(
             'public.workspace_members_workspace_created_cursor_idx'
+        ) AND indisready AND indisvalid
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_index
+        WHERE indexrelid = to_regclass(
+            'public.document_event_batches_document_id_created_at_idx'
         ) AND indisready AND indisvalid
     ) THEN
         RAISE EXCEPTION 'a core v1 uniqueness or cursor index is missing';
@@ -202,6 +209,9 @@ BEGIN
        OR to_regprocedure('public.set_document_public(uuid,boolean)') IS NULL
        OR to_regprocedure('public.get_public_document_by_slug(text)') IS NULL
        OR to_regprocedure(
+            'public.list_workspace_writing_activity(integer,integer)'
+       ) IS NULL
+       OR to_regprocedure(
             'public.append_document_event_batches(uuid,uuid,jsonb)'
        ) IS NULL
        OR to_regprocedure(
@@ -218,6 +228,18 @@ BEGIN
         'authenticated', 'public.list_workspace_members(integer)', 'EXECUTE'
     ) OR NOT has_function_privilege(
         'anon', 'public.get_public_document_by_slug(text)', 'EXECUTE'
+    ) OR has_function_privilege(
+        'public',
+        'public.list_workspace_writing_activity(integer,integer)',
+        'EXECUTE'
+    ) OR has_function_privilege(
+        'anon',
+        'public.list_workspace_writing_activity(integer,integer)',
+        'EXECUTE'
+    ) OR NOT has_function_privilege(
+        'authenticated',
+        'public.list_workspace_writing_activity(integer,integer)',
+        'EXECUTE'
     ) THEN
         RAISE EXCEPTION 'core RPC execute grants are unsafe';
     END IF;

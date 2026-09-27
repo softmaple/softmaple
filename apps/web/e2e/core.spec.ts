@@ -32,7 +32,6 @@ test("owner sees real workspace counts and stable settings", async ({
   page,
 }) => {
   await login(page, seed.owner);
-  await page.goto("/dashboard?view=all");
   await expect(page.getByText(seed.workspace.title)).toBeVisible();
   await page.goto(`/workspace/${seed.workspace.slug}`);
   await expect(
@@ -49,7 +48,6 @@ test("owner sees real workspace counts and stable settings", async ({
 
 test("workspace metadata and deletion are durable", async ({ page }) => {
   await login(page, seed.owner);
-  await page.goto("/dashboard?view=all");
   await page.getByRole("button", { name: "New workspace" }).click();
   await page.getByLabel("Workspace name").fill("Disposable E2E Space");
   await page.getByLabel("Description (optional)").fill("Created by Playwright");
@@ -66,12 +64,7 @@ test("workspace metadata and deletion are durable", async ({ page }) => {
     .fill("Renamed E2E Space");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete workspace" }).click();
-  await page.waitForURL(
-    (url) =>
-      url.pathname === `/workspace/${seed.workspace.slug}` ||
-      url.pathname === `/workspace/${seed.ownerOnlyWorkspace.slug}`,
-  );
-  await page.goto("/dashboard?view=all");
+  await page.waitForURL("**/dashboard");
   await expect(page.getByText("Renamed E2E Space")).toHaveCount(0);
 });
 

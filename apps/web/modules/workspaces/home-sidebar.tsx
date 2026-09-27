@@ -74,7 +74,7 @@ export function HomeSidebar({
             ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/dashboard?view=all">All workspaces</Link>
+              <Link href="/dashboard">All workspaces</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link

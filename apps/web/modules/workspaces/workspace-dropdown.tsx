@@ -83,7 +83,7 @@ export const WorkspaceDropdown: FC<WorkspaceDropdownProps> = (props) => {
         })}
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/dashboard?view=all">
+          <Link href="/dashboard">
             <LayoutGrid className="mr-2 size-4" />
             All workspaces
           </Link>

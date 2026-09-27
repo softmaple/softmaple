@@ -102,7 +102,7 @@ export function MobileWorkspaceHome(props: HomeProps) {
               </Link>
             </Button>
             <Button asChild variant="outline" className="h-11">
-              <Link href="/dashboard">All workspaces</Link>
+              <Link href="/dashboard?view=all">All workspaces</Link>
             </Button>
             <div className="flex items-center justify-between py-2">
               Appearance
@@ -160,7 +160,7 @@ export function MobileWorkspaceHome(props: HomeProps) {
                 ))}
                 <Link
                   className="min-h-12 border-t border-border px-3 py-4 text-sm"
-                  href="/dashboard"
+                  href="/dashboard?view=all"
                 >
                   All workspaces
                 </Link>

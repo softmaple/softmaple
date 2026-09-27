@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
@@ -10,7 +10,11 @@ import { createWorkspace } from "@/app/actions/workspaces";
 import type { SubmitButtonProps } from "@/modules/workspaces/submit-button";
 import { SubmitButton } from "@/modules/workspaces/submit-button";
 
-export const CreateWorkspaceForm = ({ onOpenChange }: SubmitButtonProps) => {
+export const CreateWorkspaceForm = ({
+  onOpenChange,
+  preview = false,
+}: SubmitButtonProps & { preview?: boolean }) => {
+  const [previewMessage, setPreviewMessage] = useState(false);
   const [state, action] = useActionState(createWorkspace, null);
   const router = useRouter();
   useEffect(() => {
@@ -21,7 +25,20 @@ export const CreateWorkspaceForm = ({ onOpenChange }: SubmitButtonProps) => {
   }, [onOpenChange, router, state]);
 
   return (
-    <form action={action}>
+    <form
+      action={action}
+      onSubmit={(event) => {
+        if (preview) {
+          event.preventDefault();
+          setPreviewMessage(true);
+        }
+      }}
+    >
+      {previewMessage ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Design preview only. No workspace was created.
+        </p>
+      ) : null}
       <div className="grid gap-4 py-4">
         {state !== null && !state.ok ? (
           <p className="text-sm text-destructive" role="alert">

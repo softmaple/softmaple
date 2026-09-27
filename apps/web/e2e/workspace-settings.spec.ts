@@ -36,7 +36,9 @@ test("authenticated member can open Settings and Members from the workspace", as
       url.pathname === `/workspace/${seed.workspace.slug}/settings` &&
       url.search === "",
   );
-  await expect(page.getByLabel("Name")).toHaveValue(seed.workspace.title);
+  await expect(page.getByLabel("Workspace name", { exact: true })).toHaveValue(
+    seed.workspace.title,
+  );
 
   await page.getByRole("link", { name: "Members" }).first().click();
   await expect(page).toHaveURL(/tab=members/);

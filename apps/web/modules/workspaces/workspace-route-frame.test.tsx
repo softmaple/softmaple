@@ -7,7 +7,7 @@ const pathname = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ usePathname: pathname }));
 
 describe("Workspace homepage chrome isolation", () => {
-  it("keeps editor and settings chrome when navigating away from home", () => {
+  it("keeps editor chrome and isolates home and settings", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     const render = (path: string, child: ReactNode) => {
@@ -31,7 +31,6 @@ describe("Workspace homepage chrome isolation", () => {
     for (const path of [
       "/workspace/studio/doc/new",
       "/workspace/studio/doc/notes",
-      "/workspace/studio/settings",
     ]) {
       render(path, <main>Existing page</main>);
       expect(
@@ -39,7 +38,7 @@ describe("Workspace homepage chrome isolation", () => {
       ).not.toBeNull();
       expect(container.querySelectorAll("main")).toHaveLength(1);
     }
-    render("/workspace/studio", <main>Home again</main>);
+    render("/workspace/studio/settings", <main>Settings</main>);
     expect(
       container.querySelector('[data-testid="existing-layout"]'),
     ).toBeNull();

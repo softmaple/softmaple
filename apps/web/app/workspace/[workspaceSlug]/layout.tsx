@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { cachedGetWorkspaces } from "@/app/actions/workspaces";
-import { listWorkspaceDocuments } from "@/app/actions/documents/documents";
-import { getWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
+import { cachedListWorkspaceDocuments } from "@/app/actions/documents/documents";
+import { cachedGetWorkspaceMemberByUserId } from "@/app/actions/workspaceMembers";
 import { requireWorkspaceRouteData } from "@/lib/actions/workspace-route";
 import { WORKSPACE_ROLE } from "@/lib/workspace-roles";
 import { WorkspaceDesktopSidebar } from "@/modules/workspaces/workspace-desktop-sidebar";
 import { WorkspaceDropdown } from "@/modules/workspaces/workspace-dropdown";
 import { WorkspaceMobileNav } from "@/modules/workspaces/workspace-mobile-nav";
+
+import { WorkspaceRouteFrame } from "@/modules/workspaces/workspace-route-frame";
 
 type Props = {
   params: Promise<{ workspaceSlug: string }>;
@@ -35,8 +37,8 @@ export default async function WorkspaceLayoutPage(props: Props) {
     currentWorkspace === undefined
       ? [null, null]
       : await Promise.all([
-          listWorkspaceDocuments(currentWorkspace.id, 100),
-          getWorkspaceMemberByUserId(currentWorkspace.id),
+          cachedListWorkspaceDocuments(currentWorkspace.id, 100),
+          cachedGetWorkspaceMemberByUserId(currentWorkspace.id),
         ]);
   const documents =
     documentsResource === null
@@ -57,38 +59,45 @@ export default async function WorkspaceLayoutPage(props: Props) {
     membership?.role === WORKSPACE_ROLE.Editor;
 
   return (
-    <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background md:flex-row">
-      <WorkspaceDesktopSidebar
-        canEdit={canEdit}
-        documents={documents}
-        workspaceSlug={workspaceSlug}
-      >
-        <WorkspaceDropdown
-          workspaceSlug={workspaceSlug}
-          workspaces={workspaces}
-        />
-      </WorkspaceDesktopSidebar>
+    <WorkspaceRouteFrame
+      workspaceSlug={workspaceSlug}
+      legacy={
+        <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background md:flex-row">
+          <WorkspaceDesktopSidebar
+            canEdit={canEdit}
+            documents={documents}
+            workspaceSlug={workspaceSlug}
+          >
+            <WorkspaceDropdown
+              workspaceSlug={workspaceSlug}
+              workspaces={workspaces}
+            />
+          </WorkspaceDesktopSidebar>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <Suspense>{children}</Suspense>
-      </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <Suspense>{children}</Suspense>
+          </div>
 
-      {/*
+          {/*
         Last in the column so the mobile bar lands at the bottom of the shell
         and the content keeps the reading order; `md:hidden` retires it once
         the desktop sidebar takes over.
       */}
-      <WorkspaceMobileNav
-        canEdit={canEdit}
-        documents={documents}
-        workspaceSlug={workspaceSlug}
-      >
-        <WorkspaceDropdown
-          compact
-          workspaceSlug={workspaceSlug}
-          workspaces={workspaces}
-        />
-      </WorkspaceMobileNav>
-    </div>
+          <WorkspaceMobileNav
+            canEdit={canEdit}
+            documents={documents}
+            workspaceSlug={workspaceSlug}
+          >
+            <WorkspaceDropdown
+              compact
+              workspaceSlug={workspaceSlug}
+              workspaces={workspaces}
+            />
+          </WorkspaceMobileNav>
+        </div>
+      }
+    >
+      {children}
+    </WorkspaceRouteFrame>
   );
 }

@@ -1,0 +1,51 @@
+/* Theme values only. Presentation uses Tailwind; interaction uses Motion.dev. */
+.workspace-home {
+  --background: #fff;
+  --foreground: #101017;
+  --muted: #f1f2f5;
+  --muted-foreground: #4c5b87;
+  --border: #e7e6e7;
+  --secondary: #fff0ba;
+  --accent: #f6f3e9;
+  --primary: #ffdb24;
+  --primary-foreground: #10100d;
+  --popover: var(--background);
+  --popover-foreground: var(--foreground);
+  --ring: #a67b09;
+  --ws-primary-end: #ffe137;
+  --ws-primary-shadow: 0 2px 8px #be960022;
+  --ws-brush-ink: #090b07;
+  --ws-sidebar: #fcfbf9;
+  --ws-paper: #fbfaf7;
+  --ws-purple: #b675f3;
+  --ws-blue: #2c6fff;
+  --ws-green: #34b780;
+  --ws-avatar-purple: #d7abf6;
+  --ws-avatar-green: #a1dfd0;
+  --ws-avatar-sand: #e7d6be;
+  --ws-shadow: 0 7px 18px #16141309;
+}
+.dark .workspace-home {
+  --background: #1b1b19;
+  --foreground: #f7f4ee;
+  --muted: #292925;
+  --muted-foreground: #bdbbb5;
+  --border: #363630;
+  --secondary: #3f371a;
+  --accent: #302f28;
+  --primary: #ffda1f;
+  --ws-sidebar: #141412;
+  --ws-paper: #252520;
+  --ws-avatar-purple: #6a427a;
+  --ws-avatar-green: #2b6b5a;
+  --ws-avatar-sand: #705e47;
+  --ws-shadow: none;
+  --ring: #e6c55a;
+}
+
+@font-face {
+  font-family: "Workspace Hand";
+  src: url("/landing/caveat-latin.woff2") format("woff2");
+  font-weight: 400 500;
+  font-display: swap;
+}

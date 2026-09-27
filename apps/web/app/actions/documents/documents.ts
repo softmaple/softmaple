@@ -108,6 +108,8 @@ export const listWorkspaceDocuments = async (
   return actionSuccess(data);
 };
 
+export const cachedListWorkspaceDocuments = cache(listWorkspaceDocuments);
+
 export const countWorkspaceDocuments = async (
   workspaceId: number,
 ): Promise<ActionResult<number>> => {

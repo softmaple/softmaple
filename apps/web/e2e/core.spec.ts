@@ -34,7 +34,11 @@ test("owner sees real workspace counts and stable settings", async ({
   await login(page, seed.owner);
   await expect(page.getByText(seed.workspace.title)).toBeVisible();
   await page.goto(`/workspace/${seed.workspace.slug}`);
-  await expect(page.getByText("Shared notes")).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Documents", exact: true })
+      .getByText("Shared notes"),
+  ).toBeVisible();
   await page.goto(`/workspace/${seed.workspace.slug}/settings`);
   await expect(page.getByLabel("Name")).toHaveValue(seed.workspace.title);
   await page.getByRole("tab", { name: /Members/ }).click();
@@ -49,10 +53,8 @@ test("workspace metadata and deletion are durable", async ({ page }) => {
   await page.getByLabel("Description (optional)").fill("Created by Playwright");
   await page.getByRole("button", { name: "Create Workspace" }).click();
   await page.waitForURL(/\/workspace\/[^/?]+$/);
-  await page
-    .getByRole("link", { name: /Settings/ })
-    .first()
-    .click();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Workspace settings" }).click();
   await page.getByLabel("Name").fill("Renamed E2E Space");
   await page.getByRole("button", { name: "Save workspace" }).click();
   await expect(page.getByRole("status")).toContainText("Changes saved");

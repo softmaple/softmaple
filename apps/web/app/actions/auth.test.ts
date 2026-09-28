@@ -201,9 +201,18 @@ describe("forgot password", () => {
     });
   });
 
-  it("asks for a moment when links were sent too recently", async () => {
+  it("answers an address's throttle like a send, so it cannot confirm an account", async () => {
     resetPasswordForEmail.mockResolvedValue({
       error: { code: "over_email_send_rate_limit", message: "slow down" },
+    });
+    expect(
+      await resetPassword(null, form({ email: "ada@example.invalid" })),
+    ).toEqual({ ok: true, data: { email: "ada@example.invalid" } });
+  });
+
+  it("asks for a moment when this client sent too many requests", async () => {
+    resetPasswordForEmail.mockResolvedValue({
+      error: { code: "over_request_rate_limit", message: "slow down" },
     });
     expect(
       await resetPassword(null, form({ email: "ada@example.invalid" })),

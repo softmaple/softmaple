@@ -1,8 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { resetPassword, type AuthActionData } from "@/app/actions/auth";
-import type { ActionResult } from "@/lib/actions/result";
+import { resetPassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
@@ -57,24 +56,24 @@ const ResetPasswordFlow = ({
   initialError,
   onChangeEmail,
 }: ResetPasswordFlowProps) => {
-  // Kept apart from the action state so a failed resend keeps the confirmation.
+  // The Server Function is the action itself, so the form submits even
+  // before hydration.
+  const [state, action] = useActionState(resetPassword, null);
+  // Kept apart from the action state so a failed resend keeps the
+  // confirmation; updated while rendering when a new result arrives.
   const [sent, setSent] = useState<Sent | null>(null);
-  const [state, action] = useActionState(
-    async (
-      previousState: ActionResult<AuthActionData> | null,
-      formData: FormData,
-    ) => {
-      const result = await resetPassword(previousState, formData);
-      if (result.ok) {
-        setSent((current) => ({
-          email: result.data.email ?? "",
-          count: (current?.count ?? 0) + 1,
-        }));
-      }
-      return result;
-    },
-    null,
-  );
+  const [handled, setHandled] = useState(state);
+  if (state !== handled) {
+    setHandled(state);
+    if (state?.ok) {
+      setSent({
+        email: state.data.email ?? "",
+        count: (sent?.count ?? 0) + 1,
+      });
+    }
+  }
+  // The result whose email error the person has since started fixing.
+  const [editedAfter, setEditedAfter] = useState<typeof state>(null);
   const failure = state !== null && !state.ok ? state : undefined;
 
   if (sent !== null) {
@@ -113,7 +112,8 @@ const ResetPasswordFlow = ({
     );
   }
 
-  const emailError = failure?.fieldErrors?.email?.[0];
+  const emailError =
+    editedAfter === state ? undefined : failure?.fieldErrors?.email?.[0];
   const notice =
     failure === undefined
       ? initialError === undefined
@@ -141,6 +141,7 @@ const ResetPasswordFlow = ({
           defaultValue={defaultEmail}
           id="email"
           name="email"
+          onChange={() => setEditedAfter(state)}
           type="email"
           required
         />

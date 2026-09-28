@@ -6,6 +6,10 @@ import { ResetPasswordForm } from "./reset-password-form";
 const { resetPassword } = vi.hoisted(() => ({ resetPassword: vi.fn() }));
 vi.mock("@/app/actions/auth", () => ({ resetPassword }));
 
+// A Server Function returns a new result object on every call.
+const replies = (result: object) =>
+  resetPassword.mockImplementation(async () => structuredClone(result));
+
 const RATE_LIMITED =
   "A reset link was sent recently. Check your inbox, or try again in a minute.";
 
@@ -46,7 +50,7 @@ afterEach(() => {
 describe("forgot password form", () => {
   it("stays on the page and confirms where the link went", async () => {
     act(() => root.render(<ResetPasswordForm />));
-    resetPassword.mockResolvedValue({
+    replies({
       ok: true,
       data: { email: "ada@example.invalid" },
     });
@@ -62,7 +66,7 @@ describe("forgot password form", () => {
 
   it("resends to the same address, keeping the confirmation on failure", async () => {
     act(() => root.render(<ResetPasswordForm />));
-    resetPassword.mockResolvedValue({
+    replies({
       ok: true,
       data: { email: "ada@example.invalid" },
     });
@@ -75,7 +79,7 @@ describe("forgot password form", () => {
       "If an account uses ada@example.invalid, another password reset link is on its way.",
     );
 
-    resetPassword.mockResolvedValue({
+    replies({
       ok: false,
       code: "CONFLICT",
       message: RATE_LIMITED,
@@ -92,7 +96,7 @@ describe("forgot password form", () => {
       ),
     );
     expect(alert()).not.toBeNull();
-    resetPassword.mockResolvedValue({
+    replies({
       ok: true,
       data: { email: "ada@example.invalid" },
     });
@@ -108,7 +112,7 @@ describe("forgot password form", () => {
 
   it("keeps the form when the email is invalid", async () => {
     act(() => root.render(<ResetPasswordForm />));
-    resetPassword.mockResolvedValue({
+    replies({
       ok: false,
       code: "VALIDATION",
       message: "Check the highlighted fields.",
@@ -122,5 +126,15 @@ describe("forgot password form", () => {
       "Enter a valid email address.",
     );
     expect(status()).toBeNull();
+
+    // Editing the field clears the stale error until the next submit.
+    await act(async () => {
+      emailInput()!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(emailInput()?.hasAttribute("aria-invalid")).toBe(false);
+    expect(container.querySelector("#email-error")).toBeNull();
+
+    await submitWith("ada@example");
+    expect(emailInput()?.getAttribute("aria-invalid")).toBe("true");
   });
 });

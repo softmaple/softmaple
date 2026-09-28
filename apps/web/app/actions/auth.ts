@@ -171,7 +171,11 @@ export const resetPassword = async (
     parsed.data.email,
     { redirectTo: recoveryRedirectTo() },
   );
-  if (error !== null) return resetLinkFailure(error.code);
+  // Supabase throttles an address only once it has an account, so answer
+  // that throttle like a send: a distinct reply would confirm the account.
+  if (error !== null && error.code !== "over_email_send_rate_limit") {
+    return resetLinkFailure(error.code);
+  }
   // Stay on the page: the next step is the inbox, and a resend is one click.
   return actionSuccess({ email: parsed.data.email });
 };

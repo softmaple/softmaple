@@ -2,13 +2,7 @@
 
 import { type ChangeEvent, type FC, useState, useTransition } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  KeyRound,
-  LoaderCircle,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import { ArrowLeft, LoaderCircle, Trash2, Upload } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -31,6 +25,7 @@ import {
   paperPanel,
   paperSerif,
 } from "@/modules/workspaces/workspace-paper-styles";
+import { PasswordReset } from "./password-reset";
 import { ThemeChoice } from "./theme-choice";
 
 type ProfileRow = UsersType["Row"];
@@ -313,19 +308,10 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
               <div>
                 <p className="text-sm font-semibold">Password</p>
                 <p className="mt-1 hidden text-xs text-muted-foreground md:block">
-                  Get a secure reset link at your account email.
+                  We’ll email a reset link to {profile.email}.
                 </p>
               </div>
-              <Button
-                asChild
-                className="h-10 w-fit self-start md:h-9"
-                variant="outline"
-              >
-                <Link href="/reset-password">
-                  <KeyRound data-icon="inline-start" />
-                  Reset password
-                </Link>
-              </Button>
+              <PasswordReset />
             </div>
           </div>
         </section>

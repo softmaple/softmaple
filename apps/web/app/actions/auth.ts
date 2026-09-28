@@ -62,6 +62,15 @@ const appOrigin = (): string => {
 const authFailure = (message: string): ActionResult<never> =>
   actionFailure(ACTION_ERROR_CODE.AuthenticationRequired, message);
 
+/** Where recovery emails land: the callback swaps the code for a session. */
+const recoveryRedirectTo = (): string =>
+  `${appOrigin()}/auth/callback?type=recovery&next=/reset-password/update`;
+
+const EMAIL_RATE_LIMIT_CODES: ReadonlySet<string> = new Set([
+  "over_email_send_rate_limit",
+  "over_request_rate_limit",
+]);
+
 export const login = async (
   _previousState: ActionResult<AuthActionData> | null,
   formData: FormData,
@@ -147,9 +156,7 @@ export const resetPassword = async (
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(
     parsed.data.email,
-    {
-      redirectTo: `${appOrigin()}/auth/callback?type=recovery&next=/reset-password/update`,
-    },
+    { redirectTo: recoveryRedirectTo() },
   );
   if (error !== null) {
     return actionFailure(
@@ -161,6 +168,36 @@ export const resetPassword = async (
     message:
       "If an account uses that email, a password reset link is on its way.",
   });
+};
+
+/**
+ * Emails a reset link to the signed-in account. The address comes from the
+ * session, never from the client, so this can only reach the caller's inbox.
+ */
+export const sendPasswordResetLink = async (): Promise<
+  ActionResult<AuthActionData>
+> => {
+  const supabase = await createClient();
+  const { data, error: userError } = await supabase.auth.getUser();
+  const email = data.user?.email;
+  if (userError !== null || !email) {
+    return authFailure("Log in to continue.");
+  }
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: recoveryRedirectTo(),
+  });
+  if (error !== null) {
+    return EMAIL_RATE_LIMIT_CODES.has(error.code ?? "")
+      ? actionFailure(
+          ACTION_ERROR_CODE.Conflict,
+          "A reset link was sent recently. Check your inbox, or try again in a minute.",
+        )
+      : actionFailure(
+          ACTION_ERROR_CODE.Internal,
+          "Could not send the reset link. Try again.",
+        );
+  }
+  return actionSuccess({ message: `We sent a reset link to ${email}.` });
 };
 
 export const updatePassword = async (
@@ -191,7 +228,7 @@ export const updatePassword = async (
   revalidatePath("/", "layout");
   return actionSuccess({
     redirectTo:
-      "/login?message=Password%20updated.%20Sign%20in%20with%20your%20new%20password.",
+      "/login?message=Password%20updated.%20Log%20in%20with%20your%20new%20password.",
   });
 };
 

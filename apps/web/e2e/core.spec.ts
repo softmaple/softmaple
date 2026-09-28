@@ -206,7 +206,8 @@ test("account profile supports theme, avatar entry, and password reset", async (
   await expect(page.getByRole("status")).toContainText("Avatar updated");
   await page.getByRole("button", { name: "Remove" }).click();
   await expect(page.getByRole("status")).toContainText("Avatar removed");
+  // Sending would email the seeded account; the unit tests cover the flow.
   await expect(
-    page.getByRole("link", { name: /Reset password/i }),
-  ).toHaveAttribute("href", "/reset-password");
+    page.getByRole("button", { name: "Send reset link" }),
+  ).toBeEnabled();
 });

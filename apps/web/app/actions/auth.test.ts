@@ -20,7 +20,7 @@ vi.mock("@/utils/supabase/server", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
-import { login, sendPasswordResetLink, signup } from "./auth";
+import { login, resetPassword, sendPasswordResetLink, signup } from "./auth";
 
 const form = (values: Record<string, string>) => {
   const data = new FormData();
@@ -151,6 +151,38 @@ describe("existing email login", () => {
     ).toMatchObject({
       ok: false,
       message: "The email or password is incorrect.",
+    });
+  });
+});
+
+describe("forgot password", () => {
+  it("sends the recovery link and returns to log in", async () => {
+    resetPasswordForEmail.mockResolvedValue({ error: null });
+    const message =
+      "If an account uses that email, a password reset link is on its way.";
+    expect(
+      await resetPassword(null, form({ email: "Ada@Example.invalid" })),
+    ).toEqual({
+      ok: true,
+      data: {
+        message,
+        redirectTo: `/login?message=${encodeURIComponent(message)}`,
+      },
+    });
+    expect(resetPasswordForEmail).toHaveBeenCalledWith("ada@example.invalid", {
+      redirectTo: expect.stringMatching(
+        /\/auth\/callback\?type=recovery&next=\/reset-password\/update$/,
+      ),
+    });
+  });
+
+  it("stays on the form when the link cannot be sent", async () => {
+    resetPasswordForEmail.mockResolvedValue({ error: { message: "down" } });
+    expect(
+      await resetPassword(null, form({ email: "ada@example.invalid" })),
+    ).toMatchObject({
+      ok: false,
+      message: "Could not send the reset link. Try again.",
     });
   });
 });

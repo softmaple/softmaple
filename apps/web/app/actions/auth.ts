@@ -164,9 +164,11 @@ export const resetPassword = async (
       "Could not send the reset link. Try again.",
     );
   }
+  const message =
+    "If an account uses that email, a password reset link is on its way.";
   return actionSuccess({
-    message:
-      "If an account uses that email, a password reset link is on its way.",
+    message,
+    redirectTo: `/login?message=${encodeURIComponent(message)}`,
   });
 };
 

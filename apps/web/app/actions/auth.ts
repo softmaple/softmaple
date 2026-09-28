@@ -15,6 +15,7 @@ import {
 } from "@/lib/actions/result";
 
 export type AuthActionData = {
+  readonly email?: string;
   readonly message?: string;
   readonly redirectTo?: string;
 };
@@ -71,6 +72,17 @@ const EMAIL_RATE_LIMIT_CODES: ReadonlySet<string> = new Set([
   "over_email_send_rate_limit",
   "over_request_rate_limit",
 ]);
+
+const resetLinkFailure = (code: string | undefined): ActionResult<never> =>
+  EMAIL_RATE_LIMIT_CODES.has(code ?? "")
+    ? actionFailure(
+        ACTION_ERROR_CODE.Conflict,
+        "A reset link was sent recently. Check your inbox, or try again in a minute.",
+      )
+    : actionFailure(
+        ACTION_ERROR_CODE.Internal,
+        "Could not send the reset link. Try again.",
+      );
 
 export const login = async (
   _previousState: ActionResult<AuthActionData> | null,
@@ -159,18 +171,9 @@ export const resetPassword = async (
     parsed.data.email,
     { redirectTo: recoveryRedirectTo() },
   );
-  if (error !== null) {
-    return actionFailure(
-      ACTION_ERROR_CODE.Internal,
-      "Could not send the reset link. Try again.",
-    );
-  }
-  const message =
-    "If an account uses that email, a password reset link is on its way.";
-  return actionSuccess({
-    message,
-    redirectTo: `/login?message=${encodeURIComponent(message)}`,
-  });
+  if (error !== null) return resetLinkFailure(error.code);
+  // Stay on the page: the next step is the inbox, and a resend is one click.
+  return actionSuccess({ email: parsed.data.email });
 };
 
 /**
@@ -189,17 +192,7 @@ export const sendPasswordResetLink = async (): Promise<
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: recoveryRedirectTo(),
   });
-  if (error !== null) {
-    return EMAIL_RATE_LIMIT_CODES.has(error.code ?? "")
-      ? actionFailure(
-          ACTION_ERROR_CODE.Conflict,
-          "A reset link was sent recently. Check your inbox, or try again in a minute.",
-        )
-      : actionFailure(
-          ACTION_ERROR_CODE.Internal,
-          "Could not send the reset link. Try again.",
-        );
-  }
+  if (error !== null) return resetLinkFailure(error.code);
   return actionSuccess({ message: `We sent a reset link to ${email}.` });
 };
 

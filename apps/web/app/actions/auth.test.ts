@@ -179,19 +179,11 @@ describe("existing email login", () => {
 });
 
 describe("forgot password", () => {
-  it("sends the recovery link and returns to log in", async () => {
+  it("sends the recovery link and stays on the page", async () => {
     resetPasswordForEmail.mockResolvedValue({ error: null });
-    const message =
-      "If an account uses that email, a password reset link is on its way.";
     expect(
       await resetPassword(null, form({ email: "Ada@Example.invalid" })),
-    ).toEqual({
-      ok: true,
-      data: {
-        message,
-        redirectTo: `/login?message=${encodeURIComponent(message)}`,
-      },
-    });
+    ).toEqual({ ok: true, data: { email: "ada@example.invalid" } });
     expect(resetPasswordForEmail).toHaveBeenCalledWith("ada@example.invalid", {
       redirectTo: expect.stringMatching(
         /\/auth\/callback\?type=recovery&next=\/reset-password\/update$/,
@@ -206,6 +198,20 @@ describe("forgot password", () => {
     ).toMatchObject({
       ok: false,
       message: "Could not send the reset link. Try again.",
+    });
+  });
+
+  it("asks for a moment when links were sent too recently", async () => {
+    resetPasswordForEmail.mockResolvedValue({
+      error: { code: "over_email_send_rate_limit", message: "slow down" },
+    });
+    expect(
+      await resetPassword(null, form({ email: "ada@example.invalid" })),
+    ).toMatchObject({
+      ok: false,
+      code: "CONFLICT",
+      message:
+        "A reset link was sent recently. Check your inbox, or try again in a minute.",
     });
   });
 });

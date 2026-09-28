@@ -17,7 +17,7 @@ import {
   SheetDescription,
 } from "@softmaple/ui/components/sheet";
 import { useMobileWorkspace } from "./use-mobile-workspace";
-import { paperSurface } from "./workspace-paper";
+import { paperSerif, paperSurface } from "./workspace-paper";
 import { CreateWorkspaceForm } from "@/modules/workspaces/create-workspace-form";
 
 type CreateWorkspaceDialogProps = {
@@ -25,6 +25,8 @@ type CreateWorkspaceDialogProps = {
   preview?: boolean;
   onOpenChange: Dispatch<SetStateAction<boolean>>;
 };
+
+const titleClass = `${paperSerif} text-2xl font-normal tracking-tight`;
 
 export const CreateWorkspaceDialog: FC<CreateWorkspaceDialogProps> = (
   props,
@@ -39,9 +41,9 @@ export const CreateWorkspaceDialog: FC<CreateWorkspaceDialogProps> = (
           showCloseButton
           className={`${paperSurface} px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]`}
         >
-          <SheetTitle>Create New Workspace</SheetTitle>
+          <SheetTitle className={titleClass}>Create workspace</SheetTitle>
           <SheetDescription>
-            A space for your notes and your team.
+            A space for your documents and the people you write with.
           </SheetDescription>
           <CreateWorkspaceForm onOpenChange={onOpenChange} preview={preview} />
         </SheetContent>
@@ -50,12 +52,11 @@ export const CreateWorkspaceDialog: FC<CreateWorkspaceDialogProps> = (
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`${paperSurface} sm:max-w-[425px]`}>
+      <DialogContent className={`${paperSurface} sm:max-w-[440px]`}>
         <DialogHeader>
-          <DialogTitle>Create New Workspace</DialogTitle>
+          <DialogTitle className={titleClass}>Create workspace</DialogTitle>
           <DialogDescription>
-            Create a new workspace to organize your documents and collaborate
-            with your team.
+            A space for your documents and the people you write with.
           </DialogDescription>
         </DialogHeader>
 

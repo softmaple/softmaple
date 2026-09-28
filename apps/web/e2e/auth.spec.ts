@@ -156,7 +156,7 @@ test("registration keyboard submission preserves input and prevents duplicate re
   });
   await page.getByLabel("Password", { exact: true }).press("Enter");
   await expect(
-    page.getByRole("button", { name: "Creating account...", exact: true }),
+    page.getByRole("button", { name: "Creating account…", exact: true }),
   ).toBeDisabled();
   await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute(
     "readonly",

@@ -6,6 +6,7 @@ import { updatePassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
+import { AuthNotice } from "./auth-notice";
 import { authInputClass, authSubmitClass } from "./auth-styles";
 
 export const UpdatePasswordForm = () => {
@@ -27,12 +28,7 @@ export const UpdatePasswordForm = () => {
   return (
     <form action={action} className="space-y-5 min-[56.25rem]:max-xl:space-y-4">
       {state !== null && !state.ok ? (
-        <p
-          className="border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {state.message}
-        </p>
+        <AuthNotice tone="error">{state.message}</AuthNotice>
       ) : null}
       <div className="space-y-2">
         <Label htmlFor="password">New password</Label>
@@ -76,7 +72,11 @@ export const UpdatePasswordForm = () => {
           </p>
         )}
       </div>
-      <SubmitButton text="Update password" className={authSubmitClass} />
+      <SubmitButton
+        text="Update password"
+        loadingText="Updating password…"
+        className={authSubmitClass}
+      />
     </form>
   );
 };

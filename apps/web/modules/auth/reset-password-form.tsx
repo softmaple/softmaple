@@ -5,6 +5,7 @@ import { resetPassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
 import { SubmitButton } from "@/modules/auth/submit-button";
+import { AuthNotice } from "./auth-notice";
 import { authInputClass, authSubmitClass } from "./auth-styles";
 
 export const ResetPasswordForm = () => {
@@ -15,16 +16,9 @@ export const ResetPasswordForm = () => {
   return (
     <form action={action} className="space-y-5 min-[56.25rem]:max-xl:space-y-4">
       {state === null ? null : (
-        <p
-          className={
-            state.ok
-              ? "border-l-2 border-primary bg-muted px-3 py-2 text-sm text-foreground"
-              : "border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          }
-          role={state.ok ? "status" : "alert"}
-        >
+        <AuthNotice tone={state.ok ? "info" : "error"}>
           {state.ok ? state.data.message : state.message}
-        </p>
+        </AuthNotice>
       )}
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
@@ -47,7 +41,11 @@ export const ResetPasswordForm = () => {
           </p>
         )}
       </div>
-      <SubmitButton text="Send reset link" className={authSubmitClass} />
+      <SubmitButton
+        text="Send reset link"
+        loadingText="Sending link…"
+        className={authSubmitClass}
+      />
     </form>
   );
 };

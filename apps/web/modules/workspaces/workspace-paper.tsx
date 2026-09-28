@@ -6,7 +6,7 @@ import type { ActionResult } from "@/lib/actions/result";
 import type { AuthActionData } from "@/app/actions/auth";
 import Link from "next/link";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
-import { ChevronDown, UserRound } from "lucide-react";
+import { CircleAlert, CircleCheck, ChevronDown, UserRound } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -29,6 +29,43 @@ export type WorkspaceProfile = {
   full_name: string | null;
   avatar_src: string | null;
 };
+export type PaperFeedbackMessage = {
+  readonly error: boolean;
+  readonly text: string;
+};
+
+/** Inline result of a settings action: errors interrupt, success stays polite. */
+export function PaperFeedback({
+  feedback,
+  className,
+}: {
+  readonly feedback: PaperFeedbackMessage | null;
+  readonly className?: string;
+}) {
+  if (feedback === null) return null;
+  const Icon = feedback.error ? CircleAlert : CircleCheck;
+  return (
+    <p
+      role={feedback.error ? "alert" : "status"}
+      className={cn(
+        "flex items-start gap-2.5 rounded-md border p-3 text-sm",
+        feedback.error
+          ? "border-destructive/50 bg-destructive/5 text-destructive"
+          : "border-border bg-card/70",
+        className,
+      )}
+    >
+      <Icon
+        aria-hidden="true"
+        className={cn(
+          "mt-0.5 size-4 shrink-0",
+          !feedback.error && "text-(--workspace-link)",
+        )}
+      />
+      {feedback.text}
+    </p>
+  );
+}
 
 export function WorkspaceBrand() {
   return (

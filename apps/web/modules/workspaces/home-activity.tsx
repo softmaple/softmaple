@@ -1,6 +1,7 @@
 import { HomeAction, HomeActionLink } from "./home-motion";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
+import { WORKSPACE_ROLE_LABEL } from "@/lib/workspace-roles";
 import {
   homeFold,
   homeHand,
@@ -181,7 +182,7 @@ export function HomePeople({
                   ? index === 2
                     ? "Online"
                     : "Writing in A brighter tomorrow"
-                  : member.role.toLowerCase()}
+                  : WORKSPACE_ROLE_LABEL[member.role]}
               </span>
             </span>
           </li>
@@ -200,10 +201,14 @@ export function HomeUpdates() {
   return (
     <section aria-label="Updates — static design preview" className="pt-7">
       <h2
-        className={`${homeSerif} mb-4 text-[23px] tracking-[-.04em]`}
+        className={`${homeSerif} mb-4 flex items-center gap-2 text-[23px] tracking-[-.04em]`}
         title="Static design preview. Notifications are not connected."
       >
-        Updates<span className="sr-only"> — static design preview</span>
+        Updates
+        {/* Sample activity must never read as real workspace activity. */}
+        <span className="rounded-full border border-border px-2 py-px text-[10px] leading-4 tracking-normal text-muted-foreground [font-family:Arial,Helvetica,sans-serif]">
+          Preview
+        </span>
       </h2>
       <div className="space-y-4">
         {UPDATE_EXAMPLES.map((update, index) => (

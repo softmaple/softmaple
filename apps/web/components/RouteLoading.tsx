@@ -62,7 +62,7 @@ export function RouteLoading() {
             className="mt-5 font-mono text-xs text-(--muted-ink)"
           >
             <span className="sr-only">Loading</span>
-            <span aria-hidden="true">Loading...</span>
+            <span aria-hidden="true">Loading…</span>
           </p>
         </div>
       </div>

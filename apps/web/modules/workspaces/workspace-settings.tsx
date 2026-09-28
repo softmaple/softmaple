@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Info,
   Mail,
   Settings,
   ShieldCheck,
@@ -30,8 +31,11 @@ import {
 } from "@softmaple/ui/components/sheet";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@softmaple/ui/components/dialog";
 import { cn } from "@softmaple/ui/lib/utils";
@@ -46,6 +50,8 @@ import { WorkspaceMembers } from "./workspace-members";
 import {
   BrushUnderline,
   PaperEntrance,
+  PaperFeedback,
+  type PaperFeedbackMessage,
   paperSerif,
   paperSurface,
   WorkspaceAccount,
@@ -53,6 +59,7 @@ import {
   WorkspaceIcon,
   type WorkspaceProfile,
 } from "./workspace-paper";
+import { paperFieldRow, paperPanel } from "./workspace-paper-styles";
 import { MapleMark } from "@/components/landing/Brand";
 import { ModeToggle } from "@/components/mode-toggle";
 
@@ -68,8 +75,6 @@ const categories = [
     unavailable: true,
   },
 ] as const;
-const fieldRow =
-  "grid gap-2 border-border py-1.5 md:py-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] md:gap-8 md:border-b md:last:border-0";
 
 export function WorkspaceSettings({
   initialTab,
@@ -98,10 +103,7 @@ export function WorkspaceSettings({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
-  const [feedback, setFeedback] = useState<{
-    error: boolean;
-    text: string;
-  } | null>(null);
+  const [feedback, setFeedback] = useState<PaperFeedbackMessage | null>(null);
   const [isPending, startTransition] = useTransition();
   const submitting = useRef(false);
   const dirty = title !== saved.title || description !== saved.description;
@@ -418,19 +420,7 @@ export function WorkspaceSettings({
                     : "The people who make this space yours."}
                 </p>
               </div>
-              {feedback ? (
-                <p
-                  className={cn(
-                    "mb-4 rounded-md border p-3 text-sm",
-                    feedback.error
-                      ? "border-destructive text-destructive"
-                      : "border-border",
-                  )}
-                  role={feedback.error ? "alert" : "status"}
-                >
-                  {feedback.text}
-                </p>
-              ) : null}
+              <PaperFeedback className="mb-4" feedback={feedback} />
               {initialTab === "members" ? (
                 <WorkspaceMembers
                   workspace={{ ...workspace, title: saved.title }}
@@ -439,6 +429,16 @@ export function WorkspaceSettings({
                 />
               ) : (
                 <>
+                  {!isOwner ? (
+                    <p className="mb-4 flex items-start gap-2.5 rounded-md border border-border bg-card/70 p-3 text-sm text-muted-foreground">
+                      <Info
+                        aria-hidden="true"
+                        className="mt-0.5 size-4 shrink-0"
+                      />
+                      Only workspace owners can edit these details or delete
+                      this workspace.
+                    </p>
+                  ) : null}
                   <form
                     id="workspace-settings-form"
                     onSubmit={(event) => {
@@ -446,8 +446,8 @@ export function WorkspaceSettings({
                       save();
                     }}
                   >
-                    <div className="md:rounded-md md:border md:border-border md:px-5 md:py-1">
-                      <div className={fieldRow}>
+                    <div className={paperPanel}>
+                      <div className={paperFieldRow}>
                         <div>
                           <p className="text-sm font-semibold">
                             Workspace icon
@@ -473,7 +473,7 @@ export function WorkspaceSettings({
                           </div>
                         </div>
                       </div>
-                      <div className={fieldRow}>
+                      <div className={paperFieldRow}>
                         <Label
                           className="self-start pt-1 text-sm font-semibold"
                           htmlFor="workspace-name"
@@ -504,7 +504,7 @@ export function WorkspaceSettings({
                           ) : null}
                         </div>
                       </div>
-                      <div className={fieldRow}>
+                      <div className={paperFieldRow}>
                         <Label
                           className="self-start pt-1 text-sm font-semibold"
                           htmlFor="workspace-description"
@@ -523,7 +523,7 @@ export function WorkspaceSettings({
                           }
                         />
                       </div>
-                      <div className={fieldRow}>
+                      <div className={paperFieldRow}>
                         <div>
                           <Label
                             className="text-sm font-semibold"
@@ -535,13 +535,14 @@ export function WorkspaceSettings({
                             This link stays the same when renamed.
                           </p>
                         </div>
-                        <div className="flex min-w-0 items-stretch overflow-hidden rounded-md border border-input text-xs">
+                        {/* Pinned to the row top so it lines up with the other fields. */}
+                        <div className="flex h-10 min-w-0 items-stretch self-start overflow-hidden rounded-md border border-input text-base shadow-xs has-[:focus-visible]:border-ring has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 md:h-8 md:text-sm dark:bg-input/30">
                           <span className="flex shrink-0 items-center border-r border-input bg-muted/70 px-3 text-muted-foreground">
                             /workspace/
                           </span>
                           <input
                             id="workspace-url"
-                            className="h-10 min-w-0 flex-1 bg-transparent px-3 md:h-8"
+                            className="min-w-0 flex-1 bg-transparent px-3 text-muted-foreground"
                             value={workspace.slug}
                             readOnly
                             title={`${workspaceHref} (read-only)`}
@@ -568,12 +569,6 @@ export function WorkspaceSettings({
                       </Button>
                     </div>
                   </form>
-                  {!isOwner ? (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Only workspace owners can edit these details or delete
-                      this workspace.
-                    </p>
-                  ) : null}
                   <section
                     aria-label="Danger zone"
                     className="mt-3 border-t border-border pt-4 md:rounded-md md:border md:border-destructive/40 md:px-5 md:py-3"
@@ -609,9 +604,6 @@ export function WorkspaceSettings({
                       </Button>
                     </div>
                   </section>
-                  <p className="mt-2 hidden text-right text-[11px] text-muted-foreground md:block">
-                    Only workspace owners can delete this workspace.
-                  </p>
                 </>
               )}
             </PaperEntrance>
@@ -625,57 +617,73 @@ export function WorkspaceSettings({
         }}
       >
         <DialogContent className={paperSurface}>
-          <DialogTitle>Delete workspace</DialogTitle>
-          <DialogDescription>
-            This permanently deletes all documents and collaboration history.
-            Enter “{saved.title}” to confirm.
-          </DialogDescription>
-          <Label htmlFor="delete-confirmation">
-            Workspace name confirmation
-          </Label>
-          <Input
-            id="delete-confirmation"
-            disabled={isPending}
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
-          />
+          <DialogHeader>
+            <DialogTitle
+              className={`${paperSerif} text-2xl font-normal tracking-tight`}
+            >
+              Delete workspace
+            </DialogTitle>
+            <DialogDescription>
+              This permanently deletes all documents and collaboration history.
+              Enter “{saved.title}” to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="delete-confirmation">
+              Workspace name confirmation
+            </Label>
+            <Input
+              id="delete-confirmation"
+              autoComplete="off"
+              disabled={isPending}
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </div>
           {feedback?.error ? (
             <p role="alert" className="text-sm text-destructive">
               {feedback.text}
             </p>
           ) : null}
-          <Button
-            variant="destructive"
-            disabled={preview || confirmation !== saved.title || isPending}
-            onClick={() => {
-              if (preview || submitting.current) return;
-              submitting.current = true;
-              startTransition(async () => {
-                try {
-                  const result = await deleteWorkspace({
-                    confirmation,
-                    workspaceSlug: workspace.slug,
-                  });
-                  if (!result.ok) {
-                    setFeedback({ error: true, text: result.message });
-                    return;
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={isPending}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={preview || confirmation !== saved.title || isPending}
+              onClick={() => {
+                if (preview || submitting.current) return;
+                submitting.current = true;
+                startTransition(async () => {
+                  try {
+                    const result = await deleteWorkspace({
+                      confirmation,
+                      workspaceSlug: workspace.slug,
+                    });
+                    if (!result.ok) {
+                      setFeedback({ error: true, text: result.message });
+                      return;
+                    }
+                    setDeleteOpen(false);
+                    router.replace("/dashboard");
+                    router.refresh();
+                  } catch {
+                    setFeedback({
+                      error: true,
+                      text: "Could not delete the workspace. Please try again.",
+                    });
+                  } finally {
+                    submitting.current = false;
                   }
-                  setDeleteOpen(false);
-                  router.replace("/dashboard");
-                  router.refresh();
-                } catch {
-                  setFeedback({
-                    error: true,
-                    text: "Could not delete the workspace. Please try again.",
-                  });
-                } finally {
-                  submitting.current = false;
-                }
-              });
-            }}
-          >
-            {isPending ? "Deleting…" : "Permanently delete workspace"}
-          </Button>
+                });
+              }}
+            >
+              {isPending ? "Deleting…" : "Permanently delete workspace"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

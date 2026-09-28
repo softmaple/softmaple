@@ -17,6 +17,8 @@ export const CreateWorkspaceForm = ({
   const [previewMessage, setPreviewMessage] = useState(false);
   const [state, action] = useActionState(createWorkspace, null);
   const router = useRouter();
+  const titleError =
+    state !== null && !state.ok ? state.fieldErrors?.title?.[0] : undefined;
   useEffect(() => {
     if (state?.ok) {
       onOpenChange(false);
@@ -40,22 +42,37 @@ export const CreateWorkspaceForm = ({
         </p>
       ) : null}
       <div className="grid gap-4 py-4">
-        {state !== null && !state.ok ? (
+        {state !== null && !state.ok && titleError === undefined ? (
           <p className="text-sm text-destructive" role="alert">
             {state.message}
           </p>
         ) : null}
-        <div className="space-y-2">
+        <div className="grid gap-2">
           <Label htmlFor="title">Workspace name</Label>
-          <Input id="title" name="title" placeholder="Research lab" required />
-          <p className="text-xs text-destructive">
-            {state !== null && !state.ok ? state.fieldErrors?.title?.[0] : null}
-          </p>
+          <Input
+            aria-describedby={
+              titleError === undefined ? undefined : "title-error"
+            }
+            aria-invalid={titleError === undefined ? undefined : true}
+            autoComplete="off"
+            className="h-10 md:h-9"
+            id="title"
+            maxLength={80}
+            name="title"
+            placeholder="Research lab"
+            required
+          />
+          {titleError === undefined ? null : (
+            <p className="text-xs text-destructive" id="title-error">
+              {titleError}
+            </p>
+          )}
         </div>
-        <div className="space-y-2">
+        <div className="grid gap-2">
           <Label htmlFor="description">Description (optional)</Label>
           <Textarea
             id="description"
+            maxLength={500}
             name="description"
             placeholder="What this workspace is for"
             rows={3}

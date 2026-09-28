@@ -199,9 +199,9 @@ export function MobileWorkspaceHome(props: HomeProps) {
             <label className="flex h-12 items-center gap-3 rounded-full border border-input/70 bg-muted/40 px-4">
               <Search className="size-5 shrink-0 text-muted-foreground" />
               <input
-                aria-label="Search your notes"
+                aria-label="Search documents"
                 className={`${paperSerif} min-w-0 flex-1 bg-transparent text-base outline-none`}
-                placeholder="Search your notes…"
+                placeholder="Search documents…"
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -377,10 +377,12 @@ export function MobileWorkspaceHome(props: HomeProps) {
               {!visible.length ? (
                 <p className="py-8 text-sm text-muted-foreground" role="status">
                   {query
-                    ? "No notes match your search."
+                    ? "No documents match your search."
                     : filter === "Shared"
                       ? "No publicly shared documents yet."
-                      : "Your next idea starts with a new note."}
+                      : props.canEdit
+                        ? "No documents yet. Start one with New document."
+                        : "No documents have been added yet."}
                 </p>
               ) : null}
               {props.documentCount > props.documents.length ? (
@@ -399,8 +401,8 @@ export function MobileWorkspaceHome(props: HomeProps) {
             href={`/workspace/${props.workspaceSlug}/doc/new`}
             className={`${paperSerif} flex h-11 w-44 items-center justify-center gap-4 rounded-full bg-primary text-base font-semibold text-primary-foreground shadow-sm`}
           >
-            <Plus className="size-5" />
-            New note
+            <Plus aria-hidden="true" className="size-5" />
+            New document
           </HomeActionLink>
         </div>
       ) : null}

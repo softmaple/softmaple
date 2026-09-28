@@ -131,7 +131,7 @@ export const signup = async (
     return actionSuccess({ redirectTo: "/dashboard" });
   }
   return actionSuccess({
-    message: "Check your email to confirm your account, then sign in.",
+    message: "Check your email to confirm your account, then log in.",
     redirectTo:
       "/login?message=Check%20your%20email%20to%20confirm%20your%20account",
   });

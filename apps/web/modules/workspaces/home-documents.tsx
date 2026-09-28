@@ -63,8 +63,12 @@ export function HomeContinue({
   documents,
   workspaceSlug,
   visualFixture,
+  canEdit,
   onBrowse,
-}: Pick<HomeProps, "documents" | "workspaceSlug" | "visualFixture"> & {
+}: Pick<
+  HomeProps,
+  "documents" | "workspaceSlug" | "visualFixture" | "canEdit"
+> & {
   onBrowse: () => void;
 }) {
   const recent = visualFixture ? documents.slice(1, 4) : documents.slice(0, 3);
@@ -80,12 +84,14 @@ export function HomeContinue({
         >
           Continue writing
         </h2>
-        <button
-          onClick={onBrowse}
-          className="flex items-center gap-2 text-xs text-muted-foreground"
-        >
-          View all <ArrowRight className="size-4" />
-        </button>
+        {recent.length > 0 ? (
+          <button
+            onClick={onBrowse}
+            className="flex items-center gap-2 rounded-sm text-xs text-muted-foreground hover:text-foreground"
+          >
+            View all <ArrowRight aria-hidden="true" className="size-4" />
+          </button>
+        ) : null}
       </div>
       <div className="grid grid-cols-3 gap-[18px] max-[1100px]:grid-cols-2">
         {recent.map((document, index) => (
@@ -98,16 +104,18 @@ export function HomeContinue({
               className="min-h-0 flex-1 overflow-hidden"
             >
               <h3
-                className={`${homeSerif} line-clamp-2 text-[24px] leading-[1.2] tracking-[-.05em]`}
+                className={`${homeSerif} ${document.preview ? "line-clamp-2" : "line-clamp-3"} text-[24px] leading-[1.2] tracking-[-.05em]`}
               >
                 {document.title}
               </h3>
-              <p
-                className={`${homeSerif} mt-[6px] line-clamp-3 text-[17px] leading-[1.35] text-muted-foreground`}
-              >
-                {document.preview ??
-                  "Pick up a thought. Make room for what comes next."}
-              </p>
+              {/* Excerpts only exist in the visual fixture; never repeat filler copy. */}
+              {document.preview ? (
+                <p
+                  className={`${homeSerif} mt-[6px] line-clamp-3 text-[17px] leading-[1.35] text-muted-foreground`}
+                >
+                  {document.preview}
+                </p>
+              ) : null}
             </Link>
             <div className="mt-3 flex items-center gap-3">
               {document.people ? (
@@ -127,7 +135,9 @@ export function HomeContinue({
         <p
           className={`${homePaper} rounded-md border border-border p-8 text-sm text-muted-foreground`}
         >
-          Give your next idea a page of its own. Create your first document.
+          {canEdit
+            ? "Give your next idea a page of its own. Start one with New document."
+            : "Documents added to this workspace will appear here."}
         </p>
       ) : null}
     </section>
@@ -139,9 +149,10 @@ export function HomeDocuments({
   profile,
   query,
   documentCount,
+  canEdit,
 }: Pick<
   HomeProps,
-  "documents" | "workspaceSlug" | "profile" | "documentCount"
+  "documents" | "workspaceSlug" | "profile" | "documentCount" | "canEdit"
 > & { query: string }) {
   const [filter, setFilter] = useState("Recent");
   const [grid, setGrid] = useState(false);
@@ -265,9 +276,13 @@ export function HomeDocuments({
           <p role="status" className="p-5 text-sm text-muted-foreground">
             {query
               ? "No documents match your search."
-              : filter === "Recent"
-                ? "No documents yet. Create your first note."
-                : `No ${filter === "Shared" ? "publicly shared" : "matching"} documents.`}
+              : filter === "Shared"
+                ? "No publicly shared documents yet."
+                : filter === "Created by me"
+                  ? "You haven’t created any documents here yet."
+                  : canEdit
+                    ? "No documents yet. Start one with New document."
+                    : "No documents have been added yet."}
           </p>
         ) : null}
       </div>

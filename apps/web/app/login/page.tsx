@@ -4,6 +4,7 @@ import { LoginForm } from "@/modules/auth/login-form";
 import { AuthGuard } from "@/modules/auth/auth-guard";
 import { AuthPageShell } from "@/modules/auth/auth-page-shell";
 import { AuthOAuthOptions } from "@/modules/auth/auth-oauth-options";
+import { AuthNotice } from "@/modules/auth/auth-notice";
 
 interface LoginPageProps {
   searchParams: Promise<{ error?: string; message?: string; next?: string }>;
@@ -22,20 +23,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         title="Welcome back"
       >
         {message === undefined ? null : (
-          <p
-            className="mb-5 border-l-2 border-primary bg-muted px-3 py-2 text-sm text-foreground"
-            role="status"
-          >
-            {message}
-          </p>
+          <AuthNotice className="mb-5">{message}</AuthNotice>
         )}
         {error === undefined ? null : (
-          <p
-            className="mb-5 border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            role="alert"
-          >
+          <AuthNotice className="mb-5" tone="error">
             {error}
-          </p>
+          </AuthNotice>
         )}
 
         <LoginForm next={params.next} />

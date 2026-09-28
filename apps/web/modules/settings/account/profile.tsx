@@ -17,9 +17,21 @@ import {
 import { Button } from "@softmaple/ui/components/button";
 import { Input } from "@softmaple/ui/components/input";
 import { Label } from "@softmaple/ui/components/label";
+import { cn } from "@softmaple/ui/lib/utils";
 import type { UsersType } from "@/types/model";
-import { ModeToggle } from "@/components/mode-toggle";
 import { removeAvatar, updateProfile, uploadAvatar } from "@/app/actions/users";
+import {
+  BrushUnderline,
+  PaperEntrance,
+  PaperFeedback,
+  type PaperFeedbackMessage,
+} from "@/modules/workspaces/workspace-paper";
+import {
+  paperFieldRow,
+  paperPanel,
+  paperSerif,
+} from "@/modules/workspaces/workspace-paper-styles";
+import { ThemeChoice } from "./theme-choice";
 
 type ProfileRow = UsersType["Row"];
 
@@ -31,188 +43,289 @@ const initials = (name: string): string =>
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 
+const sectionTitle = `${paperSerif} mb-2 text-xl tracking-tight`;
+
 export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
   initialProfile,
 }) => {
   const [profile, setProfile] = useState(initialProfile);
   const [displayName, setDisplayName] = useState(profile.full_name ?? "");
-  const [message, setMessage] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [feedback, setFeedback] = useState<PaperFeedbackMessage | null>(null);
+  const [isSaving, startSaving] = useTransition();
+  const [isUpdatingAvatar, startAvatarUpdate] = useTransition();
+  const isPending = isSaving || isUpdatingAvatar;
+  const dirty = displayName !== (profile.full_name ?? "");
+  const valid = displayName.trim().length > 0;
+  // Profiles can start without a name; only flag it once the person edits.
+  const nameError = dirty && !valid;
 
   const applyAvatar = (event: ChangeEvent<HTMLInputElement>): void => {
-    const file = event.target.files?.[0];
+    const input = event.target;
+    const file = input.files?.[0];
     if (file === undefined) return;
     const formData = new FormData();
     formData.set("avatar", file);
-    startTransition(async () => {
+    setFeedback(null);
+    startAvatarUpdate(async () => {
       const result = await uploadAvatar(formData);
+      input.value = "";
       if (!result.ok) {
-        setMessage(result.message);
+        setFeedback({ error: true, text: result.message });
         return;
       }
       setProfile(result.data);
-      setMessage("Avatar updated.");
-      event.target.value = "";
+      setFeedback({ error: false, text: "Avatar updated." });
+    });
+  };
+
+  const clearAvatar = (): void => {
+    setFeedback(null);
+    startAvatarUpdate(async () => {
+      const result = await removeAvatar();
+      if (!result.ok) {
+        setFeedback({ error: true, text: result.message });
+        return;
+      }
+      setProfile(result.data);
+      setFeedback({ error: false, text: "Avatar removed." });
     });
   };
 
   return (
-    <main className="min-h-dvh px-4 py-6 sm:px-8 sm:py-10">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between gap-3">
-          <Button asChild size="sm" variant="ghost">
-            <Link href="/dashboard">
-              <ArrowLeft className="size-4" /> Dashboard
-            </Link>
-          </Button>
-          <ModeToggle />
-        </div>
-        <div className="mt-9">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
-            Personal settings
-          </p>
-          <h1 className="mt-2 font-display text-3xl font-semibold">Account</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+    <main className="mx-auto w-full max-w-3xl px-5 pb-16 pt-4 sm:px-8 md:pt-6">
+      <Link
+        href="/dashboard"
+        className="-ml-1 inline-flex min-h-11 items-center gap-2 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft aria-hidden="true" className="size-4" />
+        All workspaces
+      </Link>
+      <PaperEntrance>
+        <div className="mb-6 mt-2">
+          <h1
+            className={`${paperSerif} text-4xl leading-tight tracking-tight md:font-medium`}
+          >
+            <BrushUnderline>Account</BrushUnderline> settings
+          </h1>
+          <p className="mt-3 text-sm text-muted-foreground">
             Your profile is visible to members of workspaces you join.
           </p>
         </div>
 
-        {message === null ? null : (
-          <p
-            className="mt-6 border-l-2 border-primary bg-muted px-3 py-2 text-sm"
-            role="status"
-          >
-            {message}
-          </p>
-        )}
+        <PaperFeedback className="mb-4" feedback={feedback} />
 
-        <section className="mt-7 border bg-card p-5 sm:p-7">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            <Avatar className="size-20 border">
-              <AvatarImage
-                alt={profile.avatar_alt ?? ""}
-                src={profile.avatar_src ?? undefined}
-              />
-              <AvatarFallback className="font-display text-xl">
-                {initials(profile.full_name ?? profile.email)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild disabled={isPending} size="sm" variant="outline">
-                <label>
-                  {isPending ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <Upload className="size-4" />
-                  )}
-                  Upload image
-                  <input
-                    accept="image/jpeg,image/png,image/webp"
-                    className="sr-only"
-                    disabled={isPending}
-                    onChange={applyAvatar}
-                    type="file"
+        <section aria-labelledby="profile-title">
+          <h2 className={sectionTitle} id="profile-title">
+            Profile
+          </h2>
+          <div className={paperPanel}>
+            <div className={paperFieldRow}>
+              <div>
+                <p className="text-sm font-semibold">Avatar</p>
+                <p className="mt-1 hidden text-xs text-muted-foreground md:block">
+                  Shown beside your name across workspaces.
+                </p>
+              </div>
+              <div className="flex items-center gap-5">
+                <Avatar className="size-16 border border-border">
+                  <AvatarImage
+                    alt={profile.avatar_alt ?? ""}
+                    className="object-cover"
+                    src={profile.avatar_src ?? undefined}
                   />
-                </label>
-              </Button>
-              {profile.avatar_src === null ? null : (
-                <Button
-                  disabled={isPending}
-                  onClick={() =>
-                    startTransition(async () => {
-                      const result = await removeAvatar();
-                      if (!result.ok) {
-                        setMessage(result.message);
-                        return;
-                      }
-                      setProfile(result.data);
-                      setMessage("Avatar removed.");
-                    })
+                  <AvatarFallback
+                    className={`${paperSerif} bg-secondary text-xl text-secondary-foreground`}
+                  >
+                    {initials(profile.full_name ?? profile.email)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      asChild
+                      className={cn(
+                        "h-10 cursor-pointer md:h-9",
+                        "has-[:focus-visible]:border-ring has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
+                        isPending && "pointer-events-none opacity-50",
+                      )}
+                      variant="outline"
+                    >
+                      <label>
+                        {isUpdatingAvatar ? (
+                          <LoaderCircle
+                            aria-hidden="true"
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <Upload aria-hidden="true" />
+                        )}
+                        Upload image
+                        <input
+                          accept="image/jpeg,image/png,image/webp"
+                          className="sr-only"
+                          disabled={isPending}
+                          onChange={applyAvatar}
+                          type="file"
+                        />
+                      </label>
+                    </Button>
+                    {profile.avatar_src === null ? null : (
+                      <Button
+                        className="h-10 md:h-9"
+                        disabled={isPending}
+                        onClick={clearAvatar}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Trash2 data-icon="inline-start" />
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    JPEG, PNG, or WebP, up to 2 MB and 2048 × 2048 px.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <form
+              id="profile-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!dirty || !valid || isPending) return;
+                setFeedback(null);
+                startSaving(async () => {
+                  const result = await updateProfile({ displayName });
+                  if (!result.ok) {
+                    setFeedback({ error: true, text: result.message });
+                    return;
                   }
-                  size="sm"
-                  variant="ghost"
+                  setProfile(result.data);
+                  setDisplayName(result.data.full_name ?? "");
+                  setFeedback({ error: false, text: "Profile saved." });
+                });
+              }}
+            >
+              <div className={paperFieldRow}>
+                <Label
+                  className="self-start pt-1 text-sm font-semibold"
+                  htmlFor="display-name"
                 >
-                  <Trash2 className="size-4" /> Remove
-                </Button>
-              )}
-              <p className="w-full font-mono text-[10px] text-muted-foreground">
-                JPEG, PNG, or WebP · 2 MB · 2048 × 2048 max
-              </p>
-            </div>
+                  Display name
+                </Label>
+                <div>
+                  <Input
+                    aria-describedby={
+                      nameError ? "display-name-error" : undefined
+                    }
+                    aria-invalid={nameError}
+                    autoComplete="name"
+                    className="h-10 md:h-8"
+                    disabled={isPending}
+                    id="display-name"
+                    maxLength={80}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    required
+                    value={displayName}
+                  />
+                  {nameError ? (
+                    <p
+                      className="mt-1 text-xs text-destructive"
+                      id="display-name-error"
+                    >
+                      Display name is required.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <div className={paperFieldRow}>
+                <div>
+                  <Label
+                    className="text-sm font-semibold"
+                    htmlFor="account-email"
+                  >
+                    Email
+                  </Label>
+                  <p className="mt-1 hidden text-xs text-muted-foreground md:block">
+                    Used to sign in and to add you to workspaces.
+                  </p>
+                </div>
+                <div>
+                  <Input
+                    aria-describedby="account-email-hint"
+                    className="h-10 bg-muted/50 text-muted-foreground md:h-8"
+                    id="account-email"
+                    readOnly
+                    value={profile.email}
+                  />
+                  <p
+                    className="mt-1 text-xs text-muted-foreground"
+                    id="account-email-hint"
+                  >
+                    Email changes aren’t available yet.
+                  </p>
+                </div>
+              </div>
+            </form>
           </div>
-
-          <form
-            className="mt-8 grid gap-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              startTransition(async () => {
-                const result = await updateProfile({ displayName });
-                if (!result.ok) {
-                  setMessage(result.message);
-                  return;
-                }
-                setProfile(result.data);
-                setDisplayName(result.data.full_name ?? "");
-                setMessage("Profile saved.");
-              });
-            }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="display-name">Display name</Label>
-              <Input
-                disabled={isPending}
-                id="display-name"
-                maxLength={80}
-                onChange={(event) => setDisplayName(event.target.value)}
-                required
-                value={displayName}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="account-email">Email</Label>
-              <Input
-                disabled
-                id="account-email"
-                readOnly
-                value={profile.email}
-              />
-              <p className="text-xs text-muted-foreground">
-                Email changes are not available in this release.
-              </p>
-            </div>
+          <div className="flex gap-2 py-3 md:justify-end">
             <Button
-              className="w-fit"
-              disabled={isPending || displayName.trim().length === 0}
+              className="h-11 flex-1 md:h-9 md:min-w-24 md:flex-none"
+              disabled={!dirty || isPending}
+              onClick={() => setDisplayName(profile.full_name ?? "")}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="h-11 flex-[1.5] md:h-9 md:min-w-36 md:flex-none"
+              disabled={!dirty || !valid || isPending}
+              form="profile-form"
               type="submit"
             >
-              Save profile
+              {isSaving ? "Saving…" : "Save changes"}
             </Button>
-          </form>
+          </div>
         </section>
 
-        <section className="mt-5 grid gap-px border bg-border sm:grid-cols-2">
-          <div className="bg-card p-5">
-            <h2 className="font-display text-lg font-semibold">Appearance</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Use Light, Dark, or your system preference.
-            </p>
-            <div className="mt-4">
-              <ModeToggle />
+        <section aria-labelledby="preferences-title" className="mt-6">
+          <h2 className={sectionTitle} id="preferences-title">
+            Preferences
+          </h2>
+          <div className={paperPanel}>
+            <div className={paperFieldRow}>
+              <div>
+                <p className="text-sm font-semibold" id="appearance-label">
+                  Appearance
+                </p>
+                <p className="mt-1 hidden text-xs text-muted-foreground md:block">
+                  Use light, dark, or match your system.
+                </p>
+              </div>
+              <ThemeChoice labelledBy="appearance-label" />
+            </div>
+            <div className={paperFieldRow}>
+              <div>
+                <p className="text-sm font-semibold">Password</p>
+                <p className="mt-1 hidden text-xs text-muted-foreground md:block">
+                  Get a secure reset link at your account email.
+                </p>
+              </div>
+              <Button
+                asChild
+                className="h-10 w-fit self-start md:h-9"
+                variant="outline"
+              >
+                <Link href="/reset-password">
+                  <KeyRound data-icon="inline-start" />
+                  Reset password
+                </Link>
+              </Button>
             </div>
           </div>
-          <div className="bg-card p-5">
-            <h2 className="font-display text-lg font-semibold">Password</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Send a secure reset link to your account email.
-            </p>
-            <Button asChild className="mt-4" size="sm" variant="outline">
-              <Link href="/reset-password">
-                <KeyRound className="size-4" /> Reset password
-              </Link>
-            </Button>
-          </div>
         </section>
-      </div>
+      </PaperEntrance>
     </main>
   );
 };

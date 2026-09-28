@@ -54,6 +54,9 @@ function WorkspaceHomeContent(props: HomeProps) {
   const focusSearchAfterClose = useRef(false);
   const updatesTrigger = useRef<HTMLButtonElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
+  const workspaceTitle =
+    props.workspaces.find((item) => item.slug === props.workspaceSlug)?.title ??
+    "Workspace";
   const browse = () =>
     document
       .getElementById("workspace-documents")
@@ -116,9 +119,13 @@ function WorkspaceHomeContent(props: HomeProps) {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-[75px] shrink-0 items-center gap-7 pl-[38px] pr-[29px] max-md:h-11 max-md:justify-between max-md:px-[14px]">
-          <div className="hidden items-center gap-3 text-sm md:flex">
-            <span className="text-muted-foreground">Workspace</span>
-            <span className="text-muted-foreground">/</span>
+          <div className="hidden min-w-0 items-center gap-3 text-sm md:flex">
+            <span className="max-w-64 truncate text-muted-foreground">
+              {workspaceTitle}
+            </span>
+            <span aria-hidden="true" className="text-muted-foreground">
+              /
+            </span>
             <span>Home</span>
           </div>
           <Sheet open={navigationOpen} onOpenChange={setNavigationOpen}>

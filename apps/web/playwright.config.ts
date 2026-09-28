@@ -22,7 +22,11 @@ process.env.E2E_BASE_URL = baseURL;
  * (E2E_SEED_SECRET and friends). They run in the `chromium-seeded` project;
  * everything else runs against placeholder credentials in `chromium`.
  */
-const seededSpecs = ["**/core.spec.ts", "**/workspace-settings.spec.ts"];
+const seededSpecs = [
+  "**/core.spec.ts",
+  "**/password-reset.spec.ts",
+  "**/workspace-settings.spec.ts",
+];
 
 export default defineConfig({
   testDir: "./e2e",

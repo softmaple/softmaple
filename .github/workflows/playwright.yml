@@ -48,8 +48,8 @@ jobs:
         run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab-nitro
       - name: Install Chromium
         run: pnpm --filter @softmaple/web exec playwright install --with-deps chromium
-      # core.spec.ts and workspace-settings.spec.ts: both seed and log in
-      # through the isolated project.
+      # Seeded specs (seededSpecs in apps/web/playwright.config.ts) create
+      # users and log in through the isolated project.
       - name: Run real product E2E
         run: pnpm --filter @softmaple/web exec playwright test --project=chromium-seeded
       - name: Upload Playwright report

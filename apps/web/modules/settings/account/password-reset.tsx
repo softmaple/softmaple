@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { CircleAlert, CircleCheck, KeyRound, LoaderCircle } from "lucide-react";
 import { Button } from "@softmaple/ui/components/button";
 import { sendPasswordResetLink } from "@/app/actions/auth";
@@ -12,11 +12,27 @@ const SEND_FAILED = "Could not send the reset link. Try again.";
  * Emails a reset link to the signed-in account without leaving settings.
  * The result appears under the button that caused it, in its own polite
  * region: the page's profile feedback already owns `role="status"`.
+ * `initialError` explains a reset link that failed and sent the person here.
  */
-export function PasswordReset() {
-  const [result, setResult] = useState<PaperFeedbackMessage | null>(null);
+export function PasswordReset({
+  initialError,
+}: {
+  readonly initialError?: string;
+}) {
+  const [result, setResult] = useState<PaperFeedbackMessage | null>(
+    initialError === undefined ? null : { error: true, text: initialError },
+  );
   const [isSending, startSending] = useTransition();
   const sent = result !== null && !result.error;
+  const alertRef = useRef<HTMLParagraphElement>(null);
+
+  // The row sits at the end of the page; bring a failed link's notice into
+  // view with the button that fixes it.
+  useEffect(() => {
+    if (initialError !== undefined) {
+      alertRef.current?.scrollIntoView({ block: "center" });
+    }
+  }, [initialError]);
 
   const send = (): void => {
     setResult(null);
@@ -75,6 +91,7 @@ export function PasswordReset() {
       {result?.error ? (
         <p
           className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-destructive"
+          ref={alertRef}
           role="alert"
         >
           <CircleAlert

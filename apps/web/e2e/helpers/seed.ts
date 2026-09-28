@@ -21,7 +21,17 @@ export type E2ESeed = {
   readonly workspace: SeedWorkspace;
 };
 
-const seedRequest = async (action: "cleanup" | "seed", runId: string) => {
+/** A dedicated account plus the token hash a reset email would carry. */
+export type E2ERecovery = {
+  readonly email: string;
+  readonly password: string;
+  readonly tokenHash: string;
+};
+
+const seedRequest = async (
+  action: "cleanup" | "recovery" | "seed",
+  runId: string,
+) => {
   const baseUrl = process.env.E2E_BASE_URL;
   const secret = process.env.E2E_SEED_SECRET;
   if (baseUrl === undefined || secret === undefined) {
@@ -44,13 +54,16 @@ const seedRequest = async (action: "cleanup" | "seed", runId: string) => {
 export const createSeed = async (runId: string): Promise<E2ESeed> =>
   (await (await seedRequest("seed", runId)).json()) as E2ESeed;
 
+export const createRecovery = async (runId: string): Promise<E2ERecovery> =>
+  (await (await seedRequest("recovery", runId)).json()) as E2ERecovery;
+
 export const cleanupSeed = async (runId: string): Promise<void> => {
   await seedRequest("cleanup", runId);
 };
 
 export const login = async (
   page: Page,
-  credentials: E2ESeed["owner"] | E2ESeed["editor"] | E2ESeed["viewer"],
+  credentials: { readonly email: string; readonly password: string },
 ): Promise<void> => {
   await page.goto("/login");
   // Exact labels: "Password" would also match the "Show password" toggle.

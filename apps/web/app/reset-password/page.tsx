@@ -4,6 +4,10 @@ import { AuthGuard } from "@/modules/auth/auth-guard";
 import { AuthNotice } from "@/modules/auth/auth-notice";
 import { AuthPageShell } from "@/modules/auth/auth-page-shell";
 import { authLinkClass } from "@/modules/auth/auth-styles";
+import {
+  authLinkErrorMessage,
+  resetLinkError,
+} from "@/modules/auth/auth-link-errors";
 
 interface ResetPasswordPageProps {
   searchParams: Promise<{ message?: string; error?: string }>;
@@ -14,10 +18,19 @@ export default async function ResetPasswordPage({
 }: ResetPasswordPageProps) {
   const params = await searchParams;
   const message = params?.message;
-  const error = params?.error;
+  const error = authLinkErrorMessage(params?.error);
+  const accountError = resetLinkError(params?.error);
 
   return (
-    <AuthGuard>
+    // Signed-in people reset from account settings; a failed link's notice
+    // follows them there.
+    <AuthGuard
+      redirectTo={
+        accountError === undefined
+          ? "/settings/account"
+          : `/settings/account?error=${accountError}`
+      }
+    >
       <AuthPageShell
         mode="login"
         description="Enter your email address and we’ll send you a link to reset your password."

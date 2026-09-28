@@ -40,9 +40,11 @@ const initials = (name: string): string =>
 
 const sectionTitle = `${paperSerif} mb-2 text-xl tracking-tight`;
 
-export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
-  initialProfile,
-}) => {
+export const Profile: FC<{
+  readonly initialProfile: ProfileRow;
+  /** Why the reset link that sent the person here didn't work. */
+  readonly resetLinkError?: string;
+}> = ({ initialProfile, resetLinkError }) => {
   const [profile, setProfile] = useState(initialProfile);
   const [displayName, setDisplayName] = useState(profile.full_name ?? "");
   const [feedback, setFeedback] = useState<PaperFeedbackMessage | null>(null);
@@ -311,7 +313,7 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
                   We’ll email a reset link to {profile.email}.
                 </p>
               </div>
-              <PasswordReset />
+              <PasswordReset initialError={resetLinkError} />
             </div>
           </div>
         </section>

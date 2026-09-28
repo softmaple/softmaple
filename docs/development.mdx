@@ -76,6 +76,22 @@ DIRECT_URL="postgresql://postgres:PASSWORD@DIRECT_HOST:5432/postgres"
 Never expose Redis credentials or Supabase service-role keys through
 `NEXT_PUBLIC_*` variables.
 
+### Password reset emails
+
+In the Supabase dashboard, open **Authentication → Email Templates → Reset
+Password** and point the link at the app's confirm route:
+
+```html
+<a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/reset-password/update">Reset password</a>
+```
+
+`/auth/confirm` verifies the token on the server, so the link works on any
+device or browser. The default `{{ .ConfirmationURL }}` link still works, via
+`/auth/callback`, but only in the browser that requested it: its PKCE code
+verifier is a cookie there. `{{ .SiteURL }}` is the project's Site URL
+(**Authentication → URL Configuration**), which should match
+`NEXT_PUBLIC_APP_URL`.
+
 ## Database
 
 Prisma migrations are the single schema source of truth.
@@ -141,11 +157,12 @@ pnpm --filter @softmaple/db db:deploy
 pnpm --filter @softmaple/web test:e2e:seeded
 ```
 
-Seeded specs (`core.spec.ts`, `workspace-settings.spec.ts`) form the
-`chromium-seeded` Playwright project. The `Isolated Supabase E2E` workflow runs
-it on demand; its GitHub environment stores these secrets and requires
-approval. Every other spec is in the `chromium` project, needs no credentials,
-and runs on each pull request as Chromium Smoke:
+Seeded specs (`core.spec.ts`, `password-reset.spec.ts`,
+`workspace-settings.spec.ts`) form the `chromium-seeded` Playwright project.
+The `Isolated Supabase E2E` workflow runs it on demand; its GitHub environment
+stores these secrets and requires approval. Every other spec is in the
+`chromium` project, needs no credentials, and runs on each pull request as
+Chromium Smoke:
 
 ```bash
 pnpm --filter @softmaple/web test:e2e:chromium

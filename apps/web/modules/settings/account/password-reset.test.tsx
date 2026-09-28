@@ -87,4 +87,36 @@ describe("account password reset", () => {
     );
     expect(sendPasswordResetLink).toHaveBeenCalledTimes(2);
   });
+
+  it("explains a failed reset link in view until a new one is sent", async () => {
+    const failedLink =
+      "This reset link has expired or was already used. Request a new one.";
+    // jsdom has no scrollIntoView.
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    try {
+      // A new key remounts, so the initial state is read again.
+      act(() =>
+        root.render(<PasswordReset initialError={failedLink} key="failed" />),
+      );
+      expect(alert()?.textContent).toBe(failedLink);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+      expect(button().textContent).toBe("Send reset link");
+
+      sendPasswordResetLink.mockResolvedValue({
+        ok: true,
+        data: { message: "We sent a reset link to ada@example.invalid." },
+      });
+      await click();
+      expect(alert()).toBeNull();
+      expect(politeRegion().textContent).toBe(
+        "We sent a reset link to ada@example.invalid.",
+      );
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
+  });
 });

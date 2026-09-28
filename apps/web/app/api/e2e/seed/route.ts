@@ -5,7 +5,11 @@ import { z } from "zod";
 import type { Database } from "@/types/model";
 
 const requestSchema = z.object({
-  action: z.union([z.literal("seed"), z.literal("cleanup")]),
+  action: z.union([
+    z.literal("seed"),
+    z.literal("cleanup"),
+    z.literal("recovery"),
+  ]),
   runId: z.string().regex(/^[a-z0-9-]{8,48}$/),
 });
 
@@ -41,6 +45,7 @@ const configuration = () => {
 const runEmails = (runId: string) => ({
   editor: `e2e+${runId}-editor@softmaple.invalid`,
   owner: `e2e+${runId}-owner@softmaple.invalid`,
+  recovery: `e2e+${runId}-recovery@softmaple.invalid`,
   viewer: `e2e+${runId}-viewer@softmaple.invalid`,
 });
 
@@ -95,6 +100,35 @@ export async function POST(request: Request) {
       password,
       user_metadata: { full_name: fullName },
     });
+  if (parsed.data.action === "recovery") {
+    // Its own account, so changing the password can't break another login.
+    const user = await createUser(emails.recovery, "E2E Recovery");
+    if (user.error !== null || user.data.user === null) {
+      return NextResponse.json(
+        { error: "Recovery user seed failed" },
+        { status: 500 },
+      );
+    }
+    // A real recovery token, verified by /auth/confirm like an emailed link.
+    // generateLink sends no email.
+    const link = await admin.auth.admin.generateLink({
+      email: emails.recovery,
+      type: "recovery",
+    });
+    if (link.error !== null) {
+      await admin.auth.admin.deleteUser(user.data.user.id);
+      return NextResponse.json(
+        { error: "Recovery link seed failed" },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({
+      email: emails.recovery,
+      password,
+      tokenHash: link.data.properties.hashed_token,
+    });
+  }
+
   const owner = await createUser(emails.owner, "E2E Owner");
   if (owner.error !== null || owner.data.user === null) {
     return NextResponse.json({ error: "Owner seed failed" }, { status: 500 });

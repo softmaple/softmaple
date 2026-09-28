@@ -5,6 +5,7 @@ import { AuthGuard } from "@/modules/auth/auth-guard";
 import { AuthPageShell } from "@/modules/auth/auth-page-shell";
 import { AuthOAuthOptions } from "@/modules/auth/auth-oauth-options";
 import { AuthNotice } from "@/modules/auth/auth-notice";
+import { authLinkErrorMessage } from "@/modules/auth/auth-link-errors";
 
 interface LoginPageProps {
   searchParams: Promise<{ error?: string; message?: string; next?: string }>;
@@ -13,7 +14,7 @@ interface LoginPageProps {
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
   const message = params.message;
-  const error = params.error;
+  const error = authLinkErrorMessage(params.error);
 
   return (
     <AuthGuard>

@@ -15,6 +15,10 @@ export const CreateWorkspaceForm = ({
   preview = false,
 }: SubmitButtonProps & { preview?: boolean }) => {
   const [previewMessage, setPreviewMessage] = useState(false);
+  // Controlled, so a rejected submission keeps what was typed (React resets
+  // uncontrolled fields after every form action).
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [state, action] = useActionState(createWorkspace, null);
   const router = useRouter();
   const titleError =
@@ -59,11 +63,17 @@ export const CreateWorkspaceForm = ({
             id="title"
             maxLength={80}
             name="title"
+            onChange={(event) => setTitle(event.target.value)}
             placeholder="Research lab"
             required
+            value={title}
           />
           {titleError === undefined ? null : (
-            <p className="text-xs text-destructive" id="title-error">
+            <p
+              className="text-xs text-destructive"
+              id="title-error"
+              role="alert"
+            >
               {titleError}
             </p>
           )}
@@ -74,8 +84,10 @@ export const CreateWorkspaceForm = ({
             id="description"
             maxLength={500}
             name="description"
+            onChange={(event) => setDescription(event.target.value)}
             placeholder="What this workspace is for"
             rows={3}
+            value={description}
           />
         </div>
       </div>

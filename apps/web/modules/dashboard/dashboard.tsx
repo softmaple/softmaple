@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
+  FileText,
   Mail,
   MoreHorizontal,
   Plus,
@@ -124,7 +125,7 @@ export const Dashboard = ({
       w.description?.toLowerCase().includes(query),
   );
   return (
-    <main className="relative isolate min-h-[calc(100dvh-4rem)] overflow-hidden">
+    <main className="relative isolate flex-1 overflow-hidden">
       <div
         aria-hidden="true"
         className={cn(
@@ -144,7 +145,8 @@ export const Dashboard = ({
         <p className="mt-3 text-sm text-muted-foreground">
           Choose a workspace and pick up where you left off.
         </p>
-        <div className="mb-5 mt-5 grid grid-cols-2 gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+        {/* Phones: the unavailable Join stays compact so Create keeps its full label. */}
+        <div className="mb-5 mt-5 grid grid-cols-[auto_minmax(0,1fr)] gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
           <div className="col-span-2 [&_[data-slot=input-group]]:h-11 md:[&_[data-slot=input-group]]:h-9 md:col-span-1">
             <SearchField
               label="Find a workspace…"
@@ -152,9 +154,16 @@ export const Dashboard = ({
               onChange={setSearchQuery}
             />
           </div>
-          {/* Disabled buttons never show a title tooltip, so say why inline. */}
-          <Button className="h-11 md:h-9" variant="outline" disabled>
-            Join workspace
+          {/* Disabled buttons never show a title tooltip, so say why inline,
+              at full contrast: the "Soon" pill is what explains it. */}
+          <Button
+            className="h-11 text-muted-foreground disabled:opacity-100 md:h-9"
+            variant="outline"
+            disabled
+          >
+            <span>
+              Join<span className="max-sm:sr-only"> workspace</span>
+            </span>
             <span className="rounded-full border border-border px-1.5 py-px text-[10px] leading-4 font-normal text-muted-foreground">
               Soon
             </span>
@@ -180,7 +189,7 @@ export const Dashboard = ({
                 <WorkspaceIcon
                   title={workspace.title}
                   src={workspace.avatar_src}
-                  className="size-15"
+                  className="size-12 min-[400px]:size-15 [&_svg]:max-[399px]:size-7"
                 />
                 <div className="min-w-0 flex-1">
                   <h2
@@ -198,10 +207,20 @@ export const Dashboard = ({
                     {workspace.description ||
                       "A little room for your next idea."}
                   </p>
-                  <p className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <Users aria-hidden="true" className="size-3.5 shrink-0" />
-                    {count(workspace.memberCount, "member")} ·{" "}
-                    {count(workspace.documentCount, "document")}
+                  {/* Each count leads with its own icon, so a narrow card wraps
+                      cleanly between them instead of stranding a separator. */}
+                  <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                      <Users aria-hidden="true" className="size-3.5 shrink-0" />
+                      {count(workspace.memberCount, "member")}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                      <FileText
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0"
+                      />
+                      {count(workspace.documentCount, "document")}
+                    </span>
                   </p>
                 </div>
                 <WorkspaceActions
@@ -282,7 +301,7 @@ export const Dashboard = ({
         onOpenChange={setShowCreateDialog}
       />
       <Sheet
-        open={mobile && selected !== null}
+        open={selected !== null}
         onOpenChange={(open) => {
           if (!open) setSelected(null);
         }}

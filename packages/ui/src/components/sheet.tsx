@@ -70,7 +70,8 @@ function SheetOverlay({
 /**
  * A tap target that sits where a thumb already is. It reads as the drag
  * affordance people expect on a bottom sheet and closes on activation, so the
- * grabber is a real control rather than decoration.
+ * grabber is a real control rather than decoration. It inherits the sheet's
+ * whole background so textured surfaces don't show a flat band behind it.
  */
 function SheetHandle({
   className,
@@ -80,7 +81,7 @@ function SheetHandle({
     <SheetPrimitive.Close
       data-slot="sheet-handle"
       className={cn(
-        "group bg-background focus-visible:ring-ring sticky top-0 z-10 -mb-2 flex min-h-11 shrink-0 items-center justify-center pt-3 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-inset",
+        "group [background:inherit] focus-visible:ring-ring sticky top-0 z-10 -mb-2 flex min-h-11 shrink-0 items-center justify-center pt-3 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-inset",
         className,
       )}
       {...props}

@@ -201,7 +201,7 @@ export const logout = async (): Promise<ActionResult<AuthActionData>> => {
   if (error !== null) {
     return actionFailure(
       ACTION_ERROR_CODE.Internal,
-      "Could not sign out. Try again.",
+      "Could not log out. Try again.",
     );
   }
   revalidatePath("/", "layout");
@@ -212,7 +212,7 @@ export const getCurrentUser = async (): Promise<ActionResult<User>> => {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getUser();
   if (error !== null || data.user === null) {
-    return authFailure("Sign in to continue.");
+    return authFailure("Log in to continue.");
   }
   return actionSuccess(data.user);
 };

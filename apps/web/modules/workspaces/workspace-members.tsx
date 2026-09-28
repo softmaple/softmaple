@@ -43,7 +43,10 @@ const initials = (name: string): string =>
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 
-/** A native select (keyboard, screen reader and e2e friendly) in the paper field style. */
+/**
+ * A native select (keyboard, screen reader and e2e friendly) in the paper
+ * field style. Phones get 16px text so iOS doesn't zoom in on focus.
+ */
 function RoleSelect({
   className,
   ...props
@@ -52,7 +55,7 @@ function RoleSelect({
     <span className={cn("relative inline-flex", className)}>
       <select
         {...props}
-        className="h-full w-full cursor-pointer appearance-none rounded-md border border-input bg-transparent pl-3 pr-8 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+        className="peer h-full w-full cursor-pointer appearance-none rounded-md border border-input bg-transparent pl-3 pr-8 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm dark:bg-input/30"
       >
         {MANAGEABLE_ROLES.map((role) => (
           <option key={role} value={role}>
@@ -62,7 +65,7 @@ function RoleSelect({
       </select>
       <ChevronDown
         aria-hidden="true"
-        className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+        className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground peer-disabled:opacity-50"
       />
     </span>
   );
@@ -85,6 +88,8 @@ export const WorkspaceMembers: FC<{
     mutation: () => Promise<{ ok: boolean; message?: string }>,
   ) => {
     if (isPending) return;
+    // Clearing first means a repeated "Changes saved." is seen and announced.
+    setFeedback(null);
     startTransition(async () => {
       try {
         const result = await mutation();
@@ -106,11 +111,13 @@ export const WorkspaceMembers: FC<{
     });
   };
   return (
-    <section className="flex flex-col gap-4" aria-label="Workspace members">
-      <PaperFeedback feedback={feedback} />
+    // Layout follows the panel width, not the viewport: from `md` up the
+    // settings sidebar takes 250px, so tablets still get the stacked form.
+    <section className="@container" aria-label="Workspace members">
+      <PaperFeedback className="mb-4" feedback={feedback} />
       {isOwner ? (
         <form
-          className="grid gap-3 rounded-md border border-border bg-card/70 p-4 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end"
+          className="mb-4 grid gap-3 rounded-md border border-border bg-card/70 p-4 @xl:grid-cols-[minmax(0,1fr)_9rem_auto] @xl:items-end"
           onSubmit={(event) => {
             event.preventDefault();
             runMutation(async () => {
@@ -129,7 +136,7 @@ export const WorkspaceMembers: FC<{
             <Input
               aria-describedby="member-email-hint"
               autoComplete="off"
-              className="h-10 sm:h-9"
+              className="h-10 @xl:h-9"
               disabled={isPending}
               id="member-email"
               onChange={(event) => setEmail(event.target.value)}
@@ -142,7 +149,7 @@ export const WorkspaceMembers: FC<{
           <div className="grid gap-2">
             <Label htmlFor="member-role">Role</Label>
             <RoleSelect
-              className="h-10 w-full sm:h-9"
+              className="h-10 w-full @xl:h-9"
               disabled={isPending}
               id="member-role"
               onChange={(event) =>
@@ -151,12 +158,12 @@ export const WorkspaceMembers: FC<{
               value={newRole}
             />
           </div>
-          <Button className="h-10 sm:h-9" disabled={isPending} type="submit">
+          <Button className="h-11 @xl:h-9" disabled={isPending} type="submit">
             <Plus data-icon="inline-start" />
             Add member
           </Button>
           <p
-            className="text-xs leading-5 text-muted-foreground sm:col-span-3"
+            className="text-xs leading-5 text-muted-foreground @xl:col-span-3"
             id="member-email-hint"
           >
             People need a Softmaple account before they can be added. Invitation
@@ -166,80 +173,98 @@ export const WorkspaceMembers: FC<{
       ) : null}
 
       <ul className="divide-y divide-border rounded-md border border-border bg-card/70">
-        {members.map((member) => (
-          <li
-            className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 px-4 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
-            key={member.member_id}
-          >
-            <Avatar className="size-9">
-              <AvatarImage alt="" src={member.avatar_src ?? undefined} />
-              <AvatarFallback className="text-xs">
-                {initials(member.full_name)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{member.full_name}</p>
-              {member.email === null ? null : (
-                <p className="truncate text-xs text-muted-foreground">
-                  {member.email}
+        {members.map((member) => {
+          // A lone role badge fits beside the name even on phones; editable
+          // rows move their select and remove button under the name there.
+          const editable = isOwner && member.role !== WORKSPACE_ROLE.Owner;
+          return (
+            <li
+              className={cn(
+                "grid items-center gap-x-3 gap-y-2 px-4 py-3",
+                editable
+                  ? "grid-cols-[auto_minmax(0,1fr)] @sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+                  : "grid-cols-[auto_minmax(0,1fr)_auto]",
+              )}
+              key={member.member_id}
+            >
+              <Avatar className="size-9">
+                <AvatarImage alt="" src={member.avatar_src ?? undefined} />
+                <AvatarFallback className="text-xs">
+                  {initials(member.full_name)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  {member.full_name}
                 </p>
-              )}
-            </div>
-            <div className="col-start-2 flex items-center gap-1 sm:col-start-auto sm:justify-end">
-              {member.role === WORKSPACE_ROLE.Owner ? (
-                <Badge variant="outline">
-                  <Crown /> {WORKSPACE_ROLE_LABEL[member.role]}
-                </Badge>
-              ) : isOwner ? (
-                <>
-                  <RoleSelect
-                    aria-label={`Role for ${member.full_name}`}
-                    className="h-9 w-28"
-                    disabled={isPending}
-                    onChange={(event) =>
-                      runMutation(() =>
-                        setWorkspaceMemberRole({
-                          memberId: member.member_id,
-                          role: event.target.value as ManageableWorkspaceRole,
-                          workspaceSlug: workspace.slug,
-                        }),
-                      )
-                    }
-                    value={member.role}
-                  />
-                  <Button
-                    aria-label={`Remove ${member.full_name}`}
-                    className="size-11 text-muted-foreground hover:text-destructive sm:size-9"
-                    disabled={isPending}
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          `Remove ${member.full_name} from this workspace?`,
+                {member.email === null ? null : (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {member.email}
+                  </p>
+                )}
+              </div>
+              <div
+                className={cn(
+                  "flex items-center gap-1 justify-end",
+                  editable &&
+                    "col-start-2 justify-start @sm:col-start-auto @sm:justify-end",
+                )}
+              >
+                {member.role === WORKSPACE_ROLE.Owner ? (
+                  <Badge variant="outline">
+                    <Crown /> {WORKSPACE_ROLE_LABEL[member.role]}
+                  </Badge>
+                ) : isOwner ? (
+                  <>
+                    <RoleSelect
+                      aria-label={`Role for ${member.full_name}`}
+                      className="h-10 w-32 sm:h-9 sm:w-28"
+                      disabled={isPending}
+                      onChange={(event) =>
+                        runMutation(() =>
+                          setWorkspaceMemberRole({
+                            memberId: member.member_id,
+                            role: event.target.value as ManageableWorkspaceRole,
+                            workspaceSlug: workspace.slug,
+                          }),
                         )
-                      )
-                        return;
-                      runMutation(() =>
-                        removeWorkspaceMember({
-                          memberId: member.member_id,
-                          workspaceSlug: workspace.slug,
-                        }),
-                      );
-                    }}
-                    size="icon"
-                    title={`Remove ${member.full_name}`}
-                    variant="ghost"
-                  >
-                    <UserMinus />
-                  </Button>
-                </>
-              ) : (
-                <Badge variant="secondary">
-                  {WORKSPACE_ROLE_LABEL[member.role]}
-                </Badge>
-              )}
-            </div>
-          </li>
-        ))}
+                      }
+                      value={member.role}
+                    />
+                    <Button
+                      aria-label={`Remove ${member.full_name}`}
+                      className="size-11 text-muted-foreground hover:text-destructive sm:size-9"
+                      disabled={isPending}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Remove ${member.full_name} from this workspace?`,
+                          )
+                        )
+                          return;
+                        runMutation(() =>
+                          removeWorkspaceMember({
+                            memberId: member.member_id,
+                            workspaceSlug: workspace.slug,
+                          }),
+                        );
+                      }}
+                      size="icon"
+                      title={`Remove ${member.full_name}`}
+                      variant="ghost"
+                    >
+                      <UserMinus />
+                    </Button>
+                  </>
+                ) : (
+                  <Badge variant="secondary">
+                    {WORKSPACE_ROLE_LABEL[member.role]}
+                  </Badge>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

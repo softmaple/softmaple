@@ -162,6 +162,7 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
                         Upload image
                         <input
                           accept="image/jpeg,image/png,image/webp"
+                          aria-describedby="avatar-hint"
                           className="sr-only"
                           disabled={isPending}
                           onChange={applyAvatar}
@@ -182,7 +183,10 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
                       </Button>
                     )}
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
+                  <p
+                    className="mt-2 text-xs text-muted-foreground"
+                    id="avatar-hint"
+                  >
                     JPEG, PNG, or WebP, up to 2 MB and 2048 × 2048 px.
                   </p>
                 </div>
@@ -247,13 +251,13 @@ export const Profile: FC<{ readonly initialProfile: ProfileRow }> = ({
                     Email
                   </Label>
                   <p className="mt-1 hidden text-xs text-muted-foreground md:block">
-                    Used to sign in and to add you to workspaces.
+                    Used to log in and to add you to workspaces.
                   </p>
                 </div>
                 <div>
                   <Input
                     aria-describedby="account-email-hint"
-                    className="h-10 bg-muted/50 text-muted-foreground md:h-8"
+                    className="h-10 bg-muted/50 text-muted-foreground md:h-8 dark:bg-muted/50"
                     id="account-email"
                     readOnly
                     value={profile.email}

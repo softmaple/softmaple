@@ -110,6 +110,7 @@ export function WorkspaceSettings({
   const valid =
     title.trim().length > 0 && title.length <= 80 && description.length <= 500;
   const workspaceHref = `/workspace/${workspace.slug}`;
+  const showActionBar = isOwner && initialTab === "general";
   const category =
     categories.find((item) => item.id === initialTab) ?? categories[0];
   const CategoryIcon = category.icon;
@@ -340,7 +341,13 @@ export function WorkspaceSettings({
             </div>
           </div>
         </aside>
-        <main className="min-w-0 px-6 pb-28 md:px-10 md:pb-10 lg:px-16">
+        {/* Only owners on General get the fixed phone action bar to clear. */}
+        <main
+          className={cn(
+            "min-w-0 px-6 pb-10 md:px-10 md:pb-10 lg:px-16",
+            showActionBar && "max-md:pb-28",
+          )}
+        >
           <div className="mx-auto max-w-[52rem]">
             <div className="md:hidden">
               <div className="flex min-h-11 items-center gap-5">
@@ -420,8 +427,8 @@ export function WorkspaceSettings({
                     : "The people who make this space yours."}
                 </p>
               </div>
-              <PaperFeedback className="mb-4" feedback={feedback} />
               {initialTab === "members" ? (
+                // Members reports its own results; one status region per view.
                 <WorkspaceMembers
                   workspace={{ ...workspace, title: saved.title }}
                   members={members}
@@ -429,6 +436,7 @@ export function WorkspaceSettings({
                 />
               ) : (
                 <>
+                  <PaperFeedback className="mb-4" feedback={feedback} />
                   {!isOwner ? (
                     <p className="mb-4 flex items-start gap-2.5 rounded-md border border-border bg-card/70 p-3 text-sm text-muted-foreground">
                       <Info
@@ -542,7 +550,7 @@ export function WorkspaceSettings({
                           </span>
                           <input
                             id="workspace-url"
-                            className="min-w-0 flex-1 bg-transparent px-3 text-muted-foreground"
+                            className="min-w-0 flex-1 bg-transparent px-3 text-muted-foreground outline-none"
                             value={workspace.slug}
                             readOnly
                             title={`${workspaceHref} (read-only)`}
@@ -550,7 +558,13 @@ export function WorkspaceSettings({
                         </div>
                       </div>
                     </div>
-                    <div className="fixed inset-x-0 bottom-0 z-20 flex gap-2 border-t border-border bg-background px-6 pt-3 pb-[max(.75rem,env(safe-area-inset-bottom))] md:static md:justify-end md:border-0 md:bg-transparent md:px-0 md:py-3">
+                    {/* Read-only members don't need a sticky bar of disabled buttons on phones. */}
+                    <div
+                      className={cn(
+                        "fixed inset-x-0 bottom-0 z-20 flex gap-2 border-t border-border bg-background px-6 pt-3 pb-[max(.75rem,env(safe-area-inset-bottom))] md:static md:justify-end md:border-0 md:bg-transparent md:px-0 md:py-3",
+                        !showActionBar && "max-md:hidden",
+                      )}
+                    >
                       <Button
                         type="button"
                         variant="outline"

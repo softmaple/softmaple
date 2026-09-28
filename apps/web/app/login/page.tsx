@@ -32,8 +32,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         )}
 
         <LoginForm next={params.next} />
-        <div className="mt-3 text-right text-sm">
-          <Link className={authLinkClass} href="/reset-password">
+        <div className="mt-1 flex justify-end text-sm">
+          <Link
+            className={`${authLinkClass} inline-flex min-h-11 items-center`}
+            href="/reset-password"
+          >
             Forgot password?
           </Link>
         </div>

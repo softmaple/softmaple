@@ -35,8 +35,9 @@ export function ThemeChoice({ labelledBy }: { readonly labelledBy: string }) {
         <label
           key={value}
           className={cn(
-            "flex min-h-10 cursor-pointer items-center gap-2 rounded-[calc(var(--radius)-3px)] px-3 text-sm text-muted-foreground transition-colors hover:text-foreground md:min-h-8",
-            "has-[:checked]:bg-secondary has-[:checked]:text-secondary-foreground",
+            "flex min-h-11 cursor-pointer items-center gap-2 rounded-[calc(var(--radius)-3px)] px-3 text-sm text-muted-foreground transition-colors hover:text-foreground md:min-h-8",
+            // Weight and a ring mark the choice, not the soft fill alone.
+            "has-[:checked]:bg-secondary has-[:checked]:font-medium has-[:checked]:text-secondary-foreground has-[:checked]:shadow-[inset_0_0_0_1px_var(--ring)]",
             "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-ring",
           )}
         >

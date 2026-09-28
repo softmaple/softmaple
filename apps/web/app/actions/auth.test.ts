@@ -1,16 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { signUp, signInWithPassword, revalidatePath } = vi.hoisted(() => ({
+const {
+  signUp,
+  signInWithPassword,
+  getUser,
+  resetPasswordForEmail,
+  revalidatePath,
+} = vi.hoisted(() => ({
   signUp: vi.fn(),
   signInWithPassword: vi.fn(),
+  getUser: vi.fn(),
+  resetPasswordForEmail: vi.fn(),
   revalidatePath: vi.fn(),
 }));
 vi.mock("@/utils/supabase/server", () => ({
-  createClient: vi.fn(async () => ({ auth: { signUp, signInWithPassword } })),
+  createClient: vi.fn(async () => ({
+    auth: { signUp, signInWithPassword, getUser, resetPasswordForEmail },
+  })),
 }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
-import { login, signup } from "./auth";
+import { login, sendPasswordResetLink, signup } from "./auth";
 
 const form = (values: Record<string, string>) => {
   const data = new FormData();
@@ -142,5 +152,53 @@ describe("existing email login", () => {
       ok: false,
       message: "The email or password is incorrect.",
     });
+  });
+});
+
+describe("account password reset", () => {
+  const signedIn = (email: string | undefined) =>
+    getUser.mockResolvedValue({ data: { user: { email } }, error: null });
+
+  it("emails the session's own address with the recovery callback", async () => {
+    signedIn("ada@example.invalid");
+    resetPasswordForEmail.mockResolvedValue({ error: null });
+    expect(await sendPasswordResetLink()).toEqual({
+      ok: true,
+      data: { message: "We sent a reset link to ada@example.invalid." },
+    });
+    expect(resetPasswordForEmail).toHaveBeenCalledWith("ada@example.invalid", {
+      redirectTo: expect.stringMatching(
+        /\/auth\/callback\?type=recovery&next=\/reset-password\/update$/,
+      ),
+    });
+  });
+
+  it.each([
+    ["no session", { data: { user: null }, error: { message: "missing" } }],
+    ["no email", { data: { user: { email: undefined } }, error: null }],
+  ])("asks to log in when there is %s", async (_case, response) => {
+    getUser.mockResolvedValue(response);
+    expect(await sendPasswordResetLink()).toMatchObject({
+      ok: false,
+      code: "AUTHENTICATION_REQUIRED",
+      message: "Log in to continue.",
+    });
+    expect(resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "over_email_send_rate_limit",
+      "A reset link was sent recently. Check your inbox, or try again in a minute.",
+    ],
+    [
+      "over_request_rate_limit",
+      "A reset link was sent recently. Check your inbox, or try again in a minute.",
+    ],
+    ["unexpected_failure", "Could not send the reset link. Try again."],
+  ])("explains %s errors", async (code, message) => {
+    signedIn("ada@example.invalid");
+    resetPasswordForEmail.mockResolvedValue({ error: { code } });
+    expect(await sendPasswordResetLink()).toMatchObject({ ok: false, message });
   });
 });

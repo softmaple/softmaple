@@ -6,7 +6,14 @@ import type { ActionResult } from "@/lib/actions/result";
 import type { AuthActionData } from "@/app/actions/auth";
 import Link from "next/link";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
-import { ChevronDown, UserRound } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  ChevronDown,
+  LogOut,
+  Settings,
+  UserRound,
+} from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -17,6 +24,8 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@softmaple/ui/components/dropdown-menu";
 import { cn } from "@softmaple/ui/lib/utils";
@@ -29,6 +38,54 @@ export type WorkspaceProfile = {
   full_name: string | null;
   avatar_src: string | null;
 };
+export type PaperFeedbackMessage = {
+  readonly error: boolean;
+  readonly text: string;
+};
+
+/**
+ * Inline result of a settings action. The polite status region stays mounted
+ * (and empty, so it takes no space) because screen readers often skip live
+ * regions that arrive already filled; errors are inserted as alerts. Render
+ * one per view so `role="status"` stays unique.
+ */
+export function PaperFeedback({
+  feedback,
+  className,
+}: {
+  readonly feedback: PaperFeedbackMessage | null;
+  readonly className?: string;
+}) {
+  const base = "flex items-start gap-2.5 rounded-md border p-3 text-sm";
+  return (
+    <>
+      <div role="status">
+        {feedback !== null && !feedback.error ? (
+          <p className={cn(base, "border-border bg-card/70", className)}>
+            <CircleCheck
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-(--workspace-link)"
+            />
+            {feedback.text}
+          </p>
+        ) : null}
+      </div>
+      {feedback?.error ? (
+        <p
+          role="alert"
+          className={cn(
+            base,
+            "border-destructive/50 bg-destructive/5 text-destructive",
+            className,
+          )}
+        >
+          <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {feedback.text}
+        </p>
+      ) : null}
+    </>
+  );
+}
 
 export function WorkspaceBrand() {
   return (
@@ -53,12 +110,18 @@ export function WorkspaceAccount({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const initials = (profile?.full_name ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
   const content = (
     <>
       <Avatar className="size-8">
         <AvatarImage src={profile?.avatar_src ?? undefined} alt="" />
-        <AvatarFallback>
-          {profile?.full_name?.slice(0, 1) || <UserRound className="size-4" />}
+        <AvatarFallback className="text-xs">
+          {initials || <UserRound className="size-4" />}
         </AvatarFallback>
       </Avatar>
       {profile ? (
@@ -86,12 +149,27 @@ export function WorkspaceAccount({
         {content}
         <ChevronDown className="hidden size-3 md:block" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className={paperSurface}>
+      <DropdownMenuContent align="end" className={cn(paperSurface, "w-56")}>
+        {profile?.full_name ? (
+          <>
+            <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
+              Signed in as{" "}
+              <span className="font-medium text-foreground">
+                {profile.full_name}
+              </span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <DropdownMenuGroup>
-          <DropdownMenuItem asChild>
-            <Link href="/settings/account">Account settings</Link>
+          <DropdownMenuItem asChild className="max-md:min-h-11">
+            <Link href="/settings/account">
+              <Settings aria-hidden="true" />
+              Account settings
+            </Link>
           </DropdownMenuItem>
           <DropdownMenuItem
+            className="max-md:min-h-11"
             disabled={pending}
             onSelect={(event) => {
               event.preventDefault();
@@ -105,12 +183,13 @@ export function WorkspaceAccount({
                   router.replace(result.data.redirectTo ?? "/");
                   router.refresh();
                 } catch {
-                  setError("Could not sign out. Try again.");
+                  setError("Could not log out. Try again.");
                 }
               });
             }}
           >
-            {pending ? "Signing out…" : "Sign out"}
+            <LogOut aria-hidden="true" />
+            {pending ? "Logging out…" : "Log out"}
           </DropdownMenuItem>
           {error ? (
             <p role="alert" className="max-w-52 p-2 text-xs text-destructive">

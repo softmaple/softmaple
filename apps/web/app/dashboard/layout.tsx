@@ -8,8 +8,10 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const profile = await getCurrentProfile();
+  // A flex column lets the page fill the space under the header exactly
+  // (no calc against the header's height and border).
   return (
-    <div className={`${paperSurface} min-h-dvh`}>
+    <div className={`${paperSurface} flex min-h-dvh flex-col`}>
       <WorkspaceHeader
         signOut={logout}
         profile={profile.ok ? profile.data : undefined}

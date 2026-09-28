@@ -69,6 +69,11 @@ Copy [`.env.example`](./.env.example). Values are resolved in
 
 \*Required unless `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set.
 
+Password reset emails need the Reset Password template from
+[Password reset emails](../../docs/development.mdx#password-reset-emails).
+With Supabase's default template, reset links work only in the browser that
+requested them.
+
 `NEXT_PUBLIC_*` values are inlined at **build** time. After changing them in
 Vercel (or any host), redeploy — restarting the running server is not enough.
 
@@ -222,14 +227,20 @@ pnpm --filter @softmaple/web dev
 pnpm --filter @softmaple/web typecheck
 pnpm --filter @softmaple/web lint
 pnpm --filter @softmaple/web test
-pnpm --filter @softmaple/web test:e2e
+pnpm --filter @softmaple/web test:e2e:chromium  # public surfaces (PR CI)
+pnpm --filter @softmaple/web test:e2e:seeded    # isolated Supabase project
 pnpm turbo run build --filter=@softmaple/web
 ```
 
-Real product E2E requires the isolated variables documented in
-[`docs/development.mdx`](../../docs/development.mdx). It starts Web and Collab
-on dynamic ports with `reuseExistingServer=false`; no mock client or forged
-authentication cookie is used.
+Playwright has two projects. `chromium` covers every spec that runs on
+placeholder credentials (landing, auth, public navigation) and runs on each
+pull request as **Chromium Smoke**. `chromium-seeded` (`core.spec.ts`,
+`password-reset.spec.ts`, `workspace-settings.spec.ts`) seeds real users and
+requires the isolated variables documented in
+[`docs/development.mdx`](../../docs/development.mdx); it runs from the manual
+**Isolated Supabase E2E** workflow. Both start Web and Collab on dynamic ports
+with `reuseExistingServer=false`; no mock client or forged authentication
+cookie is used.
 
 ## Layout
 

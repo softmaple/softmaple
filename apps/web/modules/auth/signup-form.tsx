@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { AuthNotice } from "./auth-notice";
 import { PasswordInput } from "./password-input";
 import { authInputClass, authSubmitClass } from "./auth-styles";
 import { useRouter } from "next/navigation";
@@ -60,12 +61,7 @@ export const SignupForm = () => {
       className="space-y-5 min-[56.25rem]:max-xl:space-y-4"
     >
       {state !== null && !state.ok ? (
-        <p
-          className="rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {state.message}
-        </p>
+        <AuthNotice tone="error">{state.message}</AuthNotice>
       ) : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-2">
@@ -174,7 +170,7 @@ export const SignupForm = () => {
       </div>
       <SubmitButton
         text="Create account"
-        loadingText="Creating account..."
+        loadingText="Creating account…"
         className={authSubmitClass}
       />
     </form>

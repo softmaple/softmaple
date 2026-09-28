@@ -156,7 +156,7 @@ test("registration keyboard submission preserves input and prevents duplicate re
   });
   await page.getByLabel("Password", { exact: true }).press("Enter");
   await expect(
-    page.getByRole("button", { name: "Creating account...", exact: true }),
+    page.getByRole("button", { name: "Creating account…", exact: true }),
   ).toBeDisabled();
   await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute(
     "readonly",
@@ -216,4 +216,55 @@ test("registration rejects mismatched confirmation without creating an account",
   await expect(
     page.getByLabel("Confirm password", { exact: true }),
   ).toHaveValue("Other1234");
+});
+
+test.describe("password reset links", () => {
+  const invalidLink =
+    "This reset link has expired or was already used. Request a new one.";
+
+  test("an expired or used link offers a new one", async ({ page }) => {
+    // Supabase sends expired and used links back without a code.
+    await page.goto("/auth/callback?type=recovery&next=/reset-password/update");
+    await expect(page).toHaveURL(/\/reset-password\?error=reset_link_invalid$/);
+    await expect(page.getByText(invalidLink, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Send reset link", exact: true }),
+    ).toBeVisible();
+
+    await page.goto("/auth/confirm?type=recovery&next=/reset-password/update");
+    await expect(page).toHaveURL(/\/reset-password\?error=reset_link_invalid$/);
+    await expect(page.getByText(invalidLink, { exact: true })).toBeVisible();
+  });
+
+  test("a link from another browser explains what happened", async ({
+    page,
+  }) => {
+    // No PKCE verifier cookie here: the exchange fails before Supabase.
+    await page.goto(
+      "/auth/callback?type=recovery&next=/reset-password/update&code=elsewhere",
+    );
+    await expect(page).toHaveURL(
+      /\/reset-password\?error=reset_link_other_browser$/,
+    );
+    await expect(
+      page.getByText(
+        "This reset link was opened in a different browser from the one that requested it. Request a new one here, then open it in this browser.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+  });
+
+  test("setting a password needs a reset link's session", async ({ page }) => {
+    await page.goto("/reset-password/update");
+    await expect(page).toHaveURL(/\/reset-password\?error=reset_link_invalid$/);
+    await expect(page.getByText(invalidLink, { exact: true })).toBeVisible();
+  });
+
+  test("error text in the URL is never shown", async ({ page }) => {
+    await page.goto("/login?error=Your%20account%20is%20locked.%20Call%20us.");
+    await expect(
+      page.getByText("Something went wrong. Try again.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(/account is locked/i)).toHaveCount(0);
+  });
 });

@@ -36,7 +36,7 @@ export function AuthPageShell({
           </Link>
           <Link
             href="/"
-            className="inline-flex items-center gap-2 rounded-sm text-xs text-(--muted-ink) hover:text-(--ink) focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#967200] sm:text-sm"
+            className="inline-flex min-h-11 items-center gap-2 rounded-sm text-xs text-(--muted-ink) hover:text-(--ink) focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#967200] sm:text-sm"
           >
             <ArrowLeft aria-hidden="true" className="size-4" /> Return home
           </Link>

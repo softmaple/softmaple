@@ -12,12 +12,12 @@ interface SubmitButtonProps {
 
 export const SubmitButton = ({
   className = "",
-  text = "Sign in",
+  text = "Log in",
   loadingText,
   disabled = false,
 }: SubmitButtonProps = {}) => {
   const { pending: isLoading } = useFormStatus();
-  const displayLoadingText = loadingText || `${text.replace(/\.$/, "")}...`;
+  const displayLoadingText = loadingText || `${text.replace(/\.$/, "")}…`;
 
   return (
     <Button

@@ -22,7 +22,7 @@ export const getAuthenticatedContext = async (): Promise<
   if (error !== null || data.user === null) {
     return actionFailure(
       ACTION_ERROR_CODE.AuthenticationRequired,
-      "Sign in to continue.",
+      "Log in to continue.",
     );
   }
   return actionSuccess({ supabase, user: data.user });

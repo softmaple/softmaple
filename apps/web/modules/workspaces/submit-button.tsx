@@ -18,13 +18,19 @@ export const SubmitButton: FC<SubmitButtonProps> = (props) => {
       <Button
         type="button"
         variant="outline"
+        className="h-11 md:h-9"
         onClick={() => onOpenChange(false)}
         disabled={isLoading}
       >
         Cancel
       </Button>
-      <Button type="submit" disabled={isLoading}>
-        {isLoading ? "Creating..." : "Create Workspace"}
+      <Button
+        type="submit"
+        className="h-11 md:h-9"
+        aria-busy={isLoading}
+        disabled={isLoading}
+      >
+        {isLoading ? "Creating…" : "Create workspace"}
       </Button>
     </>
   );

@@ -43,8 +43,18 @@ jobs:
         run: pnpm turbo run build --filter=@softmaple/web --filter=@softmaple/collab-nitro
       - name: Install Chromium
         run: pnpm --filter @softmaple/web exec playwright install --with-deps chromium
-      - name: Run public-surface smoke
-        run: pnpm --filter @softmaple/web exec playwright test public.spec.ts --project=chromium
+      # Every spec that runs on placeholder credentials: landing, auth,
+      # artwork, and public navigation. Seeded specs live in the
+      # `chromium-seeded` project (see playwright.yml).
+      - name: Run public-surface E2E
+        run: pnpm --filter @softmaple/web exec playwright test --project=chromium
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chromium-smoke-report
+          path: apps/web/playwright-report/
+          retention-days: 14
       - name: Upload failure traces
         if: failure()
         uses: actions/upload-artifact@v7

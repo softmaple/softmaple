@@ -1,18 +1,16 @@
 "use client";
 
-import {
-  RouteError,
-  type RouteErrorBoundaryProps,
-} from "@/components/RouteError";
+import type { RouteErrorBoundaryProps } from "@/components/RouteError";
+import { WorkspaceRouteError } from "@/modules/workspaces/workspace-route-error";
 
 export default function WorkspaceErrorPage({ retry }: RouteErrorBoundaryProps) {
   return (
-    <RouteError
+    <WorkspaceRouteError
       backHref="/dashboard"
       backLabel="All workspaces"
-      description="This workspace could not finish opening. Retry the request, or return to your workspace index."
+      description="Nothing in it was lost. Try again, or go back to all of your workspaces."
       retry={retry}
-      title="This workspace is out of view."
+      title="This workspace didn’t open."
     />
   );
 }

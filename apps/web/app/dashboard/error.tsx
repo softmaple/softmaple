@@ -1,19 +1,17 @@
 "use client";
 
-import {
-  RouteError,
-  type RouteErrorBoundaryProps,
-} from "@/components/RouteError";
+import type { RouteErrorBoundaryProps } from "@/components/RouteError";
+import { WorkspaceRouteError } from "@/modules/workspaces/workspace-route-error";
 
 export default function DashboardErrorPage({ retry }: RouteErrorBoundaryProps) {
   return (
-    <RouteError
+    <WorkspaceRouteError
       backHref="/"
       backLabel="Back to home"
-      className="min-h-[calc(100dvh-3.5rem)]"
-      description="Your workspace list is still safe. Retry the request, or return to the public home page."
+      className="min-h-0 flex-1"
+      description="Your workspaces are safe. Try again, or return to the home page."
       retry={retry}
-      title="The workspace index paused."
+      title="Your workspaces didn’t load."
     />
   );
 }

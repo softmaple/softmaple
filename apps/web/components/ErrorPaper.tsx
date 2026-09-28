@@ -1,14 +1,18 @@
 import { useId } from "react";
+import { cn } from "@softmaple/ui/lib/utils";
 
 /** A small folded-paper sketch, with theme-aware parchment rather than inversion. */
-export function ErrorPaper() {
+export function ErrorPaper({ className }: { readonly className?: string }) {
   const id = useId();
   return (
     <svg
       aria-hidden="true"
       focusable="false"
       viewBox="0 0 340 230"
-      className="pointer-events-none h-auto w-[240px] text-[#777269] [--sheet:#fffdf7] [--fold:#dfd8c9] [--crease:#c1b7a2] dark:text-[#c5b594] dark:[--sheet:#d3c6ab] dark:[--fold:#827763] dark:[--crease:#665c48] sm:w-[300px] [@media(max-height:600px)]:w-[170px]"
+      className={cn(
+        "pointer-events-none h-auto w-[240px] text-[#777269] [--sheet:#fffdf7] [--fold:#dfd8c9] [--crease:#c1b7a2] dark:text-[#c5b594] dark:[--sheet:#d3c6ab] dark:[--fold:#827763] dark:[--crease:#665c48] sm:w-[300px] [@media(max-height:600px)]:w-[170px]",
+        className,
+      )}
     >
       <defs>
         <linearGradient id={`${id}-paper`} x1="0" y1="0" x2=".8" y2="1">

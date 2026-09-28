@@ -3,7 +3,6 @@
 import {
   MotionConfig,
   useInView,
-  usePageInView,
   type AnimationPlaybackControls,
 } from "motion/react";
 import {
@@ -26,12 +25,25 @@ const subscribe = (notify: () => void) => {
 };
 const getReduced = () => matchMedia(reducedQuery).matches;
 const serverReduced = () => false;
+const subscribeVisibility = (notify: () => void) => {
+  document.addEventListener("visibilitychange", notify);
+  return () => document.removeEventListener("visibilitychange", notify);
+};
+const getPageVisible = () => !document.hidden;
+const serverPageVisible = () => true;
 const Preferences = createContext({ reduced: false, pageVisible: true });
 
 export function LandingMotion({ children }: { children: ReactNode }) {
   // Subscribe explicitly: Motion's initial preference alone doesn't cover live changes.
   const reduced = useSyncExternalStore(subscribe, getReduced, serverReduced);
-  const pageVisible = usePageInView();
+  // Read visibility during hydration. Motion's usePageInView starts at `true`
+  // and corrects in an effect, so a background tab whose section is already
+  // in view could briefly count as playing and mark its entrance started.
+  const pageVisible = useSyncExternalStore(
+    subscribeVisibility,
+    getPageVisible,
+    serverPageVisible,
+  );
   return (
     <Preferences.Provider value={{ reduced, pageVisible }}>
       <MotionConfig reducedMotion={reduced ? "always" : "never"}>

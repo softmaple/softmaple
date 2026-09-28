@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { AuthNotice } from "./auth-notice";
 import { PasswordInput } from "./password-input";
 import { authInputClass, authSubmitClass } from "./auth-styles";
 import { useRouter } from "next/navigation";
@@ -38,12 +39,7 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
         <input name="next" type="hidden" value={next} />
       )}
       {state !== null && !state.ok ? (
-        <p
-          className="rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {state.message}
-        </p>
+        <AuthNotice tone="error">{state.message}</AuthNotice>
       ) : null}
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
@@ -92,7 +88,7 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
       </div>
       <SubmitButton
         text="Log in"
-        loadingText="Logging in..."
+        loadingText="Logging in…"
         className={authSubmitClass}
       />
     </form>

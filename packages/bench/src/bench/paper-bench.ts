@@ -8,7 +8,6 @@ import {
   EventGraph,
   NativeSnapshotCodec,
   PortableSnapshotCodec,
-  type GraphEvent,
 } from "@softmaple/eg-walker";
 import { ColumnarEventGraphCodec } from "@softmaple/eg-walker/internal";
 import {
@@ -29,6 +28,7 @@ import {
   type PaperBenchmarkApplyBatchEvents,
 } from "./paper-bench-options";
 import { applyRemoteEventsInBatches } from "./paper-bench-apply";
+import { jsonByteLength } from "./json-size";
 import { loadPaperTraceCausalBatches } from "./paper-trace-causal-batches";
 import {
   buildNativePaperPayload,
@@ -499,19 +499,6 @@ Options:
 Known datasets: ${PAPER_DATASETS.join(", ")}`);
 };
 
-const cloneEvent = (event: GraphEvent): GraphEvent => ({
-  id: event.id,
-  parentVersion: new Set(event.parentVersion),
-  operation:
-    event.operation.type === "insert"
-      ? { ...event.operation }
-      : { ...event.operation },
-  timestamp: event.timestamp,
-});
-
-const utf8Bytes = (value: string): number =>
-  new TextEncoder().encode(value).byteLength;
-
 const formatNumber = (value: number): string =>
   Number.isInteger(value) ? String(value) : value.toFixed(2);
 
@@ -919,11 +906,14 @@ const runDatasetOnce = (
     applyCalls,
   );
 
-  const serialized = replica.serialize();
-  const jsonBytes = utf8Bytes(JSON.stringify(serialized));
-  const graph = EventGraph.fromEvents(
-    replica.exportEventGraph().map((event) => cloneEvent(event)),
-  );
+  // Size the JSON payload from a temporary: keeping `serialize()`'s result
+  // alive through the EGW3 and snapshot phases below pinned a second full copy
+  // of the event graph (~880 MB on the largest maintained trace).
+  const jsonBytes = jsonByteLength(replica.serialize());
+  // `exportEventGraph()` already yields caller-owned clones and `addEvent`
+  // takes its own defensive copy, so mapping `cloneEvent` over the export only
+  // added a third throwaway copy of every event.
+  const graph = EventGraph.fromEvents(replica.exportEventGraph());
   const codec = new ColumnarEventGraphCodec();
   const binary = codec.encodeBinary(graph);
   const decodedAt = performance.now();
@@ -1117,9 +1107,7 @@ const buildPersistencePayload = (
     run,
     options,
   );
-  const graph = EventGraph.fromEvents(
-    replica.exportEventGraph().map((event) => cloneEvent(event)),
-  );
+  const graph = EventGraph.fromEvents(replica.exportEventGraph());
   const binary = new ColumnarEventGraphCodec().encodeBinary(graph);
   const portableSnapshotBinary = new PortableSnapshotCodec()
     .encode(replica.createPortableSnapshot())

@@ -40,30 +40,46 @@ test("owner sees real workspace counts and stable settings", async ({
       .getByText("Shared notes"),
   ).toBeVisible();
   await page.goto(`/workspace/${seed.workspace.slug}/settings`);
-  await expect(page.getByLabel("Name")).toHaveValue(seed.workspace.title);
-  await page.getByRole("tab", { name: /Members/ }).click();
+  await expect(page.getByLabel("Workspace name", { exact: true })).toHaveValue(
+    seed.workspace.title,
+  );
+  await page
+    .getByRole("link", { name: /^Members/ })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/[?&]tab=members/);
   await expect(page.getByText("E2E Editor")).toBeVisible();
   await expect(page.getByText("E2E Viewer")).toBeVisible();
 });
 
 test("workspace metadata and deletion are durable", async ({ page }) => {
   await login(page, seed.owner);
-  await page.getByRole("button", { name: "New workspace" }).click();
-  await page.getByLabel("Workspace name").fill("Disposable E2E Space");
-  await page.getByLabel("Description (optional)").fill("Created by Playwright");
-  await page.getByRole("button", { name: "Create Workspace" }).click();
+  await page
+    .getByRole("button", { name: "Create workspace", exact: true })
+    .click();
+  const createDialog = page.getByRole("dialog", { name: "Create workspace" });
+  await createDialog.getByLabel("Workspace name").fill("Disposable E2E Space");
+  await createDialog
+    .getByLabel("Description (optional)")
+    .fill("Created by Playwright");
+  await createDialog.getByRole("button", { name: "Create workspace" }).click();
   await page.waitForURL(/\/workspace\/[^/?]+$/);
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: "Workspace settings" }).click();
-  await page.getByLabel("Name").fill("Renamed E2E Space");
-  await page.getByRole("button", { name: "Save workspace" }).click();
+  await page.waitForURL(/\/workspace\/[^/?]+\/settings$/);
+  const name = page.getByLabel("Workspace name", { exact: true });
+  await expect(name).toHaveValue("Disposable E2E Space");
+  await name.fill("Renamed E2E Space");
+  await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("status")).toContainText("Changes saved");
-  await page.getByRole("tab", { name: "Danger zone" }).click();
-  await page
-    .getByLabel("Workspace deletion confirmation")
-    .fill("Renamed E2E Space");
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete workspace" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete workspace" });
+  await deleteDialog
+    .getByLabel("Workspace name confirmation")
+    .fill("Renamed E2E Space");
+  await deleteDialog
+    .getByRole("button", { name: "Permanently delete workspace" })
+    .click();
   await page.waitForURL("**/dashboard");
   await expect(page.getByText("Renamed E2E Space")).toHaveCount(0);
 });
@@ -176,7 +192,8 @@ test("preview, export, public sharing, and revocation use live content", async (
   ).toContainText("Public observation");
   await page.getByRole("button", { name: "Disable link" }).click();
   await shared.reload();
-  await expect(shared.getByText(/not found/i)).toBeVisible();
+  // Next's default 404: "This page could not be found."
+  await expect(shared.getByText(/could not be found/i)).toBeVisible();
   await anonymous.close();
 });
 

@@ -1,22 +1,36 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** next/image sources carry the asset in `?url=`; plain sources are paths. */
+const assetPath = (source: string) => {
+  const url = new URL(source);
+  return url.searchParams.get("url") ?? url.pathname;
+};
+
 function artworkRequests(page: Page) {
   const paths = new Set<string>();
   page.on("request", (request) => {
     if (request.resourceType() !== "image") return;
-    const url = new URL(request.url());
-    const path = url.searchParams.get("url") ?? url.pathname;
+    // The route loading screen can paint while an auth page streams in, and
+    // its CSS backgrounds reuse some artwork files. Stylesheet-initiated
+    // fetches carry the stylesheet as their referrer; the artwork's <img>
+    // fetches carry the page, so only those count.
+    const referer = request.headers().referer;
+    if (referer !== undefined && new URL(referer).pathname.endsWith(".css")) {
+      return;
+    }
+    const path = assetPath(request.url());
     if (/paper-(login|signup)|veined-maple/.test(path)) paths.add(path);
   });
   return paths;
 }
 
-const expectedAssets = (mode: string, theme: string) => [
-  `/auth/paper-${mode}${theme === "dark" ? "-dark" : ""}.webp`,
-  theme === "dark"
-    ? "/auth/veined-maple-dark.webp"
-    : "/landing/veined-maple.webp",
-];
+const expectedAssets = (mode: string, theme: string) =>
+  [
+    `/auth/paper-${mode}${theme === "dark" ? "-dark" : ""}.webp`,
+    theme === "dark"
+      ? "/auth/veined-maple-dark.webp"
+      : "/landing/veined-maple.webp",
+  ].sort();
 
 async function expectArtwork(page: Page) {
   const images = page.locator("[data-auth-artwork] img");
@@ -33,6 +47,28 @@ async function expectArtwork(page: Page) {
       ),
     )
     .toBe(true);
+}
+
+/**
+ * The rendered artwork is exactly the expected theme's assets, and the
+ * artwork requested nothing else. A file the loading screen already fetched
+ * is reused from cache without a new request, so requests may be a subset.
+ */
+async function expectOnlyArtwork(
+  page: Page,
+  requests: ReadonlySet<string>,
+  expected: readonly string[],
+) {
+  await expectArtwork(page);
+  const sources = await page
+    .locator("[data-auth-artwork] img")
+    .evaluateAll((nodes) =>
+      nodes.map((node) =>
+        node instanceof HTMLImageElement ? node.currentSrc : "",
+      ),
+    );
+  expect(sources.map(assetPath).sort()).toEqual(expected);
+  expect([...requests].filter((path) => !expected.includes(path))).toEqual([]);
 }
 
 for (const mode of ["login", "signup"]) {
@@ -68,8 +104,7 @@ for (const mode of ["login", "signup"]) {
       await expect(page.locator("[data-auth-artwork] img")).toHaveCount(0);
       expect([...requests]).toEqual([]);
       await page.setViewportSize({ width: 900, height: 1100 });
-      await expectArtwork(page);
-      expect([...requests].sort()).toEqual(expectedAssets(mode, theme).sort());
+      await expectOnlyArtwork(page, requests, expectedAssets(mode, theme));
       await expect(
         page.locator('[data-auth-artwork] img[loading="lazy"]'),
       ).toHaveCount(2);
@@ -85,10 +120,7 @@ test("artwork follows system theme changes and defers hidden-theme requests", as
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/signup");
-  await expectArtwork(page);
-  expect([...requests].sort()).toEqual(
-    expectedAssets("signup", "light").sort(),
-  );
+  await expectOnlyArtwork(page, requests, expectedAssets("signup", "light"));
   await page.setViewportSize({ width: 390, height: 1100 });
   await expect(page.locator("[data-auth-artwork] img")).toHaveCount(0);
   requests.clear();
@@ -96,8 +128,7 @@ test("artwork follows system theme changes and defers hidden-theme requests", as
   await expect(page.locator("html")).toHaveClass(/dark/);
   expect([...requests]).toEqual([]);
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await expectArtwork(page);
-  expect([...requests].sort()).toEqual(expectedAssets("signup", "dark").sort());
+  await expectOnlyArtwork(page, requests, expectedAssets("signup", "dark"));
   await page.emulateMedia({ colorScheme: "light" });
   await expect(
     page.locator('[data-auth-artwork] img[src="/auth/paper-signup.webp"]'),

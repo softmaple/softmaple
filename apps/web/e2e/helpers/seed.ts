@@ -53,8 +53,9 @@ export const login = async (
   credentials: E2ESeed["owner"] | E2ESeed["editor"] | E2ESeed["viewer"],
 ): Promise<void> => {
   await page.goto("/login");
-  await page.getByLabel("Email").fill(credentials.email);
-  await page.getByLabel("Password").fill(credentials.password);
-  await page.getByRole("button", { name: /^Sign in$/i }).click();
+  // Exact labels: "Password" would also match the "Show password" toggle.
+  await page.getByLabel("Email", { exact: true }).fill(credentials.email);
+  await page.getByLabel("Password", { exact: true }).fill(credentials.password);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL("**/dashboard");
 };

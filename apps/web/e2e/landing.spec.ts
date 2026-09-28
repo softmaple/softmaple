@@ -146,7 +146,17 @@ test("narrative annotations enter once and pause in the background", async ({
     document.dispatchEvent(new Event("visibilitychange"));
   });
   await expect(narrative).toHaveAttribute("data-entrance", "playing");
-  await page.waitForTimeout(650);
+  // Pause once the note is visibly under way (it starts 0.5s in) rather than
+  // after a fixed sleep: a busy machine can start the timeline late.
+  await expect
+    .poll(
+      () =>
+        narrative
+          .locator(".story-note")
+          .evaluate((el) => Number(getComputedStyle(el).opacity)),
+      { intervals: [25] },
+    )
+    .toBeGreaterThan(0);
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", {
       configurable: true,

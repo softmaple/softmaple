@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { resetPassword } from "@/app/actions/auth";
 import { Label } from "@softmaple/ui/components/label";
 import { Input } from "@softmaple/ui/components/input";
@@ -10,8 +11,15 @@ import { authInputClass, authSubmitClass } from "./auth-styles";
 
 export const ResetPasswordForm = () => {
   const [state, action] = useActionState(resetPassword, null);
+  const router = useRouter();
   const emailError =
     state !== null && !state.ok ? state.fieldErrors?.email?.[0] : undefined;
+
+  useEffect(() => {
+    if (state?.ok && state.data.redirectTo !== undefined) {
+      router.replace(state.data.redirectTo);
+    }
+  }, [router, state]);
 
   return (
     <form action={action} className="space-y-5 min-[56.25rem]:max-xl:space-y-4">

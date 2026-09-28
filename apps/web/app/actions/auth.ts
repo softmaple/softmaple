@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { RedirectType, redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/utils/supabase/server";
 import type { User } from "@supabase/supabase-js";
@@ -164,9 +165,11 @@ export const resetPassword = async (
       "Could not send the reset link. Try again.",
     );
   }
+  const message =
+    "If an account uses that email, a password reset link is on its way.";
   return actionSuccess({
-    message:
-      "If an account uses that email, a password reset link is on its way.",
+    message,
+    redirectTo: `/login?message=${encodeURIComponent(message)}`,
   });
 };
 
@@ -226,10 +229,13 @@ export const updatePassword = async (
   }
   await supabase.auth.signOut();
   revalidatePath("/", "layout");
-  return actionSuccess({
-    redirectTo:
-      "/login?message=Password%20updated.%20Log%20in%20with%20your%20new%20password.",
-  });
+  // Redirect from the action: signing out re-renders this page without a
+  // session, and its guard would bounce to "link invalid" before a
+  // client-side redirect could run.
+  redirect(
+    `/login?message=${encodeURIComponent("Password updated. Log in with your new password.")}`,
+    RedirectType.replace,
+  );
 };
 
 export const logout = async (): Promise<ActionResult<AuthActionData>> => {

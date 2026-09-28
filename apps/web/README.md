@@ -222,14 +222,19 @@ pnpm --filter @softmaple/web dev
 pnpm --filter @softmaple/web typecheck
 pnpm --filter @softmaple/web lint
 pnpm --filter @softmaple/web test
-pnpm --filter @softmaple/web test:e2e
+pnpm --filter @softmaple/web test:e2e:chromium  # public surfaces (PR CI)
+pnpm --filter @softmaple/web test:e2e:seeded    # isolated Supabase project
 pnpm turbo run build --filter=@softmaple/web
 ```
 
-Real product E2E requires the isolated variables documented in
-[`docs/development.mdx`](../../docs/development.mdx). It starts Web and Collab
-on dynamic ports with `reuseExistingServer=false`; no mock client or forged
-authentication cookie is used.
+Playwright has two projects. `chromium` covers every spec that runs on
+placeholder credentials (landing, auth, public navigation) and runs on each
+pull request as **Chromium Smoke**. `chromium-seeded` (`core.spec.ts`,
+`workspace-settings.spec.ts`) seeds real users and requires the isolated
+variables documented in [`docs/development.mdx`](../../docs/development.mdx);
+it runs from the manual **Isolated Supabase E2E** workflow. Both start Web and
+Collab on dynamic ports with `reuseExistingServer=false`; no mock client or
+forged authentication cookie is used.
 
 ## Layout
 

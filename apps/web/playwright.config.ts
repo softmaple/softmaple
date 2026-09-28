@@ -17,13 +17,22 @@ const collabOrigin = `http://127.0.0.1:${collabPort}`;
 
 process.env.E2E_BASE_URL = baseURL;
 
+/**
+ * Specs that seed and log in through an isolated Supabase project
+ * (E2E_SEED_SECRET and friends). They run in the `chromium-seeded` project;
+ * everything else runs against placeholder credentials in `chromium`.
+ */
+const seededSpecs = ["**/core.spec.ts", "**/workspace-settings.spec.ts"];
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : 1,
-  reporter: process.env.CI ? "github" : "html",
+  // CI keeps inline annotations and also writes the HTML report the
+  // workflows upload as an artifact.
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "html",
   timeout: 45_000,
   expect: { timeout: 10_000 },
   use: {
@@ -37,6 +46,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      testIgnore: seededSpecs,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "chromium-seeded",
+      testMatch: seededSpecs,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

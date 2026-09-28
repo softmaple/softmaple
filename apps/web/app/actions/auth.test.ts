@@ -5,22 +5,45 @@ const {
   signInWithPassword,
   getUser,
   resetPasswordForEmail,
+  updateUser,
+  signOut,
   revalidatePath,
+  redirect,
 } = vi.hoisted(() => ({
   signUp: vi.fn(),
   signInWithPassword: vi.fn(),
   getUser: vi.fn(),
   resetPasswordForEmail: vi.fn(),
+  updateUser: vi.fn(),
+  signOut: vi.fn(),
   revalidatePath: vi.fn(),
+  redirect: vi.fn(),
 }));
 vi.mock("@/utils/supabase/server", () => ({
   createClient: vi.fn(async () => ({
-    auth: { signUp, signInWithPassword, getUser, resetPasswordForEmail },
+    auth: {
+      signUp,
+      signInWithPassword,
+      getUser,
+      resetPasswordForEmail,
+      updateUser,
+      signOut,
+    },
   })),
 }));
 vi.mock("next/cache", () => ({ revalidatePath }));
+vi.mock("next/navigation", () => ({
+  RedirectType: { push: "push", replace: "replace" },
+  redirect,
+}));
 
-import { login, resetPassword, sendPasswordResetLink, signup } from "./auth";
+import {
+  login,
+  resetPassword,
+  sendPasswordResetLink,
+  signup,
+  updatePassword,
+} from "./auth";
 
 const form = (values: Record<string, string>) => {
   const data = new FormData();
@@ -184,6 +207,37 @@ describe("forgot password", () => {
       ok: false,
       message: "Could not send the reset link. Try again.",
     });
+  });
+});
+
+describe("choosing a new password", () => {
+  const passwords = form({
+    password: "password123",
+    confirmPassword: "password123",
+  });
+
+  it("signs out and redirects to log in from the server", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    updateUser.mockResolvedValue({ error: null });
+    signOut.mockResolvedValue({ error: null });
+    await updatePassword(null, passwords);
+    expect(updateUser).toHaveBeenCalledWith({ password: "password123" });
+    expect(signOut).toHaveBeenCalled();
+    expect(redirect).toHaveBeenCalledWith(
+      `/login?message=${encodeURIComponent("Password updated. Log in with your new password.")}`,
+      "replace",
+    );
+  });
+
+  it("stays on the form when the password cannot be updated", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    updateUser.mockResolvedValue({ error: { message: "weak" } });
+    expect(await updatePassword(null, passwords)).toMatchObject({
+      ok: false,
+      message: "Could not update your password. Request a new reset link.",
+    });
+    expect(signOut).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
   });
 });
 

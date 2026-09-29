@@ -2,13 +2,13 @@
 //
 // Replays datasets/<dataset>.json with the paper's TypeScript reference
 // implementation and prints the dataset SHA-256 plus the final text length and
-// SHA-256. Build the reference first:
+// SHA-256. From the repository root, build the reference and run:
 //
-//   cd ../egwalker-paper/eg-walker-reference && npm install && npx tsc -p .
+//   (cd ../egwalker-paper/eg-walker-reference && npm install && npx tsc -p .)
 //   node packages/bench/scripts/paper-reference-oracle.mjs --dataset A2
 //
 // A2 takes about 7 minutes and needs a large stack and heap; the script
-// re-executes itself with both when they are missing.
+// re-executes itself in a child process with both.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";

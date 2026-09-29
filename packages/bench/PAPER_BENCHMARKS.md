@@ -436,8 +436,8 @@ of A2), `node_nodecc-raw.json` (the source of A1) and `ff-raw.json`.
 To regenerate the A2 digest (about 7 minutes):
 
 ```bash
-cd ../egwalker-paper/eg-walker-reference && npm install && npx tsc -p .
-cd - && node packages/bench/scripts/paper-reference-oracle.mjs --dataset A2
+(cd ../egwalker-paper/eg-walker-reference && npm install && npx tsc -p .)
+node packages/bench/scripts/paper-reference-oracle.mjs --dataset A2
 ```
 
 The script zero-pads numeric agents so their string order equals numeric

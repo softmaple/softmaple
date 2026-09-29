@@ -97,7 +97,8 @@ This benchmark imports the paper JSON trace and applies events through
 This is useful as a stress test for the `@softmaple/eg-walker` engine:
 
 - Can it ingest paper-scale traces?
-- Does it converge to `endContent`?
+- Does it converge to the dataset's final text oracle (see
+  [Final Text Oracle](#final-text-oracle))?
 - Which datasets trigger slow replay paths?
 - Do optimizations improve the same workload over time?
 
@@ -388,6 +389,62 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --granularity operation
 ```
 
+## Final Text Oracle
+
+Every unbounded run validates the final text after its timed region closes.
+Result lines report which oracle was used as
+`finalTextOracle=endContent|referenceDigest` (`none` for bounded runs).
+
+| Datasets               | Oracle            | Check                                                 |
+| ---------------------- | ----------------- | ----------------------------------------------------- |
+| S1, S2, S3, C1, C2, A1 | `endContent`      | exact equality with the trace's `endContent`          |
+| A2                     | `referenceDigest` | UTF-16 length, then SHA-256 of the UTF-8 encoded text |
+
+A2 cannot be validated against `endContent`. The paper builds it with
+`dt bench-duplicate raw/git-makefile.dt -n2` and exports it with
+`dt export-trace` (`step1-prepare.sh`), so it is git-makefile twice: 697,638 =
+2 × 348,819 events. The export replaces agent names with numbers in
+lexicographic order and splits some agents into several numbered slots (375
+slots in A2.json, 299 agents in the raw history). Diamond Types orders
+concurrent inserts at the same position by agent name, and that information
+does not survive the export. The first divergence is the order of two
+concurrent inserts near offset 27,800: `endContent` has
+`"AM_OBJS))\n TEST_BUILTINS_OBJS"` where any faithful replay of A2.json has
+`"AM_OBJS))\n\nTEST_BUILTINS_OBJS"`.
+
+The paper's own TypeScript reference implementation
+(`eg-walker-reference`) replays A2.json to exactly the same bytes as every
+SoftMaple path, so A2 is validated against that result instead:
+
+| Input                      | Value                                                              |
+| -------------------------- | ------------------------------------------------------------------ |
+| egwalker-paper commit      | `4d9bef55e4f2e3b3b8b0efe8f91cd35d34ed35a8`                         |
+| `datasets/A2.json` SHA-256 | `d81efb97c3316c0b8d9555f26be2fcbe57e70f36b2e5fd38256e636a747bfba0` |
+| Final text length (UTF-16) | 227,352                                                            |
+| Final text SHA-256 (UTF-8) | `3a4da13d6f7ead4357d1a93fec2f6cf58f7a2cbb50aef742c163caef64ed455c` |
+
+The digests live in `src/bench/paper-final-text.ts`. The harness hashes
+`A2.json` before using them and fails if the dataset changed, so a stale digest
+never validates new data.
+
+Agreement with Diamond Types on this history is still tested. The
+`@softmaple/eg-walker` conformance suite (`test:conformance`) replays the raw
+DT exports in `eg-walker-reference/testdata`, which keep real agent names, and
+requires DT's `endContent` byte for byte: `git-makefile-raw.json` (the source
+of A2), `node_nodecc-raw.json` (the source of A1) and `ff-raw.json`.
+
+To regenerate the A2 digest (about 7 minutes):
+
+```bash
+cd ../egwalker-paper/eg-walker-reference && npm install && npx tsc -p .
+cd - && node packages/bench/scripts/paper-reference-oracle.mjs --dataset A2
+```
+
+The script zero-pads numeric agents so their string order equals numeric
+order, matching the bench converter's padded agent keys; the reference
+tie-breaks concurrent inserts by agent string, so unpadded agents produce a
+different document.
+
 ## Metrics To Print
 
 For each dataset and run:
@@ -468,8 +525,9 @@ meanTotalMs
 The benchmark must fail if:
 
 - any remote events remain buffered;
-- `replica.getText() !== trace.endContent` for unbounded runs where the chosen
-  granularity is expected to be faithful;
+- `replica.getText()` does not match the dataset's final text oracle for
+  unbounded runs where the chosen granularity is expected to be faithful (see
+  [Final Text Oracle](#final-text-oracle));
 - portable snapshot round-trip or explicit materialization changes the text or
   event count;
 - native snapshot restore performs a full replay;

@@ -36,6 +36,11 @@ import {
   type NativePaperPayload,
 } from "./paper-bench-native";
 import { paperRootFromPackageRoot } from "./paper-bench-paths";
+import {
+  assertFinalText,
+  loadFinalTextOracle,
+  type FinalTextOracleKind,
+} from "./paper-final-text";
 import { measurePersistenceMetrics } from "./persistence-metrics";
 
 const sourcePackageRoot = resolve(
@@ -100,6 +105,7 @@ interface ApplyBenchResult {
   readonly events: number;
   readonly finalTextLength: number;
   readonly finalTextValidated: boolean;
+  readonly finalTextOracle: FinalTextOracleKind | "none";
   readonly loadConvertMs: number;
   readonly applyMs: number;
   readonly totalMs: number;
@@ -126,6 +132,7 @@ interface NativeBenchResult {
   readonly frontierSize: number;
   readonly finalTextLength: number;
   readonly finalTextValidated: boolean;
+  readonly finalTextOracle: FinalTextOracleKind | "none";
   readonly loadConvertMs: number;
   readonly graphEncodeMs: number;
   readonly binaryBytes: number;
@@ -181,7 +188,7 @@ interface PreparedApplyBench {
   readonly patchCount: number;
   readonly eventCount: number;
   readonly limited: boolean;
-  readonly expectedText: string;
+  readonly endContent: string;
   apply(replica: EgWalkerReplica): number;
 }
 
@@ -198,6 +205,7 @@ interface BenchResult {
   readonly patches: number;
   readonly events: number;
   readonly finalTextLength: number;
+  readonly finalTextOracle: FinalTextOracleKind | "none";
   readonly loadConvertMs: number;
   readonly applyMs: number;
   readonly totalMs: number;
@@ -541,6 +549,7 @@ const printResult = (result: BenchResult): void => {
       `patches=${result.patches}`,
       `events=${result.events}`,
       `text=${result.finalTextLength}`,
+      `finalTextOracle=${result.finalTextOracle}`,
       `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
       `applyMs=${formatNumber(result.applyMs)}`,
       `totalMs=${formatNumber(result.totalMs)}`,
@@ -594,6 +603,7 @@ const printApplyResult = (result: ApplyBenchResult): void => {
       `events=${result.events}`,
       `text=${result.finalTextLength}`,
       `finalTextValidated=${result.finalTextValidated}`,
+      `finalTextOracle=${result.finalTextOracle}`,
       `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
       `applyMs=${formatNumber(result.applyMs)}`,
       `totalMs=${formatNumber(result.totalMs)}`,
@@ -625,6 +635,7 @@ const printNativeResult = (result: NativeBenchResult): void => {
       `frontier=${result.frontierSize}`,
       `text=${result.finalTextLength}`,
       `finalTextValidated=${result.finalTextValidated}`,
+      `finalTextOracle=${result.finalTextOracle}`,
       `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
       `graphEncodeMs=${formatNumber(result.graphEncodeMs)}`,
       `binaryBytes=${result.binaryBytes}`,
@@ -738,14 +749,26 @@ const applyLoadedPaperTrace = (
     throw new Error(`${dataset}: ${pending} remote events remain buffered`);
   }
 
-  const text = replica.getText();
-  if (!loaded.limited && text !== loaded.trace.endContent) {
-    throw new Error(
-      `${dataset}: final text mismatch, got ${text.length} UTF-16 code units, expected ${loaded.trace.endContent.length}`,
-    );
-  }
+  return { replica, text: replica.getText(), applyCalls };
+};
 
-  return { replica, text, applyCalls };
+/**
+ * Validate a full-trace final text against the dataset oracle. Callers run it
+ * after their timed region closes; limited runs have no oracle.
+ */
+const validateFinalText = (
+  paperRoot: string,
+  dataset: PaperDataset,
+  limited: boolean,
+  endContent: string,
+  text: string,
+): FinalTextOracleKind | "none" => {
+  if (limited) {
+    return "none";
+  }
+  const oracle = loadFinalTextOracle(paperRoot, dataset, endContent);
+  assertFinalText(dataset, text, oracle);
+  return oracle.kind;
 };
 
 const applyPaperTrace = (
@@ -763,10 +786,20 @@ const applyPaperTrace = (
   readonly applyCalls: number;
 } => {
   const loaded = loadPaperTrace(paperRoot, dataset, options);
-  return {
+  const applied = applyLoadedPaperTrace(
+    dataset,
+    run,
     loaded,
-    ...applyLoadedPaperTrace(dataset, run, loaded, options.applyBatchEvents),
-  };
+    options.applyBatchEvents,
+  );
+  validateFinalText(
+    paperRoot,
+    dataset,
+    loaded.limited,
+    loaded.trace.endContent,
+    applied.text,
+  );
+  return { loaded, ...applied };
 };
 
 const printProgress = (
@@ -799,13 +832,18 @@ const prepareNativeBench = (
   const startedAt = performance.now();
   const loaded = loadPaperTrace(paperRoot, benchCase.dataset, benchCase);
   const convertedAt = performance.now();
-  const payload = buildNativePaperPayload(
-    loaded.events,
-    loaded.limited ? undefined : loaded.trace.endContent,
-  );
+  const payload = buildNativePaperPayload(loaded.events);
   const encodedAt = performance.now();
+  // Resolved after the timed conversion and encode phases.
+  const finalTextOracle = loaded.limited
+    ? undefined
+    : loadFinalTextOracle(
+        paperRoot,
+        benchCase.dataset,
+        loaded.trace.endContent,
+      );
   return {
-    payload,
+    payload: { ...payload, finalTextOracle },
     txns: loaded.txnCount,
     patches: loaded.patchCount,
     loadConvertMs: convertedAt - startedAt,
@@ -843,6 +881,7 @@ const runNativeDatasetOnce = (
     frontierSize: measured.frontierSize,
     finalTextLength: measured.finalTextLength,
     finalTextValidated: measured.finalTextValidated,
+    finalTextOracle: measured.finalTextOracle ?? "none",
     loadConvertMs: prepared.loadConvertMs,
     graphEncodeMs: prepared.graphEncodeMs,
     binaryBytes: measured.binaryBytes,
@@ -910,6 +949,13 @@ const runDatasetOnce = (
     benchCase.applyBatchEvents,
   );
   const appliedAt = performance.now();
+  const finalTextOracle = validateFinalText(
+    paperRoot,
+    benchCase.dataset,
+    loaded.limited,
+    loaded.trace.endContent,
+    text,
+  );
   printProgress(
     "applied",
     benchCase,
@@ -960,6 +1006,7 @@ const runDatasetOnce = (
     patches: loaded.patchCount,
     events: loaded.events.length,
     finalTextLength: text.length,
+    finalTextOracle,
     loadConvertMs: convertedAt - startedAt,
     applyMs: appliedAt - applyStartedAt,
     totalMs: convertedAt - startedAt + appliedAt - applyStartedAt,
@@ -1009,12 +1056,15 @@ const runApplyDatasetOnce = (
     );
   }
   const text = replica.getText();
-  if (!prepared.limited && text !== prepared.expectedText) {
-    throw new Error(
-      `${benchCase.dataset}: final text mismatch, got ${text.length} UTF-16 code units, expected ${prepared.expectedText.length}`,
-    );
-  }
   const appliedAt = performance.now();
+  // Validation runs after the timed region so digest oracles add no cost.
+  const finalTextOracle = validateFinalText(
+    paperRoot,
+    benchCase.dataset,
+    prepared.limited,
+    prepared.endContent,
+    text,
+  );
   printProgress(
     "applied",
     benchCase,
@@ -1040,6 +1090,7 @@ const runApplyDatasetOnce = (
     events: prepared.eventCount,
     finalTextLength: text.length,
     finalTextValidated: !prepared.limited,
+    finalTextOracle,
     loadConvertMs: convertedAt - startedAt,
     applyMs: appliedAt - applyStartedAt,
     totalMs: appliedAt - startedAt,
@@ -1070,7 +1121,7 @@ const prepareApplyBench = (
       patchCount: loaded.patchCount,
       eventCount: loaded.eventCount,
       limited: loaded.limited,
-      expectedText: loaded.trace.endContent,
+      endContent: loaded.trace.endContent,
       apply: (replica): number => {
         for (const batch of loaded.batches) {
           replica.applyCausalBatch(batch);
@@ -1086,7 +1137,7 @@ const prepareApplyBench = (
     patchCount: loaded.patchCount,
     eventCount: loaded.events.length,
     limited: loaded.limited,
-    expectedText: loaded.trace.endContent,
+    endContent: loaded.trace.endContent,
     apply: (replica): number =>
       applyRemoteEventsInBatches(
         replica,

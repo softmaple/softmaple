@@ -10,11 +10,13 @@ import {
   encodeTopologicallyOrderedEventsBinary,
 } from "@softmaple/eg-walker/internal";
 
+import { assertFinalText, type FinalTextOracle } from "./paper-final-text";
+
 export interface NativePaperPayload {
   readonly binary: Uint8Array;
   readonly eventCount: number;
   readonly frontier: ReadonlyArray<EventId>;
-  readonly expectedText: string | undefined;
+  readonly finalTextOracle: FinalTextOracle | undefined;
 }
 
 export interface NativePaperLoadMetrics {
@@ -23,6 +25,7 @@ export interface NativePaperLoadMetrics {
   readonly frontierSize: number;
   readonly finalTextLength: number;
   readonly finalTextValidated: boolean;
+  readonly finalTextOracle: FinalTextOracle["kind"] | undefined;
   readonly nativeDecodeMs: number;
   readonly nativeLoadMs: number;
   readonly nativeMaterializeMs: number;
@@ -57,14 +60,14 @@ interface ProcessMemorySample {
  */
 export const buildNativePaperPayload = (
   events: ReadonlyArray<GraphEvent>,
-  expectedText?: string,
+  finalTextOracle?: FinalTextOracle,
 ): NativePaperPayload => {
   const encoded = encodeTopologicallyOrderedEventsBinary(events);
   return {
     binary: encoded.binary,
     eventCount: events.length,
     frontier: [...encoded.frontier].sort(),
-    expectedText,
+    finalTextOracle,
   };
 };
 
@@ -110,22 +113,23 @@ export const measureNativePaperPayload = (
   collectGarbage();
   const memoryAfterLoad = sampleProcessMemory();
 
-  if (payload.expectedText !== undefined && text !== payload.expectedText) {
-    const difference = describeTextDifference(text, payload.expectedText);
-    throw new Error(
-      [
-        `${replicaId}: final text mismatch, got ${text.length} UTF-16 code units, expected ${payload.expectedText.length}`,
-        `first difference at ${difference.index}`,
-        `actual ${JSON.stringify(difference.actualContext)}`,
-        `expected ${JSON.stringify(difference.expectedContext)}`,
-        `binaryBytes=${payload.binary.byteLength}`,
-        `nativeDecodeMs=${decodedAt - decodeStartedAt}`,
-        `nativeLoadMs=${loadedAt - loadStartedAt}`,
-        `nativeMaterializeMs=${materializedAt - loadedAt}`,
-        `nativeDecodeHeapBytes=${memoryAfterDecode.heapUsed - memoryBeforeDecode.heapUsed}`,
-        `nativeLoadHeapBytes=${memoryAfterLoad.heapUsed - memoryAfterDecode.heapUsed}`,
-      ].join("; "),
-    );
+  if (payload.finalTextOracle !== undefined) {
+    try {
+      assertFinalText(replicaId, text, payload.finalTextOracle);
+    } catch (error) {
+      throw new Error(
+        [
+          error instanceof Error ? error.message : String(error),
+          `binaryBytes=${payload.binary.byteLength}`,
+          `nativeDecodeMs=${decodedAt - decodeStartedAt}`,
+          `nativeLoadMs=${loadedAt - loadStartedAt}`,
+          `nativeMaterializeMs=${materializedAt - loadedAt}`,
+          `nativeDecodeHeapBytes=${memoryAfterDecode.heapUsed - memoryBeforeDecode.heapUsed}`,
+          `nativeLoadHeapBytes=${memoryAfterLoad.heapUsed - memoryAfterDecode.heapUsed}`,
+        ].join("; "),
+        { cause: error },
+      );
+    }
   }
 
   return {
@@ -133,7 +137,8 @@ export const measureNativePaperPayload = (
     eventCount: payload.eventCount,
     frontierSize: frontier.length,
     finalTextLength: text.length,
-    finalTextValidated: payload.expectedText !== undefined,
+    finalTextValidated: payload.finalTextOracle !== undefined,
+    finalTextOracle: payload.finalTextOracle?.kind,
     nativeDecodeMs: decodedAt - decodeStartedAt,
     nativeLoadMs: loadedAt - loadStartedAt,
     nativeMaterializeMs: materializedAt - loadedAt,
@@ -176,28 +181,3 @@ const sameIds = (
 ): boolean =>
   left.length === right.length &&
   left.every((eventId, index) => eventId === right[index]);
-
-const describeTextDifference = (
-  actual: string,
-  expected: string,
-): {
-  readonly index: number;
-  readonly actualContext: string;
-  readonly expectedContext: string;
-} => {
-  const sharedLength = Math.min(actual.length, expected.length);
-  let index = 0;
-  while (
-    index < sharedLength &&
-    actual.charCodeAt(index) === expected.charCodeAt(index)
-  ) {
-    index++;
-  }
-  const contextStart = Math.max(0, index - 80);
-  const contextEnd = index + 160;
-  return {
-    index,
-    actualContext: actual.slice(contextStart, contextEnd),
-    expectedContext: expected.slice(contextStart, contextEnd),
-  };
-};

@@ -19,6 +19,30 @@ const CONFORMANCE_SHA256 =
 const EXPECTED_RUN_COUNT = 1_000;
 const EXPECTED_EVENT_COUNT = 91_678;
 
+/**
+ * Raw Diamond Types exports that keep real agent names. Unlike the paper's
+ * numbered JSON datasets, DT's `endContent` is reachable from these, so they
+ * pin concurrent-insert ordering to DT. git-makefile is the source of A2 and
+ * node_nodecc the source of A1.
+ */
+const RAW_DT_EXPORTS = [
+  {
+    file: "ff-raw.json",
+    sha256: "3ed8056ca141b7a513e4d3cc4790e5490869cb440753b0d3a4ddaf4ce18b26ee",
+    eventCount: 26_078,
+  },
+  {
+    file: "git-makefile-raw.json",
+    sha256: "f4c5056f538d1e2a4490c6632558f26bd8d1c4147801bce2ffc2a9674f37a63d",
+    eventCount: 348_819,
+  },
+  {
+    file: "node_nodecc-raw.json",
+    sha256: "0d556fdf974f9f5da7fd0336121029c5542220f830ad6e6ca2e93f64af6e3e1f",
+    eventCount: 947_337,
+  },
+] as const;
+
 interface ReferenceTransaction {
   readonly span: readonly [number, number];
   readonly parents: ReadonlyArray<number>;
@@ -83,16 +107,44 @@ describe("pinned eg-walker reference conformance", () => {
   });
 });
 
+describe("pinned raw Diamond Types exports", () => {
+  it.each(RAW_DT_EXPORTS)("should match DT endContent for $file", ({
+    file,
+    sha256,
+    eventCount,
+  }) => {
+    // Arrange
+    const run = loadPinnedRawExport(file, sha256);
+    const events = convertReferenceRun(run, "canonical");
+    const graph = EventGraph.fromEvents(events);
+    const codec = new ColumnarEventGraphCodec();
+
+    // Act
+    const actual = new EgWalkerEngine().generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    }).text;
+    const packedGraph = codec.decodeBinary(codec.encodeBinary(graph));
+    const packedActual = new EgWalkerReplica(
+      `raw-dt-${file}`,
+      "",
+      packedGraph,
+    ).getText();
+
+    // Assert
+    expect(events).toHaveLength(eventCount);
+    expect(actual === run.endContent, `${file} engine replay`).toBe(true);
+    expect(
+      packedGraph.getPackedReplayPlanningView(),
+      `${file} packed graph`,
+    ).not.toBeNull();
+    expect(packedActual === run.endContent, `${file} packed replay`).toBe(true);
+  }, 300_000);
+});
+
 // Helpers
 
-const loadPinnedReferenceRuns = (): ReadonlyArray<ReferenceRun> => {
-  if (!existsSync(conformancePath)) {
-    throw new Error(
-      `Missing pinned eg-walker reference fixture at ${conformancePath}. ` +
-        "Set EG_WALKER_REFERENCE_ROOT to the checkout root.",
-    );
-  }
-
+const assertPinnedReferenceCommit = (): void => {
   const actualCommit = execFileSync(
     "git",
     ["-C", referenceRoot, "rev-parse", "HEAD"],
@@ -103,14 +155,37 @@ const loadPinnedReferenceRuns = (): ReadonlyArray<ReferenceRun> => {
       `Expected eg-walker-reference ${REFERENCE_COMMIT}, received ${actualCommit}`,
     );
   }
+};
 
-  const bytes = readFileSync(conformancePath);
-  const actualChecksum = createHash("sha256").update(bytes).digest("hex");
-  if (actualChecksum !== CONFORMANCE_SHA256) {
+const readPinnedFixture = (path: string, expectedSha256: string): Buffer => {
+  if (!existsSync(path)) {
     throw new Error(
-      `Expected conformance checksum ${CONFORMANCE_SHA256}, received ${actualChecksum}`,
+      `Missing pinned eg-walker reference fixture at ${path}. ` +
+        "Set EG_WALKER_REFERENCE_ROOT to the checkout root.",
     );
   }
+  assertPinnedReferenceCommit();
+
+  const bytes = readFileSync(path);
+  const actualChecksum = createHash("sha256").update(bytes).digest("hex");
+  if (actualChecksum !== expectedSha256) {
+    throw new Error(
+      `Expected ${path} checksum ${expectedSha256}, received ${actualChecksum}`,
+    );
+  }
+  return bytes;
+};
+
+const loadPinnedRawExport = (file: string, sha256: string): ReferenceRun => {
+  const bytes = readPinnedFixture(
+    join(referenceRoot, "testdata", file),
+    sha256,
+  );
+  return JSON.parse(bytes.toString("utf8")) as ReferenceRun;
+};
+
+const loadPinnedReferenceRuns = (): ReadonlyArray<ReferenceRun> => {
+  const bytes = readPinnedFixture(conformancePath, CONFORMANCE_SHA256);
 
   const parsed: unknown = JSON.parse(bytes.toString("utf8")) as unknown;
   if (!Array.isArray(parsed)) {

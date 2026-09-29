@@ -256,7 +256,9 @@ run, a separate `node --expose-gc` worker applies the same batches untimed,
 validates the text, releases the trace and batches, and prints a
 `paper-bench-apply-memory` line:
 
-- `heapAfterApplyBytes`: heap used after GC with only the replica left alive.
+- `heapAfterApplyBytes`: heap used after GC once the trace and batches are
+  released, with the replica still alive. It includes the process's own
+  baseline, so compare it only between builds.
 - `replicaHeapBytes`: heap that dropping the replica frees.
 - `replicaArrayBufferBytes`: array buffer memory, such as packed operation
   columns, that dropping the replica frees.

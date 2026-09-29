@@ -128,7 +128,10 @@ interface ApplyMemoryResult {
   readonly applyApi: PaperBenchmarkApplyApi;
   readonly events: number;
   readonly finalTextOracle: FinalTextOracleKind | "none";
-  /** Heap used after GC with only the replica left alive. */
+  /**
+   * Heap used after GC once the trace and batches are released, with the
+   * replica still alive. It includes the process's own baseline.
+   */
   readonly heapAfterApplyBytes: number;
   /** Heap that dropping the replica frees. */
   readonly replicaHeapBytes: number;

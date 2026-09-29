@@ -14,6 +14,7 @@ import {
 } from "../index";
 import { materializeBlockState } from "../materialize";
 import { toGraphEvent } from "../wire";
+import { rebuildFromBatches } from "./rebuild-oracle";
 
 describe("BlockReplica", () => {
   it("should start from one fixed event-backed paragraph marker", () => {
@@ -725,6 +726,94 @@ describe("BlockReplica", () => {
       { ...documentBefore.blocks[0], text: "kept!" },
     ]);
     expect(next.parentVersion).toEqual([kept.events.at(-1)!.id]);
+  });
+
+  it("should reject a supplied duplicate block ID before a transaction edits anything", () => {
+    // Arrange
+    const alice = new BlockReplica("alice");
+    const bob = new BlockReplica("bob");
+    alice.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "taken",
+        type: "paragraph",
+        text: "one",
+      });
+    });
+
+    // Act
+    const batch = alice.transact((transaction) => {
+      expect(() =>
+        transaction.insertBlock("taken", {
+          id: "taken",
+          type: "paragraph",
+          text: "",
+        }),
+      ).toThrow("Duplicate block ID taken");
+      expect(() => transaction.splitBlock("taken", 1, {}, "taken")).toThrow(
+        "Duplicate block ID taken",
+      );
+      transaction.insertText("taken", 3, "!");
+    })!;
+    bob.applyRemoteEvents(alice.exportEvents());
+    alice.applyRemoteEvents(
+      bob.transact((transaction) => {
+        transaction.insertText("taken", 4, "?");
+      })!,
+    );
+
+    // Assert
+    expect(batch.events).toHaveLength(1);
+    expect(alice.getDocument().blocks.map(({ text }) => text)).toEqual([
+      "",
+      "one!?",
+    ]);
+    expect(alice.getDocument()).toEqual(
+      rebuildFromBatches("alice", alice.exportEvents()).state.document,
+    );
+  });
+
+  it("should discard a transaction whose edit failed part-way even if the callback caught the error", () => {
+    // Arrange: bob names a block after the event ID alice generates next.
+    const alice = new BlockReplica("alice");
+    const bob = new BlockReplica("bob");
+    alice.applyRemoteEvents(
+      bob.transact((transaction) => {
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: "alice:0",
+          type: "paragraph",
+          text: "bob",
+        });
+      })!,
+    );
+    const eventsBefore = alice.exportEvents();
+
+    // Act
+    expect(() =>
+      alice.transact((transaction) => {
+        try {
+          transaction.splitBlock(BOOTSTRAP_BLOCK_ID, 0);
+        } catch {
+          // The failed split already reached EG-walker; carrying on must not
+          // commit a batch built on top of it.
+        }
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "late");
+      }),
+    ).toThrow("Duplicate block ID alice:0");
+    const next = alice.transact((transaction) => {
+      transaction.insertText("alice:0", 3, "!");
+    })!;
+    bob.applyRemoteEvents(next);
+
+    // Assert
+    expect(alice.exportEvents()).toHaveLength(eventsBefore.length + 1);
+    expect(alice.getDocument().blocks.map(({ text }) => text)).toEqual([
+      "",
+      "bob!",
+    ]);
+    expect(bob.getDocument()).toEqual(alice.getDocument());
+    expect(alice.getDocument()).toEqual(
+      rebuildFromBatches("alice", alice.exportEvents()).state.document,
+    );
   });
 
   it("should reject a whole remote delivery when one of its batches is invalid", () => {

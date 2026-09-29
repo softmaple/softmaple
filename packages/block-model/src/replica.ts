@@ -387,10 +387,15 @@ export const isRichTextEventBatch = (
  * Applies operations straight to the replica's long-lived state. If the
  * callback throws after touching EG-walker, the owner rebuilds its state from
  * the committed batches, so a failed transaction still leaves no trace.
+ *
+ * An edit that throws after it reached EG-walker leaves the shared state
+ * half-applied, so it spoils the transaction even if the callback catches the
+ * error: every later call and `finish` rethrow it, and the owner rebuilds.
  */
 class BlockTransactionContext implements BlockTransaction {
   private readonly events: RichTextEvent[] = [];
   private readonly initialParentVersion: ReadonlyArray<string>;
+  private failure: { readonly error: unknown } | null = null;
   /** Whether EG-walker may have been modified by this transaction. */
   mutated = false;
 
@@ -399,6 +404,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   insertText(blockId: BlockId, offset: number, text: string): void {
+    this.assertUsable();
     if (text.length === 0) {
       return;
     }
@@ -414,6 +420,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   deleteText(blockId: BlockId, from: number, to: number): void {
+    this.assertUsable();
     const projected = this.state.requireVisibleBlock(blockId);
     this.state.rawBoundary(projected, from);
     this.state.rawBoundary(projected, to);
@@ -429,8 +436,7 @@ class BlockTransactionContext implements BlockTransaction {
     }
     // Delete from the end so earlier raw indexes stay valid.
     for (const range of [...ranges].reverse()) {
-      this.mutated = true;
-      this.events.push(
+      this.edit(() =>
         this.state.delete(
           range.start,
           range.end - range.start,
@@ -442,6 +448,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   insertBlock(afterBlockId: BlockId | null, input: BlockInput): BlockId {
+    this.assertUsable();
     assertBlockInput(input);
     const after =
       afterBlockId === null
@@ -449,6 +456,9 @@ class BlockTransactionContext implements BlockTransaction {
         : this.state.requireVisibleBlock(afterBlockId);
     if (after === undefined) {
       throw new Error("Cannot insert a block into an empty projection");
+    }
+    if (input.id !== undefined) {
+      this.assertUnusedBlockId(input.id);
     }
     let blockId = "";
     this.insertRaw(
@@ -481,10 +491,14 @@ class BlockTransactionContext implements BlockTransaction {
     fields: BlockFieldPatch = {},
     preferredBlockId?: BlockId,
   ): BlockId {
+    this.assertUsable();
     assertFieldPatch(fields);
     const projected = this.state.requireVisibleBlock(blockId);
     const source = projected.block;
     const rawIndex = this.state.rawBoundary(projected, offset);
+    if (preferredBlockId !== undefined) {
+      this.assertUnusedBlockId(preferredBlockId);
+    }
     let newBlockId = "";
     this.insertRaw(
       rawIndex,
@@ -508,6 +522,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   joinBlock(blockId: BlockId): void {
+    this.assertUsable();
     if (blockId === BOOTSTRAP_BLOCK_ID) {
       throw new Error("The bootstrap block cannot be joined");
     }
@@ -518,6 +533,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   deleteBlock(blockId: BlockId): void {
+    this.assertUsable();
     if (blockId === BOOTSTRAP_BLOCK_ID) {
       throw new Error("The bootstrap block cannot be deleted");
     }
@@ -526,6 +542,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   setBlock(blockId: BlockId, fields: BlockFieldPatch): void {
+    this.assertUsable();
     this.state.requireVisibleBlock(blockId);
     assertFieldPatch(fields);
     if (Object.keys(fields).length === 0) {
@@ -542,6 +559,7 @@ class BlockTransactionContext implements BlockTransaction {
     value: true | LinkAttributes | null,
     affinity: MarkBoundaryAffinity = defaultMarkAffinity(kind),
   ): void {
+    this.assertUsable();
     if (!isMarkKind(kind)) {
       throw new Error(`Unsupported mark kind ${String(kind)}`);
     }
@@ -563,6 +581,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   replaceDocument(next: BlockDocumentInput): ReadonlyArray<BlockId> {
+    this.assertUsable();
     if (!Array.isArray(next.blocks) || next.blocks.length === 0) {
       throw new Error("A block document must contain at least one block");
     }
@@ -661,6 +680,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   finish(): RichTextEventBatch | null {
+    this.assertUsable();
     if (this.events.length === 0) {
       return null;
     }
@@ -687,8 +707,25 @@ class BlockTransactionContext implements BlockTransaction {
     effectFor: (graphEvent: GraphEvent) => RichTextEffect,
     rejection: string,
   ): void {
+    this.edit(() => this.state.insert(rawIndex, text, effectFor, rejection));
+  }
+
+  /** Apply one edit to the shared state, spoiling the transaction on error. */
+  private edit(apply: () => RichTextEvent): void {
+    this.assertUsable();
     this.mutated = true;
-    this.events.push(this.state.insert(rawIndex, text, effectFor, rejection));
+    try {
+      this.events.push(apply());
+    } catch (error) {
+      this.failure = { error };
+      throw error;
+    }
+  }
+
+  private assertUsable(): void {
+    if (this.failure !== null) {
+      throw this.failure.error;
+    }
   }
 
   private requireBlock(blockId: BlockId): Block {

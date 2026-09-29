@@ -108,4 +108,6 @@ operations. The replica then rebuilds its sequence mirror from one full anchor
 projection. It does the same when a concurrent insert lands next to a deleted
 atom that an anchor still names, because only a projection knows which side of
 that atom the insert took. A transaction or delivery that throws rebuilds the
-state from the committed batches, so a failed update leaves no trace.
+state from the committed batches, so a failed update leaves no trace. An edit
+that fails after it reached EG-walker also ends its transaction when the
+callback catches the error: later calls rethrow it, and so does `transact`.

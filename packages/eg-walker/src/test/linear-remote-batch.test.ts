@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
-import { createCausalEventBatchBuilder } from "../core/causal-event-batch";
+import {
+  createCausalEventBatchBuilder,
+  type CausalEventBatch,
+} from "../core/causal-event-batch";
 import { EgWalkerReplica } from "../core/replica";
 import { APPLY_REMOTE_EVENT_STATUS, type GraphEvent } from "../types";
 import { cloneEvent } from "./test-helpers";
@@ -296,4 +299,110 @@ describe("applyCausalBatch on an exact chain", () => {
       perEventReference(events).replica.exportEventGraph(),
     );
   });
+
+  it("packs non-canonical IDs next to canonical runs", () => {
+    const ids = [
+      // No numeric suffix, a leading zero, more than 16 digits, and a
+      // replica ID that contains ":".
+      "draft",
+      "a:007",
+      "a:12345678901234567",
+      "team:a:0",
+      "team:a:1",
+      ...Array.from({ length: 40 }, (_, offset) => `a:${offset}`),
+      "a:0x",
+    ];
+    let length = 0;
+    const events = chainOf(ids, (offset) => {
+      if (offset % 4 === 3) {
+        length--;
+        return { type: OPERATION_TYPE.DELETE, index: 0, length: 1 };
+      }
+      return { type: OPERATION_TYPE.INSERT, index: length++, text: "x" };
+    });
+    const replica = new EgWalkerReplica("causal");
+
+    replica.applyCausalBatch(toCausalBatch(events.slice(0, 20)));
+    replica.applyCausalBatch(toCausalBatch(events.slice(20)));
+
+    const reference = perEventReference(events).replica;
+    expect(replica.getText()).toBe(reference.getText());
+    expect(replica.exportEventGraph()).toEqual(reference.exportEventGraph());
+    expect(replica.getFrontier()).toEqual(new Set(["a:0x"]));
+    expect(packedTailEvents(replica)).toBe(0);
+  });
+
+  it.each([
+    { name: "within the batch", repeated: "a:3" },
+    { name: "from an earlier batch", repeated: "a:1" },
+  ])("rejects an ID repeated $name and changes nothing", ({ repeated }) => {
+    const replica = new EgWalkerReplica("causal");
+    replica.applyCausalBatch(toCausalBatch(typing("a", 0, null, 0, "ab")));
+    const before = observableState(replica);
+    const events = [
+      ...typing("a", 2, "a:1", 2, "c".repeat(40)),
+      insertEvent(repeated, ["a:41"], 42, "x"),
+    ];
+    const batch = toCausalBatch(events);
+
+    expect(() => replica.applyCausalBatch(batch)).toThrow(
+      `Event ${repeated} already exists`,
+    );
+    expect(observableState(replica)).toEqual(before);
+    replica.applyCausalBatch(toCausalBatch(typing("a", 2, "a:1", 2, "cd")));
+    expect(replica.getText()).toBe("abcd");
+    expect(packedTailEvents(replica)).toBe(0);
+  });
+
+  it("keeps events with fractional timestamps in the object tail", () => {
+    const events = typing("a", 0, null, 0, "ab").map((event, index) => ({
+      ...event,
+      timestamp: index + 0.5,
+    }));
+    const replica = new EgWalkerReplica("causal");
+
+    replica.applyCausalBatch(toCausalBatch(events));
+
+    expect(replica.getText()).toBe("ab");
+    expect(replica.exportEventGraph().map((event) => event.timestamp)).toEqual([
+      0.5, 1.5,
+    ]);
+    expect(packedTailEvents(replica)).toBe(2);
+  });
 });
+
+/** Events that each name only the event before them. */
+const chainOf = (
+  ids: ReadonlyArray<string>,
+  operationAt: (offset: number) => GraphEvent["operation"],
+): GraphEvent[] =>
+  ids.map((id, offset) => ({
+    id,
+    parentVersion: new Set(offset === 0 ? [] : [ids[offset - 1]!]),
+    operation: operationAt(offset),
+    timestamp: offset,
+  }));
+
+const toCausalBatch = (events: ReadonlyArray<GraphEvent>): CausalEventBatch => {
+  const builder = createCausalEventBatchBuilder(events.length);
+  for (const { id, parentVersion, operation, timestamp } of events) {
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      builder.appendInsert(
+        id,
+        parentVersion,
+        operation.index,
+        operation.text,
+        timestamp,
+      );
+    } else {
+      builder.appendDelete(
+        id,
+        parentVersion,
+        operation.index,
+        operation.length,
+        timestamp,
+      );
+    }
+  }
+  return builder.finish();
+};

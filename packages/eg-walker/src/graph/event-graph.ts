@@ -32,6 +32,7 @@ import {
 import {
   PackedLinearChain,
   type LinearEventBatch,
+  type PackedLinearChainRange,
 } from "./internals/packed-linear-chain";
 import {
   RankedDiffVersionsWorkspace,
@@ -311,10 +312,24 @@ export class EventGraph {
    * batch must extend the frontier and carry integer timestamps.
    */
   canAppendLinearBatch(batch: LinearEventBatch): boolean {
+    return (
+      batch.hasSafeIntegerTimestamps &&
+      this.canAppendLinearEvents(batch.firstParents)
+    );
+  }
+
+  /**
+   * Whether {@link appendLinearEvents} can pack a chain whose first event
+   * names `firstParents`.
+   *
+   * @internal The graph must be empty, or be one chain that earlier linear
+   * appends built, with no event added through {@link addEvent} since. The
+   * chain must extend the frontier.
+   */
+  canAppendLinearEvents(firstParents: ReadonlySet<EventId>): boolean {
     if (
       this.tailEventsByInsertionRank.length !== 0 ||
-      !batch.hasSafeIntegerTimestamps ||
-      !setsEqual(batch.firstParents, this.frontier)
+      !setsEqual(firstParents, this.frontier)
     ) {
       return false;
     }
@@ -345,6 +360,42 @@ export class EventGraph {
     this.packedBase = base;
     this.frontier.clear();
     this.frontier.add(batch.lastId);
+  }
+
+  /**
+   * Append the events of an exact chain that extends the frontier straight
+   * into packed columns, reading each event once and keeping no event
+   * object.
+   *
+   * @internal Check {@link canAppendLinearEvents} with the first event's
+   * parents. Callers validate every field, as for a {@link LinearEventBatch}.
+   * @returns the appended events read back from packed columns, valid until
+   * the graph changes again, or `null` with the graph unchanged when a
+   * timestamp is not a safe integer.
+   * @throws EventAlreadyExistsError when an ID is already in the graph. The
+   * graph is left unchanged.
+   */
+  appendLinearEvents(
+    events: ReadonlyArray<GraphEvent>,
+  ): PackedLinearChainRange | null {
+    const first = events[0];
+    if (first === undefined) {
+      throw new Error("A linear append needs at least one event");
+    }
+    if (!this.canAppendLinearEvents(first.parentVersion)) {
+      throw new Error("Linear events do not extend a packed linear graph");
+    }
+    const chain = this.linearChain ?? new PackedLinearChain();
+    const range = chain.appendEvents(events);
+    if (range === null) {
+      return null;
+    }
+    this.invalidateDerivedCaches();
+    this.linearChain = chain;
+    this.packedBase = chain.latest;
+    this.frontier.clear();
+    this.frontier.add(range.lastId);
+    return range;
   }
 
   /**

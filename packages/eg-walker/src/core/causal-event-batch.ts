@@ -44,6 +44,8 @@ export interface CausalEventBatchBuilder {
 
 interface CausalEventBatchState {
   events: ReadonlyArray<GraphEvent> | null;
+  /** Whether each event after the first names only the event before it. */
+  readonly exactChain: boolean;
 }
 
 const batchStates = new WeakMap<CausalEventBatch, CausalEventBatchState>();
@@ -54,6 +56,8 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
   #eventCount = 0;
   #finished = false;
   #appending = false;
+  #exactChain = true;
+  #lastId: EventId = "";
 
   constructor(capacity: number) {
     this.#events = new Array<GraphEvent>(assertValidCapacity(capacity));
@@ -145,14 +149,24 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
       writable: false,
     });
     const batch = Object.freeze(batchCandidate) as CausalEventBatch;
-    batchStates.set(batch, { events });
+    batchStates.set(batch, { events, exactChain: this.#exactChain });
     return batch;
   }
 
   private appendOwnedEvent(event: GraphEvent): void {
+    // The parents were just copied, so checking the chain shape here costs
+    // one lookup in a hot set instead of a second pass over the batch.
+    if (
+      this.#eventCount > 0 &&
+      this.#exactChain &&
+      (event.parentVersion.size !== 1 || !event.parentVersion.has(this.#lastId))
+    ) {
+      this.#exactChain = false;
+    }
     this.#events[this.#eventCount] = event;
     ownedEvents.add(event);
     this.#eventCount++;
+    this.#lastId = event.id;
   }
 
   private assertOpen(): void {
@@ -210,6 +224,14 @@ export const inspectCausalEventBatch = (
   }
   return state.events;
 };
+
+/**
+ * @internal Whether the batch's events form one exact causal chain: every
+ * event after the first names only the event before it. The builder records
+ * this while copying parents, so an apply attempt need not scan the batch.
+ */
+export const isExactCausalChain = (batch: CausalEventBatch): boolean =>
+  getOwnedBatchState(batch).exactChain;
 
 /** @internal Mark a successfully applied batch consumed and release events. */
 export const consumeCausalEventBatch = (batch: CausalEventBatch): void => {

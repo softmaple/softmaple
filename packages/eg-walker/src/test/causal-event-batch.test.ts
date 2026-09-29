@@ -4,6 +4,7 @@ import {
   consumeCausalEventBatch,
   createCausalEventBatchBuilder,
   inspectCausalEventBatch,
+  isExactCausalChain,
   isOwnedCausalEvent,
   isOwnedCausalEventBatch,
   type CausalEventBatch,
@@ -59,6 +60,55 @@ describe("CausalEventBatchBuilder", () => {
         parentVersion: new Set(firstInspection[0]?.parentVersion),
       }),
     ).toBe(false);
+  });
+
+  it.each([
+    { name: "an empty batch", parents: [], exactChain: true },
+    { name: "one root", parents: [[]], exactChain: true },
+    {
+      name: "one event on a merge",
+      parents: [["x:0", "y:0"]],
+      exactChain: true,
+    },
+    {
+      name: "a chain from an existing frontier",
+      parents: [["x:0"], ["a:0"], ["a:1"]],
+      exactChain: true,
+    },
+    { name: "a second root", parents: [[], []], exactChain: false },
+    {
+      name: "a sibling of the previous event",
+      parents: [["x:0"], ["a:0"], ["a:0"]],
+      exactChain: false,
+    },
+    {
+      name: "a merge of the previous event",
+      parents: [[], ["a:0", "x:0"]],
+      exactChain: false,
+    },
+    {
+      name: "an event after a break",
+      parents: [[], ["x:0"], ["a:1"]],
+      exactChain: false,
+    },
+  ])("records whether $name is an exact chain", ({ parents, exactChain }) => {
+    const builder = createCausalEventBatchBuilder();
+    parents.forEach((eventParents, index) => {
+      builder.appendInsert(`a:${index}`, eventParents, 0, "a", index);
+    });
+
+    expect(isExactCausalChain(builder.finish())).toBe(exactChain);
+  });
+
+  it("judges the chain by accepted events only", () => {
+    const builder = createCausalEventBatchBuilder();
+    builder.appendInsert("a:0", [], 0, "a", 0);
+    expect(() =>
+      builder.appendInsert("rejected:0", ["a:0"], -1, "b", 1),
+    ).toThrow(/index/);
+    builder.appendInsert("a:1", ["a:0"], 1, "b", 1);
+
+    expect(isExactCausalChain(builder.finish())).toBe(true);
   });
 
   it("supports empty batches and capacity under- or over-estimates", () => {

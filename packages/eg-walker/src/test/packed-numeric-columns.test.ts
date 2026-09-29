@@ -3,11 +3,29 @@ import { describe, expect, it } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { buildPackedEventGraphBase } from "../graph/columnar-codec/packed-decode";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
+import type { PackedEventGraphBase } from "../graph/internals/packed-event-graph-base";
 import {
-  buildPackedLinearEventGraphBase,
-  type PackedEventGraphBase,
-} from "../graph/internals/packed-event-graph-base";
-import type { GraphEvent } from "../types";
+  LinearEventBatch,
+  PackedLinearChain,
+} from "../graph/internals/packed-linear-chain";
+import type { ExternalOperation, Version } from "../types";
+
+const linearBatch = (
+  parents: Version,
+  events: ReadonlyArray<
+    readonly [id: string, operation: ExternalOperation, timestamp: number]
+  >,
+): LinearEventBatch => {
+  const batch = new LinearEventBatch(parents);
+  for (const [id, operation, timestamp] of events) {
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      batch.appendInsert(id, operation.index, operation.text, timestamp);
+    } else {
+      batch.appendDelete(id, operation.index, operation.length, timestamp);
+    }
+  }
+  return batch.finish();
+};
 
 interface PackedNumericStorage {
   readonly operationIndexes: Uint32Array | Float64Array;
@@ -15,8 +33,12 @@ interface PackedNumericStorage {
   readonly timestamps: Int32Array | Uint32Array | Float64Array;
 }
 
-const numericStorage = (base: PackedEventGraphBase): PackedNumericStorage =>
-  base as unknown as PackedNumericStorage;
+const numericStorage = (base: PackedEventGraphBase): PackedNumericStorage => {
+  // Deferred columns load on first read.
+  base.operationIndexAt(0);
+  return (base as unknown as { operationColumns: PackedNumericStorage })
+    .operationColumns;
+};
 
 describe("packed numeric columns", () => {
   it("retains common operation columns in 32-bit storage", () => {
@@ -132,22 +154,28 @@ describe("packed numeric columns", () => {
     expect(Array.from(values)).toEqual([0x8000_0000, -1]);
   });
 
-  it("builds a wide exact-linear batch without truncating prior values", () => {
+  it("widens packed chain columns without truncating earlier batches", () => {
     const wide = 0x1_0000_0000;
-    const { base, frontier } = buildPackedLinearEventGraphBase([
-      {
-        id: "alice:0",
-        operation: { type: OPERATION_TYPE.INSERT, index: wide, text: "a" },
-        parentVersion: new Set(),
-        timestamp: 0x8000_0000,
-      },
-      {
-        id: "alice:1",
-        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: wide },
-        parentVersion: new Set(["alice:0"]),
-        timestamp: -1,
-      },
-    ]);
+    const chain = new PackedLinearChain();
+    chain.append(
+      linearBatch(new Set(), [
+        ["alice:0", { type: OPERATION_TYPE.INSERT, index: 0, text: "a" }, 7],
+      ]),
+    );
+    const base = chain.append(
+      linearBatch(new Set(["alice:0"]), [
+        [
+          "alice:1",
+          { type: OPERATION_TYPE.INSERT, index: wide, text: "b" },
+          0x8000_0000,
+        ],
+        [
+          "alice:2",
+          { type: OPERATION_TYPE.DELETE, index: 0, length: wide },
+          -1,
+        ],
+      ]),
+    );
     const storage = numericStorage(base);
 
     expect(storage.operationIndexes).toBeInstanceOf(Float64Array);
@@ -155,55 +183,40 @@ describe("packed numeric columns", () => {
     expect(storage.timestamps).toBeInstanceOf(Float64Array);
     expect(base.operationAt(0)).toEqual({
       type: OPERATION_TYPE.INSERT,
-      index: wide,
+      index: 0,
       text: "a",
     });
     expect(base.operationAt(1)).toEqual({
+      type: OPERATION_TYPE.INSERT,
+      index: wide,
+      text: "b",
+    });
+    expect(base.operationAt(2)).toEqual({
       type: OPERATION_TYPE.DELETE,
       index: 0,
       length: wide,
     });
-    expect(base.timestampAt(0)).toBe(0x8000_0000);
-    expect(base.timestampAt(1)).toBe(-1);
-    expect(frontier).toEqual(new Set(["alice:1"]));
+    expect([0, 1, 2].map((offset) => base.timestampAt(offset))).toEqual([
+      7, 0x8000_0000, -1,
+    ]);
   });
 
-  it("rejects malformed exact-linear batch columns before packing", () => {
-    const event = (overrides: Partial<GraphEvent> = {}): GraphEvent => ({
-      id: "alice:0",
-      operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 0 },
-      parentVersion: new Set(),
-      timestamp: 0,
-      ...overrides,
-    });
+  it("keeps narrow packed chain columns in 32-bit storage", () => {
+    const chain = new PackedLinearChain();
+    const base = chain.append(
+      linearBatch(new Set(), [
+        [
+          "alice:0",
+          { type: OPERATION_TYPE.INSERT, index: 0, text: "ab" },
+          0x8000_0000,
+        ],
+        ["alice:1", { type: OPERATION_TYPE.DELETE, index: 1, length: 1 }, 3],
+      ]),
+    );
+    const storage = numericStorage(base);
 
-    expect(() =>
-      buildPackedLinearEventGraphBase([
-        event(),
-        event({ parentVersion: new Set(["alice:0"]) }),
-      ]),
-    ).toThrow(/duplicate linear event ID/);
-    expect(() =>
-      buildPackedLinearEventGraphBase([
-        event({ parentVersion: new Set(["missing"]) }),
-      ]),
-    ).toThrow(/does not extend the linear history/);
-    expect(() =>
-      buildPackedLinearEventGraphBase([
-        event({
-          operation: { type: OPERATION_TYPE.DELETE, index: -1, length: 0 },
-        }),
-      ]),
-    ).toThrow(/Invalid operation index/);
-    expect(() =>
-      buildPackedLinearEventGraphBase([event({ timestamp: Number.NaN })]),
-    ).toThrow(/Invalid timestamp/);
-    expect(() =>
-      buildPackedLinearEventGraphBase([
-        event({
-          operation: { type: OPERATION_TYPE.DELETE, index: 0, length: -1 },
-        }),
-      ]),
-    ).toThrow(/Invalid operation length/);
+    expect(storage.operationIndexes).toBeInstanceOf(Uint32Array);
+    expect(storage.operationLengths).toBeInstanceOf(Uint32Array);
+    expect(storage.timestamps).toBeInstanceOf(Uint32Array);
   });
 });

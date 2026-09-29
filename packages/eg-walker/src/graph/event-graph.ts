@@ -25,11 +25,14 @@ import type {
   PackedOffsetTransition,
 } from "./internals/packed-diff-versions";
 import {
-  buildPackedLinearEventGraphBase,
   PackedEventGraphBase,
   type PackedBranchReplayLayout,
   type PackedCanonicalIdRun,
 } from "./internals/packed-event-graph-base";
+import {
+  PackedLinearChain,
+  type LinearEventBatch,
+} from "./internals/packed-linear-chain";
 import {
   RankedDiffVersionsWorkspace,
   type RankedDiffVersionsView,
@@ -131,6 +134,11 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
  */
 export class EventGraph {
   private packedBase: PackedEventGraphBase | null = null;
+  /**
+   * Growable columns behind {@link packedBase} while the whole graph is one
+   * exact causal chain appended through {@link appendLinearBatch}.
+   */
+  private linearChain: PackedLinearChain | null = null;
   /**
    * Transient repack of {@link packedBase} and the mutable tail, built when a
    * cold replay plans a graph that has both. Dropped on every mutation.
@@ -243,6 +251,7 @@ export class EventGraph {
    */
   clear(): void {
     this.packedBase = null;
+    this.linearChain = null;
     this.tailIndexById.clear();
     this.tailEventsByInsertionRank.length = 0;
     this.parentRankDescriptors.length = 0;
@@ -263,6 +272,9 @@ export class EventGraph {
   beginAppendTransaction(): EventGraphAppendTransaction {
     const startingEventCount = this.tailEventsByInsertionRank.length;
     const startingFrontier = Array.from(this.frontier);
+    const startingPackedBase = this.packedBase;
+    const startingLinearChain = this.linearChain;
+    const startingLinearChainMark = startingLinearChain?.mark() ?? null;
     let active = true;
     return {
       commit: (): void => {
@@ -273,7 +285,16 @@ export class EventGraph {
           return;
         }
         active = false;
+        // Tail ranks follow the packed prefix, so unwind the tail first.
         this.rollbackAppendedEvents(startingEventCount);
+        if (this.packedBase !== startingPackedBase) {
+          if (startingLinearChainMark !== null) {
+            startingLinearChain!.rollbackTo(startingLinearChainMark);
+          }
+          this.linearChain = startingLinearChain;
+          this.packedBase = startingPackedBase;
+          this.invalidateDerivedCaches();
+        }
         this.frontier.clear();
         for (const eventId of startingFrontier) {
           this.frontier.add(eventId);
@@ -283,9 +304,71 @@ export class EventGraph {
   }
 
   /**
+   * Whether {@link appendLinearBatch} can store `batch` as packed columns.
+   *
+   * @internal The graph must be empty, or be one chain that earlier linear
+   * batches built, with no event added through {@link addEvent} since. The
+   * batch must extend the frontier and carry integer timestamps.
+   */
+  canAppendLinearBatch(batch: LinearEventBatch): boolean {
+    if (
+      this.tailEventsByInsertionRank.length !== 0 ||
+      !batch.hasSafeIntegerTimestamps ||
+      !setsEqual(batch.firstParents, this.frontier)
+    ) {
+      return false;
+    }
+    return this.packedBase === null
+      ? this.frontier.size === 0
+      : this.linearChain?.latest === this.packedBase;
+  }
+
+  /**
+   * Append an exact chain that extends the frontier, writing its IDs and
+   * operations into packed columns instead of one object per event.
+   *
+   * @internal Check {@link canAppendLinearBatch} first.
+   * @throws EventAlreadyExistsError when an ID is already in the graph. The
+   * graph is left unchanged.
+   */
+  appendLinearBatch(batch: LinearEventBatch): void {
+    if (!this.canAppendLinearBatch(batch)) {
+      throw new Error("Linear batch does not extend a packed linear graph");
+    }
+    if (batch.count === 0) {
+      return;
+    }
+    const chain = this.linearChain ?? new PackedLinearChain();
+    const base = chain.append(batch);
+    this.invalidateDerivedCaches();
+    this.linearChain = chain;
+    this.packedBase = base;
+    this.frontier.clear();
+    this.frontier.add(batch.lastId);
+  }
+
+  /**
    * Add an event to the graph
    */
   addEvent(event: GraphEvent): void {
+    // Strict causal batches construct final storage objects in an opaque
+    // builder, so no caller can mutate them after transfer. All ordinary
+    // events cross the defensive-copy boundary before sidecars are derived,
+    // ensuring a custom/re-entrant parent iterable is consumed only once.
+    this.appendEvent(event, isOwnedCausalEvent(event));
+  }
+
+  /**
+   * Add an event without copying it.
+   *
+   * @internal Only for event objects this package built and no caller can
+   * reach or mutate.
+   */
+  addOwnedEvent(event: GraphEvent): void {
+    this.appendEvent(event, true);
+  }
+
+  private appendEvent(event: GraphEvent, owned: boolean): void {
     if (
       this.tailIndexById.has(event.id) ||
       (this.packedBase?.has(event.id) ?? false)
@@ -297,11 +380,7 @@ export class EventGraph {
     let maximumParentInsertionRank = -1;
     let firstParentInsertionRank = -1;
     let parentCount = 0;
-    // Strict causal batches construct final storage objects in an opaque
-    // builder, so no caller can mutate them after transfer. All ordinary
-    // events cross the defensive-copy boundary before sidecars are derived,
-    // ensuring a custom/re-entrant parent iterable is consumed only once.
-    const stored = isOwnedCausalEvent(event) ? event : cloneGraphEvent(event);
+    const stored = owned ? event : cloneGraphEvent(event);
     try {
       for (const parentId of stored.parentVersion) {
         const parentRank = this.insertionRankOf(parentId);
@@ -1378,15 +1457,6 @@ export class EventGraph {
     return graph;
   }
 
-  /** @internal Adopt builder-owned events as one immutable packed chain. */
-  static fromOwnedLinearEvents(
-    events: ReadonlyArray<GraphEvent>,
-    metadata: Record<string, unknown> = {},
-  ): EventGraph {
-    const packed = buildPackedLinearEventGraphBase(events);
-    return EventGraph.fromPackedBase(packed.base, packed.frontier, metadata);
-  }
-
   private isPackedOnly(): boolean {
     return (
       this.packedBase !== null && this.tailEventsByInsertionRank.length === 0
@@ -1681,6 +1751,9 @@ export class EventGraph {
 const encodeMultiParentStart = (start: number): number => -start - 2;
 
 const decodeMultiParentStart = (descriptor: number): number => -descriptor - 2;
+
+const setsEqual = <T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean =>
+  left.size === right.size && setContainsEvery(left, right);
 
 const setContainsEvery = <T>(
   values: ReadonlySet<T>,

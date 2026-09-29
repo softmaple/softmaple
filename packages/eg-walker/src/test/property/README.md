@@ -51,6 +51,7 @@ up automatically.
 | [`partial-replay-after-cold-load.property.test.ts`](./partial-replay-after-cold-load.property.test.ts) | After a cold load, a peer that diverged at any event and its next edit merge to the replayed text.      |
 | [`packed-delete-target-index.property.test.ts`](./packed-delete-target-index.property.test.ts)       | Out-of-order packed delete keys materialize in stable replay order.                                     |
 | [`deferred-text-materialization.property.test.ts`](./deferred-text-materialization.property.test.ts) | Deferred cold replay produces the same text and transient records as eager replay.                      |
+| [`linear-remote-batch.property.test.ts`](./linear-remote-batch.property.test.ts) | Exact chains split into batches match single-event delivery in results, text and graph, then merge a concurrent edit. |
 
 ## Shared helpers
 

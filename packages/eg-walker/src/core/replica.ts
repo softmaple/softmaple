@@ -859,7 +859,8 @@ export class EgWalkerReplica {
   applyRemoteEvents(
     events: ReadonlyArray<GraphEvent>,
   ): ApplyRemoteEventsResult {
-    if (events.length > 1) {
+    // A lazy graph has no buffer yet, so it has nothing pending.
+    if (events.length > 1 && (this.remoteEvents?.pendingCount ?? 0) === 0) {
       const linear = readRemoteLinearBatch(events, this.currentVersion);
       const applied =
         linear === null ? null : this.tryApplyRemoteLinearBatch(linear);

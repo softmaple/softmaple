@@ -6,6 +6,7 @@
   "description": "Performance harnesses for @softmaple/eg-walker",
   "scripts": {
     "bench": "vitest bench --run",
+    "block-model-bench": "node scripts/run-block-model-bench.mjs",
     "lint": "eslint .",
     "paper-bench": "node scripts/run-paper-bench.mjs",
     "test": "vitest",
@@ -18,6 +19,7 @@
     "@softmaple/eg-walker": "workspace:*"
   },
   "devDependencies": {
+    "@softmaple/block-model": "workspace:*",
     "@softmaple/eslint-config": "workspace:*",
     "@softmaple/typescript-config": "workspace:*",
     "@types/node": "^24.10.4",

@@ -5,6 +5,11 @@
     "bench": {
       "dependsOn": ["^build"]
     },
+    "block-model-bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
+    },
     "paper-bench": {
       "dependsOn": ["^build"],
       "cache": false,

@@ -501,6 +501,9 @@ importers:
         specifier: workspace:*
         version: link:../eg-walker
     devDependencies:
+      '@softmaple/block-model':
+        specifier: workspace:*
+        version: link:../block-model
       '@softmaple/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config

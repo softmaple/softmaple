@@ -28,6 +28,7 @@ import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import { TransientUtf16RopeEditor } from "../text/transient-utf16-rope";
 import {
+  coldReplayLadderEventCounts,
   CriticalCheckpointStore,
   MAX_RETAINED_CHECKPOINTS,
   type CriticalCheckpoint,
@@ -94,8 +95,10 @@ import {
 } from "./native-snapshot";
 import {
   assertPortableSnapshotMetadata,
+  assertPortableSnapshotText,
   createPortableSnapshotGraphSource,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
+  portableSnapshotRequiresTextValidation,
   registerTrustedPortableSnapshot,
   validatePortableSnapshotHeaderOnly,
   type PortableSnapshot,
@@ -172,6 +175,11 @@ interface ReplicaConstructorOptions {
   readonly currentVersion?: Version;
   readonly nextSequenceNumber?: number;
   readonly lazyEventGraph?: LazyEventGraphSource;
+  /**
+   * Text the lazy graph must replay to. The replay that proves it becomes
+   * this replica's replay state instead of being thrown away.
+   */
+  readonly lazyEventGraphText?: string;
   readonly deferLocalReplay?: boolean;
   readonly restoredSequenceRecords?: ReadonlyArray<EngineSequenceRecord>;
   readonly restoredDeleteTargets?: ReadonlyArray<DeleteTargetRecord>;
@@ -246,6 +254,7 @@ export class EgWalkerReplica {
   private readonly initialText: string;
   private eventGraph: EventGraph | null = null;
   private lazyEventGraph: LazyEventGraphSource | null = null;
+  private lazyEventGraphText: string | null = null;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
@@ -316,6 +325,10 @@ export class EgWalkerReplica {
     this.eventGraph =
       eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
     this.lazyEventGraph = options.lazyEventGraph ?? null;
+    this.lazyEventGraphText =
+      this.lazyEventGraph === null
+        ? null
+        : (options.lazyEventGraphText ?? null);
     if (this.eventGraph) {
       this.remoteEvents = this.createRemoteEventBuffer(this.eventGraph);
     }
@@ -641,41 +654,30 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Restore from the portable paper-style snapshot without retaining replay
-   * state. Validation replays the graph once at this persistence boundary;
-   * the live replica starts from plain text and builds transient state only
-   * if a later divergent event requires it.
+   * Restore from the portable paper-style snapshot, which carries no replay
+   * state. Restoring only checks the header: reads of the text need no
+   * history. The first operation that needs the event graph decodes it and,
+   * unless the snapshot came from live state in this process, replays it
+   * once to prove the text, the same sectioned replay a cold load runs. That
+   * replay's checkpoints and any engine it retains become this replica's
+   * replay state, so a divergent first edit does not replay history again.
    */
   static fromPortableSnapshot(
     snapshot: PortableSnapshot,
     replicaId: string = "portable-snapshot-replica",
   ): EgWalkerReplica {
     const validated = validatePortableSnapshotHeaderOnly(snapshot);
-    const validationStats = { replays: 0, events: 0, linearReplays: 0 };
-    const lazyEventGraph = createPortableSnapshotGraphSource(
-      validated,
-      (events, linear) => {
-        validationStats.replays++;
-        validationStats.events += events;
-        if (linear) validationStats.linearReplays++;
-      },
-    );
-
-    const replica = new EgWalkerReplica(
-      replicaId,
-      validated.initialText,
-      undefined,
-      {
-        skipReplay: true,
-        restoredText: validated.text,
-        currentVersion: new Set(validated.currentVersion),
-        nextSequenceNumber: validated.nextSequenceNumber,
-        lazyEventGraph,
-        deferLocalReplay: true,
-      },
-    );
-    replica.snapshotValidationStats = validationStats;
-    return replica;
+    return new EgWalkerReplica(replicaId, validated.initialText, undefined, {
+      skipReplay: true,
+      restoredText: validated.text,
+      currentVersion: new Set(validated.currentVersion),
+      nextSequenceNumber: validated.nextSequenceNumber,
+      lazyEventGraph: createPortableSnapshotGraphSource(validated),
+      lazyEventGraphText: portableSnapshotRequiresTextValidation(validated)
+        ? validated.text
+        : undefined,
+      deferLocalReplay: true,
+    });
   }
 
   /**
@@ -1350,11 +1352,44 @@ export class EgWalkerReplica {
       }
       const graph = source();
       graph.validateStoredEvents(assertRemoteEventWellFormed);
+      if (this.lazyEventGraphText !== null) {
+        this.adoptValidationReplay(graph, this.lazyEventGraphText);
+        this.lazyEventGraphText = null;
+      }
       this.eventGraph = graph;
       this.lazyEventGraph = null;
       this.remoteEvents = this.createRemoteEventBuffer(graph);
     }
     return this.eventGraph;
+  }
+
+  /**
+   * Prove that a lazily loaded graph replays to the restored text with the
+   * same sectioned cold replay a decoded graph gets, and keep that replay's
+   * text, checkpoints and retained engine. Any failure puts the replica back
+   * in its lazy state, so the next access validates again.
+   */
+  private adoptValidationReplay(graph: EventGraph, expectedText: string): void {
+    const lazyState = this.captureRemoteBatchSnapshot();
+    const linear = graph.isExactLinearHistory();
+    this.eventGraph = graph;
+    try {
+      this.fullReplay();
+      assertPortableSnapshotText(this.getText(), expectedText);
+    } catch (error) {
+      this.eventGraph = null;
+      this.restoreRemoteBatchSnapshot(lazyState, graph);
+      throw error;
+    }
+    // Validation is counted apart from live replays.
+    this.fullReplayCount = lazyState.fullReplayCount;
+    this.lastReplaySource = lazyState.lastReplaySource;
+    this.snapshotValidationStats = {
+      replays: this.snapshotValidationStats.replays + 1,
+      events: this.snapshotValidationStats.events + graph.getEventCount(),
+      linearReplays:
+        this.snapshotValidationStats.linearReplays + (linear ? 1 : 0),
+    };
   }
 
   private ensureRemoteEvents(): RemoteEventBuffer {
@@ -1787,14 +1822,37 @@ export class EgWalkerReplica {
       0,
       plan.sectionCount - MAX_RETAINED_CHECKPOINTS,
     );
+    // Old sections are replayed in coalesced ranges. A range stops at the
+    // next ladder cut so that cut's text can be kept as a checkpoint.
+    const ladderSections = packedLadderSections(
+      plan,
+      retainedCheckpointSectionStart,
+    );
+    let ladderCursor = 0;
+    const recordLadderCheckpoint = (rangeEnd: number): void => {
+      if (ladderSections[ladderCursor] !== rangeEnd - 1) {
+        return;
+      }
+      ladderCursor++;
+      this.criticalCheckpoints.record(
+        this.currentVersion,
+        this.documentBuffer,
+        replayedEventCount,
+        plan.eventCount,
+      );
+    };
     for (let sectionIndex = 0; sectionIndex < plan.sectionCount; ) {
+      const coalescedRangeLimit =
+        ladderCursor < ladderSections.length
+          ? ladderSections[ladderCursor]! + 1
+          : retainedCheckpointSectionStart;
       if (
         sectionIndex < retainedCheckpointSectionStart &&
         plan.isLinearSection(sectionIndex)
       ) {
         let sectionEnd = sectionIndex + 1;
         while (
-          sectionEnd < retainedCheckpointSectionStart &&
+          sectionEnd < coalescedRangeLimit &&
           plan.isLinearSection(sectionEnd)
         ) {
           sectionEnd++;
@@ -1805,6 +1863,7 @@ export class EgWalkerReplica {
           sectionEnd,
         );
         replayedEventCount = plan.sectionEndAt(sectionEnd - 1);
+        recordLadderCheckpoint(sectionEnd);
         sectionIndex = sectionEnd;
         continue;
       }
@@ -1818,7 +1877,7 @@ export class EgWalkerReplica {
         const grouped = extendPackedNonlinearReplayRange(
           plan,
           sectionIndex,
-          retainedCheckpointSectionStart,
+          coalescedRangeLimit,
           maxLinearBridgeEvents,
         );
         sectionEnd = grouped.endSection;
@@ -1888,6 +1947,8 @@ export class EgWalkerReplica {
           replayedEventCount,
           plan.eventCount,
         );
+      } else {
+        recordLadderCheckpoint(sectionEnd);
       }
       sectionIndex = sectionEnd;
     }
@@ -1940,6 +2001,7 @@ export class EgWalkerReplica {
   private fullReplayLinearGraph(graph: EventGraph): void {
     const eventCount = graph.getEventCount();
     const checkpointStart = Math.max(0, eventCount - MAX_RETAINED_CHECKPOINTS);
+    const ladder = coldReplayLadderEventCounts(eventCount, checkpointStart);
     let replayedEventCount = 0;
 
     this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
@@ -1948,13 +2010,18 @@ export class EgWalkerReplica {
 
     const packed = graph.getPackedLinearReplayView();
     if (packed === null) {
+      let ladderCursor = 0;
       for (const event of graph.iterateEventsInInsertionOrder()) {
         const operation = this.validateLocalOperation(event.operation);
         if (operation !== null) {
           this.applyPlainDocumentOperation(operation);
         }
         replayedEventCount++;
-        if (replayedEventCount > checkpointStart) {
+        const onLadder = ladder[ladderCursor] === replayedEventCount;
+        if (onLadder) {
+          ladderCursor++;
+        }
+        if (onLadder || replayedEventCount > checkpointStart) {
           this.criticalCheckpoints.record(
             new Set([event.id]),
             this.documentBuffer,
@@ -1964,7 +2031,17 @@ export class EgWalkerReplica {
         }
       }
     } else {
-      this.replayPackedLinearPrefix(packed, checkpointStart);
+      for (const cut of ladder) {
+        this.replayPackedLinearRange(packed, replayedEventCount, cut);
+        replayedEventCount = cut;
+        this.criticalCheckpoints.record(
+          new Set([requirePackedEventId(packed, cut - 1)]),
+          this.documentBuffer,
+          replayedEventCount,
+          eventCount,
+        );
+      }
+      this.replayPackedLinearRange(packed, replayedEventCount, checkpointStart);
       replayedEventCount = checkpointStart;
       for (let offset = checkpointStart; offset < packed.count; offset++) {
         const operation = this.validateLocalOperation(
@@ -1974,12 +2051,8 @@ export class EgWalkerReplica {
           this.applyPlainDocumentOperation(operation);
         }
         replayedEventCount++;
-        const eventId = packed.idAt(offset);
-        if (eventId === undefined) {
-          throw new Error(`Packed graph is missing event at offset ${offset}`);
-        }
         this.criticalCheckpoints.record(
-          new Set([eventId]),
+          new Set([requirePackedEventId(packed, offset)]),
           this.documentBuffer,
           replayedEventCount,
           eventCount,
@@ -2006,19 +2079,21 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Fold the checkpoint-free prefix of a packed causal chain into larger rope
+   * Fold a checkpoint-free range of a packed causal chain into larger rope
    * edits. The decoder has already validated scalar fields and every insert
    * slice; this method validates document-relative indexes while delaying the
    * physical edit until an adjacent run ends.
    */
-  private replayPackedLinearPrefix(
+  private replayPackedLinearRange(
     packed: PackedLinearReplayView,
+    startOffset: number,
     endOffset: number,
   ): void {
     this.documentBuffer = replayPackedLinear(
       packed,
       this.documentBuffer,
       endOffset,
+      startOffset,
     );
     this.documentCache = null;
   }
@@ -2889,6 +2964,17 @@ const versionsEqual = (
   return true;
 };
 
+const requirePackedEventId = (
+  packed: PackedLinearReplayView,
+  offset: number,
+): EventId => {
+  const eventId = packed.idAt(offset);
+  if (eventId === undefined) {
+    throw new Error(`Packed graph is missing event at offset ${offset}`);
+  }
+  return eventId;
+};
+
 const isLinearReplaySection = (
   events: ReadonlyArray<GraphEvent>,
   baseVersion: Version,
@@ -2912,6 +2998,28 @@ const isLinearReplaySection = (
     previousId = event.id;
   }
   return true;
+};
+
+/**
+ * Sections before the trailing checkpoint window whose end is a ladder cut,
+ * in replay order. See {@link coldReplayLadderEventCounts}.
+ */
+const packedLadderSections = (
+  plan: PackedCriticalReplayPlan,
+  retainedSectionStart: number,
+): number[] => {
+  if (retainedSectionStart === 0) {
+    return [];
+  }
+  const sections: number[] = [];
+  const limit = plan.sectionEndAt(retainedSectionStart - 1) + 1;
+  for (const cut of coldReplayLadderEventCounts(plan.eventCount, limit)) {
+    const section = plan.lastSectionEndingAtOrBefore(cut);
+    if (section >= 0 && section !== sections[sections.length - 1]) {
+      sections.push(section);
+    }
+  }
+  return sections;
 };
 
 interface PackedNonlinearReplayRange {

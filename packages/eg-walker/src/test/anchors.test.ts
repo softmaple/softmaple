@@ -13,7 +13,7 @@ import {
   type SequenceAnchor,
 } from "../anchors";
 import { NativeSnapshotCodec } from "../core/native-snapshot";
-import { PortableSnapshotCodec } from "../core/portable-snapshot";
+import { PortableSnapshotCodec } from "../core/portable-snapshot-codec";
 import { EgWalkerReplica } from "../core/replica";
 import type { GraphEvent } from "../types";
 

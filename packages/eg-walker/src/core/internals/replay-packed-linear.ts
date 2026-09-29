@@ -2,11 +2,16 @@ import type { PackedLinearReplayView } from "../../graph/event-graph";
 import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 import { assertCodePointBoundary, assertDocumentIndex } from "../invariants";
 
-/** Replay a decoded exact chain, coalescing edits while validating every operation. */
+/**
+ * Replay events `[startOffset, endOffset)` of a decoded exact chain onto the
+ * document at `startOffset`, coalescing edits while validating every
+ * operation.
+ */
 export const replayPackedLinear = (
   packed: PackedLinearReplayView,
   initialDocument: PersistentUtf16Rope,
   endOffset: number = packed.count,
+  startOffset: number = 0,
 ): PersistentUtf16Rope => {
   let document = initialDocument;
   let pendingKind: "insert" | "delete" | null = null;
@@ -28,7 +33,7 @@ export const replayPackedLinear = (
     pendingLength = 0;
   };
 
-  for (let offset = 0; offset < endOffset; offset++) {
+  for (let offset = startOffset; offset < endOffset; offset++) {
     const length = packed.operationLengthAt(offset);
     if (length === 0) {
       continue;

@@ -19,7 +19,6 @@ import {
   MissingParentError,
 } from "./event-graph-errors";
 import { parseEventId } from "./event-id";
-import { diffVersions as diffVersionSets } from "./internals/diff-versions";
 import { deserializeEventGraph } from "./internals/event-graph-serialization";
 import type {
   PackedLocalVersionTransition,
@@ -117,6 +116,11 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
 export class EventGraph {
   private packedBase: PackedEventGraphBase | null = null;
   /**
+   * Transient repack of {@link packedBase} and the mutable tail, built when a
+   * cold replay plans a graph that has both. Dropped on every mutation.
+   */
+  private repackedBase: PackedEventGraphBase | null = null;
+  /**
    * Relative tail index for events appended after the immutable packed prefix.
    *
    * The event payload already lives in `tailEventsByInsertionRank`; keeping a
@@ -135,7 +139,7 @@ export class EventGraph {
   private readonly parentRankDescriptors: number[] = [];
   /** Flat `[maximumRank, ...parentRanks]` blocks for multi-parent events. */
   private readonly multiParentInsertionRanks: number[] = [];
-  /** Reused by object-only numeric version diffs; nested calls lease a spare. */
+  /** Reused by numeric version diffs; nested calls lease a spare. */
   private readonly rankedDiffWorkspace = new RankedDiffVersionsWorkspace();
   private rankedDiffWorkspaceInUse = false;
   private readonly rankedReplayOrderWorkspace =
@@ -158,20 +162,23 @@ export class EventGraph {
   > = new Map();
   private readonly frontier: Set<EventId> = new Set();
   /**
-   * Stable callback table shared by numeric object-tail traversals.
+   * Stable callback table shared by numeric traversals over insertion ranks.
    *
-   * Keeping this object for the graph lifetime avoids allocating a view and
-   * four capturing closures for every conflicting event.
+   * Packed events keep their packed offsets as ranks and tail events follow
+   * them, so one view covers object-only, packed-only and packed-plus-tail
+   * graphs without falling back to string-keyed traversal. Keeping this
+   * object for the graph lifetime avoids allocating a view and four
+   * capturing closures for every conflicting event.
    */
   private readonly rankedTraversalView: RankedDiffVersionsView &
     RankedReplayOrderView = {
-    eventCount: () => this.tailEventsByInsertionRank.length,
-    insertionRankOf: (id) => this.tailIndexById.get(id),
-    eventIdAt: (rank) => this.tailEventsByInsertionRank[rank]?.id,
+    eventCount: () => this.getEventCount(),
+    insertionRankOf: (id) => this.insertionRankOf(id),
+    eventIdAt: (rank) => this.eventIdAtInsertionRank(rank),
     forEachParentRank: (rank, visit) =>
-      this.forEachTailParentInsertionRank(rank, visit),
+      this.forEachParentInsertionRank(rank, visit),
     forEachChildRank: (rank, visit) =>
-      this.forEachTailChildInsertionRank(rank, visit),
+      this.forEachChildInsertionRank(rank, visit),
   };
   private metadata: Record<string, unknown> = {};
   /**
@@ -197,6 +204,7 @@ export class EventGraph {
   private invalidateDerivedCaches(): void {
     this.cachedTopologicalOrder = null;
     this.cachedBranchPreservingOrder = null;
+    this.repackedBase = null;
     this.packedBase?.releaseDiffWorkspace();
   }
 
@@ -613,25 +621,34 @@ export class EventGraph {
 
   /** @internal Return raw packed columns when the whole graph is one chain. */
   getPackedLinearReplayView(): PackedLinearReplayView | null {
-    if (
-      this.packedBase === null ||
-      this.tailEventsByInsertionRank.length !== 0 ||
-      !this.packedBase.isExactLinear()
-    ) {
-      return null;
-    }
-    return this.packedBase;
+    const packed = this.packedReplayBase();
+    return packed !== null && packed.isExactLinear() ? packed : null;
   }
 
-  /** @internal Return numeric packed-DAG columns for allocation-light replay. */
+  /**
+   * @internal Return numeric packed-DAG columns for allocation-light replay.
+   *
+   * A packed prefix followed by a mutable tail is repacked once for the
+   * caller's replay, so a few appended events never send cold replay back to
+   * the object planner, which materializes every packed event.
+   */
   getPackedReplayPlanningView(): PackedReplayPlanningView | null {
-    if (
-      this.packedBase === null ||
-      this.tailEventsByInsertionRank.length !== 0
-    ) {
-      return null;
+    return this.packedReplayBase();
+  }
+
+  private packedReplayBase(): PackedEventGraphBase | null {
+    const packedBase = this.packedBase;
+    if (packedBase === null || this.tailEventsByInsertionRank.length === 0) {
+      return packedBase;
     }
-    return this.packedBase;
+    this.repackedBase ??= packedBase.appendTail({
+      count: this.tailEventsByInsertionRank.length,
+      eventAt: (tailIndex) => this.tailEventsByInsertionRank[tailIndex]!,
+      tailIndexOf: (id) => this.tailIndexById.get(id),
+      forEachParentOffset: (tailIndex, visit) =>
+        this.forEachTailParentInsertionRank(tailIndex, visit),
+    });
+    return this.repackedBase;
   }
 
   /**
@@ -793,31 +810,27 @@ export class EventGraph {
     ) {
       return this.packedBase.diffVersions(left, right);
     }
-    if (this.packedBase === null) {
-      const workspace = this.rankedDiffWorkspaceInUse
-        ? new RankedDiffVersionsWorkspace()
-        : this.rankedDiffWorkspace;
-      const ownsPrimaryWorkspace = workspace === this.rankedDiffWorkspace;
+    // A packed prefix with a mutable tail stays numeric: one tail event must
+    // not send the diff through string-keyed colours and rank lookups.
+    const workspace = this.rankedDiffWorkspaceInUse
+      ? new RankedDiffVersionsWorkspace()
+      : this.rankedDiffWorkspace;
+    const ownsPrimaryWorkspace = workspace === this.rankedDiffWorkspace;
+    if (ownsPrimaryWorkspace) {
+      this.rankedDiffWorkspaceInUse = true;
+    }
+    try {
+      return workspace.diff(left, right, this.rankedTraversalView);
+    } finally {
       if (ownsPrimaryWorkspace) {
-        this.rankedDiffWorkspaceInUse = true;
-      }
-      try {
-        return workspace.diff(left, right, this.rankedTraversalView);
-      } finally {
-        if (ownsPrimaryWorkspace) {
-          this.rankedDiffWorkspaceInUse = false;
-        }
+        this.rankedDiffWorkspaceInUse = false;
       }
     }
-    return diffVersionSets(left, right, {
-      getParents: (id) => this.iterateParents(id),
-      hasEvent: (id) => this.hasEvent(id),
-      insertionRankOf: (id) => this.insertionRankOf(id),
-    });
   }
 
   /**
-   * Structural work performed by the most recent object-only version diff.
+   * Structural work performed by the most recent ranked version diff, used
+   * for object-only and packed-plus-tail graphs.
    *
    * @internal Tests and benchmarks use this instead of wall-clock assertions
    * to ensure a short divergent suffix does not walk the shared history.
@@ -827,16 +840,17 @@ export class EventGraph {
   }
 
   /**
-   * Return an object-only version transition in insertion-topological order.
+   * Return a version transition in insertion-topological order.
    *
-   * @internal Packed and mixed graphs retain their storage-specific diff
-   * paths and return `null`.
+   * @internal Packed-only graphs keep their offset-based packed diff and
+   * return `null`; object-only and packed-plus-tail graphs use insertion
+   * ranks.
    */
   getRankedVersionTransition(
     left: ReadonlySet<EventId>,
     right: ReadonlySet<EventId>,
   ): RankedVersionTransition | null {
-    if (this.packedBase !== null) {
+    if (this.isPackedOnly()) {
       return null;
     }
     const workspace = this.rankedDiffWorkspaceInUse
@@ -856,15 +870,16 @@ export class EventGraph {
   }
 
   /**
-   * Return a numeric branch-preserving order for an object-only suffix.
+   * Return a numeric branch-preserving order for a replay suffix.
    *
-   * @internal Packed and packed-plus-tail graphs return `null` so callers can
-   * retain their existing storage-specific fallback.
+   * @internal Packed-only graphs return `null` so callers keep their
+   * storage-specific fallback; object-only and packed-plus-tail graphs use
+   * insertion ranks.
    */
   getRankedReplayOrder(
     replayEventIds: ReadonlySet<EventId>,
   ): ReadonlyArray<EventId> | null {
-    if (this.packedBase !== null) {
+    if (this.isPackedOnly()) {
       return null;
     }
     const workspace = this.rankedReplayOrderWorkspaceInUse
@@ -1113,6 +1128,69 @@ export class EventGraph {
   ): EventGraph {
     const packed = buildPackedLinearEventGraphBase(events);
     return EventGraph.fromPackedBase(packed.base, packed.frontier, metadata);
+  }
+
+  private isPackedOnly(): boolean {
+    return (
+      this.packedBase !== null && this.tailEventsByInsertionRank.length === 0
+    );
+  }
+
+  private eventIdAtInsertionRank(rank: number): EventId | undefined {
+    const packedCount = this.packedBase?.count ?? 0;
+    return rank < packedCount
+      ? this.packedBase!.idAt(rank)
+      : this.tailEventsByInsertionRank[rank - packedCount]?.id;
+  }
+
+  private forEachParentInsertionRank(
+    rank: number,
+    visit: (parentRank: number) => void,
+  ): void {
+    const packedBase = this.packedBase;
+    const packedCount = packedBase?.count ?? 0;
+    if (rank >= packedCount) {
+      this.forEachTailParentInsertionRank(rank - packedCount, visit);
+      return;
+    }
+    const parentCount = packedBase!.parentCountAt(rank);
+    for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+      const parentRank = packedBase!.parentOffsetAt(rank, parentIndex);
+      if (parentRank === undefined) {
+        throw new Error(
+          `Packed event ${rank} is missing parent ${parentIndex}`,
+        );
+      }
+      visit(parentRank);
+    }
+  }
+
+  private forEachChildInsertionRank(
+    rank: number,
+    visit: (childRank: number) => void,
+  ): void {
+    const packedBase = this.packedBase;
+    const packedCount = packedBase?.count ?? 0;
+    if (rank >= packedCount) {
+      this.forEachTailChildInsertionRank(rank - packedCount, visit);
+      return;
+    }
+    const childCount = packedBase!.childCountAt(rank);
+    for (let childIndex = 0; childIndex < childCount; childIndex++) {
+      const childRank = packedBase!.childOffsetAt(rank, childIndex);
+      if (childRank === undefined) {
+        throw new Error(`Packed event ${rank} is missing child ${childIndex}`);
+      }
+      visit(childRank);
+    }
+    const tailChildren = this.tailChildrenByPackedParentRank.get(rank);
+    if (typeof tailChildren === "number") {
+      visit(tailChildren);
+      return;
+    }
+    for (const childRank of tailChildren ?? []) {
+      visit(childRank);
+    }
   }
 
   private tailEventById(id: EventId): GraphEvent | undefined {

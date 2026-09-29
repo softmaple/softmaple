@@ -488,7 +488,7 @@ export class PackedEventGraphBase {
       const start = this.childStarts![offset]!;
       const end = this.childStarts![offset + 1]!;
       for (let cursor = start; cursor < end; cursor++) {
-        yield this.ids![this.childOffsets![cursor]!]!;
+        yield this.requireIdAt(this.childOffsets![cursor]!);
       }
     }
   }
@@ -956,6 +956,127 @@ export class PackedEventGraphBase {
     return { remainingParents, roots, sortBranchGroup };
   }
 
+  /**
+   * Repack this immutable prefix and events appended after it into one
+   * packed base, for planning and replaying a graph that has a mutable tail.
+   *
+   * Operation and edge columns are copied, which is linear in the graph like
+   * the replay that needs them. IDs are not re-materialized: offsets below
+   * this prefix resolve through its own index and tail IDs through the
+   * tail's.
+   */
+  appendTail(tail: PackedTailEvents): PackedEventGraphBase {
+    const baseCount = this.count;
+    const count = baseCount + tail.count;
+    const operationTypes = new Uint8Array(count);
+    operationTypes.set(this.operationTypes);
+    const tailIndexes: number[] = [];
+    const tailLengths: number[] = [];
+    const tailTimestamps: number[] = [];
+    const insertStarts = new Uint32Array(count);
+    insertStarts.set(this.insertStarts);
+    const insertedParts = [this.insertedContent];
+    let insertedLength = this.insertedContent.length;
+
+    const parentStarts = new Uint32Array(count + 1);
+    let edgeCount = 0;
+    if (this.parentStarts !== null) {
+      parentStarts.set(this.parentStarts);
+      edgeCount = this.parentStarts[baseCount]!;
+    } else {
+      for (let offset = 0; offset < baseCount; offset++) {
+        edgeCount += this.parentCountAt(offset);
+        parentStarts[offset + 1] = edgeCount;
+      }
+    }
+    const tailParents: number[] = [];
+    for (let tailIndex = 0; tailIndex < tail.count; tailIndex++) {
+      const offset = baseCount + tailIndex;
+      const { operation, timestamp } = tail.eventAt(tailIndex);
+      tailIndexes.push(operation.index);
+      tailTimestamps.push(timestamp);
+      if (operation.type === OPERATION_TYPE.INSERT) {
+        operationTypes[offset] = INSERT_OPERATION;
+        tailLengths.push(operation.text.length);
+        if (insertedLength > 0xffff_ffff) {
+          throw new Error(
+            "Inserted content exceeds packed UTF-16 offset range",
+          );
+        }
+        insertStarts[offset] = insertedLength;
+        insertedParts.push(operation.text);
+        insertedLength += operation.text.length;
+      } else {
+        operationTypes[offset] = DELETE_OPERATION;
+        tailLengths.push(operation.length);
+      }
+      tail.forEachParentOffset(tailIndex, (parentOffset) => {
+        tailParents.push(parentOffset);
+      });
+      parentStarts[offset + 1] = edgeCount + tailParents.length;
+    }
+
+    const parentOffsets = new Uint32Array(edgeCount + tailParents.length);
+    if (this.parentOffsets !== null) {
+      parentOffsets.set(this.parentOffsets);
+    } else {
+      for (let offset = 1; offset < baseCount; offset++) {
+        parentOffsets[offset - 1] = offset - 1;
+      }
+    }
+    parentOffsets.set(tailParents, edgeCount);
+    const childCounts = new Uint32Array(count);
+    for (let edge = 0; edge < parentOffsets.length; edge++) {
+      const parentOffset = parentOffsets[edge]!;
+      childCounts[parentOffset] = childCounts[parentOffset]! + 1;
+    }
+
+    // Children in ascending offset order, exactly as the EGW3 decoder builds
+    // them, so branch ordering of the repacked graph matches a fresh decode.
+    const childStarts = new Uint32Array(count + 1);
+    for (let offset = 0; offset < count; offset++) {
+      childStarts[offset + 1] = childStarts[offset]! + childCounts[offset]!;
+    }
+    const childOffsets = new Uint32Array(parentOffsets.length);
+    const childCursors = childCounts;
+    childCursors.set(childStarts.subarray(0, count));
+    for (let childOffset = 0; childOffset < count; childOffset++) {
+      const end = parentStarts[childOffset + 1]!;
+      for (let edge = parentStarts[childOffset]!; edge < end; edge++) {
+        const parentOffset = parentOffsets[edge]!;
+        childOffsets[childCursors[parentOffset]!] = childOffset;
+        childCursors[parentOffset] = childCursors[parentOffset]! + 1;
+      }
+    }
+
+    const idIndex = new TailExtendedIdIndex(this, tail);
+    const columns = {
+      idIndex,
+      operationTypes,
+      operationIndexes: appendUnsignedColumn(
+        this.operationIndexes,
+        tailIndexes,
+      ),
+      operationLengths: appendUnsignedColumn(
+        this.operationLengths,
+        tailLengths,
+      ),
+      timestamps: appendIntegerColumn(this.timestamps, tailTimestamps),
+      insertStarts,
+      insertedContent: insertedParts.join(""),
+      parentStarts,
+      parentOffsets,
+      childStarts,
+      childOffsets,
+    };
+    return this.ids === null
+      ? PackedEventGraphBase.create(columns)
+      : PackedEventGraphBase.createWithTrustedMaterializedIds({
+          ...columns,
+          ids: this.ids.concat(Array.from(idIndex.tailIds())),
+        });
+  }
+
   *iterateEvents(): IterableIterator<GraphEvent> {
     for (let offset = 0; offset < this.count; offset++) {
       yield this.eventAt(offset)!;
@@ -975,8 +1096,18 @@ export class PackedEventGraphBase {
     const start = this.parentStarts![offset]!;
     const end = this.parentStarts![offset + 1]!;
     for (let cursor = start; cursor < end; cursor++) {
-      yield this.ids![this.parentOffsets![cursor]!]!;
+      yield this.requireIdAt(this.parentOffsets![cursor]!);
     }
+  }
+
+  private requireIdAt(offset: number): EventId {
+    const id = this.idAt(offset);
+    if (id === undefined) {
+      throw new Error(
+        `Packed event graph is missing event at offset ${offset}`,
+      );
+    }
+    return id;
   }
 
   maximumSequenceForReplica(replicaId: string): number | undefined {
@@ -1012,6 +1143,129 @@ export class PackedEventGraphBase {
     return true;
   }
 }
+
+/**
+ * Events appended after an immutable packed prefix, as seen by
+ * {@link PackedEventGraphBase.appendTail}. Parent offsets are insertion ranks
+ * in the combined graph and always precede the event's own rank.
+ */
+export interface PackedTailEvents {
+  readonly count: number;
+  eventAt(tailIndex: number): GraphEvent;
+  tailIndexOf(id: EventId): number | undefined;
+  forEachParentOffset(
+    tailIndex: number,
+    visit: (parentOffset: number) => void,
+  ): void;
+}
+
+/** ID index of a repacked prefix: the prefix's own index, then the tail. */
+class TailExtendedIdIndex implements PackedEventIdIndex {
+  readonly count: number;
+
+  constructor(
+    private readonly base: PackedEventGraphBase,
+    private readonly tail: PackedTailEvents,
+  ) {
+    this.count = base.count + tail.count;
+  }
+
+  has(id: EventId): boolean {
+    return this.offsetOf(id) !== undefined;
+  }
+
+  offsetOf(id: EventId): number | undefined {
+    const baseOffset = this.base.offsetOf(id);
+    if (baseOffset !== undefined) {
+      return baseOffset;
+    }
+    const tailIndex = this.tail.tailIndexOf(id);
+    return tailIndex === undefined ? undefined : this.base.count + tailIndex;
+  }
+
+  idAt(offset: number): EventId | undefined {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= this.count) {
+      return undefined;
+    }
+    return offset < this.base.count
+      ? this.base.idAt(offset)
+      : this.tail.eventAt(offset - this.base.count).id;
+  }
+
+  canonicalRunAt(offset: number): PackedCanonicalIdRun | undefined {
+    return offset < this.base.count
+      ? this.base.canonicalIdRunAt(offset)
+      : undefined;
+  }
+
+  releaseCanonicalRunLookup(): void {
+    // The prefix owns the canonical lookup; releasing its scratch state is
+    // what the owning graph does on every mutation anyway.
+    this.base.releaseDiffWorkspace();
+  }
+
+  *iterateIds(): IterableIterator<EventId> {
+    yield* this.base.iterateIds();
+    yield* this.tailIds();
+  }
+
+  *tailIds(): IterableIterator<EventId> {
+    for (let tailIndex = 0; tailIndex < this.tail.count; tailIndex++) {
+      yield this.tail.eventAt(tailIndex).id;
+    }
+  }
+
+  maximumSequenceForReplica(replicaId: string): number | undefined {
+    let maximum = this.base.maximumSequenceForReplica(replicaId);
+    for (const id of this.tailIds()) {
+      const parsed = parseEventId(id);
+      if (
+        parsed?.replicaId === replicaId &&
+        (maximum === undefined || parsed.sequence > maximum)
+      ) {
+        maximum = parsed.sequence;
+      }
+    }
+    return maximum;
+  }
+}
+
+const fitsUint32 = (value: number): boolean =>
+  Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff;
+
+const fitsInt32 = (value: number): boolean =>
+  Number.isInteger(value) && value >= -0x8000_0000 && value <= 0x7fff_ffff;
+
+/** Copy a column and append values, widening only when a value needs it. */
+const appendUnsignedColumn = (
+  column: PackedUnsignedIntegerColumn,
+  values: ReadonlyArray<number>,
+): PackedUnsignedIntegerColumn => {
+  const length = column.length + values.length;
+  const result =
+    column instanceof Uint32Array && values.every(fitsUint32)
+      ? new Uint32Array(length)
+      : new Float64Array(length);
+  result.set(column);
+  result.set(values, column.length);
+  return result;
+};
+
+const appendIntegerColumn = (
+  column: PackedIntegerColumn,
+  values: ReadonlyArray<number>,
+): PackedIntegerColumn => {
+  const length = column.length + values.length;
+  const result =
+    column instanceof Int32Array && values.every(fitsInt32)
+      ? new Int32Array(length)
+      : column instanceof Uint32Array && values.every(fitsUint32)
+        ? new Uint32Array(length)
+        : new Float64Array(length);
+  result.set(column);
+  result.set(values, column.length);
+  return result;
+};
 
 /** Build packed columns directly from a validated exact causal chain. */
 export const buildPackedLinearEventGraphBase = (

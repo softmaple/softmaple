@@ -6,6 +6,36 @@ import { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 
 export const MAX_RETAINED_CHECKPOINTS = 32;
 
+/**
+ * Event counts at which a cold replay records checkpoints behind its dense
+ * trailing window, in ascending order and below `limit`.
+ *
+ * A cold replay records the last {@link MAX_RETAINED_CHECKPOINTS} critical
+ * sections. In a mostly sequential history those cover only the last few
+ * dozen events, so an older divergence found no checkpoint and replayed the
+ * whole history. Depths double from twice the window, the spacing
+ * {@link thinCheckpoints} keeps during incremental editing: a divergence at
+ * depth `d` finds a checkpoint at most about `2d` events back. Thinning then
+ * trims the dense window, not these cuts, back to the retention limit.
+ */
+export const coldReplayLadderEventCounts = (
+  eventCount: number,
+  limit: number,
+): number[] => {
+  const cuts: number[] = [];
+  for (
+    let depth = 2 * MAX_RETAINED_CHECKPOINTS;
+    depth < eventCount;
+    depth *= 2
+  ) {
+    const cut = eventCount - depth;
+    if (cut < limit) {
+      cuts.push(cut);
+    }
+  }
+  return cuts.reverse();
+};
+
 export type CriticalCheckpoint = ReplayCheckpoint & {
   readonly textBuffer: PersistentUtf16Rope;
   /**

@@ -103,6 +103,21 @@ interface ParsedEventId {
 
 const splitTrailingSequence = (id: EventId): ParsedEventId | null => {
   const colonIndex = id.lastIndexOf(":");
+  const sequence = canonicalSequenceAfter(id, colonIndex);
+  return sequence < 0 ? null : { prefix: id.slice(0, colonIndex), sequence };
+};
+
+/**
+ * Parse the decimal sequence after `id`'s last colon at `colonIndex`, or
+ * return -1 when `id` is not a canonical `replicaId:sequence` ID.
+ *
+ * Unlike {@link parseEventId} this allocates nothing, so hot ID-to-offset
+ * lookups can resolve canonical IDs without building a prefix string.
+ */
+export const canonicalSequenceAfter = (
+  id: EventId,
+  colonIndex: number,
+): number => {
   const suffixStart = colonIndex + 1;
   const suffixLength = id.length - suffixStart;
   if (
@@ -110,7 +125,7 @@ const splitTrailingSequence = (id: EventId): ParsedEventId | null => {
     suffixLength === 0 ||
     suffixLength > MAX_SAFE_SEQUENCE_DIGITS
   ) {
-    return null;
+    return -1;
   }
 
   let codeUnit = id.charCodeAt(suffixStart);
@@ -119,22 +134,18 @@ const splitTrailingSequence = (id: EventId): ParsedEventId | null => {
     codeUnit > 57 ||
     (codeUnit === 48 && suffixLength !== 1)
   ) {
-    return null;
+    return -1;
   }
 
   let sequence = codeUnit - 48;
   for (let index = suffixStart + 1; index < id.length; index++) {
     codeUnit = id.charCodeAt(index);
     if (codeUnit < 48 || codeUnit > 57) {
-      return null;
+      return -1;
     }
     sequence = sequence * 10 + (codeUnit - 48);
   }
-  if (sequence > Number.MAX_SAFE_INTEGER) {
-    return null;
-  }
-
-  return { prefix: id.slice(0, colonIndex), sequence };
+  return sequence > Number.MAX_SAFE_INTEGER ? -1 : sequence;
 };
 
 /**

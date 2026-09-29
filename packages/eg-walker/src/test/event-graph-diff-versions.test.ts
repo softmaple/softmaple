@@ -350,7 +350,75 @@ describe("diffVersions topological diff", () => {
     expect(packedParentIterator).not.toHaveBeenCalled();
   });
 
-  it("uses packed linear offsets until a mutable tail requires the object path", () => {
+  it("matches the object oracle when a packed prefix gains a mutable tail", () => {
+    const rng = mulberry32(0x7a11);
+    const events: Array<{
+      id: EventId;
+      timestamp: number;
+      parentVersion: Set<EventId>;
+      operation: { type: "insert"; index: number; text: string };
+    }> = [];
+    for (let index = 0; index < 180; index++) {
+      const id = index % 4 === 0 ? `custom#${index}` : `replica:${index}`;
+      const parents = new Set<EventId>();
+      if (index > 0) {
+        const parentCount = (rng() % 3) + 1;
+        for (let parent = 0; parent < parentCount; parent++) {
+          parents.add(events[rng() % events.length]!.id);
+        }
+      }
+      events.push({
+        id,
+        timestamp: index,
+        parentVersion: parents,
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+      });
+    }
+    const oracle = new EventGraph();
+    const prefix = new EventGraph();
+    events.forEach((event, index) => {
+      oracle.addEvent(event);
+      if (index < 120) prefix.addEvent(event);
+    });
+    const mixed = packGraph(prefix);
+    for (const event of events.slice(120)) mixed.addEvent(event);
+    const ranks = new Map(
+      Array.from(
+        mixed.iterateEventIdsInInsertionOrder(),
+        (id, rank) => [id, rank] as const,
+      ),
+    );
+    const parentIterator = vi.spyOn(mixed, "iterateParents");
+
+    for (let trial = 0; trial < 80; trial++) {
+      const version = (): Set<EventId> => {
+        const result = new Set<EventId>();
+        const width = (rng() % 3) + 1;
+        for (let index = 0; index < width; index++) {
+          result.add(events[rng() % events.length]!.id);
+        }
+        return result;
+      };
+      const left = version();
+      const right = version();
+      const expected = oracle.diffVersions(left, right);
+
+      expect(mixed.diffVersions(left, right)).toEqual(expected);
+      const transition = mixed.getRankedVersionTransition(left, right)!;
+      expect(new Set(transition.retreat)).toEqual(expected.onlyInLeft);
+      expect(new Set(transition.advance)).toEqual(expected.onlyInRight);
+      const retreatRanks = transition.retreat.map((id) => ranks.get(id)!);
+      const advanceRanks = transition.advance.map((id) => ranks.get(id)!);
+      expect(retreatRanks).toEqual([...retreatRanks].sort((a, b) => b - a));
+      expect(advanceRanks).toEqual([...advanceRanks].sort((a, b) => a - b));
+      expect(mixed.getRankedReplayOrder(expected.onlyInRight)).toEqual(
+        oracle.getRankedReplayOrder(expected.onlyInRight),
+      );
+    }
+    expect(parentIterator).not.toHaveBeenCalled();
+  });
+
+  it("stays numeric when a mutable tail follows a packed prefix", () => {
     const source = buildLinearHistory(4, "mixed").graph;
     const packed = packGraph(source);
     const packedParentIterator = vi.spyOn(packed, "iterateParents");
@@ -377,7 +445,44 @@ describe("diffVersions topological diff", () => {
     expect(
       packed.diffVersions(new Set(["tail"]), new Set(["mixed-1"])),
     ).toEqual(source.diffVersions(new Set(["tail"]), new Set(["mixed-1"])));
-    expect(packedParentIterator).toHaveBeenCalled();
+    expect(
+      packed.getRankedVersionTransition(
+        new Set(["tail"]),
+        new Set(["mixed-1"]),
+      ),
+    ).toEqual(
+      source.getRankedVersionTransition(
+        new Set(["tail"]),
+        new Set(["mixed-1"]),
+      ),
+    );
+    expect(packed.getRankedReplayOrder(new Set(["mixed-2", "tail"]))).toEqual(
+      source.getRankedReplayOrder(new Set(["mixed-2", "tail"])),
+    );
+    expect(packedParentIterator).not.toHaveBeenCalled();
+  });
+
+  it("walks only the divergent region of a packed prefix with a tail", () => {
+    const { graph, ids } = buildLinearHistory(20_000, "prefix");
+    const packed = packGraph(graph);
+    const branchPoint = ids[ids.length - 11]!;
+    packed.addEvent({
+      id: "late:0",
+      timestamp: 20_000,
+      parentVersion: new Set([branchPoint]),
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "L" },
+    });
+
+    const { onlyInLeft, onlyInRight } = packed.diffVersions(
+      new Set([ids[ids.length - 1]!]),
+      new Set(["late:0"]),
+    );
+
+    expect(onlyInLeft).toEqual(new Set(ids.slice(-10).reverse()));
+    expect(onlyInRight).toEqual(new Set(["late:0"]));
+    // The ten one-sided events, the new tail event and the shared branch
+    // point are visited; none of the ~20k common ancestors are.
+    expect(packed.getLastObjectDiffTraversalCount()).toBeLessThanOrEqual(12);
   });
 
   it("isolates re-entrant packed queries and resets scratch state after errors", () => {

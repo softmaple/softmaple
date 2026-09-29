@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
-  PortableSnapshotCodec,
   validatePortableSnapshotHeaderOnly,
   type PortableSnapshot,
 } from "../core/portable-snapshot";
+import { PortableSnapshotCodec } from "../core/portable-snapshot-codec";
 import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
@@ -178,6 +178,10 @@ describe("PortableSnapshot", () => {
     const source = createConcurrentReplica();
     const codec = new PortableSnapshotCodec();
     const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
+    const generatedPacked = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
 
     try {
       // Act
@@ -189,8 +193,11 @@ describe("PortableSnapshot", () => {
 
       // Assert
       expect(generated).not.toHaveBeenCalled();
+      expect(generatedPacked).not.toHaveBeenCalled();
+      expect(restored.getReplayStats().snapshotValidationReplays).toBe(0);
     } finally {
       generated.mockRestore();
+      generatedPacked.mockRestore();
     }
   });
 
@@ -200,6 +207,10 @@ describe("PortableSnapshot", () => {
     const codec = new PortableSnapshotCodec();
     const bytes = codec.encode(source.createPortableSnapshot()).slice();
     const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
+    const generatedPacked = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
 
     try {
       // Act
@@ -208,10 +219,100 @@ describe("PortableSnapshot", () => {
       );
       restored.exportEventGraph();
 
-      // Assert
-      expect(generated).toHaveBeenCalledOnce();
+      // Assert: one sectioned packed replay, the same one a cold load runs.
+      expect(generated).not.toHaveBeenCalled();
+      expect(generatedPacked).toHaveBeenCalledOnce();
+      expect(restored.getReplayStats()).toMatchObject({
+        snapshotValidationReplays: 1,
+        snapshotValidationEvents: concurrentEvents.length,
+        fullReplays: 0,
+      });
     } finally {
       generated.mockRestore();
+      generatedPacked.mockRestore();
+    }
+  });
+
+  it("keeps the validation replay for the first concurrent edit", () => {
+    // Arrange: a shared root, then one long branch the snapshot has seen.
+    const events: GraphEvent[] = [root];
+    for (let index = 0; index < 64; index++) {
+      events.push({
+        id: `alice:${index + 1}`,
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "a" },
+        parentVersion: new Set([events[events.length - 1]!.id]),
+        timestamp: index + 2,
+      });
+    }
+    const source = new EgWalkerReplica("source");
+    source.applyRemoteEvents(events);
+    const codec = new PortableSnapshotCodec();
+    const bytes = codec.encode(source.createPortableSnapshot()).slice();
+    const late: GraphEvent = {
+      id: "bob:0",
+      operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "B" },
+      parentVersion: new Set(["alice:54"]),
+      timestamp: 100,
+    };
+    const reference = new EgWalkerReplica("reference");
+    reference.applyRemoteEvents([...events, late]);
+
+    // Act
+    const restored = EgWalkerReplica.fromPortableSnapshot(codec.decode(bytes));
+    restored.applyRemoteEvent(late);
+
+    // Assert: validation left checkpoints behind, so the concurrent edit
+    // replays only the divergent suffix.
+    expect(restored.getText()).toBe(reference.getText());
+    expect(restored.getReplayStats()).toMatchObject({
+      snapshotValidationReplays: 1,
+      fullReplays: 0,
+      partialReplays: 1,
+    });
+  });
+
+  it("restores the lazy state when the validation replay fails", () => {
+    // Arrange
+    const source = createConcurrentReplica();
+    const snapshot = source.createPortableSnapshot();
+    const restored = EgWalkerReplica.fromPortableSnapshot({
+      ...snapshot,
+      text: `${snapshot.text}?`,
+    });
+    const statsBefore = restored.getReplayStats();
+
+    // Act and assert
+    expect(() => restored.insert(0, "!")).toThrow(/materialized text mismatch/);
+    expect(restored.getText()).toBe(`${snapshot.text}?`);
+    expect(restored.getFrontier()).toEqual(new Set(snapshot.currentVersion));
+    expect(restored.getReplayStats()).toEqual(statsBefore);
+    expect(() => restored.applyRemoteEvent(concurrentEvents[1]!)).toThrow(
+      /materialized text mismatch/,
+    );
+  });
+
+  it("proves an untrusted snapshot with the sectioned cold replay when encoding", () => {
+    // Arrange: a structurally equal copy carries no validation proof.
+    const snapshot = { ...createConcurrentReplica().createPortableSnapshot() };
+    const generated = vi.spyOn(EgWalkerEngine.prototype, "generate");
+    const generatedPacked = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+
+    try {
+      // Act
+      const decoded = new PortableSnapshotCodec().decode(
+        new PortableSnapshotCodec().encode(snapshot),
+      );
+
+      // Assert
+      expect(decoded.text).toBe(snapshot.text);
+      expect(generated).not.toHaveBeenCalled();
+      expect(generatedPacked).toHaveBeenCalledOnce();
+    } finally {
+      generated.mockRestore();
+      generatedPacked.mockRestore();
     }
   });
 

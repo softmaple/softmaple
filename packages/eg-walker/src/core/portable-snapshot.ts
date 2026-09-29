@@ -1,6 +1,3 @@
-import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
-import { replayPackedLinear } from "./internals/replay-packed-linear";
-import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import type { EventGraph } from "../graph/event-graph";
 import {
@@ -68,59 +65,71 @@ export const assertPortableSnapshotMetadata = (
   }
 };
 
-export class PortableSnapshotCodec {
-  encode(snapshot: PortableSnapshot): Uint8Array {
-    const existingProof = matchingProof(snapshot);
-    const validated =
-      existingProof === null ? validatePortableSnapshot(snapshot) : snapshot;
-    const proof = existingProof ?? captureProof(validated);
-    trustedSnapshots.set(snapshot, proof);
-    const writer = new BinaryWriter();
-    writer.writeString(
-      JSON.stringify({
-        formatVersion: validated.formatVersion,
-        text: validated.text,
-        initialText: validated.initialText,
-        currentVersion: validated.currentVersion,
-        eventCount: validated.eventCount,
-        nextSequenceNumber: validated.nextSequenceNumber,
-      } satisfies PortableSnapshotHeader),
-    );
-    writer.writeBytes(validated.eventGraph);
-    const body = writer.toUint8Array();
-    const encoded = new Uint8Array(MAGIC.length + body.length);
-    encoded.set(MAGIC, 0);
-    encoded.set(body, MAGIC.length);
-    trustedEncodedBytes.set(encoded, proof);
-    return encoded;
-  }
+/**
+ * @internal Encode EGWP1 bytes. A snapshot without a validation proof is
+ * header-checked and then passed to `validateUntrusted`, which must prove
+ * its graph and text (see `PortableSnapshotCodec`).
+ */
+export const encodePortableSnapshot = (
+  snapshot: PortableSnapshot,
+  validateUntrusted: (snapshot: PortableSnapshot) => PortableSnapshot,
+): Uint8Array => {
+  const existingProof = matchingProof(snapshot);
+  const validated =
+    existingProof === null
+      ? validateUntrusted(validatePortableSnapshotHeaderOnly(snapshot))
+      : snapshot;
+  const proof = existingProof ?? captureProof(validated);
+  trustedSnapshots.set(snapshot, proof);
+  const writer = new BinaryWriter();
+  writer.writeString(
+    JSON.stringify({
+      formatVersion: validated.formatVersion,
+      text: validated.text,
+      initialText: validated.initialText,
+      currentVersion: validated.currentVersion,
+      eventCount: validated.eventCount,
+      nextSequenceNumber: validated.nextSequenceNumber,
+    } satisfies PortableSnapshotHeader),
+  );
+  writer.writeBytes(validated.eventGraph);
+  const body = writer.toUint8Array();
+  const encoded = new Uint8Array(MAGIC.length + body.length);
+  encoded.set(MAGIC, 0);
+  encoded.set(body, MAGIC.length);
+  trustedEncodedBytes.set(encoded, proof);
+  return encoded;
+};
 
-  decode(bytes: Uint8Array): PortableSnapshot {
-    if (bytes.length < MAGIC.length) {
+/**
+ * @internal Decode EGWP1 bytes and check the header. The graph is decoded
+ * and proven only when a replica or the codec needs it.
+ */
+export const decodePortableSnapshot = (bytes: Uint8Array): PortableSnapshot => {
+  if (bytes.length < MAGIC.length) {
+    throw new Error("Invalid portable snapshot: missing EGWP1 header");
+  }
+  for (let index = 0; index < MAGIC.length; index++) {
+    if (bytes[index] !== MAGIC[index]) {
       throw new Error("Invalid portable snapshot: missing EGWP1 header");
     }
-    for (let index = 0; index < MAGIC.length; index++) {
-      if (bytes[index] !== MAGIC[index]) {
-        throw new Error("Invalid portable snapshot: missing EGWP1 header");
-      }
-    }
-    const reader = new BinaryReader(bytes.subarray(MAGIC.length));
-    const header = parseHeader(reader.readString());
-    const eventGraph = reader.readBytes(reader.readVarint());
-    if (reader.remainingByteLength !== 0) {
-      throw new Error("Invalid portable snapshot: trailing bytes");
-    }
-    const snapshot = validatePortableSnapshotHeaderOnly({
-      ...header,
-      eventGraph,
-    });
-    const proof = trustedEncodedBytes.get(bytes);
-    if (proof !== undefined && snapshotMatchesProof(snapshot, proof)) {
-      trustedSnapshots.set(snapshot, proof);
-    }
-    return snapshot;
   }
-}
+  const reader = new BinaryReader(bytes.subarray(MAGIC.length));
+  const header = parseHeader(reader.readString());
+  const eventGraph = reader.readBytes(reader.readVarint());
+  if (reader.remainingByteLength !== 0) {
+    throw new Error("Invalid portable snapshot: trailing bytes");
+  }
+  const snapshot = validatePortableSnapshotHeaderOnly({
+    ...header,
+    eventGraph,
+  });
+  const proof = trustedEncodedBytes.get(bytes);
+  if (proof !== undefined && snapshotMatchesProof(snapshot, proof)) {
+    trustedSnapshots.set(snapshot, proof);
+  }
+  return snapshot;
+};
 
 /** @internal Mark a snapshot produced from live replica state as validated. */
 export const registerTrustedPortableSnapshot = (
@@ -128,18 +137,6 @@ export const registerTrustedPortableSnapshot = (
 ): PortableSnapshot => {
   trustedSnapshots.set(snapshot, captureProof(snapshot));
   return snapshot;
-};
-
-export const validatePortableSnapshot = (
-  snapshot: PortableSnapshot,
-): PortableSnapshot => {
-  if (matchingProof(snapshot) !== null) {
-    return validatePortableSnapshotHeaderOnly(snapshot);
-  }
-  const validated = validatePortableSnapshotHeaderOnly(snapshot);
-  const graph = codec.decodeBinary(validated.eventGraph);
-  validatePortableSnapshotGraph(graph, validated, true);
-  return validated;
 };
 
 export const validatePortableSnapshotHeaderOnly = (
@@ -201,32 +198,19 @@ export const validatePortableSnapshotHeaderOnly = (
   return validated;
 };
 
-export const createPortableSnapshotGraphSource = (
+/**
+ * Decode a header-validated snapshot's EGW3 graph and check its event count,
+ * frontier and metadata against the header.
+ *
+ * The text is not replayed here. It is proven by the sectioned cold replay
+ * of the replica that owns the graph, so a restored replica keeps what that
+ * replay builds instead of replaying history again for its first divergent
+ * edit (see {@link portableSnapshotRequiresTextValidation}).
+ */
+export const decodePortableSnapshotGraph = (
   snapshot: PortableSnapshot,
-  onValidation?: (eventCount: number, linear: boolean) => void,
-): (() => EventGraph) => {
-  let graph: EventGraph | null = null;
-  return () => {
-    if (graph === null) {
-      const decoded = codec.decodeBinary(snapshot.eventGraph);
-      validatePortableSnapshotGraph(
-        decoded,
-        snapshot,
-        matchingProof(snapshot) === null,
-        onValidation,
-      );
-      graph = decoded;
-    }
-    return graph;
-  };
-};
-
-const validatePortableSnapshotGraph = (
-  graph: EventGraph,
-  snapshot: PortableSnapshot,
-  validateMaterializedText: boolean,
-  onValidation?: (eventCount: number, linear: boolean) => void,
-): void => {
+): EventGraph => {
+  const graph = codec.decodeBinary(snapshot.eventGraph);
   try {
     if (graph.getEventCount() !== snapshot.eventCount) {
       throw new Error("Invalid portable snapshot: event count mismatch");
@@ -235,31 +219,35 @@ const validatePortableSnapshotGraph = (
       throw new Error("Invalid portable snapshot: frontier mismatch");
     }
     assertPortableSnapshotMetadata(graph.getMetadata());
-    if (validateMaterializedText) {
-      const packed = graph.getPackedLinearReplayView();
-      let text: string;
-      if (packed !== null) {
-        text = replayPackedLinear(
-          packed,
-          PersistentUtf16Rope.from(snapshot.initialText),
-        ).toString();
-      } else {
-        const eventOrder = graph.getBranchPreservingTopologicalOrder();
-        text = new EgWalkerEngine().generate(eventOrder, snapshot.initialText, {
-          eventGraph: graph,
-          eventOrder,
-          collectTransformedOperations: false,
-        }).text;
-      }
-      if (text !== snapshot.text) {
-        throw new Error(
-          "Invalid portable snapshot: materialized text mismatch",
-        );
-      }
-      onValidation?.(graph.getEventCount(), packed !== null);
-    }
   } finally {
     graph.releaseTraversalCaches();
+  }
+  return graph;
+};
+
+/** Decode a snapshot's graph on demand; see {@link decodePortableSnapshotGraph}. */
+export const createPortableSnapshotGraphSource =
+  (snapshot: PortableSnapshot): (() => EventGraph) =>
+  () =>
+    decodePortableSnapshotGraph(snapshot);
+
+/**
+ * Whether restoring `snapshot` must replay its graph to prove its text.
+ *
+ * Snapshots produced from live replica state in this process, and byte
+ * arrays encoded from them, carry a validation proof and skip the replay.
+ */
+export const portableSnapshotRequiresTextValidation = (
+  snapshot: PortableSnapshot,
+): boolean => matchingProof(snapshot) === null;
+
+/** Reject a snapshot whose graph does not replay to its recorded text. */
+export const assertPortableSnapshotText = (
+  replayedText: string,
+  snapshotText: string,
+): void => {
+  if (replayedText !== snapshotText) {
+    throw new Error("Invalid portable snapshot: materialized text mismatch");
   }
 };
 

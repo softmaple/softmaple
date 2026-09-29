@@ -70,6 +70,15 @@ export class CausalIndex {
     this.frontier.add(eventId);
   }
 
+  /** Integration order: every ancestor of an event comes before it. */
+  order(eventId: string): number {
+    const node = this.nodes.get(eventId);
+    if (node === undefined) {
+      throw new Error(`Event ${eventId} is not integrated`);
+    }
+    return node.lv;
+  }
+
   /** Strict ancestry, matching a parent-graph search from `descendantId`. */
   isAncestor(ancestorId: string, descendantId: string): boolean {
     if (ancestorId === descendantId) {
@@ -99,35 +108,6 @@ export class CausalIndex {
     }
     byDescendant.set(descendantId, result);
     return result;
-  }
-
-  /** Every strict ancestor of `eventId`. */
-  collectAncestors(eventId: string): Set<string> {
-    const ancestors = new Set<string>();
-    const node = this.nodes.get(eventId);
-    if (node === undefined) {
-      return ancestors;
-    }
-    const covered = new Map<ChainNode, number>();
-    const stack: Array<readonly [ChainNode, number]> = [
-      [node.chain, node.index - 1],
-    ];
-    while (stack.length > 0) {
-      const [chain, lastIndex] = stack.pop()!;
-      const previous = covered.get(chain);
-      if (previous === undefined) {
-        for (const parent of chain.parents) {
-          const parentNode = this.nodes.get(parent)!;
-          stack.push([parentNode.chain, parentNode.index]);
-        }
-      }
-      const from = (previous ?? -1) + 1;
-      for (let index = from; index <= lastIndex; index++) {
-        ancestors.add(chain.ids[index]!);
-      }
-      covered.set(chain, Math.max(previous ?? -1, lastIndex));
-    }
-    return ancestors;
   }
 
   private searchAncestor(ancestor: EventNode, descendant: EventNode): boolean {

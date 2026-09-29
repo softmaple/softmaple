@@ -119,6 +119,11 @@ export class RawLayer {
     return this.segments;
   }
 
+  /** Segment that starts at the block's marker, if the marker is integrated. */
+  segmentOf(blockId: BlockId): Segment | undefined {
+    return this.segmentsByBlock.get(blockId);
+  }
+
   /** Raw index of the first content code unit after the segment's marker. */
   contentStart(segment: Segment): number {
     return this.prefix.length + this.lengths.prefix(segment.index) + 1;

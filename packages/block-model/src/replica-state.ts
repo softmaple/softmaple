@@ -162,7 +162,6 @@ export class ReplicaState {
   private readonly insertEvents: MirrorInsertEvent[] = [];
   private readonly blocks = new Map<BlockId, BlockMeta>();
   private readonly children = new Map<BlockId, BlockId[]>();
-  private readonly joinEventIds: string[] = [];
   private readonly marksByOwner = new Map<BlockId, MarkRecord[]>();
   private unindexedMarks: MarkRecord[] = [];
   private structureDirty = true;
@@ -463,7 +462,6 @@ export class ReplicaState {
           throw new Error("The deterministic bootstrap block cannot be joined");
         }
         this.meta(effect.blockId).joins.push(eventId);
-        this.joinEventIds.push(eventId);
         this.structureDirty = true;
         return;
       case "mark-set":
@@ -692,40 +690,60 @@ export class ReplicaState {
    * Recover the visible block group that owned a mark when it was set.
    * Ownership depends only on the mark's causal past, so it never changes
    * after integration.
+   *
+   * In the mark's past, a group is a visible block followed by the visible
+   * blocks joined into it, skipping blocks that were not visible yet or any
+   * more. The mark's block starts its group unless it had already been joined
+   * after an earlier visible block, so only the segments from the mark's block
+   * to the next group are examined.
    */
   private markOwners(mark: MarkRecord): ReadonlySet<BlockId> {
-    if (
-      !this.joinEventIds.some((joinId) =>
-        this.causal.isAncestor(joinId, mark.eventId),
-      )
-    ) {
-      return new Set([mark.blockId]);
+    const owned = new Set([mark.blockId]);
+    const own = this.raw.segmentOf(mark.blockId);
+    if (own === undefined || !this.visibleAt(own, mark.eventId)) {
+      return owned;
     }
-    const observed = this.causal.collectAncestors(mark.eventId);
-    let visibleOwner: BlockId | null = null;
-    const owned = new Set<BlockId>();
-    for (const segment of this.raw.segmentList) {
-      const meta = this.blocks.get(segment.blockId)!;
-      if (
-        !observed.has(meta.markerEventId!) ||
-        [...meta.causes].some((cause) => observed.has(cause))
-      ) {
+    const segments = this.raw.segmentList;
+    if (
+      this.joinedAt(own, mark.eventId) &&
+      segments
+        .slice(0, own.index)
+        .some((segment) => this.visibleAt(segment, mark.eventId))
+    ) {
+      return owned;
+    }
+    for (let index = own.index + 1; index < segments.length; index++) {
+      const segment = segments[index]!;
+      if (!this.visibleAt(segment, mark.eventId)) {
         continue;
       }
-      const joinedBeforeMark = meta.joins.some((joinId) =>
-        observed.has(joinId),
-      );
-      if (!joinedBeforeMark || visibleOwner === null) {
-        visibleOwner = meta.id;
+      if (!this.joinedAt(segment, mark.eventId)) {
+        break;
       }
-      if (visibleOwner === mark.blockId) {
-        owned.add(meta.id);
-      }
-    }
-    if (owned.size === 0) {
-      owned.add(mark.blockId);
+      owned.add(segment.blockId);
     }
     return owned;
+  }
+
+  /** Whether the block existed and was not removed before `eventId`. */
+  private visibleAt(segment: Segment, eventId: string): boolean {
+    const meta = this.blocks.get(segment.blockId)!;
+    if (!this.causal.isAncestor(meta.markerEventId!, eventId)) {
+      return false;
+    }
+    for (const cause of meta.causes) {
+      if (this.causal.isAncestor(cause, eventId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Whether the block was joined to its predecessor before `eventId`. */
+  private joinedAt(segment: Segment, eventId: string): boolean {
+    return this.blocks
+      .get(segment.blockId)!
+      .joins.some((joinId) => this.causal.isAncestor(joinId, eventId));
   }
 
   private markRangeDirty(start: number, end: number): void {
@@ -1050,19 +1068,35 @@ export class ReplicaState {
     }
   }
 
-  /** Causal LWW: the largest event ID among the causally maximal marks. */
+  /**
+   * Causal LWW: the largest event ID among the causally maximal marks.
+   *
+   * Newest first, a mark is dominated exactly when it is an ancestor of a
+   * maximal mark already found: anything it precedes was integrated later and
+   * is either maximal or precedes a maximal mark. A linear history therefore
+   * needs one ancestry check per mark instead of one per pair.
+   */
   private selectWinner(candidates: ReadonlyArray<ResolvedMark>): ResolvedMark {
-    let winner: ResolvedMark | null = null;
-    for (const candidate of candidates) {
-      const dominated = candidates.some(
-        (other) =>
-          other.mark.eventId !== candidate.mark.eventId &&
-          this.causal.isAncestor(candidate.mark.eventId, other.mark.eventId),
-      );
+    const newestFirst = [...candidates].sort(
+      (left, right) =>
+        this.causal.order(right.mark.eventId) -
+        this.causal.order(left.mark.eventId),
+    );
+    const maximal: ResolvedMark[] = [];
+    for (const candidate of newestFirst) {
       if (
-        !dominated &&
-        (winner === null ||
-          compareIds(winner.mark.eventId, candidate.mark.eventId) < 0)
+        !maximal.some((other) =>
+          this.causal.isAncestor(candidate.mark.eventId, other.mark.eventId),
+        )
+      ) {
+        maximal.push(candidate);
+      }
+    }
+    let winner: ResolvedMark | null = null;
+    for (const candidate of maximal) {
+      if (
+        winner === null ||
+        compareIds(winner.mark.eventId, candidate.mark.eventId) < 0
       ) {
         winner = candidate;
       }

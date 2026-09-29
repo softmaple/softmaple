@@ -14,6 +14,7 @@ import {
 } from "../index";
 import { materializeBlockState } from "../materialize";
 import { toGraphEvent } from "../wire";
+import { rebuildFromBatches } from "./rebuild-oracle";
 
 describe("BlockReplica", () => {
   it("should start from one fixed event-backed paragraph marker", () => {
@@ -688,6 +689,164 @@ describe("BlockReplica", () => {
       BOOTSTRAP_BLOCK_ID,
       "second",
     ]);
+  });
+
+  it("should discard edits already applied by a transaction that throws", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    const kept = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "kept");
+    })!;
+    const documentBefore = replica.getDocument();
+    const eventsBefore = replica.exportEvents();
+
+    // Act
+    expect(() =>
+      replica.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 4, " lost");
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: "lost-block",
+          type: "paragraph",
+          text: "lost",
+        });
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: "lost-block",
+          type: "paragraph",
+          text: "duplicate",
+        });
+      }),
+    ).toThrow("Duplicate block ID lost-block");
+    const next = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 4, "!");
+    })!;
+
+    // Assert
+    expect(replica.exportEvents()).toHaveLength(eventsBefore.length + 1);
+    expect(replica.getDocument().blocks).toEqual([
+      { ...documentBefore.blocks[0], text: "kept!" },
+    ]);
+    expect(next.parentVersion).toEqual([kept.events.at(-1)!.id]);
+  });
+
+  it("should reject a supplied duplicate block ID before a transaction edits anything", () => {
+    // Arrange
+    const alice = new BlockReplica("alice");
+    const bob = new BlockReplica("bob");
+    alice.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "taken",
+        type: "paragraph",
+        text: "one",
+      });
+    });
+
+    // Act
+    const batch = alice.transact((transaction) => {
+      expect(() =>
+        transaction.insertBlock("taken", {
+          id: "taken",
+          type: "paragraph",
+          text: "",
+        }),
+      ).toThrow("Duplicate block ID taken");
+      expect(() => transaction.splitBlock("taken", 1, {}, "taken")).toThrow(
+        "Duplicate block ID taken",
+      );
+      transaction.insertText("taken", 3, "!");
+    })!;
+    bob.applyRemoteEvents(alice.exportEvents());
+    alice.applyRemoteEvents(
+      bob.transact((transaction) => {
+        transaction.insertText("taken", 4, "?");
+      })!,
+    );
+
+    // Assert
+    expect(batch.events).toHaveLength(1);
+    expect(alice.getDocument().blocks.map(({ text }) => text)).toEqual([
+      "",
+      "one!?",
+    ]);
+    expect(alice.getDocument()).toEqual(
+      rebuildFromBatches("alice", alice.exportEvents()).state.document,
+    );
+  });
+
+  it("should discard a transaction whose edit failed part-way even if the callback caught the error", () => {
+    // Arrange: bob names a block after the event ID alice generates next.
+    const alice = new BlockReplica("alice");
+    const bob = new BlockReplica("bob");
+    alice.applyRemoteEvents(
+      bob.transact((transaction) => {
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: "alice:0",
+          type: "paragraph",
+          text: "bob",
+        });
+      })!,
+    );
+    const eventsBefore = alice.exportEvents();
+
+    // Act
+    expect(() =>
+      alice.transact((transaction) => {
+        try {
+          transaction.splitBlock(BOOTSTRAP_BLOCK_ID, 0);
+        } catch {
+          // The failed split already reached EG-walker; carrying on must not
+          // commit a batch built on top of it.
+        }
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "late");
+      }),
+    ).toThrow("Duplicate block ID alice:0");
+    const next = alice.transact((transaction) => {
+      transaction.insertText("alice:0", 3, "!");
+    })!;
+    bob.applyRemoteEvents(next);
+
+    // Assert
+    expect(alice.exportEvents()).toHaveLength(eventsBefore.length + 1);
+    expect(alice.getDocument().blocks.map(({ text }) => text)).toEqual([
+      "",
+      "bob!",
+    ]);
+    expect(bob.getDocument()).toEqual(alice.getDocument());
+    expect(alice.getDocument()).toEqual(
+      rebuildFromBatches("alice", alice.exportEvents()).state.document,
+    );
+  });
+
+  it("should reject a whole remote delivery when one of its batches is invalid", () => {
+    // Arrange
+    const author = new BlockReplica("author");
+    const valid = author.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "shared-id",
+        type: "paragraph",
+        text: "first",
+      });
+    })!;
+    const rival = new BlockReplica("rival");
+    const conflicting = rival.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "shared-id",
+        type: "h1",
+        text: "second",
+      });
+    })!;
+    const receiver = new BlockReplica("receiver");
+    const documentBefore = receiver.getDocument();
+
+    // Act / Assert
+    expect(() => receiver.applyRemoteEvents([valid, conflicting])).toThrow(
+      "Duplicate block ID shared-id",
+    );
+    expect(receiver.getDocument()).toEqual(documentBefore);
+    expect(receiver.getBatch(valid.batchId)).toBeNull();
+    expect(receiver.applyRemoteEvents(valid).integratedBatchIds).toEqual([
+      valid.batchId,
+    ]);
+    expect(receiver.getDocument()).toEqual(author.getDocument());
   });
 
   it("should emit a minimal text splice when replaceDocument appends text", () => {

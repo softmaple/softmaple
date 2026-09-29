@@ -1,6 +1,7 @@
 # @softmaple/bench
 
-Performance harnesses for [`@softmaple/eg-walker`](../eg-walker/README.md).
+Performance harnesses for [`@softmaple/eg-walker`](../eg-walker/README.md)
+and the [`@softmaple/block-model`](../block-model/README.md) layer built on it.
 This private tooling package keeps benchmark code, fixtures, and dependencies
 out of the production CRDT package.
 
@@ -76,6 +77,49 @@ pnpm exec turbo run paper-bench \
 
 See [PAPER_BENCHMARKS.md](./PAPER_BENCHMARKS.md) for dataset setup, calibrated
 lanes, metrics, guardrails, and reporting guidance.
+
+## Block-model edit latency
+
+`block-model-bench` measures a one-character edit on a `@softmaple/block-model`
+`BlockReplica` that already holds a long history, typed at the end of the
+document through three entry points: a local `transact(insertText)`, a remote
+`applyRemoteEvents` of one caught-up peer batch, and a local
+`transact(replaceDocument)` the way the Lexical binding commits every editor
+update. The history is one author typing
+one character per batch, delivered in a single bulk `applyRemoteEvents` call so
+setup stays linear in the history on every build. Every process validates the
+document text after setup and after the timed edits.
+
+Each process warms up with ten edits of each kind, then rotates through the
+three lanes for `--samples` rounds and reports per-lane medians. A fourth lane
+then splits the last block at its end and joins the new block back, so every
+later mark has a block join in its causal past, and toggles bold on the last
+character: ten warm-up toggles, then `--samples` timed ones. It checks the
+final bold span along with the text. The driver starts a
+fresh process for every implementation, history size and run, alternating the
+implementation order between runs, and prints the median of the per-process
+medians:
+
+```bash
+pnpm exec turbo run block-model-bench --filter=@softmaple/bench -- \
+  --batches 50,200,800,3200,10000 --runs 3
+```
+
+To compare two builds, build `@softmaple/block-model` in each checkout (for
+example a `git worktree` of the base commit) and give each implementation a
+unique name:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/block-model
+node scripts/run-block-model-bench.mjs \
+  --impl base=/path/to/base/packages/block-model/dist/index.js \
+  --impl head=../block-model/dist/index.js \
+  --batches 50,200,800,3200,10000 --runs 3 --output /path/to/results
+```
+
+`--paragraph-length N` starts a new paragraph every `N` characters instead of
+typing the whole history into one block. `--output` appends every process's
+samples to `runs.jsonl`.
 
 ## Replay optimization A/B workers
 

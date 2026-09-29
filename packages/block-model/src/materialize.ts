@@ -697,12 +697,12 @@ const setsIntersect = <T>(
   return false;
 };
 
-const sameMarkValue = (
+export const sameMarkValue = (
   left: true | LinkAttributes,
   right: true | LinkAttributes,
 ): boolean => JSON.stringify(left) === JSON.stringify(right);
 
-const normalizeOutputAttributes = (
+export const normalizeOutputAttributes = (
   type: BlockType,
   requested: BlockAttributes,
   previousBlocks: ReadonlyMap<BlockId, BlockType>,

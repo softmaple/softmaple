@@ -1,11 +1,5 @@
-import { EgWalkerReplica, type GraphEvent } from "@softmaple/eg-walker";
-import {
-  captureAnchor,
-  createSequenceAnchorProjection,
-  resolveAnchor,
-  tryResolveAnchor,
-  type AnchorAffinity,
-} from "@softmaple/eg-walker/anchors";
+import type { GraphEvent } from "@softmaple/eg-walker";
+import type { AnchorAffinity } from "@softmaple/eg-walker/anchors";
 
 import {
   BLOCK_MARKER,
@@ -14,11 +8,8 @@ import {
   BOOTSTRAP_BLOCK_ID,
   METADATA_MARKER,
 } from "./constants";
-import {
-  materializeBlockState,
-  type MaterializedBlockState,
-  type ProjectedBlock,
-} from "./materialize";
+import { ReplicaState } from "./replica-state";
+import { diffText } from "./text-diff";
 import type {
   ApplyRichTextEventsResult,
   Block,
@@ -46,55 +37,74 @@ import {
   cloneBatch,
   compareIds,
   encodeText,
-  fromGraphEvent,
   isBlockType,
   isLinkAttributes,
   isMarkKind,
   normalizeFields,
   parseBatch,
   sameBatch,
-  toGraphEvent,
 } from "./wire";
 
+interface PendingBatch {
+  readonly batch: RichTextEventBatch;
+  /** A parent event of the batch that is not integrated yet. */
+  readonly missing: string;
+}
+
+interface IntegrationPlan {
+  /** Batches that become ready, in causal order. */
+  readonly ready: ReadonlyArray<RichTextEventBatch>;
+  /** Batches that stay or become pending, keyed by batch ID. */
+  readonly parked: ReadonlyMap<string, PendingBatch>;
+}
+
 export class BlockReplica {
-  private egWalker: EgWalkerReplica;
-  private batchesById: Map<string, RichTextEventBatch>;
-  private integratedBatchIds: Set<string>;
-  private state: MaterializedBlockState;
+  private state: ReplicaState;
+  private readonly batchesById = new Map<string, RichTextEventBatch>([
+    [BOOTSTRAP_BATCH_ID, BOOTSTRAP_BATCH],
+  ]);
+  private readonly eventOwner = new Map<string, string>(
+    BOOTSTRAP_BATCH.events.map((event) => [event.id, BOOTSTRAP_BATCH_ID]),
+  );
+  /** Integrated non-bootstrap batches, in the causal order they were applied. */
+  private readonly integrated: RichTextEventBatch[] = [];
+  private readonly pending = new Map<string, PendingBatch>();
+  /** Pending batch IDs keyed by the missing event they wait for. */
+  private readonly waiting = new Map<string, Set<string>>();
   private readonly listeners = new Set<BlockReplicaListener>();
 
   constructor(private readonly replicaId: string) {
     if (replicaId.length === 0) {
       throw new Error("Block replica ID cannot be empty");
     }
-    this.batchesById = new Map([[BOOTSTRAP_BATCH_ID, BOOTSTRAP_BATCH]]);
-    const rebuilt = rebuildReplica(replicaId, this.batchesById);
-    this.egWalker = rebuilt.egWalker;
-    this.integratedBatchIds = rebuilt.integratedBatchIds;
-    this.state = rebuilt.state;
+    this.state = new ReplicaState(replicaId);
   }
 
   transact(
     callback: (transaction: BlockTransaction) => void,
   ): RichTextEventBatch | null {
-    const context = new BlockTransactionContext(
-      this.replicaId,
-      this.egWalker,
-      integratedEvents(this.batchesById, this.integratedBatchIds),
-    );
-    callback(context);
-    const batch = context.finish();
+    const context = new BlockTransactionContext(this.state);
+    let batch: RichTextEventBatch | null;
+    try {
+      callback(context);
+      batch = context.finish();
+    } catch (error) {
+      if (context.mutated) {
+        this.state = this.rebuildState();
+      }
+      throw error;
+    }
     if (batch === null) {
       return null;
     }
 
-    const nextBatches = new Map(this.batchesById);
-    nextBatches.set(batch.batchId, batch);
-    const rebuilt = rebuildReplica(this.replicaId, nextBatches);
-    this.batchesById = nextBatches;
-    this.egWalker = rebuilt.egWalker;
-    this.integratedBatchIds = rebuilt.integratedBatchIds;
-    this.state = rebuilt.state;
+    // A pending batch can wait for an event ID this replica just produced.
+    const plan = this.planIntegration(
+      [],
+      batch.events.map(({ id }) => id),
+    );
+    this.integrateReady(plan);
+    this.commit([batch], [batch, ...plan.ready], plan);
     this.notify("local", [batch.batchId]);
     return cloneBatch(batch);
   }
@@ -105,11 +115,12 @@ export class BlockReplica {
     const incoming = (Array.isArray(input) ? input : [input]).map((batch) =>
       parseBatch(batch),
     );
-    const nextBatches = new Map(this.batchesById);
-    const eventOwner = eventOwners(nextBatches);
+    const staged = new Map<string, RichTextEventBatch>();
+    const stagedOwners = new Map<string, string>();
 
     for (const batch of incoming) {
-      const existing = nextBatches.get(batch.batchId);
+      const existing =
+        this.batchesById.get(batch.batchId) ?? staged.get(batch.batchId);
       if (existing !== undefined) {
         if (!sameBatch(existing, batch)) {
           throw new Error(`Conflicting batch ID ${batch.batchId}`);
@@ -117,44 +128,35 @@ export class BlockReplica {
         continue;
       }
       for (const event of batch.events) {
-        const owner = eventOwner.get(event.id);
+        const owner =
+          this.eventOwner.get(event.id) ?? stagedOwners.get(event.id);
         if (owner !== undefined) {
           throw new Error(
             `Event ID ${event.id} already belongs to batch ${owner}`,
           );
         }
-        eventOwner.set(event.id, batch.batchId);
+        stagedOwners.set(event.id, batch.batchId);
       }
-      nextBatches.set(batch.batchId, batch);
+      staged.set(batch.batchId, batch);
     }
 
-    const rebuilt = rebuildReplica(this.replicaId, nextBatches);
-    const newlyIntegrated = [...rebuilt.integratedBatchIds]
-      .filter(
-        (batchId) =>
-          batchId !== BOOTSTRAP_BATCH_ID &&
-          !this.integratedBatchIds.has(batchId),
-      )
+    const plan = this.planIntegration([...staged.values()], []);
+    this.integrateReady(plan);
+    this.commit([...staged.values()], plan.ready, plan);
+    const newlyIntegrated = plan.ready
+      .map(({ batchId }) => batchId)
       .sort(compareIds);
-    this.batchesById = nextBatches;
-    this.egWalker = rebuilt.egWalker;
-    this.integratedBatchIds = rebuilt.integratedBatchIds;
-    this.state = rebuilt.state;
     if (newlyIntegrated.length > 0) {
       this.notify("remote", newlyIntegrated);
     }
     return Object.freeze({
       integratedBatchIds: Object.freeze(newlyIntegrated),
-      pendingBatchIds: Object.freeze(
-        [...nextBatches.keys()]
-          .filter((batchId) => !rebuilt.integratedBatchIds.has(batchId))
-          .sort(compareIds),
-      ),
+      pendingBatchIds: Object.freeze([...this.pending.keys()].sort(compareIds)),
     });
   }
 
   getDocument(): BlockDocument {
-    return this.state.document;
+    return this.state.document();
   }
 
   getBatch(batchId: string): RichTextEventBatch | null {
@@ -216,25 +218,11 @@ export class BlockReplica {
     offset: number,
     affinity: AnchorAffinity,
   ): BlockAnchor {
-    const projected = requireProjectedBlock(this.state, blockId);
-    const rawIndex = rawBoundary(projected, offset);
-    return Object.freeze({
-      blockId,
-      anchor: captureAnchor(this.egWalker, rawIndex, affinity),
-    });
+    return this.state.captureBlockAnchor(blockId, offset, affinity);
   }
 
   resolveBlockAnchor(anchor: BlockAnchor): ResolvedBlockAnchor {
-    const rawIndex = resolveRawAnchor(this.egWalker, anchor);
-    const resolved = nearestBlockBoundary(
-      this.state.projectedBlocks,
-      rawIndex,
-      anchor,
-    );
-    if (resolved === null) {
-      throw new Error("Cannot resolve block anchor in an empty document");
-    }
-    return resolved;
+    return this.state.resolveBlockAnchor(anchor);
   }
 
   /**
@@ -242,19 +230,121 @@ export class BlockReplica {
    * has not been integrated yet. Invalid anchors still throw.
    */
   tryResolveBlockAnchor(anchor: BlockAnchor): ResolvedBlockAnchor | null {
-    const rawIndex = tryResolveRawAnchor(this.egWalker, anchor);
-    if (rawIndex === null) {
-      return null;
+    return this.state.tryResolveBlockAnchor(anchor);
+  }
+
+  /**
+   * Decide which batches become ready, without touching replica state.
+   * `integratedEventIds` are events that just became available locally.
+   */
+  private planIntegration(
+    staged: ReadonlyArray<RichTextEventBatch>,
+    integratedEventIds: ReadonlyArray<string>,
+  ): IntegrationPlan {
+    const ready: RichTextEventBatch[] = [];
+    const parked = new Map<string, PendingBatch>();
+    const parkedByMissing = new Map<string, string[]>();
+    const planned = new Set<string>();
+    const woken = [...integratedEventIds];
+
+    const evaluate = (batch: RichTextEventBatch): void => {
+      const missing = batch.parentVersion.find(
+        (parent) => !this.state.hasEvent(parent) && !planned.has(parent),
+      );
+      if (missing === undefined) {
+        ready.push(batch);
+        parked.delete(batch.batchId);
+        for (const event of batch.events) {
+          planned.add(event.id);
+          woken.push(event.id);
+        }
+        return;
+      }
+      parked.set(batch.batchId, { batch, missing });
+      const waiters = parkedByMissing.get(missing);
+      if (waiters === undefined) {
+        parkedByMissing.set(missing, [batch.batchId]);
+      } else {
+        waiters.push(batch.batchId);
+      }
+    };
+
+    staged.forEach(evaluate);
+    while (woken.length > 0) {
+      const eventId = woken.pop()!;
+      const waiters = [
+        ...[...(this.waiting.get(eventId) ?? [])].map(
+          (batchId) => this.pending.get(batchId)!.batch,
+        ),
+        ...(parkedByMissing.get(eventId) ?? []).map(
+          (batchId) => parked.get(batchId)!.batch,
+        ),
+      ];
+      parkedByMissing.delete(eventId);
+      waiters.forEach(evaluate);
     }
-    const resolved = nearestBlockBoundary(
-      this.state.projectedBlocks,
-      rawIndex,
-      anchor,
-    );
-    if (resolved === null) {
-      throw new Error("Cannot resolve block anchor in an empty document");
+    return { ready, parked };
+  }
+
+  private integrateReady(plan: IntegrationPlan): void {
+    if (plan.ready.length === 0) {
+      return;
     }
-    return resolved;
+    try {
+      this.state.integrateBatches(plan.ready);
+    } catch (error) {
+      this.state = this.rebuildState();
+      throw error;
+    }
+  }
+
+  private commit(
+    stored: ReadonlyArray<RichTextEventBatch>,
+    integrated: ReadonlyArray<RichTextEventBatch>,
+    plan: IntegrationPlan,
+  ): void {
+    for (const batch of stored) {
+      this.batchesById.set(batch.batchId, batch);
+      for (const event of batch.events) {
+        this.eventOwner.set(event.id, batch.batchId);
+      }
+    }
+    this.integrated.push(...integrated);
+    for (const batch of plan.ready) {
+      this.unpark(batch.batchId);
+    }
+    for (const [batchId, entry] of plan.parked) {
+      this.unpark(batchId);
+      this.pending.set(batchId, entry);
+      const waiters = this.waiting.get(entry.missing);
+      if (waiters === undefined) {
+        this.waiting.set(entry.missing, new Set([batchId]));
+      } else {
+        waiters.add(batchId);
+      }
+    }
+  }
+
+  private unpark(batchId: string): void {
+    const entry = this.pending.get(batchId);
+    if (entry === undefined) {
+      return;
+    }
+    this.pending.delete(batchId);
+    const waiters = this.waiting.get(entry.missing);
+    waiters?.delete(batchId);
+    if (waiters?.size === 0) {
+      this.waiting.delete(entry.missing);
+    }
+  }
+
+  /** Recover from a failed update by replaying the committed batches. */
+  private rebuildState(): ReplicaState {
+    const state = new ReplicaState(this.replicaId);
+    if (this.integrated.length > 0) {
+      state.integrateBatches(this.integrated);
+    }
+    return state;
   }
 
   private notify(origin: "local" | "remote", batchIds: string[]): void {
@@ -264,7 +354,7 @@ export class BlockReplica {
     const change = Object.freeze({
       origin,
       batchIds: Object.freeze([...batchIds]),
-      document: this.state.document,
+      document: this.state.document(),
     });
     for (const listener of [...this.listeners]) {
       try {
@@ -293,104 +383,99 @@ export const isRichTextEventBatch = (
   }
 };
 
+/**
+ * Applies operations straight to the replica's long-lived state. If the
+ * callback throws after touching EG-walker, the owner rebuilds its state from
+ * the committed batches, so a failed transaction still leaves no trace.
+ *
+ * An edit that throws after it reached EG-walker leaves the shared state
+ * half-applied, so it spoils the transaction even if the callback catches the
+ * error: every later call and `finish` rethrow it, and the owner rebuilds.
+ */
 class BlockTransactionContext implements BlockTransaction {
-  private readonly egWalker: EgWalkerReplica;
-  private readonly baseEvents: ReadonlyArray<RichTextEvent>;
   private readonly events: RichTextEvent[] = [];
   private readonly initialParentVersion: ReadonlyArray<string>;
-  private state: MaterializedBlockState;
+  private failure: { readonly error: unknown } | null = null;
+  /** Whether EG-walker may have been modified by this transaction. */
+  mutated = false;
 
-  constructor(
-    replicaId: string,
-    source: EgWalkerReplica,
-    baseEvents: ReadonlyArray<RichTextEvent>,
-  ) {
-    this.egWalker = EgWalkerReplica.fromEventGraph(
-      replicaId,
-      source.exportEventGraph(),
-    );
-    this.baseEvents = baseEvents;
-    this.initialParentVersion = [...this.egWalker.getFrontier()].sort(
-      compareIds,
-    );
-    this.state = materializeBlockState(this.egWalker, baseEvents);
+  constructor(private readonly state: ReplicaState) {
+    this.initialParentVersion = state.frontier();
   }
 
   insertText(blockId: BlockId, offset: number, text: string): void {
+    this.assertUsable();
     if (text.length === 0) {
       return;
     }
-    const projected = requireProjectedBlock(this.state, blockId);
-    const rawIndex = rawBoundary(projected, offset);
+    const projected = this.state.requireVisibleBlock(blockId);
+    const rawIndex = this.state.rawBoundary(projected, offset);
     const encoded = encodeText(text);
-    const graphEvent = this.egWalker.insert(rawIndex, encoded);
-    if (graphEvent === null) {
-      throw new Error("EG-walker rejected a non-empty encoded text insert");
-    }
-    this.pushEvent(graphEvent, { type: "text-insert", blockId, text });
+    this.insertRaw(
+      rawIndex,
+      encoded,
+      () => ({ type: "text-insert", blockId, text }),
+      "EG-walker rejected a non-empty encoded text insert",
+    );
   }
 
   deleteText(blockId: BlockId, from: number, to: number): void {
-    const projected = requireProjectedBlock(this.state, blockId);
-    rawBoundary(projected, from);
-    rawBoundary(projected, to);
+    this.assertUsable();
+    const projected = this.state.requireVisibleBlock(blockId);
+    this.state.rawBoundary(projected, from);
+    this.state.rawBoundary(projected, to);
     if (from > to) {
       throw new Error("Text delete range must be forward");
     }
     if (from === to) {
       return;
     }
-    const units = projected.units.filter(
-      (unit) => from <= unit.from && unit.to <= to,
-    );
-    if (
-      units.length === 0 ||
-      units[0]!.from !== from ||
-      units.at(-1)!.to !== to
-    ) {
+    const ranges = this.state.deleteRanges(projected, from, to);
+    if (ranges.length === 0) {
       throw new Error("Text delete range must align to UTF-16 boundaries");
     }
-    const groups = contiguousRawGroups(units).reverse();
-    for (const group of groups) {
-      const graphEvent = this.egWalker.delete(
-        group.start,
-        group.end - group.start,
-      );
-      if (graphEvent === null) {
-        throw new Error("EG-walker rejected a non-empty text delete");
-      }
-      this.events.push(
-        fromGraphEvent(graphEvent, { type: "text-delete", blockId }),
+    // Delete from the end so earlier raw indexes stay valid.
+    for (const range of [...ranges].reverse()) {
+      this.edit(() =>
+        this.state.delete(
+          range.start,
+          range.end - range.start,
+          { type: "text-delete", blockId },
+          "EG-walker rejected a non-empty text delete",
+        ),
       );
     }
-    this.refresh();
   }
 
   insertBlock(afterBlockId: BlockId | null, input: BlockInput): BlockId {
+    this.assertUsable();
     assertBlockInput(input);
     const after =
       afterBlockId === null
-        ? this.state.projectedBlocks[0]
-        : requireProjectedBlock(this.state, afterBlockId);
+        ? this.state.firstVisibleBlock()
+        : this.state.requireVisibleBlock(afterBlockId);
     if (after === undefined) {
       throw new Error("Cannot insert a block into an empty projection");
     }
-    const rawIndex = after.rawEnd;
-    const graphEvent = this.egWalker.insert(rawIndex, BLOCK_MARKER);
-    if (graphEvent === null) {
-      throw new Error("EG-walker rejected a block marker insert");
+    if (input.id !== undefined) {
+      this.assertUnusedBlockId(input.id);
     }
-    const blockId = input.id ?? graphEvent.id;
-    this.assertUnusedBlockId(blockId);
-    this.events.push(
-      fromGraphEvent(graphEvent, {
-        type: "block-create",
-        blockId,
-        sourceBlockId: null,
-        fields: normalizeFields(input.type, input.attrs),
-      }),
+    let blockId = "";
+    this.insertRaw(
+      this.state.rawEnd(after),
+      BLOCK_MARKER,
+      (graphEvent) => {
+        blockId = input.id ?? graphEvent.id;
+        this.assertUnusedBlockId(blockId);
+        return {
+          type: "block-create",
+          blockId,
+          sourceBlockId: null,
+          fields: normalizeFields(input.type, input.attrs),
+        };
+      },
+      "EG-walker rejected a block marker insert",
     );
-    this.refresh();
     if (input.text.length > 0) {
       this.insertText(blockId, 0, input.text);
     }
@@ -406,52 +491,59 @@ class BlockTransactionContext implements BlockTransaction {
     fields: BlockFieldPatch = {},
     preferredBlockId?: BlockId,
   ): BlockId {
+    this.assertUsable();
     assertFieldPatch(fields);
-    const source = requireProjectedBlock(this.state, blockId);
-    const rawIndex = rawBoundary(source, offset);
-    const graphEvent = this.egWalker.insert(rawIndex, BLOCK_MARKER);
-    if (graphEvent === null) {
-      throw new Error("EG-walker rejected a split marker insert");
+    const projected = this.state.requireVisibleBlock(blockId);
+    const source = projected.block;
+    const rawIndex = this.state.rawBoundary(projected, offset);
+    if (preferredBlockId !== undefined) {
+      this.assertUnusedBlockId(preferredBlockId);
     }
-    const newBlockId = preferredBlockId ?? graphEvent.id;
-    this.assertUnusedBlockId(newBlockId);
-    this.events.push(
-      fromGraphEvent(graphEvent, {
-        type: "block-create",
-        blockId: newBlockId,
-        sourceBlockId: blockId,
-        fields: normalizeFields(fields.type ?? source.block.type, {
-          ...source.block.attrs,
-          ...fields,
-        }),
-      }),
+    let newBlockId = "";
+    this.insertRaw(
+      rawIndex,
+      BLOCK_MARKER,
+      (graphEvent) => {
+        newBlockId = preferredBlockId ?? graphEvent.id;
+        this.assertUnusedBlockId(newBlockId);
+        return {
+          type: "block-create",
+          blockId: newBlockId,
+          sourceBlockId: blockId,
+          fields: normalizeFields(fields.type ?? source.type, {
+            ...source.attrs,
+            ...fields,
+          }),
+        };
+      },
+      "EG-walker rejected a split marker insert",
     );
-    this.refresh();
     return newBlockId;
   }
 
   joinBlock(blockId: BlockId): void {
+    this.assertUsable();
     if (blockId === BOOTSTRAP_BLOCK_ID) {
       throw new Error("The bootstrap block cannot be joined");
     }
-    const projected = requireProjectedBlock(this.state, blockId);
-    const index = this.state.projectedBlocks.indexOf(projected);
-    if (index <= 0) {
+    if (this.state.requireVisibleBlock(blockId).index <= 0) {
       throw new Error("The first visible block cannot be joined");
     }
     this.pushMetadata({ type: "block-join", blockId });
   }
 
   deleteBlock(blockId: BlockId): void {
+    this.assertUsable();
     if (blockId === BOOTSTRAP_BLOCK_ID) {
       throw new Error("The bootstrap block cannot be deleted");
     }
-    requireProjectedBlock(this.state, blockId);
+    this.state.requireVisibleBlock(blockId);
     this.pushMetadata({ type: "block-delete", blockId });
   }
 
   setBlock(blockId: BlockId, fields: BlockFieldPatch): void {
-    requireProjectedBlock(this.state, blockId);
+    this.assertUsable();
+    this.state.requireVisibleBlock(blockId);
     assertFieldPatch(fields);
     if (Object.keys(fields).length === 0) {
       return;
@@ -467,37 +559,39 @@ class BlockTransactionContext implements BlockTransaction {
     value: true | LinkAttributes | null,
     affinity: MarkBoundaryAffinity = defaultMarkAffinity(kind),
   ): void {
+    this.assertUsable();
     if (!isMarkKind(kind)) {
       throw new Error(`Unsupported mark kind ${String(kind)}`);
     }
     assertMarkValue(kind, value);
-    const projected = requireProjectedBlock(this.state, blockId);
-    const rawFrom = rawBoundary(projected, from);
-    const rawTo = rawBoundary(projected, to);
+    const projected = this.state.requireVisibleBlock(blockId);
+    const rawFrom = this.state.rawBoundary(projected, from);
+    const rawTo = this.state.rawBoundary(projected, to);
     if (from >= to || rawFrom >= rawTo) {
       if (from === to) {
         return;
       }
       throw new Error("Mark range must be non-empty and forward");
     }
-    const projection = createSequenceAnchorProjection(this.egWalker);
     const range = {
-      start: projection.captureAnchor(rawFrom, affinity.start),
-      end: projection.captureAnchor(rawTo, affinity.end),
+      start: this.state.captureAnchor(rawFrom, affinity.start),
+      end: this.state.captureAnchor(rawTo, affinity.end),
     };
     this.pushMetadata({ type: "mark-set", blockId, kind, value, range });
   }
 
   replaceDocument(next: BlockDocumentInput): ReadonlyArray<BlockId> {
+    this.assertUsable();
     if (!Array.isArray(next.blocks) || next.blocks.length === 0) {
       throw new Error("A block document must contain at least one block");
     }
     next.blocks.forEach(assertBlockInput);
-    const before = this.state.document.blocks;
+    const before = this.state.document().blocks;
     const existingIndex = new Map(
       before.map((block, index) => [block.id, index]),
     );
     const selectedIds: BlockId[] = [];
+    const selected = new Set<BlockId>();
     const inputIds = new Map<string, BlockId>();
     let lastExistingIndex = -1;
 
@@ -506,7 +600,7 @@ class BlockTransactionContext implements BlockTransaction {
       let stableId: BlockId;
       const knownIndex = input.id ? existingIndex.get(input.id) : undefined;
       if (index === 0) {
-        const first = this.state.document.blocks[0]!;
+        const first = this.state.document().blocks[0]!;
         if (input.id !== undefined && input.id !== first.id) {
           throw new Error(
             `replaceDocument cannot replace first block ID ${first.id} with ${input.id}`,
@@ -528,10 +622,11 @@ class BlockTransactionContext implements BlockTransaction {
           marks: [],
         });
       }
-      if (selectedIds.includes(stableId)) {
+      if (selected.has(stableId)) {
         throw new Error(`replaceDocument contains duplicate block ${stableId}`);
       }
       selectedIds.push(stableId);
+      selected.add(stableId);
       if (input.inputId !== undefined) {
         if (inputIds.has(input.inputId)) {
           throw new Error(`Duplicate transaction inputId ${input.inputId}`);
@@ -541,7 +636,7 @@ class BlockTransactionContext implements BlockTransaction {
     }
 
     for (const block of before) {
-      if (block.id !== BOOTSTRAP_BLOCK_ID && !selectedIds.includes(block.id)) {
+      if (block.id !== BOOTSTRAP_BLOCK_ID && !selected.has(block.id)) {
         this.deleteBlock(block.id);
       }
     }
@@ -550,7 +645,7 @@ class BlockTransactionContext implements BlockTransaction {
       const input = next.blocks[index]!;
       const stableId = selectedIds[index]!;
       const parentId = resolveInputParent(input, inputIds);
-      const current = requireBlock(this.state.document, stableId);
+      const current = this.requireBlock(stableId);
       const desiredFields = normalizeFields(input.type, {
         ...input.attrs,
         parentId,
@@ -570,7 +665,7 @@ class BlockTransactionContext implements BlockTransaction {
           this.insertText(stableId, textChange.from, textChange.insert);
         }
       }
-      const refreshed = requireBlock(this.state.document, stableId);
+      const refreshed = this.requireBlock(stableId);
       const desiredMarks = input.marks ?? [];
       if (!sameMarks(refreshed.marks, desiredMarks)) {
         for (const mark of refreshed.marks) {
@@ -585,6 +680,7 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   finish(): RichTextEventBatch | null {
+    this.assertUsable();
     if (this.events.length === 0) {
       return null;
     }
@@ -597,40 +693,50 @@ class BlockTransactionContext implements BlockTransaction {
   }
 
   private pushMetadata(effect: RichTextEffect): void {
-    const graphEvent = this.egWalker.insert(
-      this.egWalker.getText().length,
+    this.insertRaw(
+      this.state.rawLength(),
       METADATA_MARKER,
+      () => effect,
+      "EG-walker rejected a metadata carrier insert",
     );
-    if (graphEvent === null) {
-      throw new Error("EG-walker rejected a metadata carrier insert");
+  }
+
+  private insertRaw(
+    rawIndex: number,
+    text: string,
+    effectFor: (graphEvent: GraphEvent) => RichTextEffect,
+    rejection: string,
+  ): void {
+    this.edit(() => this.state.insert(rawIndex, text, effectFor, rejection));
+  }
+
+  /** Apply one edit to the shared state, spoiling the transaction on error. */
+  private edit(apply: () => RichTextEvent): void {
+    this.assertUsable();
+    this.mutated = true;
+    try {
+      this.events.push(apply());
+    } catch (error) {
+      this.failure = { error };
+      throw error;
     }
-    this.pushEvent(graphEvent, effect);
   }
 
-  private pushEvent(graphEvent: GraphEvent, effect: RichTextEffect): void {
-    this.events.push(fromGraphEvent(graphEvent, effect));
-    this.refresh();
+  private assertUsable(): void {
+    if (this.failure !== null) {
+      throw this.failure.error;
+    }
   }
 
-  private refresh(): void {
-    this.state = materializeBlockState(this.egWalker, [
-      ...this.baseEvents,
-      ...this.events,
-    ]);
+  private requireBlock(blockId: BlockId): Block {
+    return this.state.requireVisibleBlock(blockId).block;
   }
 
   private assertUnusedBlockId(blockId: string): void {
     if (blockId.length === 0) {
       throw new Error("Block ID cannot be empty");
     }
-    const exists = [...this.baseEvents, ...this.events].some((event) => {
-      const effect = event.effect;
-      return (
-        (effect.type === "bootstrap" || effect.type === "block-create") &&
-        effect.blockId === blockId
-      );
-    });
-    if (exists) {
+    if (this.state.hasBlockMarker(blockId)) {
       throw new Error(`Duplicate block ID ${blockId}`);
     }
   }
@@ -642,137 +748,6 @@ class BlockTransactionContext implements BlockTransaction {
     this.setMark(blockId, mark.from, mark.to, mark.kind, mark.value);
   }
 }
-
-interface RebuiltReplica {
-  readonly egWalker: EgWalkerReplica;
-  readonly integratedBatchIds: Set<string>;
-  readonly state: MaterializedBlockState;
-}
-
-const rebuildReplica = (
-  replicaId: string,
-  batches: ReadonlyMap<string, RichTextEventBatch>,
-): RebuiltReplica => {
-  const ordered = readyBatches(batches);
-  const egWalker = new EgWalkerReplica(replicaId);
-  for (const batch of ordered) {
-    egWalker.applyRemoteEvents(batch.events.map(toGraphEvent));
-  }
-  const events = ordered.flatMap((batch) => [...batch.events]);
-  return {
-    egWalker,
-    integratedBatchIds: new Set(ordered.map((batch) => batch.batchId)),
-    state: materializeBlockState(egWalker, events),
-  };
-};
-
-const readyBatches = (
-  batches: ReadonlyMap<string, RichTextEventBatch>,
-): RichTextEventBatch[] => {
-  const bootstrap = batches.get(BOOTSTRAP_BATCH_ID);
-  if (bootstrap === undefined || !sameBatch(bootstrap, BOOTSTRAP_BATCH)) {
-    throw new Error("Block replica has no valid deterministic bootstrap batch");
-  }
-  const ordered = [bootstrap];
-  const integratedEvents = new Set(bootstrap.events.map((event) => event.id));
-  const remaining = [...batches.values()]
-    .filter((batch) => batch.batchId !== BOOTSTRAP_BATCH_ID)
-    .sort((left, right) => compareIds(left.batchId, right.batchId));
-  let progressed = true;
-  while (progressed) {
-    progressed = false;
-    for (let index = 0; index < remaining.length; index++) {
-      const batch = remaining[index]!;
-      if (
-        !batch.parentVersion.every((parent) => integratedEvents.has(parent))
-      ) {
-        continue;
-      }
-      ordered.push(batch);
-      batch.events.forEach((event) => integratedEvents.add(event.id));
-      remaining.splice(index, 1);
-      index--;
-      progressed = true;
-    }
-  }
-  return ordered;
-};
-
-const eventOwners = (
-  batches: ReadonlyMap<string, RichTextEventBatch>,
-): Map<string, string> => {
-  const owners = new Map<string, string>();
-  for (const batch of batches.values()) {
-    for (const event of batch.events) {
-      const existing = owners.get(event.id);
-      if (existing !== undefined && existing !== batch.batchId) {
-        throw new Error(`Event ID ${event.id} belongs to multiple batches`);
-      }
-      owners.set(event.id, batch.batchId);
-    }
-  }
-  return owners;
-};
-
-const integratedEvents = (
-  batches: ReadonlyMap<string, RichTextEventBatch>,
-  integrated: ReadonlySet<string>,
-): ReadonlyArray<RichTextEvent> =>
-  readyBatches(batches)
-    .filter((batch) => integrated.has(batch.batchId))
-    .flatMap((batch) => [...batch.events]);
-
-const requireProjectedBlock = (
-  state: MaterializedBlockState,
-  blockId: BlockId,
-): ProjectedBlock => {
-  const projected = state.projectedBlocks.find(
-    ({ block }) => block.id === blockId,
-  );
-  if (projected === undefined) {
-    throw new Error(`Unknown or hidden block ${blockId}`);
-  }
-  return projected;
-};
-
-const requireBlock = (document: BlockDocument, blockId: BlockId): Block => {
-  const block = document.blocks.find(({ id }) => id === blockId);
-  if (block === undefined) {
-    throw new Error(`Unknown or hidden block ${blockId}`);
-  }
-  return block;
-};
-
-const rawBoundary = (projected: ProjectedBlock, offset: number): number => {
-  if (!Number.isSafeInteger(offset) || offset < 0) {
-    throw new Error("Block offset must be a non-negative safe integer");
-  }
-  const rawIndex = projected.boundaries.get(offset);
-  if (rawIndex === undefined) {
-    throw new Error(
-      `Block offset ${offset} is out of range or splits a surrogate pair`,
-    );
-  }
-  return rawIndex;
-};
-
-const contiguousRawGroups = (
-  units: ReadonlyArray<{
-    readonly rawFrom: number;
-    readonly rawTo: number;
-  }>,
-): Array<{ readonly start: number; readonly end: number }> => {
-  const groups: Array<{ start: number; end: number }> = [];
-  for (const unit of units) {
-    const previous = groups.at(-1);
-    if (previous !== undefined && previous.end === unit.rawFrom) {
-      previous.end = unit.rawTo;
-    } else {
-      groups.push({ start: unit.rawFrom, end: unit.rawTo });
-    }
-  }
-  return groups;
-};
 
 const defaultMarkAffinity = (kind: MarkKind): MarkBoundaryAffinity =>
   kind === "link"
@@ -883,96 +858,3 @@ const sameMarks = (
 ): boolean =>
   left.length === right.length &&
   left.every((mark, index) => sameMarkSpan(mark, right[index]!));
-
-interface TextChange {
-  readonly from: number;
-  readonly oldTo: number;
-  readonly insert: string;
-}
-
-const diffText = (before: string, after: string): TextChange | null => {
-  if (before === after) {
-    return null;
-  }
-  const beforePoints = Array.from(before);
-  const afterPoints = Array.from(after);
-  let prefixCount = 0;
-  while (
-    prefixCount < beforePoints.length &&
-    prefixCount < afterPoints.length &&
-    beforePoints[prefixCount] === afterPoints[prefixCount]
-  ) {
-    prefixCount++;
-  }
-  let suffixCount = 0;
-  while (
-    suffixCount < beforePoints.length - prefixCount &&
-    suffixCount < afterPoints.length - prefixCount &&
-    beforePoints[beforePoints.length - suffixCount - 1] ===
-      afterPoints[afterPoints.length - suffixCount - 1]
-  ) {
-    suffixCount++;
-  }
-  const from = beforePoints.slice(0, prefixCount).join("").length;
-  const oldSuffixLength = beforePoints
-    .slice(beforePoints.length - suffixCount)
-    .join("").length;
-  const newSuffixLength = afterPoints
-    .slice(afterPoints.length - suffixCount)
-    .join("").length;
-  return {
-    from,
-    oldTo: before.length - oldSuffixLength,
-    insert: after.slice(from, after.length - newSuffixLength),
-  };
-};
-
-const resolveRawAnchor = (
-  egWalker: EgWalkerReplica,
-  anchor: BlockAnchor,
-): number => {
-  // Kept behind a tiny helper so a future batch resolver can replace the
-  // current on-demand EG replay without changing the public block API.
-  return resolveAnchor(egWalker, anchor.anchor);
-};
-
-const tryResolveRawAnchor = (
-  egWalker: EgWalkerReplica,
-  anchor: BlockAnchor,
-): number | null => tryResolveAnchor(egWalker, anchor.anchor);
-
-const nearestBlockBoundary = (
-  projectedBlocks: ReadonlyArray<ProjectedBlock>,
-  rawIndex: number,
-  anchor: BlockAnchor,
-): ResolvedBlockAnchor | null => {
-  let best: {
-    readonly blockId: BlockId;
-    readonly offset: number;
-    readonly raw: number;
-  } | null = null;
-  for (const projected of projectedBlocks) {
-    for (const { offset, raw } of projected.anchorBoundaries) {
-      if (best === null) {
-        best = { blockId: projected.block.id, offset, raw };
-        continue;
-      }
-      const distance = Math.abs(raw - rawIndex);
-      const bestDistance = Math.abs(best.raw - rawIndex);
-      const affinity: AnchorAffinity = anchor.anchor.affinity;
-      const preferredTie =
-        distance === bestDistance &&
-        ((raw === best.raw &&
-          projected.block.id === anchor.blockId &&
-          best.blockId !== anchor.blockId) ||
-          (raw !== best.raw &&
-            (affinity === "after" ? raw < best.raw : raw > best.raw)));
-      if (distance < bestDistance || preferredTie) {
-        best = { blockId: projected.block.id, offset, raw };
-      }
-    }
-  }
-  return best === null
-    ? null
-    : Object.freeze({ blockId: best.blockId, offset: best.offset });
-};

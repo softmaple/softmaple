@@ -690,6 +690,76 @@ describe("BlockReplica", () => {
     ]);
   });
 
+  it("should discard edits already applied by a transaction that throws", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    const kept = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "kept");
+    })!;
+    const documentBefore = replica.getDocument();
+    const eventsBefore = replica.exportEvents();
+
+    // Act
+    expect(() =>
+      replica.transact((transaction) => {
+        transaction.insertText(BOOTSTRAP_BLOCK_ID, 4, " lost");
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: "lost-block",
+          type: "paragraph",
+          text: "lost",
+        });
+        transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+          id: "lost-block",
+          type: "paragraph",
+          text: "duplicate",
+        });
+      }),
+    ).toThrow("Duplicate block ID lost-block");
+    const next = replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 4, "!");
+    })!;
+
+    // Assert
+    expect(replica.exportEvents()).toHaveLength(eventsBefore.length + 1);
+    expect(replica.getDocument().blocks).toEqual([
+      { ...documentBefore.blocks[0], text: "kept!" },
+    ]);
+    expect(next.parentVersion).toEqual([kept.events.at(-1)!.id]);
+  });
+
+  it("should reject a whole remote delivery when one of its batches is invalid", () => {
+    // Arrange
+    const author = new BlockReplica("author");
+    const valid = author.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "shared-id",
+        type: "paragraph",
+        text: "first",
+      });
+    })!;
+    const rival = new BlockReplica("rival");
+    const conflicting = rival.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "shared-id",
+        type: "h1",
+        text: "second",
+      });
+    })!;
+    const receiver = new BlockReplica("receiver");
+    const documentBefore = receiver.getDocument();
+
+    // Act / Assert
+    expect(() => receiver.applyRemoteEvents([valid, conflicting])).toThrow(
+      "Duplicate block ID shared-id",
+    );
+    expect(receiver.getDocument()).toEqual(documentBefore);
+    expect(receiver.getBatch(valid.batchId)).toBeNull();
+    expect(receiver.applyRemoteEvents(valid).integratedBatchIds).toEqual([
+      valid.batchId,
+    ]);
+    expect(receiver.getDocument()).toEqual(author.getDocument());
+  });
+
   it("should emit a minimal text splice when replaceDocument appends text", () => {
     // Arrange
     const base = new BlockReplica("seed");

@@ -86,7 +86,26 @@ mark endpoints use stable EG-walker anchors. Bold, italic, underline, strike,
 and inline-code inherit concurrent boundary inserts by default; links do not.
 
 The v1 model intentionally omits undo/redo, arbitrary custom/decorator nodes,
-tables, and block reordering. Anchor projection currently reconstructs
-temporary character state from the persistent event graph for each resolution;
-callers should avoid resolving large numbers of independent anchors outside a
-single editor update until a batch projection API is available.
+tables, and block reordering.
+
+## Incremental state
+
+A `BlockReplica` keeps one long-lived EG-walker replica for its whole life.
+Each local or remote batch is applied to it once, and the index operations
+EG-walker reports for those events update three derived structures:
+
+- a causal index that answers ancestry for causal LWW and remove-wins rules;
+- an identity-preserving mirror of the raw sequence, split into one segment per
+  block marker, which resolves stable anchors and mark ranges;
+- per-block metadata (fields, removals, joins, marks).
+
+`getDocument()` rebuilds only the blocks whose segments changed, so an edit
+costs the same with 50 batches of history as with 10,000. Batches with missing
+dependencies stay buffered until their parents arrive.
+
+When EG-walker has to replay concurrent history, it cannot report exact index
+operations. The replica then rebuilds its sequence mirror from one full anchor
+projection. It does the same when a concurrent insert lands next to a deleted
+atom that an anchor still names, because only a projection knows which side of
+that atom the insert took. A transaction or delivery that throws rebuilds the
+state from the committed batches, so a failed update leaves no trace.

@@ -78,14 +78,26 @@ export const BOOTSTRAP_BATCH: RichTextEventBatch = deepFreezeBatch({
   ],
 });
 
+const BLOCK_MARKER_CODE = BLOCK_MARKER.charCodeAt(0);
+const METADATA_MARKER_CODE = METADATA_MARKER.charCodeAt(0);
+const TEXT_ESCAPE_CODE = TEXT_ESCAPE.charCodeAt(0);
+
 export const encodeText = (text: string): string => {
   assertWellFormedUtf16(text, "text");
   let encoded = "";
+  let plainStart = 0;
   for (let index = 0; index < text.length; index++) {
-    const codeUnit = text[index]!;
-    encoded += isReserved(codeUnit) ? `${TEXT_ESCAPE}${codeUnit}` : codeUnit;
+    const code = text.charCodeAt(index);
+    if (
+      code === BLOCK_MARKER_CODE ||
+      code === METADATA_MARKER_CODE ||
+      code === TEXT_ESCAPE_CODE
+    ) {
+      encoded += `${text.slice(plainStart, index)}${TEXT_ESCAPE}${text[index]}`;
+      plainStart = index + 1;
+    }
   }
-  return encoded;
+  return plainStart === 0 ? text : encoded + text.slice(plainStart);
 };
 
 export const toGraphEvent = (event: RichTextEvent): GraphEvent => ({

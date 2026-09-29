@@ -55,7 +55,7 @@ function RoleSelect({
     <span className={cn("relative inline-flex", className)}>
       <select
         {...props}
-        className="peer h-full w-full cursor-pointer appearance-none rounded-md border border-input bg-transparent pl-3 pr-8 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm dark:bg-input/30"
+        className="peer h-full w-full cursor-pointer appearance-none rounded-md border border-input bg-transparent pl-3 pr-8 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30"
       >
         {MANAGEABLE_ROLES.map((role) => (
           <option key={role} value={role}>
@@ -117,6 +117,7 @@ export const WorkspaceMembers: FC<{
       <PaperFeedback className="mb-4" feedback={feedback} />
       {isOwner ? (
         <form
+          aria-busy={isPending}
           className="mb-4 grid gap-3 rounded-md border border-border bg-card/70 p-4 @xl:grid-cols-[minmax(0,1fr)_9rem_auto] @xl:items-end"
           onSubmit={(event) => {
             event.preventDefault();
@@ -136,7 +137,11 @@ export const WorkspaceMembers: FC<{
             <Input
               aria-describedby="member-email-hint"
               autoComplete="off"
-              className="h-10 @xl:h-9"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
+              className="h-11 @xl:h-9"
               disabled={isPending}
               id="member-email"
               onChange={(event) => setEmail(event.target.value)}
@@ -149,7 +154,7 @@ export const WorkspaceMembers: FC<{
           <div className="grid gap-2">
             <Label htmlFor="member-role">Role</Label>
             <RoleSelect
-              className="h-10 w-full @xl:h-9"
+              className="h-11 w-full @xl:h-9"
               disabled={isPending}
               id="member-role"
               onChange={(event) =>
@@ -218,7 +223,7 @@ export const WorkspaceMembers: FC<{
                   <>
                     <RoleSelect
                       aria-label={`Role for ${member.full_name}`}
-                      className="h-10 w-32 sm:h-9 sm:w-28"
+                      className="h-11 w-32 md:h-9 md:w-28"
                       disabled={isPending}
                       onChange={(event) =>
                         runMutation(() =>
@@ -233,7 +238,7 @@ export const WorkspaceMembers: FC<{
                     />
                     <Button
                       aria-label={`Remove ${member.full_name}`}
-                      className="size-11 text-muted-foreground hover:text-destructive sm:size-9"
+                      className="size-11 text-muted-foreground hover:text-destructive md:size-9"
                       disabled={isPending}
                       onClick={() => {
                         if (

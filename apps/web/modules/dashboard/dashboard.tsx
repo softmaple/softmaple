@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -72,7 +72,7 @@ function WorkspaceActions({
 }: {
   readonly workspace: WorkspaceSummary;
   readonly mobile: boolean;
-  readonly onOpenSheet: () => void;
+  readonly onOpenSheet: (trigger: HTMLButtonElement) => void;
 }) {
   const trigger = (
     <Button
@@ -80,7 +80,7 @@ function WorkspaceActions({
       variant="ghost"
       className="-mr-2 -mt-2 min-h-11 min-w-11"
       aria-label={`Actions for ${workspace.title}`}
-      onClick={mobile ? onOpenSheet : undefined}
+      onClick={mobile ? (event) => onOpenSheet(event.currentTarget) : undefined}
     >
       <MoreHorizontal />
     </Button>
@@ -118,6 +118,17 @@ export const Dashboard = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selected, setSelected] = useState<WorkspaceSummary | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsTrigger = useRef<HTMLElement | null>(null);
+  const createTrigger = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeOnDesktop = () => {
+      if (desktop.matches) setActionsOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
   const query = searchQuery.trim().toLowerCase();
   const filtered = workspaces.filter(
     (w) =>
@@ -170,7 +181,10 @@ export const Dashboard = ({
           </Button>
           <Button
             className="h-11 md:h-9"
-            onClick={() => setShowCreateDialog(true)}
+            onClick={(event) => {
+              createTrigger.current = event.currentTarget;
+              setShowCreateDialog(true);
+            }}
           >
             <Plus data-icon="inline-start" />
             Create workspace
@@ -197,7 +211,7 @@ export const Dashboard = ({
                     title={workspace.title}
                   >
                     <Link
-                      className="rounded-sm hover:underline hover:underline-offset-4"
+                      className="block truncate rounded-sm hover:underline hover:underline-offset-4"
                       href={`/workspace/${workspace.slug}`}
                     >
                       {workspace.title}
@@ -226,7 +240,11 @@ export const Dashboard = ({
                 <WorkspaceActions
                   workspace={workspace}
                   mobile={mobile}
-                  onOpenSheet={() => setSelected(workspace)}
+                  onOpenSheet={(trigger) => {
+                    actionsTrigger.current = trigger;
+                    setSelected(workspace);
+                    setActionsOpen(true);
+                  }}
                 />
               </div>
               <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-1">
@@ -262,12 +280,15 @@ export const Dashboard = ({
               </EmptyDescription>
             </EmptyHeader>
             <Button
+              className="h-11 md:h-9"
               variant={workspaces.length ? "outline" : "default"}
-              onClick={() =>
-                workspaces.length
-                  ? setSearchQuery("")
-                  : setShowCreateDialog(true)
-              }
+              onClick={(event) => {
+                if (workspaces.length) setSearchQuery("");
+                else {
+                  createTrigger.current = event.currentTarget;
+                  setShowCreateDialog(true);
+                }
+              }}
             >
               {workspaces.length ? "Clear search" : "Create workspace"}
             </Button>
@@ -299,16 +320,16 @@ export const Dashboard = ({
         preview={preview}
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
+        triggerRef={createTrigger}
       />
-      <Sheet
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-      >
+      <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
         <SheetContent
           side="bottom"
           showCloseButton
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            actionsTrigger.current?.focus();
+          }}
           className={`${paperSurface} px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]`}
         >
           <SheetTitle

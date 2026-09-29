@@ -5,6 +5,11 @@ import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { XIcon } from "lucide-react";
 
 import { cn } from "@softmaple/ui/lib/utils";
+import { useSheetGestures } from "@softmaple/ui/hooks/use-sheet-gestures";
+
+const SheetContext = React.createContext<((open: boolean) => void) | null>(
+  null,
+);
 
 const SheetSide = {
   Top: "top",
@@ -25,12 +30,34 @@ const sheetSideStyles: Readonly<Record<SheetSide, string>> = {
   right:
     "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
   bottom:
-    "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t pb-[env(safe-area-inset-bottom)]",
+    "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom inset-x-0 bottom-[var(--sheet-viewport-bottom,0px)] max-h-[min(85dvh,calc(var(--sheet-viewport-height,100dvh)-1rem))] overflow-y-auto overscroll-y-contain rounded-t-2xl border-t pb-[env(safe-area-inset-bottom)] scroll-pb-[max(1rem,env(safe-area-inset-bottom))]",
   left: "data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm",
 };
 
-function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />;
+function Sheet({
+  open,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof SheetPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const setOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (open === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [open, onOpenChange],
+  );
+  return (
+    <SheetContext.Provider value={setOpen}>
+      <SheetPrimitive.Root
+        data-slot="sheet"
+        open={open ?? uncontrolledOpen}
+        onOpenChange={setOpen}
+        {...props}
+      />
+    </SheetContext.Provider>
+  );
 }
 
 function SheetTrigger({
@@ -59,7 +86,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:animate-none fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]",
         className,
       )}
       {...props}
@@ -69,8 +96,8 @@ function SheetOverlay({
 
 /**
  * A tap target that sits where a thumb already is. It reads as the drag
- * affordance people expect on a bottom sheet and closes on activation, so the
- * grabber is a real control rather than decoration. It inherits the sheet's
+ * affordance people expect on a bottom sheet. It can be dragged, tapped, or
+ * activated with a keyboard to dismiss. It inherits the sheet's
  * whole background so textured surfaces don't show a flat band behind it.
  */
 function SheetHandle({
@@ -81,7 +108,7 @@ function SheetHandle({
     <SheetPrimitive.Close
       data-slot="sheet-handle"
       className={cn(
-        "group [background:inherit] focus-visible:ring-ring sticky top-0 z-10 -mb-2 flex min-h-11 shrink-0 items-center justify-center pt-3 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-inset",
+        "group [background:inherit] focus-visible:ring-ring sticky top-0 z-10 -mb-2 flex min-h-11 shrink-0 touch-none cursor-grab select-none items-center justify-center pt-3 pb-2 outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-inset",
         className,
       )}
       {...props}
@@ -107,23 +134,93 @@ function SheetContent({
   side = SheetSide.Right,
   showHandle,
   showCloseButton,
+  ref,
+  onOpenAutoFocus,
   ...props
 }: SheetContentProps) {
   const hasHandle = showHandle ?? side === SheetSide.Bottom;
   const hasCloseButton = showCloseButton ?? !hasHandle;
+  const setOpen = React.useContext(SheetContext);
+  const [content, setContent] = React.useState<HTMLDivElement | null>(null);
+  const contentRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      setContent(node);
+      if (typeof ref === "function") {
+        const cleanup = ref(node);
+        return () => {
+          setContent(null);
+          if (cleanup) cleanup();
+          else ref(null);
+        };
+      }
+      if (ref) ref.current = node;
+    },
+    [ref],
+  );
+  useSheetGestures(content, side === SheetSide.Bottom, () => setOpen?.(false));
+
+  React.useEffect(() => {
+    const viewport = window.visualViewport;
+    if (side !== SheetSide.Bottom || !content || !viewport) return;
+    const update = () => {
+      if (viewport.scale !== 1) return;
+      content.style.setProperty(
+        "--sheet-viewport-height",
+        `${viewport.height}px`,
+      );
+      content.style.setProperty(
+        "--sheet-viewport-bottom",
+        `${Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)}px`,
+      );
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+      content.style.removeProperty("--sheet-viewport-height");
+      content.style.removeProperty("--sheet-viewport-bottom");
+    };
+  }, [content, side]);
 
   return (
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content
+        ref={contentRef}
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-200 data-[state=open]:duration-300",
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out motion-reduce:animate-none motion-reduce:transition-none fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-200 data-[state=open]:duration-300",
           sheetSideStyles[side],
           className,
         )}
         {...props}
+        onOpenAutoFocus={(event) => {
+          onOpenAutoFocus?.(event);
+          if (
+            event.defaultPrevented ||
+            side !== SheetSide.Bottom ||
+            !window.matchMedia("(pointer: coarse)").matches
+          )
+            return;
+          // Radix normally focuses the grabber. A handle-free form should not
+          // summon the software keyboard until the user chooses an input.
+          const sheetElement =
+            event.target instanceof HTMLElement ? event.target : content;
+          const target = sheetElement?.querySelector<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"], [contenteditable="true"]',
+          );
+          if (
+            target?.matches(
+              'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), textarea, [contenteditable="true"]',
+            )
+          ) {
+            event.preventDefault();
+            sheetElement?.focus({ preventScroll: true });
+          }
+        }}
       >
         {hasHandle ? <SheetHandle /> : null}
         {children}

@@ -66,7 +66,7 @@ export function SiteHeader() {
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
-                className="md:hidden"
+                className="size-11 md:hidden"
                 size="icon"
                 variant="outline"
                 aria-label="Open navigation"

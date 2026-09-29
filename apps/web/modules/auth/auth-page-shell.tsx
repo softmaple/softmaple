@@ -64,9 +64,12 @@ export function AuthPageShell({
           </section>
         </div>
 
-        <footer className="relative z-10 flex flex-wrap items-center justify-between gap-4 px-6 py-7 text-[11px] text-(--muted-ink) sm:px-10 lg:px-14 min-[56.25rem]:max-xl:py-5">
+        <footer className="relative z-10 flex flex-wrap items-center justify-between gap-4 px-6 py-7 pb-[max(1.75rem,env(safe-area-inset-bottom))] text-[11px] text-(--muted-ink) sm:px-10 lg:px-14 min-[56.25rem]:max-xl:py-5">
           <p>© {new Date().getFullYear()} Softmaple</p>
-          <nav aria-label="Legal" className="flex gap-6">
+          <nav
+            aria-label="Legal"
+            className="flex gap-6 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:items-center"
+          >
             <Link className={authLinkClass} href="/privacy" prefetch={false}>
               Privacy
             </Link>

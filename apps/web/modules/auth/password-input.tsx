@@ -15,6 +15,9 @@ export function PasswordInput({
   return (
     <div className="relative">
       <Input
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
         {...props}
         type={visible ? "text" : "password"}
         className={`${authInputClass} pr-12`}
@@ -24,6 +27,8 @@ export function PasswordInput({
         aria-label={`${visible ? "Hide" : "Show"} ${visibilityLabel}`}
         aria-controls={props.id}
         aria-pressed={visible}
+        disabled={props.disabled}
+        onPointerDown={(event) => event.preventDefault()}
         onClick={() => setVisible((current) => !current)}
         className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-md text-(--ink) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#967200]"
       >

@@ -106,6 +106,8 @@ export function WorkspaceSettings({
   const [feedback, setFeedback] = useState<PaperFeedbackMessage | null>(null);
   const [isPending, startTransition] = useTransition();
   const submitting = useRef(false);
+  const deleteTrigger = useRef<HTMLButtonElement>(null);
+  const cancelDelete = useRef<HTMLButtonElement>(null);
   const dirty = title !== saved.title || description !== saved.description;
   const valid =
     title.trim().length > 0 && title.length <= 80 && description.length <= 500;
@@ -449,6 +451,7 @@ export function WorkspaceSettings({
                   ) : null}
                   <form
                     id="workspace-settings-form"
+                    aria-busy={isPending}
                     onSubmit={(event) => {
                       event.preventDefault();
                       save();
@@ -490,7 +493,9 @@ export function WorkspaceSettings({
                         </Label>
                         <div>
                           <Input
-                            className="h-10 md:h-8"
+                            className="h-11 md:h-8"
+                            autoComplete="off"
+                            enterKeyHint="next"
                             id="workspace-name"
                             maxLength={80}
                             disabled={!isOwner || isPending}
@@ -544,7 +549,7 @@ export function WorkspaceSettings({
                           </p>
                         </div>
                         {/* Pinned to the row top so it lines up with the other fields. */}
-                        <div className="flex h-10 min-w-0 items-stretch self-start overflow-hidden rounded-md border border-input text-base shadow-xs has-[:focus-visible]:border-ring has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 md:h-8 md:text-sm dark:bg-input/30">
+                        <div className="flex h-11 min-w-0 items-stretch self-start overflow-hidden rounded-md border border-input text-base shadow-xs has-[:focus-visible]:border-ring has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 md:h-8 md:text-sm dark:bg-input/30">
                           <span className="flex shrink-0 items-center border-r border-input bg-muted/70 px-3 text-muted-foreground">
                             /workspace/
                           </span>
@@ -604,6 +609,7 @@ export function WorkspaceSettings({
                         </p>
                       </div>
                       <Button
+                        ref={deleteTrigger}
                         className="h-11 self-start border-destructive text-destructive md:h-9 md:self-center"
                         variant="outline"
                         disabled={!isOwner || isPending}
@@ -630,7 +636,17 @@ export function WorkspaceSettings({
           if (!isPending) setDeleteOpen(open);
         }}
       >
-        <DialogContent className={paperSurface}>
+        <DialogContent
+          className={paperSurface}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            cancelDelete.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            deleteTrigger.current?.focus({ preventScroll: true });
+          }}
+        >
           <DialogHeader>
             <DialogTitle
               className={`${paperSerif} text-2xl font-normal tracking-tight`}
@@ -648,7 +664,11 @@ export function WorkspaceSettings({
             </Label>
             <Input
               id="delete-confirmation"
+              className="h-11 md:h-9"
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               disabled={isPending}
               value={confirmation}
               onChange={(event) => setConfirmation(event.target.value)}
@@ -661,11 +681,18 @@ export function WorkspaceSettings({
           ) : null}
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="outline" disabled={isPending}>
+              <Button
+                ref={cancelDelete}
+                className="h-11 md:h-9"
+                type="button"
+                variant="outline"
+                disabled={isPending}
+              >
                 Cancel
               </Button>
             </DialogClose>
             <Button
+              className="h-11 md:h-9"
               variant="destructive"
               disabled={preview || confirmation !== saved.title || isPending}
               onClick={() => {

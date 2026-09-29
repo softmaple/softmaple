@@ -1,6 +1,12 @@
 "use client";
 
-import type { FC, Dispatch, SetStateAction } from "react";
+import {
+  useState,
+  type FC,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 
 import {
   Dialog,
@@ -24,6 +30,7 @@ type CreateWorkspaceDialogProps = {
   open: boolean;
   preview?: boolean;
   onOpenChange: Dispatch<SetStateAction<boolean>>;
+  triggerRef: RefObject<HTMLButtonElement | null>;
 };
 
 const titleClass = `${paperSerif} text-2xl font-normal tracking-tight`;
@@ -31,14 +38,25 @@ const titleClass = `${paperSerif} text-2xl font-normal tracking-tight`;
 export const CreateWorkspaceDialog: FC<CreateWorkspaceDialogProps> = (
   props,
 ) => {
-  const { open, onOpenChange, preview = false } = props;
+  const { open, onOpenChange, preview = false, triggerRef } = props;
   const mobile = useMobileWorkspace();
-  if (mobile)
+  // Keep the mounted form (including a draft or pending submission) when the
+  // phone rotates. Pick the current layout again on the next opening.
+  const [presentation, setPresentation] = useState({ open, mobile });
+  if (open !== presentation.open || (!open && mobile !== presentation.mobile)) {
+    setPresentation({ open, mobile });
+  }
+  const restoreFocus = (event: Event) => {
+    event.preventDefault();
+    triggerRef.current?.focus({ preventScroll: true });
+  };
+  if (presentation.mobile)
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
           showCloseButton
+          onCloseAutoFocus={restoreFocus}
           className={`${paperSurface} px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]`}
         >
           <SheetTitle className={titleClass}>Create workspace</SheetTitle>
@@ -52,7 +70,10 @@ export const CreateWorkspaceDialog: FC<CreateWorkspaceDialogProps> = (
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`${paperSurface} sm:max-w-[440px]`}>
+      <DialogContent
+        className={`${paperSurface} sm:max-w-[440px]`}
+        onCloseAutoFocus={restoreFocus}
+      >
         <DialogHeader>
           <DialogTitle className={titleClass}>Create workspace</DialogTitle>
           <DialogDescription>

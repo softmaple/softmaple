@@ -70,6 +70,20 @@ describe("search keyboard shortcuts", () => {
     expect(search.value).toBe("notes");
   });
 
+  it("clears from the touch control and returns focus to the search field", () => {
+    const search = container.querySelector("input")!;
+    const clear = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Clear search"]',
+    )!;
+    clear.focus();
+    act(() => clear.click());
+    expect(search.value).toBe("");
+    expect(document.activeElement).toBe(search);
+    expect(
+      container.querySelector('button[aria-label="Clear search"]'),
+    ).toBeNull();
+  });
+
   it("does not steal slash from a document editor or form field", () => {
     for (const tag of ["input", "textarea", "div"]) {
       const editor = document.createElement(tag);

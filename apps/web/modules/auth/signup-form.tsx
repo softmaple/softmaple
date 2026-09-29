@@ -76,6 +76,8 @@ export const SignupForm = () => {
             onChange={(event) => setFirstName(event.target.value)}
             readOnly={pending}
             autoComplete="given-name"
+            enterKeyHint="next"
+            maxLength={60}
             id="firstName"
             name="firstName"
             type="text"
@@ -95,6 +97,8 @@ export const SignupForm = () => {
             onChange={(event) => setLastName(event.target.value)}
             readOnly={pending}
             autoComplete="family-name"
+            enterKeyHint="next"
+            maxLength={60}
             id="lastName"
             name="lastName"
             type="text"
@@ -116,6 +120,10 @@ export const SignupForm = () => {
           onChange={(event) => setEmail(event.target.value)}
           readOnly={pending}
           autoComplete="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
           id="email"
           name="email"
           type="email"
@@ -136,6 +144,9 @@ export const SignupForm = () => {
           onChange={(event) => setPassword(event.target.value)}
           readOnly={pending}
           autoComplete="new-password"
+          enterKeyHint="next"
+          minLength={8}
+          maxLength={128}
           id="password"
           name="password"
           required
@@ -162,6 +173,9 @@ export const SignupForm = () => {
           readOnly={pending}
           visibilityLabel="confirm password"
           autoComplete="new-password"
+          enterKeyHint="go"
+          minLength={8}
+          maxLength={128}
           id="confirmPassword"
           name="confirmPassword"
           required

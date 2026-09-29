@@ -36,10 +36,10 @@ export function WorkspaceHome(props: HomeProps) {
   return (
     <HomeMotion>
       <div className="md:hidden">
-        <MobileWorkspaceHome {...props} />
+        <MobileWorkspaceHome key={props.workspaceSlug} {...props} />
       </div>
       <div className="hidden md:block">
-        <WorkspaceHomeContent {...props} />
+        <WorkspaceHomeContent key={props.workspaceSlug} {...props} />
       </div>
     </HomeMotion>
   );
@@ -53,6 +53,7 @@ function WorkspaceHomeContent(props: HomeProps) {
   const mobileSearch = useRef<HTMLInputElement>(null);
   const focusSearchAfterClose = useRef(false);
   const updatesTrigger = useRef<HTMLButtonElement>(null);
+  const searchTrigger = useRef<HTMLElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const workspaceTitle =
     props.workspaces.find((item) => item.slug === props.workspaceSlug)?.title ??
@@ -67,7 +68,13 @@ function WorkspaceHomeContent(props: HomeProps) {
         focusSearchAfterClose.current = true;
         setNavigationOpen(false);
       } else mobileSearch.current?.focus();
-    } else setSearchOpen(true);
+    } else {
+      searchTrigger.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      setSearchOpen(true);
+    }
   }, [navigationOpen]);
   const home = () => {
     setQuery("");
@@ -77,6 +84,8 @@ function WorkspaceHomeContent(props: HomeProps) {
     const onKey = (event: KeyboardEvent) => {
       if (
         window.innerWidth >= 768 &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
         (event.metaKey || event.ctrlKey) &&
         event.key === "k"
       ) {
@@ -89,7 +98,7 @@ function WorkspaceHomeContent(props: HomeProps) {
       if (desktop.matches) {
         setNavigationOpen(false);
         setUpdatesOpen(false);
-      }
+      } else setSearchOpen(false);
     };
     document.addEventListener("keydown", onKey);
     desktop.addEventListener("change", onDesktop);
@@ -314,6 +323,10 @@ function WorkspaceHomeContent(props: HomeProps) {
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
         <DialogContent
           className={`${homeSurface} max-h-[80dvh] overflow-y-auto`}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            searchTrigger.current?.focus({ preventScroll: true });
+          }}
         >
           <DialogTitle>Search documents</DialogTitle>
           <DialogDescription>
@@ -339,6 +352,7 @@ function WorkspaceHomeContent(props: HomeProps) {
                   <Link
                     className="block truncate rounded px-2 py-3 text-sm hover:bg-accent"
                     href={`/workspace/${props.workspaceSlug}/doc/${item.slug}`}
+                    onClick={() => setSearchOpen(false)}
                   >
                     {item.title}
                   </Link>

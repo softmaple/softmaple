@@ -56,7 +56,7 @@ export function PasswordReset({
   return (
     <div className="min-w-0">
       <Button
-        className="h-10 md:h-9"
+        className="h-11 md:h-9"
         disabled={isSending}
         onClick={send}
         type="button"

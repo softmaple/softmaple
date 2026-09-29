@@ -53,6 +53,10 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
           onChange={(event) => setEmail(event.target.value)}
           readOnly={pending}
           autoComplete="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
           id="email"
           name="email"
           type="email"
@@ -76,6 +80,7 @@ export const LoginForm = ({ next }: { readonly next?: string }) => {
           onChange={(event) => setPassword(event.target.value)}
           readOnly={pending}
           autoComplete="current-password"
+          enterKeyHint="go"
           id="password"
           name="password"
           required

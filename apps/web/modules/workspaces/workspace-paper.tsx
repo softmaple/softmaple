@@ -211,9 +211,13 @@ export function WorkspaceHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="border-b border-border">
+    <header className="border-b border-border pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex min-h-16 max-w-6xl items-center gap-6 px-5 sm:px-8">
-        <Link href="/dashboard" aria-label="Softmaple dashboard">
+        <Link
+          href="/dashboard"
+          aria-label="Softmaple dashboard"
+          className="inline-flex min-h-11 items-center"
+        >
           <WorkspaceBrand />
         </Link>
         {children}

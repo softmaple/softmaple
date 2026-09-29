@@ -143,9 +143,11 @@ export const sha256Hex = (text: string): string =>
  * the code they share with every other document.
  *
  * One author types while a second one occasionally inserts concurrently, so
- * the history has both chains and short nonlinear sections. Divergences at a
- * shallow and a deep point reach both a recent checkpoint and an older one
- * with sections of either kind in between.
+ * the history has both chains and short nonlinear sections. As in the paper
+ * traces, the author types and deletes at a cursor inside the text, so a
+ * replay that starts from a checkpoint edits text it did not replay itself.
+ * Divergences at a shallow and a deep point reach both a recent checkpoint
+ * and an older one with sections of either kind in between.
  */
 export const warmUpSnapshotFirstEdit = (
   api: SnapshotFirstEditApi,
@@ -162,6 +164,7 @@ export const warmUpSnapshotFirstEdit = (
     ids.push(event.id);
     return event;
   };
+  let cursor = 0;
   while (ids.length < historyLength) {
     const position = ids.length % 200;
     if (position === 100 || position === 116) {
@@ -169,11 +172,20 @@ export const warmUpSnapshotFirstEdit = (
       const theirs = recorded(peer.insert(peer.getText().length, "b"));
       author.applyRemoteEvent(theirs);
       peer.applyRemoteEvent(mine);
+      // The author's "a" landed before the cursor.
+      cursor++;
       continue;
     }
-    peer.applyRemoteEvent(
-      recorded(author.insert(ids.length % (author.getText().length + 1), "x")),
-    );
+    if (position % 64 === 0) {
+      cursor = Math.floor(author.getText().length / 2);
+    }
+    if (position % 16 === 15 && cursor > 0) {
+      cursor--;
+      peer.applyRemoteEvent(recorded(author.delete(cursor, 1)));
+      continue;
+    }
+    peer.applyRemoteEvent(recorded(author.insert(cursor, "x")));
+    cursor++;
   }
   const bytes = new api.PortableSnapshotCodec().encode(
     author.createPortableSnapshot(),

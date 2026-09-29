@@ -15,6 +15,7 @@ import {
   measureSnapshotFirstEdit,
   parseSnapshotEditKind,
   SECOND_EDIT_MARKER,
+  warmUpSnapshotFirstEdit,
 } from "../bench/snapshot-first-edit";
 import { buildSnapshotFirstEditFixture } from "../bench/snapshot-first-edit-fixture";
 
@@ -142,6 +143,12 @@ describe("snapshot first-edit lanes", () => {
     expect(result.heapAfterOpenBytes).toBeGreaterThan(0);
     expect(result.nativeLoadMs).toBeGreaterThanOrEqual(0);
     expect(result.firstEditMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("warms up every lane on a history edited inside its text", () => {
+    // Every lane validates its edited text, so a warm-up history that a lane
+    // cannot merge throws here.
+    expect(() => warmUpSnapshotFirstEdit(api, 1)).not.toThrow();
   });
 
   it("rejects a snapshot that does not match its manifest", () => {

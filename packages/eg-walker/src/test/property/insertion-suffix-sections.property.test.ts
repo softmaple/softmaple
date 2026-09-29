@@ -6,6 +6,9 @@
  * general planner's cuts over its branch-preserving order must reappear as
  * insertion-rank cuts. The insertion-rank planner merges consecutive chains,
  * so the reference sections are merged the same way before comparing.
+ *
+ * Ordering a section, or the suffix after a cut, by its insertion-rank range
+ * gives the same branch-preserving order as ordering the same events by ID.
  */
 
 import fc from "fast-check";
@@ -59,6 +62,31 @@ describe("property: insertion suffix sections", () => {
 
           // Assert
           for (const { actual, expected } of plans) {
+            expect(actual).toEqual(expected);
+          }
+        },
+      ),
+      fcParams(),
+    );
+  });
+
+  it("should order every section and every suffix after a cut as the replay order of its events", () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(
+          eventDagArb({}),
+          fc.array(segmentArb, { minLength: 1 }).map(buildHistory),
+        ),
+        fc.boolean(),
+        (events, packed) => {
+          // Arrange
+          const graph = packed ? pack(events) : EventGraph.fromEvents(events);
+
+          // Act
+          const orders = rangeOrdersAfterEveryCut(graph);
+
+          // Assert
+          for (const { actual, expected } of orders) {
             expect(actual).toEqual(expected);
           }
         },
@@ -147,6 +175,37 @@ const plansAfterEveryCut = (
     cut += sections[first]?.events.length ?? 0;
   }
   return plans;
+};
+
+/**
+ * Each critical section, and each suffix after a critical cut, ordered as an
+ * insertion-rank range and as the replay order of the same events.
+ */
+const rangeOrdersAfterEveryCut = (
+  graph: EventGraph,
+): ReadonlyArray<{
+  readonly actual: ReadonlyArray<EventId>;
+  readonly expected: ReadonlyArray<EventId>;
+}> => {
+  const eventCount = graph.getEventCount();
+  const idAt = (rank: number): EventId =>
+    graph.getRankedReplayEventsInRange(rank, rank + 1)[0]!.id;
+  const ranges: Array<readonly [number, number]> = [];
+  let cut = 0;
+  for (const section of planCriticalReplaySections(graph)) {
+    ranges.push([cut, cut + section.events.length], [cut, eventCount]);
+    cut += section.events.length;
+  }
+  return ranges.map(([start, end]) => ({
+    actual: graph.getRankedReplayEventsInRange(start, end).map(({ id }) => id),
+    expected: graph.getRankedReplayOrder(
+      new Set(
+        Array.from({ length: end - start }, (_unused, index) =>
+          idAt(start + index),
+        ),
+      ),
+    ),
+  }));
 };
 
 const mergeChains = (

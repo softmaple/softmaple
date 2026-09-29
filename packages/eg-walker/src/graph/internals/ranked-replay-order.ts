@@ -42,46 +42,61 @@ export class RankedReplayOrderWorkspace {
         if (rank === undefined) {
           throw new Error(`Missing replay event in graph: ${eventId}`);
         }
-        this.addMember(rank);
+        this.addMember(rank, 0);
       }
-      return this.orderMembers(view).map((rank) =>
+      return this.orderMembers(view, 0).map((rank) =>
         requireEventIdAt(view, rank),
       );
     } finally {
-      this.clearMembers();
+      this.clearMembers(0);
     }
   }
 
-  /** Order the events at insertion ranks `[start, end)`, returning ranks. */
+  /**
+   * Order the events at insertion ranks `[start, end)`, returning ranks.
+   *
+   * The columns are indexed from `start`, so ordering a short suffix of a long
+   * history does not allocate columns for the whole graph.
+   */
   orderRange(
     start: number,
     end: number,
     view: RankedReplayOrderView,
   ): ReadonlyArray<number> {
-    this.ensureCapacity(view.eventCount());
+    this.ensureCapacity(end - start);
     try {
       for (let rank = start; rank < end; rank++) {
-        this.addMember(rank);
+        this.addMember(rank, start);
       }
-      return this.orderMembers(view);
+      return this.orderMembers(view, start);
     } finally {
-      this.clearMembers();
+      this.clearMembers(start);
     }
   }
 
-  private addMember(rank: number): void {
-    if (this.membership[rank] !== 0) {
+  /** Mark `rank` as a member, in the column at `rank - offset`. */
+  private addMember(rank: number, offset: number): void {
+    if (this.membership[rank - offset] !== 0) {
       return;
     }
-    this.membership[rank] = 1;
+    this.membership[rank - offset] = 1;
     this.touchedRanks.push(rank);
   }
 
-  private orderMembers(view: RankedReplayOrderView): number[] {
+  private orderMembers(view: RankedReplayOrderView, offset: number): number[] {
     const ordered: number[] = [];
+    // Parents and children of members may fall outside the columns.
+    const isMember = (rank: number): boolean => {
+      const column = rank - offset;
+      return (
+        column >= 0 &&
+        column < this.membership.length &&
+        this.membership[column] === 1
+      );
+    };
     let parentCount = 0;
     const countParent = (parentRank: number): void => {
-      if (this.membership[parentRank] === 1) {
+      if (isMember(parentRank)) {
         parentCount++;
       }
     };
@@ -89,7 +104,7 @@ export class RankedReplayOrderWorkspace {
     for (const rank of this.touchedRanks) {
       parentCount = 0;
       view.forEachParentRank(rank, countParent);
-      this.remainingParents[rank] = parentCount;
+      this.remainingParents[rank - offset] = parentCount;
       if (parentCount === 0) {
         this.roots.push(rank);
       }
@@ -106,11 +121,11 @@ export class RankedReplayOrderWorkspace {
     }
 
     const visitChild = (childRank: number): void => {
-      if (this.membership[childRank] !== 1) {
+      if (!isMember(childRank)) {
         return;
       }
-      const remaining = this.remainingParents[childRank]! - 1;
-      this.remainingParents[childRank] = remaining;
+      const remaining = this.remainingParents[childRank - offset]! - 1;
+      this.remainingParents[childRank - offset] = remaining;
       if (remaining === 0) {
         this.newlyReady.push(childRank);
       }
@@ -118,10 +133,10 @@ export class RankedReplayOrderWorkspace {
 
     while (this.stack.length > 0) {
       const rank = this.stack.pop()!;
-      if (this.membership[rank] !== 1) {
+      if (!isMember(rank)) {
         continue;
       }
-      this.membership[rank] = 2;
+      this.membership[rank - offset] = 2;
       ordered.push(rank);
 
       this.newlyReady.length = 0;
@@ -140,10 +155,10 @@ export class RankedReplayOrderWorkspace {
     return ordered;
   }
 
-  private clearMembers(): void {
+  private clearMembers(offset: number): void {
     for (const rank of this.touchedRanks) {
-      this.membership[rank] = 0;
-      this.remainingParents[rank] = 0;
+      this.membership[rank - offset] = 0;
+      this.remainingParents[rank - offset] = 0;
     }
     this.resetScratch();
   }

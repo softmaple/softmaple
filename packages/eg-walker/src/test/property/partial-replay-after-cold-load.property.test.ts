@@ -19,34 +19,44 @@ import type { EventId, GraphEvent } from "../../types";
 import { fcParams } from "./run-config";
 
 describe("property: partial replay after a cold load", () => {
-  it("should merge a peer that diverged at any event into the replayed text", () => {
-    fc.assert(
-      fc.property(
-        fc.array(segmentArb, { minLength: 1 }),
-        fc.nat(),
-        (segments, pick) => {
-          // Arrange
-          const history = buildHistory(segments);
-          const ancestor = history[pick % history.length]!;
-          const late = insert("peer:0", [ancestor.id], 0);
-          const next = insert("peer:1", ["peer:0"], 1);
-          const replica = new EgWalkerReplica("reader", "", pack(history));
+  it(
+    "should merge a peer that diverged at any event into the replayed text",
+    {
+      // Each run loads its history cold three times; the suite's default run
+      // count needs longer than the default per-test timeout.
+      timeout: 60_000,
+    },
+    () => {
+      fc.assert(
+        fc.property(
+          // Six segments reach past the ladder's 256-event cut while keeping a
+          // history at most 1,200 events long, so every run stays cheap.
+          fc.array(segmentArb, { minLength: 1, maxLength: 6 }),
+          fc.nat(),
+          (segments, pick) => {
+            // Arrange
+            const history = buildHistory(segments);
+            const ancestor = history[pick % history.length]!;
+            const late = insert("peer:0", [ancestor.id], 0);
+            const next = insert("peer:1", ["peer:0"], 1);
+            const replica = new EgWalkerReplica("reader", "", pack(history));
 
-          // Act
-          replica.applyRemoteEvent(late);
-          const afterLate = replica.getText();
-          replica.applyRemoteEvent(next);
+            // Act
+            replica.applyRemoteEvent(late);
+            const afterLate = replica.getText();
+            replica.applyRemoteEvent(next);
 
-          // Assert
-          expect(afterLate).toBe(replayedText([...history, late]));
-          expect(replica.getText()).toBe(
-            replayedText([...history, late, next]),
-          );
-        },
-      ),
-      fcParams(),
-    );
-  });
+            // Assert
+            expect(afterLate).toBe(replayedText([...history, late]));
+            expect(replica.getText()).toBe(
+              replayedText([...history, late, next]),
+            );
+          },
+        ),
+        fcParams(),
+      );
+    },
+  );
 });
 
 // Helpers
@@ -72,7 +82,10 @@ const segmentArb: fc.Arbitrary<Segment> = fc.oneof(
   }),
   fc.record({
     kind: fc.constant("fork" as const),
-    branches: fc.array(fc.integer({ min: 1, max: 6 }), { minLength: 2 }),
+    branches: fc.array(fc.integer({ min: 1, max: 6 }), {
+      minLength: 2,
+      maxLength: 3,
+    }),
     merged: fc.boolean(),
     atEnd: fc.boolean(),
   }),

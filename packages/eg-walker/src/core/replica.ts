@@ -48,6 +48,7 @@ import {
   EventAlreadyExistsError,
   type PackedLinearReplayView,
 } from "../graph/event-graph";
+import { LinearEventBatch } from "../graph/internals/packed-linear-chain";
 import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import {
   EgWalkerEngine,
@@ -84,6 +85,7 @@ import {
   isTopologicallyReadyBatch,
 } from "./internals/batch-replay-shape";
 import { assertPendingCandidatesAcyclic } from "./internals/pending-causality";
+import { readRemoteLinearBatch } from "./internals/remote-linear-batch";
 import {
   consumeDecodedNativeSnapshotGraphSource,
   consumeDecodedNativeSnapshotRuntimeState,
@@ -799,50 +801,36 @@ export class EgWalkerReplica {
       consumeCausalEventBatch(batch);
       return;
     }
-    if (
-      graph.getEventCount() === 0 &&
-      isOrderedLinearBatchFromVersion(events, this.currentVersion)
-    ) {
-      this.applyInitialPackedCausalBatch(batch, events, graph);
-      return;
-    }
 
     const snapshot = this.captureRemoteBatchSnapshot();
     const transaction = graph.beginAppendTransaction();
     this.replayCacheCoverageJournal = [];
     const eventCountBeforeBatch = graph.getEventCount();
-    let orderedLinear = true;
-    let previousId: EventId | null = null;
 
     try {
-      for (let index = 0; index < events.length; index++) {
-        const event = events[index]!;
-        if (index === 0) {
-          orderedLinear = versionsEqual(
-            event.parentVersion,
-            this.currentVersion,
-          );
-        } else if (
-          event.parentVersion.size !== 1 ||
-          previousId === null ||
-          !event.parentVersion.has(previousId)
-        ) {
-          orderedLinear = false;
-        }
-        graph.addEvent(event);
-        previousId = event.id;
-      }
-
-      if (orderedLinear) {
-        this.applyCausalLinearBatch(events, eventCountBeforeBatch);
-      } else if (!this.tryApplyWarmBatch(events, graph)) {
-        this.engineStatsOverride = null;
-        const checkpoint = this.criticalCheckpoints.pickFor(graph);
-        if (checkpoint === null) {
-          this.fullReplay();
+      if (isOrderedLinearBatchFromVersion(events, this.currentVersion)) {
+        const linear = linearBatchFromOwnedEvents(events);
+        if (graph.canAppendLinearBatch(linear)) {
+          graph.appendLinearBatch(linear);
         } else {
-          this.partialReplayFromCheckpoint(checkpoint);
-          this.maybeAdvanceCheckpoint();
+          for (const event of events) {
+            graph.addEvent(event);
+          }
+        }
+        this.applyLinearBatch(linear, eventCountBeforeBatch);
+      } else {
+        for (const event of events) {
+          graph.addEvent(event);
+        }
+        if (!this.tryApplyWarmBatch(events, graph)) {
+          this.engineStatsOverride = null;
+          const checkpoint = this.criticalCheckpoints.pickFor(graph);
+          if (checkpoint === null) {
+            this.fullReplay();
+          } else {
+            this.partialReplayFromCheckpoint(checkpoint);
+            this.maybeAdvanceCheckpoint();
+          }
         }
       }
 
@@ -861,30 +849,6 @@ export class EgWalkerReplica {
     }
   }
 
-  /** Install an initial exact chain without retaining an object graph tail. */
-  private applyInitialPackedCausalBatch(
-    batch: CausalEventBatch,
-    events: ReadonlyArray<GraphEvent>,
-    emptyGraph: EventGraph,
-  ): void {
-    const packedGraph = EventGraph.fromOwnedLinearEvents(
-      events,
-      emptyGraph.getMetadata(),
-    );
-    const snapshot = this.captureRemoteBatchSnapshot();
-    try {
-      this.applyCausalLinearBatch(events, 0);
-      consumeCausalEventBatch(batch);
-    } catch (error) {
-      this.restoreRemoteBatchSnapshot(snapshot, emptyGraph);
-      throw error;
-    }
-
-    this.eventGraph = packedGraph;
-    this.lazyEventGraph = null;
-    this.remoteEvents = this.createRemoteEventBuffer(packedGraph);
-  }
-
   /**
    * Atomically validate and accept a remote event batch.
    *
@@ -895,6 +859,15 @@ export class EgWalkerReplica {
   applyRemoteEvents(
     events: ReadonlyArray<GraphEvent>,
   ): ApplyRemoteEventsResult {
+    if (events.length > 1) {
+      const linear = readRemoteLinearBatch(events, this.currentVersion);
+      const applied =
+        linear === null ? null : this.tryApplyRemoteLinearBatch(linear);
+      if (applied !== null) {
+        return applied;
+      }
+    }
+
     const clonedEvents = events.map(cloneRemoteEvent);
     const graph = this.ensureEventGraph();
     const remoteEvents = this.ensureRemoteEvents();
@@ -1129,9 +1102,68 @@ export class EgWalkerReplica {
     return operations;
   }
 
-  /** Apply an already-appended exact chain without result allocations. */
-  private applyCausalLinearBatch(
-    events: ReadonlyArray<GraphEvent>,
+  /**
+   * Take the linear fast path for a caller's batch when the reference path
+   * would integrate it through {@link applyClosedLinearBatch}: a closed chain
+   * of new events extending {@link currentVersion}, with nothing pending.
+   *
+   * Returns `null`, with every change undone, when the batch repeats an ID or
+   * an operation does not fit the document. The general path then handles
+   * duplicates and reports errors exactly as it did before this path existed.
+   */
+  private tryApplyRemoteLinearBatch(
+    batch: LinearEventBatch,
+  ): ApplyRemoteEventsResult | null {
+    const graph = this.ensureEventGraph();
+    if (
+      this.ensureRemoteEvents().pendingCount !== 0 ||
+      !versionsEqual(batch.firstParents, this.currentVersion)
+    ) {
+      return null;
+    }
+
+    const snapshot = this.captureRemoteBatchSnapshot();
+    const transaction = graph.beginAppendTransaction();
+    const eventCountBeforeBatch = graph.getEventCount();
+    try {
+      if (graph.canAppendLinearBatch(batch)) {
+        graph.appendLinearBatch(batch);
+      } else {
+        for (let offset = 0; offset < batch.count; offset++) {
+          graph.addOwnedEvent(ownedLinearBatchEvent(batch, offset));
+        }
+      }
+    } catch (error) {
+      transaction.rollback();
+      if (error instanceof EventAlreadyExistsError) {
+        return null;
+      }
+      throw error;
+    }
+
+    this.replayCacheCoverageJournal = [];
+    try {
+      this.applyLinearBatch(batch, eventCountBeforeBatch);
+      transaction.commit();
+    } catch {
+      transaction.rollback();
+      this.rollbackReplayCacheCoverage();
+      this.restoreRemoteBatchSnapshot(snapshot, graph);
+      return null;
+    } finally {
+      this.replayCacheCoverageJournal = null;
+    }
+    return linearBatchResults(batch);
+  }
+
+  /**
+   * Apply an exact chain the graph already holds, dropping any retained replay
+   * engine: a causal extension is expressed in the plain document's indexes.
+   * Edits before the retained-checkpoint window are coalesced into rope
+   * splices; each event in the window is applied and checkpointed on its own.
+   */
+  private applyLinearBatch(
+    batch: LinearEventBatch,
     eventCountBeforeBatch: number,
   ): void {
     const previousStats = this.engineStatsOverride ?? this.engine?.getStats();
@@ -1146,115 +1178,32 @@ export class EgWalkerReplica {
     this.replayCacheEvents = 0;
     this.replayCacheBytes = 0;
 
-    const checkpointStart = Math.max(
-      0,
-      events.length - MAX_RETAINED_CHECKPOINTS,
-    );
-    const eventCountAfterBatch = eventCountBeforeBatch + events.length;
-    this.replayCausalLinearPrefix(events, checkpointStart);
-    for (let index = checkpointStart; index < events.length; index++) {
-      const event = events[index]!;
-      const operation = this.validateCausalLinearOperation(event.operation);
+    const count = batch.count;
+    const checkpointStart = Math.max(0, count - MAX_RETAINED_CHECKPOINTS);
+    const eventCountAfterBatch = eventCountBeforeBatch + count;
+    if (checkpointStart > 0) {
+      this.replayPackedLinearRange(batch, 0, checkpointStart);
+    }
+    for (let offset = checkpointStart; offset < count; offset++) {
+      const operation = this.validateCausalLinearOperation(
+        batch.operationAt(offset),
+      );
       if (operation !== null) {
         this.applyPlainDocumentOperation(operation);
       }
       this.criticalCheckpoints.record(
-        new Set([event.id]),
+        new Set([batch.idAt(offset)!]),
         this.documentBuffer,
-        eventCountBeforeBatch + index + 1,
+        eventCountBeforeBatch + offset + 1,
         eventCountAfterBatch,
       );
     }
 
-    const last = events[events.length - 1]!;
-    this.currentVersion = new Set([last.id]);
+    this.currentVersion = new Set([batch.lastId]);
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
-    this.incrementalApplyCount += events.length;
+    this.incrementalApplyCount += count;
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
-  }
-
-  /** Fold a trusted linear batch prefix without losing per-event validation. */
-  private replayCausalLinearPrefix(
-    events: ReadonlyArray<GraphEvent>,
-    endOffset: number,
-  ): void {
-    let pendingKind: "insert" | "delete" | null = null;
-    let pendingIndex = 0;
-    let pendingLength = 0;
-    let pendingInsertParts: string[] = [];
-
-    const flush = (): void => {
-      if (pendingKind === "insert") {
-        this.applyPlainDocumentOperation({
-          type: OPERATION_TYPE.INSERT,
-          index: pendingIndex,
-          text:
-            pendingInsertParts.length === 1
-              ? pendingInsertParts[0]!
-              : pendingInsertParts.join(""),
-        });
-      } else if (pendingKind === "delete") {
-        this.applyPlainDocumentOperation({
-          type: OPERATION_TYPE.DELETE,
-          index: pendingIndex,
-          length: pendingLength,
-        });
-      }
-      pendingKind = null;
-      pendingLength = 0;
-      pendingInsertParts = [];
-    };
-
-    for (let offset = 0; offset < endOffset; offset++) {
-      const operation = events[offset]!.operation;
-      if (operation.type === OPERATION_TYPE.INSERT) {
-        if (operation.text.length === 0) {
-          continue;
-        }
-        if (
-          pendingKind === "insert" &&
-          operation.index === pendingIndex + pendingLength
-        ) {
-          pendingInsertParts.push(operation.text);
-          pendingLength += operation.text.length;
-          continue;
-        }
-
-        flush();
-        this.validateCausalLinearOperation(operation);
-        pendingKind = "insert";
-        pendingIndex = operation.index;
-        pendingLength = operation.text.length;
-        pendingInsertParts = [operation.text];
-        continue;
-      }
-
-      if (operation.length === 0) {
-        continue;
-      }
-      if (pendingKind === "delete" && operation.index === pendingIndex) {
-        const virtualDocumentLength =
-          this.documentBuffer.length - pendingLength;
-        if (operation.index + operation.length > virtualDocumentLength) {
-          throw new Error(
-            `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${virtualDocumentLength}`,
-          );
-        }
-        const combinedLength = pendingLength + operation.length;
-        this.assertNotMidSurrogate(operation.index + combinedLength);
-        pendingLength = combinedLength;
-        continue;
-      }
-
-      flush();
-      this.validateCausalLinearOperation(operation);
-      pendingKind = "delete";
-      pendingIndex = operation.index;
-      pendingLength = operation.length;
-    }
-
-    flush();
   }
 
   /**
@@ -2995,6 +2944,73 @@ const toPositionOperation = (
     index: operation.index,
     length: operation.length,
   };
+};
+
+/** Copy a causal builder's exact chain into columns. */
+const linearBatchFromOwnedEvents = (
+  events: ReadonlyArray<GraphEvent>,
+): LinearEventBatch => {
+  const batch = new LinearEventBatch(events[0]!.parentVersion);
+  for (const event of events) {
+    const operation = event.operation;
+    if (operation.type === OPERATION_TYPE.INSERT) {
+      batch.appendInsert(
+        event.id,
+        operation.index,
+        operation.text,
+        event.timestamp,
+      );
+    } else {
+      batch.appendDelete(
+        event.id,
+        operation.index,
+        operation.length,
+        event.timestamp,
+      );
+    }
+  }
+  return batch.finish();
+};
+
+/** Build the graph's own event object for one event of a linear batch. */
+const ownedLinearBatchEvent = (
+  batch: LinearEventBatch,
+  offset: number,
+): GraphEvent => ({
+  id: batch.idAt(offset)!,
+  operation: batch.operationAt(offset),
+  parentVersion:
+    offset === 0
+      ? new Set(batch.firstParents)
+      : new Set([batch.idAt(offset - 1)!]),
+  timestamp: batch.timestampAt(offset),
+});
+
+/**
+ * Per-event results of an integrated linear batch. A causal extension is
+ * applied to the plain document as given, so each event's position operation
+ * is its own operation, and `null` when it changes nothing.
+ */
+const linearBatchResults = (
+  batch: LinearEventBatch,
+): ApplyRemoteEventsResult => {
+  const results: ApplyRemoteEventResult[] = [];
+  const operations: PositionOperation[] = [];
+  for (let offset = 0; offset < batch.count; offset++) {
+    const index = batch.operationIndexAt(offset);
+    const length = batch.operationLengthAt(offset);
+    const operation: PositionOperation | null =
+      length === 0
+        ? null
+        : batch.isInsertAt(offset)
+          ? { type: OPERATION_TYPE.INSERT, index, length }
+          : { type: OPERATION_TYPE.DELETE, index, length };
+    results.push({ status: APPLY_REMOTE_EVENT_STATUS.Integrated, operation });
+    if (operation !== null) {
+      operations.push(operation);
+    }
+  }
+  return { results, operations };
 };
 
 const prepareRemoteBatch = (

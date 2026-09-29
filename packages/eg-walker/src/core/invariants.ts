@@ -134,6 +134,26 @@ export const assertWellFormedUtf16 = (text: string, context: string): void => {
 };
 
 /**
+ * Return whether `text` has no lone surrogate: the check
+ * {@link assertWellFormedUtf16} makes, for callers that fall back to another
+ * path instead of throwing.
+ */
+export const isWellFormedUtf16 = (text: string): boolean => {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0xd800 || code > 0xdfff) {
+      continue;
+    }
+    const next = text.charCodeAt(i + 1);
+    if (code > 0xdbff || !(next >= 0xdc00 && next <= 0xdfff)) {
+      return false;
+    }
+    i++;
+  }
+  return true;
+};
+
+/**
  * Validate the invariants the replica relies on for a remote {@link GraphEvent}
  * before accepting it into the event graph: insert payloads must be
  * well-formed UTF-16, and delete lengths must be finite and non-negative.

@@ -23,6 +23,14 @@ It executes the full 1,000-run, 91,678-event corpus twice: once with canonical
 event IDs (typed-run compression enabled) and once with non-canonical padded
 IDs (typed-run compression disabled).
 
+The same run also replays the three raw Diamond Types exports in
+`testdata/` (`ff-raw.json`, `git-makefile-raw.json`, `node_nodecc-raw.json`),
+each pinned by SHA-256, through the engine and packed-graph paths and requires
+DT's `endContent` byte for byte. These exports keep real agent names, so they
+check concurrent-insert ordering against DT on the histories behind paper
+datasets A2 (git-makefile) and A1 (node_nodecc). The numbered paper JSON
+datasets cannot do this for A2; see `packages/bench/PAPER_BENCHMARKS.md`.
+
 `paper-trace-converter.ts` is the operation-granularity adapter for paper
 datasets. It replays every transaction frontier, derives Unicode-scalar to
 UTF-16 offsets from the actual parent document, and rejects invalid spans or

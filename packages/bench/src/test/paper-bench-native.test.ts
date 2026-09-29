@@ -36,7 +36,10 @@ describe("native-only paper benchmark", () => {
       },
     ];
 
-    const payload = buildNativePaperPayload(events, "🙂");
+    const payload = buildNativePaperPayload(events, {
+      kind: "endContent",
+      text: "🙂",
+    });
     let garbageCollections = 0;
     const result = measureNativePaperPayload(
       payload,
@@ -52,6 +55,7 @@ describe("native-only paper benchmark", () => {
     expect(result.frontierSize).toBe(1);
     expect(result.finalTextLength).toBe(2);
     expect(result.finalTextValidated).toBe(true);
+    expect(result.finalTextOracle).toBe("endContent");
     expect(result.nativeDecodeMs).toBeGreaterThanOrEqual(0);
     expect(result.nativeLoadMs).toBeGreaterThanOrEqual(0);
     expect(result.nativeMaterializeMs).toBeGreaterThanOrEqual(0);
@@ -86,6 +90,26 @@ describe("native-only paper benchmark", () => {
     expect(result.replayStats.fullReplays).toBe(1);
   });
 
+  it("rejects a payload whose final text does not match its oracle", () => {
+    const events: GraphEvent[] = [
+      {
+        id: "alice:0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "A" },
+        timestamp: 0,
+      },
+    ];
+    const payload = buildNativePaperPayload(events, {
+      kind: "referenceDigest",
+      length: 1,
+      sha256: "0".repeat(64),
+    });
+
+    expect(() =>
+      measureNativePaperPayload(payload, "native-only-test"),
+    ).toThrow(/native-only-test: final text mismatch.*reference sha256/);
+  });
+
   it("runs the native-only CLI lane against a small paper fixture", () => {
     const result = spawnSync(
       process.execPath,
@@ -106,6 +130,7 @@ describe("native-only paper benchmark", () => {
     expect(result.stdout).toContain("paper-bench-native dataset=S1");
     expect(result.stdout).toContain("events=3");
     expect(result.stdout).toContain("finalTextValidated=true");
+    expect(result.stdout).toContain("finalTextOracle=endContent");
     expect(result.stdout).toMatch(/nativeDecodeHeapBytes=-?\d+/);
     expect(result.stdout).toMatch(/nativeLoadHeapBytes=-?\d+/);
     expect(result.stdout).toMatch(/nativeTotalHeapBytes=-?\d+/);

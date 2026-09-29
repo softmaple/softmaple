@@ -122,9 +122,9 @@ const typing = (
 /**
  * 505 typed events, five layers of two concurrent inserts joined by a merge,
  * then 495 more typed events. After a cold load the checkpoint ladder holds
- * a cut 512 events back, at `before:503`, so a peer diverging at `after:194`,
- * 300 events back, finds it with a two-event chain, the concurrent layers and
- * a 196-event chain between that cut and its own.
+ * a cut 512 events back, after `before:502`, so a peer diverging at
+ * `after:194`, 300 events back, finds it with a two-event chain, the
+ * concurrent layers and a 196-event chain between that cut and its own.
  */
 const historyWithConcurrentSections = (): GraphEvent[] => {
   const events = typing("before", 505, [], 0);

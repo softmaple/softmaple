@@ -156,7 +156,7 @@ describe("property: incremental block state", () => {
           );
 
           // Act
-          for (const pick of deliveryOrder) {
+          for (const pick of batches.length === 0 ? [] : deliveryOrder) {
             receiver.applyRemoteEvents(batches[pick % batches.length]!);
           }
           receiver.applyRemoteEvents(batches);

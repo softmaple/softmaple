@@ -83,6 +83,7 @@ interface CliOptions {
   readonly memoryWorker: boolean;
   readonly memoryRun?: number;
   readonly applyOnly: boolean;
+  readonly applyMemoryWorker: boolean;
   readonly nativeOnly: boolean;
   readonly nativeOnlyWorker: boolean;
   readonly planPhase0: boolean;
@@ -117,6 +118,22 @@ interface ApplyBenchResult {
   readonly sequenceRecords: number;
   readonly peakSequenceRecords: number;
   readonly sequenceTreeOperations: number;
+}
+
+interface ApplyMemoryResult {
+  readonly dataset: PaperDataset;
+  readonly label: string;
+  readonly run: number;
+  readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
+  readonly applyApi: PaperBenchmarkApplyApi;
+  readonly events: number;
+  readonly finalTextOracle: FinalTextOracleKind | "none";
+  /** Heap used after GC with only the replica left alive. */
+  readonly heapAfterApplyBytes: number;
+  /** Heap that dropping the replica frees. */
+  readonly replicaHeapBytes: number;
+  /** Array buffer memory, such as packed columns, dropping it frees. */
+  readonly replicaArrayBufferBytes: number;
 }
 
 interface NativeBenchResult {
@@ -300,6 +317,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
   let memoryWorker = false;
   let memoryRun: number | undefined;
   let applyOnly = false;
+  let applyMemoryWorker = false;
   let nativeOnly = false;
   let nativeOnlyWorker = false;
   let planPhase0 = false;
@@ -399,6 +417,11 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
       applyOnly = true;
       continue;
     }
+    if (arg === "--apply-memory-worker") {
+      applyOnly = true;
+      applyMemoryWorker = true;
+      continue;
+    }
     if (arg === "--native-only") {
       nativeOnly = true;
       continue;
@@ -472,6 +495,7 @@ const parseCliOptions = (args: ReadonlyArray<string>): CliOptions => {
     memoryWorker,
     memoryRun,
     applyOnly,
+    applyMemoryWorker,
     nativeOnly,
     nativeOnlyWorker,
     planPhase0,
@@ -495,7 +519,8 @@ Options:
                      Remote receive batch size. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS}
   --apply-api MODE   Apply-only ingestion API: causal or detailed. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_API}
   --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
-                     in a separate --expose-gc process
+                     in a separate --expose-gc process. With --apply-only, measure the
+                     heap and array buffers the ingesting replica retains after GC
   --apply-only       Measure conversion and public batch receive only; skip all persistence work
   --native-only      Build an EGW3 payload outside the timed lane, then measure
                      decode, replica load/replay, and final text materialization
@@ -615,6 +640,24 @@ const printApplyResult = (result: ApplyBenchResult): void => {
       `sequenceRecords=${result.sequenceRecords}`,
       `peakSequenceRecords=${result.peakSequenceRecords}`,
       `sequenceTreeOperations=${result.sequenceTreeOperations}`,
+    ].join(" "),
+  );
+};
+
+const printApplyMemoryResult = (result: ApplyMemoryResult): void => {
+  console.log(
+    [
+      "paper-bench-apply-memory",
+      `dataset=${result.dataset}`,
+      `label=${result.label}`,
+      `run=${result.run}`,
+      `applyBatchEvents=${result.applyBatchEvents}`,
+      `applyApi=${result.applyApi}`,
+      `events=${result.events}`,
+      `finalTextOracle=${result.finalTextOracle}`,
+      `heapAfterApplyBytes=${result.heapAfterApplyBytes}`,
+      `replicaHeapBytes=${result.replicaHeapBytes}`,
+      `replicaArrayBufferBytes=${result.replicaArrayBufferBytes}`,
     ].join(" "),
   );
 };
@@ -1147,6 +1190,90 @@ const prepareApplyBench = (
   };
 };
 
+/**
+ * Ingest a trace untimed and measure what the replica retains: the heap and
+ * array buffers that dropping it frees once garbage is collected. The trace
+ * and its batches are released first, so they are not counted.
+ */
+const measureApplyMemory = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
+): ApplyMemoryResult => {
+  const ingested = ingestForMemory(paperRoot, run, benchCase, applyApi);
+  const withReplica = settledMemoryUsage();
+  ingested.replica = null;
+  const withoutReplica = settledMemoryUsage();
+
+  return {
+    dataset: benchCase.dataset,
+    label: benchCase.label,
+    run,
+    applyBatchEvents: benchCase.applyBatchEvents,
+    applyApi,
+    events: ingested.events,
+    finalTextOracle: ingested.finalTextOracle,
+    heapAfterApplyBytes: withReplica.heapUsed,
+    replicaHeapBytes: withReplica.heapUsed - withoutReplica.heapUsed,
+    replicaArrayBufferBytes:
+      withReplica.arrayBuffers - withoutReplica.arrayBuffers,
+  };
+};
+
+/**
+ * Memory usage once garbage collection has settled. V8 releases array buffer
+ * memory on a background sweeper, so one forced collection can return before
+ * freed buffers leave the count; collect again until it stops changing.
+ */
+const settledMemoryUsage = (): NodeJS.MemoryUsage => {
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  let usage = process.memoryUsage();
+  for (let attempt = 0; attempt < 10; attempt++) {
+    runGc();
+    Atomics.wait(pause, 0, 0, 10);
+    runGc();
+    const next = process.memoryUsage();
+    if (next.arrayBuffers === usage.arrayBuffers && attempt > 0) {
+      return next;
+    }
+    usage = next;
+  }
+  return usage;
+};
+
+/** Apply a trace and keep only the validated replica. */
+const ingestForMemory = (
+  paperRoot: string,
+  run: number,
+  benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
+): {
+  replica: EgWalkerReplica | null;
+  readonly events: number;
+  readonly finalTextOracle: FinalTextOracleKind | "none";
+} => {
+  const prepared = prepareApplyBench(paperRoot, benchCase, applyApi);
+  const replica = new EgWalkerReplica(
+    `paper-bench-memory:${benchCase.dataset}:${run}:${applyApi}`,
+  );
+  prepared.apply(replica);
+  const pending = replica.getPendingRemoteCount();
+  if (pending !== 0) {
+    throw new Error(
+      `${benchCase.dataset}: ${pending} remote events remain buffered`,
+    );
+  }
+  const finalTextOracle = validateFinalText(
+    paperRoot,
+    benchCase.dataset,
+    prepared.limited,
+    prepared.endContent,
+    replica.getText(),
+  );
+  return { replica, events: prepared.eventCount, finalTextOracle };
+};
+
 const buildPersistencePayload = (
   paperRoot: string,
   dataset: PaperDataset,
@@ -1380,6 +1507,60 @@ const runMemoryWorkerProcess = (
   if (result.status !== 0) {
     throw new Error(
       `${benchCase.label}: memory worker failed with exit code ${result.status ?? "unknown"}`,
+    );
+  }
+};
+
+const runApplyMemoryWorkerProcess = (
+  options: CliOptions,
+  benchCase: BenchCase,
+  run: number,
+): void => {
+  const script = process.argv[1];
+  if (!script) {
+    throw new Error("Cannot locate paper-bench script for apply memory worker");
+  }
+
+  const args = [
+    "--expose-gc",
+    ...process.execArgv,
+    script,
+    "--apply-memory-worker",
+    "--datasets",
+    benchCase.dataset,
+    "--runs",
+    "1",
+    "--memory-run",
+    String(run),
+    "--paper-root",
+    options.paperRoot,
+    "--granularity",
+    benchCase.granularity,
+    "--apply-batch-events",
+    String(benchCase.applyBatchEvents),
+    "--apply-api",
+    options.applyApi,
+  ];
+  if (benchCase.maxTxns !== undefined) {
+    args.push("--max-txns", String(benchCase.maxTxns));
+  }
+  if (benchCase.maxEvents !== undefined) {
+    args.push("--max-events", String(benchCase.maxEvents));
+  }
+
+  const result = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  if (result.stdout.length > 0) {
+    process.stdout.write(result.stdout);
+  }
+  if (result.stderr.length > 0) {
+    process.stderr.write(result.stderr);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `${benchCase.label}: apply memory worker failed with exit code ${result.status ?? "unknown"}`,
     );
   }
 };
@@ -1858,16 +2039,30 @@ const main = (): void => {
   if (
     options.applyOnly &&
     (options.nativeOnly ||
-      options.memory ||
       options.memoryWorker ||
       options.planPhase0 ||
       options.phase6Gates)
   ) {
     throw new Error(
-      "--apply-only cannot be combined with --native-only, --memory, --plan-phase0, or --phase6-gates",
+      "--apply-only cannot be combined with --native-only, --plan-phase0, or --phase6-gates",
     );
   }
   const benchCases = buildBenchCases(options);
+  if (options.applyMemoryWorker) {
+    const benchCase = benchCases[0];
+    if (!benchCase || benchCases.length !== 1) {
+      throw new Error("Apply memory worker requires one benchmark case");
+    }
+    printApplyMemoryResult(
+      measureApplyMemory(
+        options.paperRoot,
+        options.memoryRun ?? 1,
+        benchCase,
+        options.applyApi,
+      ),
+    );
+    return;
+  }
   if (options.nativeOnlyWorker) {
     const benchCase = benchCases[0];
     if (!benchCase || benchCases.length !== 1) {
@@ -1930,6 +2125,9 @@ const main = (): void => {
         );
         applyResults.push(result);
         printApplyResult(result);
+        if (options.memory) {
+          runApplyMemoryWorkerProcess(options, benchCase, run);
+        }
       }
     }
     printApplySummaries(applyResults);

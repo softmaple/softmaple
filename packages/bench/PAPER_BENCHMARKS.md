@@ -251,6 +251,25 @@ of the process prevents persistence object graphs from contaminating raw apply
 time and peak memory. Use the normal or `--native-only` lanes for persistence
 and cold-load measurements.
 
+Add `--memory` to measure what an ingesting replica retains. After each timed
+run, a separate `node --expose-gc` worker applies the same batches untimed,
+validates the text, releases the trace and batches, and prints a
+`paper-bench-apply-memory` line:
+
+- `heapAfterApplyBytes`: heap used after GC with only the replica left alive.
+- `replicaHeapBytes`: heap that dropping the replica frees.
+- `replicaArrayBufferBytes`: array buffer memory, such as packed operation
+  columns, that dropping the replica frees.
+
+```bash
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
+  --datasets S3 \
+  --runs 3 \
+  --apply-batch-events all \
+  --apply-only \
+  --memory
+```
+
 Phase 0 guardrail suite:
 
 ```bash

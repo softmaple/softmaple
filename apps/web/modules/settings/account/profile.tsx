@@ -64,32 +64,48 @@ export const Profile: FC<{
     formData.set("avatar", file);
     setFeedback(null);
     startAvatarUpdate(async () => {
-      const result = await uploadAvatar(formData);
-      input.value = "";
-      if (!result.ok) {
-        setFeedback({ error: true, text: result.message });
-        return;
+      try {
+        const result = await uploadAvatar(formData);
+        if (!result.ok) {
+          setFeedback({ error: true, text: result.message });
+          return;
+        }
+        setProfile(result.data);
+        setFeedback({ error: false, text: "Avatar updated." });
+      } catch {
+        setFeedback({
+          error: true,
+          text: "Could not upload your image. Try again.",
+        });
+      } finally {
+        // Selecting the same file again must still fire a change event.
+        input.value = "";
       }
-      setProfile(result.data);
-      setFeedback({ error: false, text: "Avatar updated." });
     });
   };
 
   const clearAvatar = (): void => {
     setFeedback(null);
     startAvatarUpdate(async () => {
-      const result = await removeAvatar();
-      if (!result.ok) {
-        setFeedback({ error: true, text: result.message });
-        return;
+      try {
+        const result = await removeAvatar();
+        if (!result.ok) {
+          setFeedback({ error: true, text: result.message });
+          return;
+        }
+        setProfile(result.data);
+        setFeedback({ error: false, text: "Avatar removed." });
+      } catch {
+        setFeedback({
+          error: true,
+          text: "Could not remove your image. Try again.",
+        });
       }
-      setProfile(result.data);
-      setFeedback({ error: false, text: "Avatar removed." });
     });
   };
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-5 pb-16 pt-4 sm:px-8 md:pt-6">
+    <main className="mx-auto w-full max-w-3xl px-5 pb-[max(4rem,env(safe-area-inset-bottom))] pt-4 sm:px-8 md:pt-6">
       <Link
         href="/dashboard"
         className="-ml-1 inline-flex min-h-11 items-center gap-2 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground"
@@ -141,7 +157,7 @@ export const Profile: FC<{
                     <Button
                       asChild
                       className={cn(
-                        "h-10 cursor-pointer md:h-9",
+                        "h-11 cursor-pointer md:h-9",
                         "has-[:focus-visible]:border-ring has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
                         isPending && "pointer-events-none opacity-50",
                       )}
@@ -169,7 +185,7 @@ export const Profile: FC<{
                     </Button>
                     {profile.avatar_src === null ? null : (
                       <Button
-                        className="h-10 md:h-9"
+                        className="h-11 md:h-9"
                         disabled={isPending}
                         onClick={clearAvatar}
                         type="button"
@@ -196,14 +212,21 @@ export const Profile: FC<{
                 if (!dirty || !valid || isPending) return;
                 setFeedback(null);
                 startSaving(async () => {
-                  const result = await updateProfile({ displayName });
-                  if (!result.ok) {
-                    setFeedback({ error: true, text: result.message });
-                    return;
+                  try {
+                    const result = await updateProfile({ displayName });
+                    if (!result.ok) {
+                      setFeedback({ error: true, text: result.message });
+                      return;
+                    }
+                    setProfile(result.data);
+                    setDisplayName(result.data.full_name ?? "");
+                    setFeedback({ error: false, text: "Profile saved." });
+                  } catch {
+                    setFeedback({
+                      error: true,
+                      text: "Could not save your profile. Try again.",
+                    });
                   }
-                  setProfile(result.data);
-                  setDisplayName(result.data.full_name ?? "");
-                  setFeedback({ error: false, text: "Profile saved." });
                 });
               }}
             >
@@ -221,7 +244,7 @@ export const Profile: FC<{
                     }
                     aria-invalid={nameError}
                     autoComplete="name"
-                    className="h-10 md:h-8"
+                    className="h-11 md:h-8"
                     disabled={isPending}
                     id="display-name"
                     maxLength={80}
@@ -254,7 +277,7 @@ export const Profile: FC<{
                 <div>
                   <Input
                     aria-describedby="account-email-hint"
-                    className="h-10 bg-muted/50 text-muted-foreground md:h-8 dark:bg-muted/50"
+                    className="h-11 bg-muted/50 text-muted-foreground md:h-8 dark:bg-muted/50"
                     id="account-email"
                     readOnly
                     value={profile.email}

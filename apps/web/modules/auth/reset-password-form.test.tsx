@@ -23,12 +23,19 @@ const buttonNamed = (name: string) =>
   [...container.querySelectorAll("button")].find(
     (button) => button.textContent === name,
   );
-const submitWith = (email: string) =>
-  act(async () => {
+const typeEmail = (email: string) =>
+  act(() => {
     const input = emailInput()!;
-    input.value = email;
-    input.form!.requestSubmit();
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(input, email);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   });
+const submitWith = async (email: string) => {
+  typeEmail(email);
+  await act(async () => emailInput()!.form!.requestSubmit());
+};
 const click = (name: string) =>
   act(async () => {
     buttonNamed(name)!.click();
@@ -126,11 +133,10 @@ describe("forgot password form", () => {
       "Enter a valid email address.",
     );
     expect(status()).toBeNull();
+    expect(emailInput()?.value).toBe("ada@example");
 
     // Editing the field clears the stale error until the next submit.
-    await act(async () => {
-      emailInput()!.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    typeEmail("ada@example.invalid");
     expect(emailInput()?.hasAttribute("aria-invalid")).toBe(false);
     expect(container.querySelector("#email-error")).toBeNull();
 

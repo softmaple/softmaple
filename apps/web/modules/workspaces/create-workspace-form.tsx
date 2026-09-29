@@ -19,7 +19,7 @@ export const CreateWorkspaceForm = ({
   // uncontrolled fields after every form action).
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [state, action] = useActionState(createWorkspace, null);
+  const [state, action, pending] = useActionState(createWorkspace, null);
   const router = useRouter();
   const titleError =
     state !== null && !state.ok ? state.fieldErrors?.title?.[0] : undefined;
@@ -33,7 +33,12 @@ export const CreateWorkspaceForm = ({
   return (
     <form
       action={action}
+      aria-busy={pending}
       onSubmit={(event) => {
+        if (pending) {
+          event.preventDefault();
+          return;
+        }
         if (preview) {
           event.preventDefault();
           setPreviewMessage(true);
@@ -59,7 +64,9 @@ export const CreateWorkspaceForm = ({
             }
             aria-invalid={titleError === undefined ? undefined : true}
             autoComplete="off"
-            className="h-10 md:h-9"
+            className="h-11 md:h-9"
+            enterKeyHint="next"
+            readOnly={pending}
             id="title"
             maxLength={80}
             name="title"
@@ -87,6 +94,7 @@ export const CreateWorkspaceForm = ({
             onChange={(event) => setDescription(event.target.value)}
             placeholder="What this workspace is for"
             rows={3}
+            readOnly={pending}
             value={description}
           />
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -62,8 +62,11 @@ export function MobileWorkspaceHome(props: HomeProps) {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [selected, setSelected] = useState<HomeDocument | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const docsRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const actionsTrigger = useRef<HTMLButtonElement | null>(null);
   const current = props.workspaces.find((w) => w.slug === props.workspaceSlug);
   const firstName =
     (props.profile.full_name ?? "").trim().split(/\s+/)[0] || "there";
@@ -76,6 +79,17 @@ export function MobileWorkspaceHome(props: HomeProps) {
   );
   // Workspace-wide presence is unavailable. Fixtures are explicitly dev-only.
   const active = props.visualFixture ? props.documents[0] : undefined;
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeOnDesktop = () => {
+      if (!desktop.matches) return;
+      setMenuOpen(false);
+      setSwitchOpen(false);
+      setActionsOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
   const navigate = (next: Section) => {
     setSection(next);
     setFilter(next === "Shared" ? "Shared" : "Recent");
@@ -108,13 +122,18 @@ export function MobileWorkspaceHome(props: HomeProps) {
             <SheetTitle className={sheetTitle}>Workspace navigation</SheetTitle>
             <SheetDescription>Make room for your next idea.</SheetDescription>
             <Button asChild variant="outline" className="h-11">
-              <Link href={`/workspace/${props.workspaceSlug}/settings`}>
+              <Link
+                href={`/workspace/${props.workspaceSlug}/settings`}
+                onClick={() => setMenuOpen(false)}
+              >
                 <Settings />
                 Workspace settings
               </Link>
             </Button>
             <Button asChild variant="outline" className="h-11">
-              <Link href="/dashboard">All workspaces</Link>
+              <Link href="/dashboard" onClick={() => setMenuOpen(false)}>
+                All workspaces
+              </Link>
             </Button>
             <div className="flex items-center justify-between py-1 text-sm">
               Appearance
@@ -122,7 +141,11 @@ export function MobileWorkspaceHome(props: HomeProps) {
             </div>
           </SheetContent>
         </Sheet>
-        <Link href="/dashboard" aria-label="Softmaple dashboard">
+        <Link
+          href="/dashboard"
+          aria-label="Softmaple dashboard"
+          className="inline-flex min-h-11 items-center"
+        >
           <WorkspaceBrand />
         </Link>
         <WorkspaceAccount profile={props.profile} />
@@ -136,10 +159,9 @@ export function MobileWorkspaceHome(props: HomeProps) {
           <main className={cn("px-5 pb-5", props.canEdit && "pb-24")}>
             <Sheet open={switchOpen} onOpenChange={setSwitchOpen}>
               <SheetTrigger asChild>
-                {/* The pill stays compact; the pseudo-element gives it a 44px target. */}
                 <Button
                   variant="outline"
-                  className={`${paperSerif} relative mb-1 h-9 max-w-full justify-start rounded-full after:absolute after:inset-x-0 after:-inset-y-1 after:content-['']`}
+                  className={`${paperSerif} mb-1 h-11 max-w-full justify-start rounded-full`}
                 >
                   <Folder />
                   <span className="truncate">
@@ -176,6 +198,7 @@ export function MobileWorkspaceHome(props: HomeProps) {
                   <Link
                     className="mt-1 flex min-h-12 items-center border-t border-border px-3 text-sm"
                     href="/dashboard"
+                    onClick={() => setSwitchOpen(false)}
                   >
                     All workspaces
                   </Link>
@@ -217,19 +240,37 @@ export function MobileWorkspaceHome(props: HomeProps) {
                   className="size-5 shrink-0 text-muted-foreground"
                 />
                 <input
+                  ref={searchRef}
                   aria-label="Search documents"
-                  className={`${paperSerif} min-w-0 flex-1 bg-transparent text-base outline-none focus-visible:outline-none [&::-webkit-search-cancel-button]:appearance-none`}
+                  className={`${paperSerif} h-full min-w-0 flex-1 bg-transparent text-base outline-none focus-visible:outline-none [&::-webkit-search-cancel-button]:appearance-none`}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint="search"
                   placeholder="Search documents…"
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === "Enter") event.currentTarget.blur();
+                    if (event.key === "Escape" && query) {
+                      event.preventDefault();
+                      setQuery("");
+                    }
+                  }}
                 />
                 {query ? (
                   <button
                     type="button"
                     aria-label="Clear search"
-                    className="grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => setQuery("")}
+                    className="grid size-11 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setQuery("");
+                      searchRef.current?.focus();
+                    }}
                   >
                     <X aria-hidden="true" className="size-4" />
                   </button>
@@ -358,7 +399,11 @@ export function MobileWorkspaceHome(props: HomeProps) {
                         size="icon"
                         variant="ghost"
                         aria-label={`Actions for ${doc.title}`}
-                        onClick={() => setSelected(doc)}
+                        onClick={(event) => {
+                          actionsTrigger.current = event.currentTarget;
+                          setSelected(doc);
+                          setActionsOpen(true);
+                        }}
                       >
                         <MoreVertical />
                       </Button>
@@ -486,15 +531,14 @@ export function MobileWorkspaceHome(props: HomeProps) {
           </button>
         ))}
       </nav>
-      <Sheet
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-      >
+      <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
         <SheetContent
           side="bottom"
           showCloseButton
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            actionsTrigger.current?.focus({ preventScroll: true });
+          }}
           className={`${paperSurface} px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]`}
         >
           <SheetTitle className={cn(sheetTitle, "truncate pr-10")}>
@@ -505,6 +549,7 @@ export function MobileWorkspaceHome(props: HomeProps) {
             <Button asChild className="h-11">
               <Link
                 href={`/workspace/${props.workspaceSlug}/doc/${selected.slug}`}
+                onClick={() => setActionsOpen(false)}
               >
                 Open document
                 <ArrowRight />

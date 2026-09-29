@@ -58,7 +58,8 @@ const ResetPasswordFlow = ({
 }: ResetPasswordFlowProps) => {
   // The Server Function is the action itself, so the form submits even
   // before hydration.
-  const [state, action] = useActionState(resetPassword, null);
+  const [state, action, pending] = useActionState(resetPassword, null);
+  const [email, setEmail] = useState(defaultEmail);
   // Kept apart from the action state so a failed resend keeps the
   // confirmation; updated while rendering when a new result arrives.
   const [sent, setSent] = useState<Sent | null>(null);
@@ -90,7 +91,13 @@ const ResetPasswordFlow = ({
         <p className="text-sm leading-6 text-(--muted-ink)">
           Didn’t get it? Check your spam folder, or send it again.
         </p>
-        <form action={action}>
+        <form
+          action={action}
+          aria-busy={pending}
+          onSubmit={(event) => {
+            if (pending) event.preventDefault();
+          }}
+        >
           <input name="email" type="hidden" value={sent.email} />
           <SubmitButton
             text="Resend reset link"
@@ -102,6 +109,7 @@ const ResetPasswordFlow = ({
           Wrong address?{" "}
           <button
             className={`${authLinkClass} cursor-pointer`}
+            disabled={pending}
             onClick={() => onChangeEmail(sent.email)}
             type="button"
           >
@@ -124,7 +132,14 @@ const ResetPasswordFlow = ({
       : { tone: "error" as const, text: failure.message };
 
   return (
-    <form action={action} className="space-y-5 min-[56.25rem]:max-xl:space-y-4">
+    <form
+      action={action}
+      aria-busy={pending}
+      onSubmit={(event) => {
+        if (pending) event.preventDefault();
+      }}
+      className="space-y-5 min-[56.25rem]:max-xl:space-y-4"
+    >
       {notice === null ? null : (
         <AuthNotice tone={notice.tone}>{notice.text}</AuthNotice>
       )}
@@ -138,10 +153,18 @@ const ResetPasswordFlow = ({
           className={authInputClass}
           placeholder="you@example.com"
           autoComplete="email"
-          defaultValue={defaultEmail}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="send"
+          value={email}
+          readOnly={pending}
           id="email"
           name="email"
-          onChange={() => setEditedAfter(state)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            setEditedAfter(state);
+          }}
           type="email"
           required
         />

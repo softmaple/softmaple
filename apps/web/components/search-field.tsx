@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "@softmaple/ui/components/input-group";
 import { Kbd } from "@softmaple/ui/components/kbd";
@@ -57,12 +58,18 @@ export function SearchField({
   }, []);
 
   return (
-    <InputGroup>
+    <InputGroup className="h-11 md:h-9">
       <InputGroupInput
         ref={inputRef}
         aria-label={label}
         aria-keyshortcuts="/"
         placeholder={label}
+        autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        enterKeyHint="search"
+        className="[&::-webkit-search-cancel-button]:appearance-none"
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -83,7 +90,23 @@ export function SearchField({
       <InputGroupAddon>
         <Search />
       </InputGroupAddon>
-      <InputGroupAddon align="inline-end">
+      {value ? (
+        <InputGroupAddon align="inline-end" className="py-0 pr-1">
+          <InputGroupButton
+            aria-label="Clear search"
+            className="size-11 md:size-8"
+            size="icon-sm"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => {
+              onChange("");
+              inputRef.current?.focus();
+            }}
+          >
+            <X aria-hidden="true" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      ) : null}
+      <InputGroupAddon align="inline-end" className="hidden md:flex">
         <Kbd aria-hidden="true">/</Kbd>
       </InputGroupAddon>
     </InputGroup>

@@ -42,6 +42,19 @@ const implementations = (
     path: resolve(entry.slice(separator + 1)),
   };
 });
+const duplicate = implementations.find(
+  ({ name }, index) =>
+    implementations.findIndex((other) => other.name === name) !== index,
+);
+if (duplicate !== undefined) {
+  throw new Error(`--impl name ${duplicate.name} is used more than once`);
+}
+const lanes = [
+  { label: "Local `transact(insertText)`", key: "localMedianMs" },
+  { label: "Remote `applyRemoteEvents`", key: "remoteMedianMs" },
+  { label: "Local `transact(replaceDocument)`", key: "replaceMedianMs" },
+  { label: "Local `transact(setMark)` after a join", key: "markMedianMs" },
+];
 const sizes = values.batches.split(",").map(Number);
 const runs = Number(values.runs);
 if (!Number.isSafeInteger(runs) || runs < 1) {
@@ -111,7 +124,9 @@ try {
           );
         }
         console.error(
-          `END ${label} local=${result.localMedianMs.toFixed(3)}ms remote=${result.remoteMedianMs.toFixed(3)}ms replace=${result.replaceMedianMs.toFixed(3)}ms`,
+          `END ${label} ${lanes
+            .map(({ key }) => `${key}=${result[key].toFixed(3)}`)
+            .join(" ")}`,
         );
       }
     }
@@ -131,11 +146,7 @@ function formatTable(results) {
   const divider = `|---:|---|${names.map(() => "---:|").join("")}${names.length === 2 ? "---:|" : ""}`;
   const rows = [];
   for (const size of sizes) {
-    for (const [lane, key] of [
-      ["Local `transact(insertText)`", "localMedianMs"],
-      ["Remote `applyRemoteEvents`", "remoteMedianMs"],
-      ["Local `transact(replaceDocument)`", "replaceMedianMs"],
-    ]) {
+    for (const { label: lane, key } of lanes) {
       const medians = names.map((name) =>
         medianOf(
           results

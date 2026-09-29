@@ -2,8 +2,10 @@
  * One-character edit latency on a BlockReplica that already holds a long
  * history, through three entry points: `transact(insertText)`, a remote
  * `applyRemoteEvents`, and `transact(replaceDocument)` as the Lexical binding
- * commits every editor update. Run the bundled output with --expose-gc, one
- * process per sample set; `scripts/run-block-model-bench.mjs` drives it.
+ * commits every editor update. A fourth lane then joins a block and toggles
+ * bold on one character, so every mark it sets has a join in its past. Run
+ * the bundled output with --expose-gc, one process per sample set;
+ * `scripts/run-block-model-bench.mjs` drives it.
  *
  * usage: block-model-edit-latency.mjs <block-model/dist/index.js> <batches>
  *          [samples] [paragraph-length]
@@ -149,6 +151,57 @@ assert.deepEqual(
   blockTexts,
 );
 
+// Split the last block at its end and join the new block back. The text stays
+// the same, but every later mark now has a block join in its causal past.
+const joinBatch = replica.transact((transaction) => {
+  transaction.joinBlock(
+    transaction.splitBlock(history.lastBlockId, blockTexts.at(-1)!.length),
+  );
+});
+assert.ok(joinBatch !== null);
+let bold = false;
+
+/** Toggle bold on the last character of the last block. */
+const toggleMark = (): number => {
+  const length = blockTexts.at(-1)!.length;
+  bold = !bold;
+  const start = performance.now();
+  const batch = replica.transact((transaction) => {
+    transaction.setMark(
+      history.lastBlockId,
+      length - 1,
+      length,
+      "bold",
+      bold ? true : null,
+    );
+  });
+  const elapsed = performance.now() - start;
+  assert.ok(batch !== null);
+  assert.equal(batch.events.length, 1);
+  return elapsed;
+};
+
+for (let edit = 0; edit < WARMUP_EDITS; edit++) {
+  toggleMark();
+}
+globalThis.gc?.();
+const mark: number[] = [];
+for (let sample = 0; sample < samples; sample++) {
+  mark.push(toggleMark());
+}
+const lastLength = blockTexts.at(-1)!.length;
+const { blocks } = replica.getDocument();
+assert.deepEqual(
+  blocks.map(({ text }) => text),
+  blockTexts,
+);
+assert.deepEqual(
+  blocks.at(-1)!.marks,
+  bold
+    ? [{ kind: "bold", from: lastLength - 1, to: lastLength, value: true }]
+    : [],
+);
+
 console.log(
   JSON.stringify({
     batches: batchCount,
@@ -158,9 +211,11 @@ console.log(
     localMedianMs: median(local),
     remoteMedianMs: median(remote),
     replaceMedianMs: median(replace),
+    markMedianMs: median(mark),
     localMs: local,
     remoteMs: remote,
     replaceMs: replace,
+    markMs: mark,
     blocks: blockTexts.length,
     finalTextValidated: true,
     maxRssKiB: process.resourceUsage().maxRSS,

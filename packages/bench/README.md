@@ -91,7 +91,11 @@ setup stays linear in the history on every build. Every process validates the
 document text after setup and after the timed edits.
 
 Each process warms up with ten edits of each kind, then rotates through the
-three lanes for `--samples` rounds and reports per-lane medians. The driver starts a
+three lanes for `--samples` rounds and reports per-lane medians. A fourth lane
+then splits the last block at its end and joins the new block back, so every
+later mark has a block join in its causal past, and toggles bold on the last
+character: ten warm-up toggles, then `--samples` timed ones. It checks the
+final bold span along with the text. The driver starts a
 fresh process for every implementation, history size and run, alternating the
 implementation order between runs, and prints the median of the per-process
 medians:
@@ -102,7 +106,8 @@ pnpm exec turbo run block-model-bench --filter=@softmaple/bench -- \
 ```
 
 To compare two builds, build `@softmaple/block-model` in each checkout (for
-example a `git worktree` of the base commit) and name each implementation:
+example a `git worktree` of the base commit) and give each implementation a
+unique name:
 
 ```bash
 pnpm exec turbo run build --filter=@softmaple/block-model

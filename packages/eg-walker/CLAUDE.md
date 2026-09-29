@@ -47,6 +47,8 @@ src/
     replica.ts
     invariants.ts
     replay-walker.ts
+    portable-snapshot.ts
+    portable-snapshot-codec.ts
     internals/
       critical-checkpoint-store.ts
       persistence-metadata.ts
@@ -74,7 +76,8 @@ src/
     columnar-codec.ts
     internals/
       binary-io.ts
-      diff-versions.ts
+      ranked-diff-versions.ts
+      packed-diff-versions.ts
       event-graph-serialization.ts
       max-heap.ts
       topological-order.ts

@@ -54,10 +54,10 @@ export type {
   NativeSnapshotResumeCacheMode,
 } from "./core/replica";
 export {
-  PortableSnapshotCodec,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
   type PortableSnapshot,
 } from "./core/portable-snapshot";
+export { PortableSnapshotCodec } from "./core/portable-snapshot-codec";
 export { inspectCausalEventBatch } from "./core/causal-event-batch";
 export {
   PersistentUtf16Rope,

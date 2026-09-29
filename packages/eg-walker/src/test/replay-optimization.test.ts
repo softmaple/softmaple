@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EgWalkerReplica } from "../core/replica";
 import { createCausalEventBatchBuilder } from "../core/causal-event-batch";
-import { PortableSnapshotCodec } from "../core/portable-snapshot";
+import { PortableSnapshotCodec } from "../core/portable-snapshot-codec";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import type { GraphEvent } from "../types";
 

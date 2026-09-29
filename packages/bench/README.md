@@ -121,6 +121,43 @@ node scripts/run-block-model-bench.mjs \
 typing the whole history into one block. `--output` appends every process's
 samples to `runs.jsonl`.
 
+## Snapshot first-edit latency
+
+`snapshot-first-edit-bench` opens a paper dataset with
+`EgWalkerReplica.fromPortableSnapshot` and times the first edit, which pays for
+the lazy EGW3 decode and the snapshot's text validation, and the edit after it.
+Each lane runs in a fresh process, because once one edit has paid for the lazy
+work every later operation measures something else:
+
+| Lane             | First edit                                                        | Second edit                 |
+| ---------------- | ----------------------------------------------------------------- | --------------------------- |
+| `local`          | `insert(0, …)`                                                    | another local insert        |
+| `remote`         | a caught-up peer's insert on the snapshot frontier                | the same peer's next insert |
+| `concurrent-<d>` | a peer's insert whose parent is `d` events before the history end | the same peer's next insert |
+| `native`         | cold load of the same EGW3 bytes (`nativeLoadMs`), for comparison | —                           |
+
+The driver prepares one EGWP1 snapshot per dataset (and prefix) with this
+checkout's eg-walker, outside any timed region, and measures every
+implementation against the same bytes. Every process checks the edited text:
+exactly for `local` and `remote`, and for `concurrent-<d>` by removing both
+inserted markers and comparing with the snapshot text. The driver also requires
+every implementation to produce the same final text.
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-snapshot-first-edit-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --datasets S1,C1,A1,A2 --runs 3 --output /path/to/results
+```
+
+`--kinds` selects lanes (default
+`native,local,remote,concurrent-10,concurrent-1000`), `--fractions 0.125,0.25`
+adds prefixes of each dataset's editing order, and `--reuse-fixtures` keeps the
+prepared snapshots of an earlier run in the same `--output`. The driver
+alternates implementation order between runs, appends every sample to
+`runs.jsonl` and writes the median table to `summary.md`.
+
 ## Replay optimization A/B workers
 
 `replay-bench` adds full-text-checked threshold, receive API, graph import and

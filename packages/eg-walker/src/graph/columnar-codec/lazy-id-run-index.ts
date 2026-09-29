@@ -1,5 +1,5 @@
 import type { EventId } from "../../types";
-import { parseEventId } from "../event-id";
+import { canonicalSequenceAfter, parseEventId } from "../event-id";
 import type { PackedEventIdIndex } from "../internals/packed-event-graph-base";
 import type { IdRun } from "./types";
 
@@ -22,6 +22,9 @@ export class LazyIdRunIndex implements PackedEventIdIndex {
   private readonly customOffsets: ReadonlyMap<EventId, number>;
   private readonly maximumSequenceByReplica: ReadonlyMap<string, number>;
   private runIndexesByEventOffset: Uint32Array | null = null;
+  /** Replica of the previous canonical lookup and its (possibly absent) runs. */
+  private lookupReplicaId: string | null = null;
+  private lookupRuns: ReadonlyArray<IdRun> | undefined;
 
   constructor(runs: ReadonlyArray<IdRun>, expectedCount: number) {
     if (!Number.isSafeInteger(expectedCount) || expectedCount < 0) {
@@ -113,16 +116,40 @@ export class LazyIdRunIndex implements PackedEventIdIndex {
     return this.offsetOf(id) !== undefined;
   }
 
+  /**
+   * Resolve an ID without allocating. Graph traversals look up many IDs of
+   * the same few replicas in a row, so the previous lookup's replica is
+   * matched in place before slicing a new prefix for the replica map.
+   */
   offsetOf(id: EventId): number | undefined {
-    const parsed = parseEventId(id);
-    if (parsed !== null) {
+    const colonIndex = id.lastIndexOf(":");
+    const sequence = canonicalSequenceAfter(id, colonIndex);
+    if (sequence >= 0) {
       const canonicalOffset = findCanonicalOffset(
-        this.canonicalRunsByReplica.get(parsed.replicaId),
-        parsed.sequence,
+        this.canonicalRunsFor(id, colonIndex),
+        sequence,
       );
       if (canonicalOffset !== undefined) return canonicalOffset;
     }
     return this.customOffsets.get(id);
+  }
+
+  private canonicalRunsFor(
+    id: EventId,
+    colonIndex: number,
+  ): ReadonlyArray<IdRun> | undefined {
+    const previous = this.lookupReplicaId;
+    if (
+      previous !== null &&
+      previous.length === colonIndex &&
+      id.startsWith(previous)
+    ) {
+      return this.lookupRuns;
+    }
+    const replicaId = id.slice(0, colonIndex);
+    this.lookupReplicaId = replicaId;
+    this.lookupRuns = this.canonicalRunsByReplica.get(replicaId);
+    return this.lookupRuns;
   }
 
   idAt(offset: number): EventId | undefined {

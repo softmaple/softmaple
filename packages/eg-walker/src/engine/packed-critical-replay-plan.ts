@@ -51,6 +51,26 @@ export class PackedCriticalReplayPlan {
     return this.sectionEnds[sectionIndex]!;
   }
 
+  /**
+   * Last section whose end frontier covers at most `eventCount` events, or
+   * -1 when even the first section is larger.
+   */
+  lastSectionEndingAtOrBefore(eventCount: number): number {
+    let low = 0;
+    let high = this.sectionCount - 1;
+    let found = -1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (this.sectionEnds[middle]! <= eventCount) {
+        found = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return found;
+  }
+
   sectionEventCountAt(sectionIndex: number): number {
     return this.sectionEndAt(sectionIndex) - this.sectionStartAt(sectionIndex);
   }

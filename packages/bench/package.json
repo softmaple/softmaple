@@ -12,7 +12,8 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "typecheck": "tsc --noEmit",
-    "replay-bench": "node --expose-gc scripts/run-replay-bench.mjs"
+    "replay-bench": "node --expose-gc scripts/run-replay-bench.mjs",
+    "snapshot-first-edit-bench": "node scripts/run-snapshot-first-edit-bench.mjs"
   },
   "license": "MIT",
   "dependencies": {

@@ -81,6 +81,39 @@ describe("LazyIdRunIndex", () => {
     expect(parseableCustom.maximumSequenceForReplica("alice")).toBe(500);
   });
 
+  it("reuses the previous lookup's replica without confusing similar IDs", () => {
+    const index = new LazyIdRunIndex(
+      [
+        run("a:b", 0, 0, 2),
+        run("alice", 5, 2, 2),
+        run("alicf", 5, 4, 1),
+        run("alice:07", 0, 5, 1, true),
+        run("x:b", 3, 6, 1),
+      ],
+      7,
+    );
+
+    // Alternate replicas whose prefixes share characters or lengths.
+    const lookups: ReadonlyArray<readonly [string, number | undefined]> = [
+      ["alice:6", 3],
+      ["alice:5", 2],
+      ["alicf:5", 4],
+      ["alice:6", 3],
+      ["a:b:1", 1],
+      ["x:b:3", 6],
+      ["a:b:0", 0],
+      ["a:bc:0", undefined],
+      ["alice:07", 5],
+      ["alice:7", undefined],
+      ["alice:", undefined],
+      [":5", undefined],
+      ["alice:12345678901234567", undefined],
+    ];
+    for (const [id, offset] of lookups) {
+      expect(index.offsetOf(id), id).toBe(offset);
+    }
+  });
+
   it("strictly rejects collisions without building a per-event map", () => {
     expect(
       () =>

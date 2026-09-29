@@ -347,9 +347,11 @@ describe("packed critical-section replay planning", () => {
     const replica = new EgWalkerReplica("packed-layers", "", packedGraph);
 
     expect(replica.getText()).toBe(expected);
-    // One bounded engine covers the 68 obsolete cuts; the trailing 32 cuts
-    // remain independent so each can still seed a retained checkpoint.
-    expect(generate).toHaveBeenCalledTimes(33);
+    // Two bounded engines cover the 68 obsolete cuts, split at the ladder
+    // checkpoint 64 events behind the head (the 128-event cut ends the first
+    // range). The trailing 32 cuts remain independent so each can still seed
+    // a retained checkpoint.
+    expect(generate).toHaveBeenCalledTimes(34);
     expect(materialize).not.toHaveBeenCalled();
     expect(stringDiff).not.toHaveBeenCalled();
   });
@@ -410,10 +412,11 @@ describe("packed critical-section replay planning", () => {
     );
 
     expect(replica.getText()).toBe(expected);
-    // The 168 obsolete cuts become one N-(short L)-N range plus one direct
-    // trailing L cut. Only the 16 nonlinear cuts in the retained 32-section
-    // checkpoint window still need independent engines.
-    expect(generate).toHaveBeenCalledTimes(17);
+    // The 168 obsolete cuts become N-(short L)-N ranges that stop at the
+    // ladder checkpoints 64, 128 and 256 events behind the head: four
+    // bounded engines plus direct L cuts. Only the 16 nonlinear cuts in the
+    // retained 32-section checkpoint window still need independent engines.
+    expect(generate).toHaveBeenCalledTimes(20);
   });
 
   it("widens obsolete bridges after a low-pressure nonlinear range", () => {

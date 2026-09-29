@@ -117,6 +117,33 @@ describe("snapshot first-edit lanes", () => {
     expect(result.statsAfterFirstEdit?.fullReplays).toBe(1);
   });
 
+  it.each([
+    "native-concurrent-0",
+    "native-concurrent-12",
+  ])("times and validates the %s lane after a cold load", (kind) => {
+    const result = measureSnapshotFirstEdit(
+      api,
+      fixture.bytes,
+      fixture.manifest,
+      parseSnapshotEditKind(kind),
+    );
+
+    expect(result).toMatchObject({
+      kind,
+      restoreMs: 0,
+      finalTextLength: fixture.text.length + 2,
+      finalTextValidated: true,
+    });
+    expect(result.statsAfterOpen).toMatchObject({
+      snapshotValidationReplays: 0,
+      fullReplays: 1,
+    });
+    expect(result.statsAfterFirstEdit?.fullReplays).toBe(1);
+    expect(result.heapAfterOpenBytes).toBeGreaterThan(0);
+    expect(result.nativeLoadMs).toBeGreaterThanOrEqual(0);
+    expect(result.firstEditMs).toBeGreaterThanOrEqual(0);
+  });
+
   it("rejects a snapshot that does not match its manifest", () => {
     expect(() =>
       measureSnapshotFirstEdit(
@@ -172,6 +199,13 @@ describe("snapshot first-edit lanes", () => {
       type: "concurrent",
       depth: 1000,
     });
+    expect(parseSnapshotEditKind("native-concurrent-10000")).toEqual({
+      type: "native-concurrent",
+      depth: 10000,
+    });
+    expect(() => parseSnapshotEditKind("native-local")).toThrow(
+      /Unknown snapshot edit kind/,
+    );
     expect(() => parseSnapshotEditKind("concurrent-x")).toThrow(
       /Unknown snapshot edit kind/,
     );

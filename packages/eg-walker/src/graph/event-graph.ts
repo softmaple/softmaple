@@ -872,16 +872,12 @@ export class EventGraph {
   /**
    * Return a numeric branch-preserving order for a replay suffix.
    *
-   * @internal Packed-only graphs return `null` so callers keep their
-   * storage-specific fallback; object-only and packed-plus-tail graphs use
-   * insertion ranks.
+   * @internal Every graph shape is ordered over insertion ranks, so a
+   * partial replay never materializes the suffix's events to sort them.
    */
   getRankedReplayOrder(
     replayEventIds: ReadonlySet<EventId>,
-  ): ReadonlyArray<EventId> | null {
-    if (this.isPackedOnly()) {
-      return null;
-    }
+  ): ReadonlyArray<EventId> {
     const workspace = this.rankedReplayOrderWorkspaceInUse
       ? new RankedReplayOrderWorkspace()
       : this.rankedReplayOrderWorkspace;

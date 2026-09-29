@@ -9,6 +9,7 @@ import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { planPackedCriticalReplaySections } from "../engine/packed-critical-replay-plan";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
+import { PackedEventGraphBase } from "../graph/internals/packed-event-graph-base";
 import type { EventId, GraphEvent } from "../types";
 
 const insert = (
@@ -244,6 +245,40 @@ describe("packed prefix with a mutable tail", () => {
     expect(new EgWalkerReplica("reader", "", graph).getText()).toBe(
       objectText([...history, ...branch]),
     );
+  });
+
+  it("resolves prefix and tail IDs through a lazily indexed repack", () => {
+    const history = typing("author", 50);
+    const graph = pack(history);
+    const branch = [
+      insert("peer:0", ["author:9"], 0, "!", 100),
+      insert("author:50", ["peer:0", "author:49"], 0, "?", 101),
+    ];
+    for (const event of branch) graph.addEvent(event);
+    const view = graph.getPackedReplayPlanningView();
+    if (!(view instanceof PackedEventGraphBase)) {
+      throw new Error("Expected a repacked PackedEventGraphBase");
+    }
+
+    expect(Array.from(view.iterateIds())).toEqual(
+      [...history, ...branch].map(({ id }) => id),
+    );
+    expect([
+      view.has("author:0"),
+      view.has("peer:0"),
+      view.has("peer:1"),
+    ]).toEqual([true, true, false]);
+    expect(view.offsetOf("author:50")).toBe(51);
+    expect(view.idAt(-1)).toBeUndefined();
+    expect(view.idAt(52)).toBeUndefined();
+    expect(view.canonicalIdRunAt(7)).toMatchObject({ replicaId: "author" });
+    expect(view.canonicalIdRunAt(50)).toBeUndefined();
+    expect(view.maximumSequenceForReplica("author")).toBe(50);
+    expect(view.maximumSequenceForReplica("peer")).toBe(0);
+    expect(view.maximumSequenceForReplica("nobody")).toBeUndefined();
+
+    view.releaseDiffWorkspace();
+    expect(view.offsetOf("author:7")).toBe(7);
   });
 
   it("streams a linear prefix with a linear tail through the packed chain path", () => {

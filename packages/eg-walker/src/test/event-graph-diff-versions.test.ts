@@ -426,6 +426,10 @@ describe("diffVersions topological diff", () => {
     expect(
       packed.diffVersions(new Set(["mixed-3"]), new Set(["mixed-1"])),
     ).toEqual(source.diffVersions(new Set(["mixed-3"]), new Set(["mixed-1"])));
+    // A packed-only graph orders a replay suffix over its packed offsets.
+    expect(
+      packed.getRankedReplayOrder(new Set(["mixed-3", "mixed-2"])),
+    ).toEqual(["mixed-2", "mixed-3"]);
     expect(packedParentIterator).not.toHaveBeenCalled();
 
     const tail = {

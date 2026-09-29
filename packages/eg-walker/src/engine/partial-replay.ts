@@ -1,6 +1,5 @@
 import { EgWalkerEngine, type GeneratedDocument } from "./eg-walker-engine";
 import type { EventGraph } from "../graph/event-graph";
-import { compareEventIds } from "../graph/event-id";
 import type { EventId, Version } from "../types";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 
@@ -99,7 +98,7 @@ export class PartialReplayManager {
     // fast path and minimising retreat/advance churn. Only the divergent
     // suffix is replayed, so compute the branch-preserving order on that
     // suffix instead of sorting the whole graph on every partial replay.
-    return getBranchPreservingReplayOrder(graph, onlyInRight);
+    return graph.getRankedReplayOrder(onlyInRight);
   }
 }
 
@@ -113,84 +112,4 @@ const checkpointBuffer = (
     return PersistentUtf16Rope.from(checkpoint.text);
   }
   throw new Error("Replay checkpoint requires text or textBuffer content");
-};
-
-const getBranchPreservingReplayOrder = (
-  graph: EventGraph,
-  replayEventIds: ReadonlySet<EventId>,
-): ReadonlyArray<EventId> => {
-  const rankedOrder = graph.getRankedReplayOrder(replayEventIds);
-  if (rankedOrder !== null) {
-    return rankedOrder;
-  }
-
-  const remainingParents = new Map<EventId, number>();
-  const children = new Map<EventId, EventId[]>();
-  const roots: EventId[] = [];
-
-  for (const eventId of replayEventIds) {
-    const event = graph.getEvent(eventId);
-    if (!event) {
-      throw new Error(`Missing replay event in graph: ${eventId}`);
-    }
-
-    let parentCount = 0;
-    for (const parentId of event.parentVersion) {
-      if (!replayEventIds.has(parentId)) {
-        continue;
-      }
-      parentCount++;
-      const childIds = children.get(parentId) ?? [];
-      childIds.push(eventId);
-      children.set(parentId, childIds);
-    }
-
-    remainingParents.set(eventId, parentCount);
-    if (parentCount === 0) {
-      roots.push(eventId);
-    }
-  }
-
-  roots.sort(compareEventIds);
-
-  const stack: EventId[] = [];
-  for (let i = roots.length - 1; i >= 0; i--) {
-    stack.push(roots[i]!);
-  }
-
-  const ordered: EventId[] = [];
-  const visited = new Set<EventId>();
-
-  while (stack.length > 0) {
-    const eventId = stack.pop()!;
-    if (visited.has(eventId)) {
-      continue;
-    }
-    visited.add(eventId);
-    ordered.push(eventId);
-
-    const childIds = children.get(eventId);
-    if (!childIds || childIds.length === 0) {
-      continue;
-    }
-
-    const newlyReady: EventId[] = [];
-    for (const childId of childIds) {
-      const remaining = (remainingParents.get(childId) ?? 0) - 1;
-      remainingParents.set(childId, remaining);
-      if (remaining === 0) {
-        newlyReady.push(childId);
-      }
-    }
-    newlyReady.sort(compareEventIds);
-    for (let i = newlyReady.length - 1; i >= 0; i--) {
-      stack.push(newlyReady[i]!);
-    }
-  }
-
-  if (ordered.length !== remainingParents.size) {
-    throw new Error("Cycle detected in partial replay suffix");
-  }
-
-  return ordered;
 };

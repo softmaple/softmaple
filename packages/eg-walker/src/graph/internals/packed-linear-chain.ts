@@ -1,5 +1,10 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
-import type { EventId, ExternalOperation, Version } from "../../types";
+import type {
+  EventId,
+  ExternalOperation,
+  GraphEvent,
+  Version,
+} from "../../types";
 import { GrowableIdRunIndex } from "./growable-id-run-index";
 import {
   PACKED_OPERATION_TYPE,
@@ -303,6 +308,45 @@ class OperationColumnStore {
     this.include(batch);
   }
 
+  /**
+   * Append one event. The store must have room. A column widens, copying its
+   * stored values, only when the value does not fit it.
+   */
+  push(
+    type: number,
+    index: number,
+    length: number,
+    timestamp: number,
+    insertStart: number,
+  ): void {
+    if (index > this.maximumIndex) this.maximumIndex = index;
+    if (length > this.maximumLength) this.maximumLength = length;
+    if (timestamp < this.minimumTimestamp) {
+      this.minimumTimestamp = timestamp;
+    } else if (timestamp > this.maximumTimestamp) {
+      this.maximumTimestamp = timestamp;
+    }
+    const at = this.count;
+    this.operationIndexes[at] = index;
+    this.operationLengths[at] = length;
+    this.timestamps[at] = timestamp;
+    // A typed array wraps a value it cannot hold, so reading it back finds
+    // an overflow without checking each column's type.
+    if (
+      this.operationIndexes[at] !== index ||
+      this.operationLengths[at] !== length ||
+      this.timestamps[at] !== timestamp
+    ) {
+      this.reserve(this.capacity, this);
+      this.operationIndexes[at] = index;
+      this.operationLengths[at] = length;
+      this.timestamps[at] = timestamp;
+    }
+    this.operationTypes[at] = type;
+    this.insertStarts[at] = insertStart;
+    this.count = at + 1;
+  }
+
   /** Append every event another store holds. */
   appendStore(other: OperationColumnStore): void {
     this.reserve(this.count + other.count, other);
@@ -358,11 +402,12 @@ export interface PackedLinearChainMark {
  * Growable packed storage for a graph that is one exact causal chain.
  *
  * {@link append} adds a batch after the chain and returns a new
- * {@link PackedEventGraphBase} over the longer chain. Appending copies each
- * event's operation into a chunk once and never moves stored events, so
- * ingesting a long history allocates off-heap memory once per event. V8
- * starts a full garbage collection for every 64 MB of new off-heap memory,
- * which growing one contiguous column by doubling would allocate twice over.
+ * {@link PackedEventGraphBase} over the longer chain; {@link appendEvents}
+ * does the same for event objects. Appending copies each event's operation
+ * into a chunk once and never moves stored events, so ingesting a long
+ * history allocates off-heap memory once per event. V8 starts a full garbage
+ * collection for every 64 MB of new off-heap memory, which growing one
+ * contiguous column by doubling would allocate twice over.
  *
  * Bases read operation columns only when a replay or export needs them. The
  * first such read copies the chunks into contiguous columns, which grow by
@@ -444,6 +489,102 @@ export class PackedLinearChain {
     if (batch.contentLength > 0) {
       this.insertedContent += batch.insertedContent;
     }
+    return this.publish(end);
+  }
+
+  /**
+   * Append event objects of an exact chain whose first event extends the
+   * chain's last one.
+   *
+   * Unlike {@link append}, the events are not first copied into a
+   * {@link LinearEventBatch}, whose arrays grow by one entry per event per
+   * column. Each event is read once: its ID goes into the run index and its
+   * operation into the typed columns. Callers validate each event's fields,
+   * as for a batch.
+   *
+   * @returns the appended events, read back from the chain's columns, or
+   * `null` with the chain unchanged when a timestamp is not a safe integer.
+   * @throws EventAlreadyExistsError when an ID is already in the chain; the
+   * chain is left unchanged.
+   */
+  appendEvents(
+    events: ReadonlyArray<GraphEvent>,
+  ): PackedLinearChainRange | null {
+    const mark = this.mark();
+    const start = this.eventCount;
+    const count = events.length;
+    const contentStart = this.insertedContent.length;
+    const texts: string[] = [];
+    let insertStart = contentStart;
+    const contiguous = this.contiguous;
+    let store =
+      this.chunks.length === 0 &&
+      contiguous.count + count <= contiguous.capacity
+        ? contiguous
+        : null;
+    const stores = store === null ? [] : [store];
+    try {
+      for (let offset = 0; offset < count; offset++) {
+        const event = events[offset]!;
+        const timestamp = event.timestamp;
+        if (!Number.isSafeInteger(timestamp)) {
+          this.rollbackTo(mark);
+          return null;
+        }
+        this.ids.append(event.id);
+        if (store === null || store.count === store.capacity) {
+          store = this.writableChunk(start + offset);
+          stores.push(store);
+        }
+        const operation = event.operation;
+        if (operation.type === OPERATION_TYPE.INSERT) {
+          const text = operation.text;
+          if (insertStart + text.length > UINT32_MAX) {
+            throw new Error(
+              "Inserted content exceeds packed UTF-16 offset range",
+            );
+          }
+          store.push(
+            PACKED_OPERATION_TYPE.INSERT,
+            operation.index,
+            text.length,
+            timestamp,
+            insertStart,
+          );
+          texts.push(text);
+          insertStart += text.length;
+        } else {
+          store.push(
+            PACKED_OPERATION_TYPE.DELETE,
+            operation.index,
+            operation.length,
+            timestamp,
+            0,
+          );
+        }
+      }
+    } catch (error) {
+      this.rollbackTo(mark);
+      throw error;
+    }
+
+    const content = texts.join("");
+    if (content.length > 0) {
+      this.insertedContent += content;
+    }
+    this.publish(start + count);
+    return new PackedLinearChainRange(
+      this.ids,
+      stores,
+      start,
+      count,
+      contentStart,
+      content,
+    );
+  }
+
+  /** Make the first `end` events the latest base. */
+  private publish(end: number): PackedEventGraphBase {
     this.eventCount = end;
     this.base = PackedEventGraphBase.create({
       idIndex: this.ids.view(),
@@ -472,17 +613,7 @@ export class PackedLinearChain {
     }
     let written = 0;
     while (written < batch.count) {
-      let chunk = this.chunks[this.chunks.length - 1];
-      if (chunk === undefined || chunk.count === chunk.capacity) {
-        chunk = new OperationColumnStore(
-          this.eventCount + written,
-          Math.min(
-            MAX_CHUNK_CAPACITY,
-            Math.max(MIN_CHUNK_CAPACITY, (chunk?.capacity ?? 0) * 2),
-          ),
-        );
-        this.chunks.push(chunk);
-      }
+      const chunk = this.writableChunk(this.eventCount + written);
       const length = Math.min(
         batch.count - written,
         chunk.capacity - chunk.count,
@@ -490,6 +621,23 @@ export class PackedLinearChain {
       chunk.appendBatch(batch, written, length, contentStart);
       written += length;
     }
+  }
+
+  /** The last chunk while it has room, else a new chunk from `start`. */
+  private writableChunk(start: number): OperationColumnStore {
+    const last = this.chunks[this.chunks.length - 1];
+    if (last !== undefined && last.count < last.capacity) {
+      return last;
+    }
+    const chunk = new OperationColumnStore(
+      start,
+      Math.min(
+        MAX_CHUNK_CAPACITY,
+        Math.max(MIN_CHUNK_CAPACITY, (last?.capacity ?? 0) * 2),
+      ),
+    );
+    this.chunks.push(chunk);
+    return chunk;
   }
 
   /** Operation columns of the first `count` events, made contiguous. */
@@ -509,6 +657,108 @@ export class PackedLinearChain {
       this.chunks = [];
     }
     return contiguous.views(count);
+  }
+}
+
+/**
+ * Events one {@link PackedLinearChain.appendEvents} call appended, read back
+ * from the chain's columns at offsets `0..count`.
+ *
+ * A replay reads the events in order, so the store that held the previous
+ * offset is checked first. Valid only until the chain changes again.
+ */
+export class PackedLinearChainRange {
+  private storeIndex = 0;
+
+  /** @internal Built by {@link PackedLinearChain.appendEvents}. */
+  constructor(
+    private readonly ids: GrowableIdRunIndex,
+    private readonly stores: ReadonlyArray<OperationColumnStore>,
+    private readonly start: number,
+    readonly count: number,
+    private readonly contentStart: number,
+    private readonly content: string,
+  ) {}
+
+  /** ID of the range's last event. */
+  get lastId(): EventId {
+    const id = this.idAt(this.count - 1);
+    if (id === undefined) {
+      throw new Error("An empty linear range has no last event");
+    }
+    return id;
+  }
+
+  idAt(offset: number): EventId | undefined {
+    return offset < 0
+      ? undefined
+      : this.ids.idBefore(this.start + offset, this.start + this.count);
+  }
+
+  isInsertAt(offset: number): boolean {
+    const at = this.start + offset;
+    const store = this.storeAt(at);
+    return (
+      store.operationTypes[at - store.start] === PACKED_OPERATION_TYPE.INSERT
+    );
+  }
+
+  operationIndexAt(offset: number): number {
+    const at = this.start + offset;
+    const store = this.storeAt(at);
+    return store.operationIndexes[at - store.start]!;
+  }
+
+  operationLengthAt(offset: number): number {
+    const at = this.start + offset;
+    const store = this.storeAt(at);
+    return store.operationLengths[at - store.start]!;
+  }
+
+  /** Offset of an insert's text in {@link sliceInsertedContent}. */
+  insertStartAt(offset: number): number {
+    const at = this.start + offset;
+    const store = this.storeAt(at);
+    return store.insertStarts[at - store.start]! - this.contentStart;
+  }
+
+  sliceInsertedContent(start: number, end: number): string {
+    return this.content.slice(start, end);
+  }
+
+  operationAt(offset: number): ExternalOperation {
+    const index = this.operationIndexAt(offset);
+    const length = this.operationLengthAt(offset);
+    if (this.isInsertAt(offset)) {
+      const start = this.insertStartAt(offset);
+      return {
+        type: OPERATION_TYPE.INSERT,
+        index,
+        text: this.content.slice(start, start + length),
+      };
+    }
+    return { type: OPERATION_TYPE.DELETE, index, length };
+  }
+
+  /** The store holding chain offset `at`, which must be in this range. */
+  private storeAt(at: number): OperationColumnStore {
+    const stores = this.stores;
+    const current = stores[this.storeIndex];
+    if (
+      current !== undefined &&
+      at >= current.start &&
+      at < current.start + current.count
+    ) {
+      return current;
+    }
+    for (let index = 0; index < stores.length; index++) {
+      const store = stores[index]!;
+      if (at >= store.start && at < store.start + store.count) {
+        this.storeIndex = index;
+        return store;
+      }
+    }
+    throw new Error(`Linear range has no event at chain offset ${at}`);
   }
 }
 

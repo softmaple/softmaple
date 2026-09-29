@@ -108,6 +108,7 @@ import {
 import {
   consumeCausalEventBatch,
   inspectCausalEventBatch,
+  isExactCausalChain,
   type CausalEventBatch,
 } from "./causal-event-batch";
 
@@ -248,6 +249,12 @@ interface CheckpointEngineRecoveryAnchor {
 type EngineRecoveryAnchor =
   | StateEngineRecoveryAnchor
   | CheckpointEngineRecoveryAnchor;
+
+/**
+ * Events of one exact chain at offsets `0..count`: a {@link LinearEventBatch},
+ * or a chain the graph packed and reads back from its columns.
+ */
+type LinearChainEvents = PackedLinearReplayView & { readonly lastId: EventId };
 
 /**
  * Public replica for Eg-walker.
@@ -808,16 +815,29 @@ export class EgWalkerReplica {
     const eventCountBeforeBatch = graph.getEventCount();
 
     try {
-      if (isOrderedLinearBatchFromVersion(events, this.currentVersion)) {
-        const linear = linearBatchFromOwnedEvents(events);
-        if (graph.canAppendLinearBatch(linear)) {
-          graph.appendLinearBatch(linear);
+      const firstParents = events[0]!.parentVersion;
+      if (
+        isExactCausalChain(batch) &&
+        versionsEqual(firstParents, this.currentVersion)
+      ) {
+        // The builder validated every field, so an exact chain goes straight
+        // into packed columns and replays from them. The general graph path
+        // is left for a graph that is not one packed chain, or for
+        // timestamps packed columns cannot hold.
+        const packed = graph.canAppendLinearEvents(firstParents)
+          ? graph.appendLinearEvents(events)
+          : null;
+        if (packed !== null) {
+          this.applyLinearBatch(packed, eventCountBeforeBatch);
         } else {
           for (const event of events) {
             graph.addEvent(event);
           }
+          this.applyLinearBatch(
+            linearBatchFromOwnedEvents(events),
+            eventCountBeforeBatch,
+          );
         }
-        this.applyLinearBatch(linear, eventCountBeforeBatch);
       } else {
         for (const event of events) {
           graph.addEvent(event);
@@ -1164,7 +1184,7 @@ export class EgWalkerReplica {
    * splices; each event in the window is applied and checkpointed on its own.
    */
   private applyLinearBatch(
-    batch: LinearEventBatch,
+    batch: LinearChainEvents,
     eventCountBeforeBatch: number,
   ): void {
     const previousStats = this.engineStatsOverride ?? this.engine?.getStats();

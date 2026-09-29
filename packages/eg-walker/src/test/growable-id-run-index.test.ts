@@ -51,6 +51,26 @@ describe("GrowableIdRunIndex", () => {
     expect(view.maximumSequenceForReplica("a")).toBe(0);
   });
 
+  it("keeps an over-long suffix custom and splits at the last colon", () => {
+    const index = new GrowableIdRunIndex();
+    appendAll(index, ["a:12345678901234567", "a:b:1", "a:b:2", "a:1"]);
+    const view = index.view();
+
+    expect(view.canonicalRunAt?.(0)).toBeUndefined();
+    expect(view.offsetOf("a:12345678901234567")).toBe(0);
+    expect(view.offsetOf("a:1234567890123456")).toBeUndefined();
+    expect(view.canonicalRunAt?.(2)).toMatchObject({
+      replicaId: "a:b",
+      startSequence: 1,
+      startEventOffset: 1,
+      length: 2,
+    });
+    expect(view.offsetOf("a:b:2")).toBe(2);
+    expect(view.offsetOf("a:1")).toBe(3);
+    expect(view.maximumSequenceForReplica("a:b")).toBe(2);
+    expect(view.maximumSequenceForReplica("a")).toBe(1);
+  });
+
   it.each([
     { name: "inside the growing run", ids: ["a:0", "a:1", "a:0"] },
     { name: "inside an older run", ids: ["a:5", "a:6", "b:0", "a:6"] },

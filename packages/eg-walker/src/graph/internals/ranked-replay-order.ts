@@ -36,7 +36,49 @@ export class RankedReplayOrderWorkspace {
     view: RankedReplayOrderView,
   ): ReadonlyArray<EventId> {
     this.ensureCapacity(view.eventCount());
-    const ordered: EventId[] = [];
+    try {
+      for (const eventId of replayEventIds) {
+        const rank = view.insertionRankOf(eventId);
+        if (rank === undefined) {
+          throw new Error(`Missing replay event in graph: ${eventId}`);
+        }
+        this.addMember(rank);
+      }
+      return this.orderMembers(view).map((rank) =>
+        requireEventIdAt(view, rank),
+      );
+    } finally {
+      this.clearMembers();
+    }
+  }
+
+  /** Order the events at insertion ranks `[start, end)`, returning ranks. */
+  orderRange(
+    start: number,
+    end: number,
+    view: RankedReplayOrderView,
+  ): ReadonlyArray<number> {
+    this.ensureCapacity(view.eventCount());
+    try {
+      for (let rank = start; rank < end; rank++) {
+        this.addMember(rank);
+      }
+      return this.orderMembers(view);
+    } finally {
+      this.clearMembers();
+    }
+  }
+
+  private addMember(rank: number): void {
+    if (this.membership[rank] !== 0) {
+      return;
+    }
+    this.membership[rank] = 1;
+    this.touchedRanks.push(rank);
+  }
+
+  private orderMembers(view: RankedReplayOrderView): number[] {
+    const ordered: number[] = [];
     let parentCount = 0;
     const countParent = (parentRank: number): void => {
       if (this.membership[parentRank] === 1) {
@@ -44,76 +86,66 @@ export class RankedReplayOrderWorkspace {
       }
     };
 
-    try {
-      for (const eventId of replayEventIds) {
-        const rank = view.insertionRankOf(eventId);
-        if (rank === undefined) {
-          throw new Error(`Missing replay event in graph: ${eventId}`);
-        }
-        if (this.membership[rank] !== 0) {
-          continue;
-        }
-        this.membership[rank] = 1;
-        this.touchedRanks.push(rank);
+    for (const rank of this.touchedRanks) {
+      parentCount = 0;
+      view.forEachParentRank(rank, countParent);
+      this.remainingParents[rank] = parentCount;
+      if (parentCount === 0) {
+        this.roots.push(rank);
       }
-
-      for (const rank of this.touchedRanks) {
-        parentCount = 0;
-        view.forEachParentRank(rank, countParent);
-        this.remainingParents[rank] = parentCount;
-        if (parentCount === 0) {
-          this.roots.push(rank);
-        }
-      }
-
-      const compareRanks = (left: number, right: number): number =>
-        compareEventIds(
-          requireEventIdAt(view, left),
-          requireEventIdAt(view, right),
-        );
-      this.roots.sort(compareRanks);
-      for (let index = this.roots.length - 1; index >= 0; index--) {
-        this.stack.push(this.roots[index]!);
-      }
-
-      const visitChild = (childRank: number): void => {
-        if (this.membership[childRank] !== 1) {
-          return;
-        }
-        const remaining = this.remainingParents[childRank]! - 1;
-        this.remainingParents[childRank] = remaining;
-        if (remaining === 0) {
-          this.newlyReady.push(childRank);
-        }
-      };
-
-      while (this.stack.length > 0) {
-        const rank = this.stack.pop()!;
-        if (this.membership[rank] !== 1) {
-          continue;
-        }
-        this.membership[rank] = 2;
-        ordered.push(requireEventIdAt(view, rank));
-
-        this.newlyReady.length = 0;
-        view.forEachChildRank(rank, visitChild);
-        this.newlyReady.sort(compareRanks);
-        for (let index = this.newlyReady.length - 1; index >= 0; index--) {
-          this.stack.push(this.newlyReady[index]!);
-        }
-      }
-
-      if (ordered.length !== this.touchedRanks.length) {
-        throw new Error("Cycle detected in partial replay suffix");
-      }
-      return ordered;
-    } finally {
-      for (const rank of this.touchedRanks) {
-        this.membership[rank] = 0;
-        this.remainingParents[rank] = 0;
-      }
-      this.resetScratch();
     }
+
+    const compareRanks = (left: number, right: number): number =>
+      compareEventIds(
+        requireEventIdAt(view, left),
+        requireEventIdAt(view, right),
+      );
+    this.roots.sort(compareRanks);
+    for (let index = this.roots.length - 1; index >= 0; index--) {
+      this.stack.push(this.roots[index]!);
+    }
+
+    const visitChild = (childRank: number): void => {
+      if (this.membership[childRank] !== 1) {
+        return;
+      }
+      const remaining = this.remainingParents[childRank]! - 1;
+      this.remainingParents[childRank] = remaining;
+      if (remaining === 0) {
+        this.newlyReady.push(childRank);
+      }
+    };
+
+    while (this.stack.length > 0) {
+      const rank = this.stack.pop()!;
+      if (this.membership[rank] !== 1) {
+        continue;
+      }
+      this.membership[rank] = 2;
+      ordered.push(rank);
+
+      this.newlyReady.length = 0;
+      view.forEachChildRank(rank, visitChild);
+      if (this.newlyReady.length > 1) {
+        this.newlyReady.sort(compareRanks);
+      }
+      for (let index = this.newlyReady.length - 1; index >= 0; index--) {
+        this.stack.push(this.newlyReady[index]!);
+      }
+    }
+
+    if (ordered.length !== this.touchedRanks.length) {
+      throw new Error("Cycle detected in partial replay suffix");
+    }
+    return ordered;
+  }
+
+  private clearMembers(): void {
+    for (const rank of this.touchedRanks) {
+      this.membership[rank] = 0;
+      this.remainingParents[rank] = 0;
+    }
+    this.resetScratch();
   }
 
   private ensureCapacity(eventCount: number): void {

@@ -1,6 +1,6 @@
 import { EgWalkerEngine, type GeneratedDocument } from "./eg-walker-engine";
 import type { EventGraph } from "../graph/event-graph";
-import type { EventId, Version } from "../types";
+import type { EventId, GraphEvent, Version } from "../types";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 
 interface ReplayCheckpointBase {
@@ -52,16 +52,25 @@ export class PartialReplayManager {
     targetVersion: Version = graph.getFrontier(),
     options: PartialReplayOptions = {},
   ): PartialReplayResult {
-    const replayedEventIds = this.getReplayEventIds(
+    return this.replayEvents(
       graph,
-      checkpoint.version,
-      targetVersion,
+      checkpoint,
+      this.getReplayEvents(graph, checkpoint.version, targetVersion),
+      options,
     );
-    const events = replayedEventIds
-      .map((eventId) => graph.getEvent(eventId))
-      .filter(
-        (event): event is NonNullable<typeof event> => event !== undefined,
-      );
+  }
+
+  /**
+   * Replay `events` on top of `checkpoint`. They must be exactly the events
+   * of the target version outside the checkpoint's closure, in the order
+   * {@link getReplayEvents} returns them.
+   */
+  replayEvents(
+    graph: EventGraph,
+    checkpoint: ReplayCheckpoint,
+    events: ReadonlyArray<GraphEvent>,
+    options: PartialReplayOptions = {},
+  ): PartialReplayResult {
     const engine = new EgWalkerEngine();
     const initialTextBuffer = checkpointBuffer(checkpoint);
     const generated = engine.generate(events, "", {
@@ -81,9 +90,22 @@ export class PartialReplayManager {
       textBuffer,
       transformedOperations: generated.transformedOperations,
       stats: generated.stats,
-      replayedEventIds,
+      replayedEventIds: events.map(({ id }) => id),
       engine,
     };
+  }
+
+  /** Events in `to` but not in `from`, in partial replay order. */
+  getReplayEvents(
+    graph: EventGraph,
+    from: Version,
+    to: Version,
+  ): ReadonlyArray<GraphEvent> {
+    return this.getReplayEventIds(graph, from, to)
+      .map((eventId) => graph.getEvent(eventId))
+      .filter(
+        (event): event is NonNullable<typeof event> => event !== undefined,
+      );
   }
 
   getReplayEventIds(

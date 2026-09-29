@@ -168,6 +168,9 @@ const MID_BRIDGE_PRESSURE_BYTES = 16 * 1024 * 1024;
 // independent of total history size. The trailing checkpoint window remains
 // one section per engine so retained recovery semantics do not change.
 const MAX_NONLINEAR_SUPERSECTION_EVENTS = 32_768;
+// A one-shot piece index costs one document rebuild when it is frozen. Below
+// this many events, editing the persistent rope directly is cheaper.
+const MIN_TRANSIENT_CHAIN_EVENTS = 128;
 
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;
@@ -2700,25 +2703,116 @@ export class EgWalkerReplica {
     this.replayCacheBytes = 0;
   }
 
+  /**
+   * Section 3.6 partial replay of the events after `checkpoint`.
+   *
+   * Only the last nonlinear critical section after the checkpoint needs CRDT
+   * state: every cut before it stays critical whatever arrives later. The
+   * sections before it are replayed the way a cold replay replays them, chains
+   * straight onto the rope and nonlinear sections in throwaway engines, so the
+   * retained engine starts at the nearest critical version before the
+   * divergence rather than at the checkpoint, which the checkpoint ladder may
+   * have placed up to twice as far back.
+   */
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
     const graph = this.ensureEventGraph();
     this.clearSupersededReplayCacheRefusal();
     this.captureEnginePeakBeforeSwap();
     const frontier = graph.getFrontier();
-    const result = this.partialReplayer.replayFromCheckpoint(
+    const sections = graph.planInsertionSuffixSections(
+      checkpoint.eventCount,
+      checkpoint.version,
+    );
+    // Consecutive chains are one section, so a suffix without concurrency
+    // keeps the whole chain in the engine, as a single replay would.
+    let engineSection = sections.length - 1;
+    while (engineSection > 0 && sections[engineSection]!.linear) {
+      engineSection--;
+    }
+
+    let document = checkpoint.textBuffer;
+    let peakSequenceRecordCount = 0;
+    const fastForwardEnd = Math.max(0, engineSection);
+    for (let sectionIndex = 0; sectionIndex < fastForwardEnd; ) {
+      const section = sections[sectionIndex]!;
+      if (section.linear) {
+        document = this.replayChainAtInsertionRanks(
+          graph,
+          section.start,
+          section.end,
+          document,
+        );
+        sectionIndex++;
+        continue;
+      }
+      // One engine lifetime covers nonlinear sections separated only by
+      // short chains, as in a cold replay, so a history of many small
+      // concurrent sections does not rebuild the document once per section.
+      let groupEnd = sectionIndex + 1;
+      while (groupEnd < fastForwardEnd) {
+        const next = sections[groupEnd]!;
+        // A chain joins only together with the nonlinear section after it.
+        const joinedEnd = next.linear ? groupEnd + 2 : groupEnd + 1;
+        if (
+          joinedEnd > fastForwardEnd ||
+          (next.linear && next.end - next.start > MAX_LINEAR_BRIDGE_EVENTS) ||
+          sections[joinedEnd - 1]!.end - section.start >
+            MAX_NONLINEAR_SUPERSECTION_EVENTS
+        ) {
+          break;
+        }
+        groupEnd = joinedEnd;
+      }
+      const events = graph.getRankedReplayEventsInRange(
+        section.start,
+        sections[groupEnd - 1]!.end,
+      );
+      const generated = new EgWalkerEngine().generate(events, "", {
+        initialVersion: section.baseFrontier,
+        initialTextBuffer: document,
+        eventGraph: graph,
+        eventOrder: events,
+        collectTransformedOperations: false,
+      });
+      document = generated.textBuffer;
+      peakSequenceRecordCount = Math.max(
+        peakSequenceRecordCount,
+        generated.stats.peakSequenceRecordCount,
+      );
+      sectionIndex = groupEnd;
+    }
+
+    const engineStart =
+      engineSection === -1
+        ? checkpoint.eventCount
+        : sections[engineSection]!.start;
+    const base: CriticalCheckpoint = {
+      version: new Set(
+        engineSection === -1
+          ? checkpoint.version
+          : sections[engineSection]!.baseFrontier,
+      ),
+      textBuffer: document,
+      eventCount: engineStart,
+    };
+    const result = this.partialReplayer.replayEvents(
       graph,
-      checkpoint,
-      frontier,
+      base,
+      graph.getRankedReplayEventsInRange(engineStart, graph.getEventCount()),
       { collectTransformedOperations: false },
     );
     this.engine = result.engine;
     this.engineRecoveryAnchor = {
       kind: "checkpoint",
-      checkpoint,
+      checkpoint: base,
       estimatedBytes: 0,
     };
-    this.setReplayCacheBase(checkpoint.version, result.replayedEventIds);
+    this.setReplayCacheBase(base.version, result.replayedEventIds);
     this.replayCacheEvents = result.replayedEventIds.length;
+    this.replicaPeakSequenceRecordCount = Math.max(
+      this.replicaPeakSequenceRecordCount,
+      peakSequenceRecordCount,
+    );
     this.documentBuffer = result.textBuffer;
     this.documentCache = null;
     this.currentVersion = frontier;
@@ -2728,6 +2822,103 @@ export class EgWalkerReplica {
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
     this.refreshReplayCacheMetrics();
     this.evictReplayCacheIfNeeded();
+  }
+
+  /**
+   * Apply the chain of events at insertion ranks `[start, end)` to
+   * `document`, validating each operation against the text it edits.
+   *
+   * A long chain goes through a one-shot piece index. Freezing that index
+   * rebuilds the whole document, so a short chain edits the persistent rope
+   * directly, joining adjacent inserts and deletes into one edit.
+   */
+  private replayChainAtInsertionRanks(
+    graph: EventGraph,
+    start: number,
+    end: number,
+    document: PersistentUtf16Rope,
+  ): PersistentUtf16Rope {
+    if (end - start >= MIN_TRANSIENT_CHAIN_EVENTS) {
+      const editor = new TransientUtf16RopeEditor(document);
+      for (let rank = start; rank < end; rank++) {
+        const operation = this.validateLocalOperation(
+          graph.operationAtInsertionRank(rank),
+          editor,
+        );
+        if (operation === null) {
+          continue;
+        }
+        if (operation.type === OPERATION_TYPE.INSERT) {
+          editor.insert(operation.index, operation.text);
+        } else {
+          editor.delete(operation.index, operation.length);
+        }
+      }
+      return editor.finish();
+    }
+
+    let rope = document;
+    let pendingKind: "insert" | "delete" | null = null;
+    let pendingIndex = 0;
+    let pendingLength = 0;
+    let pendingInsertParts: string[] = [];
+    const flush = (): void => {
+      if (pendingKind === "insert") {
+        rope = rope.insert(pendingIndex, pendingInsertParts.join(""));
+      } else if (pendingKind === "delete") {
+        rope = rope.delete(pendingIndex, pendingLength);
+      }
+      pendingKind = null;
+      pendingLength = 0;
+      pendingInsertParts = [];
+    };
+
+    for (let rank = start; rank < end; rank++) {
+      const operation = graph.operationAtInsertionRank(rank);
+      if (operation.type === OPERATION_TYPE.INSERT) {
+        if (operation.text.length === 0) {
+          continue;
+        }
+        if (
+          pendingKind === "insert" &&
+          operation.index === pendingIndex + pendingLength
+        ) {
+          pendingInsertParts.push(operation.text);
+          pendingLength += operation.text.length;
+          continue;
+        }
+        flush();
+        this.validateLocalOperation(operation, rope);
+        pendingKind = "insert";
+        pendingIndex = operation.index;
+        pendingLength = operation.text.length;
+        pendingInsertParts = [operation.text];
+        continue;
+      }
+
+      if (operation.length === 0) {
+        continue;
+      }
+      if (pendingKind === "delete" && operation.index === pendingIndex) {
+        const virtualDocumentLength = rope.length - pendingLength;
+        if (operation.index + operation.length > virtualDocumentLength) {
+          throw new Error(
+            `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${virtualDocumentLength}`,
+          );
+        }
+        const combinedLength = pendingLength + operation.length;
+        this.assertNotMidSurrogate(operation.index + combinedLength, rope);
+        pendingLength = combinedLength;
+        continue;
+      }
+      flush();
+      this.validateLocalOperation(operation, rope);
+      pendingKind = "delete";
+      pendingIndex = operation.index;
+      pendingLength = operation.length;
+    }
+    flush();
+    return rope;
   }
 
   private inferNextSequenceNumber(): number {

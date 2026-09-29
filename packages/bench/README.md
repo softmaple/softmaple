@@ -129,17 +129,18 @@ the lazy EGW3 decode and the snapshot's text validation, and the edit after it.
 Each lane runs in a fresh process, because once one edit has paid for the lazy
 work every later operation measures something else:
 
-| Lane             | First edit                                                        | Second edit                 |
-| ---------------- | ----------------------------------------------------------------- | --------------------------- |
-| `local`          | `insert(0, …)`                                                    | another local insert        |
-| `remote`         | a caught-up peer's insert on the snapshot frontier                | the same peer's next insert |
-| `concurrent-<d>` | a peer's insert whose parent is `d` events before the history end | the same peer's next insert |
-| `native`         | cold load of the same EGW3 bytes (`nativeLoadMs`), for comparison | —                           |
+| Lane                    | First edit                                                                                   | Second edit                 |
+| ----------------------- | -------------------------------------------------------------------------------------------- | --------------------------- |
+| `local`                 | `insert(0, …)`                                                                               | another local insert        |
+| `remote`                | a caught-up peer's insert on the snapshot frontier                                           | the same peer's next insert |
+| `concurrent-<d>`        | a peer's insert whose parent is `d` events before the history end                            | the same peer's next insert |
+| `native`                | cold load of the same EGW3 bytes (`nativeLoadMs`), for comparison                            | —                           |
+| `native-concurrent-<d>` | after a cold load of the decoded EGW3 graph, a peer's insert whose parent is `d` events back | the same peer's next insert |
 
 The driver prepares one EGWP1 snapshot per dataset (and prefix) with this
 checkout's eg-walker, outside any timed region, and measures every
 implementation against the same bytes. Every process checks the edited text:
-exactly for `local` and `remote`, and for `concurrent-<d>` by removing both
+exactly for `local` and `remote`, and for the concurrent lanes by removing both
 inserted markers and comparing with the snapshot text. The driver also requires
 every implementation to produce the same final text.
 
@@ -157,6 +158,26 @@ adds prefixes of each dataset's editing order, and `--reuse-fixtures` keeps the
 prepared snapshots of an earlier run in the same `--output`. The driver
 alternates implementation order between runs, appends every sample to
 `runs.jsonl` and writes the median table to `summary.md`.
+
+### Divergence depth after a cold load
+
+The `native-concurrent-<d>` lanes measure how a replica opened from a decoded
+graph merges a peer that diverged `d` events ago. The cold load is timed on its
+own as `nativeLoadMs`, so the first edit is only the merge: the partial replay
+from the nearest retained checkpoint, or a full replay when none dominates the
+divergence. Next to the timings, the summary reports the heap after GC once the
+graph is loaded and again after both edits, the checkpoint text the cold load
+retained, and how many events the first edit left in the retained replay
+engine:
+
+```bash
+node scripts/run-snapshot-first-edit-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --datasets S1,C1,A1,A2 --runs 5 \
+  --kinds native,native-concurrent-10,native-concurrent-100,native-concurrent-1000,native-concurrent-10000 \
+  --output /path/to/results
+```
 
 ## Replay optimization A/B workers
 

@@ -58,6 +58,22 @@ export interface EventGraphAppendTransaction {
   rollback(): void;
 }
 
+/**
+ * One critical section of the events after a critical version.
+ *
+ * @internal Returned by {@link EventGraph.planInsertionSuffixSections}.
+ */
+export interface InsertionSuffixSection {
+  /** Insertion rank of the section's first event. */
+  readonly start: number;
+  /** Insertion rank after its last event: the closure size of its end cut. */
+  readonly end: number;
+  /** Whether the section is one causal chain starting at `baseFrontier`. */
+  readonly linear: boolean;
+  /** The critical version the section starts from. */
+  readonly baseFrontier: ReadonlySet<EventId>;
+}
+
 /** Allocation-free column access used only by exact-linear cold replay. */
 export interface PackedLinearReplayView {
   readonly count: number;
@@ -895,6 +911,251 @@ export class EventGraph {
   }
 
   /**
+   * Materialize the events at insertion ranks `[start, end)` in the
+   * branch-preserving order of {@link getRankedReplayOrder}.
+   *
+   * @internal The range must be convex: every event causally between two of
+   * its events is in it too. The events between two critical cuts, or after
+   * one, always are.
+   */
+  getRankedReplayEventsInRange(
+    start: number,
+    end: number,
+  ): ReadonlyArray<GraphEvent> {
+    const eventCount = this.getEventCount();
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      end < start ||
+      end > eventCount
+    ) {
+      throw new RangeError(`Invalid insertion rank range ${start}..${end}`);
+    }
+    const workspace = this.rankedReplayOrderWorkspaceInUse
+      ? new RankedReplayOrderWorkspace()
+      : this.rankedReplayOrderWorkspace;
+    const ownsPrimaryWorkspace = workspace === this.rankedReplayOrderWorkspace;
+    if (ownsPrimaryWorkspace) {
+      this.rankedReplayOrderWorkspaceInUse = true;
+    }
+    let ranks: ReadonlyArray<number>;
+    try {
+      ranks = workspace.orderRange(start, end, this.rankedTraversalView);
+    } finally {
+      if (ownsPrimaryWorkspace) {
+        this.rankedReplayOrderWorkspaceInUse = false;
+      }
+    }
+    return ranks.map((rank) => this.eventAtInsertionRank(rank));
+  }
+
+  /** @internal Operation of the event at an insertion rank, as a copy. */
+  operationAtInsertionRank(rank: number): ExternalOperation {
+    const packedCount = this.packedBase?.count ?? 0;
+    if (rank >= 0 && rank < packedCount) {
+      return this.packedBase!.operationAt(rank);
+    }
+    const event = this.tailEventsByInsertionRank[rank - packedCount];
+    if (event === undefined) {
+      throw new Error(`Event graph is missing insertion rank ${rank}`);
+    }
+    return { ...event.operation };
+  }
+
+  /**
+   * Split the events after a critical version at the critical cuts among
+   * them.
+   *
+   * @internal `prefixFrontier` must be a critical version whose closure is
+   * exactly the first `prefixEventCount` events in insertion order, as for a
+   * trusted checkpoint, so every later event descends from it. A critical
+   * version's closure is a prefix of every topological order, so scanning
+   * insertion ranks finds the same cuts as the branch-preserving planners.
+   *
+   * A cut is critical when every event that is ready there, meaning its
+   * parents are all before the cut, has every frontier event of the prefix
+   * as a parent: every later event descends from one of those. The scan keeps
+   * the number of missing (frontier event, ready event) parent pairs as
+   * {@link planCriticalReplaySections} does, over insertion ranks instead of
+   * string-keyed maps. Consecutive sections that are single causal chains
+   * are merged into one.
+   */
+  planInsertionSuffixSections(
+    prefixEventCount: number,
+    prefixFrontier: ReadonlySet<EventId>,
+  ): ReadonlyArray<InsertionSuffixSection> {
+    const eventCount = this.getEventCount();
+    if (
+      !Number.isSafeInteger(prefixEventCount) ||
+      prefixEventCount < 0 ||
+      prefixEventCount > eventCount
+    ) {
+      throw new RangeError(`Invalid critical prefix size ${prefixEventCount}`);
+    }
+    const frontier = new Set<number>();
+    for (const eventId of prefixFrontier) {
+      const rank = this.insertionRankOf(eventId);
+      if (rank === undefined || rank >= prefixEventCount) {
+        throw new Error(
+          `Critical prefix frontier event ${eventId} is not among the first ${prefixEventCount} events`,
+        );
+      }
+      frontier.add(rank);
+    }
+
+    const suffixLength = eventCount - prefixEventCount;
+    // An event becomes ready once its latest parent has been passed.
+    const latestParentRanks = new Int32Array(suffixLength);
+    const suffixCoverage = new Int32Array(suffixLength);
+    const prefixCoverage = new Map<number, number>();
+    const coverageOf = (rank: number): number =>
+      rank >= prefixEventCount
+        ? suffixCoverage[rank - prefixEventCount]!
+        : (prefixCoverage.get(rank) ?? 0);
+    const addCoverage = (rank: number, delta: number): void => {
+      if (rank >= prefixEventCount) {
+        suffixCoverage[rank - prefixEventCount]! += delta;
+        return;
+      }
+      const next = (prefixCoverage.get(rank) ?? 0) + delta;
+      if (next === 0) {
+        prefixCoverage.delete(rank);
+      } else {
+        prefixCoverage.set(rank, next);
+      }
+    };
+    const parents: number[] = [];
+    const pushParent = (parentRank: number): void => {
+      parents.push(parentRank);
+    };
+    const parentsInFrontier = (): number => {
+      let count = 0;
+      for (const parentRank of parents) {
+        if (frontier.has(parentRank)) {
+          count++;
+        }
+      }
+      return count;
+    };
+
+    let readyCount = 0;
+    let missingPairs = 0;
+    const markReady = (): void => {
+      readyCount++;
+      missingPairs += frontier.size - parentsInFrontier();
+      for (const parentRank of parents) {
+        addCoverage(parentRank, 1);
+      }
+    };
+    for (let rank = prefixEventCount; rank < eventCount; rank++) {
+      parents.length = 0;
+      this.forEachParentInsertionRank(rank, pushParent);
+      let latestParentRank = -1;
+      for (const parentRank of parents) {
+        latestParentRank = Math.max(latestParentRank, parentRank);
+      }
+      latestParentRanks[rank - prefixEventCount] = latestParentRank;
+      if (latestParentRank < prefixEventCount) {
+        markReady();
+      }
+    }
+
+    let passedRank = -1;
+    const visitChild = (childRank: number): void => {
+      if (latestParentRanks[childRank - prefixEventCount] !== passedRank) {
+        return;
+      }
+      parents.length = 0;
+      this.forEachParentInsertionRank(childRank, pushParent);
+      markReady();
+    };
+
+    // A cut's frontier is a single event on every chain, so bases are kept
+    // as that event's rank and copied to an array only when wider.
+    const sections: InsertionSuffixSection[] = [];
+    let sectionStart = prefixEventCount;
+    let sectionBase: number | ReadonlyArray<number> =
+      frontier.size === 1 ? frontier.values().next().value! : [...frontier];
+    let sectionLinear = true;
+    let chainStart = -1;
+    let chainBase = sectionBase;
+    const versionOf = (base: number | ReadonlyArray<number>): Set<EventId> =>
+      typeof base === "number"
+        ? new Set([this.requireEventIdAtInsertionRank(base)])
+        : new Set(base.map((rank) => this.requireEventIdAtInsertionRank(rank)));
+    const flushChain = (end: number): void => {
+      if (chainStart === -1) {
+        return;
+      }
+      sections.push({
+        start: chainStart,
+        end,
+        linear: true,
+        baseFrontier: versionOf(chainBase),
+      });
+      chainStart = -1;
+    };
+
+    for (let rank = prefixEventCount; rank < eventCount; rank++) {
+      parents.length = 0;
+      this.forEachParentInsertionRank(rank, pushParent);
+      const frontierSize = frontier.size;
+      const inFrontier = parentsInFrontier();
+      if (rank === sectionStart) {
+        sectionLinear =
+          parents.length === frontierSize && inFrontier === frontierSize;
+      } else if (parents.length !== 1 || parents[0] !== rank - 1) {
+        sectionLinear = false;
+      }
+
+      // The event leaves the ready set and replaces its parents in the
+      // prefix frontier.
+      readyCount--;
+      missingPairs -= frontierSize - inFrontier;
+      for (const parentRank of parents) {
+        addCoverage(parentRank, -1);
+      }
+      for (const parentRank of parents) {
+        if (frontier.delete(parentRank)) {
+          missingPairs -= readyCount - coverageOf(parentRank);
+        }
+      }
+      frontier.add(rank);
+      missingPairs += readyCount - coverageOf(rank);
+
+      passedRank = rank;
+      this.forEachChildInsertionRank(rank, visitChild);
+
+      if (readyCount !== 0 && missingPairs !== 0) {
+        continue;
+      }
+      const end = rank + 1;
+      if (sectionLinear) {
+        if (chainStart === -1) {
+          chainStart = sectionStart;
+          chainBase = sectionBase;
+        }
+      } else {
+        flushChain(sectionStart);
+        sections.push({
+          start: sectionStart,
+          end,
+          linear: false,
+          baseFrontier: versionOf(sectionBase),
+        });
+      }
+      sectionStart = end;
+      sectionBase = frontier.size === 1 ? rank : [...frontier];
+    }
+    flushChain(eventCount);
+    if (sectionStart !== eventCount) {
+      throw new Error("Critical suffix plan did not cover every event");
+    }
+    return sections;
+  }
+
+  /**
    * Get events in topological order (Kahn's algorithm; iterative).
    *
    * Sorts ties by numeric-aware event id via {@link compareEventIds}
@@ -1137,6 +1398,30 @@ export class EventGraph {
     return rank < packedCount
       ? this.packedBase!.idAt(rank)
       : this.tailEventsByInsertionRank[rank - packedCount]?.id;
+  }
+
+  private requireEventIdAtInsertionRank(rank: number): EventId {
+    const eventId = this.eventIdAtInsertionRank(rank);
+    if (eventId === undefined) {
+      throw new Error(`Event graph is missing insertion rank ${rank}`);
+    }
+    return eventId;
+  }
+
+  private eventAtInsertionRank(rank: number): GraphEvent {
+    const packedCount = this.packedBase?.count ?? 0;
+    const tailEvent =
+      rank < packedCount
+        ? undefined
+        : this.tailEventsByInsertionRank[rank - packedCount];
+    const event =
+      tailEvent === undefined
+        ? this.packedBase?.eventAt(rank)
+        : cloneGraphEvent(tailEvent);
+    if (event === undefined) {
+      throw new Error(`Event graph is missing insertion rank ${rank}`);
+    }
+    return event;
   }
 
   private forEachParentInsertionRank(

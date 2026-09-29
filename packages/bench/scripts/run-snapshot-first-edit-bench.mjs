@@ -1,14 +1,18 @@
 /**
- * First-edit latency after `EgWalkerReplica.fromPortableSnapshot` on the
- * paper datasets. Prepares one EGWP1 snapshot per dataset (and prefix) with
- * this checkout's eg-walker, then measures every lane in a fresh process per
- * sample, alternating implementation order between runs.
+ * First-edit latency after `EgWalkerReplica.fromPortableSnapshot`, or after a
+ * cold load of the decoded EGW3 graph, on the paper datasets. Prepares one
+ * EGWP1 snapshot per dataset (and prefix) with this checkout's eg-walker, then
+ * measures every lane in a fresh process per sample, alternating
+ * implementation order between runs.
  *
  * usage: node scripts/run-snapshot-first-edit-bench.mjs
  *   [--impl name=path/to/eg-walker/dist/index.js]...
  *   [--datasets S1,C1,A1,A2] [--fractions 1]
  *   [--kinds native,local,remote,concurrent-10,concurrent-1000]
  *   [--runs 3] [--paper-root PATH] [--output DIR] [--reuse-fixtures]
+ *
+ * `--kinds` also accepts `native-concurrent-<depth>`: cold load, then one
+ * concurrent remote edit at that depth.
  */
 import assert from "node:assert/strict";
 import console from "node:console";
@@ -69,9 +73,14 @@ if (new Set(names).size !== names.length) {
 const datasets = values.datasets.split(",").map((value) => value.trim());
 const fractions = values.fractions.split(",").map(Number);
 const kinds = values.kinds.split(",").map((value) => value.trim());
-const depths = kinds
-  .filter((kind) => kind.startsWith("concurrent-"))
-  .map((kind) => Number(kind.slice("concurrent-".length)));
+const depths = [
+  ...new Set(
+    kinds.flatMap((kind) => {
+      const match = /^(?:native-)?concurrent-(\d+)$/.exec(kind);
+      return match === null ? [] : [Number(match[1])];
+    }),
+  ),
+];
 const runs = Number(values.runs);
 if (!Number.isSafeInteger(runs) || runs < 1) {
   throw new Error("--runs must be a positive integer");
@@ -245,6 +254,18 @@ function formatTable(cases, results) {
       kind: "native",
       key: "nativeLoadMs",
     },
+    {
+      title: "Heap after GC, after the cold load",
+      kind: "native",
+      key: "heapAfterOpenBytes",
+      format: formatBytes,
+    },
+    {
+      title: "Checkpoint text retained after the cold load",
+      kind: "native",
+      key: "statsAfterOpen.checkpointUniqueTextBytes",
+      format: formatBytes,
+    },
     ...kinds
       .filter((kind) => kind !== "native")
       .flatMap((kind) => [
@@ -253,11 +274,31 @@ function formatTable(cases, results) {
           kind,
           key: "firstEditMs",
         },
+        ...(kind.startsWith("native-")
+          ? [
+              {
+                title: `Events replayed by the first edit: ${describeKind(kind)}`,
+                kind,
+                key: "statsAfterFirstEdit.replayCacheEvents",
+                format: formatCount,
+              },
+            ]
+          : []),
         {
           title: `Second edit: ${describeKind(kind)}`,
           kind,
           key: "secondEditMs",
         },
+        ...(kind.startsWith("native-")
+          ? [
+              {
+                title: `Heap after GC, after both edits: ${describeKind(kind)}`,
+                kind,
+                key: "heapAfterGcBytes",
+                format: formatBytes,
+              },
+            ]
+          : []),
       ]),
   ];
   const header = `| Case | Lane |${names.map((name) => ` ${name} (median, n=${runs}) |`).join("")}${names.length === 2 ? " Change |" : ""}`;
@@ -266,6 +307,12 @@ function formatTable(cases, results) {
   for (const { label } of cases) {
     for (const lane of lanes) {
       if (lane.kind !== null && !kinds.includes(lane.kind)) continue;
+      if (
+        lane.kind === null &&
+        !kinds.some((kind) => kind !== "native" && !kind.startsWith("native-"))
+      ) {
+        continue;
+      }
       const medians = names.map((name) =>
         medianOf(
           results
@@ -274,18 +321,20 @@ function formatTable(cases, results) {
                 result.implementation === name &&
                 result.label === label &&
                 (lane.kind === null
-                  ? result.kind !== "native"
+                  ? result.kind !== "native" &&
+                    !result.kind.startsWith("native-")
                   : result.kind === lane.kind),
             )
-            .map((result) => result[lane.key]),
+            .map((result) => valueAt(result, lane.key)),
         ),
       );
       const change =
         medians.length === 2
           ? ` ${(((medians[1] - medians[0]) / medians[0]) * 100).toFixed(1)}% |`
           : "";
+      const format = lane.format ?? formatMs;
       rows.push(
-        `| ${label} | ${lane.title} |${medians.map((value) => ` ${formatMs(value)} |`).join("")}${change}`,
+        `| ${label} | ${lane.title} |${medians.map((value) => ` ${format(value)} |`).join("")}${change}`,
       );
     }
   }
@@ -295,7 +344,15 @@ function formatTable(cases, results) {
 function describeKind(kind) {
   if (kind === "local") return "local";
   if (kind === "remote") return "remote, linear";
-  return `remote, concurrent at depth ${Number(kind.slice("concurrent-".length)).toLocaleString("en-US")}`;
+  const match = /^(native-)?concurrent-(\d+)$/.exec(kind);
+  const depth = Number(match[2]).toLocaleString("en-US");
+  return match[1] === undefined
+    ? `remote, concurrent at depth ${depth}`
+    : `remote, concurrent at depth ${depth}, after a cold load`;
+}
+
+function valueAt(result, key) {
+  return key.split(".").reduce((value, part) => value?.[part], result);
 }
 
 function medianOf(values) {
@@ -310,4 +367,14 @@ function formatMs(value) {
   if (value === undefined || Number.isNaN(value)) return "n/a";
   if (value >= 1000) return `${(value / 1000).toFixed(2)} s`;
   return value >= 10 ? `${value.toFixed(1)} ms` : `${value.toFixed(3)} ms`;
+}
+
+function formatBytes(value) {
+  if (value === undefined || Number.isNaN(value)) return "n/a";
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function formatCount(value) {
+  if (value === undefined || Number.isNaN(value)) return "n/a";
+  return Math.round(value).toLocaleString("en-US");
 }

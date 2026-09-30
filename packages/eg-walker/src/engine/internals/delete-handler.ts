@@ -1,7 +1,7 @@
-import type { EventId, ExternalOperation } from "../../types";
+import type { ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
-import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
+import { PLACEHOLDER_AGENT, type AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
 import { coalesceDeleteRuns } from "./text-utils";
@@ -19,8 +19,12 @@ export interface DeleteHandlerDeps {
   readonly deleteText: (index: number, length: number) => void;
 }
 
+/**
+ * Apply the delete event at `localVersion`, or at `packedOrderIndex` during
+ * packed replay, whose targets are keyed by replay order until retained.
+ */
 export const applyDelete = (
-  eventId: EventId | null,
+  localVersion: number | null,
   operationIndex: number,
   operationLength: number,
   deps: DeleteHandlerDeps,
@@ -28,8 +32,8 @@ export const applyDelete = (
   deferTextMaterialization: boolean,
   packedOrderIndex?: number,
 ): ReadonlyArray<ExternalOperation> => {
-  if (eventId === null && packedOrderIndex === undefined) {
-    throw new Error("Delete event ID is required outside packed replay");
+  if (localVersion === null && packedOrderIndex === undefined) {
+    throw new Error("Delete event is required outside packed replay");
   }
   const {
     sequence,
@@ -191,8 +195,7 @@ export const applyDelete = (
       // record. Single-character records and per-code-unit paste fragments
       // skip the split entirely and are marked in place.
       const isMultiCharRecord =
-        (candidate.eventId === PLACEHOLDER_EVENT_ID ||
-          candidate.run !== null) &&
+        (candidate.agent === PLACEHOLDER_AGENT || candidate.run) &&
         candidate.content.length > 1;
       if (isMultiCharRecord) {
         const availableInRecord =
@@ -250,7 +253,7 @@ export const applyDelete = (
   }
 
   if (packedOrderIndex === undefined) {
-    deleteTargets.commitRecord(eventId!, targetGroup);
+    deleteTargets.commitRecord(localVersion!, targetGroup);
   } else {
     deleteTargets.commitPackedRecord(packedOrderIndex, targetGroup);
   }

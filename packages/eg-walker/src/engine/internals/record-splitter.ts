@@ -1,19 +1,28 @@
-import { parseEventId } from "../../graph/event-id";
-import type { EventId } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
-import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
-import { EventItemIndex, type EventItems } from "./event-item-index";
+import {
+  PLACEHOLDER_AGENT,
+  placeholderSerialOf,
+  type AugmentedCRDTItem,
+  type ItemKey,
+  type ItemTable,
+} from "./engine-types";
+import {
+  EventItemIndex,
+  type EventIdentityResolver,
+  type EventItems,
+} from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import type { RecordContent } from "./record-content";
 
 interface RecordSplitterDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
-  readonly itemsById: Map<EventId, AugmentedCRDTItem>;
+  readonly items: ItemTable;
+  readonly events: EventIdentityResolver;
   readonly eventItems: EventItemIndex;
   readonly originLeftIndex: OriginLeftIndex;
   readonly deleteTargets: DeleteTargetIndex;
-  readonly nextPlaceholderId: () => EventId;
+  readonly nextPlaceholderSerial: () => number;
   readonly onRecordSplit?: (
     left: AugmentedCRDTItem,
     right: AugmentedCRDTItem,
@@ -42,11 +51,11 @@ export class RecordSplitter {
    *
    * Two record shapes carry multi-character content and can be split:
    *
-   * - **Placeholder:** right gets a fresh placeholder id; both halves stay
-   *   anonymous, owned by the engine-internal `PLACEHOLDER_EVENT_ID`.
-   * - **Typed-run record:** right inherits the run's replicaId with
-   *   `startSequence` advanced by `offsetInRecord` and is registered as one
-   *   numeric range, so retreat / advance resolve either half logarithmically.
+   * - **Placeholder:** right gets a fresh placeholder serial; both halves
+   *   stay anonymous placeholder records.
+   * - **Typed-run record:** right continues the run's agent with its start
+   *   sequence advanced by `offsetInRecord` and is registered as one numeric
+   *   range, so retreat / advance resolve either half logarithmically.
    */
   splitRecordAt(position: number, offsetInRecord: number): number {
     const { sequence } = this.deps;
@@ -63,7 +72,7 @@ export class RecordSplitter {
     left: AugmentedCRDTItem,
     offsetInRecord: number,
   ): AugmentedCRDTItem {
-    const { sequence, itemsById, originLeftIndex, deleteTargets } = this.deps;
+    const { sequence, items, originLeftIndex, deleteTargets } = this.deps;
     if (offsetInRecord <= 0 || offsetInRecord >= left.content.length) {
       throw new Error(
         `Record split offset ${offsetInRecord} is invalid for ${left.id}`,
@@ -82,14 +91,16 @@ export class RecordSplitter {
       left.content = leftOriginalContent;
       throw new Error(`Record ${left.id} missing from sequence index`);
     }
-    itemsById.set(right.id, right);
+    items.add(right);
 
     // Existing items with `originLeft = left.id` were anchored to the
     // right boundary of the pre-split record; that boundary now lives
     // at the end of {@link right}, so transfer their `originLeft`
     // references over. `originRight = left.id` references still point
     // at the left edge of the original record, which is unchanged.
-    originLeftIndex.rewriteReferences(left.id, right.id, itemsById);
+    originLeftIndex.rewriteReferences(left.id, right.id, (itemId) =>
+      items.at(itemId),
+    );
     // A typed-run right half is the causal continuation of the left half.
     // Track it only after rewriting old right-boundary references; tracking it
     // first would make the rewrite move its own originLeft to itself.
@@ -100,7 +111,7 @@ export class RecordSplitter {
     // `everDeleted` and `prepareState` and must move together under
     // future retreat / advance calls for those events.
     deleteTargets.extendMembership(left.id, right.id);
-    if (left.run !== null) {
+    if (left.run) {
       this.deps.eventItems.registerRunItem(right);
     }
     this.deps.onRecordSplit?.(left, right);
@@ -132,69 +143,88 @@ export class RecordSplitter {
   }
 
   /**
-   * Ensure the slice owned by `eventId` is a single record before
-   * retreat / advance toggle its `prepareState`. A typed-run leaf that
+   * Ensure the slice owned by the event at `localVersion` is a single record
+   * before retreat / advance toggle its `prepareState`. A typed-run leaf that
    * still holds more than this one event's code unit is carved into prefix /
    * slice / suffix records via {@link splitRecordAt}, which also remaps the
-   * other events' `eventItems` entries to point at the new neighbours.
+   * other events' item entries to point at the new neighbours.
    * Returns the exact scalar/array references that the caller should toggle;
    * this avoids a second event-index lookup after split bookkeeping.
    */
-  isolateRunSliceForEvent(eventId: EventId): EventItems | undefined {
-    const { itemsById, eventItems } = this.deps;
-    const items = eventItems.get(eventId);
+  isolateRunSliceForEvent(localVersion: number): EventItems | undefined {
+    const { items, eventItems, events } = this.deps;
+    const eventItemIds = eventItems.get(localVersion);
     if (
-      items === undefined ||
-      (typeof items !== "string" && items.length === 0)
+      eventItemIds === undefined ||
+      (typeof eventItemIds !== "number" && eventItemIds.length === 0)
     ) {
       // Event hasn't been integrated yet (e.g. a delete-only or pre-effect
       // retreat). Nothing to toggle.
-      return items;
+      return eventItemIds;
     }
-    if (typeof items !== "string" && items.length > 1) {
+    if (typeof eventItemIds !== "number" && eventItemIds.length > 1) {
       // Multi-character INSERT events stay one record per code unit, each with
-      // its own id and `run === null`. The retreat / advance loop already
+      // its own key and `run === false`. The retreat / advance loop already
       // toggles every slice in order; no isolation is needed.
-      return items;
+      return eventItemIds;
     }
-    const itemId = typeof items === "string" ? items : items[0];
+    const itemId =
+      typeof eventItemIds === "number" ? eventItemIds : eventItemIds[0];
     if (itemId === undefined) {
-      return items;
+      return eventItemIds;
     }
-    const record = itemsById.get(itemId);
+    const record = items.at(itemId);
     if (!record) {
       throw new Error(
-        `eventItems pointed at unknown item ${itemId} for event ${eventId}`,
+        `eventItems pointed at unknown item ${itemId} for event ${localVersion}`,
       );
     }
-    if (record.run === null) {
-      // Placeholder or per-code-unit paste record — nothing to coalesce, so
-      // the slice is already this event's whole contribution.
-      return items;
+    if (!record.run || record.content.length === 1) {
+      // Placeholder or per-code-unit paste record, or a one-code-unit run
+      // that is already the exact slice.
+      return eventItemIds;
+    }
+    if (events.agentAt(localVersion) !== record.agent) {
+      // A non-canonical event ended up pointing at a typed-run record. The
+      // run-extension guard in `applyInsert` only seeds runs from canonical
+      // events, so this should be unreachable; bail out conservatively
+      // rather than splitting at a wrong offset.
+      return eventItemIds;
+    }
+    const middle = this.isolateScalar(record, events.sequenceAt(localVersion));
+    return middle === null ? eventItemIds : middle.id;
+  }
+
+  /**
+   * Isolate the code unit of the canonical scalar event `(agent, sequence)`
+   * inside its typed-run record, or return `null` when no run holds it.
+   */
+  isolateRunSliceForCanonical(
+    agent: number,
+    sequence: number,
+  ): AugmentedCRDTItem | null {
+    const record = this.deps.eventItems.getRunItem(agent, sequence);
+    if (record === undefined || !record.run) {
+      return null;
     }
     if (record.content.length === 1) {
-      // Direct event mappings are rewritten with every typed-run split, so a
-      // one-code-unit record is already the exact slice. Avoid reparsing the
-      // canonical id on repeat retreat/advance transitions.
-      return items;
+      return record;
     }
-    const parsed = parseEventId(eventId);
-    if (parsed === null || parsed.replicaId !== record.run.replicaId) {
-      // A non-canonical event id ended up pointing at a typed-run record.
-      // The run-extension guard in `applyInsert` only seeds runs from
-      // canonical `replicaId:sequence` ids, so this should be unreachable;
-      // bail out conservatively rather than splitting at a wrong offset.
-      return items;
-    }
-    const offsetInRecord = parsed.sequence - record.run.startSequence;
+    return this.isolateScalar(record, sequence);
+  }
+
+  private isolateScalar(
+    record: AugmentedCRDTItem,
+    sequence: number,
+  ): AugmentedCRDTItem | null {
+    const offsetInRecord = sequence - record.sequence;
     if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
-      // Same defensive bail-out: the eventItems entry should never point at
-      // a record whose run no longer covers this event's sequence.
-      return items;
+      // The item entry should never point at a record whose run no longer
+      // covers this event's sequence.
+      return null;
     }
     if (offsetInRecord === 0 && record.content.length === 1) {
-      // Slice is already its own record.
-      return items;
+      return record;
     }
 
     let middle = record;
@@ -204,7 +234,7 @@ export class RecordSplitter {
     if (middle.content.length > 1) {
       this.splitRecord(middle, 1);
     }
-    return middle.id;
+    return middle;
   }
 
   /**
@@ -218,43 +248,43 @@ export class RecordSplitter {
    * scalar compatibility path for this event.
    */
   isolateRunSpanForEvents(
-    firstEventId: EventId,
+    firstLocalVersion: number,
     maximumEventCount: number,
   ): AugmentedCRDTItem | null {
-    const parsed = parseEventId(firstEventId);
+    const { items, eventItems, events } = this.deps;
+    const agent = events.agentAt(firstLocalVersion);
     if (
-      parsed === null ||
+      agent < 0 ||
       !Number.isSafeInteger(maximumEventCount) ||
       maximumEventCount <= 0
     ) {
       return null;
     }
 
-    const { itemsById, eventItems } = this.deps;
-    const items = eventItems.get(firstEventId);
-    if (typeof items !== "string") {
+    const itemId = eventItems.get(firstLocalVersion);
+    if (typeof itemId !== "number") {
       return null;
     }
-    const record = itemsById.get(items);
+    const record = items.at(itemId);
     if (
       record === undefined ||
-      record.run === null ||
+      !record.run ||
       typeof record.content !== "string" ||
-      record.run.replicaId !== parsed.replicaId
+      record.agent !== agent
     ) {
       return null;
     }
 
     return this.isolateCanonicalRunSpan(
       record,
-      parsed.sequence,
+      events.sequenceAt(firstLocalVersion),
       maximumEventCount,
     );
   }
 
   /** Packed equivalent that consumes already-decoded canonical ID columns. */
   isolateRunSpanForCanonicalEvents(
-    replicaId: string,
+    agent: number,
     firstSequence: number,
     maximumEventCount: number,
   ): AugmentedCRDTItem | null {
@@ -266,12 +296,12 @@ export class RecordSplitter {
     ) {
       return null;
     }
-    const record = this.deps.eventItems.getRunItem(replicaId, firstSequence);
+    const record = this.deps.eventItems.getRunItem(agent, firstSequence);
     if (
       record === undefined ||
-      record.run === null ||
+      !record.run ||
       typeof record.content !== "string" ||
-      record.run.replicaId !== replicaId
+      record.agent !== agent
     ) {
       return null;
     }
@@ -287,10 +317,10 @@ export class RecordSplitter {
     firstSequence: number,
     maximumEventCount: number,
   ): AugmentedCRDTItem | null {
-    if (record.run === null || typeof record.content !== "string") {
+    if (!record.run || typeof record.content !== "string") {
       return null;
     }
-    const offsetInRecord = firstSequence - record.run.startSequence;
+    const offsetInRecord = firstSequence - record.sequence;
     if (offsetInRecord < 0 || offsetInRecord >= record.content.length) {
       return null;
     }
@@ -315,14 +345,16 @@ export class RecordSplitter {
     offsetInRecord: number,
     rightContent: RecordContent,
   ): AugmentedCRDTItem {
-    if (left.run !== null) {
+    const id: ItemKey = this.deps.items.nextKey();
+    if (left.run) {
       if (typeof rightContent !== "string") {
         throw new Error("Typed-run split content must be materialized text");
       }
-      const startSequence = left.run.startSequence + offsetInRecord;
       return {
-        id: `${left.run.replicaId}:${startSequence}:0`,
-        eventId: `${left.run.replicaId}:${startSequence}`,
+        id,
+        agent: left.agent,
+        sequence: left.sequence + offsetInRecord,
+        offset: 0,
         content: rightContent,
         // A typed run compresses a chain of per-event CRDT records. Splitting
         // must restore the chain boundary instead of erasing it, otherwise the
@@ -333,10 +365,7 @@ export class RecordSplitter {
         originRight: left.originRight,
         everDeleted: left.everDeleted,
         prepareState: left.prepareState,
-        run: {
-          replicaId: left.run.replicaId,
-          startSequence,
-        },
+        run: true,
       };
     }
 
@@ -346,15 +375,24 @@ export class RecordSplitter {
         leftPlaceholder,
         offsetInRecord,
       );
+      const segmentId = leftPlaceholder.state.segmentIdAtBoundary(
+        rightPlaceholder.start,
+      );
+      const serial = placeholderSerialOf(segmentId);
+      if (serial < 0) {
+        throw new Error(`Invalid placeholder segment ID ${segmentId}`);
+      }
       const right: AugmentedCRDTItem = {
-        id: leftPlaceholder.state.segmentIdAtBoundary(rightPlaceholder.start),
-        eventId: PLACEHOLDER_EVENT_ID,
+        id,
+        agent: PLACEHOLDER_AGENT,
+        sequence: serial,
+        offset: 0,
         content: rightContent,
         originLeft: null,
         originRight: null,
         everDeleted: false,
         prepareState: 1,
-        run: null,
+        run: false,
         placeholder: rightPlaceholder,
       };
       rightPlaceholder.attachOwner(right);
@@ -362,14 +400,16 @@ export class RecordSplitter {
     }
 
     return {
-      id: this.deps.nextPlaceholderId(),
-      eventId: PLACEHOLDER_EVENT_ID,
+      id,
+      agent: PLACEHOLDER_AGENT,
+      sequence: this.deps.nextPlaceholderSerial(),
+      offset: 0,
       content: rightContent,
       originLeft: null,
       originRight: null,
       everDeleted: left.everDeleted,
       prepareState: left.prepareState,
-      run: null,
+      run: false,
     };
   }
 }

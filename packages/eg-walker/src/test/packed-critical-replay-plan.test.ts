@@ -693,13 +693,19 @@ describe("packed critical-section replay planning", () => {
       RecordSplitter.prototype,
       "isolateRunSpanForEvents",
     );
+    // Both graphs keep the fixture's topological order as local versions.
+    const localVersionOf = (eventId: EventId): number =>
+      events.findIndex((event) => event.id === eventId);
+    const scalarLocalVersions = new Set(
+      [3, 4, 5, 6, 7].map((sequence) => localVersionOf(`a:${sequence}`)),
+    );
     const packed = new EgWalkerReplica("packed-span", "", pack(events));
     const packedSpanCalls = spanIsolation.mock.calls.filter(
-      ([replicaId, firstSequence, eventCount]) =>
-        replicaId === "a" && firstSequence === 3 && eventCount === 5,
+      ([, firstSequence, eventCount]) =>
+        firstSequence === 3 && eventCount === 5,
     ).length;
-    const packedScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
-      /^a:[3-7]$/.test(eventId),
+    const packedScalarCalls = scalarIsolation.mock.calls.filter(
+      ([localVersion]) => scalarLocalVersions.has(localVersion),
     ).length;
 
     spanIsolation.mockClear();
@@ -710,13 +716,16 @@ describe("packed critical-section replay planning", () => {
       "",
       EventGraph.fromEvents(events),
     );
-    const objectScalarCalls = scalarIsolation.mock.calls.filter(([eventId]) =>
-      /^a:[3-7]$/.test(eventId),
+    const objectScalarCalls = scalarIsolation.mock.calls.filter(
+      ([localVersion]) => scalarLocalVersions.has(localVersion),
     ).length;
-    const objectSpanCalls = objectSpanIsolation.mock.calls.filter(
-      ([firstEventId, eventCount]) =>
-        firstEventId === "a:3" && eventCount === 5,
+    // Object graphs expose the same numeric agent/sequence columns, so they
+    // share the canonical span path instead of resolving event spans.
+    const objectSpanCalls = spanIsolation.mock.calls.filter(
+      ([, firstSequence, eventCount]) =>
+        firstSequence === 3 && eventCount === 5,
     ).length;
+    const objectEventSpanCalls = objectSpanIsolation.mock.calls.length;
     spanIsolation.mockRestore();
     scalarIsolation.mockRestore();
     objectSpanIsolation.mockRestore();
@@ -725,6 +734,7 @@ describe("packed critical-section replay planning", () => {
     expect(packedScalarCalls).toBe(0);
     expect(objectSpanCalls).toBe(2);
     expect(objectScalarCalls).toBe(0);
+    expect(objectEventSpanCalls).toBe(0);
     expect(packed.getText()).toBe(`aaa${"b".repeat(10)}`);
     expect(packed.getText()).toBe(object.getText());
     expect(packed.getReplayStats().engineRetreats).toBe(7);

@@ -28,6 +28,11 @@ import type { EventId, GraphEvent, Version } from "../../types";
 import { eventDagArb } from "./arbitraries";
 import { fcParams } from "./run-config";
 
+// Each run plans every critical cut of a generated history against the
+// string-keyed reference planner; under coverage instrumentation the suite's
+// default run count needs longer than the default per-test timeout.
+const GENERATED_HISTORY_TIMEOUT_MS = 15_000;
+
 describe("property: insertion suffix sections", () => {
   it("should match the general planner after every critical cut of a DAG", () => {
     fc.assert(
@@ -47,53 +52,61 @@ describe("property: insertion suffix sections", () => {
     );
   });
 
-  it("should match the general planner after every critical cut of a fork-and-merge history", () => {
-    fc.assert(
-      fc.property(
-        fc.array(segmentArb, { minLength: 1 }),
-        fc.boolean(),
-        (segments, packed) => {
-          // Arrange
-          const events = buildHistory(segments);
-          const graph = packed ? pack(events) : EventGraph.fromEvents(events);
+  it(
+    "should match the general planner after every critical cut of a fork-and-merge history",
+    () => {
+      fc.assert(
+        fc.property(
+          fc.array(segmentArb, { minLength: 1 }),
+          fc.boolean(),
+          (segments, packed) => {
+            // Arrange
+            const events = buildHistory(segments);
+            const graph = packed ? pack(events) : EventGraph.fromEvents(events);
 
-          // Act
-          const plans = plansAfterEveryCut(graph);
+            // Act
+            const plans = plansAfterEveryCut(graph);
 
-          // Assert
-          for (const { actual, expected } of plans) {
-            expect(actual).toEqual(expected);
-          }
-        },
-      ),
-      fcParams(),
-    );
-  });
-
-  it("should order every section and every suffix after a cut as the replay order of its events", () => {
-    fc.assert(
-      fc.property(
-        fc.oneof(
-          eventDagArb({}),
-          fc.array(segmentArb, { minLength: 1 }).map(buildHistory),
+            // Assert
+            for (const { actual, expected } of plans) {
+              expect(actual).toEqual(expected);
+            }
+          },
         ),
-        fc.boolean(),
-        (events, packed) => {
-          // Arrange
-          const graph = packed ? pack(events) : EventGraph.fromEvents(events);
+        fcParams(),
+      );
+    },
+    GENERATED_HISTORY_TIMEOUT_MS,
+  );
 
-          // Act
-          const orders = rangeOrdersAfterEveryCut(graph);
+  it(
+    "should order every section and every suffix after a cut as the replay order of its events",
+    () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(
+            eventDagArb({}),
+            fc.array(segmentArb, { minLength: 1 }).map(buildHistory),
+          ),
+          fc.boolean(),
+          (events, packed) => {
+            // Arrange
+            const graph = packed ? pack(events) : EventGraph.fromEvents(events);
 
-          // Assert
-          for (const { actual, expected } of orders) {
-            expect(actual).toEqual(expected);
-          }
-        },
-      ),
-      fcParams(),
-    );
-  });
+            // Act
+            const orders = rangeOrdersAfterEveryCut(graph);
+
+            // Assert
+            for (const { actual, expected } of orders) {
+              expect(actual).toEqual(expected);
+            }
+          },
+        ),
+        fcParams(),
+      );
+    },
+    GENERATED_HISTORY_TIMEOUT_MS,
+  );
 });
 
 // Helpers

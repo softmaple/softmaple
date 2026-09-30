@@ -747,22 +747,23 @@ describe("EgWalkerEngine", () => {
     const engine = new EgWalkerEngine();
     // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
     engine.graph = graph;
+    // Local versions follow insertion order: a = 0, b = 1, c = 2.
     // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.eventOrder.set("a", 0);
+    engine.eventOrder.set(0, 0);
     // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.eventOrder.set("b", 1);
+    engine.eventOrder.set(1, 1);
     // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.eventOrder.set("c", 2);
+    engine.eventOrder.set(2, 2);
 
     // @ts-expect-error - Private method coverage for deterministic retreat/advance ordering.
-    expect(engine.diffVersions(new Set(["b", "c"]), new Set(["a"]))).toEqual({
-      retreat: ["c", "b"],
-      advance: ["a"],
+    expect(engine.diffVersions([1, 2], [0])).toEqual({
+      retreat: [2, 1],
+      advance: [0],
     });
     // @ts-expect-error - Private method coverage for deterministic retreat/advance ordering.
-    expect(engine.diffVersions(new Set(["c"]), new Set(["a", "b"]))).toEqual({
-      retreat: ["c"],
-      advance: ["a", "b"],
+    expect(engine.diffVersions([2], [0, 1])).toEqual({
+      retreat: [2],
+      advance: [0, 1],
     });
   });
 

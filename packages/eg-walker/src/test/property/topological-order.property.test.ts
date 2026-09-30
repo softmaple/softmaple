@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import { ColumnarEventGraphCodec } from "../../graph/columnar-codec";
+import { encodeTopologicallyOrderedEventsBinary } from "../../graph/columnar-codec/topological-binary-encoder";
 import { EventGraph } from "../../graph/event-graph";
 import type { EventId, GraphEvent } from "../../types";
 import {
@@ -64,9 +65,69 @@ describe("property: EventGraph topological orders", () => {
       fcParams(),
     );
   });
+
+  it("should encode EGW3 from columns exactly like the event encoder", () => {
+    fc.assert(
+      fc.property(eventDagArb, fc.nat(), (dag, packedSeed) => {
+        // Arrange
+        const events = withVariedOperations(dag);
+        const graph = graphWithPackedPrefix(
+          events,
+          packedSeed % (events.length + 1),
+        );
+        const expected = encodeTopologicallyOrderedEventsBinary(
+          graph.getLinearReplayOrder() ?? graph.getTopologicalOrder(),
+          graph.getMetadata(),
+          Array.from(graph.getFrontier()),
+        );
+
+        // Act
+        const encoded = graph.encodeTopologicalBinary();
+
+        // Assert
+        expect(encoded.frontier).toEqual(expected.frontier);
+        expect(Buffer.from(encoded.binary).equals(expected.binary)).toBe(true);
+      }),
+      fcParams(),
+    );
+  });
 });
 
 // Helpers
+
+/**
+ * Mix inserts of varying text with deletes so every column varies, and
+ * rename events to canonical runs of three agents plus custom IDs. A custom
+ * ID never equals an agent name here: the columnar codec's run encoder
+ * merges such an ID into the following canonical run, which its decoder then
+ * rejects, independently of the encoder under test.
+ */
+const withVariedOperations = (
+  events: ReadonlyArray<GraphEvent>,
+): GraphEvent[] => {
+  const renamed = new Map(
+    events.map((event, index) => [
+      event.id,
+      index % 4 === 3
+        ? `custom-${index}`
+        : `${["a", "b", "c"][index % 3]}:${index >> 1}`,
+    ]),
+  );
+  const rename = (id: EventId): EventId => renamed.get(id)!;
+  return events.map((event, index) => ({
+    id: rename(event.id),
+    parentVersion: new Set(Array.from(event.parentVersion, rename)),
+    operation:
+      index % 3 === 1
+        ? { type: OPERATION_TYPE.DELETE, index: index % 4, length: index % 3 }
+        : {
+            type: OPERATION_TYPE.INSERT,
+            index: index % 5,
+            text: index % 3 === 2 ? "🙂y" : "x",
+          },
+    timestamp: index % 2 === 0 ? index : -index,
+  }));
+};
 
 const eventIdArb: fc.Arbitrary<EventId> = fc.string({
   minLength: 1,

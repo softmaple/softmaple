@@ -1,7 +1,11 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
-import { parseEventId } from "../event-id";
+import type { AgentTable } from "./agent-table";
 import { EventIdTieBreaker } from "./event-id-tie-breaker";
+import {
+  EventIdRunIndex,
+  type PackedCanonicalIdRun,
+} from "./event-id-run-index";
 import { MaxHeap } from "./max-heap";
 import {
   type PackedIntegerColumn,
@@ -52,23 +56,31 @@ type PackedEventGraphCommonColumns = (
   readonly implicitLinearEdges?: boolean;
 };
 
+export type { PackedCanonicalIdRun } from "./event-id-run-index";
+
+/**
+ * Event IDs of a packed graph by offset (local version).
+ *
+ * Replicas are numbered by the shared {@link agents} table. `agentAt`
+ * returns `-1` for an ID that does not parse as `replicaId:sequence`, so
+ * callers order and group events numerically and format an ID only at an
+ * API boundary.
+ */
 export interface PackedEventIdIndex {
   readonly count: number;
+  readonly agents: AgentTable;
   has(id: EventId): boolean;
   offsetOf(id: EventId): number | undefined;
   idAt(offset: number): EventId | undefined;
+  agentAt(offset: number): number;
+  sequenceAt(offset: number): number;
+  /** Offset of the canonical ID `(agent, sequence)`, or `-1`. */
+  offsetOfCanonical?(agent: number, sequence: number): number;
+  /** Whether any event has a custom (verbatim) ID. */
+  hasCustomIds?(): boolean;
   canonicalRunAt?(offset: number): PackedCanonicalIdRun | undefined;
-  releaseCanonicalRunLookup?(): void;
   iterateIds(): IterableIterator<EventId>;
   maximumSequenceForReplica(replicaId: string): number | undefined;
-}
-
-/** Canonical ID interval retained by the EGW3 run index. */
-export interface PackedCanonicalIdRun {
-  readonly replicaId: string;
-  readonly startSequence: number;
-  readonly startEventOffset: number;
-  readonly length: number;
 }
 
 interface MaterializedPackedEventIds {
@@ -137,8 +149,7 @@ interface PackedBranchTraversalWorkspace {
  */
 export class PackedEventGraphBase {
   private readonly ids: ReadonlyArray<EventId> | null;
-  private readonly offsetById: ReadonlyMap<EventId, number> | null;
-  private readonly idIndex: PackedEventIdIndex | null;
+  private readonly idIndex: PackedEventIdIndex;
   private readonly eventCount: number;
   /** `null` until {@link loadOperationColumns} supplies deferred columns. */
   private operationColumns: PackedOperationColumns | null;
@@ -179,8 +190,7 @@ export class PackedEventGraphBase {
    */
   static fromTail(tail: PackedTailEvents): PackedEventGraphBase {
     const empty = PackedEventGraphBase.create({
-      ids: [],
-      offsetById: new Map(),
+      idIndex: new EventIdRunIndex(tail.agents).view(),
       operationTypes: new Uint8Array(0),
       operationIndexes: new Uint32Array(0),
       operationLengths: new Uint32Array(0),
@@ -260,11 +270,9 @@ export class PackedEventGraphBase {
       }
 
       this.ids = ids;
-      this.offsetById = idIndex === undefined ? columns.offsetById : null;
-      this.idIndex = idIndex ?? null;
+      this.idIndex = idIndex ?? indexMaterializedIds(ids);
     } else {
       this.ids = null;
-      this.offsetById = null;
       this.idIndex = idIndex!;
     }
     this.eventCount = count;
@@ -282,16 +290,47 @@ export class PackedEventGraphBase {
     return this.eventCount;
   }
 
+  /** Replica numbering shared with the graph that owns this base. */
+  get agents(): AgentTable {
+    return this.idIndex.agents;
+  }
+
   has(id: EventId): boolean {
-    return this.idIndex !== null
-      ? this.idIndex.has(id)
-      : this.offsetById!.has(id);
+    return this.idIndex.has(id);
   }
 
   offsetOf(id: EventId): number | undefined {
-    return this.idIndex !== null
-      ? this.idIndex.offsetOf(id)
-      : this.offsetById!.get(id);
+    return this.idIndex.offsetOf(id);
+  }
+
+  /**
+   * Agent of the event at `offset`, or `-1` when its ID does not parse as
+   * `replicaId:sequence`.
+   */
+  agentAt(offset: number): number {
+    return this.idIndex.agentAt(offset);
+  }
+
+  /** Sequence of the event at `offset`; meaningful for canonical agents. */
+  sequenceAt(offset: number): number {
+    return this.idIndex.sequenceAt(offset);
+  }
+
+  /**
+   * Whether the base holds `id`, given its already parsed canonical parts
+   * (`agent < 0` for an ID that does not parse).
+   */
+  hasParsed(id: EventId, agent: number, sequence: number): boolean {
+    const index = this.idIndex;
+    if (agent >= 0 && index.offsetOfCanonical !== undefined) {
+      // A custom run can still hold a canonical-looking ID in hand-written
+      // payloads, so a canonical miss falls back to the full lookup there.
+      return (
+        index.offsetOfCanonical(agent, sequence) >= 0 ||
+        (index.hasCustomIds?.() === true && index.has(id))
+      );
+    }
+    return index.has(id);
   }
 
   /** Compute a version diff directly over immutable packed offsets. */
@@ -341,6 +380,25 @@ export class PackedEventGraphBase {
   }
 
   /**
+   * Compute a range-compressed transition from a version given as offsets to
+   * one event's parents. The returned buffers are overwritten by the next
+   * diff query.
+   */
+  diffLocalVersionsToParentRanges(
+    currentOffsets: ReadonlyArray<number>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diffLocalVersionsToParentRanges(
+      currentOffsets,
+      targetEventOffset,
+      this,
+      rankByOffset,
+    );
+  }
+
+  /**
    * Compute a numeric transition from one event to another event's parents.
    *
    * The returned view is workspace-owned and is overwritten by the next diff.
@@ -380,23 +438,22 @@ export class PackedEventGraphBase {
   /** Release scratch storage once a packed replay has finished. */
   releaseDiffWorkspace(): void {
     this.diffWorkspace = null;
-    this.idIndex?.releaseCanonicalRunLookup?.();
   }
 
   idAt(offset: number): EventId | undefined {
-    return this.ids !== null ? this.ids[offset] : this.idIndex!.idAt(offset);
+    return this.ids !== null ? this.ids[offset] : this.idIndex.idAt(offset);
   }
 
   /** Return canonical author/sequence metadata without reparsing an ID. */
   canonicalIdRunAt(offset: number): PackedCanonicalIdRun | undefined {
-    return this.idIndex?.canonicalRunAt?.(offset);
+    return this.idIndex.canonicalRunAt?.(offset);
   }
 
   *iterateIds(): IterableIterator<EventId> {
     if (this.ids !== null) {
-      yield* this.ids!;
+      yield* this.ids;
     } else {
-      yield* this.idIndex!.iterateIds();
+      yield* this.idIndex.iterateIds();
     }
   }
 
@@ -431,6 +488,14 @@ export class PackedEventGraphBase {
       return { type: OPERATION_TYPE.DELETE, index, length };
     }
     throw new Error(`Invalid packed operation type ${String(type)}`);
+  }
+
+  /**
+   * Whether some ID is stored verbatim, so its agent and sequence columns
+   * may not spell it. Unknown index shapes answer conservatively.
+   */
+  hasCustomIds(): boolean {
+    return this.idIndex.hasCustomIds?.() ?? true;
   }
 
   isInsertAt(offset: number): boolean {
@@ -565,9 +630,7 @@ export class PackedEventGraphBase {
     const parentStarts = this.parentStarts!;
     const childStarts = this.childStarts!;
     const childOffsets = this.childOffsets!;
-    const ids = new EventIdTieBreaker(count, (offset) =>
-      this.requireIdAt(offset),
-    );
+    const ids = new EventIdTieBreaker(this);
     // A max-heap with an inverted comparator pops the smallest ready ID.
     const ready = new MaxHeap<number>((left, right) =>
       ids.compare(right, left),
@@ -1035,12 +1098,10 @@ export class PackedEventGraphBase {
       }
     }
 
-    // Most sibling groups differ in span, so parse IDs only at a first tie.
-    let ids: EventIdTieBreaker | null = null;
+    // Most sibling groups differ in span; IDs break only the remaining ties.
+    const ids = new EventIdTieBreaker(this);
     const compareIds = (left: number, right: number): number =>
-      (ids ??= new EventIdTieBreaker(this.count, (offset) =>
-        this.requireIdAt(offset),
-      )).compare(left, right);
+      ids.compare(left, right);
     const compareExclusive = (left: number, right: number): number => {
       const difference = exclusiveSpan[left]! - exclusiveSpan[right]!;
       return difference === 0 ? compareIds(left, right) : difference;
@@ -1076,6 +1137,9 @@ export class PackedEventGraphBase {
    * tail's.
    */
   appendTail(tail: PackedTailEvents): PackedEventGraphBase {
+    if (tail.agents !== this.agents) {
+      throw new Error("A packed tail must share its prefix's agent table");
+    }
     const baseCount = this.count;
     const count = baseCount + tail.count;
     const baseOperations = this.operations();
@@ -1086,8 +1150,11 @@ export class PackedEventGraphBase {
     const tailTimestamps: number[] = [];
     const insertStarts = new Uint32Array(count);
     insertStarts.set(baseOperations.insertStarts);
-    const insertedParts = [this.insertedContent];
-    let insertedLength = this.insertedContent.length;
+    const baseContentLength = this.insertedContent.length;
+    const tailContent = tail.insertedContent();
+    if (baseContentLength + tailContent.length > 0xffff_ffff) {
+      throw new Error("Inserted content exceeds packed UTF-16 offset range");
+    }
 
     const parentStarts = new Uint32Array(count + 1);
     let edgeCount = 0;
@@ -1106,23 +1173,15 @@ export class PackedEventGraphBase {
     };
     for (let tailIndex = 0; tailIndex < tail.count; tailIndex++) {
       const offset = baseCount + tailIndex;
-      const { operation, timestamp } = tail.eventAt(tailIndex);
-      tailIndexes.push(operation.index);
-      tailTimestamps.push(timestamp);
-      if (operation.type === OPERATION_TYPE.INSERT) {
+      tailIndexes.push(tail.operationIndexAt(tailIndex));
+      tailLengths.push(tail.operationLengthAt(tailIndex));
+      tailTimestamps.push(tail.timestampAt(tailIndex));
+      if (tail.isInsertAt(tailIndex)) {
         operationTypes[offset] = INSERT_OPERATION;
-        tailLengths.push(operation.text.length);
-        if (insertedLength > 0xffff_ffff) {
-          throw new Error(
-            "Inserted content exceeds packed UTF-16 offset range",
-          );
-        }
-        insertStarts[offset] = insertedLength;
-        insertedParts.push(operation.text);
-        insertedLength += operation.text.length;
+        insertStarts[offset] =
+          baseContentLength + tail.insertStartAt(tailIndex);
       } else {
         operationTypes[offset] = DELETE_OPERATION;
-        tailLengths.push(operation.length);
       }
       tail.forEachParentOffset(tailIndex, pushTailParent);
       parentStarts[offset + 1] = edgeCount + tailParents.length;
@@ -1178,7 +1237,10 @@ export class PackedEventGraphBase {
         tailTimestamps,
       ),
       insertStarts,
-      insertedContent: insertedParts.join(""),
+      insertedContent:
+        tailContent.length === 0
+          ? this.insertedContent
+          : this.insertedContent + tailContent,
       parentStarts,
       parentOffsets,
       childStarts,
@@ -1188,7 +1250,7 @@ export class PackedEventGraphBase {
       ? PackedEventGraphBase.create(columns)
       : PackedEventGraphBase.createWithTrustedMaterializedIds({
           ...columns,
-          ids: this.ids.concat(Array.from(idIndex.tailIds())),
+          ids: this.ids.concat(Array.from(tail.iterateIds())),
         });
   }
 
@@ -1226,20 +1288,7 @@ export class PackedEventGraphBase {
   }
 
   maximumSequenceForReplica(replicaId: string): number | undefined {
-    if (this.idIndex !== null) {
-      return this.idIndex.maximumSequenceForReplica(replicaId);
-    }
-    let maximum: number | undefined;
-    for (const id of this.ids!) {
-      const parsed = parseEventId(id);
-      if (
-        parsed?.replicaId === replicaId &&
-        (maximum === undefined || parsed.sequence > maximum)
-      ) {
-        maximum = parsed.sequence;
-      }
-    }
-    return maximum;
+    return this.idIndex.maximumSequenceForReplica(replicaId);
   }
 
   private computeExactLinear(): boolean {
@@ -1262,16 +1311,30 @@ export class PackedEventGraphBase {
 /**
  * Events appended after an immutable packed prefix, as seen by
  * {@link PackedEventGraphBase.appendTail}. Parent offsets are insertion ranks
- * in the combined graph and always precede the event's own rank.
+ * in the combined graph and always precede the event's own rank. The tail
+ * numbers its replicas with the prefix's {@link AgentTable}.
  */
 export interface PackedTailEvents {
   readonly count: number;
-  eventAt(tailIndex: number): GraphEvent;
-  tailIndexOf(id: EventId): number | undefined;
+  readonly agents: AgentTable;
+  isInsertAt(tailIndex: number): boolean;
+  operationIndexAt(tailIndex: number): number;
+  operationLengthAt(tailIndex: number): number;
+  timestampAt(tailIndex: number): number;
+  /** Offset of an insert's text in {@link insertedContent}. */
+  insertStartAt(tailIndex: number): number;
+  insertedContent(): string;
   forEachParentOffset(
     tailIndex: number,
     visit: (parentOffset: number) => void,
   ): void;
+  idAt(tailIndex: number): EventId;
+  /** Tail index of `id`, or `-1`. */
+  indexOf(id: EventId): number;
+  agentAt(tailIndex: number): number;
+  sequenceAt(tailIndex: number): number;
+  maximumSequenceForReplica(replicaId: string): number | undefined;
+  iterateIds(): IterableIterator<EventId>;
 }
 
 /** ID index of a repacked prefix: the prefix's own index, then the tail. */
@@ -1285,6 +1348,10 @@ class TailExtendedIdIndex implements PackedEventIdIndex {
     this.count = base.count + tail.count;
   }
 
+  get agents(): AgentTable {
+    return this.base.agents;
+  }
+
   has(id: EventId): boolean {
     return this.offsetOf(id) !== undefined;
   }
@@ -1294,8 +1361,8 @@ class TailExtendedIdIndex implements PackedEventIdIndex {
     if (baseOffset !== undefined) {
       return baseOffset;
     }
-    const tailIndex = this.tail.tailIndexOf(id);
-    return tailIndex === undefined ? undefined : this.base.count + tailIndex;
+    const tailIndex = this.tail.indexOf(id);
+    return tailIndex < 0 ? undefined : this.base.count + tailIndex;
   }
 
   idAt(offset: number): EventId | undefined {
@@ -1304,7 +1371,19 @@ class TailExtendedIdIndex implements PackedEventIdIndex {
     }
     return offset < this.base.count
       ? this.base.idAt(offset)
-      : this.tail.eventAt(offset - this.base.count).id;
+      : this.tail.idAt(offset - this.base.count);
+  }
+
+  agentAt(offset: number): number {
+    return offset < this.base.count
+      ? this.base.agentAt(offset)
+      : this.tail.agentAt(offset - this.base.count);
+  }
+
+  sequenceAt(offset: number): number {
+    return offset < this.base.count
+      ? this.base.sequenceAt(offset)
+      : this.tail.sequenceAt(offset - this.base.count);
   }
 
   canonicalRunAt(offset: number): PackedCanonicalIdRun | undefined {
@@ -1313,37 +1392,32 @@ class TailExtendedIdIndex implements PackedEventIdIndex {
       : undefined;
   }
 
-  releaseCanonicalRunLookup(): void {
-    // The prefix owns the canonical lookup; releasing its scratch state is
-    // what the owning graph does on every mutation anyway.
-    this.base.releaseDiffWorkspace();
-  }
-
   *iterateIds(): IterableIterator<EventId> {
     yield* this.base.iterateIds();
-    yield* this.tailIds();
-  }
-
-  *tailIds(): IterableIterator<EventId> {
-    for (let tailIndex = 0; tailIndex < this.tail.count; tailIndex++) {
-      yield this.tail.eventAt(tailIndex).id;
-    }
+    yield* this.tail.iterateIds();
   }
 
   maximumSequenceForReplica(replicaId: string): number | undefined {
-    let maximum = this.base.maximumSequenceForReplica(replicaId);
-    for (const id of this.tailIds()) {
-      const parsed = parseEventId(id);
-      if (
-        parsed?.replicaId === replicaId &&
-        (maximum === undefined || parsed.sequence > maximum)
-      ) {
-        maximum = parsed.sequence;
-      }
+    const baseMaximum = this.base.maximumSequenceForReplica(replicaId);
+    const tailMaximum = this.tail.maximumSequenceForReplica(replicaId);
+    if (baseMaximum === undefined) {
+      return tailMaximum;
     }
-    return maximum;
+    return tailMaximum === undefined
+      ? baseMaximum
+      : Math.max(baseMaximum, tailMaximum);
   }
 }
+
+const indexMaterializedIds = (
+  ids: ReadonlyArray<EventId>,
+): PackedEventIdIndex => {
+  const index = new EventIdRunIndex();
+  for (const id of ids) {
+    index.append(id);
+  }
+  return index.view();
+};
 
 const assertOperationColumnLengths = (
   columns: PackedOperationColumns,

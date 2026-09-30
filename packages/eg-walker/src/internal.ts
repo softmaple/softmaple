@@ -17,10 +17,7 @@ export {
   type FugueOrderStats,
 } from "./engine/internals/fugue-order-index";
 export {
-  itemFromRecord,
   itemsFromRecords,
-  recordFromItem,
-  recordsFromItems,
   sequenceFromRecords,
   type EngineSequenceRecord,
 } from "./engine/sequence-records";

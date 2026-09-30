@@ -27,6 +27,11 @@ interface PackedDecodeColumns extends PackedOperationColumns {
   readonly parentOverrides: ReadonlyArray<ParentOverride>;
 }
 
+interface PackedRunIndexedDecodeColumns extends PackedOperationColumns {
+  readonly idIndex: PackedEventIdIndex;
+  readonly parentOverrides: ReadonlyArray<ParentOverride>;
+}
+
 interface PackedLinearDecodeColumns extends PackedOperationColumns {
   readonly idIndex: PackedEventIdIndex;
 }
@@ -38,22 +43,21 @@ export interface PackedDecodeResult {
 
 export const buildPackedEventGraphBase = (
   columns: PackedDecodeColumns,
-): PackedDecodeResult => buildPackedEventGraphBaseInternal(columns, false);
+): PackedDecodeResult => buildPackedEventGraphBaseInternal(columns);
 
 /**
- * Decode materialized IDs whose ID index was derived from the same validated
- * ID-run column. Parent lookups remain strict; only the redundant per-ID
- * index cross-check is skipped.
+ * Decode a graph whose IDs stay in the validated ID-run index. No per-event
+ * ID string is materialized; parent lookups remain strict.
  */
-export const buildPackedEventGraphBaseFromValidatedIdRuns = (
-  columns: PackedDecodeColumns & { readonly idIndex: PackedEventIdIndex },
-): PackedDecodeResult => buildPackedEventGraphBaseInternal(columns, true);
+export const buildPackedEventGraphBaseFromIdRunIndex = (
+  columns: PackedRunIndexedDecodeColumns,
+): PackedDecodeResult => buildPackedEventGraphBaseInternal(columns);
 
 const buildPackedEventGraphBaseInternal = (
-  columns: PackedDecodeColumns,
-  trustMaterializedIds: boolean,
+  columns: PackedDecodeColumns | PackedRunIndexedDecodeColumns,
 ): PackedDecodeResult => {
-  const count = columns.ids.length;
+  const ids = "ids" in columns ? columns.ids : undefined;
+  const count = ids?.length ?? columns.idIndex!.count;
   if (
     columns.operationIndexes.length !== count ||
     columns.operationLengths.length !== count ||
@@ -62,11 +66,14 @@ const buildPackedEventGraphBaseInternal = (
     throw new Error("Invalid packed event graph: column length mismatch");
   }
 
-  const offsetById =
-    columns.idIndex === undefined ? indexIds(columns.ids) : undefined;
+  const offsetById = columns.idIndex === undefined ? indexIds(ids!) : undefined;
   const idLookup: PackedEventOffsetLookup = columns.idIndex ?? {
     offsetOf: (id) => offsetById!.get(id),
   };
+  const idAt =
+    ids === undefined
+      ? (offset: number): EventId => columns.idIndex!.idAt(offset)!
+      : (offset: number): EventId => ids[offset]!;
   const operationColumns = buildOperationColumns(columns, count);
   const {
     parentStarts,
@@ -75,7 +82,7 @@ const buildPackedEventGraphBaseInternal = (
     childOffsets,
     frontier,
     implicitLinearEdges,
-  } = buildEdges(columns.ids, idLookup, columns.parentOverrides);
+  } = buildEdges(count, idAt, idLookup, columns.parentOverrides);
 
   const commonColumns = {
     operationTypes: operationColumns.operationTypes,
@@ -93,18 +100,17 @@ const buildPackedEventGraphBaseInternal = (
   const base =
     columns.idIndex === undefined
       ? PackedEventGraphBase.create({
-          ids: columns.ids,
+          ids: ids!,
           offsetById: offsetById!,
           ...commonColumns,
         })
-      : trustMaterializedIds
-        ? PackedEventGraphBase.createWithTrustedMaterializedIds({
-            ids: columns.ids,
+      : ids === undefined
+        ? PackedEventGraphBase.create({
             idIndex: columns.idIndex,
             ...commonColumns,
           })
         : PackedEventGraphBase.create({
-            ids: columns.ids,
+            ids,
             idIndex: columns.idIndex,
             ...commonColumns,
           });
@@ -268,7 +274,8 @@ const buildOperationColumns = (
 };
 
 const buildEdges = (
-  ids: ReadonlyArray<EventId>,
+  count: number,
+  idAt: (offset: number) => EventId,
   idIndex: PackedEventOffsetLookup,
   overrides: ReadonlyArray<ParentOverride>,
 ): {
@@ -279,14 +286,13 @@ const buildEdges = (
   readonly frontier: ReadonlySet<EventId>;
   readonly implicitLinearEdges: boolean;
 } => {
-  const count = ids.length;
   if (overrides.length === 0) {
     return {
       parentStarts: new Uint32Array(),
       parentOffsets: new Uint32Array(),
       childStarts: new Uint32Array(),
       childOffsets: new Uint32Array(),
-      frontier: count === 0 ? new Set() : new Set([ids[count - 1]!]),
+      frontier: count === 0 ? new Set() : new Set([idAt(count - 1)]),
       implicitLinearEdges: true,
     };
   }
@@ -329,7 +335,7 @@ const buildEdges = (
   const frontier = new Set<EventId>();
   for (let offset = 0; offset < count; offset++) {
     childStarts[offset + 1] = childStarts[offset]! + childCounts[offset]!;
-    if (childCounts[offset] === 0) frontier.add(ids[offset]!);
+    if (childCounts[offset] === 0) frontier.add(idAt(offset));
   }
   const childOffsets = new Uint32Array(edgeCount);
   // Child counts are dead after the frontier and prefix sums are known. Reuse

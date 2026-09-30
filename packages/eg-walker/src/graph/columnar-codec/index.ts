@@ -51,9 +51,9 @@ import {
   writeParentOverrides,
 } from "./parents";
 import { decodeIds, encodeIdRuns, readIdRuns, writeIdRuns } from "./ids";
-import { LazyIdRunIndex } from "./lazy-id-run-index";
+import { EventIdRunIndex } from "../internals/event-id-run-index";
 import {
-  buildPackedEventGraphBaseFromValidatedIdRuns,
+  buildPackedEventGraphBaseFromIdRunIndex,
   buildPackedLinearEventGraphBaseFromIdIndex,
 } from "./packed-decode";
 
@@ -250,7 +250,7 @@ export class ColumnarEventGraphCodec {
       version,
       "columnar graph version",
     );
-    const idIndex = new LazyIdRunIndex(idRuns, expectedEventCount);
+    const idIndex = EventIdRunIndex.fromRuns(idRuns, expectedEventCount).view();
     const packed =
       parentOverrides.length === 0
         ? buildPackedLinearEventGraphBaseFromIdIndex({
@@ -261,8 +261,7 @@ export class ColumnarEventGraphCodec {
             insertedContent,
             timestamps,
           })
-        : buildPackedEventGraphBaseFromValidatedIdRuns({
-            ids: decodeIds(idRuns),
+        : buildPackedEventGraphBaseFromIdRunIndex({
             idIndex,
             operationRuns: partialOperationRuns,
             operationIndexes,

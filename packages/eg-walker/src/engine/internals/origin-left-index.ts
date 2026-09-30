@@ -1,91 +1,89 @@
-import type { EventId } from "../../types";
-import type { AugmentedCRDTItem } from "./engine-types";
+import type { AugmentedCRDTItem, ItemKey } from "./engine-types";
 
-type OriginLeftRefs = EventId | Set<EventId>;
+type OriginLeftRefs = ItemKey | ItemKey[];
 
 /**
- * Reverse index: `target item id` -> set of item ids whose `originLeft`
- * points at it. Maintained alongside the engine's `itemsById` map so
- * that `RecordSplitter.splitRecordAt` can cheaply rewrite the
- * `originLeft` references when it carves a placeholder in two. Without
- * this rewrite the YATA integration scan would see siblings anchored
- * to the same logical boundary as if they had different origins, which
- * breaks partial replay convergence.
+ * Reverse index: `target item` -> items whose `originLeft` points at it.
+ * Maintained alongside the engine's item table so that
+ * `RecordSplitter.splitRecordAt` can cheaply rewrite the `originLeft`
+ * references when it carves a record in two. Without this rewrite the YATA
+ * integration scan would see siblings anchored to the same logical boundary
+ * as if they had different origins, which breaks partial replay convergence.
  *
  * The index also lets `applyInsert`'s typed-run coalescing branch
  * cheaply ask "does anyone anchor on this record's right boundary?":
  * extending such a record would shift the boundary that those
  * neighbours chose as their `originLeft`, so the coalescing path must
  * back off and place a fresh item instead.
+ *
+ * Item keys are dense, so the index is an array indexed by target key.
  */
 export class OriginLeftIndex {
-  private readonly refs = new Map<EventId, OriginLeftRefs>();
+  private refs: Array<OriginLeftRefs | undefined> = [];
 
   clear(): void {
-    this.refs.clear();
+    this.refs = [];
   }
 
-  track(itemId: EventId, originLeft: EventId | null): void {
+  track(itemId: ItemKey, originLeft: ItemKey | null): void {
     if (originLeft === null) {
       return;
     }
-    const refs = this.refs.get(originLeft);
+    const refs = this.refs[originLeft];
     if (refs === undefined) {
-      this.refs.set(originLeft, itemId);
+      this.refs[originLeft] = itemId;
       return;
     }
-    if (typeof refs === "string") {
+    if (typeof refs === "number") {
       if (refs !== itemId) {
-        this.refs.set(originLeft, new Set([refs, itemId]));
+        this.refs[originLeft] = [refs, itemId];
       }
       return;
     }
-    refs.add(itemId);
+    if (!refs.includes(itemId)) {
+      refs.push(itemId);
+    }
   }
 
-  has(itemId: EventId): boolean {
-    const refs = this.refs.get(itemId);
-    return refs !== undefined && (typeof refs === "string" || refs.size > 0);
+  has(itemId: ItemKey): boolean {
+    const refs = this.refs[itemId];
+    return refs !== undefined && (typeof refs === "number" || refs.length > 0);
   }
 
   rewriteReferences(
-    oldOriginLeft: EventId,
-    newOriginLeft: EventId,
-    itemsById: ReadonlyMap<EventId, AugmentedCRDTItem>,
+    oldOriginLeft: ItemKey,
+    newOriginLeft: ItemKey,
+    itemAt: (itemId: ItemKey) => AugmentedCRDTItem | undefined,
   ): void {
-    const refs = this.refs.get(oldOriginLeft);
+    const refs = this.refs[oldOriginLeft];
     if (refs === undefined) {
       return;
     }
-    this.refs.delete(oldOriginLeft);
-    const merged = this.refs.get(newOriginLeft);
-    const next = new Set<EventId>(
+    this.refs[oldOriginLeft] = undefined;
+    const merged = this.refs[newOriginLeft];
+    const next: ItemKey[] =
       merged === undefined
         ? []
-        : typeof merged === "string"
+        : typeof merged === "number"
           ? [merged]
-          : merged,
-    );
-    for (const itemId of refsToIterable(refs)) {
-      const item = itemsById.get(itemId);
+          : merged.slice();
+    const moved = typeof refs === "number" ? [refs] : refs;
+    for (const itemId of moved) {
+      const item = itemAt(itemId);
       if (!item || item.originLeft !== oldOriginLeft) {
         continue;
       }
       item.originLeft = newOriginLeft;
-      next.add(itemId);
-    }
-    if (next.size === 1) {
-      const [only] = next;
-      if (only !== undefined) {
-        this.refs.set(newOriginLeft, only);
+      if (!next.includes(itemId)) {
+        next.push(itemId);
       }
+    }
+    if (next.length === 1) {
+      this.refs[newOriginLeft] = next[0]!;
       return;
     }
-    if (next.size > 1) {
-      this.refs.set(newOriginLeft, next);
+    if (next.length > 1) {
+      this.refs[newOriginLeft] = next;
     }
   }
 }
-
-const refsToIterable = (refs: OriginLeftRefs): Iterable<EventId> =>
-  typeof refs === "string" ? [refs] : refs;

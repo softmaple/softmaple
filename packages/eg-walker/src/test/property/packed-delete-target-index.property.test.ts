@@ -15,6 +15,15 @@ const packedDeleteTargetInstructionArb: fc.Arbitrary<PackedDeleteTargetInstructi
     kind: fc.constantFrom("empty" as const, "item" as const, "run" as const),
   });
 
+const RUN_AGENT = 3;
+const TARGET_ITEM_BASE = 1;
+const RESOLVED_ITEM_BASE = 1_000_000;
+const DELETE_EVENT_BASE = 2_000_000;
+const formatItem = (itemId: number): string =>
+  itemId >= RESOLVED_ITEM_BASE
+    ? `resolved:${itemId - RESOLVED_ITEM_BASE}`
+    : `target-item:${itemId - TARGET_ITEM_BASE}`;
+
 describe("property: packed delete-target indexing", () => {
   it("materializes out-of-order numeric keys in replay order", () => {
     fc.assert(
@@ -46,18 +55,15 @@ describe("property: packed delete-target indexing", () => {
               continue;
             }
             if (instruction.kind === "run") {
-              index.recordPackedRunEvent(
-                orderIndex,
-                `target-event:${relativeIndex}`,
-              );
+              index.recordPackedRunEvent(orderIndex, RUN_AGENT, relativeIndex);
               continue;
             }
             const group = index.beginRecord();
-            index.appendItem(group, `target-item:${relativeIndex}`);
+            index.appendItem(group, TARGET_ITEM_BASE + relativeIndex);
             index.commitPackedRecord(orderIndex, group);
           }
 
-          expect(index.entries()).toEqual([]);
+          expect(index.entries(formatItem)).toEqual([]);
           for (
             let relativeIndex = 0;
             relativeIndex < instructions.length;
@@ -65,25 +71,29 @@ describe("property: packed delete-target indexing", () => {
           ) {
             index.materializeRunEventTargetsOfPackedOrder(
               startOrderIndex + relativeIndex,
-              (eventId) => `${eventId}:resolved`,
+              (agent, sequence) => {
+                expect(agent).toBe(RUN_AGENT);
+                return RESOLVED_ITEM_BASE + sequence;
+              },
             );
           }
           index.materializePackedRecords(
-            (orderIndex) => `delete:${orderIndex}`,
+            (orderIndex) => DELETE_EVENT_BASE + orderIndex,
           );
 
           expect(index.hasPackedRecords()).toBe(false);
           expect(index.hasPackedOrderRange()).toBe(false);
-          expect(index.entries()).toEqual(
+          expect(index.entries(formatItem)).toEqual(
             instructions.flatMap((instruction, relativeIndex) =>
               instruction.kind === "empty"
                 ? []
                 : [
                     {
-                      deleteEventId: `delete:${startOrderIndex + relativeIndex}`,
+                      deleteEvent:
+                        DELETE_EVENT_BASE + startOrderIndex + relativeIndex,
                       targetIds: [
                         instruction.kind === "run"
-                          ? `target-event:${relativeIndex}:resolved`
+                          ? `resolved:${relativeIndex}`
                           : `target-item:${relativeIndex}`,
                       ],
                     },

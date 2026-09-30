@@ -2,7 +2,6 @@ import type {
   EventGraph,
   PackedReplayPlanningView,
 } from "../graph/event-graph";
-import type { PackedCanonicalIdRun } from "../graph/internals/packed-event-graph-base";
 import type { EventId, GraphEvent } from "../types";
 import type { ExternalOperation } from "../types";
 import type {
@@ -89,11 +88,17 @@ export class PackedCriticalReplayPlan {
     return this.eventIdAtKnownOffset(offset);
   }
 
-  /** @internal Canonical ID interval retained by the packed EGW3 index. */
-  canonicalIdRunAtKnownOffset(
-    offset: number,
-  ): PackedCanonicalIdRun | undefined {
-    return this.graph.canonicalIdRunAt?.(offset);
+  /**
+   * @internal Agent of the event at `offset`, or `-1` when its ID is not a
+   * canonical `replicaId:sequence`. Offsets are the graph's local versions.
+   */
+  agentAtKnownOffset(offset: number): number {
+    return this.graph.agentAt(offset);
+  }
+
+  /** @internal Sequence of the event at `offset`. */
+  sequenceAtKnownOffset(offset: number): number {
+    return this.graph.sequenceAt(offset);
   }
 
   /** @internal `offset` must originate from this plan or one of its diffs. */
@@ -230,41 +235,33 @@ export class PackedCriticalReplayPlan {
     return Object.freeze(ids);
   }
 
-  parentsEqualVersionAt(
-    orderIndex: number,
-    version: ReadonlySet<EventId>,
-  ): boolean {
-    return this.parentsEqualVersionAtKnownOffset(
-      this.eventOffsetAt(orderIndex),
-      version,
-    );
-  }
-
-  /** @internal `eventOffset` must originate from this plan. */
-  parentsEqualVersionAtKnownOffset(
+  /** @internal Whether an event's parents are exactly `version`'s offsets. */
+  parentsEqualLocalVersionsAtKnownOffset(
     eventOffset: number,
-    version: ReadonlySet<EventId>,
+    version: ReadonlyArray<number>,
   ): boolean {
     const parentCount = this.graph.parentCountAt(eventOffset);
-    if (parentCount !== version.size) {
+    if (parentCount !== version.length) {
       return false;
     }
     for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
       const parentOffset = this.graph.parentOffsetAt(eventOffset, parentIndex);
-      if (
-        parentOffset === undefined ||
-        !version.has(this.eventIdAtOffset(parentOffset))
-      ) {
+      if (parentOffset === undefined || !version.includes(parentOffset)) {
         return false;
       }
     }
     return true;
   }
 
-  hasSingleParentOffsetAt(orderIndex: number, parentOffset: number): boolean {
-    return this.hasSingleParentAtKnownOffset(
-      this.eventOffsetAt(orderIndex),
-      parentOffset,
+  /** @internal `targetEventOffset` must originate from this plan. */
+  transitionRangesFromLocalVersionsToKnownOffset(
+    currentVersion: ReadonlyArray<number>,
+    targetEventOffset: number,
+  ): PackedLocalVersionTransition {
+    return this.graph.diffLocalVersionsToParentRanges(
+      currentVersion,
+      targetEventOffset,
+      this.rankByOffset,
     );
   }
 
@@ -289,24 +286,9 @@ export class PackedCriticalReplayPlan {
     return this.rankByOffset[offset]!;
   }
 
-  isInsertAtOffset(offset: number): boolean {
-    this.assertEventOffset(offset);
-    return this.isInsertAtKnownOffset(offset);
-  }
-
   /** @internal `offset` must originate from this plan or one of its diffs. */
   isInsertAtKnownOffset(offset: number): boolean {
     return this.graph.isInsertAt(offset);
-  }
-
-  transitionFromVersion(
-    currentVersion: ReadonlySet<EventId>,
-    targetOrderIndex: number,
-  ): PackedOffsetTransition {
-    return this.transitionFromVersionToKnownOffset(
-      currentVersion,
-      this.eventOffsetAt(targetOrderIndex),
-    );
   }
 
   /** @internal `targetEventOffset` must originate from this plan. */
@@ -318,16 +300,6 @@ export class PackedCriticalReplayPlan {
       currentVersion,
       targetEventOffset,
       this.rankByOffset,
-    );
-  }
-
-  transitionRangesFromVersion(
-    currentVersion: ReadonlySet<EventId>,
-    targetOrderIndex: number,
-  ): PackedLocalVersionTransition {
-    return this.transitionRangesFromVersionToKnownOffset(
-      currentVersion,
-      this.eventOffsetAt(targetOrderIndex),
     );
   }
 
@@ -343,17 +315,6 @@ export class PackedCriticalReplayPlan {
     );
   }
 
-  transitionFromOffset(
-    currentOffset: number,
-    targetOrderIndex: number,
-  ): PackedOffsetTransition {
-    this.assertEventOffset(currentOffset);
-    return this.transitionBetweenKnownOffsets(
-      currentOffset,
-      this.eventOffsetAt(targetOrderIndex),
-    );
-  }
-
   /** @internal Both offsets must originate from this plan. */
   transitionBetweenKnownOffsets(
     currentOffset: number,
@@ -363,17 +324,6 @@ export class PackedCriticalReplayPlan {
       currentOffset,
       targetEventOffset,
       this.rankByOffset,
-    );
-  }
-
-  transitionRangesFromOffset(
-    currentOffset: number,
-    targetOrderIndex: number,
-  ): PackedLocalVersionTransition {
-    this.assertEventOffset(currentOffset);
-    return this.transitionRangesBetweenKnownOffsets(
-      currentOffset,
-      this.eventOffsetAt(targetOrderIndex),
     );
   }
 

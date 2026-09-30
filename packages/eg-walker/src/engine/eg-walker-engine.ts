@@ -1,7 +1,8 @@
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
-import { compareEventIds, parseEventId } from "../graph/event-id";
+import { compareEventIds } from "../graph/event-id";
 import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
+import type { LocalVersionTransition } from "../graph/internals/ranked-diff-versions";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
   containsUtf16SurrogateCodeUnit,
@@ -20,13 +21,18 @@ import {
   type DeleteHandlerDeps,
 } from "./internals/delete-handler";
 import {
+  CUSTOM_EVENT_AGENT,
+  formatPlaceholderId,
+  ItemTable,
+  PLACEHOLDER_AGENT,
   PLACEHOLDER_EVENT_ID,
-  PLACEHOLDER_ID_PREFIX,
+  placeholderSerialOf,
   type AugmentedCRDTItem,
   type EngineStats,
   type GeneratedDocument,
   type GenerateOptions,
   type IncrementalApplyResult,
+  type ItemKey,
 } from "./internals/engine-types";
 import { EventItemIndex } from "./internals/event-item-index";
 import { FugueOrderIndex } from "./internals/fugue-order-index";
@@ -47,11 +53,11 @@ import {
 import { RecordSplitter } from "./internals/record-splitter";
 import { SegmentedPlaceholderState } from "./internals/segmented-placeholder";
 import {
-  itemsFromCompactRecords,
-  itemsFromRecords,
-  recordFromItem,
+  ItemIdCodec,
+  recordsFromCompactRecords,
   type CompactEngineSequenceRecords,
   type EngineSequenceRecord,
+  type EventIdSource,
 } from "./internals/sequence-records";
 import type { PackedCriticalReplayPlan } from "./packed-critical-replay-plan";
 
@@ -94,25 +100,24 @@ export interface EngineRecoveryState {
 // rank lookup and rope edit dominates the shallow final rope rebuild.
 const DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS = 64;
 
-const versionsEqual = (
-  left: ReadonlySet<EventId>,
-  right: ReadonlySet<EventId>,
+/** Whether two versions given as local versions hold the same events. */
+const localVersionsEqual = (
+  left: ReadonlyArray<number>,
+  right: ReadonlyArray<number>,
 ): boolean => {
-  if (left.size !== right.size) {
+  if (left.length !== right.length) {
     return false;
   }
-  for (const id of left) {
-    if (!right.has(id)) {
+  if (left.length === 1) {
+    return left[0] === right[0];
+  }
+  for (const localVersion of left) {
+    if (!right.includes(localVersion)) {
       return false;
     }
   }
   return true;
 };
-
-const ascendingNumber = (left: number, right: number): number => left - right;
-const descendingNumber = (left: number, right: number): number => right - left;
-const descendingEventId = (left: EventId, right: EventId): number =>
-  compareEventIds(right, left);
 
 /**
  * Direct implementation of the Eg-walker replay algorithm from Appendix B.
@@ -122,13 +127,26 @@ const descendingEventId = (left: EventId, right: EventId): number =>
  * and effect-state, walks causal history, and then can be discarded.
  */
 export class EgWalkerEngine {
-  private readonly eventOrder = new Map<EventId, number>();
-  private readonly eventIdsByOrder: EventId[] = [];
+  /** Replay order of each event this engine replays, by local version. */
+  private readonly eventOrder = new Map<number, number>();
+  private readonly eventsByOrder: number[] = [];
   private eventIndexesComplete = false;
   private processedEventCount = 0;
   private graph = new EventGraph();
-  private readonly eventItems = new EventItemIndex();
-  private readonly itemsById = new Map<EventId, AugmentedCRDTItem>();
+  private readonly eventIdentity = {
+    agentAt: (localVersion: number): number => this.graph.agentAt(localVersion),
+    sequenceAt: (localVersion: number): number =>
+      this.graph.sequenceAt(localVersion),
+  };
+  private readonly eventIdSource: EventIdSource = {
+    agentTable: () => this.graph.agentTable,
+    localVersionOf: (id) => this.graph.localVersionOf(id),
+    idAtLocalVersion: (localVersion) =>
+      this.graph.idAtLocalVersion(localVersion),
+  };
+  private readonly codec = new ItemIdCodec(this.eventIdSource);
+  private readonly eventItems = new EventItemIndex(this.eventIdentity);
+  private readonly items = new ItemTable();
   private readonly originLeftIndex = new OriginLeftIndex();
   private readonly deleteTargets = new DeleteTargetIndex();
   private readonly segmentedPlaceholders = new Set<
@@ -155,15 +173,17 @@ export class EgWalkerEngine {
   );
   private readonly fugueOrder = new FugueOrderIndex(
     this.sequence,
-    this.itemsById,
+    (itemId) => this.items.at(itemId),
+    (item) => this.codec.eventIdOf(item),
   );
   private readonly recordSplitter = new RecordSplitter({
     sequence: this.sequence,
-    itemsById: this.itemsById,
+    items: this.items,
+    events: this.eventIdentity,
     eventItems: this.eventItems,
     originLeftIndex: this.originLeftIndex,
     deleteTargets: this.deleteTargets,
-    nextPlaceholderId: () => this.nextPlaceholderId(),
+    nextPlaceholderSerial: () => this.placeholderCounter++,
     onRecordSplit: (left, right) => {
       if (!this.useLinearIntegrationOracle) {
         this.fugueOrder.handleRecordSplit(left, right);
@@ -171,7 +191,8 @@ export class EgWalkerEngine {
     },
   });
   private readonly pendingInsert = new PendingInsertBuffer();
-  private currentVersion = new Set<EventId>();
+  /** The engine's current version, as local versions. */
+  private currentVersion: number[] = [];
   private resultingText = PersistentUtf16Rope.from("");
   private retreatCount = 0;
   private advanceCount = 0;
@@ -198,7 +219,24 @@ export class EgWalkerEngine {
     options: GenerateOptions = {},
   ): GeneratedDocument {
     this.reset(events, initialText, options);
+    const graph = this.graph;
+    const localVersions = events.map((event) =>
+      this.requireLocalVersion(event.id),
+    );
+    return this.runGeneration(
+      localVersions,
+      (index) => events[index]!.operation,
+      options,
+      graph,
+    );
+  }
 
+  private runGeneration(
+    localVersions: ReadonlyArray<number>,
+    operationAt: (index: number) => ExternalOperation,
+    options: GenerateOptions,
+    graph: EventGraph,
+  ): GeneratedDocument {
     const collectTransformedOperations =
       options.collectTransformedOperations !== false;
     // Empty-seed cold replay always benefits from a single final materialize.
@@ -208,7 +246,7 @@ export class EgWalkerEngine {
     this.deferTextMaterialization =
       !collectTransformedOperations &&
       (this.resultingText.length === 0 ||
-        events.length >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS);
+        localVersions.length >= DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS);
     if (this.deferTextMaterialization) {
       this.enableSegmentedPlaceholder();
     }
@@ -216,10 +254,11 @@ export class EgWalkerEngine {
       collectTransformedOperations ? [] : undefined;
 
     let eventIndex = 0;
-    while (eventIndex < events.length) {
-      const event = events[eventIndex]!;
+    while (eventIndex < localVersions.length) {
+      const localVersion = localVersions[eventIndex]!;
       const transformed = this.processEvent(
-        event,
+        localVersion,
+        operationAt(eventIndex),
         collectTransformedOperations,
       );
       transformedOperations?.push(...transformed);
@@ -229,7 +268,13 @@ export class EgWalkerEngine {
         !collectTransformedOperations &&
         options.integrationMode !== "linear-oracle"
       ) {
-        eventIndex = this.extendObjectInsertRun(events, eventIndex, event);
+        eventIndex = this.extendObjectInsertRun(
+          localVersions,
+          operationAt,
+          eventIndex,
+          localVersion,
+          graph,
+        );
       }
     }
 
@@ -304,7 +349,7 @@ export class EgWalkerEngine {
     }
 
     if (currentOffset !== null) {
-      this.currentVersion = new Set([plan.eventIdAtOffset(currentOffset)]);
+      this.currentVersion = [currentOffset];
     }
     return this.finishGeneration(undefined);
   }
@@ -319,15 +364,15 @@ export class EgWalkerEngine {
     const end = plan.sectionEndAt(endSectionIndex - 1);
     const materializeDeleteKeys = this.deleteTargets.hasPackedOrderRange();
     this.eventOrder.clear();
-    this.eventIdsByOrder.length = 0;
+    this.eventsByOrder.length = 0;
     for (let orderIndex = start; orderIndex < end; orderIndex++) {
+      // Packed offsets are the graph's local versions.
       const eventOffset = plan.eventOffsetAt(orderIndex);
-      const eventId = plan.eventIdAtKnownOffset(eventOffset);
       if (materializeDeleteKeys) {
-        this.deleteTargets.materializePackedRecord(orderIndex, eventId);
+        this.deleteTargets.materializePackedRecord(orderIndex, eventOffset);
       }
-      this.eventOrder.set(eventId, orderIndex - start);
-      this.eventIdsByOrder.push(eventId);
+      this.eventOrder.set(eventOffset, orderIndex - start);
+      this.eventsByOrder.push(eventOffset);
     }
     if (materializeDeleteKeys) {
       if (this.deleteTargets.hasPackedRecords()) {
@@ -374,7 +419,7 @@ export class EgWalkerEngine {
         eventsProcessed: this.processedEventCount,
         nonConflictingRunCount: this.nonConflictingRunCount,
         fullReplayCount: this.fullReplayCount,
-        sequenceRecordCount: this.itemsById.size,
+        sequenceRecordCount: this.items.size,
         peakSequenceRecordCount: this.peakSequenceRecordCount,
         integrationProbeCount: this.integrationProbeCount,
         fugueComparisons: fugueStats.comparisons,
@@ -409,13 +454,14 @@ export class EgWalkerEngine {
       deleteTargets: state.deleteTargets,
     });
     engine.eventOrder.clear();
-    engine.eventIdsByOrder.length = 0;
+    engine.eventsByOrder.length = 0;
     state.eventOrder.forEach((eventId, index) => {
-      if (!graph.hasEvent(eventId)) {
+      const localVersion = graph.localVersionOf(eventId);
+      if (localVersion < 0) {
         throw new Error(`Recovery state references missing event ${eventId}`);
       }
-      engine.eventOrder.set(eventId, index);
-      engine.eventIdsByOrder.push(eventId);
+      engine.eventOrder.set(localVersion, index);
+      engine.eventsByOrder.push(localVersion);
     });
     engine.eventIndexesComplete = state.eventIndexesComplete;
     engine.restoreStats(state.stats);
@@ -429,8 +475,9 @@ export class EgWalkerEngine {
    */
   applyEvent(event: GraphEvent, graph: EventGraph): IncrementalApplyResult {
     this.prepareIncrementalGraph(graph);
-    this.registerIncrementalEvent(event);
-    const transformed = this.processEvent(event, true);
+    const localVersion = this.requireLocalVersion(event.id);
+    this.registerIncrementalEvent(localVersion);
+    const transformed = this.processEvent(localVersion, event.operation, true);
     // {@link EgWalkerReplica.applyRemoteEvent} reads the returned `text`
     // (and then `getText()`) immediately after this call, so the
     // incremental return value must reflect the post-event document. This
@@ -455,8 +502,9 @@ export class EgWalkerEngine {
   ): PersistentUtf16Rope {
     this.prepareIncrementalGraph(graph);
     for (const event of events) {
-      this.registerIncrementalEvent(event);
-      this.processEvent(event, false);
+      const localVersion = this.requireLocalVersion(event.id);
+      this.registerIncrementalEvent(localVersion);
+      this.processEvent(localVersion, event.operation, false);
     }
     this.flushPendingInsert();
     return this.resultingText;
@@ -467,12 +515,20 @@ export class EgWalkerEngine {
     this.graph = graph;
   }
 
-  private registerIncrementalEvent(event: GraphEvent): void {
-    if (this.eventIndexesComplete && !this.eventOrder.has(event.id)) {
+  private registerIncrementalEvent(localVersion: number): void {
+    if (this.eventIndexesComplete && !this.eventOrder.has(localVersion)) {
       const order = this.eventOrder.size;
-      this.eventOrder.set(event.id, order);
-      this.eventIdsByOrder.push(event.id);
+      this.eventOrder.set(localVersion, order);
+      this.eventsByOrder.push(localVersion);
     }
+  }
+
+  private requireLocalVersion(eventId: EventId): number {
+    const localVersion = this.graph.localVersionOf(eventId);
+    if (localVersion < 0) {
+      throw new Error(`Event ${eventId} is not in the replay graph`);
+    }
+    return localVersion;
   }
 
   getText(): string {
@@ -493,7 +549,11 @@ export class EgWalkerEngine {
   }
 
   getCurrentVersion(): ReadonlySet<EventId> {
-    return this.currentVersion;
+    return new Set(
+      this.currentVersion.map((localVersion) =>
+        this.graph.idAtLocalVersion(localVersion),
+      ),
+    );
   }
 
   /** Move the transient prepare view without applying a new event. */
@@ -501,12 +561,22 @@ export class EgWalkerEngine {
     this.materializePackedDeleteTargets();
     this.flushPendingInsert();
     this.graph = graph;
-    const { retreat, advance } = this.diffVersions(
-      this.currentVersion,
-      version,
-    );
+    const target = this.localVersionsOf(version);
+    const { retreat, advance } = this.diffVersions(this.currentVersion, target);
     this.applyObjectPrepareTransition(retreat, advance);
-    this.currentVersion = new Set(version);
+    this.currentVersion = target;
+  }
+
+  /** Local versions of a version's events; events not in the graph drop. */
+  private localVersionsOf(version: Iterable<EventId>): number[] {
+    const localVersions: number[] = [];
+    for (const eventId of version) {
+      const localVersion = this.graph.localVersionOf(eventId);
+      if (localVersion >= 0 && !localVersions.includes(localVersion)) {
+        localVersions.push(localVersion);
+      }
+    }
+    return localVersions;
   }
 
   getPrepareLength(): number {
@@ -600,7 +670,7 @@ export class EgWalkerEngine {
       eventsProcessed: this.processedEventCount,
       nonConflictingRunCount: this.nonConflictingRunCount,
       fullReplayCount: this.fullReplayCount,
-      sequenceRecordCount: this.itemsById.size,
+      sequenceRecordCount: this.items.size,
       peakSequenceRecordCount: this.peakSequenceRecordCount,
       integrationProbeCount: this.integrationProbeCount,
       fugueComparisons: fugueStats.comparisons,
@@ -641,8 +711,10 @@ export class EgWalkerEngine {
     this.flushPendingInsert();
     this.materializeSnapshotDeleteTargets();
     const items = this.sequence.toArray();
+    const itemAt = (itemId: ItemKey): AugmentedCRDTItem | undefined =>
+      this.items.at(itemId);
     if (this.segmentedPlaceholders.size === 0) {
-      return items.map(recordFromItem);
+      return items.map((item) => this.codec.recordFromItem(item, itemAt));
     }
 
     const rightBoundaryAliases = new Map<EventId, EventId>();
@@ -657,7 +729,7 @@ export class EgWalkerEngine {
       );
       const rightmost = segments.at(-1);
       if (rightmost !== undefined) {
-        rightBoundaryAliases.set(item.id, rightmost.id);
+        rightBoundaryAliases.set(this.codec.itemIdOf(item), rightmost.id);
       }
     }
 
@@ -665,7 +737,7 @@ export class EgWalkerEngine {
     for (const item of items) {
       const placeholder = item.placeholder;
       if (placeholder === undefined) {
-        const record = recordFromItem(item);
+        const record = this.codec.recordFromItem(item, itemAt);
         const originLeft =
           record.originLeft === null
             ? null
@@ -703,11 +775,17 @@ export class EgWalkerEngine {
   getDeleteTargetRecords(): DeleteTargetRecord[] {
     this.flushPendingInsert();
     this.materializeSnapshotDeleteTargets();
-    const records = this.deleteTargets.entries((target) =>
-      target.state
-        .logicalSegmentsInRange(target.start, target.end)
-        .map(({ id }) => id),
+    const entries = this.deleteTargets.entries(
+      (itemId) => this.codec.itemIdOf(this.items.require(itemId)),
+      (target) =>
+        target.state
+          .logicalSegmentsInRange(target.start, target.end)
+          .map(({ id }) => id),
     );
+    const records = entries.map((entry) => ({
+      deleteEventId: this.graph.idAtLocalVersion(entry.deleteEvent),
+      targetIds: entry.targetIds,
+    }));
     if (!records.some((record) => record.targetIds.length > 1)) {
       return records;
     }
@@ -717,7 +795,7 @@ export class EgWalkerEngine {
     this.sequence.forEach((item) => {
       const placeholder = item.placeholder;
       if (placeholder === undefined) {
-        order.set(item.id, rank++);
+        order.set(this.codec.itemIdOf(item), rank++);
         return;
       }
       for (const segment of placeholder.state.logicalSegmentsInRange(
@@ -745,7 +823,7 @@ export class EgWalkerEngine {
       return;
     }
     this.deleteTargets.materializeRunEventTargets(
-      (eventId) => this.resolveRunDeleteTargetItem(eventId).id,
+      (agent, sequence) => this.resolveRunDeleteTargetItem(agent, sequence).id,
     );
     this.samplePeakSequenceRecordCount();
   }
@@ -758,8 +836,9 @@ export class EgWalkerEngine {
     if (plan === null) {
       throw new Error("Packed delete targets have no replay plan");
     }
+    // Packed offsets are the graph's local versions.
     this.deleteTargets.materializePackedRecords((orderIndex) =>
-      plan.eventIdAt(orderIndex),
+      plan.eventOffsetAt(orderIndex),
     );
     if (this.deleteTargets.hasPackedRecords()) {
       throw new Error("Packed delete target materialization is incomplete");
@@ -775,33 +854,35 @@ export class EgWalkerEngine {
   captureRecoveryState(): EngineRecoveryState {
     this.flushPendingInsert();
     return {
-      currentVersion: new Set(this.currentVersion),
+      currentVersion: this.getCurrentVersion(),
       textBuffer: this.resultingText,
       sequenceRecords: this.getSequenceRecords(),
       deleteTargets: this.getDeleteTargetRecords(),
-      eventOrder: this.eventIdsByOrder.slice(),
+      eventOrder: this.eventsByOrder.map((localVersion) =>
+        this.graph.idAtLocalVersion(localVersion),
+      ),
       eventIndexesComplete: this.eventIndexesComplete,
       stats: this.getStats(),
     };
   }
 
   private restoreSnapshotState(state: EngineSnapshotState): void {
-    const items = state.compactSequenceRecords
-      ? itemsFromCompactRecords(state.compactSequenceRecords)
-      : itemsFromRecords(state.sequenceRecords ?? []);
-
     this.eventOrder.clear();
-    this.eventIdsByOrder.length = 0;
+    this.eventsByOrder.length = 0;
     this.eventIndexesComplete = false;
     this.graph = state.graph;
     this.eventItems.clear();
     this.deleteTargets.clear();
     this.segmentedPlaceholders.clear();
-    this.itemsById.clear();
+    this.items.clear();
     this.originLeftIndex.clear();
     this.fugueOrder.clear();
+    const records = state.compactSequenceRecords
+      ? recordsFromCompactRecords(state.compactSequenceRecords)
+      : (state.sequenceRecords ?? []);
+    const items = this.codec.itemsFromRecords(records, this.items);
     this.sequence.resetFromRecords(items);
-    this.currentVersion = new Set(state.currentVersion);
+    this.currentVersion = this.localVersionsOf(state.currentVersion);
     this.resultingText =
       state.textBuffer ?? PersistentUtf16Rope.from(state.text);
     this.prepareViewMayContainSurrogatePairs =
@@ -817,31 +898,56 @@ export class EgWalkerEngine {
     this.nonConflictingRunCount = 0;
     this.fullReplayCount = 0;
     const graphFrontier = state.graph.getFrontier();
-    this.processedEventCount = versionsEqual(this.currentVersion, graphFrontier)
+    this.processedEventCount = versionSetsEqual(
+      state.currentVersion,
+      graphFrontier,
+    )
       ? state.graph.getEventCount()
-      : state.graph.expandVersion(this.currentVersion).size;
+      : state.graph.expandVersion(state.currentVersion).size;
     this.peakSequenceRecordCount = items.length;
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle = false;
     this.placeholderCounter = inferNextPlaceholderCounter(items);
 
-    for (const item of items) {
-      this.itemsById.set(item.id, item);
+    items.forEach((item, index) => {
+      this.items.add(item);
       this.originLeftIndex.track(item.id, item.originLeft);
-      this.trackEventItems(item);
-    }
+      this.trackEventItems(item, records[index]!.eventId);
+    });
     this.fugueOrder.rebuild(items);
 
     const deleteTargets = state.compactDeleteTargets
       ? iterateCompactDeleteTargets(state.compactDeleteTargets)
       : (state.deleteTargets ?? []);
+    const keyByItemId = new Map<EventId, ItemKey>();
+    records.forEach((record, index) => {
+      keyByItemId.set(record.id, items[index]!.id);
+    });
     for (const target of deleteTargets) {
-      this.deleteTargets.record(target.deleteEventId, target.targetIds);
+      const deleteEvent = this.graph.localVersionOf(target.deleteEventId);
+      if (deleteEvent < 0) {
+        throw new Error(
+          `Delete target record references missing event ${target.deleteEventId}`,
+        );
+      }
+      this.deleteTargets.record(
+        deleteEvent,
+        target.targetIds.map((itemId) => {
+          const key = keyByItemId.get(itemId);
+          if (key === undefined) {
+            throw new Error(
+              `Delete target ${target.deleteEventId} references unknown item ${itemId}`,
+            );
+          }
+          return key;
+        }),
+      );
     }
   }
 
   private processEvent(
-    event: GraphEvent,
+    localVersion: number,
+    operation: ExternalOperation,
     collectTransformedOperations: boolean,
   ): ReadonlyArray<ExternalOperation> {
     // Section 3.4 "internal-document" fast path.
@@ -857,9 +963,16 @@ export class EgWalkerEngine {
     // Concurrent / divergent events still fall through to the full path
     // below, which retreats overlapping inserts/deletes back to the
     // event's prepare-view and re-advances after applying.
-    if (this.isNonConflictingRun(event)) {
-      const transformed = this.apply(event, collectTransformedOperations);
-      this.currentVersion = new Set([event.id]);
+    const parents = this.parentScratch;
+    parents.length = 0;
+    this.graph.forEachParentLocalVersion(localVersion, this.pushParent);
+    if (localVersionsEqual(parents, this.currentVersion)) {
+      const transformed = this.apply(
+        localVersion,
+        operation,
+        collectTransformedOperations,
+      );
+      this.currentVersion = [localVersion];
       this.nonConflictingRunCount++;
       this.processedEventCount++;
       this.samplePeakSequenceRecordCount();
@@ -868,18 +981,27 @@ export class EgWalkerEngine {
 
     const { retreat, advance } = this.diffVersions(
       this.currentVersion,
-      event.parentVersion,
+      parents.slice(),
     );
 
     this.applyObjectPrepareTransition(retreat, advance);
 
-    const transformed = this.apply(event, collectTransformedOperations);
-    this.currentVersion = new Set([event.id]);
+    const transformed = this.apply(
+      localVersion,
+      operation,
+      collectTransformedOperations,
+    );
+    this.currentVersion = [localVersion];
     this.fullReplayCount++;
     this.processedEventCount++;
     this.samplePeakSequenceRecordCount();
     return transformed;
   }
+
+  private readonly parentScratch: number[] = [];
+  private readonly pushParent = (parent: number): void => {
+    this.parentScratch.push(parent);
+  };
 
   private processPackedEvent(
     plan: PackedCriticalReplayPlan,
@@ -890,7 +1012,7 @@ export class EgWalkerEngine {
   ): number {
     const nonConflicting =
       currentOffset === null
-        ? plan.parentsEqualVersionAtKnownOffset(
+        ? plan.parentsEqualLocalVersionsAtKnownOffset(
             eventOffset,
             this.currentVersion,
           )
@@ -899,7 +1021,7 @@ export class EgWalkerEngine {
     if (!nonConflicting) {
       const transition =
         currentOffset === null
-          ? plan.transitionRangesFromVersionToKnownOffset(
+          ? plan.transitionRangesFromLocalVersionsToKnownOffset(
               this.currentVersion,
               eventOffset,
             )
@@ -938,35 +1060,40 @@ export class EgWalkerEngine {
    * typed-run spans identical to eager per-event records.
    */
   private extendObjectInsertRun(
-    events: ReadonlyArray<GraphEvent>,
+    localVersions: ReadonlyArray<number>,
+    operationAt: (index: number) => ExternalOperation,
     startEventIndex: number,
-    currentEvent: GraphEvent,
+    currentLocalVersion: number,
+    graph: EventGraph,
   ): number {
     const tail = this.objectInsertTail;
     if (
       tail === null ||
       typeof tail.content !== "string" ||
-      tail.run === null ||
+      !tail.run ||
       tail.originRight !== null ||
       !this.sequence.isLast(tail)
     ) {
       return startEventIndex;
     }
 
-    const run = tail.run;
-    const firstSequence = run.startSequence + tail.content.length;
+    const firstSequence = tail.sequence + tail.content.length;
     let expectedSequence = firstSequence;
     let expectedPrepareIndex = this.objectInsertNextPrepareIndex;
-    let previousEventId = currentEvent.id;
+    let previousLocalVersion = currentLocalVersion;
     let eventIndex = startEventIndex;
     const appendedTextParts: string[] = [];
+    const parents = this.parentScratch;
 
-    while (eventIndex < events.length) {
-      const event = events[eventIndex]!;
-      const operation = event.operation;
+    while (eventIndex < localVersions.length) {
+      const localVersion = localVersions[eventIndex]!;
+      parents.length = 0;
+      graph.forEachParentLocalVersion(localVersion, this.pushParent);
+      if (parents.length !== 1 || parents[0] !== previousLocalVersion) {
+        break;
+      }
+      const operation = operationAt(eventIndex);
       if (
-        event.parentVersion.size !== 1 ||
-        !event.parentVersion.has(previousEventId) ||
         operation.type !== OPERATION_TYPE.INSERT ||
         operation.text.length !== 1 ||
         operation.index !== expectedPrepareIndex
@@ -978,11 +1105,9 @@ export class EgWalkerEngine {
       if (codeUnit >= 0xd800 && codeUnit <= 0xdfff) {
         break;
       }
-      const parsed = parseEventId(event.id);
       if (
-        parsed === null ||
-        parsed.replicaId !== run.replicaId ||
-        parsed.sequence !== expectedSequence ||
+        graph.agentAt(localVersion) !== tail.agent ||
+        graph.sequenceAt(localVersion) !== expectedSequence ||
         !this.eventItems.canExtendRunItem(tail, appendedTextParts.length + 1)
       ) {
         break;
@@ -991,7 +1116,7 @@ export class EgWalkerEngine {
       appendedTextParts.push(operation.text);
       expectedPrepareIndex++;
       expectedSequence++;
-      previousEventId = event.id;
+      previousLocalVersion = localVersion;
       eventIndex++;
     }
 
@@ -1006,7 +1131,7 @@ export class EgWalkerEngine {
         this.objectInsertNextPrepareIndex ||
       !canExtendTypedRun(
         tail,
-        run.replicaId,
+        tail.agent,
         firstSequence,
         appendedEvents,
         this.insertDeps,
@@ -1020,7 +1145,7 @@ export class EgWalkerEngine {
     // must fail exactly as the scalar path would; subsequent boundaries are
     // behind known non-surrogate inserts and therefore cannot split a pair.
     this.assertOperationInPrepareView(
-      events[startEventIndex]!.id,
+      localVersions[startEventIndex]!,
       this.objectInsertNextPrepareIndex,
       1,
       false,
@@ -1032,7 +1157,7 @@ export class EgWalkerEngine {
       this.deferTextMaterialization,
     );
     this.objectInsertNextPrepareIndex = expectedPrepareIndex;
-    this.currentVersion = new Set([previousEventId]);
+    this.currentVersion = [previousLocalVersion];
     this.nonConflictingRunCount += appendedEvents;
     this.processedEventCount += appendedEvents;
     this.samplePeakSequenceRecordCount();
@@ -1048,29 +1173,31 @@ export class EgWalkerEngine {
    * prepare deltas, and refresh ranked weights once.
    */
   private applyObjectPrepareTransition(
-    retreat: ReadonlyArray<EventId>,
-    advance: ReadonlyArray<EventId>,
+    retreat: ReadonlyArray<number>,
+    advance: ReadonlyArray<number>,
   ): void {
     const deltas = this.prepareDeltas;
     deltas.clear();
 
     const materializeDeleteTargets = this.deleteTargets.hasRunEventTargets();
-    const resolveItemId = (eventId: EventId): EventId =>
-      this.resolveRunDeleteTargetItem(eventId).id;
-    const materializeAndCount = (eventIds: ReadonlyArray<EventId>): number => {
+    const resolveItemId = (agent: number, sequence: number): ItemKey =>
+      this.resolveRunDeleteTargetItem(agent, sequence).id;
+    const graph = this.graph;
+    const materializeAndCount = (
+      localVersions: ReadonlyArray<number>,
+    ): number => {
       let knownEventCount = 0;
-      for (const eventId of eventIds) {
-        if (!this.eventOrder.has(eventId)) {
-          continue;
-        }
-        const isInsert = this.graph.isInsertEvent(eventId);
-        if (isInsert === undefined) {
+      for (const localVersion of localVersions) {
+        if (!this.eventOrder.has(localVersion)) {
           continue;
         }
         knownEventCount++;
-        if (!isInsert && materializeDeleteTargets) {
+        if (
+          materializeDeleteTargets &&
+          !graph.isInsertAtLocalVersion(localVersion)
+        ) {
           this.deleteTargets.materializeRunEventTargetsOf(
-            eventId,
+            localVersion,
             resolveItemId,
           );
         }
@@ -1090,38 +1217,32 @@ export class EgWalkerEngine {
   }
 
   private collectObjectInsertPrepareSpans(
-    eventIds: ReadonlyArray<EventId>,
+    localVersions: ReadonlyArray<number>,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
+    const graph = this.graph;
+    const isKnownInsert = (localVersion: number): boolean =>
+      this.eventOrder.has(localVersion) &&
+      graph.isInsertAtLocalVersion(localVersion);
     let groupStart = 0;
-    while (groupStart < eventIds.length) {
-      const firstId = eventIds[groupStart]!;
-      if (
-        !this.eventOrder.has(firstId) ||
-        this.graph.isInsertEvent(firstId) !== true
-      ) {
+    while (groupStart < localVersions.length) {
+      const first = localVersions[groupStart]!;
+      if (!isKnownInsert(first)) {
         groupStart++;
         continue;
       }
 
-      const first = parseEventId(firstId);
+      const agent = graph.agentAt(first);
       let groupEnd = groupStart + 1;
-      if (first !== null) {
-        let expectedSequence = first.sequence + delta;
-        while (groupEnd < eventIds.length) {
-          const nextId = eventIds[groupEnd]!;
+      if (agent >= 0) {
+        let expectedSequence = graph.sequenceAt(first) + delta;
+        while (groupEnd < localVersions.length) {
+          const next = localVersions[groupEnd]!;
           if (
-            !this.eventOrder.has(nextId) ||
-            this.graph.isInsertEvent(nextId) !== true
-          ) {
-            break;
-          }
-          const next = parseEventId(nextId);
-          if (
-            next === null ||
-            next.replicaId !== first.replicaId ||
-            next.sequence !== expectedSequence
+            !isKnownInsert(next) ||
+            graph.agentAt(next) !== agent ||
+            graph.sequenceAt(next) !== expectedSequence
           ) {
             break;
           }
@@ -1135,13 +1256,13 @@ export class EgWalkerEngine {
       while (consumed < groupLength) {
         const eventIndex =
           delta === 1 ? groupStart + consumed : groupEnd - consumed - 1;
-        const eventId = eventIds[eventIndex]!;
+        const localVersion = localVersions[eventIndex]!;
         const item = this.recordSplitter.isolateRunSpanForEvents(
-          eventId,
+          localVersion,
           groupLength - consumed,
         );
         if (item === null) {
-          this.collectInsertPrepareDelta(eventId, delta, deltas);
+          this.collectInsertPrepareDelta(localVersion, delta, deltas);
           consumed++;
           continue;
         }
@@ -1151,7 +1272,9 @@ export class EgWalkerEngine {
           isolatedEventCount <= 0 ||
           isolatedEventCount > groupLength - consumed
         ) {
-          throw new Error(`Invalid typed-run transition span at ${eventId}`);
+          throw new Error(
+            `Invalid typed-run transition span at event ${localVersion}`,
+          );
         }
         this.collectPrepareDeltaForItem(item, delta, deltas);
         consumed += isolatedEventCount;
@@ -1161,16 +1284,16 @@ export class EgWalkerEngine {
   }
 
   private collectObjectDeletePrepareDeltas(
-    eventIds: ReadonlyArray<EventId>,
+    localVersions: ReadonlyArray<number>,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
-    for (const eventId of eventIds) {
+    for (const localVersion of localVersions) {
       if (
-        this.eventOrder.has(eventId) &&
-        this.graph.isInsertEvent(eventId) === false
+        this.eventOrder.has(localVersion) &&
+        !this.graph.isInsertAtLocalVersion(localVersion)
       ) {
-        this.collectDeletePrepareDelta(eventId, delta, deltas);
+        this.collectDeletePrepareDelta(localVersion, delta, deltas);
       }
     }
   }
@@ -1235,7 +1358,7 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.collectPackedDeletePrepareDelta(plan, offset, rank, -1, deltas);
+          this.collectPackedDeletePrepareDelta(offset, rank, -1, deltas);
         }
       }
     }
@@ -1252,7 +1375,7 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.collectPackedDeletePrepareDelta(plan, offset, rank, 1, deltas);
+          this.collectPackedDeletePrepareDelta(offset, rank, 1, deltas);
         }
       }
     }
@@ -1291,8 +1414,8 @@ export class EgWalkerEngine {
     if (!this.deleteTargets.hasRunEventTargets()) {
       return;
     }
-    const resolveItemId = (eventId: EventId): EventId =>
-      this.resolveRunDeleteTargetItem(eventId).id;
+    const resolveItemId = (agent: number, sequence: number): ItemKey =>
+      this.resolveRunDeleteTargetItem(agent, sequence).id;
     for (let range = 0; range < transition.retreatRangeCount; range++) {
       const start = transition.retreatStarts[range]!;
       for (
@@ -1313,7 +1436,7 @@ export class EgWalkerEngine {
             );
           } else {
             this.deleteTargets.materializeRunEventTargetsOf(
-              plan.eventIdAtKnownOffset(offset),
+              offset,
               resolveItemId,
             );
           }
@@ -1340,7 +1463,7 @@ export class EgWalkerEngine {
             );
           } else {
             this.deleteTargets.materializeRunEventTargetsOf(
-              plan.eventIdAtKnownOffset(offset),
+              offset,
               resolveItemId,
             );
           }
@@ -1384,28 +1507,15 @@ export class EgWalkerEngine {
         continue;
       }
 
-      const canonicalRun =
+      const agent =
         plan.operationLengthAtKnownOffset(offset) === 1
-          ? plan.canonicalIdRunAtKnownOffset(offset)
-          : undefined;
-      const eventId =
-        canonicalRun === undefined
-          ? plan.eventIdAtKnownOffset(offset)
-          : undefined;
-      const parsed =
-        canonicalRun === undefined && eventId !== undefined
-          ? parseEventId(eventId)
-          : null;
-      const replicaId = canonicalRun?.replicaId ?? parsed?.replicaId ?? null;
-      const sequence =
-        canonicalRun === undefined
-          ? (parsed?.sequence ?? -1)
-          : canonicalRun.startSequence + offset - canonicalRun.startEventOffset;
+          ? plan.agentAtKnownOffset(offset)
+          : CUSTOM_EVENT_AGENT;
       let groupLength = 1;
       let groupTailOffset = offset;
       let scanOffset = offset + direction;
-      if (replicaId !== null) {
-        let expectedSequence = sequence + direction;
+      if (agent >= 0) {
+        let expectedSequence = plan.sequenceAtKnownOffset(offset) + direction;
         while (
           direction === 1 ? scanOffset < endOffset : scanOffset >= startOffset
         ) {
@@ -1414,23 +1524,9 @@ export class EgWalkerEngine {
             scanRank < rangeStart ||
             scanRank >= rangeEnd ||
             !plan.isInsertAtKnownOffset(scanOffset) ||
-            plan.operationLengthAtKnownOffset(scanOffset) !== 1
-          ) {
-            break;
-          }
-          const nextRun = plan.canonicalIdRunAtKnownOffset(scanOffset);
-          const next =
-            nextRun === undefined
-              ? parseEventId(plan.eventIdAtKnownOffset(scanOffset))
-              : null;
-          const nextReplicaId = nextRun?.replicaId ?? next?.replicaId ?? null;
-          const nextSequence =
-            nextRun === undefined
-              ? (next?.sequence ?? -1)
-              : nextRun.startSequence + scanOffset - nextRun.startEventOffset;
-          if (
-            nextReplicaId !== replicaId ||
-            nextSequence !== expectedSequence
+            plan.operationLengthAtKnownOffset(scanOffset) !== 1 ||
+            plan.agentAtKnownOffset(scanOffset) !== agent ||
+            plan.sequenceAtKnownOffset(scanOffset) !== expectedSequence
           ) {
             break;
           }
@@ -1442,31 +1538,17 @@ export class EgWalkerEngine {
       }
 
       const firstOffset = direction === 1 ? offset : groupTailOffset;
-      const firstRun = plan.canonicalIdRunAtKnownOffset(firstOffset);
-      if (firstRun !== undefined) {
+      if (agent >= 0) {
         this.collectPackedInsertPrepareSpan(
-          plan,
           firstOffset,
           groupLength,
           direction,
           deltas,
-          firstRun.replicaId,
-          firstRun.startSequence + firstOffset - firstRun.startEventOffset,
-        );
-      } else if (groupLength === 1) {
-        this.collectInsertPrepareDelta(
-          eventId ?? plan.eventIdAtKnownOffset(offset),
-          direction,
-          deltas,
+          agent,
+          plan.sequenceAtKnownOffset(firstOffset),
         );
       } else {
-        this.collectPackedInsertPrepareSpan(
-          plan,
-          firstOffset,
-          groupLength,
-          direction,
-          deltas,
-        );
+        this.collectInsertPrepareDelta(offset, direction, deltas);
       }
       if (direction === 1) {
         this.advanceCount += groupLength;
@@ -1479,31 +1561,22 @@ export class EgWalkerEngine {
 
   /** Consume one ascending canonical event span by current run fragments. */
   private collectPackedInsertPrepareSpan(
-    plan: PackedCriticalReplayPlan,
     firstOffset: number,
     eventCount: number,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
-    replicaId?: string,
-    firstSequence?: number,
+    agent: number,
+    firstSequence: number,
   ): void {
     let consumed = 0;
     while (consumed < eventCount) {
-      const eventOffset = firstOffset + consumed;
-      const item =
-        replicaId !== undefined && firstSequence !== undefined
-          ? this.recordSplitter.isolateRunSpanForCanonicalEvents(
-              replicaId,
-              firstSequence + consumed,
-              eventCount - consumed,
-            )
-          : this.recordSplitter.isolateRunSpanForEvents(
-              plan.eventIdAtKnownOffset(eventOffset),
-              eventCount - consumed,
-            );
+      const item = this.recordSplitter.isolateRunSpanForCanonicalEvents(
+        agent,
+        firstSequence + consumed,
+        eventCount - consumed,
+      );
       if (item === null) {
-        const eventId = plan.eventIdAtKnownOffset(eventOffset);
-        this.collectInsertPrepareDelta(eventId, delta, deltas);
+        this.collectInsertPrepareDelta(firstOffset + consumed, delta, deltas);
         consumed++;
         continue;
       }
@@ -1513,8 +1586,9 @@ export class EgWalkerEngine {
         isolatedEventCount <= 0 ||
         isolatedEventCount > eventCount - consumed
       ) {
-        const eventId = plan.eventIdAtKnownOffset(eventOffset);
-        throw new Error(`Invalid typed-run transition span at ${eventId}`);
+        throw new Error(
+          `Invalid typed-run transition span at ${this.eventLabel(firstOffset + consumed)}`,
+        );
       }
       this.collectPrepareDeltaForItem(item, delta, deltas);
       consumed += isolatedEventCount;
@@ -1529,21 +1603,13 @@ export class EgWalkerEngine {
     const operationIndex = plan.operationIndexAtKnownOffset(eventOffset);
     const operationLength = plan.operationLengthAtKnownOffset(eventOffset);
     if (plan.isInsertAtKnownOffset(eventOffset)) {
-      const eventId = plan.eventIdAtKnownOffset(eventOffset);
-      const canonicalRun = plan.canonicalIdRunAtKnownOffset(eventOffset);
-      const canonicalSequence =
-        canonicalRun === undefined
-          ? undefined
-          : canonicalRun.startSequence +
-            eventOffset -
-            canonicalRun.startEventOffset;
       const start = plan.insertStartAtKnownOffset(eventOffset);
       const insertedText = plan.sliceInsertedContent(
         start,
         start + operationLength,
       );
       this.assertOperationInPrepareView(
-        eventId,
+        eventOffset,
         operationIndex,
         operationLength,
         false,
@@ -1555,7 +1621,9 @@ export class EgWalkerEngine {
           ? this.packedInsertTail
           : null;
       applyInsert(
-        eventId,
+        eventOffset,
+        plan.agentAtKnownOffset(eventOffset),
+        plan.sequenceAtKnownOffset(eventOffset),
         operationIndex,
         insertedText,
         this.insertDeps,
@@ -1563,8 +1631,6 @@ export class EgWalkerEngine {
         this.deferTextMaterialization,
         knownTail,
         this.packedInsertTailResult,
-        canonicalRun?.replicaId,
-        canonicalSequence,
       );
       this.packedInsertTail = this.packedInsertTailResult.item;
       this.packedInsertNextPrepareIndex = operationIndex + operationLength;
@@ -1610,15 +1676,15 @@ export class EgWalkerEngine {
     if (
       tail === null ||
       typeof tail.content !== "string" ||
-      tail.run === null ||
+      !tail.run ||
       tail.originRight !== null ||
       !this.sequence.isLast(tail)
     ) {
       return startOrderIndex;
     }
 
-    const run = tail.run;
-    const firstSequence = run.startSequence + tail.content.length;
+    const agent = tail.agent;
+    const firstSequence = tail.sequence + tail.content.length;
     let expectedSequence = firstSequence;
     let expectedPrepareIndex = this.packedInsertNextPrepareIndex;
     let previousOffset = currentOffset;
@@ -1637,19 +1703,10 @@ export class EgWalkerEngine {
         break;
       }
 
-      const canonicalRun = plan.canonicalIdRunAtKnownOffset(eventOffset);
-      const parsed =
-        canonicalRun === undefined
-          ? parseEventId(plan.eventIdAtKnownOffset(eventOffset))
-          : null;
-      const replicaId = canonicalRun?.replicaId ?? parsed?.replicaId ?? null;
-      const sequence =
-        canonicalRun === undefined
-          ? (parsed?.sequence ?? -1)
-          : canonicalRun.startSequence +
-            eventOffset -
-            canonicalRun.startEventOffset;
-      if (replicaId !== run.replicaId || sequence !== expectedSequence) {
+      if (
+        plan.agentAtKnownOffset(eventOffset) !== agent ||
+        plan.sequenceAtKnownOffset(eventOffset) !== expectedSequence
+      ) {
         break;
       }
 
@@ -1682,7 +1739,7 @@ export class EgWalkerEngine {
         this.packedInsertNextPrepareIndex ||
       !canExtendTypedRun(
         tail,
-        run.replicaId,
+        agent,
         firstSequence,
         appendedEvents,
         this.insertDeps,
@@ -1828,9 +1885,8 @@ export class EgWalkerEngine {
         landing.offsetInRecord,
         appendedEvents,
       );
-      const run = middle.run;
       if (
-        run === null ||
+        !middle.run ||
         typeof middle.content !== "string" ||
         middle.content.length !== appendedEvents ||
         middle.prepareState !== 1
@@ -1842,7 +1898,8 @@ export class EgWalkerEngine {
       for (let consumed = 0; consumed < appendedEvents; consumed++) {
         this.deleteTargets.recordPackedRunEvent(
           startOrderIndex + consumed,
-          `${run.replicaId}:${run.startSequence + consumed}`,
+          middle.agent,
+          middle.sequence + consumed,
         );
       }
       middle.everDeleted = true;
@@ -1864,7 +1921,7 @@ export class EgWalkerEngine {
    * mid-apply growth that splits/inserts produced.
    */
   private samplePeakSequenceRecordCount(): void {
-    const live = this.itemsById.size;
+    const live = this.items.size;
     if (live > this.peakSequenceRecordCount) {
       this.peakSequenceRecordCount = live;
     }
@@ -1878,21 +1935,6 @@ export class EgWalkerEngine {
     return count;
   }
 
-  /**
-   * Section 3.4 non-conflicting-run detection.
-   *
-   * Returns true iff {@link event.parentVersion} matches
-   * {@link currentVersion} exactly. Set equality is enough: each event's
-   * parent version is already a frontier of the causal graph, so two
-   * frontiers compare equal as sets iff they expand to the same ancestor
-   * closure. When this holds, `diffVersions(currentVersion, parent)`
-   * returns two empty sets and the retreat/advance loops are no-ops, so
-   * the caller can skip them outright.
-   */
-  private isNonConflictingRun(event: GraphEvent): boolean {
-    return versionsEqual(event.parentVersion, this.currentVersion);
-  }
-
   private reset(
     events: ReadonlyArray<GraphEvent>,
     initialText: string,
@@ -1901,28 +1943,31 @@ export class EgWalkerEngine {
     this.resetState(initialText, options);
     const graphEvents =
       options.eventOrder ?? options.eventGraph?.getTopologicalOrder() ?? events;
-    graphEvents.forEach((event, index) => {
-      this.eventOrder.set(event.id, index);
-      this.eventIdsByOrder.push(event.id);
-      if (!options.eventGraph) {
+    if (!options.eventGraph) {
+      for (const event of graphEvents) {
         this.graph.addEvent(event);
       }
+    }
+    graphEvents.forEach((event, index) => {
+      const localVersion = this.requireLocalVersion(event.id);
+      this.eventOrder.set(localVersion, index);
+      this.eventsByOrder.push(localVersion);
     });
     this.eventIndexesComplete = true;
   }
 
   private resetState(initialText: string, options: GenerateOptions): void {
     this.eventOrder.clear();
-    this.eventIdsByOrder.length = 0;
+    this.eventsByOrder.length = 0;
     this.eventIndexesComplete = false;
     this.graph = options.eventGraph ?? new EventGraph();
     this.eventItems.clear();
     this.deleteTargets.clear();
-    this.itemsById.clear();
+    this.items.clear();
     this.originLeftIndex.clear();
     this.fugueOrder.clear();
     this.sequence.clear();
-    this.currentVersion = new Set(options.initialVersion ?? []);
+    this.currentVersion = this.localVersionsOf(options.initialVersion ?? []);
     this.resultingText =
       options.initialTextBuffer ?? PersistentUtf16Rope.from(initialText);
     this.prepareViewMayContainSurrogatePairs =
@@ -1967,8 +2012,10 @@ export class EgWalkerEngine {
     // matching the partial-replay path that has been exercising this code
     // since Section 3.6 landed.
     const placeholder: AugmentedCRDTItem = {
-      id: this.nextPlaceholderId(),
-      eventId: PLACEHOLDER_EVENT_ID,
+      id: this.items.nextKey(),
+      agent: PLACEHOLDER_AGENT,
+      sequence: this.placeholderCounter++,
+      offset: 0,
       content:
         options.initialTextBuffer === undefined
           ? initialText
@@ -1977,18 +2024,14 @@ export class EgWalkerEngine {
       originRight: null,
       everDeleted: false,
       prepareState: 1,
-      run: null,
+      run: false,
     };
     if (!this.fugueOrder.integrateAtKnownPosition(placeholder)) {
       throw new Error("Fugue order index unavailable for initial text");
     }
     this.sequence.insert(0, placeholder);
-    this.itemsById.set(placeholder.id, placeholder);
+    this.items.add(placeholder);
     this.samplePeakSequenceRecordCount();
-  }
-
-  private nextPlaceholderId(): EventId {
-    return `${PLACEHOLDER_ID_PREFIX}${this.placeholderCounter++}`;
   }
 
   private enableSegmentedPlaceholder(): void {
@@ -1998,7 +2041,8 @@ export class EgWalkerEngine {
     const placeholder = this.sequence.at(0);
     if (
       placeholder === undefined ||
-      placeholder.eventId !== PLACEHOLDER_EVENT_ID ||
+      placeholder.agent !== PLACEHOLDER_AGENT ||
+      placeholder.external !== undefined ||
       placeholder.placeholder !== undefined ||
       placeholder.content.length === 0
     ) {
@@ -2007,8 +2051,8 @@ export class EgWalkerEngine {
 
     const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
       placeholder.content.length,
-      placeholder.id,
-      () => this.nextPlaceholderId(),
+      formatPlaceholderId(placeholder.sequence),
+      () => formatPlaceholderId(this.placeholderCounter++),
     );
     const slice = state.createInitialPhysicalSlice();
     slice.attachOwner(placeholder);
@@ -2017,32 +2061,39 @@ export class EgWalkerEngine {
     this.sequence.updateItem(placeholder);
   }
 
-  private trackEventItems(item: AugmentedCRDTItem): void {
-    if (item.run !== null) {
+  /** Register a restored item under the event it names in its record. */
+  private trackEventItems(item: AugmentedCRDTItem, eventId: EventId): void {
+    if (item.run) {
       this.eventItems.registerRunItem(item);
       return;
     }
 
-    if (item.eventId !== PLACEHOLDER_EVENT_ID) {
-      this.eventItems.add(item.eventId, item.id);
+    if (eventId !== PLACEHOLDER_EVENT_ID) {
+      // An item of an event outside the graph cannot be reached by a replay
+      // transition, which only names graph events.
+      const localVersion = this.graph.localVersionOf(eventId);
+      if (localVersion >= 0) {
+        this.eventItems.add(localVersion, item.id);
+      }
     }
   }
 
   private apply(
-    event: GraphEvent,
+    localVersion: number,
+    operation: ExternalOperation,
     collectTransformedOperations: boolean,
   ): ReadonlyArray<ExternalOperation> {
-    const operation = event.operation;
-
     if (operation.type === OPERATION_TYPE.INSERT) {
       this.assertOperationInPrepareView(
-        event.id,
+        localVersion,
         operation.index,
         operation.text.length,
         false,
       );
       const transformed = applyInsert(
-        event.id,
+        localVersion,
+        this.graph.agentAt(localVersion),
+        this.graph.sequenceAt(localVersion),
         operation.index,
         operation.text,
         this.insertDeps,
@@ -2065,7 +2116,7 @@ export class EgWalkerEngine {
     }
 
     this.assertOperationInPrepareView(
-      event.id,
+      localVersion,
       operation.index,
       operation.length,
       true,
@@ -2076,7 +2127,7 @@ export class EgWalkerEngine {
       this.objectInsertTailResult.item = null;
     }
     return applyDelete(
-      event.id,
+      localVersion,
       operation.index,
       operation.length,
       this.deleteDeps,
@@ -2090,7 +2141,7 @@ export class EgWalkerEngine {
    * retreat/advance, before any sequence, text, or delete-target mutation.
    */
   private assertOperationInPrepareView(
-    eventId: EventId | number,
+    localVersion: number,
     operationIndex: number,
     operationLength: number,
     isDelete: boolean,
@@ -2103,19 +2154,28 @@ export class EgWalkerEngine {
       !Number.isSafeInteger(end)
     ) {
       throw new Error(
-        `Event ${eventId} operation range ${operationIndex}..${end} exceeds parent document length ${prepareLength}`,
+        `Event ${this.eventLabel(localVersion)} operation range ${operationIndex}..${end} exceeds parent document length ${prepareLength}`,
       );
     }
 
-    this.assertPrepareScalarBoundary(operationIndex, eventId);
+    this.assertPrepareScalarBoundary(operationIndex, localVersion);
     if (isDelete) {
-      this.assertPrepareScalarBoundary(end, eventId);
+      this.assertPrepareScalarBoundary(end, localVersion);
+    }
+  }
+
+  /** An event's ID for an error message. */
+  private eventLabel(localVersion: number): string {
+    try {
+      return this.graph.idAtLocalVersion(localVersion);
+    } catch {
+      return `#${localVersion}`;
     }
   }
 
   private assertPrepareScalarBoundary(
     index: number,
-    eventId: EventId | number,
+    localVersion: number,
   ): void {
     if (!this.prepareViewMayContainSurrogatePairs) {
       return;
@@ -2146,18 +2206,19 @@ export class EgWalkerEngine {
       after <= 0xdfff
     ) {
       throw new Error(
-        `Event ${eventId} index ${index} splits a Unicode scalar in its parent document`,
+        `Event ${this.eventLabel(localVersion)} index ${index} splits a Unicode scalar in its parent document`,
       );
     }
   }
 
   private collectInsertPrepareDelta(
-    eventId: EventId,
+    localVersion: number,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
-    const eventItems = this.recordSplitter.isolateRunSliceForEvent(eventId);
-    if (typeof eventItems === "string") {
+    const eventItems =
+      this.recordSplitter.isolateRunSliceForEvent(localVersion);
+    if (typeof eventItems === "number") {
       this.collectItemPrepareDelta(eventItems, delta, deltas);
       return;
     }
@@ -2167,19 +2228,18 @@ export class EgWalkerEngine {
   }
 
   private collectDeletePrepareDelta(
-    eventId: EventId,
+    localVersion: number,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
     this.collectDeletePrepareTargets(
-      this.deleteTargets.firstTargetOf(eventId),
+      this.deleteTargets.firstTargetOf(localVersion),
       delta,
       deltas,
     );
   }
 
   private collectPackedDeletePrepareDelta(
-    plan: PackedCriticalReplayPlan,
     eventOffset: number,
     orderIndex: number,
     delta: 1 | -1,
@@ -2191,11 +2251,7 @@ export class EgWalkerEngine {
       this.collectDeletePrepareTargets(packedTarget, delta, deltas);
       return;
     }
-    this.collectDeletePrepareDelta(
-      plan.eventIdAtKnownOffset(eventOffset),
-      delta,
-      deltas,
-    );
+    this.collectDeletePrepareDelta(eventOffset, delta, deltas);
   }
 
   private collectDeletePrepareTargets(
@@ -2214,7 +2270,7 @@ export class EgWalkerEngine {
         );
       } else if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
         throw new Error(
-          `Packed transition did not materialize typed-run target ${this.deleteTargets.runEventIdOf(target)}`,
+          `Packed transition did not materialize typed-run target ${this.deleteTargets.runEventAgentOf(target)}:${this.deleteTargets.runEventSequenceOf(target)}`,
         );
       } else {
         for (const slice of this.deleteTargets
@@ -2238,25 +2294,31 @@ export class EgWalkerEngine {
     }
   }
 
-  private resolveRunDeleteTargetItem(eventId: EventId): AugmentedCRDTItem {
-    const items = this.recordSplitter.isolateRunSliceForEvent(eventId);
-    if (typeof items !== "string") {
-      throw new Error(`Typed-run delete target ${eventId} is not scalar`);
-    }
-    const item = this.requireItem(items);
+  private resolveRunDeleteTargetItem(
+    agent: number,
+    sequence: number,
+  ): AugmentedCRDTItem {
+    const item = this.recordSplitter.isolateRunSliceForCanonical(
+      agent,
+      sequence,
+    );
     if (
-      item.run === null ||
+      item === null ||
+      !item.run ||
       item.content.length !== 1 ||
-      item.eventId !== eventId
+      item.agent !== agent ||
+      item.sequence !== sequence
     ) {
-      throw new Error(`Typed-run delete target ${eventId} is not isolated`);
+      throw new Error(
+        `Typed-run delete target ${this.graph.agentTable.nameOf(agent)}:${sequence} is not isolated`,
+      );
     }
     this.samplePeakSequenceRecordCount();
     return item;
   }
 
   private collectItemPrepareDelta(
-    itemId: EventId,
+    itemId: ItemKey,
     delta: 1 | -1,
     deltas: Map<AugmentedCRDTItem, number>,
   ): void {
@@ -2339,7 +2401,8 @@ export class EgWalkerEngine {
   // swapping them out, so a one-shot snapshot at construction is sound.
   private readonly insertDeps: InsertHandlerDeps = {
     sequence: this.sequence,
-    itemsById: this.itemsById,
+    items: this.items,
+    eventIdOf: (item) => this.codec.eventIdOf(item),
     eventItems: this.eventItems,
     originLeftIndex: this.originLeftIndex,
     recordSplitter: this.recordSplitter,
@@ -2374,72 +2437,21 @@ export class EgWalkerEngine {
   }
 
   private diffVersions(
-    currentVersion: ReadonlySet<EventId>,
-    targetVersion: ReadonlySet<EventId>,
-  ): { retreat: EventId[]; advance: EventId[] } {
+    currentVersion: ReadonlyArray<number>,
+    targetVersion: ReadonlyArray<number>,
+  ): LocalVersionTransition {
     this.ensureEventIndexes();
-    const rankedTransition = this.graph.getRankedVersionTransition(
+    const transition = this.graph.getLocalVersionTransition(
       currentVersion,
       targetVersion,
     );
-    if (rankedTransition !== null) {
-      if (this.eventOrder.size === this.graph.getEventCount()) {
-        return {
-          retreat: rankedTransition.retreat,
-          advance: rankedTransition.advance,
-        };
-      }
-      return {
-        retreat: rankedTransition.retreat.filter((id) =>
-          this.eventOrder.has(id),
-        ),
-        advance: rankedTransition.advance.filter((id) =>
-          this.eventOrder.has(id),
-        ),
-      };
+    if (this.eventOrder.size === this.graph.getEventCount()) {
+      return transition;
     }
-
-    const { onlyInLeft, onlyInRight } = this.graph.diffVersions(
-      currentVersion,
-      targetVersion,
-    );
-
     return {
-      retreat: this.sortByEventOrder(onlyInLeft, true),
-      advance: this.sortByEventOrder(onlyInRight, false),
+      retreat: transition.retreat.filter((lv) => this.eventOrder.has(lv)),
+      advance: transition.advance.filter((lv) => this.eventOrder.has(lv)),
     };
-  }
-
-  // Sort dense numeric ranks and translate them through the parallel ID
-  // column. This avoids allocating one `{ id, order }` object per diff event
-  // while still paying only one eventOrder lookup per ID.
-  private sortByEventOrder(
-    ids: Iterable<EventId>,
-    descending: boolean,
-  ): EventId[] {
-    const orders: number[] = [];
-    const unknownIds: EventId[] = [];
-    for (const id of ids) {
-      const order = this.eventOrder.get(id);
-      if (order === undefined) {
-        unknownIds.push(id);
-      } else {
-        orders.push(order);
-      }
-    }
-    orders.sort(descending ? descendingNumber : ascendingNumber);
-    unknownIds.sort(descending ? descendingEventId : compareEventIds);
-
-    const knownIds = orders.map((order) => {
-      const eventId = this.eventIdsByOrder[order];
-      if (eventId === undefined) {
-        throw new Error(`Event order ${order} has no event ID`);
-      }
-      return eventId;
-    });
-    return descending
-      ? [...unknownIds, ...knownIds]
-      : [...knownIds, ...unknownIds];
   }
 
   private ensureEventIndexes(): void {
@@ -2447,20 +2459,17 @@ export class EgWalkerEngine {
       return;
     }
     this.eventOrder.clear();
-    this.eventIdsByOrder.length = 0;
+    this.eventsByOrder.length = 0;
     this.graph.getTopologicalOrder().forEach((event, index) => {
-      this.eventOrder.set(event.id, index);
-      this.eventIdsByOrder.push(event.id);
+      const localVersion = this.requireLocalVersion(event.id);
+      this.eventOrder.set(localVersion, index);
+      this.eventsByOrder.push(localVersion);
     });
     this.eventIndexesComplete = true;
   }
 
-  private requireItem(itemId: EventId): AugmentedCRDTItem {
-    const item = this.itemsById.get(itemId);
-    if (!item) {
-      throw new Error(`CRDT item ${itemId} not found`);
-    }
-    return item;
+  private requireItem(itemId: ItemKey): AugmentedCRDTItem {
+    return this.items.require(itemId);
   }
 }
 
@@ -2469,13 +2478,31 @@ const inferNextPlaceholderCounter = (
 ): number => {
   let next = 0;
   for (const item of items) {
-    if (!item.id.startsWith(PLACEHOLDER_ID_PREFIX)) {
-      continue;
-    }
-    const suffix = Number(item.id.slice(PLACEHOLDER_ID_PREFIX.length));
-    if (Number.isInteger(suffix) && suffix >= next) {
-      next = suffix + 1;
+    const serial =
+      item.external !== undefined
+        ? placeholderSerialOf(item.external.id)
+        : item.agent === PLACEHOLDER_AGENT
+          ? item.sequence
+          : -1;
+    if (serial >= next) {
+      next = serial + 1;
     }
   }
   return next;
+};
+
+/** Whether two versions hold the same event IDs. */
+const versionSetsEqual = (
+  left: ReadonlySet<EventId>,
+  right: ReadonlySet<EventId>,
+): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const id of left) {
+    if (!right.has(id)) {
+      return false;
+    }
+  }
+  return true;
 };

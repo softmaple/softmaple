@@ -278,6 +278,49 @@ export class PackedDiffVersionsWorkspace
   }
 
   /**
+   * Diff a version given as packed offsets (local versions) against one
+   * event's parents as local-version ranges.
+   */
+  diffLocalVersionsToParentRanges(
+    currentOffsets: ReadonlyArray<number>,
+    targetEventOffset: number,
+    view: PackedDiffVersionsView,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    if (this.active) {
+      return new PackedDiffVersionsWorkspace(
+        this.eventCount,
+      ).diffLocalVersionsToParentRanges(
+        currentOffsets,
+        targetEventOffset,
+        view,
+        rankByOffset,
+      );
+    }
+
+    this.assertEventOffset(targetEventOffset);
+    for (const offset of currentOffsets) {
+      this.assertEventOffset(offset);
+    }
+    this.begin(rankByOffset ?? null);
+    try {
+      let pendingDivergent = 0;
+      for (const offset of currentOffsets) {
+        pendingDivergent += this.paint(offset, DIFF_COLOR.LEFT);
+      }
+      pendingDivergent += this.paintParents(
+        targetEventOffset,
+        DIFF_COLOR.RIGHT,
+        view,
+      );
+      this.collectRangeTransition(pendingDivergent, view);
+      return this;
+    } finally {
+      this.finish();
+    }
+  }
+
+  /**
    * Diff a singleton packed version against one event's direct parent version.
    */
   diffOffsetToParents(
@@ -435,40 +478,7 @@ export class PackedDiffVersionsWorkspace
     initialPendingDivergent: number,
     view: PackedDiffVersionsView,
   ): void {
-    let pendingDivergent = initialPendingDivergent;
-    while (this.heapLength > 0 && pendingDivergent > 0) {
-      const offset = this.pop();
-      const finalColor = this.colors[offset]!;
-
-      if (finalColor === DIFF_COLOR.LEFT) {
-        this.retreatBuffer = this.ensureCapacity(
-          this.retreatBuffer,
-          this.retreatLength + 1,
-        );
-        this.retreatBuffer[this.retreatLength++] = offset;
-        this.scalarOffsetWrites++;
-        pendingDivergent--;
-      } else if (finalColor === DIFF_COLOR.RIGHT) {
-        this.advanceBuffer = this.ensureCapacity(
-          this.advanceBuffer,
-          this.advanceLength + 1,
-        );
-        this.advanceBuffer[this.advanceLength++] = offset;
-        this.scalarOffsetWrites++;
-        pendingDivergent--;
-      }
-
-      const parentCount = view.parentCountAt(offset);
-      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-        const parentOffset = view.parentOffsetAt(offset, parentIndex);
-        if (parentOffset === undefined) {
-          throw new Error(
-            `Packed event ${offset} is missing parent ${parentIndex}`,
-          );
-        }
-        pendingDivergent += this.paint(parentOffset, finalColor);
-      }
-    }
+    this.walkDivergent(initialPendingDivergent, view, false);
 
     // Right-side offsets were discovered from high to low replay rank. Reverse
     // their populated prefix in place so callers can advance causally from low
@@ -496,32 +506,7 @@ export class PackedDiffVersionsWorkspace
     initialPendingDivergent: number,
     view: PackedDiffVersionsView,
   ): void {
-    let pendingDivergent = initialPendingDivergent;
-    while (this.heapLength > 0 && pendingDivergent > 0) {
-      const offset = this.pop();
-      const finalColor = this.colors[offset]!;
-
-      if (finalColor === DIFF_COLOR.LEFT) {
-        this.appendDescendingRetreatOffset(offset);
-        this.retreatRangeEventLength++;
-        pendingDivergent--;
-      } else if (finalColor === DIFF_COLOR.RIGHT) {
-        this.appendDescendingAdvanceOffset(offset);
-        this.advanceRangeEventLength++;
-        pendingDivergent--;
-      }
-
-      const parentCount = view.parentCountAt(offset);
-      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-        const parentOffset = view.parentOffsetAt(offset, parentIndex);
-        if (parentOffset === undefined) {
-          throw new Error(
-            `Packed event ${offset} is missing parent ${parentIndex}`,
-          );
-        }
-        pendingDivergent += this.paint(parentOffset, finalColor);
-      }
-    }
+    this.walkDivergent(initialPendingDivergent, view, true);
 
     for (
       let left = 0, right = this.advanceRangeLength - 1;
@@ -535,6 +520,99 @@ export class PackedDiffVersionsWorkspace
       this.advanceStartBuffer[right] = start;
       this.advanceEndBuffer[right] = end;
     }
+  }
+
+  /**
+   * Visit painted events in descending replay rank until no one-sided event
+   * remains queued.
+   *
+   * Sole-parent chains dominate long-running branches. When an event's only
+   * parent is still unpainted and outranks everything queued, the heap would
+   * pop it next, so the walk continues into it directly instead of pushing
+   * and popping. The visit order is therefore identical to a pure heap walk.
+   */
+  private walkDivergent(
+    initialPendingDivergent: number,
+    view: PackedDiffVersionsView,
+    ranges: boolean,
+  ): void {
+    const colors = this.colors;
+    let pendingDivergent = initialPendingDivergent;
+    while (this.heapLength > 0 && pendingDivergent > 0) {
+      let offset = this.pop();
+      while (true) {
+        const finalColor = colors[offset]!;
+        if (finalColor !== DIFF_COLOR.COMMON) {
+          this.emitDivergent(offset, finalColor, ranges);
+          pendingDivergent--;
+        }
+
+        const parentCount = view.parentCountAt(offset);
+        if (parentCount !== 1) {
+          for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+            const parentOffset = view.parentOffsetAt(offset, parentIndex);
+            if (parentOffset === undefined) {
+              throw new Error(
+                `Packed event ${offset} is missing parent ${parentIndex}`,
+              );
+            }
+            pendingDivergent += this.paint(parentOffset, finalColor);
+          }
+          break;
+        }
+
+        const parentOffset = view.parentOffsetAt(offset, 0);
+        if (parentOffset === undefined) {
+          throw new Error(`Packed event ${offset} is missing parent 0`);
+        }
+        if (colors[parentOffset] !== 0) {
+          pendingDivergent += this.paint(parentOffset, finalColor);
+          break;
+        }
+        colors[parentOffset] = finalColor;
+        this.recordTouched(parentOffset);
+        if (finalColor !== DIFF_COLOR.COMMON) {
+          pendingDivergent++;
+        }
+        if (
+          pendingDivergent > 0 &&
+          (this.heapLength === 0 ||
+            this.compareReplayRank(this.heap[0]!, parentOffset) < 0)
+        ) {
+          offset = parentOffset;
+          continue;
+        }
+        this.push(parentOffset);
+        break;
+      }
+    }
+  }
+
+  private emitDivergent(offset: number, color: number, ranges: boolean): void {
+    if (ranges) {
+      if (color === DIFF_COLOR.LEFT) {
+        this.appendDescendingRetreatOffset(offset);
+        this.retreatRangeEventLength++;
+      } else {
+        this.appendDescendingAdvanceOffset(offset);
+        this.advanceRangeEventLength++;
+      }
+      return;
+    }
+    if (color === DIFF_COLOR.LEFT) {
+      this.retreatBuffer = this.ensureCapacity(
+        this.retreatBuffer,
+        this.retreatLength + 1,
+      );
+      this.retreatBuffer[this.retreatLength++] = offset;
+    } else {
+      this.advanceBuffer = this.ensureCapacity(
+        this.advanceBuffer,
+        this.advanceLength + 1,
+      );
+      this.advanceBuffer[this.advanceLength++] = offset;
+    }
+    this.scalarOffsetWrites++;
   }
 
   private appendDescendingRetreatOffset(offset: number): void {

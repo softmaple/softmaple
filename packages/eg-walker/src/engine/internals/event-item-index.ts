@@ -1,9 +1,13 @@
-import { parseEventId } from "../../graph/event-id";
-import type { EventId } from "../../types";
-import type { AugmentedCRDTItem } from "./engine-types";
+import type { AugmentedCRDTItem, ItemKey } from "./engine-types";
 
-type StoredEventItems = EventId | EventId[];
-export type EventItems = EventId | ReadonlyArray<EventId>;
+type StoredEventItems = ItemKey | ItemKey[];
+export type EventItems = ItemKey | ReadonlyArray<ItemKey>;
+
+/** Canonical `(agent, sequence)` of an event, or a negative agent. */
+export interface EventIdentityResolver {
+  agentAt(localVersion: number): number;
+  sequenceAt(localVersion: number): number;
+}
 
 interface RunItemNode {
   readonly item: AugmentedCRDTItem;
@@ -15,46 +19,49 @@ interface RunItemNode {
 }
 
 /**
- * Event-id -> CRDT item lookup used by retreat / advance.
+ * Event -> CRDT item lookup used by retreat / advance.
  *
- * Normal multi-character insert events keep direct map entries because one
- * event can own multiple CRDT items. Coalesced typed-run records are cheaper:
- * a record spans a contiguous `${replicaId}:${sequence}` range, so replay and
- * snapshot restore register the range once instead of materializing one map
- * entry and one string per character event. Each author's ranges live in a
- * deterministic treap, keeping arbitrary split/lookup order logarithmic.
+ * Normal multi-character insert events keep direct entries, keyed by the
+ * event's local version, because one event can own multiple CRDT items.
+ * Coalesced typed-run records are cheaper: a record spans a contiguous
+ * `(agent, sequence)` range, so replay and snapshot restore register the
+ * range once instead of one entry per character event. Each agent's ranges
+ * live in a deterministic treap, keeping arbitrary split/lookup order
+ * logarithmic.
  */
 export class EventItemIndex {
-  private readonly direct = new Map<EventId, StoredEventItems>();
-  private readonly runRootsByReplica = new Map<string, RunItemNode>();
+  private readonly direct = new Map<number, StoredEventItems>();
+  private runRootsByAgent: Array<RunItemNode | undefined> = [];
   private runNodesByItem = new WeakMap<AugmentedCRDTItem, RunItemNode>();
+
+  constructor(private readonly events: EventIdentityResolver) {}
 
   clear(): void {
     this.direct.clear();
-    this.runRootsByReplica.clear();
+    this.runRootsByAgent = [];
     this.runNodesByItem = new WeakMap<AugmentedCRDTItem, RunItemNode>();
   }
 
-  set(eventId: EventId, itemIds: EventId[]): void {
-    this.direct.set(eventId, itemIds.length === 1 ? itemIds[0]! : itemIds);
+  set(localVersion: number, itemIds: ItemKey[]): void {
+    this.direct.set(localVersion, itemIds.length === 1 ? itemIds[0]! : itemIds);
   }
 
   /** Store the dominant one-event/one-record case without a wrapper array. */
-  setOne(eventId: EventId, itemId: EventId): void {
-    this.direct.set(eventId, itemId);
+  setOne(localVersion: number, itemId: ItemKey): void {
+    this.direct.set(localVersion, itemId);
   }
 
-  add(eventId: EventId, itemId: EventId): void {
-    const items = this.direct.get(eventId);
+  add(localVersion: number, itemId: ItemKey): void {
+    const items = this.direct.get(localVersion);
     if (items === undefined) {
-      this.direct.set(eventId, itemId);
+      this.direct.set(localVersion, itemId);
       return;
     }
-    if (typeof items !== "string") {
+    if (typeof items !== "number") {
       items.push(itemId);
       return;
     }
-    this.direct.set(eventId, [items, itemId]);
+    this.direct.set(localVersion, [items, itemId]);
   }
 
   /**
@@ -62,63 +69,62 @@ export class EventItemIndex {
    * event genuinely owns multiple records. Callers must treat returned arrays
    * as read-only; avoiding a scalar wrapper is load-bearing on replay diffs.
    */
-  get(eventId: EventId): EventItems | undefined {
-    const direct = this.direct.get(eventId);
+  get(localVersion: number): EventItems | undefined {
+    const direct = this.direct.get(localVersion);
     if (direct !== undefined) {
       return direct;
     }
 
-    const parsed = parseEventId(eventId);
-    if (parsed === null) {
+    const agent = this.events.agentAt(localVersion);
+    if (agent < 0) {
       return undefined;
     }
-
-    const item = this.findRunItem(parsed.replicaId, parsed.sequence);
+    const item = this.findRunItem(agent, this.events.sequenceAt(localVersion));
     return item?.id;
   }
 
-  /** Resolve a canonical scalar event without formatting or parsing its ID. */
-  getRunItem(
-    replicaId: string,
-    sequence: number,
-  ): AugmentedCRDTItem | undefined {
-    return this.findRunItem(replicaId, sequence) ?? undefined;
+  /** Whether an event has direct (non-run) item entries. */
+  hasDirect(localVersion: number): boolean {
+    return this.direct.has(localVersion);
+  }
+
+  /** Resolve a canonical scalar event without resolving its local version. */
+  getRunItem(agent: number, sequence: number): AugmentedCRDTItem | undefined {
+    return this.findRunItem(agent, sequence) ?? undefined;
   }
 
   registerRunItem(item: AugmentedCRDTItem): void {
-    const run = item.run;
-    if (run === null) {
+    if (!item.run) {
       return;
     }
     if (item.content.length <= 0) {
       throw new Error(`Typed run ${item.id} must have positive length`);
     }
-    const endSequence = run.startSequence + item.content.length;
+    const startSequence = item.sequence;
+    const endSequence = startSequence + item.content.length;
     if (!Number.isSafeInteger(endSequence)) {
       throw new Error(`Typed run ${item.id} exceeds the safe sequence range`);
     }
 
-    const root = this.runRootsByReplica.get(run.replicaId) ?? null;
-    const predecessor = findRunPredecessor(root, run.startSequence);
-    if (predecessor?.startSequence === run.startSequence) {
+    const root = this.runRootsByAgent[item.agent] ?? null;
+    const predecessor = findRunPredecessor(root, startSequence);
+    if (predecessor?.startSequence === startSequence) {
       if (predecessor.item === item) {
         this.assertRunEndBeforeSuccessor(predecessor, endSequence);
         return;
       }
-      throw new Error(
-        `Duplicate typed-run start sequence ${run.startSequence}`,
-      );
+      throw new Error(`Duplicate typed-run start sequence ${startSequence}`);
     }
     if (
       predecessor !== null &&
-      run.startSequence <
+      startSequence <
         predecessor.startSequence + predecessor.item.content.length
     ) {
       throw new Error(
-        `Typed run ${item.id} overlaps ${predecessor.item.id} at sequence ${run.startSequence}`,
+        `Typed run ${item.id} overlaps ${predecessor.item.id} at sequence ${startSequence}`,
       );
     }
-    const successor = findRunSuccessor(root, run.startSequence);
+    const successor = findRunSuccessor(root, startSequence);
     if (successor !== null && endSequence > successor.startSequence) {
       throw new Error(
         `Typed run ${item.id} overlaps ${successor.item.id} at sequence ${successor.startSequence}`,
@@ -127,14 +133,13 @@ export class EventItemIndex {
 
     const node: RunItemNode = {
       item,
-      startSequence: run.startSequence,
-      priority: sequencePriority(run.startSequence),
+      startSequence,
+      priority: sequencePriority(startSequence),
       nextStartSequence: successor?.startSequence ?? Number.POSITIVE_INFINITY,
       left: null,
       right: null,
     };
-    const nextRoot = insertRunNode(root, node);
-    this.runRootsByReplica.set(run.replicaId, nextRoot);
+    this.runRootsByAgent[item.agent] = insertRunNode(root, node);
     this.runNodesByItem.set(item, node);
     if (predecessor !== null) {
       predecessor.nextStartSequence = node.startSequence;
@@ -153,7 +158,7 @@ export class EventItemIndex {
       return false;
     }
     const node = this.runNodesByItem.get(item);
-    if (node === undefined || item.run === null) {
+    if (node === undefined || !item.run) {
       return false;
     }
     const nextEnd = node.startSequence + item.content.length + additionalLength;
@@ -172,13 +177,10 @@ export class EventItemIndex {
   }
 
   private findRunItem(
-    replicaId: string,
+    agent: number,
     sequence: number,
   ): AugmentedCRDTItem | null {
-    const node = findRunNode(
-      this.runRootsByReplica.get(replicaId) ?? null,
-      sequence,
-    );
+    const node = findRunNode(this.runRootsByAgent[agent] ?? null, sequence);
     return node?.item ?? null;
   }
 }

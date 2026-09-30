@@ -8,7 +8,6 @@ import type {
 } from "../types";
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import {
   BinaryReader,
   BinaryWriter,
@@ -93,13 +92,7 @@ export class NativeSnapshotCodec {
       validateNativeSnapshotWithGraph(snapshot);
     try {
       const header = headerFromSnapshot(validated);
-      const events =
-        graph.getLinearReplayOrder() ?? graph.getTopologicalOrder();
-      const graphBytes = encodeTopologicallyOrderedEventsBinary(
-        events,
-        graph.getMetadata(),
-        Array.from(graph.getFrontier()),
-      ).binary;
+      const graphBytes = graph.encodeTopologicalBinary().binary;
       const body = new BinaryWriter();
       body.writeBytes(
         encodeCompressedSectionIfSmaller(

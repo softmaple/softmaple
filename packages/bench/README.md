@@ -215,6 +215,26 @@ GC pauses that started in it. `--output` receives `summary.md` and
 `runs.jsonl`, which keeps every sample with its GC pauses split by phase and
 by major and minor collections. Each invocation replaces both files.
 
+## Local keystroke memory
+
+`local-keystroke-memory-bench` types `--count` single-character local inserts
+into a fresh replica, appending at the end (`append`) or inserting in the
+middle of the document (`middle`). Each sample runs in a fresh `--expose-gc`
+process, forces full collections before and after typing, and reports what
+the live replica retains per keystroke: JS heap, array buffers (packed and
+typed-array columns live outside the JS heap) and their sum.
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-local-keystroke-memory-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --count 100000 --modes append,middle --runs 3 --output /path/to/results
+```
+
+`--output` receives `summary.md` and `runs.jsonl`; each invocation replaces
+both files.
+
 ## Replay optimization A/B workers
 
 `replay-bench` adds full-text-checked threshold, receive API, graph import and

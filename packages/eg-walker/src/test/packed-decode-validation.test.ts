@@ -3,9 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   buildPackedEventGraphBase,
-  buildPackedEventGraphBaseFromValidatedIdRuns,
+  buildPackedEventGraphBaseFromIdRunIndex,
 } from "../graph/columnar-codec/packed-decode";
+import { EventIdRunIndex } from "../graph/internals/event-id-run-index";
 import type { PackedEventIdIndex } from "../graph/internals/packed-event-graph-base";
+
+/** Agent and sequence accessors of a real run index over `ids`. */
+const numericIdAccessors = (
+  ids: ReadonlyArray<string>,
+): Pick<PackedEventIdIndex, "agents" | "agentAt" | "sequenceAt"> => {
+  const index = new EventIdRunIndex();
+  for (const id of ids) {
+    index.append(id);
+  }
+  return {
+    agents: index.agents,
+    agentAt: (offset) => index.agentAt(offset),
+    sequenceAt: (offset) => index.sequenceAt(offset),
+  };
+};
 
 type PackedColumns = Parameters<typeof buildPackedEventGraphBase>[0];
 
@@ -45,6 +61,7 @@ describe("packed EGW3 validation", () => {
     const offsetById = new Map(ids.map((id, offset) => [id, offset]));
     const lookupCounts = new Map<string, number>();
     const idIndex: PackedEventIdIndex = {
+      ...numericIdAccessors(ids),
       count: ids.length,
       has: (id) => offsetById.has(id),
       offsetOf: (id) => {
@@ -103,11 +120,12 @@ describe("packed EGW3 validation", () => {
     ]).toEqual([1, 2, 2, undefined, undefined]);
   });
 
-  it("skips redundant ID-index lookups only for validated ID runs", () => {
+  it("decodes run-indexed graphs through the ID index alone", () => {
     const ids = ["a:0", "a:1"];
     const offsetById = new Map(ids.map((id, offset) => [id, offset]));
     const offsetOf = vi.fn((id: string) => offsetById.get(id));
     const idIndex: PackedEventIdIndex = {
+      ...numericIdAccessors(ids),
       count: ids.length,
       has: (id) => offsetById.has(id),
       offsetOf,
@@ -118,11 +136,15 @@ describe("packed EGW3 validation", () => {
       maximumSequenceForReplica: () => 1,
     };
 
-    buildPackedEventGraphBaseFromValidatedIdRuns({
-      ...twoInsertColumns(),
+    const { ids: _ids, ...columns } = twoInsertColumns();
+    const { base, frontier } = buildPackedEventGraphBaseFromIdRunIndex({
+      ...columns,
       idIndex,
       parentOverrides: [{ eventOffset: 1, parents: ["a:0"] }],
     });
+
+    expect(base.idAt(1)).toBe("a:1");
+    expect([...frontier]).toEqual(["a:1"]);
 
     expect(offsetOf).toHaveBeenCalledTimes(1);
     expect(offsetOf).toHaveBeenCalledWith("a:0");
@@ -131,6 +153,7 @@ describe("packed EGW3 validation", () => {
   it("keeps mismatched caller-provided ID indexes strict by default", () => {
     const ids = ["a:0", "a:1"];
     const idIndex: PackedEventIdIndex = {
+      ...numericIdAccessors(ids),
       count: ids.length,
       has: () => true,
       offsetOf: (id) => (id === "a:0" ? 1 : 0),

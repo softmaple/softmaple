@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { LazyIdRunIndex } from "../graph/columnar-codec/lazy-id-run-index";
+import { EventIdRunIndex } from "../graph/internals/event-id-run-index";
 import type { IdRun } from "../graph/columnar-codec/types";
 import { EventGraph } from "../graph/event-graph";
 
@@ -20,9 +20,12 @@ const run = (
   custom,
 });
 
-describe("LazyIdRunIndex", () => {
+const indexRuns = (runs: ReadonlyArray<IdRun>, count: number) =>
+  EventIdRunIndex.fromRuns(runs, count).view();
+
+describe("EventIdRunIndex.fromRuns", () => {
   it("resolves canonical and custom runs without expanding them", () => {
-    const index = new LazyIdRunIndex(
+    const index = indexRuns(
       [
         run("alice", 40, 0, 3),
         run("legacy-id", 0, 3, 1, true),
@@ -65,8 +68,6 @@ describe("LazyIdRunIndex", () => {
     });
     expect(index.canonicalRunAt(-1)).toBeUndefined();
     expect(index.canonicalRunAt(8)).toBeUndefined();
-    index.releaseCanonicalRunLookup();
-    expect(index.canonicalRunAt(2)).toBe(index.canonicalRunAt(0));
     expect(index.offsetOf("alice:41")).toBe(1);
     expect(index.offsetOf("legacy-id")).toBe(3);
     expect(index.offsetOf("alice:99")).toBeUndefined();
@@ -74,15 +75,12 @@ describe("LazyIdRunIndex", () => {
     expect(index.maximumSequenceForReplica("alice")).toBe(101);
     expect(index.maximumSequenceForReplica("missing")).toBeUndefined();
 
-    const parseableCustom = new LazyIdRunIndex(
-      [run("alice:500", 0, 0, 1, true)],
-      1,
-    );
+    const parseableCustom = indexRuns([run("alice:500", 0, 0, 1, true)], 1);
     expect(parseableCustom.maximumSequenceForReplica("alice")).toBe(500);
   });
 
   it("reuses the previous lookup's replica without confusing similar IDs", () => {
-    const index = new LazyIdRunIndex(
+    const index = indexRuns(
       [
         run("a:b", 0, 0, 2),
         run("alice", 5, 2, 2),
@@ -115,42 +113,36 @@ describe("LazyIdRunIndex", () => {
   });
 
   it("strictly rejects collisions without building a per-event map", () => {
-    expect(
-      () =>
-        new LazyIdRunIndex(
-          [run("alice", 0, 0, 3), run("bob", 0, 3, 1), run("alice", 2, 4, 2)],
-          6,
-        ),
+    expect(() =>
+      indexRuns(
+        [run("alice", 0, 0, 3), run("bob", 0, 3, 1), run("alice", 2, 4, 2)],
+        6,
+      ),
     ).toThrow("Duplicate event ID in columnar graph: alice:2");
 
-    expect(
-      () =>
-        new LazyIdRunIndex(
-          [run("duplicate", 0, 0, 1, true), run("duplicate", 0, 1, 1, true)],
-          2,
-        ),
+    expect(() =>
+      indexRuns(
+        [run("duplicate", 0, 0, 1, true), run("duplicate", 0, 1, 1, true)],
+        2,
+      ),
     ).toThrow("Duplicate event ID in columnar graph: duplicate");
 
-    expect(
-      () =>
-        new LazyIdRunIndex(
-          [run("alice", 4, 0, 2), run("alice:5", 0, 2, 1, true)],
-          3,
-        ),
+    expect(() =>
+      indexRuns([run("alice", 4, 0, 2), run("alice:5", 0, 2, 1, true)], 3),
     ).toThrow("Duplicate event ID in columnar graph: alice:5");
   });
 
   it("rejects malformed or incomplete run layouts", () => {
-    expect(() => new LazyIdRunIndex([run("alice", 0, 1, 1)], 1)).toThrow(
+    expect(() => indexRuns([run("alice", 0, 1, 1)], 1)).toThrow(
       "Invalid ID run 0",
     );
-    expect(() => new LazyIdRunIndex([run("", 0, 0, 1)], 1)).toThrow(
+    expect(() => indexRuns([run("", 0, 0, 1)], 1)).toThrow(
       "Invalid event ID in run 0",
     );
-    expect(() => new LazyIdRunIndex([run("custom", 0, 0, 2, true)], 2)).toThrow(
+    expect(() => indexRuns([run("custom", 0, 0, 2, true)], 2)).toThrow(
       "Custom id run must have length 1",
     );
-    expect(() => new LazyIdRunIndex([run("alice", 0, 0, 1)], 2)).toThrow(
+    expect(() => indexRuns([run("alice", 0, 0, 1)], 2)).toThrow(
       "ID runs cover 1 events but graph contains 2",
     );
   });
@@ -250,5 +242,50 @@ describe("lazy exact-linear EGW3 IDs", () => {
     } finally {
       iterateIds.mockRestore();
     }
+  });
+});
+
+describe("EventIdRunIndex validation and bounds", () => {
+  it("rejects invalid counts, overlong runs and unsafe sequences", () => {
+    expect(() => EventIdRunIndex.fromRuns([], -1)).toThrow(
+      "Invalid packed event count -1",
+    );
+    expect(() => EventIdRunIndex.fromRuns([run("a", 0, 0, 3)], 2)).toThrow(
+      "ID run 0 exceeds the event count",
+    );
+    expect(() =>
+      EventIdRunIndex.fromRuns([run("a", Number.MAX_SAFE_INTEGER, 0, 4)], 4),
+    ).toThrow("ID run 0 exceeds the safe sequence range");
+  });
+
+  it("reports sizes and rejects offsets outside the index", () => {
+    const index = EventIdRunIndex.fromRuns(
+      [run("a", 0, 0, 2), run("custom-id", 0, 2, 1, true)],
+      3,
+    );
+    const view = index.view();
+
+    expect(index.count).toBe(3);
+    expect(index.runCount).toBe(2);
+    expect(index.agents.size).toBe(1);
+    expect(() => index.agentAt(3)).toThrow("has no local version 3");
+    expect(() => view.agentAt(-1)).toThrow("has no local version -1");
+    expect(() => index.agents.nameOf(7)).toThrow("Unknown agent 7");
+    expect(index.agents.compare(0, 0)).toBe(0);
+  });
+
+  it("forgets truncated custom runs whose IDs parse canonically", () => {
+    // A hand-written payload may mark a canonical-looking ID as custom.
+    const index = EventIdRunIndex.fromRuns(
+      [run("a", 0, 0, 1), run("b:7", 0, 1, 1, true)],
+      2,
+    );
+    expect(index.maximumSequenceBefore("b", 2)).toBe(7);
+
+    index.truncate(1);
+
+    expect(index.count).toBe(1);
+    expect(index.maximumSequenceBefore("b", 1)).toBeUndefined();
+    expect(index.localVersionOf("b:7")).toBe(-1);
   });
 });

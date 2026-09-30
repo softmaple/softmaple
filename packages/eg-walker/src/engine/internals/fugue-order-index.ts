@@ -5,7 +5,11 @@ import {
 } from "../../graph/event-id";
 import type { EventId } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
-import { PLACEHOLDER_EVENT_ID, type AugmentedCRDTItem } from "./engine-types";
+import {
+  PLACEHOLDER_AGENT,
+  type AugmentedCRDTItem,
+  type ItemKey,
+} from "./engine-types";
 import {
   PACKED_EULER_BOUNDARY,
   PackedEulerRankIndex,
@@ -46,9 +50,10 @@ export interface FugueOrderStats {
  */
 export class FugueOrderIndex {
   private readonly markerSequence = new PackedEulerRankIndex();
-  private readonly nodesById = new Map<EventId, FugueNode>();
-  private readonly forcedParentById = new Map<EventId, EventId>();
-  private readonly forcedChildByParentId = new Map<EventId, EventId>();
+  /** Fugue node of each item, indexed by item key. */
+  private nodesById: Array<FugueNode | undefined> = [];
+  private readonly forcedParentById = new Map<ItemKey, ItemKey>();
+  private readonly forcedChildByParentId = new Map<ItemKey, ItemKey>();
   private rootNode!: FugueNode;
   private comparisons = 0;
   private markerOperations = 0;
@@ -57,9 +62,15 @@ export class FugueOrderIndex {
   private rebuilds = 0;
   private valid = true;
 
+  /**
+   * @param itemAt resolves an item key.
+   * @param eventIdOf formats the ID of an item's event. Siblings with equal
+   * anchors are ordered by event ID; the ID is formatted only at such a tie.
+   */
   constructor(
     private readonly sequence: IndexedSequence<AugmentedCRDTItem>,
-    private readonly itemsById: ReadonlyMap<EventId, AugmentedCRDTItem>,
+    private readonly itemAt: (itemId: ItemKey) => AugmentedCRDTItem | undefined,
+    private readonly eventIdOf: (item: AugmentedCRDTItem) => EventId,
   ) {
     this.reset();
   }
@@ -115,7 +126,7 @@ export class FugueOrderIndex {
     }
     const forcedParentId = this.forcedParentById.get(item.id);
     const rightAnchor =
-      item.originRight === null ? null : this.itemsById.get(item.originRight);
+      item.originRight === null ? null : this.itemAt(item.originRight);
     const isLeftChild =
       forcedParentId === undefined &&
       rightAnchor !== undefined &&
@@ -123,12 +134,12 @@ export class FugueOrderIndex {
       rightAnchor.originLeft === item.originLeft;
     const parent =
       forcedParentId !== undefined
-        ? this.nodesById.get(forcedParentId)
+        ? this.nodesById[forcedParentId]
         : isLeftChild
-          ? this.nodesById.get(rightAnchor.id)
+          ? this.nodesById[rightAnchor.id]
           : item.originLeft === null
             ? this.rootNode
-            : this.nodesById.get(item.originLeft);
+            : this.nodesById[item.originLeft];
     if (parent === undefined) {
       throw new Error(
         `Fugue index missing parent ${item.originLeft ?? "ROOT"} for ${item.id}`,
@@ -169,7 +180,7 @@ export class FugueOrderIndex {
       );
     }
     this.markerOperations += 3;
-    this.nodesById.set(item.id, node);
+    this.nodesById[item.id] = node;
     return position;
   }
 
@@ -178,9 +189,9 @@ export class FugueOrderIndex {
     this.rebuilds++;
     this.forcedParentById.clear();
     this.forcedChildByParentId.clear();
-    let previousPlaceholderId: EventId | null = null;
+    let previousPlaceholderId: ItemKey | null = null;
     for (const item of records) {
-      if (item.eventId !== PLACEHOLDER_EVENT_ID) {
+      if (item.agent !== PLACEHOLDER_AGENT) {
         continue;
       }
       if (previousPlaceholderId !== null) {
@@ -191,7 +202,7 @@ export class FugueOrderIndex {
     this.reset(false);
     this.valid = true;
     const recordIds = new Set(records.map(({ id }) => id));
-    const childrenByParent = new Map<EventId | null, AugmentedCRDTItem[]>();
+    const childrenByParent = new Map<ItemKey | null, AugmentedCRDTItem[]>();
     for (const item of records) {
       const parentId = this.fugueParentId(item);
       if (parentId !== null && !recordIds.has(parentId)) {
@@ -220,7 +231,7 @@ export class FugueOrderIndex {
     }
 
     for (let index = 0; index < records.length; index++) {
-      const node = this.nodesById.get(records[index]!.id);
+      const node = this.nodesById[records[index]!.id];
       if (
         node === undefined ||
         this.markerSequence.rankOfVisit(node.markerHandle) !== index
@@ -235,11 +246,11 @@ export class FugueOrderIndex {
     if (!this.valid) {
       throw new Error("Cannot update an invalid Fugue order index");
     }
-    const leftNode = this.nodesById.get(left.id);
+    const leftNode = this.nodesById[left.id];
     if (leftNode === undefined) {
       throw new Error(`Fugue index missing split record ${left.id}`);
     }
-    if (this.nodesById.has(right.id)) {
+    if (this.nodesById[right.id] !== undefined) {
       throw new Error(`Fugue index already contains split record ${right.id}`);
     }
     if (!this.sequence.areAdjacent(left, right)) {
@@ -259,7 +270,7 @@ export class FugueOrderIndex {
       this.forcedParentById.set(previousForcedChild, right.id);
       this.forcedChildByParentId.set(right.id, previousForcedChild);
     }
-    if (right.eventId === PLACEHOLDER_EVENT_ID) {
+    if (right.agent === PLACEHOLDER_AGENT) {
       this.setForcedParent(right.id, left.id);
     }
 
@@ -268,20 +279,20 @@ export class FugueOrderIndex {
       rightNode.markerHandle,
     );
     this.markerOperations += 3;
-    this.nodesById.set(right.id, rightNode);
+    this.nodesById[right.id] = rightNode;
   }
 
   invalidate(): void {
     this.valid = false;
   }
 
-  private fugueParentId(item: AugmentedCRDTItem): EventId | null {
+  private fugueParentId(item: AugmentedCRDTItem): ItemKey | null {
     const forcedParent = this.forcedParentById.get(item.id);
     if (forcedParent !== undefined) {
       return forcedParent;
     }
     const rightAnchor =
-      item.originRight === null ? null : this.itemsById.get(item.originRight);
+      item.originRight === null ? null : this.itemAt(item.originRight);
     return rightAnchor !== undefined &&
       rightAnchor !== null &&
       rightAnchor.originLeft === item.originLeft
@@ -296,7 +307,7 @@ export class FugueOrderIndex {
       this.markerTreeOperationOffset +=
         this.markerSequence.getStructuralOperationCount();
     }
-    this.nodesById.clear();
+    this.nodesById = [];
     const root = createFugueNode(null, this.markerSequence.reset());
     this.rootNode = root;
     if (resetStats) {
@@ -362,8 +373,8 @@ export class FugueOrderIndex {
   ): number {
     this.comparisons++;
     if (side === "right") {
-      const leftPlaceholder = left.item!.eventId === PLACEHOLDER_EVENT_ID;
-      const rightPlaceholder = right.item!.eventId === PLACEHOLDER_EVENT_ID;
+      const leftPlaceholder = left.item!.agent === PLACEHOLDER_AGENT;
+      const rightPlaceholder = right.item!.agent === PLACEHOLDER_AGENT;
       if (leftPlaceholder !== rightPlaceholder) {
         // A split placeholder is the untouched suffix of checkpoint/initial
         // text. New children anchored at the split boundary belong before
@@ -385,8 +396,8 @@ export class FugueOrderIndex {
   }
 
   private compareRightAnchors(
-    leftId: EventId | null,
-    rightId: EventId | null,
+    leftId: ItemKey | null,
+    rightId: ItemKey | null,
   ): number {
     if (leftId === rightId) {
       return 0;
@@ -397,8 +408,8 @@ export class FugueOrderIndex {
     if (rightId === null) {
       return 1;
     }
-    const left = this.nodesById.get(leftId);
-    const right = this.nodesById.get(rightId);
+    const left = this.nodesById[leftId];
+    const right = this.nodesById[rightId];
     if (left === undefined) {
       return right === undefined ? 0 : -1;
     }
@@ -411,12 +422,12 @@ export class FugueOrderIndex {
 
   private getSortKey(node: FugueNode): EventIdSortKey {
     if (node.sortKey === null) {
-      node.sortKey = createEventIdSortKey(node.item!.eventId);
+      node.sortKey = createEventIdSortKey(this.eventIdOf(node.item!));
     }
     return node.sortKey;
   }
 
-  private setForcedParent(childId: EventId, parentId: EventId): void {
+  private setForcedParent(childId: ItemKey, parentId: ItemKey): void {
     const existingChild = this.forcedChildByParentId.get(parentId);
     if (existingChild !== undefined && existingChild !== childId) {
       throw new Error(`Fugue forced parent ${parentId} has multiple children`);

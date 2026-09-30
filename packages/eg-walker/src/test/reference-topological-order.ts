@@ -1,6 +1,15 @@
-import type { EventId } from "../../types";
-import { compareEventIds } from "../event-id";
-import { MaxHeap } from "./max-heap";
+/**
+ * String-keyed reference implementations of the two topological orders.
+ *
+ * `EventGraph` computes both orders over insertion ranks with typed columns.
+ * These are the implementations it replaced, kept as test oracles: they walk
+ * `Map<EventId, ...>` state and compare IDs with `compareEventIds`, so a
+ * property test can check the numeric orders against them.
+ */
+
+import { compareEventIds } from "../graph/event-id";
+import { MaxHeap } from "../graph/internals/max-heap";
+import type { EventId } from "../types";
 
 const MAX_EXCLUSIVE_BRANCH_SPAN = 1_024;
 

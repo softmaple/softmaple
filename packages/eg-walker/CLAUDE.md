@@ -80,7 +80,7 @@ src/
       packed-diff-versions.ts
       event-graph-serialization.ts
       max-heap.ts
-      topological-order.ts
+      event-id-tie-breaker.ts
   types/index.ts
 ```
 

@@ -41,10 +41,6 @@ import {
   type RankedVersionTransition,
 } from "./internals/ranked-diff-versions";
 import {
-  getBranchPreservingTopologicalOrder as computeBranchPreservingTopologicalOrder,
-  getTopologicalOrder as computeTopologicalOrder,
-} from "./internals/topological-order";
-import {
   RankedReplayOrderWorkspace,
   type RankedReplayOrderView,
 } from "./internals/ranked-replay-order";
@@ -1317,10 +1313,13 @@ export class EventGraph {
       return this.cachedTopologicalOrder;
     }
 
+    // Order insertion ranks over the packed planning view's CSR edges, as
+    // cold replay does, instead of string-keyed maps and child generators.
+    const ranks = this.packedReplayBase()?.getTopologicalOrderOffsets();
     this.cachedTopologicalOrder = Object.freeze(
-      computeTopologicalOrder(this.topologicalOrderView()).map((id) =>
-        cloneReadonlyGraphEvent(this.requireStoredEvent(id)),
-      ),
+      ranks === undefined
+        ? []
+        : Array.from(ranks, (rank) => this.readonlyEventAtInsertionRank(rank)),
     );
     return this.cachedTopologicalOrder;
   }
@@ -1361,23 +1360,11 @@ export class EventGraph {
       return this.cachedBranchPreservingOrder;
     }
 
-    if (
-      this.packedBase !== null &&
-      this.tailEventsByInsertionRank.length === 0
-    ) {
-      const offsets = this.packedBase.getBranchPreservingOrderOffsets();
-      this.cachedBranchPreservingOrder = Object.freeze(
-        Array.from(offsets, (offset) =>
-          readonlyPackedGraphEvent(this.packedBase!, offset),
-        ),
-      );
-      return this.cachedBranchPreservingOrder;
-    }
-
+    const ranks = this.packedReplayBase()?.getBranchPreservingOrderOffsets();
     this.cachedBranchPreservingOrder = Object.freeze(
-      computeBranchPreservingTopologicalOrder(this.topologicalOrderView()).map(
-        (id) => cloneReadonlyGraphEvent(this.requireStoredEvent(id)),
-      ),
+      ranks === undefined
+        ? []
+        : Array.from(ranks, (rank) => this.readonlyEventAtInsertionRank(rank)),
     );
     return this.cachedBranchPreservingOrder;
   }
@@ -1389,7 +1376,46 @@ export class EventGraph {
     return new Set(this.iterateChildren(id));
   }
 
-  /** Allocation-free child traversal that does not expose the backing set. */
+  /**
+   * Visit the children of an event without allocating an iterator.
+   *
+   * @internal Graph traversals call this once per visited event;
+   * {@link iterateChildren} is the public convenience API.
+   */
+  forEachChild(id: EventId, visit: (childId: EventId) => void): void {
+    const packedBase = this.packedBase;
+    const packedOffset = packedBase?.offsetOf(id);
+    let childRanks: TailChildInsertionRanks | undefined;
+    if (packedBase !== null && packedOffset !== undefined) {
+      const childCount = packedBase.childCountAt(packedOffset);
+      for (let childIndex = 0; childIndex < childCount; childIndex++) {
+        visit(
+          this.requireEventIdAtInsertionRank(
+            packedBase.childOffsetAt(packedOffset, childIndex)!,
+          ),
+        );
+      }
+      childRanks = this.tailChildrenByPackedParentRank.get(packedOffset);
+    } else {
+      const tailIndex = this.tailIndexById.get(id);
+      childRanks =
+        tailIndex === undefined
+          ? undefined
+          : this.tailChildrenByTailIndex[tailIndex];
+    }
+    if (childRanks === undefined) {
+      return;
+    }
+    if (typeof childRanks === "number") {
+      visit(this.requireTailEventIdAtInsertionRank(childRanks));
+      return;
+    }
+    for (const childRank of childRanks) {
+      visit(this.requireTailEventIdAtInsertionRank(childRank));
+    }
+  }
+
+  /** Child traversal that does not expose the backing set. */
   *iterateChildren(id: EventId): IterableIterator<EventId> {
     const packedBase = this.packedBase;
     const packedOffset = packedBase?.offsetOf(id);
@@ -1704,23 +1730,17 @@ export class EventGraph {
     return false;
   }
 
-  private requireStoredEvent(id: EventId): GraphEvent {
-    const tail = this.tailEventById(id);
-    if (tail !== undefined) return tail;
-    const offset = this.packedBase?.offsetOf(id);
-    const event =
-      offset === undefined ? undefined : this.packedBase?.eventAt(offset);
-    if (event === undefined) {
-      throw new Error(`Event graph is missing event ${id}`);
+  /** A frozen copy of the event at an insertion rank, for traversal orders. */
+  private readonlyEventAtInsertionRank(rank: number): GraphEvent {
+    const packedCount = this.packedBase?.count ?? 0;
+    if (rank < packedCount) {
+      return readonlyPackedGraphEvent(this.packedBase!, rank);
     }
-    return event;
-  }
-
-  private parentCountOf(id: EventId): number {
-    const tail = this.tailEventById(id);
-    if (tail !== undefined) return tail.parentVersion.size;
-    const offset = this.packedBase?.offsetOf(id);
-    return offset === undefined ? 0 : this.packedBase!.parentCountAt(offset);
+    const event = this.tailEventsByInsertionRank[rank - packedCount];
+    if (event === undefined) {
+      throw new Error(`Event graph is missing insertion rank ${rank}`);
+    }
+    return cloneReadonlyGraphEvent(event);
   }
 
   private insertionRankOf(id: EventId): number | undefined {
@@ -1796,17 +1816,6 @@ export class EventGraph {
   private packedBaseChildCount(id: EventId): number {
     const offset = this.packedBase?.offsetOf(id);
     return offset === undefined ? 0 : this.packedBase!.childCountAt(offset);
-  }
-
-  private topologicalOrderView(): Parameters<
-    typeof computeTopologicalOrder
-  >[0] {
-    return {
-      eventCount: this.getEventCount(),
-      eventIds: this.iterateEventIdsInInsertionOrder(),
-      parentCountOf: (id) => this.parentCountOf(id),
-      childrenOf: (id) => this.iterateChildren(id),
-    };
   }
 }
 

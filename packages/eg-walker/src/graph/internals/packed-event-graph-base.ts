@@ -1,6 +1,8 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
-import { compareEventIds, parseEventId } from "../event-id";
+import { parseEventId } from "../event-id";
+import { EventIdTieBreaker } from "./event-id-tie-breaker";
+import { MaxHeap } from "./max-heap";
 import {
   type PackedIntegerColumn,
   type PackedUnsignedIntegerColumn,
@@ -544,6 +546,62 @@ export class PackedEventGraphBase {
   }
 
   /**
+   * Return Kahn's topological order as packed insertion offsets, taking
+   * ready events in {@link compareEventIds} order.
+   *
+   * This is the order {@link EventGraph.getTopologicalOrder} returns. It runs
+   * over the CSR edges with a typed parent counter and a heap of offsets, and
+   * parses an event's ID only when it is ready together with another event.
+   */
+  getTopologicalOrderOffsets(): Uint32Array {
+    const count = this.count;
+    const order = new Uint32Array(count);
+    if (this.implicitLinearEdges) {
+      for (let offset = 0; offset < count; offset++) {
+        order[offset] = offset;
+      }
+      return order;
+    }
+    const parentStarts = this.parentStarts!;
+    const childStarts = this.childStarts!;
+    const childOffsets = this.childOffsets!;
+    const ids = new EventIdTieBreaker(count, (offset) =>
+      this.requireIdAt(offset),
+    );
+    // A max-heap with an inverted comparator pops the smallest ready ID.
+    const ready = new MaxHeap<number>((left, right) =>
+      ids.compare(right, left),
+    );
+    const remainingParents = new Uint32Array(count);
+    for (let offset = 0; offset < count; offset++) {
+      const parentCount = parentStarts[offset + 1]! - parentStarts[offset]!;
+      remainingParents[offset] = parentCount;
+      if (parentCount === 0) {
+        ready.push(offset);
+      }
+    }
+
+    let length = 0;
+    while (ready.size > 0) {
+      const offset = ready.pop()!;
+      order[length++] = offset;
+      const end = childStarts[offset + 1]!;
+      for (let cursor = childStarts[offset]!; cursor < end; cursor++) {
+        const childOffset = childOffsets[cursor]!;
+        const remaining = remainingParents[childOffset]! - 1;
+        remainingParents[childOffset] = remaining;
+        if (remaining === 0) {
+          ready.push(childOffset);
+        }
+      }
+    }
+    if (length !== count) {
+      throw new Error("Cycle detected in packed event graph");
+    }
+    return order;
+  }
+
+  /**
    * Return the branch-preserving traversal as packed insertion offsets.
    *
    * A decoded prefix is already a validated DAG whose parents always precede
@@ -977,17 +1035,19 @@ export class PackedEventGraphBase {
       }
     }
 
+    // Most sibling groups differ in span, so parse IDs only at a first tie.
+    let ids: EventIdTieBreaker | null = null;
+    const compareIds = (left: number, right: number): number =>
+      (ids ??= new EventIdTieBreaker(this.count, (offset) =>
+        this.requireIdAt(offset),
+      )).compare(left, right);
     const compareExclusive = (left: number, right: number): number => {
       const difference = exclusiveSpan[left]! - exclusiveSpan[right]!;
-      return difference === 0
-        ? compareEventIds(this.idAt(left)!, this.idAt(right)!)
-        : difference;
+      return difference === 0 ? compareIds(left, right) : difference;
     };
     const compareLongest = (left: number, right: number): number => {
       const difference = longestPath![left]! - longestPath![right]!;
-      return difference === 0
-        ? compareEventIds(this.idAt(left)!, this.idAt(right)!)
-        : difference;
+      return difference === 0 ? compareIds(left, right) : difference;
     };
     const sortBranchGroup = (group: number[]): void => {
       let hasLongExclusiveBranch = false;

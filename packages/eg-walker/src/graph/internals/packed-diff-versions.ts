@@ -1,4 +1,5 @@
 import type { EventId } from "../../types";
+import type { GraphRuns } from "./graph-runs";
 
 const DIFF_COLOR = {
   LEFT: 1,
@@ -10,6 +11,7 @@ const INITIAL_WORKSPACE_CAPACITY = 64;
 
 export interface PackedDiffVersionsView {
   readonly count: number;
+  readonly runs: GraphRuns;
   offsetOf(id: EventId): number | undefined;
   idAt(offset: number): EventId | undefined;
   parentCountAt(offset: number): number;
@@ -26,8 +28,8 @@ export interface PackedVersionDiff {
  *
  * Only the prefixes selected by `retreatCount` and `advanceCount` are valid.
  * The arrays and this view are owned by a reusable workspace and are
- * overwritten by its next query. Retreat offsets are in descending replay
- * rank; advance offsets are in ascending replay rank.
+ * overwritten by its next query. Retreat offsets are in descending local
+ * version; advance offsets are in ascending local version.
  */
 export interface PackedOffsetTransition {
   readonly retreatOffsets: Uint32Array;
@@ -59,13 +61,14 @@ export interface PackedLocalVersionTransition {
 /**
  * Reusable numeric workspace for Appendix B's version diff.
  *
- * Packed insertion offsets are already a valid topological rank, so the
- * traversal needs neither string-keyed colour maps nor a generic heap with a
- * comparator closure. A caller may supply another topological rank per offset
- * (the branch-preserving replay order) to exactly match its event traversal.
- * Colours live in one byte per packed event; the heap, touched-offset list and
- * transition outputs grow only to the largest divergent region observed by
- * this immutable graph and are reused by subsequent diffs.
+ * Packed insertion offsets are local versions and already a valid
+ * topological rank, so the traversal needs neither string-keyed colour maps
+ * nor a heap with a comparator closure. It walks the graph's runs rather than
+ * its events: a transition across a long branch costs one step per run, not
+ * one per event. Colours live in one byte per packed event; the heap,
+ * touched-offset list and transition outputs grow only to the largest
+ * divergent region observed by this immutable graph and are reused by
+ * subsequent diffs.
  */
 export class PackedDiffVersionsWorkspace
   implements PackedOffsetTransition, PackedLocalVersionTransition
@@ -88,7 +91,6 @@ export class PackedDiffVersionsWorkspace
   private advanceRangeLength = 0;
   private advanceRangeEventLength = 0;
   private scalarOffsetWrites = 0;
-  private activeRankByOffset: Uint32Array | null = null;
   private active = false;
 
   constructor(private readonly eventCount: number) {
@@ -173,7 +175,7 @@ export class PackedDiffVersionsWorkspace
       );
     }
 
-    this.begin(null);
+    this.begin();
     try {
       let pendingDivergent = this.paintVersion(left, DIFF_COLOR.LEFT, view);
       pendingDivergent += this.paintVersion(right, DIFF_COLOR.RIGHT, view);
@@ -204,21 +206,15 @@ export class PackedDiffVersionsWorkspace
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
     view: PackedDiffVersionsView,
-    rankByOffset?: Uint32Array,
   ): PackedOffsetTransition {
     if (this.active) {
       return new PackedDiffVersionsWorkspace(
         this.eventCount,
-      ).diffVersionToParents(
-        currentVersion,
-        targetEventOffset,
-        view,
-        rankByOffset,
-      );
+      ).diffVersionToParents(currentVersion, targetEventOffset, view);
     }
 
     this.assertEventOffset(targetEventOffset);
-    this.begin(rankByOffset ?? null);
+    this.begin();
     try {
       let pendingDivergent = this.paintVersion(
         currentVersion,
@@ -244,21 +240,15 @@ export class PackedDiffVersionsWorkspace
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
     view: PackedDiffVersionsView,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition {
     if (this.active) {
       return new PackedDiffVersionsWorkspace(
         this.eventCount,
-      ).diffVersionToParentRanges(
-        currentVersion,
-        targetEventOffset,
-        view,
-        rankByOffset,
-      );
+      ).diffVersionToParentRanges(currentVersion, targetEventOffset, view);
     }
 
     this.assertEventOffset(targetEventOffset);
-    this.begin(rankByOffset ?? null);
+    this.begin();
     try {
       let pendingDivergent = this.paintVersion(
         currentVersion,
@@ -285,7 +275,6 @@ export class PackedDiffVersionsWorkspace
     currentOffsets: ReadonlyArray<number>,
     targetEventOffset: number,
     view: PackedDiffVersionsView,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition {
     if (this.active) {
       return new PackedDiffVersionsWorkspace(
@@ -294,7 +283,6 @@ export class PackedDiffVersionsWorkspace
         currentOffsets,
         targetEventOffset,
         view,
-        rankByOffset,
       );
     }
 
@@ -302,7 +290,7 @@ export class PackedDiffVersionsWorkspace
     for (const offset of currentOffsets) {
       this.assertEventOffset(offset);
     }
-    this.begin(rankByOffset ?? null);
+    this.begin();
     try {
       let pendingDivergent = 0;
       for (const offset of currentOffsets) {
@@ -327,22 +315,16 @@ export class PackedDiffVersionsWorkspace
     currentOffset: number,
     targetEventOffset: number,
     view: PackedDiffVersionsView,
-    rankByOffset?: Uint32Array,
   ): PackedOffsetTransition {
     if (this.active) {
       return new PackedDiffVersionsWorkspace(
         this.eventCount,
-      ).diffOffsetToParents(
-        currentOffset,
-        targetEventOffset,
-        view,
-        rankByOffset,
-      );
+      ).diffOffsetToParents(currentOffset, targetEventOffset, view);
     }
 
     this.assertEventOffset(currentOffset);
     this.assertEventOffset(targetEventOffset);
-    this.begin(rankByOffset ?? null);
+    this.begin();
     try {
       let pendingDivergent = this.paint(currentOffset, DIFF_COLOR.LEFT);
       pendingDivergent += this.paintParents(
@@ -365,22 +347,16 @@ export class PackedDiffVersionsWorkspace
     currentOffset: number,
     targetEventOffset: number,
     view: PackedDiffVersionsView,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition {
     if (this.active) {
       return new PackedDiffVersionsWorkspace(
         this.eventCount,
-      ).diffOffsetToParentRanges(
-        currentOffset,
-        targetEventOffset,
-        view,
-        rankByOffset,
-      );
+      ).diffOffsetToParentRanges(currentOffset, targetEventOffset, view);
     }
 
     this.assertEventOffset(currentOffset);
     this.assertEventOffset(targetEventOffset);
-    this.begin(rankByOffset ?? null);
+    this.begin();
     try {
       let pendingDivergent = this.paint(currentOffset, DIFF_COLOR.LEFT);
       pendingDivergent += this.paintParents(
@@ -395,14 +371,8 @@ export class PackedDiffVersionsWorkspace
     }
   }
 
-  private begin(rankByOffset: Uint32Array | null): void {
-    if (rankByOffset !== null && rankByOffset.length !== this.eventCount) {
-      throw new Error(
-        `Packed replay rank length ${rankByOffset.length} does not match event count ${this.eventCount}`,
-      );
-    }
+  private begin(): void {
     this.active = true;
-    this.activeRankByOffset = rankByOffset;
     this.retreatLength = 0;
     this.advanceLength = 0;
     this.retreatRangeLength = 0;
@@ -478,35 +448,43 @@ export class PackedDiffVersionsWorkspace
     initialPendingDivergent: number,
     view: PackedDiffVersionsView,
   ): void {
-    this.walkDivergent(initialPendingDivergent, view, false);
-
-    // Right-side offsets were discovered from high to low replay rank. Reverse
-    // their populated prefix in place so callers can advance causally from low
-    // to high without allocating a sorted copy or a typed-array slice.
-    for (
-      let left = 0, right = this.advanceLength - 1;
-      left < right;
-      left++, right--
-    ) {
-      const value = this.advanceBuffer[left]!;
-      this.advanceBuffer[left] = this.advanceBuffer[right]!;
-      this.advanceBuffer[right] = value;
+    this.collectRangeTransition(initialPendingDivergent, view);
+    // Expand ranges into scalar offsets: retreat descending, advance ascending.
+    for (let range = 0; range < this.retreatRangeLength; range++) {
+      const start = this.retreatStartBuffer[range]!;
+      for (
+        let offset = this.retreatEndBuffer[range]! - 1;
+        offset >= start;
+        offset--
+      ) {
+        this.emitScalar(offset, DIFF_COLOR.LEFT);
+      }
+    }
+    for (let range = 0; range < this.advanceRangeLength; range++) {
+      const end = this.advanceEndBuffer[range]!;
+      for (
+        let offset = this.advanceStartBuffer[range]!;
+        offset < end;
+        offset++
+      ) {
+        this.emitScalar(offset, DIFF_COLOR.RIGHT);
+      }
     }
   }
 
   /**
    * Collect the transition directly into local-version ranges.
    *
-   * The max-heap yields both sides in descending replay rank. Retreat ranges
+   * The walk yields both sides in descending local version. Retreat ranges
    * therefore arrive in their final order. Advance ranges are accumulated in
    * the inverse direction, then their range pairs (not their events) are
-   * reversed so callers can expand them in ascending replay rank.
+   * reversed so callers can expand them in ascending local version.
    */
   private collectRangeTransition(
     initialPendingDivergent: number,
     view: PackedDiffVersionsView,
   ): void {
-    this.walkDivergent(initialPendingDivergent, view, true);
+    this.walkDivergent(initialPendingDivergent, view.runs);
 
     for (
       let left = 0, right = this.advanceRangeLength - 1;
@@ -523,82 +501,86 @@ export class PackedDiffVersionsWorkspace
   }
 
   /**
-   * Visit painted events in descending replay rank until no one-sided event
-   * remains queued.
+   * Visit painted events in descending local version, one run at a time,
+   * until no one-sided event remains queued.
    *
-   * Sole-parent chains dominate long-running branches. When an event's only
-   * parent is still unpainted and outranks everything queued, the heap would
-   * pop it next, so the walk continues into it directly instead of pushing
-   * and popping. The visit order is therefore identical to a pure heap walk.
+   * Every event of a run after its first has the previous event as its only
+   * parent, so a colour flows unchanged down a run until it reaches another
+   * queued event of the same run, where the two colours merge. The walk
+   * therefore pops the highest queued event, absorbs every other queued
+   * event of its run, emits the run's coloured spans, and queues the parents
+   * of the run's first event. Its cost follows the runs it visits, not the
+   * events in them.
    */
   private walkDivergent(
     initialPendingDivergent: number,
-    view: PackedDiffVersionsView,
-    ranges: boolean,
+    runs: GraphRuns,
   ): void {
     const colors = this.colors;
     let pendingDivergent = initialPendingDivergent;
     while (this.heapLength > 0 && pendingDivergent > 0) {
-      let offset = this.pop();
-      while (true) {
-        const finalColor = colors[offset]!;
-        if (finalColor !== DIFF_COLOR.COMMON) {
-          this.emitDivergent(offset, finalColor, ranges);
+      let top = this.pop();
+      let color = colors[top]!;
+      if (color !== DIFF_COLOR.COMMON) {
+        pendingDivergent--;
+      }
+      const run = runs.runOf(top);
+      const start = runs.startOf(run);
+      while (this.heapLength > 0 && this.heap[0]! >= start) {
+        const next = this.pop();
+        this.emitSpan(next + 1, top + 1, color);
+        const nextColor = colors[next]!;
+        if (nextColor !== DIFF_COLOR.COMMON) {
           pendingDivergent--;
         }
-
-        const parentCount = view.parentCountAt(offset);
-        if (parentCount !== 1) {
-          for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-            const parentOffset = view.parentOffsetAt(offset, parentIndex);
-            if (parentOffset === undefined) {
-              throw new Error(
-                `Packed event ${offset} is missing parent ${parentIndex}`,
-              );
-            }
-            pendingDivergent += this.paint(parentOffset, finalColor);
-          }
-          break;
-        }
-
-        const parentOffset = view.parentOffsetAt(offset, 0);
-        if (parentOffset === undefined) {
-          throw new Error(`Packed event ${offset} is missing parent 0`);
-        }
-        if (colors[parentOffset] !== 0) {
-          pendingDivergent += this.paint(parentOffset, finalColor);
-          break;
-        }
-        colors[parentOffset] = finalColor;
-        this.recordTouched(parentOffset);
-        if (finalColor !== DIFF_COLOR.COMMON) {
-          pendingDivergent++;
-        }
-        if (
-          pendingDivergent > 0 &&
-          (this.heapLength === 0 ||
-            this.compareReplayRank(this.heap[0]!, parentOffset) < 0)
-        ) {
-          offset = parentOffset;
-          continue;
-        }
-        this.push(parentOffset);
+        color |= nextColor;
+        top = next;
+      }
+      this.emitSpan(start, top + 1, color);
+      if (pendingDivergent === 0 && color === DIFF_COLOR.COMMON) {
         break;
+      }
+      const parentCount = runs.parentCountOf(run);
+      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+        pendingDivergent += this.paint(
+          runs.lastOf(runs.parentRunAt(run, parentIndex)),
+          color,
+        );
       }
     }
   }
 
-  private emitDivergent(offset: number, color: number, ranges: boolean): void {
-    if (ranges) {
-      if (color === DIFF_COLOR.LEFT) {
-        this.appendDescendingRetreatOffset(offset);
-        this.retreatRangeEventLength++;
-      } else {
-        this.appendDescendingAdvanceOffset(offset);
-        this.advanceRangeEventLength++;
-      }
+  /** Record events `[start, end)`, visited in descending order, by colour. */
+  private emitSpan(start: number, end: number, color: number): void {
+    if (start >= end || color === DIFF_COLOR.COMMON) {
       return;
     }
+    if (color === DIFF_COLOR.LEFT) {
+      this.retreatRangeEventLength += end - start;
+      const previous = this.retreatRangeLength - 1;
+      if (previous >= 0 && end === this.retreatStartBuffer[previous]) {
+        this.retreatStartBuffer[previous] = start;
+        return;
+      }
+      this.ensureRetreatRangeCapacity(this.retreatRangeLength + 1);
+      this.retreatStartBuffer[this.retreatRangeLength] = start;
+      this.retreatEndBuffer[this.retreatRangeLength] = end;
+      this.retreatRangeLength++;
+      return;
+    }
+    this.advanceRangeEventLength += end - start;
+    const previous = this.advanceRangeLength - 1;
+    if (previous >= 0 && end === this.advanceStartBuffer[previous]) {
+      this.advanceStartBuffer[previous] = start;
+      return;
+    }
+    this.ensureAdvanceRangeCapacity(this.advanceRangeLength + 1);
+    this.advanceStartBuffer[this.advanceRangeLength] = start;
+    this.advanceEndBuffer[this.advanceRangeLength] = end;
+    this.advanceRangeLength++;
+  }
+
+  private emitScalar(offset: number, color: number): void {
     if (color === DIFF_COLOR.LEFT) {
       this.retreatBuffer = this.ensureCapacity(
         this.retreatBuffer,
@@ -613,38 +595,6 @@ export class PackedDiffVersionsWorkspace
       this.advanceBuffer[this.advanceLength++] = offset;
     }
     this.scalarOffsetWrites++;
-  }
-
-  private appendDescendingRetreatOffset(offset: number): void {
-    const previousRange = this.retreatRangeLength - 1;
-    if (
-      previousRange >= 0 &&
-      offset + 1 === this.retreatStartBuffer[previousRange]
-    ) {
-      this.retreatStartBuffer[previousRange] = offset;
-      return;
-    }
-
-    this.ensureRetreatRangeCapacity(this.retreatRangeLength + 1);
-    this.retreatStartBuffer[this.retreatRangeLength] = offset;
-    this.retreatEndBuffer[this.retreatRangeLength] = offset + 1;
-    this.retreatRangeLength++;
-  }
-
-  private appendDescendingAdvanceOffset(offset: number): void {
-    const previousRange = this.advanceRangeLength - 1;
-    if (
-      previousRange >= 0 &&
-      offset + 1 === this.advanceStartBuffer[previousRange]
-    ) {
-      this.advanceStartBuffer[previousRange] = offset;
-      return;
-    }
-
-    this.ensureAdvanceRangeCapacity(this.advanceRangeLength + 1);
-    this.advanceStartBuffer[this.advanceRangeLength] = offset;
-    this.advanceEndBuffer[this.advanceRangeLength] = offset + 1;
-    this.advanceRangeLength++;
   }
 
   /**
@@ -674,7 +624,7 @@ export class PackedDiffVersionsWorkspace
     while (index > 0) {
       const parent = (index - 1) >> 1;
       const parentOffset = this.heap[parent]!;
-      if (this.compareReplayRank(parentOffset, offset) >= 0) {
+      if (parentOffset >= offset) {
         break;
       }
       this.heap[index] = parentOffset;
@@ -698,11 +648,10 @@ export class PackedDiffVersionsWorkspace
       }
       const right = left + 1;
       const largerChild =
-        right < this.heapLength &&
-        this.compareReplayRank(this.heap[right]!, this.heap[left]!) > 0
+        right < this.heapLength && this.heap[right]! > this.heap[left]!
           ? right
           : left;
-      if (this.compareReplayRank(this.heap[largerChild]!, last) <= 0) {
+      if (this.heap[largerChild]! <= last) {
         break;
       }
       this.heap[index] = this.heap[largerChild]!;
@@ -710,14 +659,6 @@ export class PackedDiffVersionsWorkspace
     }
     this.heap[index] = last;
     return top;
-  }
-
-  private compareReplayRank(leftOffset: number, rightOffset: number): number {
-    const leftRank = this.activeRankByOffset?.[leftOffset] ?? leftOffset;
-    const rightRank = this.activeRankByOffset?.[rightOffset] ?? rightOffset;
-    return leftRank === rightRank
-      ? leftOffset - rightOffset
-      : leftRank - rightRank;
   }
 
   private recordTouched(offset: number): void {
@@ -762,7 +703,6 @@ export class PackedDiffVersionsWorkspace
     }
     this.heapLength = 0;
     this.touchedLength = 0;
-    this.activeRankByOffset = null;
     this.active = false;
   }
 }

@@ -6,7 +6,9 @@ import {
   EventIdRunIndex,
   type PackedCanonicalIdRun,
 } from "./event-id-run-index";
+import { GraphRuns } from "./graph-runs";
 import { MaxHeap } from "./max-heap";
+import type { TailOperationColumns } from "./tail-event-log";
 import {
   type PackedIntegerColumn,
   type PackedUnsignedIntegerColumn,
@@ -49,11 +51,8 @@ type PackedEventGraphCommonColumns = (
   | DeferredPackedOperationColumns
 ) & {
   readonly insertedContent: string;
-  readonly parentStarts: Uint32Array;
-  readonly parentOffsets: Uint32Array;
-  readonly childStarts: Uint32Array;
-  readonly childOffsets: Uint32Array;
-  readonly implicitLinearEdges?: boolean;
+  /** Edges as runs of consecutive local versions. */
+  readonly runs: GraphRuns;
 };
 
 export type { PackedCanonicalIdRun } from "./event-id-run-index";
@@ -127,10 +126,8 @@ export interface PackedBranchReplayLayout {
   readonly sectionEnds: Uint32Array;
   readonly linearSections: Uint8Array;
   readonly sectionCount: number;
-  /** Events emitted without repeating unchanged strict-chain bookkeeping. */
-  readonly strictChainEventCount: number;
-  /** Maximal strict-chain spans emitted by the fast path. */
-  readonly strictChainRunCount: number;
+  /** Runs the traversal visited; it scanned edges once per run. */
+  readonly runCount: number;
 }
 
 interface PackedBranchTraversalWorkspace {
@@ -143,9 +140,11 @@ interface PackedBranchTraversalWorkspace {
  * Immutable, allocation-light storage for an already validated EGW3 prefix.
  *
  * Public `GraphEvent` objects and parent sets are reconstructed only at an API
- * boundary. Graph queries use the packed numeric columns and CSR edges
- * directly, so loading a snapshot does not permanently allocate an object,
- * operation and two sets for every event.
+ * boundary. Edges are stored as {@link GraphRuns}: runs of consecutive local
+ * versions whose inner events have their predecessor as only parent. Graph
+ * queries use the packed numeric columns and the runs directly, so loading
+ * a snapshot allocates neither an object, operation and two sets nor an
+ * edge entry for every event.
  */
 export class PackedEventGraphBase {
   private readonly ids: ReadonlyArray<EventId> | null;
@@ -155,11 +154,8 @@ export class PackedEventGraphBase {
   private operationColumns: PackedOperationColumns | null;
   private readonly loadOperationColumns: (() => PackedOperationColumns) | null;
   private readonly insertedContent: string;
-  private readonly parentStarts: Uint32Array | null;
-  private readonly parentOffsets: Uint32Array | null;
-  private readonly childStarts: Uint32Array | null;
-  private readonly childOffsets: Uint32Array | null;
-  private readonly implicitLinearEdges: boolean;
+  /** Edges as runs; an event's parents are read through its run. */
+  private readonly graphRuns: GraphRuns;
   private readonly exactLinear: boolean;
   private diffWorkspace: PackedDiffVersionsWorkspace | null = null;
 
@@ -197,10 +193,7 @@ export class PackedEventGraphBase {
       timestamps: new Int32Array(0),
       insertStarts: new Uint32Array(0),
       insertedContent: "",
-      parentStarts: new Uint32Array(1),
-      parentOffsets: new Uint32Array(0),
-      childStarts: new Uint32Array(1),
-      childOffsets: new Uint32Array(0),
+      runs: GraphRuns.linear(0),
     });
     return empty.appendTail(tail);
   }
@@ -216,26 +209,14 @@ export class PackedEventGraphBase {
       this.operationColumns = columns;
       this.loadOperationColumns = null;
     } else {
-      if (columns.implicitLinearEdges !== true) {
+      if (!columns.runs.isLinear()) {
         throw new Error("Deferred operation columns require a linear graph");
       }
       this.operationColumns = null;
       this.loadOperationColumns = columns.loadOperationColumns;
     }
-    this.implicitLinearEdges = columns.implicitLinearEdges ?? false;
-    if (!this.implicitLinearEdges) {
-      if (
-        columns.parentStarts.length !== count + 1 ||
-        columns.childStarts.length !== count + 1
-      ) {
-        throw new Error("Invalid packed event graph: column length mismatch");
-      }
-      if (
-        columns.parentStarts[count] !== columns.parentOffsets.length ||
-        columns.childStarts[count] !== columns.childOffsets.length
-      ) {
-        throw new Error("Invalid packed event graph: CSR length mismatch");
-      }
+    if (columns.runs.eventCount !== count) {
+      throw new Error("Invalid packed event graph: column length mismatch");
     }
 
     if (columns.ids !== undefined) {
@@ -277,17 +258,17 @@ export class PackedEventGraphBase {
     }
     this.eventCount = count;
     this.insertedContent = columns.insertedContent;
-    this.parentStarts = this.implicitLinearEdges ? null : columns.parentStarts;
-    this.parentOffsets = this.implicitLinearEdges
-      ? null
-      : columns.parentOffsets;
-    this.childStarts = this.implicitLinearEdges ? null : columns.childStarts;
-    this.childOffsets = this.implicitLinearEdges ? null : columns.childOffsets;
-    this.exactLinear = this.implicitLinearEdges || this.computeExactLinear();
+    this.graphRuns = columns.runs;
+    this.exactLinear = columns.runs.isLinear();
   }
 
   get count(): number {
     return this.eventCount;
+  }
+
+  /** The graph's edges as runs of consecutive local versions. */
+  get runs(): GraphRuns {
+    return this.graphRuns;
   }
 
   /** Replica numbering shared with the graph that owns this base. */
@@ -350,14 +331,12 @@ export class PackedEventGraphBase {
   diffVersionToParents(
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedOffsetTransition {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diffVersionToParents(
       currentVersion,
       targetEventOffset,
       this,
-      rankByOffset,
     );
   }
 
@@ -368,14 +347,12 @@ export class PackedEventGraphBase {
   diffVersionToParentRanges(
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diffVersionToParentRanges(
       currentVersion,
       targetEventOffset,
       this,
-      rankByOffset,
     );
   }
 
@@ -387,14 +364,12 @@ export class PackedEventGraphBase {
   diffLocalVersionsToParentRanges(
     currentOffsets: ReadonlyArray<number>,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diffLocalVersionsToParentRanges(
       currentOffsets,
       targetEventOffset,
       this,
-      rankByOffset,
     );
   }
 
@@ -406,14 +381,12 @@ export class PackedEventGraphBase {
   diffOffsetToParents(
     currentOffset: number,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedOffsetTransition {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diffOffsetToParents(
       currentOffset,
       targetEventOffset,
       this,
-      rankByOffset,
     );
   }
 
@@ -424,14 +397,12 @@ export class PackedEventGraphBase {
   diffOffsetToParentRanges(
     currentOffset: number,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition {
     this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
     return this.diffWorkspace.diffOffsetToParentRanges(
       currentOffset,
       targetEventOffset,
       this,
-      rankByOffset,
     );
   }
 
@@ -534,57 +505,41 @@ export class PackedEventGraphBase {
   }
 
   parentCountAt(offset: number): number {
-    if (this.implicitLinearEdges) {
-      return offset > 0 && offset < this.count ? 1 : 0;
-    }
-    return this.parentStarts![offset + 1]! - this.parentStarts![offset]!;
+    return this.isOffset(offset) ? this.graphRuns.parentCountAt(offset) : 0;
   }
 
   /** Return a parent as a packed insertion offset without materialising IDs. */
   parentOffsetAt(offset: number, parentIndex: number): number | undefined {
-    if (!Number.isInteger(parentIndex) || parentIndex < 0) {
-      return undefined;
-    }
-    if (this.implicitLinearEdges) {
-      return parentIndex === 0 && offset > 0 && offset < this.count
-        ? offset - 1
-        : undefined;
-    }
-    const start = this.parentStarts![offset];
-    const end = this.parentStarts![offset + 1];
     if (
-      start === undefined ||
-      end === undefined ||
-      start + parentIndex >= end
+      !Number.isInteger(parentIndex) ||
+      parentIndex < 0 ||
+      !this.isOffset(offset)
     ) {
       return undefined;
     }
-    return this.parentOffsets![start + parentIndex];
+    const parent = this.graphRuns.parentAt(offset, parentIndex);
+    return parent < 0 ? undefined : parent;
   }
 
   childCountAt(offset: number): number {
-    if (this.implicitLinearEdges) {
-      return offset >= 0 && offset + 1 < this.count ? 1 : 0;
-    }
-    return this.childStarts![offset + 1]! - this.childStarts![offset]!;
+    return this.isOffset(offset) ? this.graphRuns.childCountAt(offset) : 0;
   }
 
   /** Return a child as a packed insertion offset without materialising IDs. */
   childOffsetAt(offset: number, childIndex: number): number | undefined {
-    if (!Number.isInteger(childIndex) || childIndex < 0) {
+    if (
+      !Number.isInteger(childIndex) ||
+      childIndex < 0 ||
+      !this.isOffset(offset)
+    ) {
       return undefined;
     }
-    if (this.implicitLinearEdges) {
-      return childIndex === 0 && offset >= 0 && offset + 1 < this.count
-        ? offset + 1
-        : undefined;
-    }
-    const start = this.childStarts![offset];
-    const end = this.childStarts![offset + 1];
-    if (start === undefined || end === undefined || start + childIndex >= end) {
-      return undefined;
-    }
-    return this.childOffsets![start + childIndex];
+    const child = this.graphRuns.childAt(offset, childIndex);
+    return child < 0 ? undefined : child;
+  }
+
+  private isOffset(offset: number): boolean {
+    return Number.isInteger(offset) && offset >= 0 && offset < this.eventCount;
   }
 
   *iterateParents(id: EventId): IterableIterator<EventId> {
@@ -597,15 +552,9 @@ export class PackedEventGraphBase {
   *iterateChildren(id: EventId): IterableIterator<EventId> {
     const offset = this.offsetOf(id);
     if (offset !== undefined) {
-      if (this.implicitLinearEdges) {
-        const child = this.idAt(offset + 1);
-        if (child !== undefined) yield child;
-        return;
-      }
-      const start = this.childStarts![offset]!;
-      const end = this.childStarts![offset + 1]!;
-      for (let cursor = start; cursor < end; cursor++) {
-        yield this.requireIdAt(this.childOffsets![cursor]!);
+      const childCount = this.childCountAt(offset);
+      for (let childIndex = 0; childIndex < childCount; childIndex++) {
+        yield this.requireIdAt(this.graphRuns.childAt(offset, childIndex));
       }
     }
   }
@@ -615,46 +564,67 @@ export class PackedEventGraphBase {
    * ready events in {@link compareEventIds} order.
    *
    * This is the order {@link EventGraph.getTopologicalOrder} returns. It runs
-   * over the CSR edges with a typed parent counter and a heap of offsets, and
-   * parses an event's ID only when it is ready together with another event.
+   * over the graph's runs: an event inside a run is the only newly ready
+   * event once its predecessor is emitted, so it is emitted directly while it
+   * orders before every other ready event, and only a run whose next event
+   * loses that comparison goes back into the heap.
    */
   getTopologicalOrderOffsets(): Uint32Array {
     const count = this.count;
     const order = new Uint32Array(count);
-    if (this.implicitLinearEdges) {
+    if (this.exactLinear) {
       for (let offset = 0; offset < count; offset++) {
         order[offset] = offset;
       }
       return order;
     }
-    const parentStarts = this.parentStarts!;
-    const childStarts = this.childStarts!;
-    const childOffsets = this.childOffsets!;
+    const runs = this.runs;
     const ids = new EventIdTieBreaker(this);
+    // The next unemitted event of each run in the heap.
+    const cursors = new Uint32Array(runs.count);
     // A max-heap with an inverted comparator pops the smallest ready ID.
     const ready = new MaxHeap<number>((left, right) =>
-      ids.compare(right, left),
+      ids.compare(cursors[right]!, cursors[left]!),
     );
-    const remainingParents = new Uint32Array(count);
-    for (let offset = 0; offset < count; offset++) {
-      const parentCount = parentStarts[offset + 1]! - parentStarts[offset]!;
-      remainingParents[offset] = parentCount;
+    const remainingParents = new Uint32Array(runs.count);
+    for (let run = 0; run < runs.count; run++) {
+      const parentCount = runs.parentCountOf(run);
+      remainingParents[run] = parentCount;
       if (parentCount === 0) {
-        ready.push(offset);
+        cursors[run] = runs.startOf(run);
+        ready.push(run);
       }
     }
 
     let length = 0;
     while (ready.size > 0) {
-      const offset = ready.pop()!;
+      const run = ready.pop()!;
+      const last = runs.lastOf(run);
+      let offset = cursors[run]!;
       order[length++] = offset;
-      const end = childStarts[offset + 1]!;
-      for (let cursor = childStarts[offset]!; cursor < end; cursor++) {
-        const childOffset = childOffsets[cursor]!;
-        const remaining = remainingParents[childOffset]! - 1;
-        remainingParents[childOffset] = remaining;
+      while (offset < last) {
+        offset++;
+        if (
+          ready.size > 0 &&
+          ids.compare(offset, cursors[ready.peek()!]!) > 0
+        ) {
+          break;
+        }
+        order[length++] = offset;
+      }
+      if (order[length - 1] !== last) {
+        cursors[run] = offset;
+        ready.push(run);
+        continue;
+      }
+      const childCount = runs.childCountOf(run);
+      for (let childIndex = 0; childIndex < childCount; childIndex++) {
+        const child = runs.childRunAt(run, childIndex);
+        const remaining = remainingParents[child]! - 1;
+        remainingParents[child] = remaining;
         if (remaining === 0) {
-          ready.push(childOffset);
+          cursors[child] = runs.startOf(child);
+          ready.push(child);
         }
       }
     }
@@ -667,19 +637,20 @@ export class PackedEventGraphBase {
   /**
    * Return the branch-preserving traversal as packed insertion offsets.
    *
-   * A decoded prefix is already a validated DAG whose parents always precede
-   * their children. Keeping this traversal numeric avoids rebuilding an
-   * `EventId -> remaining parent count` map and avoids a string-ID lookup plus
-   * generator allocation for every visited child edge during cold replay.
+   * The depth-first traversal visits runs: once a run's first event is
+   * emitted, its next event is the only newly ready one and is popped
+   * straight away, so a run is always emitted whole. Branch groups form only
+   * at the last event of a run.
    */
   getBranchPreservingOrderOffsets(): Uint32Array {
-    if (this.implicitLinearEdges) {
-      const result = new Uint32Array(this.count);
+    const result = new Uint32Array(this.count);
+    if (this.exactLinear) {
       for (let offset = 0; offset < this.count; offset++) {
         result[offset] = offset;
       }
       return result;
     }
+    const runs = this.runs;
     const { remainingParents, roots, sortBranchGroup } =
       this.createBranchTraversalWorkspace();
 
@@ -688,25 +659,22 @@ export class PackedEventGraphBase {
       stack.push(roots[index]!);
     }
 
-    const result = new Uint32Array(this.count);
     let resultLength = 0;
-    // Most events release no child (and a linear edge releases exactly one).
-    // Reusing one scratch group avoids allocating an empty array for every
-    // event in large operation-granularity traces while preserving the same
-    // branch-group ordering whenever several children become ready together.
     const newlyReady: number[] = [];
     while (stack.length > 0) {
-      const offset = stack.pop()!;
-      result[resultLength++] = offset;
+      const run = stack.pop()!;
+      const end = runs.endOf(run);
+      for (let offset = runs.startOf(run); offset < end; offset++) {
+        result[resultLength++] = offset;
+      }
 
       newlyReady.length = 0;
-      const start = this.childStarts![offset]!;
-      const end = this.childStarts![offset + 1]!;
-      for (let cursor = start; cursor < end; cursor++) {
-        const childOffset = this.childOffsets![cursor]!;
-        const remaining = remainingParents[childOffset]! - 1;
-        remainingParents[childOffset] = remaining;
-        if (remaining === 0) newlyReady.push(childOffset);
+      const childCount = runs.childCountOf(run);
+      for (let childIndex = 0; childIndex < childCount; childIndex++) {
+        const child = runs.childRunAt(run, childIndex);
+        const remaining = remainingParents[child]! - 1;
+        remainingParents[child] = remaining;
+        if (remaining === 0) newlyReady.push(child);
       }
       if (newlyReady.length > 1) {
         sortBranchGroup(newlyReady);
@@ -723,14 +691,20 @@ export class PackedEventGraphBase {
   }
 
   /**
-   * Build replay order, inverse rank, and critical cuts in one numeric DFS.
+   * Build replay order, inverse rank, and critical cuts in one depth-first
+   * traversal of the graph's runs.
    *
-   * The standalone critical planner historically initialized another parent
-   * counter, walked every child edge again, kept a separate ready bitmap, and
-   * inverted the finished order in a final pass. The DFS stack is already the
-   * authoritative ready set, so critical-frontier accounting can advance as
-   * each offset is emitted. Once an offset is popped, its remaining-parent
-   * slot is dead and can hold the inverse replay rank.
+   * A cut is critical when every ready event has every event of the emitted
+   * prefix's frontier as a parent. The traversal keeps the number of missing
+   * (frontier event, ready event) parent pairs. Only a run's first and last
+   * events change it: inside a run, each event replaces its predecessor in
+   * the frontier and its successor replaces it in the ready set, which
+   * leaves the frontier size, the ready count and the missing pairs
+   * unchanged. Every event inside a run is therefore a cut exactly when the
+   * run's first event is, and the planner decides it once per run instead of
+   * scanning each event's edges. Per-run arrays hold the frontier and the
+   * ready-parent coverage of run ends; a run's inner events are in the
+   * frontier only while the run is being emitted.
    */
   buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout {
     const eventCount = this.count;
@@ -742,8 +716,7 @@ export class PackedEventGraphBase {
         sectionEnds: empty,
         linearSections: new Uint8Array(),
         sectionCount: 0,
-        strictChainEventCount: 0,
-        strictChainRunCount: 0,
+        runCount: 0,
       };
     }
 
@@ -758,17 +731,13 @@ export class PackedEventGraphBase {
         sectionEnds: new Uint32Array([eventCount]),
         linearSections: new Uint8Array([1]),
         sectionCount: 1,
-        strictChainEventCount: 0,
-        strictChainRunCount: 0,
+        runCount: 1,
       };
     }
 
+    const runs = this.runs;
     const { remainingParents, roots, sortBranchGroup } =
       this.createBranchTraversalWorkspace();
-    const parentStarts = this.parentStarts!;
-    const parentOffsets = this.parentOffsets!;
-    const childStarts = this.childStarts!;
-    const childOffsets = this.childOffsets!;
 
     const stack: number[] = [];
     for (let index = roots.length - 1; index >= 0; index--) {
@@ -776,222 +745,144 @@ export class PackedEventGraphBase {
     }
 
     const eventOrder = new Uint32Array(eventCount);
-    const rankByOffset = remainingParents;
+    const rankByOffset = new Uint32Array(eventCount);
     const sectionEnds = new Uint32Array(eventCount);
     const linearSections = new Uint8Array(eventCount);
-    const prefixFrontier = new Uint8Array(eventCount);
-    const readyParentCoverage = new Uint32Array(eventCount);
+    /** Whether a run's last event is in the prefix frontier. */
+    const frontierEnds = new Uint8Array(runs.count);
+    /** Ready runs whose first event has a run's last event as a parent. */
+    const readyParentCoverage = new Uint32Array(runs.count);
     const newlyReady: number[] = [];
 
     let readyCount = roots.length;
-    let prefixFrontierSize = 0;
+    let frontierSize = 0;
     let missingReadyParentPairs = 0;
     let sectionCount = 0;
     let sectionStart = 0;
     let sectionIsLinear = true;
-    let resultLength = 0;
-    let strictChainEventCount = 0;
-    let strictChainRunCount = 0;
+    let orderIndex = 0;
 
-    while (stack.length > 0) {
-      const eventOffset = stack.pop()!;
-      const orderIndex = resultLength;
-      eventOrder[orderIndex] = eventOffset;
-      rankByOffset[eventOffset] = orderIndex;
-      resultLength++;
-      readyCount--;
-
-      const parentStart = parentStarts[eventOffset]!;
-      const parentEnd = parentStarts[eventOffset + 1]!;
-      const parentCount = parentEnd - parentStart;
-      const prefixFrontierSizeBefore = prefixFrontierSize;
-      let parentsInPrefixFrontier = 0;
-
-      // Remove the popped ready root's coverage while replacing its live
-      // parents with the event itself. All arithmetic uses the ready count
-      // after the pop, matching the standalone planner exactly.
-      for (let cursor = parentStart; cursor < parentEnd; cursor++) {
-        const parentOffset = parentOffsets[cursor]!;
-        const previousCoverage = readyParentCoverage[parentOffset]!;
-        if (previousCoverage === 0) {
-          throw new Error("Invalid packed replay ready-parent coverage");
-        }
-        const nextCoverage = previousCoverage - 1;
-        readyParentCoverage[parentOffset] = nextCoverage;
-
-        if (prefixFrontier[parentOffset] !== 1) {
-          continue;
-        }
-        parentsInPrefixFrontier++;
-        missingReadyParentPairs -= readyCount - nextCoverage;
-        prefixFrontier[parentOffset] = 0;
-        prefixFrontierSize--;
+    const emit = (offset: number): void => {
+      eventOrder[orderIndex] = offset;
+      rankByOffset[offset] = orderIndex;
+      orderIndex++;
+    };
+    const cutIfCritical = (): void => {
+      if (readyCount === 0 || missingReadyParentPairs === 0) {
+        sectionEnds[sectionCount] = orderIndex;
+        linearSections[sectionCount] = sectionIsLinear ? 1 : 0;
+        sectionCount++;
+        sectionStart = orderIndex;
       }
-
-      if (orderIndex === sectionStart) {
-        sectionIsLinear =
-          parentCount === prefixFrontierSizeBefore &&
-          parentsInPrefixFrontier === prefixFrontierSizeBefore;
-      } else if (
-        parentCount !== 1 ||
-        parentOffsets[parentStart] !== eventOrder[orderIndex - 1]
-      ) {
-        sectionIsLinear = false;
-      }
-
-      missingReadyParentPairs -=
-        prefixFrontierSizeBefore - parentsInPrefixFrontier;
-      prefixFrontier[eventOffset] = 1;
-      prefixFrontierSize++;
-      missingReadyParentPairs += readyCount - readyParentCoverage[eventOffset]!;
-
+    };
+    // Put a run's last event in the frontier and expose its ready children.
+    const finishRun = (run: number): void => {
+      frontierEnds[run] = 1;
+      frontierSize++;
+      missingReadyParentPairs += readyCount - readyParentCoverage[run]!;
       newlyReady.length = 0;
-      const childStart = childStarts[eventOffset]!;
-      const childEnd = childStarts[eventOffset + 1]!;
-      for (let cursor = childStart; cursor < childEnd; cursor++) {
-        const childOffset = childOffsets[cursor]!;
-        const remaining = remainingParents[childOffset]! - 1;
-        remainingParents[childOffset] = remaining;
+      const childCount = runs.childCountOf(run);
+      for (let childIndex = 0; childIndex < childCount; childIndex++) {
+        const child = runs.childRunAt(run, childIndex);
+        const remaining = remainingParents[child]! - 1;
+        remainingParents[child] = remaining;
         if (remaining !== 0) {
           continue;
         }
-
-        const childParentStart = parentStarts[childOffset]!;
-        const childParentEnd = parentStarts[childOffset + 1]!;
-        let childParentsInPrefixFrontier = 0;
-        for (
-          let parentCursor = childParentStart;
-          parentCursor < childParentEnd;
-          parentCursor++
-        ) {
-          const parentOffset = parentOffsets[parentCursor]!;
-          if (prefixFrontier[parentOffset] === 1) {
-            childParentsInPrefixFrontier++;
+        const parentCount = runs.parentCountOf(child);
+        let parentsInFrontier = 0;
+        for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+          const parent = runs.parentRunAt(child, parentIndex);
+          if (frontierEnds[parent] === 1) {
+            parentsInFrontier++;
           }
-          readyParentCoverage[parentOffset] =
-            readyParentCoverage[parentOffset]! + 1;
+          readyParentCoverage[parent] = readyParentCoverage[parent]! + 1;
         }
-        missingReadyParentPairs +=
-          prefixFrontierSize - childParentsInPrefixFrontier;
+        missingReadyParentPairs += frontierSize - parentsInFrontier;
         readyCount++;
-        newlyReady.push(childOffset);
+        newlyReady.push(child);
       }
+    };
 
-      if (readyCount === 0 || missingReadyParentPairs === 0) {
-        sectionEnds[sectionCount] = orderIndex + 1;
-        linearSections[sectionCount] = sectionIsLinear ? 1 : 0;
-        sectionCount++;
-        sectionStart = orderIndex + 1;
+    let previousOffset = -1;
+    while (stack.length > 0) {
+      const run = stack.pop()!;
+      const start = runs.startOf(run);
+      const last = runs.lastOf(run);
+
+      // The run's first event leaves the ready set and replaces its parents
+      // in the frontier. All arithmetic uses the ready count after the pop.
+      readyCount--;
+      const parentCount = runs.parentCountOf(run);
+      const frontierSizeBefore = frontierSize;
+      let parentsInFrontier = 0;
+      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+        const parent = runs.parentRunAt(run, parentIndex);
+        const coverage = readyParentCoverage[parent]!;
+        if (coverage === 0) {
+          throw new Error("Invalid packed replay ready-parent coverage");
+        }
+        readyParentCoverage[parent] = coverage - 1;
+        if (frontierEnds[parent] !== 1) {
+          continue;
+        }
+        parentsInFrontier++;
+        missingReadyParentPairs -= readyCount - (coverage - 1);
+        frontierEnds[parent] = 0;
+        frontierSize--;
       }
-
-      // A strict p -> v -> c chain leaves every frontier cardinality and
-      // ready-parent coverage total unchanged while replacing p with v.
-      // Hold the sole newly-ready event out of the stack, emit v, and replace
-      // it with c without repeating the parent/child edge scans.
-      // Stop before a leaf, fan-out, or fan-in boundary; the normal loop owns
-      // those state transitions.
-      if (
-        newlyReady.length === 1 &&
-        childEnd - childStart === 1 &&
-        childOffsets[childStart] === newlyReady[0] &&
-        prefixFrontier[eventOffset] === 1 &&
-        readyParentCoverage[eventOffset] === 1
+      if (orderIndex === sectionStart) {
+        sectionIsLinear =
+          parentCount === frontierSizeBefore &&
+          parentsInFrontier === frontierSizeBefore;
+      } else if (
+        parentCount !== 1 ||
+        runs.lastOf(runs.parentRunAt(run, 0)) !== previousOffset
       ) {
-        let chainEventOffset = newlyReady[0]!;
-        const chainEventParentStart = parentStarts[chainEventOffset]!;
-        const chainEventParentEnd = parentStarts[chainEventOffset + 1]!;
-        if (
-          chainEventParentEnd - chainEventParentStart === 1 &&
-          parentOffsets[chainEventParentStart] === eventOffset &&
-          remainingParents[chainEventOffset] === 0
-        ) {
-          let chainTailOffset = -1;
-          const chainEmitsCut =
-            readyCount === 0 || missingReadyParentPairs === 0;
-          const chainSectionIsLinear = prefixFrontierSize === 1;
-          if (!chainEmitsCut && resultLength === sectionStart) {
-            sectionIsLinear = chainSectionIsLinear;
+        sectionIsLinear = false;
+      }
+      missingReadyParentPairs -= frontierSizeBefore - parentsInFrontier;
+
+      if (start === last) {
+        finishRun(run);
+        emit(start);
+        cutIfCritical();
+      } else {
+        // The first event joins the frontier, and the next event of the run,
+        // whose only parent it is, becomes ready.
+        frontierSize++;
+        missingReadyParentPairs += readyCount;
+        missingReadyParentPairs += frontierSize - 1;
+        readyCount++;
+        emit(start);
+        cutIfCritical();
+
+        const innerCut = missingReadyParentPairs === 0;
+        for (let offset = start + 1; offset < last; offset++) {
+          if (orderIndex === sectionStart) {
+            sectionIsLinear = frontierSize === 1;
           }
-
-          // Packed insertion offsets are topological ranks. Long operation-
-          // granularity runs are normally stored as consecutive one-parent
-          // offsets, so prove that compact CSR shape directly and skip child
-          // offset loads plus parent-counter writes for every interior event.
-          while (chainEventOffset + 1 < eventCount) {
-            const chainChildOffset = chainEventOffset + 1;
-            const chainChildStart = childStarts[chainEventOffset]!;
-            const chainChildParentStart = parentStarts[chainChildOffset]!;
-            if (
-              childStarts[chainEventOffset + 1] !== chainChildStart + 1 ||
-              parentStarts[chainChildOffset + 1] !==
-                chainChildParentStart + 1 ||
-              parentOffsets[chainChildParentStart] !== chainEventOffset
-            ) {
-              break;
-            }
-
-            eventOrder[resultLength] = chainEventOffset;
-            rankByOffset[chainEventOffset] = resultLength;
-            resultLength++;
-            strictChainEventCount++;
-            if (chainEmitsCut) {
-              sectionEnds[sectionCount] = resultLength;
-              linearSections[sectionCount] = chainSectionIsLinear ? 1 : 0;
-              sectionCount++;
-              sectionStart = resultLength;
-            }
-
-            chainTailOffset = chainEventOffset;
-            chainEventOffset = chainChildOffset;
-          }
-
-          // The general tier preserves arbitrary non-adjacent packed DAGs.
-          // Interior remaining-parent slots are dead once their event is
-          // emitted and immediately become inverse ranks, so only the final
-          // held-out child needs to be marked ready before it reaches stack.
-          while (true) {
-            const chainChildStart = childStarts[chainEventOffset]!;
-            const chainChildEnd = childStarts[chainEventOffset + 1]!;
-            if (chainChildEnd - chainChildStart !== 1) {
-              break;
-            }
-            const chainChildOffset = childOffsets[chainChildStart]!;
-            const chainChildParentStart = parentStarts[chainChildOffset]!;
-            const chainChildParentEnd = parentStarts[chainChildOffset + 1]!;
-            if (
-              chainChildParentEnd - chainChildParentStart !== 1 ||
-              parentOffsets[chainChildParentStart] !== chainEventOffset ||
-              remainingParents[chainChildOffset] !== 1
-            ) {
-              break;
-            }
-
-            eventOrder[resultLength] = chainEventOffset;
-            rankByOffset[chainEventOffset] = resultLength;
-            resultLength++;
-            strictChainEventCount++;
-            if (chainEmitsCut) {
-              sectionEnds[sectionCount] = resultLength;
-              linearSections[sectionCount] = chainSectionIsLinear ? 1 : 0;
-              sectionCount++;
-              sectionStart = resultLength;
-            }
-
-            chainTailOffset = chainEventOffset;
-            chainEventOffset = chainChildOffset;
-          }
-
-          if (chainTailOffset !== -1) {
-            strictChainRunCount++;
-            remainingParents[chainEventOffset] = 0;
-            prefixFrontier[eventOffset] = 0;
-            readyParentCoverage[eventOffset] = 0;
-            prefixFrontier[chainTailOffset] = 1;
-            readyParentCoverage[chainTailOffset] = 1;
-            newlyReady[0] = chainEventOffset;
+          emit(offset);
+          if (innerCut) {
+            cutIfCritical();
           }
         }
+
+        // The last event replaces its predecessor in the frontier.
+        readyCount--;
+        missingReadyParentPairs -= readyCount;
+        frontierSize--;
+        // A cut before the last event leaves its predecessor as the whole
+        // frontier, so a section starting here is linear.
+        if (orderIndex === sectionStart) {
+          sectionIsLinear = true;
+        }
+        missingReadyParentPairs -= frontierSize;
+        finishRun(run);
+        emit(last);
+        cutIfCritical();
       }
+      previousOffset = last;
 
       if (newlyReady.length > 1) {
         sortBranchGroup(newlyReady);
@@ -1001,7 +892,7 @@ export class PackedEventGraphBase {
       }
     }
 
-    if (resultLength !== eventCount) {
+    if (orderIndex !== eventCount) {
       throw new Error("Cycle detected in packed event graph");
     }
     if (sectionStart !== eventCount) {
@@ -1014,100 +905,62 @@ export class PackedEventGraphBase {
       sectionEnds: sectionEnds.slice(0, sectionCount),
       linearSections: linearSections.slice(0, sectionCount),
       sectionCount,
-      strictChainEventCount,
-      strictChainRunCount,
+      runCount: runs.count,
     };
   }
 
+  /**
+   * Per-run parent counters, roots and the branch-group comparator.
+   *
+   * A group of ready runs is ordered by the exclusive span of each run's
+   * first event: the events that only it leads to through single-parent
+   * edges. Inside a run each event's span is one more than its successor's,
+   * so a run's span is its length plus the spans of its single-parent child
+   * runs. Once any exclusive branch exceeds {@link MAX_EXCLUSIVE_BRANCH_SPAN},
+   * groups holding one order by longest causal path instead, which runs
+   * accumulate the same way. Event IDs break the remaining ties.
+   */
   private createBranchTraversalWorkspace(): PackedBranchTraversalWorkspace {
-    const remainingParents = new Uint32Array(this.count);
-    const exclusiveSpan = new Uint32Array(this.count);
-    let longestPath: Uint32Array | null = null;
+    const runs = this.runs;
+    const runCount = runs.count;
+    const remainingParents = new Uint32Array(runCount);
+    const exclusiveSpan = new Float64Array(runCount);
+    const longestPath = new Float64Array(runCount);
     const roots: number[] = [];
-    const parentStarts = this.parentStarts!;
-    const childStarts = this.childStarts!;
-    const childOffsets = this.childOffsets!;
 
-    for (let offset = 0; offset < this.count; offset++) {
-      const parentCount = parentStarts[offset + 1]! - parentStarts[offset]!;
-      remainingParents[offset] = parentCount;
+    for (let run = 0; run < runCount; run++) {
+      const parentCount = runs.parentCountOf(run);
+      remainingParents[run] = parentCount;
       if (parentCount === 0) {
-        roots.push(offset);
+        roots.push(run);
       }
+    }
+    // Child runs start after their parent run ends.
+    for (let run = runCount - 1; run >= 0; run--) {
+      const length = runs.endOf(run) - runs.startOf(run);
+      let span = length;
+      let childPath = 0;
+      const childCount = runs.childCountOf(run);
+      for (let childIndex = 0; childIndex < childCount; childIndex++) {
+        const child = runs.childRunAt(run, childIndex);
+        if (remainingParents[child] === 1) {
+          span += exclusiveSpan[child]!;
+        }
+        childPath = Math.max(childPath, longestPath[child]!);
+      }
+      exclusiveSpan[run] = span;
+      longestPath[run] = length + childPath;
     }
 
-    // Packed insertion offsets are topological ranks. Accumulate the size of
-    // each exclusive single-parent branch in reverse order; multi-parent
-    // merge suffixes are shared and therefore do not belong to either branch.
-    //
-    // Longest-path ordering is needed only after some exclusive branch crosses
-    // MAX_EXCLUSIVE_BRANCH_SPAN. Most collaborative traces never cross that
-    // threshold, so allocating and filling another event-sized column for
-    // every child edge is pure cold-load overhead. Activate it lazily at the
-    // first long branch. Because children have larger topological offsets,
-    // only the already-visited suffix needs a one-time backfill.
-    let nextCombinedOffset = -1;
-    for (let offset = this.count - 1; offset >= 0; offset--) {
-      let span = 1;
-      const start = childStarts[offset]!;
-      const end = childStarts[offset + 1]!;
-      for (let cursor = start; cursor < end; cursor++) {
-        const childOffset = childOffsets[cursor]!;
-        if (remainingParents[childOffset] === 1) {
-          span += exclusiveSpan[childOffset]!;
-        }
-      }
-      exclusiveSpan[offset] = span;
-      if (span > MAX_EXCLUSIVE_BRANCH_SPAN) {
-        longestPath = new Uint32Array(this.count);
-        for (
-          let backfillOffset = this.count - 1;
-          backfillOffset >= offset;
-          backfillOffset--
-        ) {
-          let backfillPath = 1;
-          const backfillStart = childStarts[backfillOffset]!;
-          const backfillEnd = childStarts[backfillOffset + 1]!;
-          for (let cursor = backfillStart; cursor < backfillEnd; cursor++) {
-            backfillPath = Math.max(
-              backfillPath,
-              1 + longestPath[childOffsets[cursor]!]!,
-            );
-          }
-          longestPath[backfillOffset] = backfillPath;
-        }
-        nextCombinedOffset = offset - 1;
-        break;
-      }
-    }
-    if (longestPath !== null) {
-      for (let offset = nextCombinedOffset; offset >= 0; offset--) {
-        let span = 1;
-        let path = 1;
-        const start = childStarts[offset]!;
-        const end = childStarts[offset + 1]!;
-        for (let cursor = start; cursor < end; cursor++) {
-          const childOffset = childOffsets[cursor]!;
-          if (remainingParents[childOffset] === 1) {
-            span += exclusiveSpan[childOffset]!;
-          }
-          path = Math.max(path, 1 + longestPath[childOffset]!);
-        }
-        exclusiveSpan[offset] = span;
-        longestPath[offset] = path;
-      }
-    }
-
-    // Most sibling groups differ in span; IDs break only the remaining ties.
     const ids = new EventIdTieBreaker(this);
     const compareIds = (left: number, right: number): number =>
-      ids.compare(left, right);
+      ids.compare(runs.startOf(left), runs.startOf(right));
     const compareExclusive = (left: number, right: number): number => {
       const difference = exclusiveSpan[left]! - exclusiveSpan[right]!;
       return difference === 0 ? compareIds(left, right) : difference;
     };
     const compareLongest = (left: number, right: number): number => {
-      const difference = longestPath![left]! - longestPath![right]!;
+      const difference = longestPath[left]! - longestPath[right]!;
       return difference === 0 ? compareIds(left, right) : difference;
     };
     const sortBranchGroup = (group: number[]): void => {
@@ -1126,13 +979,12 @@ export class PackedEventGraphBase {
 
     return { remainingParents, roots, sortBranchGroup };
   }
-
   /**
    * Repack this immutable prefix and events appended after it into one
    * packed base, for planning and replaying a graph that has a mutable tail.
    *
-   * Operation and edge columns are copied, which is linear in the graph like
-   * the replay that needs them. IDs are not re-materialized: offsets below
+   * Operation columns are copied, which is linear in the graph like the
+   * replay that needs them; edges are rebuilt as runs. IDs are not re-materialized: offsets below
    * this prefix resolve through its own index and tail IDs through the
    * tail's.
    */
@@ -1145,9 +997,6 @@ export class PackedEventGraphBase {
     const baseOperations = this.operations();
     const operationTypes = new Uint8Array(count);
     operationTypes.set(baseOperations.operationTypes);
-    const tailIndexes: number[] = [];
-    const tailLengths: number[] = [];
-    const tailTimestamps: number[] = [];
     const insertStarts = new Uint32Array(count);
     insertStarts.set(baseOperations.insertStarts);
     const baseContentLength = this.insertedContent.length;
@@ -1156,69 +1005,80 @@ export class PackedEventGraphBase {
       throw new Error("Inserted content exceeds packed UTF-16 offset range");
     }
 
-    const parentStarts = new Uint32Array(count + 1);
-    let edgeCount = 0;
-    if (this.parentStarts !== null) {
-      parentStarts.set(this.parentStarts);
-      edgeCount = this.parentStarts[baseCount]!;
+    // Only events whose parents are not just their predecessor carry edges:
+    // the prefix's run starts and the tail's branch and merge events.
+    const explicit: number[] = [];
+    const explicitParentStarts: number[] = [0];
+    const explicitParents: number[] = [];
+    const baseRuns = this.graphRuns;
+    for (let run = 0; run < baseRuns.count; run++) {
+      const start = baseRuns.startOf(run);
+      const parentCount = baseRuns.parentCountOf(run);
+      if (
+        parentCount === 1 &&
+        baseRuns.lastOf(baseRuns.parentRunAt(run, 0)) === start - 1
+      ) {
+        continue;
+      }
+      explicit.push(start);
+      for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+        explicitParents.push(
+          baseRuns.lastOf(baseRuns.parentRunAt(run, parentIndex)),
+        );
+      }
+      explicitParentStarts.push(explicitParents.length);
+    }
+    tail.appendExplicitParents(
+      baseCount,
+      explicit,
+      explicitParentStarts,
+      explicitParents,
+    );
+    const tailColumns = tail.operationColumns();
+    let tailIndexes: ArrayLike<number>;
+    let tailLengths: ArrayLike<number>;
+    let tailTimestamps: ArrayLike<number>;
+    if (tailColumns !== null) {
+      operationTypes.set(tailColumns.types, baseCount);
+      for (let tailIndex = 0; tailIndex < tail.count; tailIndex++) {
+        if (tailColumns.types[tailIndex] === INSERT_OPERATION) {
+          insertStarts[baseCount + tailIndex] =
+            baseContentLength + tailColumns.insertStarts[tailIndex]!;
+        }
+      }
+      tailIndexes = tailColumns.indexes;
+      tailLengths = tailColumns.lengths;
+      tailTimestamps = tailColumns.timestamps;
     } else {
-      for (let offset = 0; offset < baseCount; offset++) {
-        edgeCount += this.parentCountAt(offset);
-        parentStarts[offset + 1] = edgeCount;
+      const indexes: number[] = [];
+      const lengths: number[] = [];
+      const timestamps: number[] = [];
+      for (let tailIndex = 0; tailIndex < tail.count; tailIndex++) {
+        const offset = baseCount + tailIndex;
+        indexes.push(tail.operationIndexAt(tailIndex));
+        lengths.push(tail.operationLengthAt(tailIndex));
+        timestamps.push(tail.timestampAt(tailIndex));
+        if (tail.isInsertAt(tailIndex)) {
+          operationTypes[offset] = INSERT_OPERATION;
+          insertStarts[offset] =
+            baseContentLength + tail.insertStartAt(tailIndex);
+        } else {
+          operationTypes[offset] = DELETE_OPERATION;
+        }
       }
+      tailIndexes = indexes;
+      tailLengths = lengths;
+      tailTimestamps = timestamps;
     }
-    const tailParents: number[] = [];
-    const pushTailParent = (parentOffset: number): void => {
-      tailParents.push(parentOffset);
-    };
-    for (let tailIndex = 0; tailIndex < tail.count; tailIndex++) {
-      const offset = baseCount + tailIndex;
-      tailIndexes.push(tail.operationIndexAt(tailIndex));
-      tailLengths.push(tail.operationLengthAt(tailIndex));
-      tailTimestamps.push(tail.timestampAt(tailIndex));
-      if (tail.isInsertAt(tailIndex)) {
-        operationTypes[offset] = INSERT_OPERATION;
-        insertStarts[offset] =
-          baseContentLength + tail.insertStartAt(tailIndex);
-      } else {
-        operationTypes[offset] = DELETE_OPERATION;
-      }
-      tail.forEachParentOffset(tailIndex, pushTailParent);
-      parentStarts[offset + 1] = edgeCount + tailParents.length;
-    }
-
-    const parentOffsets = new Uint32Array(edgeCount + tailParents.length);
-    if (this.parentOffsets !== null) {
-      parentOffsets.set(this.parentOffsets);
-    } else {
-      for (let offset = 1; offset < baseCount; offset++) {
-        parentOffsets[offset - 1] = offset - 1;
-      }
-    }
-    parentOffsets.set(tailParents, edgeCount);
-    const childCounts = new Uint32Array(count);
-    for (let edge = 0; edge < parentOffsets.length; edge++) {
-      const parentOffset = parentOffsets[edge]!;
-      childCounts[parentOffset] = childCounts[parentOffset]! + 1;
-    }
-
-    // Children in ascending offset order, exactly as the EGW3 decoder builds
-    // them, so branch ordering of the repacked graph matches a fresh decode.
-    const childStarts = new Uint32Array(count + 1);
-    for (let offset = 0; offset < count; offset++) {
-      childStarts[offset + 1] = childStarts[offset]! + childCounts[offset]!;
-    }
-    const childOffsets = new Uint32Array(parentOffsets.length);
-    const childCursors = childCounts;
-    childCursors.set(childStarts.subarray(0, count));
-    for (let childOffset = 0; childOffset < count; childOffset++) {
-      const end = parentStarts[childOffset + 1]!;
-      for (let edge = parentStarts[childOffset]!; edge < end; edge++) {
-        const parentOffset = parentOffsets[edge]!;
-        childOffsets[childCursors[parentOffset]!] = childOffset;
-        childCursors[parentOffset] = childCursors[parentOffset]! + 1;
-      }
-    }
+    // Children stay in ascending offset order, exactly as the EGW3 decoder
+    // builds them, so branch ordering of the repacked graph matches a fresh
+    // decode.
+    const runs = GraphRuns.fromExplicitParents(
+      count,
+      explicit,
+      explicitParentStarts,
+      explicitParents,
+    );
 
     const idIndex = new TailExtendedIdIndex(this, tail);
     const columns = {
@@ -1241,10 +1101,7 @@ export class PackedEventGraphBase {
         tailContent.length === 0
           ? this.insertedContent
           : this.insertedContent + tailContent,
-      parentStarts,
-      parentOffsets,
-      childStarts,
-      childOffsets,
+      runs,
     };
     return this.ids === null
       ? PackedEventGraphBase.create(columns)
@@ -1265,15 +1122,9 @@ export class PackedEventGraphBase {
   }
 
   *iterateParentsAt(offset: number): IterableIterator<EventId> {
-    if (this.implicitLinearEdges) {
-      const parent = this.idAt(offset - 1);
-      if (parent !== undefined) yield parent;
-      return;
-    }
-    const start = this.parentStarts![offset]!;
-    const end = this.parentStarts![offset + 1]!;
-    for (let cursor = start; cursor < end; cursor++) {
-      yield this.requireIdAt(this.parentOffsets![cursor]!);
+    const parentCount = this.parentCountAt(offset);
+    for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+      yield this.requireIdAt(this.graphRuns.parentAt(offset, parentIndex));
     }
   }
 
@@ -1289,22 +1140,6 @@ export class PackedEventGraphBase {
 
   maximumSequenceForReplica(replicaId: string): number | undefined {
     return this.idIndex.maximumSequenceForReplica(replicaId);
-  }
-
-  private computeExactLinear(): boolean {
-    for (let offset = 0; offset < this.count; offset++) {
-      const start = this.parentStarts![offset]!;
-      const end = this.parentStarts![offset + 1]!;
-      if (offset === 0) {
-        if (start !== end) return false;
-      } else if (
-        end - start !== 1 ||
-        this.parentOffsets![start] !== offset - 1
-      ) {
-        return false;
-      }
-    }
-    return true;
   }
 }
 
@@ -1327,6 +1162,15 @@ export interface PackedTailEvents {
   forEachParentOffset(
     tailIndex: number,
     visit: (parentOffset: number) => void,
+  ): void;
+  /** Typed operation columns, or `null` to read events one at a time. */
+  operationColumns(): TailOperationColumns | null;
+  /** Append events whose parents are not just their predecessor. */
+  appendExplicitParents(
+    baseCount: number,
+    explicit: number[],
+    parentStarts: number[],
+    parents: number[],
   ): void;
   idAt(tailIndex: number): EventId;
   /** Tail index of `id`, or `-1`. */
@@ -1440,14 +1284,27 @@ const fitsUint32 = (value: number): boolean =>
 const fitsInt32 = (value: number): boolean =>
   Number.isInteger(value) && value >= -0x8000_0000 && value <= 0x7fff_ffff;
 
+const everyValue = (
+  values: ArrayLike<number>,
+  test: (value: number) => boolean,
+): boolean => {
+  for (let index = 0; index < values.length; index++) {
+    if (!test(values[index]!)) {
+      return false;
+    }
+  }
+  return true;
+};
+
 /** Copy a column and append values, widening only when a value needs it. */
 const appendUnsignedColumn = (
   column: PackedUnsignedIntegerColumn,
-  values: ReadonlyArray<number>,
+  values: ArrayLike<number>,
 ): PackedUnsignedIntegerColumn => {
   const length = column.length + values.length;
   const result =
-    column instanceof Uint32Array && values.every(fitsUint32)
+    column instanceof Uint32Array &&
+    (values instanceof Uint32Array || everyValue(values, fitsUint32))
       ? new Uint32Array(length)
       : new Float64Array(length);
   result.set(column);
@@ -1457,13 +1314,14 @@ const appendUnsignedColumn = (
 
 const appendIntegerColumn = (
   column: PackedIntegerColumn,
-  values: ReadonlyArray<number>,
+  values: ArrayLike<number>,
 ): PackedIntegerColumn => {
   const length = column.length + values.length;
   const result =
-    column instanceof Int32Array && values.every(fitsInt32)
+    column instanceof Int32Array &&
+    (values instanceof Int32Array || everyValue(values, fitsInt32))
       ? new Int32Array(length)
-      : column instanceof Uint32Array && values.every(fitsUint32)
+      : column instanceof Uint32Array && everyValue(values, fitsUint32)
         ? new Uint32Array(length)
         : new Float64Array(length);
   result.set(column);

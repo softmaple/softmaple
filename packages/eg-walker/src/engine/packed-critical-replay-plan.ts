@@ -30,8 +30,8 @@ export class PackedCriticalReplayPlan {
     private readonly sectionEnds: Uint32Array,
     private readonly linearSections: Uint8Array,
     readonly sectionCount: number,
-    readonly strictChainEventCount: number,
-    readonly strictChainRunCount: number,
+    /** Runs the planner visited; it scanned edges once per run. */
+    readonly runCount: number,
   ) {
     this.numericFrontier = new Uint8Array(eventOrder.length);
   }
@@ -261,7 +261,6 @@ export class PackedCriticalReplayPlan {
     return this.graph.diffLocalVersionsToParentRanges(
       currentVersion,
       targetEventOffset,
-      this.rankByOffset,
     );
   }
 
@@ -270,10 +269,7 @@ export class PackedCriticalReplayPlan {
     eventOffset: number,
     parentOffset: number,
   ): boolean {
-    return (
-      this.graph.parentCountAt(eventOffset) === 1 &&
-      this.graph.parentOffsetAt(eventOffset, 0) === parentOffset
-    );
+    return this.graph.runs.hasSingleParent(eventOffset, parentOffset);
   }
 
   orderIndexOfOffset(offset: number): number {
@@ -296,11 +292,7 @@ export class PackedCriticalReplayPlan {
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
   ): PackedOffsetTransition {
-    return this.graph.diffVersionToParents(
-      currentVersion,
-      targetEventOffset,
-      this.rankByOffset,
-    );
+    return this.graph.diffVersionToParents(currentVersion, targetEventOffset);
   }
 
   /** @internal `targetEventOffset` must originate from this plan. */
@@ -311,7 +303,6 @@ export class PackedCriticalReplayPlan {
     return this.graph.diffVersionToParentRanges(
       currentVersion,
       targetEventOffset,
-      this.rankByOffset,
     );
   }
 
@@ -320,11 +311,7 @@ export class PackedCriticalReplayPlan {
     currentOffset: number,
     targetEventOffset: number,
   ): PackedOffsetTransition {
-    return this.graph.diffOffsetToParents(
-      currentOffset,
-      targetEventOffset,
-      this.rankByOffset,
-    );
+    return this.graph.diffOffsetToParents(currentOffset, targetEventOffset);
   }
 
   /** @internal Both offsets must originate from this plan. */
@@ -335,7 +322,6 @@ export class PackedCriticalReplayPlan {
     return this.graph.diffOffsetToParentRanges(
       currentOffset,
       targetEventOffset,
-      this.rankByOffset,
     );
   }
 
@@ -423,7 +409,7 @@ export class PackedCriticalReplayPlan {
 }
 
 /**
- * Plan critical replay directly over packed CSR columns.
+ * Plan critical replay directly over the packed graph's runs.
  *
  * Returns `null` for object-backed or mixed packed/mutable graphs so those
  * graphs retain the general public planner. The packed codec has already
@@ -445,7 +431,6 @@ export const planPackedCriticalReplaySections = (
     layout.sectionEnds,
     layout.linearSections,
     layout.sectionCount,
-    layout.strictChainEventCount,
-    layout.strictChainRunCount,
+    layout.runCount,
   );
 };

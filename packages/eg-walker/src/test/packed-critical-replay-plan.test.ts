@@ -167,7 +167,7 @@ describe("packed critical-section replay planning", () => {
     ).toEqual(expected.flatMap(({ events }) => events.map(({ id }) => id)));
   });
 
-  it("fast-forwards strict chains across deferred and singleton cuts", () => {
+  it("plans strict chains as whole runs across deferred and singleton cuts", () => {
     const graph = pack([
       event("root", [], 0),
       event("left:0", ["root"], 1),
@@ -187,7 +187,8 @@ describe("packed critical-section replay planning", () => {
     const compact = planPackedCriticalReplaySections(graph)!;
     const expected = planCriticalReplaySections(graph);
 
-    expect(compact.strictChainEventCount).toBe(6);
+    // root, the two branches, and the merge with its tail.
+    expect(compact.runCount).toBe(4);
     expect(compact.sectionCount).toBe(expected.length);
     expect(
       Array.from({ length: compact.eventCount }, (_, orderIndex) =>
@@ -249,8 +250,8 @@ describe("packed critical-section replay planning", () => {
     const compact = planPackedCriticalReplaySections(graph)!;
     const expected = planCriticalReplaySections(graph);
 
-    expect(compact.strictChainRunCount).toBeGreaterThan(0);
-    expect(compact.strictChainEventCount).toBeGreaterThan(64);
+    // root, left, right, merge..tail, both fan events, and join..leaf.
+    expect(compact.runCount).toBe(7);
     expect(compact.sectionCount).toBe(expected.length);
     for (let sectionIndex = 0; sectionIndex < expected.length; sectionIndex++) {
       expect(
@@ -291,9 +292,9 @@ describe("packed critical-section replay planning", () => {
 
       const compact = planPackedCriticalReplaySections(pack(events))!;
 
-      expect(compact.strictChainEventCount).toBe(2 * (branchLength - 2));
-      expect(compact.strictChainRunCount).toBe(2);
-      expect(compact.eventCount - compact.strictChainEventCount).toBe(6);
+      // The planner scans edges once per run, whatever the branch length.
+      expect(compact.runCount).toBe(4);
+      expect(compact.eventCount).toBe(2 * branchLength + 2);
     }
   });
 

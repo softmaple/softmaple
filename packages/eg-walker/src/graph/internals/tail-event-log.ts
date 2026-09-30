@@ -16,6 +16,17 @@ const UINT32_MAX = 0xffff_ffff;
 /** Inserted text is sealed into flat chunks of about this many code units. */
 const TEXT_CHUNK_LENGTH = 4_096;
 
+/** Operation columns of a tail, indexed by tail index. */
+export interface TailOperationColumns {
+  /** 1 for an insert, 2 for a delete. */
+  readonly types: Uint8Array;
+  readonly indexes: Uint32Array | Float64Array;
+  readonly lengths: Uint32Array | Float64Array;
+  readonly timestamps: Int32Array | Float64Array;
+  /** Offset of an insert's text in the tail's inserted content. */
+  readonly insertStarts: Uint32Array;
+}
+
 /** No parent or child. */
 export const NO_RANK = -1;
 
@@ -274,6 +285,55 @@ export class TailEventLog implements PackedTailEvents {
       };
     }
     return { type: OPERATION_TYPE.DELETE, index, length };
+  }
+
+  /**
+   * The typed operation columns of every event, as views that the next
+   * append may invalidate, or `null` while an irregular event is stored.
+   */
+  operationColumns(): TailOperationColumns | null {
+    if (this.hasIrregularEvents()) {
+      return null;
+    }
+    const count = this.eventCount;
+    return {
+      types: this.types.subarray(0, count),
+      indexes: this.indexes.subarray(0, count),
+      lengths: this.lengths.subarray(0, count),
+      timestamps: this.timestamps.subarray(0, count),
+      insertStarts: this.insertStarts.subarray(0, count),
+    };
+  }
+
+  /**
+   * Append the events whose parents are not just their predecessor, in
+   * tail order, as `GraphRuns.fromExplicitParents` reads them. `baseCount`
+   * is the insertion rank of the first tail event.
+   */
+  appendExplicitParents(
+    baseCount: number,
+    explicit: number[],
+    parentStarts: number[],
+    parents: number[],
+  ): void {
+    for (let tailIndex = 0; tailIndex < this.eventCount; tailIndex++) {
+      const rank = baseCount + tailIndex;
+      const parent = this.parents[tailIndex]!;
+      if (parent === rank - 1) {
+        continue;
+      }
+      explicit.push(rank);
+      if (parent >= 0) {
+        parents.push(parent);
+      } else if (parent < NO_RANK) {
+        const start = decodeList(parent);
+        const end = start + 2 + this.multiParentRanks[start]!;
+        for (let index = start + 2; index < end; index++) {
+          parents.push(this.multiParentRanks[index]!);
+        }
+      }
+      parentStarts.push(parents.length);
+    }
   }
 
   parentCountAt(tailIndex: number): number {

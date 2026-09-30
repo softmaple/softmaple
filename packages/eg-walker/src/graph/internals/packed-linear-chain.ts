@@ -7,6 +7,7 @@ import type {
 } from "../../types";
 import { AgentTable } from "./agent-table";
 import { EventIdRunIndex } from "./event-id-run-index";
+import { GraphRuns } from "./graph-runs";
 import {
   PACKED_OPERATION_TYPE,
   PackedEventGraphBase,
@@ -20,7 +21,6 @@ import type {
 const INT32_MIN = -0x8000_0000;
 const INT32_MAX = 0x7fff_ffff;
 const UINT32_MAX = 0xffff_ffff;
-const NO_EDGES = new Uint32Array(0);
 
 /**
  * Events of one exact causal chain, read once from their source objects and
@@ -596,11 +596,7 @@ export class PackedLinearChain {
       idIndex: this.ids.view(),
       insertedContent: this.insertedContent,
       loadOperationColumns: () => this.operationColumns(end),
-      parentStarts: NO_EDGES,
-      parentOffsets: NO_EDGES,
-      childStarts: NO_EDGES,
-      childOffsets: NO_EDGES,
-      implicitLinearEdges: true,
+      runs: GraphRuns.linear(end),
     });
     return this.base;
   }

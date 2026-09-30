@@ -56,7 +56,7 @@ describe("packed EGW3 validation", () => {
     expect(base.eventAt(99)).toBeUndefined();
   });
 
-  it("resolves each parent override once while building both CSR directions", () => {
+  it("resolves each parent override once while building the graph runs", () => {
     const ids = ["a:0", "a:1", "b:0", "b:1"];
     const offsetById = new Map(ids.map((id, offset) => [id, offset]));
     const lookupCounts = new Map<string, number>();

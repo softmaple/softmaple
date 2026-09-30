@@ -278,6 +278,49 @@ export class PackedDiffVersionsWorkspace
   }
 
   /**
+   * Diff a version given as packed offsets (local versions) against one
+   * event's parents as local-version ranges.
+   */
+  diffLocalVersionsToParentRanges(
+    currentOffsets: ReadonlyArray<number>,
+    targetEventOffset: number,
+    view: PackedDiffVersionsView,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    if (this.active) {
+      return new PackedDiffVersionsWorkspace(
+        this.eventCount,
+      ).diffLocalVersionsToParentRanges(
+        currentOffsets,
+        targetEventOffset,
+        view,
+        rankByOffset,
+      );
+    }
+
+    this.assertEventOffset(targetEventOffset);
+    for (const offset of currentOffsets) {
+      this.assertEventOffset(offset);
+    }
+    this.begin(rankByOffset ?? null);
+    try {
+      let pendingDivergent = 0;
+      for (const offset of currentOffsets) {
+        pendingDivergent += this.paint(offset, DIFF_COLOR.LEFT);
+      }
+      pendingDivergent += this.paintParents(
+        targetEventOffset,
+        DIFF_COLOR.RIGHT,
+        view,
+      );
+      this.collectRangeTransition(pendingDivergent, view);
+      return this;
+    } finally {
+      this.finish();
+    }
+  }
+
+  /**
    * Diff a singleton packed version against one event's direct parent version.
    */
   diffOffsetToParents(

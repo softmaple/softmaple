@@ -1,11 +1,10 @@
 export {
-  itemFromRecord,
-  itemsFromCompactRecords,
+  ItemIdCodec,
   itemsFromRecords,
   recordsFromCompactRecords,
-  recordFromItem,
-  recordsFromItems,
   sequenceFromRecords,
   type CompactEngineSequenceRecords,
   type EngineSequenceRecord,
+  type EventIdSource,
+  type TypedRun,
 } from "./internals/sequence-records";

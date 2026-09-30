@@ -96,6 +96,24 @@ export class PackedCriticalReplayPlan {
     return this.graph.canonicalIdRunAt?.(offset);
   }
 
+  /**
+   * @internal Agent of the event at `offset`, or `-1` when its ID is not a
+   * canonical `replicaId:sequence`. Offsets are the graph's local versions.
+   */
+  agentAtKnownOffset(offset: number): number {
+    return this.graph.agentAt(offset);
+  }
+
+  /** @internal Sequence of the event at `offset`. */
+  sequenceAtKnownOffset(offset: number): number {
+    return this.graph.sequenceAt(offset);
+  }
+
+  /** @internal Prepare random access to agents and sequences by offset. */
+  prepareIdLookup(): void {
+    this.graph.prepareIdLookup();
+  }
+
   /** @internal `offset` must originate from this plan or one of its diffs. */
   eventIdAtKnownOffset(offset: number): EventId {
     const id = this.graph.idAt(offset);
@@ -259,6 +277,36 @@ export class PackedCriticalReplayPlan {
       }
     }
     return true;
+  }
+
+  /** @internal Whether an event's parents are exactly `version`'s offsets. */
+  parentsEqualLocalVersionsAtKnownOffset(
+    eventOffset: number,
+    version: ReadonlyArray<number>,
+  ): boolean {
+    const parentCount = this.graph.parentCountAt(eventOffset);
+    if (parentCount !== version.length) {
+      return false;
+    }
+    for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
+      const parentOffset = this.graph.parentOffsetAt(eventOffset, parentIndex);
+      if (parentOffset === undefined || !version.includes(parentOffset)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** @internal `targetEventOffset` must originate from this plan. */
+  transitionRangesFromLocalVersionsToKnownOffset(
+    currentVersion: ReadonlyArray<number>,
+    targetEventOffset: number,
+  ): PackedLocalVersionTransition {
+    return this.graph.diffLocalVersionsToParentRanges(
+      currentVersion,
+      targetEventOffset,
+      this.rankByOffset,
+    );
   }
 
   hasSingleParentOffsetAt(orderIndex: number, parentOffset: number): boolean {

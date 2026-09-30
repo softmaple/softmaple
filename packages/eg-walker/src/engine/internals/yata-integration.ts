@@ -1,7 +1,7 @@
 import { compareEventIds } from "../../graph/event-id";
 import type { EventId } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
-import type { AugmentedCRDTItem } from "./engine-types";
+import type { AugmentedCRDTItem, ItemTable } from "./engine-types";
 
 /**
  * YjsMod / Fugue-family integration scan used by the paper's reference
@@ -22,11 +22,13 @@ import type { AugmentedCRDTItem } from "./engine-types";
 export const findIntegrationPosition = (
   item: AugmentedCRDTItem,
   sequence: IndexedSequence<AugmentedCRDTItem>,
-  itemsById: ReadonlyMap<EventId, AugmentedCRDTItem>,
+  items: ItemTable,
+  eventIdOf: (item: AugmentedCRDTItem) => EventId,
   recordProbe: () => void = () => undefined,
 ): number => {
-  const leftItem = item.originLeft ? itemsById.get(item.originLeft) : null;
-  const rightItem = item.originRight ? itemsById.get(item.originRight) : null;
+  const leftItem = item.originLeft !== null ? items.at(item.originLeft) : null;
+  const rightItem =
+    item.originRight !== null ? items.at(item.originRight) : null;
   const leftPos = leftItem ? sequence.positionOf(leftItem) : -1;
   const rightPos = rightItem ? sequence.positionOf(rightItem) : sequence.length;
 
@@ -53,7 +55,7 @@ export const findIntegrationPosition = (
       if (other.originRight === item.originRight) {
         // Identical origin tuples are truly concurrent siblings. Their stable
         // event-id order is the final tie-break.
-        if (compareEventIds(item.eventId, other.eventId) < 0) {
+        if (compareEventIds(eventIdOf(item), eventIdOf(other)) < 0) {
           break;
         }
         scanning = false;
@@ -63,7 +65,7 @@ export const findIntegrationPosition = (
         // remembers the start of a nested region in case a later neighbour
         // proves that the new item belongs before the whole region.
         const otherRight =
-          other.originRight === null ? null : itemsById.get(other.originRight);
+          other.originRight === null ? null : items.at(other.originRight);
         const otherRightPos =
           otherRight === undefined || otherRight === null
             ? sequence.length
@@ -79,7 +81,7 @@ export const findIntegrationPosition = (
       }
     } else {
       const otherLeft =
-        other.originLeft === null ? null : itemsById.get(other.originLeft);
+        other.originLeft === null ? null : items.at(other.originLeft);
       const otherLeftPos =
         otherLeft === undefined || otherLeft === null
           ? -1

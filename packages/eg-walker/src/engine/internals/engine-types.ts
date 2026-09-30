@@ -8,37 +8,44 @@ export const PLACEHOLDER_EVENT_ID = "__placeholder__";
 export const PLACEHOLDER_ID_PREFIX = "__placeholder__:";
 
 /**
- * Identity of an {@link AugmentedCRDTItem} that represents a coalesced run
- * of contiguous single-character INSERT events from one author. The record
- * spans `content.length` events whose IDs are
- * `${replicaId}:${startSequence + offsetInRecord}` for
- * `offsetInRecord ∈ [0, content.length)`.
- *
- * Records produced by multi-character paste events and the initial-text
- * placeholder do **not** carry a {@link TypedRun}; for those, the
- * `eventId` field alone identifies the owning event.
+ * Engine-local key of an {@link AugmentedCRDTItem}. Keys are dense, start at
+ * 1 and are never reused by one engine, so per-item state lives in arrays
+ * indexed by key instead of string-keyed maps.
  */
-export interface TypedRun {
-  readonly replicaId: string;
-  readonly startSequence: number;
-}
+export type ItemKey = number;
+
+/**
+ * `agent` of an item whose event ID is not a canonical `replicaId:sequence`;
+ * its `sequence` holds the event's local version.
+ */
+export const CUSTOM_EVENT_AGENT = -1;
+
+/** `agent` of a placeholder item; its `sequence` holds the placeholder serial. */
+export const PLACEHOLDER_AGENT = -2;
 
 /**
  * Augmented CRDT item used during replay.
  *
+ * An item names the event that inserted its first code unit numerically:
+ * `(agent, sequence)` for a canonical event ID, the event's local version for
+ * any other ID, or a placeholder serial. `offset` is the code unit's index in
+ * that event. The persisted string form `${eventId}:${offset}` (and
+ * `__placeholder__:${serial}`) is formatted only at snapshot and recovery
+ * boundaries.
+ *
  * A record can take two coalesced shapes (or be a single-event item):
  *
- * - **Placeholder** (`eventId === PLACEHOLDER_EVENT_ID`, `run === null`):
+ * - **Placeholder** (`agent === PLACEHOLDER_AGENT`, `run === false`):
  *   contiguous run of pre-checkpoint / initial-text content, split on
  *   demand by concurrent inserts and deletes. Splits assign fresh
- *   placeholder IDs to the right half.
- * - **Typed-run record** (`run !== null`): coalesced run of contiguous
- *   single-character INSERT events from one author (Section 3.4 "smaller"
- *   lever). Splits move whole-event slices to new records with IDs
- *   `${replicaId}:${startSequence + offsetInRecord}:0`.
+ *   placeholder serials to the right half.
+ * - **Typed-run record** (`run === true`): coalesced run of contiguous
+ *   single-character INSERT events of `agent`, starting at `sequence`
+ *   (Section 3.4 "smaller" lever). Splits move whole-event slices to new
+ *   records that start at the later sequence.
  *
  * Multi-character INSERT events stay one record per code unit (each with
- * `run === null` and a real `eventId`); we do not coalesce them, since the
+ * `run === false` and its `offset`); we do not coalesce them, since the
  * per-code-unit IDs already serve as anchors for concurrent siblings.
  *
  * `content` is mutable to support in-place run extension and splits without
@@ -47,16 +54,28 @@ export interface TypedRun {
  * rope views that split without materializing the retained document.
  */
 export interface AugmentedCRDTItem {
-  readonly id: EventId;
-  readonly eventId: EventId;
+  readonly id: ItemKey;
+  readonly agent: number;
+  readonly sequence: number;
+  readonly offset: number;
   content: RecordContent;
-  originLeft: EventId | null;
-  readonly originRight: EventId | null;
+  originLeft: ItemKey | null;
+  readonly originRight: ItemKey | null;
   everDeleted: boolean;
   prepareState: number;
-  run: TypedRun | null;
+  readonly run: boolean;
   /** Deferred checkpoint state; absent from ordinary and serialized records. */
   placeholder?: PlaceholderPhysicalSlice<AugmentedCRDTItem>;
+  /**
+   * Verbatim string IDs of an item restored from a record whose IDs do not
+   * follow the `${eventId}:${offset}` scheme, so it round-trips unchanged.
+   */
+  readonly external?: ExternalItemIds;
+}
+
+export interface ExternalItemIds {
+  readonly id: EventId;
+  readonly eventId: EventId;
 }
 
 export interface EngineStats {
@@ -136,6 +155,11 @@ export interface GenerateOptions {
    * checkpoint replay.
    */
   readonly eventOrder?: ReadonlyArray<GraphEvent>;
+  /**
+   * {@link eventOrder} as local versions of `eventGraph`, for callers that
+   * already hold a numeric suffix order.
+   */
+  readonly eventOrderLocalVersions?: ReadonlyArray<number>;
   /** Test-only slow oracle; production always uses FugueOrderIndex. */
   readonly integrationMode?: "indexed" | "linear-oracle";
 }
@@ -152,3 +176,60 @@ export interface IncrementalApplyResult {
   readonly textBuffer: PersistentUtf16Rope;
   readonly transformedOperations: ReadonlyArray<ExternalOperation>;
 }
+
+/**
+ * The items of one engine, indexed by {@link ItemKey}. Items are never
+ * removed, so keys stay dense and the table's size is the record count.
+ */
+export class ItemTable {
+  private items: Array<AugmentedCRDTItem | undefined> = [undefined];
+
+  get size(): number {
+    return this.items.length - 1;
+  }
+
+  /** The key the next item must use. */
+  nextKey(): ItemKey {
+    return this.items.length;
+  }
+
+  add(item: AugmentedCRDTItem): void {
+    if (item.id !== this.items.length) {
+      throw new Error(`CRDT item ${item.id} is out of key order`);
+    }
+    this.items.push(item);
+  }
+
+  at(itemId: ItemKey): AugmentedCRDTItem | undefined {
+    return this.items[itemId];
+  }
+
+  require(itemId: ItemKey): AugmentedCRDTItem {
+    const item = this.items[itemId];
+    if (item === undefined) {
+      throw new Error(`CRDT item ${itemId} not found`);
+    }
+    return item;
+  }
+
+  clear(): void {
+    this.items = [undefined];
+  }
+}
+
+export const formatPlaceholderId = (serial: number): EventId =>
+  `${PLACEHOLDER_ID_PREFIX}${serial}`;
+
+/** Serial of a `__placeholder__:N` ID, or `-1` when `id` is not one. */
+export const placeholderSerialOf = (id: EventId): number => {
+  if (!id.startsWith(PLACEHOLDER_ID_PREFIX)) {
+    return -1;
+  }
+  const suffix = id.slice(PLACEHOLDER_ID_PREFIX.length);
+  const serial = Number(suffix);
+  return Number.isSafeInteger(serial) &&
+    serial >= 0 &&
+    String(serial) === suffix
+    ? serial
+    : -1;
+};

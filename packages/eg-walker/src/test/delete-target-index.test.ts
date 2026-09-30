@@ -10,86 +10,122 @@ import {
 import type { AugmentedCRDTItem } from "../engine/internals/engine-types";
 import { SegmentedPlaceholderState } from "../engine/internals/segmented-placeholder";
 
+const AUTHOR = 0;
+const ids = new Map<string, number>();
+const names: string[] = [];
+/** Stable numeric key for a readable test name. */
+const id = (name: string): number => {
+  let key = ids.get(name);
+  if (key === undefined) {
+    key = names.length + 1;
+    ids.set(name, key);
+    names.push(name);
+  }
+  return key;
+};
+const nameOf = (key: number): string => {
+  const name = names[key - 1];
+  if (name === undefined) {
+    throw new Error(`Unknown test key ${key}`);
+  }
+  return name;
+};
+
 describe("DeleteTargetIndex", () => {
   describe("record / targetsOf", () => {
     it("returns undefined for an unrecorded delete event", () => {
       const index = new DeleteTargetIndex();
-      expect(index.targetsOf("missing")).toBeUndefined();
+      expect(index.targetsOf(id("missing"))).toBeUndefined();
     });
 
     it("stores the recorded target list under the delete event", () => {
       const index = new DeleteTargetIndex();
-      index.record("delete-1", ["item-a", "item-b"]);
-      expect(Array.from(index.targetsOf("delete-1") ?? [])).toEqual([
-        "item-a",
-        "item-b",
+      index.record(id("delete-1"), [id("item-a"), id("item-b")]);
+      expect(Array.from(index.targetsOf(id("delete-1")) ?? [])).toEqual([
+        id("item-a"),
+        id("item-b"),
       ]);
-      expect(index.targetRefsOf("delete-1")).toEqual(["item-a", "item-b"]);
+      expect(index.targetRefsOf(id("delete-1"))).toEqual([
+        id("item-a"),
+        id("item-b"),
+      ]);
     });
 
     it("exposes a scalar hot-path ref while preserving targetsOf array semantics", () => {
       const index = new DeleteTargetIndex();
-      index.recordOne("delete-1", "item-a");
+      index.recordOne(id("delete-1"), id("item-a"));
 
-      expect(index.targetRefsOf("delete-1")).toBe("item-a");
-      expect(index.targetsOf("delete-1")).toEqual(["item-a"]);
+      expect(index.targetRefsOf(id("delete-1"))).toBe(id("item-a"));
+      expect(index.targetsOf(id("delete-1"))).toEqual([id("item-a")]);
     });
 
     it("materializes a lazy typed-run event target to an item target", () => {
       const index = new DeleteTargetIndex();
-      index.recordRunEvent("delete-1", "author:4");
+      index.recordRunEvent(id("delete-1"), AUTHOR, 4);
       expect(index.hasRunEventTargets()).toBe(true);
 
-      const target = index.firstTargetOf("delete-1");
+      const target = index.firstTargetOf(id("delete-1"));
       expect(index.kindOf(target)).toBe(DELETE_TARGET_KIND.RUN_EVENT);
-      expect(index.runEventIdOf(target)).toBe("author:4");
-      expect(index.targetRefsOf("delete-1")).toEqual({
+      expect(index.runEventSequenceOf(target)).toBe(4);
+      expect(index.targetRefsOf(id("delete-1"))).toEqual({
         kind: "typed-run-event",
-        eventId: "author:4",
+        agent: AUTHOR,
+        sequence: 4,
       });
-      expect(() => index.targetsOf("delete-1")).toThrow("must be materialized");
+      expect(() => index.targetsOf(id("delete-1"))).toThrow(
+        "must be materialized",
+      );
 
-      index.materializeRunEventTargetsOf("delete-1", (eventId) =>
-        eventId === "author:4" ? "author:4:0" : "unreachable",
+      index.materializeRunEventTargetsOf(id("delete-1"), (agent, sequence) =>
+        agent === AUTHOR && sequence === 4
+          ? id("author:4:0")
+          : id("unreachable"),
       );
 
       expect(index.kindOf(target)).toBe(DELETE_TARGET_KIND.ITEM);
       expect(index.hasRunEventTargets()).toBe(false);
-      expect(index.targetsOf("delete-1")).toEqual(["author:4:0"]);
-      index.extendMembership("author:4:0", "author:5:0");
-      expect(index.targetsOf("delete-1")).toEqual(["author:4:0", "author:5:0"]);
+      expect(index.targetsOf(id("delete-1"))).toEqual([id("author:4:0")]);
+      index.extendMembership(id("author:4:0"), id("author:5:0"));
+      expect(index.targetsOf(id("delete-1"))).toEqual([
+        id("author:4:0"),
+        id("author:5:0"),
+      ]);
     });
 
     it("keeps lazy target accounting exact across runtime records, replacement, and abort", () => {
       const index = new DeleteTargetIndex();
-      index.recordRuntime("delete-1", [
-        { kind: "typed-run-event", eventId: "author:4" },
-        "ordinary-item",
-        { kind: "typed-run-event", eventId: "author:5" },
+      index.recordRuntime(id("delete-1"), [
+        { kind: "typed-run-event", agent: AUTHOR, sequence: 4 },
+        id("ordinary-item"),
+        { kind: "typed-run-event", agent: AUTHOR, sequence: 5 },
       ]);
       expect(index.hasRunEventTargets()).toBe(true);
 
-      index.materializeRunEventTargets((eventId) => `${eventId}:item`);
-      expect(index.targetsOf("delete-1")).toEqual([
-        "author:4:item",
-        "ordinary-item",
-        "author:5:item",
+      index.materializeRunEventTargets((_agent, sequence) =>
+        id(`author:${sequence}:item`),
+      );
+      expect(index.targetsOf(id("delete-1"))).toEqual([
+        id("author:4:item"),
+        id("ordinary-item"),
+        id("author:5:item"),
       ]);
       expect(index.hasRunEventTargets()).toBe(false);
 
-      index.recordRunEvent("delete-1", "author:6");
+      index.recordRunEvent(id("delete-1"), AUTHOR, 6);
       expect(index.hasRunEventTargets()).toBe(true);
-      index.recordOne("delete-1", "replacement-item");
+      index.recordOne(id("delete-1"), id("replacement-item"));
       expect(index.hasRunEventTargets()).toBe(false);
-      expect(index.targetsOf("delete-1")).toEqual(["replacement-item"]);
+      expect(index.targetsOf(id("delete-1"))).toEqual([id("replacement-item")]);
 
       const aborted = index.beginRecord();
-      index.appendRunEvent(aborted, "author:7");
+      index.appendRunEvent(aborted, AUTHOR, 7);
       expect(index.hasRunEventTargets()).toBe(true);
       index.abortRecord(aborted);
       expect(index.hasRunEventTargets()).toBe(false);
 
-      index.materializeRunEventTargetsOf("missing", () => "unreachable");
+      index.materializeRunEventTargetsOf(id("missing"), () =>
+        id("unreachable"),
+      );
     });
 
     it("rolls back lazy and placeholder builders after validation or commit errors", () => {
@@ -100,7 +136,7 @@ describe("DeleteTargetIndex", () => {
         () => "placeholder:1",
       );
       expect(() =>
-        index.recordPlaceholderRange("invalid-placeholder", state, -1, 1),
+        index.recordPlaceholderRange(id("invalid-placeholder"), state, -1, 1),
       ).toThrow("Invalid placeholder delete target");
 
       const commit = vi
@@ -108,66 +144,72 @@ describe("DeleteTargetIndex", () => {
         .mockImplementationOnce(() => {
           throw new Error("simulated commit failure");
         });
-      expect(() => index.recordRunEvent("failed-delete", "author:4")).toThrow(
-        "simulated commit failure",
-      );
+      expect(() =>
+        index.recordRunEvent(id("failed-delete"), AUTHOR, 4),
+      ).toThrow("simulated commit failure");
       commit.mockRestore();
 
-      expect(index.firstTargetOf("failed-delete")).toBe(0);
+      expect(index.firstTargetOf(id("failed-delete"))).toBe(0);
       expect(index.hasRunEventTargets()).toBe(false);
-      index.recordOne("live-delete", "item");
+      index.recordOne(id("live-delete"), id("item"));
       expect(() =>
-        index.runEventIdOf(index.firstTargetOf("live-delete")),
+        index.runEventAgentOf(index.firstTargetOf(id("live-delete"))),
       ).toThrow("is not a typed-run event target");
     });
 
     it("tracks reverse membership for scalar records", () => {
       const index = new DeleteTargetIndex();
-      index.recordOne("delete-1", "item-left");
+      index.recordOne(id("delete-1"), id("item-left"));
 
-      index.extendMembership("item-left", "item-right");
+      index.extendMembership(id("item-left"), id("item-right"));
 
-      expect(index.targetsOf("delete-1")).toEqual(["item-left", "item-right"]);
+      expect(index.targetsOf(id("delete-1"))).toEqual([
+        id("item-left"),
+        id("item-right"),
+      ]);
     });
 
     it("defensively copies the caller's array so later mutations don't leak in", () => {
       const index = new DeleteTargetIndex();
-      const ids = ["item-a", "item-b"];
-      index.record("delete-1", ids);
-      ids.push("item-c");
-      expect(Array.from(index.targetsOf("delete-1") ?? [])).toEqual([
-        "item-a",
-        "item-b",
+      const ids = [id("item-a"), id("item-b")];
+      index.record(id("delete-1"), ids);
+      ids.push(id("item-c"));
+      expect(Array.from(index.targetsOf(id("delete-1")) ?? [])).toEqual([
+        id("item-a"),
+        id("item-b"),
       ]);
     });
 
     it("accepts an empty target list", () => {
       const index = new DeleteTargetIndex();
-      index.record("delete-empty", []);
-      expect(Array.from(index.targetsOf("delete-empty") ?? [])).toEqual([]);
-      expect(index.targetRefsOf("delete-empty")).toEqual([]);
-      expect(index.targetRefsOf("missing")).toBeUndefined();
+      index.record(id("delete-empty"), []);
+      expect(Array.from(index.targetsOf(id("delete-empty")) ?? [])).toEqual([]);
+      expect(index.targetRefsOf(id("delete-empty"))).toEqual([]);
+      expect(index.targetRefsOf(id("missing"))).toBeUndefined();
     });
   });
 
   describe("entries", () => {
     it("returns defensive target arrays for scalar and multi-target records", () => {
       const index = new DeleteTargetIndex();
-      index.record("delete-scalar", ["item-a"]);
-      index.record("delete-many", ["item-b", "item-c"]);
+      index.record(id("delete-scalar"), [id("item-a")]);
+      index.record(id("delete-many"), [id("item-b"), id("item-c")]);
 
-      const entries = index.entries();
+      const entries = index.entries(nameOf);
       expect(entries).toEqual([
-        { deleteEventId: "delete-scalar", targetIds: ["item-a"] },
+        { deleteEvent: id("delete-scalar"), targetIds: ["item-a"] },
         {
-          deleteEventId: "delete-many",
+          deleteEvent: id("delete-many"),
           targetIds: ["item-b", "item-c"],
         },
       ]);
 
       const manyTargets = entries[1]?.targetIds as string[] | undefined;
       manyTargets?.push("item-mutated");
-      expect(index.targetsOf("delete-many")).toEqual(["item-b", "item-c"]);
+      expect(index.targetsOf(id("delete-many"))).toEqual([
+        id("item-b"),
+        id("item-c"),
+      ]);
     });
 
     it("materializes runtime placeholder ranges only at the legacy boundary", () => {
@@ -183,14 +225,14 @@ describe("DeleteTargetIndex", () => {
         end: 4,
       };
       const index = new DeleteTargetIndex();
-      index.recordRuntimeOne("delete-placeholder", target);
+      index.recordRuntimeOne(id("delete-placeholder"), target);
 
-      expect(() => index.targetsOf("delete-placeholder")).toThrow(
+      expect(() => index.targetsOf(id("delete-placeholder"))).toThrow(
         "require a materializer",
       );
-      expect(index.entries(() => ["placeholder:0"])).toEqual([
+      expect(index.entries(nameOf, () => ["placeholder:0"])).toEqual([
         {
-          deleteEventId: "delete-placeholder",
+          deleteEvent: id("delete-placeholder"),
           targetIds: ["placeholder:0"],
         },
       ]);
@@ -209,11 +251,11 @@ describe("DeleteTargetIndex", () => {
 
       index.recordPackedPlaceholderRange(12, state, 2, 4);
       const itemGroup = index.beginRecord();
-      index.appendItem(itemGroup, "item:left");
+      index.appendItem(itemGroup, id("item:left"));
       index.commitPackedRecord(10, itemGroup);
-      index.recordPackedRunEvent(14, "author:4");
+      index.recordPackedRunEvent(14, AUTHOR, 4);
 
-      expect(index.entries()).toEqual([]);
+      expect(index.entries(nameOf)).toEqual([]);
       expect(index.hasPackedRecords()).toBe(true);
       expect(index.kindOf(index.firstTargetOfPackedOrder(10))).toBe(
         DELETE_TARGET_KIND.ITEM,
@@ -231,75 +273,83 @@ describe("DeleteTargetIndex", () => {
         "Invalid packed delete order index",
       );
 
-      index.materializeRunEventTargetsOfPackedOrder(14, () => "author:4:0");
-      index.extendMembership("item:left", "item:right");
-      index.materializePackedRecords((orderIndex) => `delete:${orderIndex}`);
+      index.materializeRunEventTargetsOfPackedOrder(14, () => id("author:4:0"));
+      index.extendMembership(id("item:left"), id("item:right"));
+      index.materializePackedRecords((orderIndex) =>
+        id(`delete:${orderIndex}`),
+      );
 
       expect(index.hasPackedRecords()).toBe(false);
       expect(index.hasPackedOrderRange()).toBe(false);
       expect(
-        index.entries(({ start, end }) => [`placeholder:${start}:${end}`]),
+        index.entries(nameOf, ({ start, end }) => [
+          `placeholder:${start}:${end}`,
+        ]),
       ).toEqual([
         {
-          deleteEventId: "delete:10",
+          deleteEvent: id("delete:10"),
           targetIds: ["item:left", "item:right"],
         },
         {
-          deleteEventId: "delete:12",
+          deleteEvent: id("delete:12"),
           targetIds: ["placeholder:2:4"],
         },
-        { deleteEventId: "delete:14", targetIds: ["author:4:0"] },
+        { deleteEvent: id("delete:14"), targetIds: ["author:4:0"] },
       ]);
     });
 
     it("rejects duplicate packed ranks without replacing the live target", () => {
       const index = new DeleteTargetIndex();
       index.configurePackedOrderRange(0, 2);
-      index.recordPackedRunEvent(0, "author:0");
+      index.recordPackedRunEvent(0, AUTHOR, 0);
 
       expect(() => index.assertPackedOrderRangeAvailable(0, 2)).toThrow(
         "Duplicate packed delete order index 0",
       );
-      expect(() => index.recordPackedRunEvent(0, "author:1")).toThrow(
+      expect(() => index.recordPackedRunEvent(0, AUTHOR, 1)).toThrow(
         "Duplicate packed delete order index 0",
       );
-      expect(index.runEventIdOf(index.firstTargetOfPackedOrder(0))).toBe(
-        "author:0",
+      expect(index.runEventSequenceOf(index.firstTargetOfPackedOrder(0))).toBe(
+        0,
       );
-      index.materializeRunEventTargetsOfPackedOrder(0, () => "author:0:0");
-      index.materializePackedRecords((orderIndex) => `delete:${orderIndex}`);
-      expect(index.targetsOf("delete:0")).toEqual(["author:0:0"]);
+      index.materializeRunEventTargetsOfPackedOrder(0, () => id("author:0:0"));
+      index.materializePackedRecords((orderIndex) =>
+        id(`delete:${orderIndex}`),
+      );
+      expect(index.targetsOf(id("delete:0"))).toEqual([id("author:0:0")]);
       expect(index.hasRunEventTargets()).toBe(false);
     });
 
     it("keeps a packed target retryable after an ID collision", () => {
       const index = new DeleteTargetIndex();
-      index.record("collision", ["existing"]);
+      index.record(id("collision"), [id("existing")]);
       index.configurePackedOrderRange(10, 11);
       const group = index.beginRecord();
-      index.appendItem(group, "packed");
+      index.appendItem(group, id("packed"));
       index.commitPackedRecord(10, group);
 
-      expect(() => index.materializePackedRecord(10, "collision")).toThrow(
-        "Duplicate materialized delete event collision",
+      expect(() => index.materializePackedRecord(10, id("collision"))).toThrow(
+        `Duplicate materialized delete event ${id("collision")}`,
       );
-      expect(index.targetsOf("collision")).toEqual(["existing"]);
+      expect(index.targetsOf(id("collision"))).toEqual([id("existing")]);
       expect(index.hasPackedRecords()).toBe(true);
-      expect(index.itemIdOf(index.firstTargetOfPackedOrder(10))).toBe("packed");
+      expect(index.itemIdOf(index.firstTargetOfPackedOrder(10))).toBe(
+        id("packed"),
+      );
 
-      index.materializePackedRecord(10, "delete:10");
+      index.materializePackedRecord(10, id("delete:10"));
       index.releasePackedOrderRange();
-      expect(index.entries()).toEqual([
-        { deleteEventId: "collision", targetIds: ["existing"] },
-        { deleteEventId: "delete:10", targetIds: ["packed"] },
+      expect(index.entries(nameOf)).toEqual([
+        { deleteEvent: id("collision"), targetIds: ["existing"] },
+        { deleteEvent: id("delete:10"), targetIds: ["packed"] },
       ]);
     });
 
     it("clears and reuses packed order ranges above the uint16 boundary", () => {
       const index = new DeleteTargetIndex();
       index.configurePackedOrderRange(65_535, 70_002);
-      index.recordPackedRunEvent(65_536, "author:1");
-      index.recordPackedRunEvent(70_000, "author:2");
+      index.recordPackedRunEvent(65_536, AUTHOR, 1);
+      index.recordPackedRunEvent(70_000, AUTHOR, 2);
       expect(index.firstTargetOfPackedOrder(65_536)).not.toBe(0);
       expect(index.firstTargetOfPackedOrder(70_000)).not.toBe(0);
 
@@ -308,9 +358,9 @@ describe("DeleteTargetIndex", () => {
       expect(index.hasPackedRecords()).toBe(false);
       expect(index.hasRunEventTargets()).toBe(false);
       expect(index.firstTargetOfPackedOrder(7)).toBe(0);
-      index.recordPackedRunEvent(8, "author:3");
-      expect(index.runEventIdOf(index.firstTargetOfPackedOrder(8))).toBe(
-        "author:3",
+      index.recordPackedRunEvent(8, AUTHOR, 3);
+      expect(index.runEventSequenceOf(index.firstTargetOfPackedOrder(8))).toBe(
+        3,
       );
     });
 
@@ -322,14 +372,14 @@ describe("DeleteTargetIndex", () => {
       );
       const index = new DeleteTargetIndex();
       const group = index.beginRecord();
-      index.appendItem(group, "item-left");
+      index.appendItem(group, id("item-left"));
       index.appendPlaceholderRange(group, state, 2, 6);
-      index.appendItem(group, "item-right");
-      index.commitRecord("delete-mixed", group);
+      index.appendItem(group, id("item-right"));
+      index.commitRecord(id("delete-mixed"), group);
 
-      const first = index.firstTargetOf("delete-mixed");
+      const first = index.firstTargetOf(id("delete-mixed"));
       expect(index.kindOf(first)).toBe(DELETE_TARGET_KIND.ITEM);
-      expect(index.itemIdOf(first)).toBe("item-left");
+      expect(index.itemIdOf(first)).toBe(id("item-left"));
 
       const second = index.nextTarget(first);
       expect(index.kindOf(second)).toBe(DELETE_TARGET_KIND.PLACEHOLDER);
@@ -339,19 +389,19 @@ describe("DeleteTargetIndex", () => {
 
       const third = index.nextTarget(second);
       expect(index.kindOf(third)).toBe(DELETE_TARGET_KIND.ITEM);
-      expect(index.itemIdOf(third)).toBe("item-right");
+      expect(index.itemIdOf(third)).toBe(id("item-right"));
       expect(index.nextTarget(third)).toBe(0);
-      expect(index.firstTargetOf("missing")).toBe(0);
+      expect(index.firstTargetOf(id("missing"))).toBe(0);
 
-      expect(index.targetRefsOf("delete-mixed")).toEqual([
-        "item-left",
+      expect(index.targetRefsOf(id("delete-mixed"))).toEqual([
+        id("item-left"),
         {
           kind: "placeholder-range",
           state,
           start: 2,
           end: 6,
         },
-        "item-right",
+        id("item-right"),
       ]);
     });
 
@@ -360,18 +410,18 @@ describe("DeleteTargetIndex", () => {
       for (let groupIndex = 0; groupIndex < 40; groupIndex++) {
         const group = index.beginRecord();
         for (let targetIndex = 0; targetIndex < 40; targetIndex++) {
-          index.appendItem(group, `item:${groupIndex}:${targetIndex}`);
+          index.appendItem(group, id(`item:${groupIndex}:${targetIndex}`));
         }
-        index.commitRecord(`delete:${groupIndex}`, group);
+        index.commitRecord(id(`delete:${groupIndex}`), group);
       }
 
-      let target = index.firstTargetOf("delete:39");
+      let target = index.firstTargetOf(id("delete:39"));
       for (let targetIndex = 0; targetIndex < 40; targetIndex++) {
-        expect(index.itemIdOf(target)).toBe(`item:39:${targetIndex}`);
+        expect(index.itemIdOf(target)).toBe(id(`item:39:${targetIndex}`));
         target = index.nextTarget(target);
       }
       expect(target).toBe(0);
-      expect(index.entries()).toHaveLength(40);
+      expect(index.entries(nameOf)).toHaveLength(40);
     });
 
     it("preserves safe-integer placeholder offsets above the uint32 range", () => {
@@ -386,9 +436,9 @@ describe("DeleteTargetIndex", () => {
       const index = new DeleteTargetIndex();
       const group = index.beginRecord();
       index.appendPlaceholderRange(group, state, start, end);
-      index.commitRecord("delete-large-offset", group);
+      index.commitRecord(id("delete-large-offset"), group);
 
-      const target = index.firstTargetOf("delete-large-offset");
+      const target = index.firstTargetOf(id("delete-large-offset"));
       expect(index.placeholderStartOf(target)).toBe(start);
       expect(index.placeholderEndOf(target)).toBe(end);
     });
@@ -396,17 +446,17 @@ describe("DeleteTargetIndex", () => {
     it("aborts an uncommitted group and reuses its target storage safely", () => {
       const index = new DeleteTargetIndex();
       const aborted = index.beginRecord();
-      index.appendItem(aborted, "aborted-left");
-      index.appendItem(aborted, "aborted-right");
+      index.appendItem(aborted, id("aborted-left"));
+      index.appendItem(aborted, id("aborted-right"));
       index.abortRecord(aborted);
 
-      expect(index.firstTargetOf("aborted-delete")).toBe(0);
-      index.extendMembership("aborted-left", "should-not-appear");
+      expect(index.firstTargetOf(id("aborted-delete"))).toBe(0);
+      index.extendMembership(id("aborted-left"), id("should-not-appear"));
 
       const committed = index.beginRecord();
-      index.appendItem(committed, "live-left");
-      index.commitRecord("live-delete", committed);
-      expect(index.targetsOf("live-delete")).toEqual(["live-left"]);
+      index.appendItem(committed, id("live-left"));
+      index.commitRecord(id("live-delete"), committed);
+      expect(index.targetsOf(id("live-delete"))).toEqual([id("live-left")]);
       const next = index.beginRecord();
       index.abortRecord(next);
     });
@@ -418,7 +468,7 @@ describe("DeleteTargetIndex", () => {
         () => "placeholder:1",
       );
       const runtime = new DeleteTargetIndex();
-      runtime.recordRuntimeOne("delete-placeholder", {
+      runtime.recordRuntimeOne(id("delete-placeholder"), {
         kind: "placeholder-range",
         state,
         start: 0,
@@ -427,20 +477,20 @@ describe("DeleteTargetIndex", () => {
 
       // Physical placeholder splits do not extend coordinate targets. At the
       // snapshot boundary the range becomes stable logical item IDs instead.
-      runtime.extendMembership("placeholder:0", "physical-right");
-      expect(runtime.entries(() => ["logical-left"])).toEqual([
+      runtime.extendMembership(id("placeholder:0"), id("physical-right"));
+      expect(runtime.entries(nameOf, () => ["logical-left"])).toEqual([
         {
-          deleteEventId: "delete-placeholder",
+          deleteEvent: id("delete-placeholder"),
           targetIds: ["logical-left"],
         },
       ]);
 
       const restored = new DeleteTargetIndex();
-      restored.record("delete-placeholder", ["logical-left"]);
-      restored.extendMembership("logical-left", "logical-right");
-      expect(restored.targetsOf("delete-placeholder")).toEqual([
-        "logical-left",
-        "logical-right",
+      restored.record(id("delete-placeholder"), [id("logical-left")]);
+      restored.extendMembership(id("logical-left"), id("logical-right"));
+      expect(restored.targetsOf(id("delete-placeholder"))).toEqual([
+        id("logical-left"),
+        id("logical-right"),
       ]);
     });
 
@@ -454,21 +504,21 @@ describe("DeleteTargetIndex", () => {
       const group = index.beginRecord();
 
       expect(() => index.beginRecord()).toThrow("already active");
-      expect(() => index.appendItem(group + 1, "wrong-group")).toThrow(
+      expect(() => index.appendItem(group + 1, id("wrong-group"))).toThrow(
         "not the active builder",
       );
-      expect(() => index.commitRecord("wrong-delete", group + 1)).toThrow(
+      expect(() => index.commitRecord(id("wrong-delete"), group + 1)).toThrow(
         "not the active builder",
       );
       expect(() => index.abortRecord(group + 1)).toThrow(
         "not the active builder",
       );
 
-      index.appendItem(group, "item");
+      index.appendItem(group, id("item"));
       index.appendPlaceholderRange(group, state, 1, 3);
-      index.commitRecord("delete", group);
+      index.commitRecord(id("delete"), group);
 
-      const item = index.firstTargetOf("delete");
+      const item = index.firstTargetOf(id("delete"));
       const placeholder = index.nextTarget(item);
       expect(() => index.placeholderStateOf(item)).toThrow(
         "is not a placeholder target",
@@ -504,23 +554,23 @@ describe("DeleteTargetIndex", () => {
       const index = new DeleteTargetIndex();
 
       expect(() =>
-        index.recordRuntimeOne("negative", invalidTarget(-1, 1)),
+        index.recordRuntimeOne(id("negative"), invalidTarget(-1, 1)),
       ).toThrow("Invalid placeholder delete target");
       expect(() =>
-        index.recordRuntime("reversed", [
+        index.recordRuntime(id("reversed"), [
           invalidTarget(0, 1),
           invalidTarget(3, 2),
         ]),
       ).toThrow("Invalid placeholder delete target");
 
-      const throwingItems = ["item-before-error"];
+      const throwingItems = [id("item-before-error")];
       Object.defineProperty(throwingItems, Symbol.iterator, {
         value: function* () {
-          yield "item-before-error";
+          yield id("item-before-error");
           throw new Error("iterator failed");
         },
       });
-      expect(() => index.record("iterator-error", throwingItems)).toThrow(
+      expect(() => index.record(id("iterator-error"), throwingItems)).toThrow(
         "iterator failed",
       );
 
@@ -532,28 +582,34 @@ describe("DeleteTargetIndex", () => {
       ];
       for (const [start, end] of invalidRanges) {
         expect(() =>
-          index.recordRuntimeOne("invalid-range", invalidTarget(start, end)),
+          index.recordRuntimeOne(
+            id("invalid-range"),
+            invalidTarget(start, end),
+          ),
         ).toThrow("Invalid placeholder delete target");
       }
 
-      expect(index.entries()).toEqual([]);
-      index.recordOne("reused", "live-item");
-      expect(index.targetsOf("reused")).toEqual(["live-item"]);
+      expect(index.entries(nameOf)).toEqual([]);
+      index.recordOne(id("reused"), id("live-item"));
+      expect(index.targetsOf(id("reused"))).toEqual([id("live-item")]);
     });
 
     it("removes stale reverse membership when a delete record is replaced", () => {
       const index = new DeleteTargetIndex();
-      index.recordOne("delete-a", "shared");
-      index.recordOne("delete-b", "shared");
+      index.recordOne(id("delete-a"), id("shared"));
+      index.recordOne(id("delete-b"), id("shared"));
 
-      index.recordOne("delete-a", "replacement-a");
-      index.extendMembership("shared", "shared-right");
-      expect(index.targetsOf("delete-a")).toEqual(["replacement-a"]);
-      expect(index.targetsOf("delete-b")).toEqual(["shared", "shared-right"]);
+      index.recordOne(id("delete-a"), id("replacement-a"));
+      index.extendMembership(id("shared"), id("shared-right"));
+      expect(index.targetsOf(id("delete-a"))).toEqual([id("replacement-a")]);
+      expect(index.targetsOf(id("delete-b"))).toEqual([
+        id("shared"),
+        id("shared-right"),
+      ]);
 
-      index.recordOne("delete-b", "replacement-b");
-      index.extendMembership("shared", "orphan-right");
-      expect(index.targetsOf("delete-b")).toEqual(["replacement-b"]);
+      index.recordOne(id("delete-b"), id("replacement-b"));
+      index.extendMembership(id("shared"), id("orphan-right"));
+      expect(index.targetsOf(id("delete-b"))).toEqual([id("replacement-b")]);
     });
 
     it("reuses one placeholder state reference across multiple ranges", () => {
@@ -575,9 +631,9 @@ describe("DeleteTargetIndex", () => {
         start: 4,
         end: 6,
       };
-      index.recordRuntime("delete", [firstTarget, secondTarget]);
+      index.recordRuntime(id("delete"), [firstTarget, secondTarget]);
 
-      const refs = index.targetRefsOf("delete");
+      const refs = index.targetRefsOf(id("delete"));
       expect(Array.isArray(refs)).toBe(true);
       expect(refs).toEqual([firstTarget, secondTarget]);
       expect(isPlaceholderDeleteTarget(refs ?? [])).toBe(false);
@@ -618,10 +674,10 @@ describe("DeleteTargetIndex", () => {
   describe("extendMembership", () => {
     it("is a no-op when the source item has no owning deletes", () => {
       const index = new DeleteTargetIndex();
-      index.extendMembership("unknown", "to");
+      index.extendMembership(id("unknown"), id("to"));
       // Nothing was ever recorded, so the new target should not appear
       // under any delete event.
-      expect(index.targetsOf("unknown")).toBeUndefined();
+      expect(index.targetsOf(id("unknown"))).toBeUndefined();
     });
 
     it("extends every delete event that targeted the source item", () => {
@@ -630,38 +686,38 @@ describe("DeleteTargetIndex", () => {
       // new right half so their retreat/advance still flips the right
       // slice's prepare-state.
       const index = new DeleteTargetIndex();
-      index.record("delete-1", ["item-left"]);
-      index.record("delete-2", ["item-left"]);
+      index.record(id("delete-1"), [id("item-left")]);
+      index.record(id("delete-2"), [id("item-left")]);
 
-      index.extendMembership("item-left", "item-right");
+      index.extendMembership(id("item-left"), id("item-right"));
 
-      expect(Array.from(index.targetsOf("delete-1") ?? [])).toEqual([
-        "item-left",
-        "item-right",
+      expect(Array.from(index.targetsOf(id("delete-1")) ?? [])).toEqual([
+        id("item-left"),
+        id("item-right"),
       ]);
-      expect(Array.from(index.targetsOf("delete-2") ?? [])).toEqual([
-        "item-left",
-        "item-right",
+      expect(Array.from(index.targetsOf(id("delete-2")) ?? [])).toEqual([
+        id("item-left"),
+        id("item-right"),
       ]);
-      expect(index.targetRefsOf("delete-1")).toEqual([
-        "item-left",
-        "item-right",
+      expect(index.targetRefsOf(id("delete-1"))).toEqual([
+        id("item-left"),
+        id("item-right"),
       ]);
-      expect(index.targetRefsOf("delete-2")).toEqual([
-        "item-left",
-        "item-right",
+      expect(index.targetRefsOf(id("delete-2"))).toEqual([
+        id("item-left"),
+        id("item-right"),
       ]);
     });
 
     it("does not extend deletes that never targeted the source item", () => {
       const index = new DeleteTargetIndex();
-      index.record("delete-relevant", ["item-left"]);
-      index.record("delete-other", ["item-elsewhere"]);
+      index.record(id("delete-relevant"), [id("item-left")]);
+      index.record(id("delete-other"), [id("item-elsewhere")]);
 
-      index.extendMembership("item-left", "item-right");
+      index.extendMembership(id("item-left"), id("item-right"));
 
-      expect(Array.from(index.targetsOf("delete-other") ?? [])).toEqual([
-        "item-elsewhere",
+      expect(Array.from(index.targetsOf(id("delete-other")) ?? [])).toEqual([
+        id("item-elsewhere"),
       ]);
     });
 
@@ -671,18 +727,18 @@ describe("DeleteTargetIndex", () => {
       // duplicate entry that would later double-toggle prepare-state under
       // retreat/advance.
       const index = new DeleteTargetIndex();
-      index.record("delete-1", ["item-left"]);
+      index.record(id("delete-1"), [id("item-left")]);
 
-      index.extendMembership("item-left", "item-right");
-      index.extendMembership("item-left", "item-right");
+      index.extendMembership(id("item-left"), id("item-right"));
+      index.extendMembership(id("item-left"), id("item-right"));
 
-      expect(Array.from(index.targetsOf("delete-1") ?? [])).toEqual([
-        "item-left",
-        "item-right",
+      expect(Array.from(index.targetsOf(id("delete-1")) ?? [])).toEqual([
+        id("item-left"),
+        id("item-right"),
       ]);
-      expect(index.targetRefsOf("delete-1")).toEqual([
-        "item-left",
-        "item-right",
+      expect(index.targetRefsOf(id("delete-1"))).toEqual([
+        id("item-left"),
+        id("item-right"),
       ]);
     });
   });
@@ -690,15 +746,15 @@ describe("DeleteTargetIndex", () => {
   describe("clear", () => {
     it("drops both the forward and reverse indices", () => {
       const index = new DeleteTargetIndex();
-      index.record("delete-1", ["item-a"]);
+      index.record(id("delete-1"), [id("item-a")]);
       index.clear();
 
-      expect(index.targetsOf("delete-1")).toBeUndefined();
+      expect(index.targetsOf(id("delete-1"))).toBeUndefined();
 
       // The reverse index is also cleared: extending after clear() must
       // not resurrect the membership.
-      index.extendMembership("item-a", "item-b");
-      expect(index.targetsOf("delete-1")).toBeUndefined();
+      index.extendMembership(id("item-a"), id("item-b"));
+      expect(index.targetsOf(id("delete-1"))).toBeUndefined();
     });
   });
 });

@@ -37,6 +37,7 @@ import {
 } from "./internals/packed-linear-chain";
 import {
   RankedDiffVersionsWorkspace,
+  type LocalVersionTransition,
   type RankedDiffVersionsView,
   type RankedVersionTransition,
 } from "./internals/ranked-diff-versions";
@@ -96,6 +97,11 @@ export interface PackedLinearReplayView {
  */
 export interface PackedReplayPlanningView extends PackedLinearReplayView {
   offsetOf(id: EventId): number | undefined;
+  /** Agent of the event at an offset, or `-1` for a non-canonical ID. */
+  agentAt(offset: number): number;
+  sequenceAt(offset: number): number;
+  /** Prepare random access to agents and sequences by offset. */
+  prepareIdLookup(): void;
   getBranchPreservingOrderOffsets(): Uint32Array;
   buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout;
   eventAt(offset: number): GraphEvent | undefined;
@@ -110,6 +116,11 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
   ): PackedOffsetTransition;
   diffVersionToParentRanges(
     currentVersion: ReadonlySet<EventId>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition;
+  diffLocalVersionsToParentRanges(
+    currentOffsets: ReadonlyArray<number>,
     targetEventOffset: number,
     rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition;
@@ -1010,6 +1021,33 @@ export class EventGraph {
     }
     try {
       return workspace.diffOrdered(left, right, this.rankedTraversalView);
+    } finally {
+      if (ownsPrimaryWorkspace) {
+        this.rankedDiffWorkspaceInUse = false;
+      }
+    }
+  }
+
+  /**
+   * Return the transition between two versions given as local versions.
+   *
+   * @internal Replay engines keep versions as local versions, so neither
+   * side is parsed or formatted. Retreat lists children before parents and
+   * advance parents before children, both in insertion-rank order.
+   */
+  getLocalVersionTransition(
+    left: ReadonlyArray<number>,
+    right: ReadonlyArray<number>,
+  ): LocalVersionTransition {
+    const workspace = this.rankedDiffWorkspaceInUse
+      ? new RankedDiffVersionsWorkspace()
+      : this.rankedDiffWorkspace;
+    const ownsPrimaryWorkspace = workspace === this.rankedDiffWorkspace;
+    if (ownsPrimaryWorkspace) {
+      this.rankedDiffWorkspaceInUse = true;
+    }
+    try {
+      return workspace.diffLocalVersions(left, right, this.rankedTraversalView);
     } finally {
       if (ownsPrimaryWorkspace) {
         this.rankedDiffWorkspaceInUse = false;

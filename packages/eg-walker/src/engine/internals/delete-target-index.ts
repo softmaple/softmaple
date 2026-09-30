@@ -1,5 +1,5 @@
 import type { EventId } from "../../types";
-import type { AugmentedCRDTItem } from "./engine-types";
+import type { AugmentedCRDTItem, ItemKey } from "./engine-types";
 import type { SegmentedPlaceholderState } from "./segmented-placeholder";
 
 export interface DeleteTargetRecord {
@@ -21,18 +21,29 @@ export interface PlaceholderDeleteTarget {
   readonly end: number;
 }
 
+/** One scalar event `(agent, sequence)` inside a typed insert run. */
 export interface TypedRunDeleteTarget {
   readonly kind: "typed-run-event";
-  readonly eventId: EventId;
+  readonly agent: number;
+  readonly sequence: number;
 }
 
 export type RuntimeDeleteTarget =
-  | EventId
+  | ItemKey
   | PlaceholderDeleteTarget
   | TypedRunDeleteTarget;
+
+/** A delete event (by local version) and the targets it recorded. */
+export interface DeleteTargetEntry {
+  readonly deleteEvent: number;
+  readonly targetIds: ReadonlyArray<EventId>;
+}
 export type DeleteTargetRefs =
   | RuntimeDeleteTarget
   | ReadonlyArray<RuntimeDeleteTarget>;
+
+/** Resolve a typed-run scalar event to the item that isolates it. */
+export type RunEventResolver = (agent: number, sequence: number) => ItemKey;
 
 export const DELETE_TARGET_KIND = {
   ITEM: 1,
@@ -55,7 +66,7 @@ const MAX_UINT32 = 0xffff_ffff;
 export const isPlaceholderDeleteTarget = (
   target: DeleteTargetRefs,
 ): target is PlaceholderDeleteTarget =>
-  typeof target !== "string" &&
+  typeof target !== "number" &&
   !Array.isArray(target) &&
   "kind" in target &&
   target.kind === "placeholder-range";
@@ -122,8 +133,9 @@ const readIdRef = (
  * and recovery formats unchanged.
  */
 export class DeleteTargetIndex {
-  private readonly groups = new Map<EventId, DeleteTargetGroupHandle>();
-  private readonly byItem = new Map<EventId, DeleteOwners>();
+  /** Groups keyed by the local version of their delete event. */
+  private readonly groups = new Map<number, DeleteTargetGroupHandle>();
+  private readonly byItem = new Map<ItemKey, DeleteOwners>();
   private packedOrderGroups = EMPTY_PACKED_ORDER_GROUPS;
   private packedOrderStart = 0;
   private packedGroupCount = 0;
@@ -143,7 +155,9 @@ export class DeleteTargetIndex {
   private targetStateRefs = new Uint32Array(INITIAL_CAPACITY + 1);
   private targetStarts = new Float64Array(INITIAL_CAPACITY + 1);
   private targetEnds = new Float64Array(INITIAL_CAPACITY + 1);
-  private targetItemIds: Array<EventId | undefined> = [undefined];
+  /** Item key of an ITEM target. RUN_EVENT targets keep their agent and
+   * sequence in `targetStarts` / `targetEnds`. */
+  private targetItemIds: number[] = [0];
 
   private placeholderStateRefs = new WeakMap<
     SegmentedPlaceholderState<AugmentedCRDTItem>,
@@ -167,7 +181,7 @@ export class DeleteTargetIndex {
     this.targetStateRefs.fill(0, 0, this.targetCount + 1);
     this.targetStarts.fill(0, 0, this.targetCount + 1);
     this.targetEnds.fill(0, 0, this.targetCount + 1);
-    this.targetItemIds.length = 1;
+    this.targetItemIds = [0];
     this.placeholderStateRefs = new WeakMap();
     this.placeholderStates = [undefined];
     this.groupCount = 0;
@@ -180,30 +194,51 @@ export class DeleteTargetIndex {
   }
 
   entries(
+    formatItem: (itemId: ItemKey) => EventId,
     materializePlaceholder?: (
       target: PlaceholderDeleteTarget,
     ) => ReadonlyArray<EventId>,
-  ): DeleteTargetRecord[] {
-    return Array.from(this.groups, ([deleteEventId, group]) => ({
-      deleteEventId,
-      targetIds: this.materializeTargetIds(group, materializePlaceholder),
+  ): DeleteTargetEntry[] {
+    return Array.from(this.groups, ([deleteEvent, group]) => ({
+      deleteEvent,
+      targetIds: this.materializeTargetIds(
+        group,
+        formatItem,
+        materializePlaceholder,
+      ),
     }));
   }
 
-  targetsOf(deleteEventId: EventId): ReadonlyArray<EventId> | undefined {
-    const group = this.groups.get(deleteEventId);
+  /** Item keys a delete event targeted, when all are ordinary items. */
+  targetsOf(deleteEvent: number): ReadonlyArray<ItemKey> | undefined {
+    const group = this.groups.get(deleteEvent);
     if (group === undefined) {
       return undefined;
     }
-    return this.materializeTargetIds(group);
+    const targets: ItemKey[] = [];
+    let target = this.groupHeads[group] ?? EMPTY_HANDLE;
+    while (target !== EMPTY_HANDLE) {
+      const kind = this.kindOf(target);
+      if (kind === DELETE_TARGET_KIND.PLACEHOLDER) {
+        throw new Error("Segmented placeholder targets require a materializer");
+      }
+      if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
+        throw new Error(
+          "Typed-run event targets must be materialized before reading item IDs",
+        );
+      }
+      targets.push(this.itemIdOf(target));
+      target = this.targetNext[target] ?? EMPTY_HANDLE;
+    }
+    return targets;
   }
 
   /**
    * Compatibility view of the historical scalar/array target union.
    * Replay should prefer {@link firstTargetOf} and the numeric cursor methods.
    */
-  targetRefsOf(deleteEventId: EventId): DeleteTargetRefs | undefined {
-    const group = this.groups.get(deleteEventId);
+  targetRefsOf(deleteEvent: number): DeleteTargetRefs | undefined {
+    const group = this.groups.get(deleteEvent);
     if (group === undefined) {
       return undefined;
     }
@@ -267,17 +302,22 @@ export class DeleteTargetIndex {
     this.packedOrderStart = startOrderIndex;
   }
 
-  appendItem(group: DeleteTargetGroupHandle, itemId: EventId): void {
+  appendItem(group: DeleteTargetGroupHandle, itemId: ItemKey): void {
     this.assertActiveGroup(group);
     const target = this.allocateTarget(DELETE_TARGET_KIND.ITEM);
     this.targetItemIds[target] = itemId;
     this.appendTarget(group, target);
   }
 
-  appendRunEvent(group: DeleteTargetGroupHandle, eventId: EventId): void {
+  appendRunEvent(
+    group: DeleteTargetGroupHandle,
+    agent: number,
+    sequence: number,
+  ): void {
     this.assertActiveGroup(group);
     const target = this.allocateTarget(DELETE_TARGET_KIND.RUN_EVENT);
-    this.targetItemIds[target] = eventId;
+    this.targetStarts[target] = agent;
+    this.targetEnds[target] = sequence;
     this.appendTarget(group, target);
     this.runEventTargetCount++;
   }
@@ -297,14 +337,14 @@ export class DeleteTargetIndex {
     this.appendTarget(group, target);
   }
 
-  commitRecord(deleteEventId: EventId, group: DeleteTargetGroupHandle): void {
+  commitRecord(deleteEvent: number, group: DeleteTargetGroupHandle): void {
     this.assertActiveGroup(group);
-    const replaced = this.groups.get(deleteEventId);
+    const replaced = this.groups.get(deleteEvent);
     if (replaced !== undefined) {
       this.removeGroupMembership(replaced);
       this.runEventTargetCount -= this.countRunEventTargetsInGroup(replaced);
     }
-    this.groups.set(deleteEventId, group);
+    this.groups.set(deleteEvent, group);
     this.groupCommitted[group] = 1;
     this.activeGroup = EMPTY_HANDLE;
     this.addGroupMembership(group);
@@ -342,8 +382,8 @@ export class DeleteTargetIndex {
   }
 
   /** First target node for a delete event, or zero for missing/empty groups. */
-  firstTargetOf(deleteEventId: EventId): DeleteTargetHandle {
-    const group = this.groups.get(deleteEventId);
+  firstTargetOf(deleteEvent: number): DeleteTargetHandle {
+    const group = this.groups.get(deleteEvent);
     return group === undefined
       ? EMPTY_HANDLE
       : (this.groupHeads[group] ?? EMPTY_HANDLE);
@@ -375,28 +415,33 @@ export class DeleteTargetIndex {
     return kind;
   }
 
-  itemIdOf(target: DeleteTargetHandle): EventId {
+  itemIdOf(target: DeleteTargetHandle): ItemKey {
     if (this.kindOf(target) !== DELETE_TARGET_KIND.ITEM) {
       throw new Error(`Delete target ${target} is not an item target`);
     }
     const itemId = this.targetItemIds[target];
-    if (itemId === undefined) {
+    if (itemId === undefined || itemId === 0) {
       throw new Error(`Delete item target ${target} has no item id`);
     }
     return itemId;
   }
 
-  runEventIdOf(target: DeleteTargetHandle): EventId {
+  runEventAgentOf(target: DeleteTargetHandle): number {
+    this.assertRunEventTarget(target);
+    return this.targetStarts[target]!;
+  }
+
+  runEventSequenceOf(target: DeleteTargetHandle): number {
+    this.assertRunEventTarget(target);
+    return this.targetEnds[target]!;
+  }
+
+  private assertRunEventTarget(target: DeleteTargetHandle): void {
     if (this.kindOf(target) !== DELETE_TARGET_KIND.RUN_EVENT) {
       throw new Error(
         `Delete target ${target} is not a typed-run event target`,
       );
     }
-    const eventId = this.targetItemIds[target];
-    if (eventId === undefined) {
-      throw new Error(`Delete typed-run target ${target} has no event id`);
-    }
-    return eventId;
   }
 
   placeholderStateOf(
@@ -428,16 +473,16 @@ export class DeleteTargetIndex {
   }
 
   /** Store the dominant one-delete/one-record case without an array. */
-  recordOne(deleteEventId: EventId, itemId: EventId): void {
-    this.recordRuntimeOne(deleteEventId, itemId);
+  recordOne(deleteEvent: number, itemId: ItemKey): void {
+    this.recordRuntimeOne(deleteEvent, itemId);
   }
 
   /** Store one lazy scalar coordinate inside a typed insert run. */
-  recordRunEvent(deleteEventId: EventId, targetEventId: EventId): void {
+  recordRunEvent(deleteEvent: number, agent: number, sequence: number): void {
     const group = this.beginRecord();
     try {
-      this.appendRunEvent(group, targetEventId);
-      this.commitRecord(deleteEventId, group);
+      this.appendRunEvent(group, agent, sequence);
+      this.commitRecord(deleteEvent, group);
     } catch (error) {
       if (this.activeGroup === group) {
         this.abortRecord(group);
@@ -447,10 +492,14 @@ export class DeleteTargetIndex {
   }
 
   /** Store a typed-run target without materializing the packed delete ID. */
-  recordPackedRunEvent(deleteOrderIndex: number, targetEventId: EventId): void {
+  recordPackedRunEvent(
+    deleteOrderIndex: number,
+    agent: number,
+    sequence: number,
+  ): void {
     const group = this.beginRecord();
     try {
-      this.appendRunEvent(group, targetEventId);
+      this.appendRunEvent(group, agent, sequence);
       this.commitPackedRecord(deleteOrderIndex, group);
     } catch (error) {
       if (this.activeGroup === group) {
@@ -462,7 +511,7 @@ export class DeleteTargetIndex {
 
   /** Store one placeholder range without allocating a runtime target object. */
   recordPlaceholderRange(
-    deleteEventId: EventId,
+    deleteEvent: number,
     state: SegmentedPlaceholderState<AugmentedCRDTItem>,
     start: number,
     end: number,
@@ -470,7 +519,7 @@ export class DeleteTargetIndex {
     const group = this.beginRecord();
     try {
       this.appendPlaceholderRange(group, state, start, end);
-      this.commitRecord(deleteEventId, group);
+      this.commitRecord(deleteEvent, group);
     } catch (error) {
       if (this.activeGroup === group) {
         this.abortRecord(group);
@@ -498,13 +547,13 @@ export class DeleteTargetIndex {
     }
   }
 
-  record(deleteEventId: EventId, itemIds: ReadonlyArray<EventId>): void {
+  record(deleteEvent: number, itemIds: ReadonlyArray<ItemKey>): void {
     const group = this.beginRecord();
     try {
       for (const itemId of itemIds) {
         this.appendItem(group, itemId);
       }
-      this.commitRecord(deleteEventId, group);
+      this.commitRecord(deleteEvent, group);
     } catch (error) {
       if (this.activeGroup === group) {
         this.abortRecord(group);
@@ -513,11 +562,11 @@ export class DeleteTargetIndex {
     }
   }
 
-  recordRuntimeOne(deleteEventId: EventId, target: RuntimeDeleteTarget): void {
+  recordRuntimeOne(deleteEvent: number, target: RuntimeDeleteTarget): void {
     const group = this.beginRecord();
     try {
       this.appendRuntimeTarget(group, target);
-      this.commitRecord(deleteEventId, group);
+      this.commitRecord(deleteEvent, group);
     } catch (error) {
       if (this.activeGroup === group) {
         this.abortRecord(group);
@@ -527,7 +576,7 @@ export class DeleteTargetIndex {
   }
 
   recordRuntime(
-    deleteEventId: EventId,
+    deleteEvent: number,
     targets: ReadonlyArray<RuntimeDeleteTarget>,
   ): void {
     const group = this.beginRecord();
@@ -535,7 +584,7 @@ export class DeleteTargetIndex {
       for (const target of targets) {
         this.appendRuntimeTarget(group, target);
       }
-      this.commitRecord(deleteEventId, group);
+      this.commitRecord(deleteEvent, group);
     } catch (error) {
       if (this.activeGroup === group) {
         this.abortRecord(group);
@@ -544,7 +593,7 @@ export class DeleteTargetIndex {
     }
   }
 
-  extendMembership(fromItemId: EventId, toItemId: EventId): void {
+  extendMembership(fromItemId: ItemKey, toItemId: ItemKey): void {
     const owners = this.byItem.get(fromItemId);
     if (owners === undefined) {
       return;
@@ -564,9 +613,7 @@ export class DeleteTargetIndex {
    * The resolver may split a run, so callers invoke this before collecting
    * sequence records as well as before collecting delete-target records.
    */
-  materializeRunEventTargets(
-    resolveItemId: (eventId: EventId) => EventId,
-  ): void {
+  materializeRunEventTargets(resolveItemId: RunEventResolver): void {
     for (const group of this.groups.values()) {
       this.materializeRunEventTargetsInGroup(group, resolveItemId);
     }
@@ -599,7 +646,7 @@ export class DeleteTargetIndex {
   }
 
   materializePackedRecords(
-    resolveDeleteEventId: (orderIndex: number) => EventId,
+    resolveDeleteEvent: (orderIndex: number) => number,
   ): void {
     if (this.packedGroupCount === 0) {
       this.releasePackedOrderRange();
@@ -615,25 +662,22 @@ export class DeleteTargetIndex {
         continue;
       }
       const orderIndex = this.packedOrderStart + localIndex;
-      this.materializePackedRecord(
-        orderIndex,
-        resolveDeleteEventId(orderIndex),
-      );
+      this.materializePackedRecord(orderIndex, resolveDeleteEvent(orderIndex));
     }
     this.releasePackedOrderRange();
   }
 
-  materializePackedRecord(orderIndex: number, deleteEventId: EventId): void {
+  materializePackedRecord(orderIndex: number, deleteEvent: number): void {
     const localIndex = this.packedLocalIndex(orderIndex);
     const group = this.packedOrderGroups[localIndex] ?? EMPTY_HANDLE;
     if (group === EMPTY_HANDLE) {
       return;
     }
-    const replaced = this.groups.get(deleteEventId);
+    const replaced = this.groups.get(deleteEvent);
     if (replaced !== undefined && replaced !== group) {
-      throw new Error(`Duplicate materialized delete event ${deleteEventId}`);
+      throw new Error(`Duplicate materialized delete event ${deleteEvent}`);
     }
-    this.groups.set(deleteEventId, group);
+    this.groups.set(deleteEvent, group);
     this.packedOrderGroups[localIndex] = EMPTY_HANDLE;
     this.packedGroupCount--;
   }
@@ -695,7 +739,7 @@ export class DeleteTargetIndex {
 
   materializeRunEventTargetsOfPackedOrder(
     orderIndex: number,
-    resolveItemId: (eventId: EventId) => EventId,
+    resolveItemId: RunEventResolver,
   ): void {
     const group = this.packedGroupAtOrder(orderIndex);
     if (group !== EMPTY_HANDLE) {
@@ -719,10 +763,10 @@ export class DeleteTargetIndex {
   }
 
   materializeRunEventTargetsOf(
-    deleteEventId: EventId,
-    resolveItemId: (eventId: EventId) => EventId,
+    deleteEvent: number,
+    resolveItemId: RunEventResolver,
   ): void {
-    const group = this.groups.get(deleteEventId);
+    const group = this.groups.get(deleteEvent);
     if (group !== undefined) {
       this.materializeRunEventTargetsInGroup(group, resolveItemId);
     }
@@ -732,10 +776,10 @@ export class DeleteTargetIndex {
     group: DeleteTargetGroupHandle,
     target: RuntimeDeleteTarget,
   ): void {
-    if (typeof target === "string") {
+    if (typeof target === "number") {
       this.appendItem(group, target);
     } else if (target.kind === "typed-run-event") {
-      this.appendRunEvent(group, target.eventId);
+      this.appendRunEvent(group, target.agent, target.sequence);
     } else {
       this.appendPlaceholderRange(
         group,
@@ -787,7 +831,7 @@ export class DeleteTargetIndex {
     this.targetStateRefs[target] = 0;
     this.targetStarts[target] = 0;
     this.targetEnds[target] = 0;
-    this.targetItemIds[target] = undefined;
+    this.targetItemIds[target] = 0;
     this.targetNext[target] = this.targetFreeHead;
     this.targetFreeHead = target;
   }
@@ -818,7 +862,8 @@ export class DeleteTargetIndex {
     if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
       return {
         kind: "typed-run-event",
-        eventId: this.runEventIdOf(target),
+        agent: this.runEventAgentOf(target),
+        sequence: this.runEventSequenceOf(target),
       };
     }
     return {
@@ -831,13 +876,18 @@ export class DeleteTargetIndex {
 
   private materializeRunEventTargetsInGroup(
     group: DeleteTargetGroupHandle,
-    resolveItemId: (eventId: EventId) => EventId,
+    resolveItemId: RunEventResolver,
   ): void {
     let target = this.groupHeads[group] ?? EMPTY_HANDLE;
     while (target !== EMPTY_HANDLE) {
       if (this.kindOf(target) === DELETE_TARGET_KIND.RUN_EVENT) {
-        const itemId = resolveItemId(this.runEventIdOf(target));
+        const itemId = resolveItemId(
+          this.runEventAgentOf(target),
+          this.runEventSequenceOf(target),
+        );
         this.targetKinds[target] = DELETE_TARGET_KIND.ITEM;
+        this.targetStarts[target] = 0;
+        this.targetEnds[target] = 0;
         this.targetItemIds[target] = itemId;
         this.addOwner(itemId, group);
         this.runEventTargetCount--;
@@ -860,6 +910,7 @@ export class DeleteTargetIndex {
 
   private materializeTargetIds(
     group: DeleteTargetGroupHandle,
+    formatItem: (itemId: ItemKey) => EventId,
     materializePlaceholder?: (
       target: PlaceholderDeleteTarget,
     ) => ReadonlyArray<EventId>,
@@ -869,7 +920,7 @@ export class DeleteTargetIndex {
     while (target !== EMPTY_HANDLE) {
       const kind = this.kindOf(target);
       if (kind === DELETE_TARGET_KIND.ITEM) {
-        materialized.push(this.itemIdOf(target));
+        materialized.push(formatItem(this.itemIdOf(target)));
       } else if (kind === DELETE_TARGET_KIND.PLACEHOLDER) {
         if (materializePlaceholder === undefined) {
           throw new Error(
@@ -914,7 +965,7 @@ export class DeleteTargetIndex {
     }
   }
 
-  private addOwner(itemId: EventId, group: DeleteTargetGroupHandle): void {
+  private addOwner(itemId: ItemKey, group: DeleteTargetGroupHandle): void {
     const owners = this.byItem.get(itemId);
     if (owners === undefined) {
       this.byItem.set(itemId, group);
@@ -927,7 +978,7 @@ export class DeleteTargetIndex {
     }
   }
 
-  private removeOwner(itemId: EventId, group: DeleteTargetGroupHandle): void {
+  private removeOwner(itemId: ItemKey, group: DeleteTargetGroupHandle): void {
     const owners = this.byItem.get(itemId);
     if (owners === undefined) {
       return;
@@ -951,7 +1002,7 @@ export class DeleteTargetIndex {
 
   private extendGroupMembership(
     group: DeleteTargetGroupHandle,
-    toItemId: EventId,
+    toItemId: ItemKey,
   ): void {
     if (this.groupCommitted[group] !== 1) {
       return;

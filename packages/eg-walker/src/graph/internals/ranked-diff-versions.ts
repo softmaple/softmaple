@@ -14,6 +14,14 @@ export interface RankedDiffVersionsView {
   forEachParentRank(rank: number, visit: (parentRank: number) => void): void;
 }
 
+/** A version transition over local versions (insertion ranks). */
+export interface LocalVersionTransition {
+  /** Child-before-parent order for retreating the left-only suffix. */
+  readonly retreat: number[];
+  /** Parent-before-child order for advancing the right-only suffix. */
+  readonly advance: number[];
+}
+
 export interface RankedVersionTransition {
   /** Child-before-parent order for retreating the left-only suffix. */
   readonly retreat: EventId[];
@@ -87,6 +95,66 @@ export class RankedDiffVersionsWorkspace {
     return { retreat, advance: advanceDescending };
   }
 
+  /**
+   * Return the diff of two versions given as local versions, as local
+   * versions in insertion-topological transition order. No ID is parsed or
+   * formatted.
+   */
+  diffLocalVersions(
+    left: ReadonlyArray<number>,
+    right: ReadonlyArray<number>,
+    view: RankedDiffVersionsView,
+  ): LocalVersionTransition {
+    const retreat: number[] = [];
+    const advance: number[] = [];
+    this.begin(view);
+    try {
+      for (const rank of left) {
+        this.paintRank(rank, DIFF_COLOR.LEFT);
+      }
+      for (const rank of right) {
+        this.paintRank(rank, DIFF_COLOR.RIGHT);
+      }
+      while (this.heap.size > 0 && this.pendingDivergent > 0) {
+        const rank = this.heap.pop()!;
+        this.visitedRankCount++;
+        const finalColor = this.colors[rank] ?? DIFF_COLOR.NONE;
+        if (finalColor === DIFF_COLOR.LEFT) {
+          retreat.push(rank);
+          this.pendingDivergent--;
+        } else if (finalColor === DIFF_COLOR.RIGHT) {
+          advance.push(rank);
+          this.pendingDivergent--;
+        }
+        this.propagatedColor = finalColor;
+        view.forEachParentRank(rank, this.paintParentRank);
+      }
+    } finally {
+      this.end();
+    }
+    advance.reverse();
+    return { retreat, advance };
+  }
+
+  private begin(view: RankedDiffVersionsView): void {
+    this.visitedRankCount = 0;
+    this.ensureCapacity(view.eventCount());
+    this.activeView = view;
+    this.pendingDivergent = 0;
+    this.propagatedColor = DIFF_COLOR.NONE;
+  }
+
+  private end(): void {
+    for (const rank of this.touchedRanks) {
+      this.colors[rank] = DIFF_COLOR.NONE;
+    }
+    this.touchedRanks.length = 0;
+    this.heap.clear();
+    this.activeView = null;
+    this.pendingDivergent = 0;
+    this.propagatedColor = DIFF_COLOR.NONE;
+  }
+
   private run(
     left: ReadonlySet<EventId>,
     right: ReadonlySet<EventId>,
@@ -96,11 +164,7 @@ export class RankedDiffVersionsWorkspace {
     retreat: EventId[] | null,
     advanceDescending: EventId[] | null,
   ): void {
-    this.visitedRankCount = 0;
-    this.ensureCapacity(view.eventCount());
-    this.activeView = view;
-    this.pendingDivergent = 0;
-    this.propagatedColor = DIFF_COLOR.NONE;
+    this.begin(view);
 
     try {
       this.paintVersion(left, DIFF_COLOR.LEFT);
@@ -129,14 +193,7 @@ export class RankedDiffVersionsWorkspace {
         view.forEachParentRank(rank, this.paintParentRank);
       }
     } finally {
-      for (const rank of this.touchedRanks) {
-        this.colors[rank] = DIFF_COLOR.NONE;
-      }
-      this.touchedRanks.length = 0;
-      this.heap.clear();
-      this.activeView = null;
-      this.pendingDivergent = 0;
-      this.propagatedColor = DIFF_COLOR.NONE;
+      this.end();
     }
   }
 

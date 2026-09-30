@@ -382,6 +382,25 @@ export class PackedEventGraphBase {
   }
 
   /**
+   * Compute a range-compressed transition from a version given as offsets to
+   * one event's parents. The returned buffers are overwritten by the next
+   * diff query.
+   */
+  diffLocalVersionsToParentRanges(
+    currentOffsets: ReadonlyArray<number>,
+    targetEventOffset: number,
+    rankByOffset?: Uint32Array,
+  ): PackedLocalVersionTransition {
+    this.diffWorkspace ??= new PackedDiffVersionsWorkspace(this.count);
+    return this.diffWorkspace.diffLocalVersionsToParentRanges(
+      currentOffsets,
+      targetEventOffset,
+      this,
+      rankByOffset,
+    );
+  }
+
+  /**
    * Compute a numeric transition from one event to another event's parents.
    *
    * The returned view is workspace-owned and is overwritten by the next diff.

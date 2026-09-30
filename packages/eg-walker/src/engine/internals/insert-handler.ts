@@ -1,8 +1,12 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
-import { parseEventId } from "../../graph/event-id";
 import type { EventId, ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
-import type { AugmentedCRDTItem, TypedRun } from "./engine-types";
+import {
+  CUSTOM_EVENT_AGENT,
+  type AugmentedCRDTItem,
+  type ItemKey,
+  type ItemTable,
+} from "./engine-types";
 import { EventItemIndex } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
@@ -15,7 +19,7 @@ const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
 
 export interface InsertHandlerDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
-  readonly itemsById: Map<EventId, AugmentedCRDTItem>;
+  readonly items: ItemTable;
   readonly eventItems: EventItemIndex;
   readonly originLeftIndex: OriginLeftIndex;
   readonly recordSplitter: RecordSplitter;
@@ -27,6 +31,8 @@ export interface InsertHandlerDeps {
   readonly insertText: (index: number, text: string) => void;
   readonly recordIntegrationProbe: () => void;
   readonly useLinearIntegrationOracle: () => boolean;
+  /** Formats an item's event ID for the linear oracle's tie-breaks. */
+  readonly eventIdOf: (item: AugmentedCRDTItem) => EventId;
 }
 
 export interface InsertTailResult {
@@ -43,15 +49,15 @@ export interface InsertTailResult {
  */
 export const canExtendTypedRun = (
   item: AugmentedCRDTItem,
-  replicaId: string,
+  agent: number,
   startSequence: number,
   additionalLength: number,
   deps: InsertHandlerDeps,
 ): boolean =>
   typeof item.content === "string" &&
-  item.run !== null &&
-  item.run.replicaId === replicaId &&
-  item.run.startSequence + item.content.length === startSequence &&
+  item.run &&
+  item.agent === agent &&
+  item.sequence + item.content.length === startSequence &&
   item.prepareState === 1 &&
   !item.everDeleted &&
   !deps.originLeftIndex.has(item.id) &&
@@ -82,8 +88,16 @@ export const applyTypedRunExtension = (
   return effectIndex;
 };
 
+/**
+ * Integrate the insert event at `localVersion`.
+ *
+ * `agent` and `eventSequence` are the event's canonical ID parts, or
+ * {@link CUSTOM_EVENT_AGENT} for an event whose ID is not canonical.
+ */
 export const applyInsert = (
-  eventId: EventId,
+  localVersion: number,
+  agent: number,
+  eventSequence: number,
   operationIndex: number,
   insertedText: string,
   deps: InsertHandlerDeps,
@@ -91,12 +105,10 @@ export const applyInsert = (
   deferTextMaterialization: boolean,
   knownTail: AugmentedCRDTItem | null = null,
   tailResult?: InsertTailResult,
-  canonicalReplicaId?: string,
-  canonicalSequence?: number,
 ): ReadonlyArray<ExternalOperation> => {
   const {
     sequence,
-    itemsById,
+    items,
     eventItems,
     originLeftIndex,
     recordSplitter,
@@ -114,7 +126,7 @@ export const applyInsert = (
   }
 
   if (insertedText.length === 0) {
-    eventItems.set(eventId, []);
+    eventItems.set(localVersion, []);
     return NO_TRANSFORMED_OPERATIONS;
   }
 
@@ -132,7 +144,7 @@ export const applyInsert = (
     : undefined;
   let originLeft = originLeftRecord?.id ?? null;
   let originRightPosition: number | null = null;
-  let originRight: EventId | null = null;
+  let originRight: ItemKey | null = null;
   let conflictRegionEmpty = knownBoundary;
 
   if (!knownBoundary) {
@@ -184,16 +196,7 @@ export const applyInsert = (
   // per code unit) while leaving multi-author / multi-event ordering
   // unchanged — split-on-demand carves the run when a concurrent insert
   // or delete anchors inside it.
-  if (
-    (canonicalReplicaId === undefined) !==
-    (canonicalSequence === undefined)
-  ) {
-    throw new Error("Canonical insert ID metadata must be complete");
-  }
-  const suppliedCanonicalId = canonicalReplicaId !== undefined;
-  const parsed = suppliedCanonicalId ? null : parseEventId(eventId);
-  const eventReplicaId = canonicalReplicaId ?? parsed?.replicaId ?? null;
-  const eventSequence = canonicalSequence ?? parsed?.sequence ?? -1;
+  const canonical = agent >= 0;
   const coalescingBoundary = knownBoundary
     ? originLeftRecord !== undefined && sequence.isLast(originLeftRecord)
     : originLeftPosition !== null &&
@@ -201,7 +204,7 @@ export const applyInsert = (
   if (
     conflictRegionEmpty &&
     insertedText.length === 1 &&
-    eventReplicaId !== null &&
+    canonical &&
     coalescingBoundary
   ) {
     const leftRecord = originLeftRecord;
@@ -209,7 +212,7 @@ export const applyInsert = (
       leftRecord !== undefined &&
       canExtendTypedRun(
         leftRecord,
-        eventReplicaId,
+        agent,
         eventSequence,
         insertedText.length,
         deps,
@@ -243,8 +246,10 @@ export const applyInsert = (
     }
   }
 
-  const insertedIds: EventId[] | null = insertedText.length === 1 ? null : [];
+  const insertedIds: ItemKey[] | null = insertedText.length === 1 ? null : [];
   let left = originLeft;
+  const itemAgent = canonical ? agent : CUSTOM_EVENT_AGENT;
+  const itemSequence = canonical ? eventSequence : localVersion;
 
   // First code unit: pay the full integration scan if the conflict region
   // isn't empty. Single-character INSERTs from a canonical
@@ -252,19 +257,17 @@ export const applyInsert = (
   // contiguous events from the same author can extend it in-place (the
   // coalescing branch above). Multi-character INSERTs and IDs that don't
   // parse keep `run = null` and behave like the pre-coalescing engine.
-  const firstRun: TypedRun | null =
-    eventReplicaId !== null && insertedText.length === 1
-      ? { replicaId: eventReplicaId, startSequence: eventSequence }
-      : null;
   const firstItem: AugmentedCRDTItem = {
-    id: `${eventId}:0`,
-    eventId,
+    id: items.nextKey(),
+    agent: itemAgent,
+    sequence: itemSequence,
+    offset: 0,
     content: insertedText[0] ?? "",
     originLeft: left,
     originRight,
     everDeleted: false,
     prepareState: 1,
-    run: firstRun,
+    run: canonical && insertedText.length === 1,
   };
   const indexedFirstPosition =
     useOracle || conflictRegionEmpty ? null : fugueOrder.integrate(firstItem);
@@ -277,7 +280,8 @@ export const applyInsert = (
       ? findIntegrationPosition(
           firstItem,
           sequence,
-          itemsById,
+          items,
+          deps.eventIdOf,
           recordIntegrationProbe,
         )
       : null;
@@ -286,7 +290,7 @@ export const applyInsert = (
     (indexedKnownPositionIntegrated === false ||
       (!conflictRegionEmpty && indexedFirstPosition === null))
   ) {
-    throw new Error(`Fugue order index unavailable for event ${eventId}`);
+    throw new Error(`Fugue order index unavailable for event ${localVersion}`);
   }
   const actualFirstPosition = knownBoundary
     ? -1
@@ -306,12 +310,14 @@ export const applyInsert = (
       originLeftRecord === undefined ||
       !sequence.insertAfter(originLeftRecord, firstItem)
     ) {
-      throw new Error(`Known insert boundary unavailable for event ${eventId}`);
+      throw new Error(
+        `Known insert boundary unavailable for event ${localVersion}`,
+      );
     }
   } else {
     sequence.insert(actualFirstPosition, firstItem);
   }
-  itemsById.set(firstItem.id, firstItem);
+  items.add(firstItem);
   originLeftIndex.track(firstItem.id, firstItem.originLeft);
   insertedIds?.push(firstItem.id);
   left = firstItem.id;
@@ -330,24 +336,28 @@ export const applyInsert = (
   // one multi-character INSERT.
   for (let offset = 1; offset < insertedText.length; offset++) {
     const item: AugmentedCRDTItem = {
-      id: `${eventId}:${offset}`,
-      eventId,
+      id: items.nextKey(),
+      agent: itemAgent,
+      sequence: itemSequence,
+      offset,
       content: insertedText[offset] ?? "",
       originLeft: left,
       originRight,
       everDeleted: false,
       prepareState: 1,
-      run: null,
+      run: false,
     };
     const indexedIntegrated =
       useOracle || fugueOrder.integrateAtKnownPosition(item);
     if (!indexedIntegrated) {
-      throw new Error(`Fugue order index unavailable for event ${eventId}`);
+      throw new Error(
+        `Fugue order index unavailable for event ${localVersion}`,
+      );
     }
     if (!sequence.insertAfter(tailItem, item)) {
-      throw new Error(`Insert tail unavailable for event ${eventId}`);
+      throw new Error(`Insert tail unavailable for event ${localVersion}`);
     }
-    itemsById.set(item.id, item);
+    items.add(item);
     originLeftIndex.track(item.id, item.originLeft);
     insertedIds?.push(item.id);
     left = item.id;
@@ -359,13 +369,13 @@ export const applyInsert = (
   }
 
   if (insertedIds === null) {
-    if (firstItem.run === null) {
-      eventItems.setOne(eventId, firstItem.id);
+    if (!firstItem.run) {
+      eventItems.setOne(localVersion, firstItem.id);
     } else {
       eventItems.registerRunItem(firstItem);
     }
   } else {
-    eventItems.set(eventId, insertedIds);
+    eventItems.set(localVersion, insertedIds);
   }
 
   // Cold replay callers only need the final document. The sequence already

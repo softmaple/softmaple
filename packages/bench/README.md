@@ -213,7 +213,7 @@ iteration's ratio to the first. A full collection of earlier iterations'
 garbage can land in either phase, so apply time is also reported without the
 GC pauses that started in it. `--output` receives `summary.md` and
 `runs.jsonl`, which keeps every sample with its GC pauses split by phase and
-by major and minor collections.
+by major and minor collections. Each invocation replaces both files.
 
 ## Replay optimization A/B workers
 

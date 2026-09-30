@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { constants } from "node:perf_hooks";
@@ -117,6 +117,8 @@ describe("repeated whole-trace ingest", () => {
   it("runs the driver against a small paper fixture", () => {
     const output = mkdtempSync(join(tmpdir(), "repeated-ingest-test-"));
     try {
+      // A reused output directory must not mix in an earlier invocation.
+      writeFileSync(join(output, "runs.jsonl"), '{"stale":true}\n');
       const result = spawnSync(
         process.execPath,
         [
@@ -140,10 +142,12 @@ describe("repeated whole-trace ingest", () => {
       expect(result.stdout).toContain(
         "| S1 | Apply, iteration 2 ÷ iteration 1 |",
       );
-      const [sample] = readFileSync(join(output, "runs.jsonl"), "utf8")
+      const samples = readFileSync(join(output, "runs.jsonl"), "utf8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
+      expect(samples).toHaveLength(1);
+      const [sample] = samples;
       expect(sample).toMatchObject({
         implementation: "head",
         dataset: "S1",

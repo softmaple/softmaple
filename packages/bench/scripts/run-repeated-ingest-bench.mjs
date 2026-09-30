@@ -12,7 +12,7 @@
  */
 import console from "node:console";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -87,6 +87,11 @@ try {
     splitting: false,
   });
 
+  // Samples are appended as they finish, so a failed run keeps them; start
+  // from empty files so both describe this invocation only.
+  const runsPath = join(output, "runs.jsonl");
+  writeFileSync(runsPath, "");
+  rmSync(join(output, "summary.md"), { force: true });
   const results = [];
   for (const dataset of datasets) {
     for (let run = 1; run <= runs; run++) {
@@ -120,10 +125,7 @@ try {
           ...JSON.parse(child.stdout.trim().split("\n").at(-1)),
         };
         results.push(result);
-        appendFileSync(
-          join(output, "runs.jsonl"),
-          `${JSON.stringify(result)}\n`,
-        );
+        appendFileSync(runsPath, `${JSON.stringify(result)}\n`);
         const perIteration = result.iterations
           .map(
             (entry) =>
@@ -138,7 +140,7 @@ try {
   const table = formatTable(results);
   writeFileSync(join(output, "summary.md"), `${table}\n`);
   console.log(table);
-  console.error(`raw samples: ${join(output, "runs.jsonl")}`);
+  console.error(`raw samples: ${runsPath}`);
 } finally {
   await rm(bundleDirectory, { force: true, recursive: true });
 }

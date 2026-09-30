@@ -28,6 +28,21 @@ export interface ConvertedPaperTraceCausalBatches
   readonly batches: ReadonlyArray<CausalEventBatch>;
 }
 
+/**
+ * The eg-walker functions that build causal batches. Only the module that
+ * built a batch can apply it, so a harness measuring another build passes
+ * that build's functions.
+ */
+export interface CausalBatchConversionApi {
+  readonly createCausalEventBatchBuilder: typeof createCausalEventBatchBuilder;
+  readonly convertPaperTraceToAtomicSink: typeof convertPaperTraceToAtomicSink;
+}
+
+const DEFAULT_CAUSAL_BATCH_CONVERSION_API: CausalBatchConversionApi = {
+  createCausalEventBatchBuilder,
+  convertPaperTraceToAtomicSink,
+};
+
 export interface LoadPaperTraceCausalBatchesOptions {
   readonly batchEvents: PaperBenchmarkApplyBatchEvents;
   readonly maxTxns?: number;
@@ -55,6 +70,7 @@ export const streamPaperTraceToCausalBatches = (
   batchEvents: PaperBenchmarkApplyBatchEvents,
   onBatch: (batch: CausalEventBatch) => void,
   options: StreamPaperTraceCausalBatchesOptions = {},
+  api: CausalBatchConversionApi = DEFAULT_CAUSAL_BATCH_CONVERSION_API,
 ): StreamPaperTraceCausalBatchesResult => {
   assertValidBatchEvents(batchEvents);
 
@@ -72,7 +88,7 @@ export const streamPaperTraceToCausalBatches = (
   };
 
   const activeBuilder = (): CausalEventBatchBuilder => {
-    builder ??= createCausalEventBatchBuilder(
+    builder ??= api.createCausalEventBatchBuilder(
       initialBatchCapacity(trace, batchEvents, options.maxEvents),
     );
     return builder;
@@ -88,7 +104,7 @@ export const streamPaperTraceToCausalBatches = (
     }
   };
 
-  const summary = convertPaperTraceToAtomicSink(
+  const summary = api.convertPaperTraceToAtomicSink(
     dataset,
     trace,
     {
@@ -125,6 +141,7 @@ export const convertPaperTraceToCausalBatches = (
   trace: PaperTrace,
   batchEvents: PaperBenchmarkApplyBatchEvents,
   options: StreamPaperTraceCausalBatchesOptions = {},
+  api: CausalBatchConversionApi = DEFAULT_CAUSAL_BATCH_CONVERSION_API,
 ): ConvertedPaperTraceCausalBatches => {
   const batches: CausalEventBatch[] = [];
   const summary = streamPaperTraceToCausalBatches(
@@ -133,6 +150,7 @@ export const convertPaperTraceToCausalBatches = (
     batchEvents,
     (batch) => batches.push(batch),
     options,
+    api,
   );
   return { ...summary, batches };
 };

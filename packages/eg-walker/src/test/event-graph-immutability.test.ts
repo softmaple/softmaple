@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+import {
+  createCausalEventBatchBuilder,
+  inspectCausalEventBatch,
+} from "../core/causal-event-batch";
 import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../types";
 
@@ -34,6 +38,28 @@ describe("EventGraph ownership boundary", () => {
     );
     (graph.getChildren("root") as Set<string>).clear();
     (graph.getParents("child") as Set<string>).clear();
+
+    expect(graph.serialize()).toEqual(expected);
+    expect(graph.getEvent("child")).toMatchObject({
+      parentVersion: new Set(["root"]),
+      operation: { text: "B" },
+    });
+  });
+
+  it("copies an event a causal batch built", () => {
+    const batch = createCausalEventBatchBuilder()
+      .appendInsert("root", [], 0, "A", 1)
+      .appendInsert("child", ["root"], 1, "B", 2)
+      .finish();
+    const events = inspectCausalEventBatch(batch);
+    const graph = new EventGraph();
+    for (const event of events) {
+      graph.addEvent(event);
+    }
+    const expected = graph.serialize();
+
+    (events[1]!.parentVersion as Set<string>).clear();
+    (events[1]!.operation as { text: string }).text = "mutated input";
 
     expect(graph.serialize()).toEqual(expected);
     expect(graph.getEvent("child")).toMatchObject({

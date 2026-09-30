@@ -6,7 +6,6 @@
  */
 
 import { OPERATION_TYPE } from "../constants/operation-types";
-import { isOwnedCausalEvent } from "../core/causal-event-batch";
 import type {
   EventId,
   ExternalOperation,
@@ -400,18 +399,18 @@ export class EventGraph {
    * Add an event to the graph
    */
   addEvent(event: GraphEvent): void {
-    // Strict causal batches construct final storage objects in an opaque
-    // builder, so no caller can mutate them after transfer. All ordinary
-    // events cross the defensive-copy boundary before sidecars are derived,
-    // ensuring a custom/re-entrant parent iterable is consumed only once.
-    this.appendEvent(event, isOwnedCausalEvent(event));
+    // Every event crosses the defensive-copy boundary before sidecars are
+    // derived, ensuring a custom/re-entrant parent iterable is consumed only
+    // once and the caller cannot mutate stored state through its object.
+    this.appendEvent(event, false);
   }
 
   /**
    * Add an event without copying it.
    *
    * @internal Only for event objects this package built and no caller can
-   * reach or mutate.
+   * reach or mutate, such as the events of a strict causal batch. The caller
+   * decides; the graph keeps no record of which events it adopted.
    */
   addOwnedEvent(event: GraphEvent): void {
     this.appendEvent(event, true);

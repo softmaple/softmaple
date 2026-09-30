@@ -49,7 +49,6 @@ interface CausalEventBatchState {
 }
 
 const batchStates = new WeakMap<CausalEventBatch, CausalEventBatchState>();
-const ownedEvents = new WeakSet<GraphEvent>();
 
 class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
   #events: GraphEvent[];
@@ -164,7 +163,6 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
       this.#exactChain = false;
     }
     this.#events[this.#eventCount] = event;
-    ownedEvents.add(event);
     this.#eventCount++;
     this.#lastId = event.id;
   }
@@ -202,14 +200,13 @@ export const isOwnedCausalEventBatch = (
   value !== null &&
   batchStates.has(value as CausalEventBatch);
 
-/** @internal Return whether an event is final storage owned by this module. */
-export const isOwnedCausalEvent = (value: unknown): value is GraphEvent =>
-  (typeof value === "object" || typeof value === "function") &&
-  value !== null &&
-  ownedEvents.has(value as GraphEvent);
-
 /**
  * @internal Borrow the batch's owned events for an apply attempt.
+ *
+ * The builder created these objects and no public API returns them, so the
+ * apply attempt may store them without a copy through
+ * `EventGraph.addOwnedEvent`. Ownership is not recorded on the events: every
+ * other path treats an event as caller-owned and copies it.
  *
  * This operation does not consume the batch. A caller must invoke
  * {@link consumeCausalEventBatch} only after its transaction commits, which

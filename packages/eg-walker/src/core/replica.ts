@@ -793,6 +793,8 @@ export class EgWalkerReplica {
    * retried after its missing prerequisite is installed.
    */
   applyCausalBatch(batch: CausalEventBatch): void {
+    // The batch's builder created these event objects and no public API
+    // returns them, so the graph adopts them below without a copy.
     const events = inspectCausalEventBatch(batch);
     const graph = this.ensureEventGraph();
     if (this.ensureRemoteEvents().pendingCount !== 0) {
@@ -827,7 +829,7 @@ export class EgWalkerReplica {
           this.applyLinearBatch(packed, eventCountBeforeBatch);
         } else {
           for (const event of events) {
-            graph.addEvent(event);
+            graph.addOwnedEvent(event);
           }
           this.applyLinearBatch(
             linearBatchFromOwnedEvents(events),
@@ -836,7 +838,7 @@ export class EgWalkerReplica {
         }
       } else {
         for (const event of events) {
-          graph.addEvent(event);
+          graph.addOwnedEvent(event);
         }
         if (!this.tryApplyWarmBatch(events, graph)) {
           this.engineStatsOverride = null;

@@ -1,13 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   createCausalEventBatchBuilder,
+  inspectCausalEventBatch,
   type CausalEventBatch,
 } from "../core/causal-event-batch";
 import { MAX_RETAINED_CHECKPOINTS } from "../core/internals/critical-checkpoint-store";
 import { MIN_TRANSIENT_CHAIN_EVENTS } from "../core/internals/replay-packed-linear";
 import { EgWalkerReplica } from "../core/replica";
+import { EventGraph } from "../graph/event-graph";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { GraphEvent } from "../types";
 
@@ -233,6 +235,44 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
     expect(replica.exportEventGraph()[0]).toEqual(
       insertEvent("a:0", [], 0, "a"),
     );
+  });
+
+  it.each([
+    { name: "a branch and merge", setup: [], events: branchAndMergeEvents() },
+    {
+      name: "a chain after an object-stored event",
+      setup: [insertEvent("root:0", [], 0, "a")],
+      events: [
+        insertEvent("chain:1", ["root:0"], 1, "b"),
+        insertEvent("chain:2", ["chain:1"], 2, "c"),
+      ],
+    },
+  ])("stores the events of $name without copying them", ({ setup, events }) => {
+    const replica = new EgWalkerReplica("causal-adopt");
+    const reference = new EgWalkerReplica("detailed-adopt");
+    for (const event of setup) {
+      replica.applyRemoteEvent(event);
+      reference.applyRemoteEvent(event);
+    }
+    const batch = toCausalBatch(events);
+    const built = inspectCausalEventBatch(batch);
+    const copied = vi.spyOn(EventGraph.prototype, "addEvent");
+    const adopted = vi.spyOn(EventGraph.prototype, "addOwnedEvent");
+
+    try {
+      replica.applyCausalBatch(batch);
+
+      expect(copied).not.toHaveBeenCalled();
+      expect(adopted).toHaveBeenCalledTimes(built.length);
+      built.forEach((event, index) => {
+        expect(adopted.mock.calls[index]?.[0]).toBe(event);
+      });
+    } finally {
+      copied.mockRestore();
+      adopted.mockRestore();
+    }
+    reference.applyRemoteEvents(events);
+    expect(replica.getText()).toBe(reference.getText());
   });
 
   it("consumes an empty batch exactly once", () => {

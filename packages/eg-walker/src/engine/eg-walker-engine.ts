@@ -231,32 +231,6 @@ export class EgWalkerEngine {
     );
   }
 
-  /**
-   * Replay the events at `localVersions` of `options.eventGraph`, in that
-   * order, reading each operation from the graph instead of from a
-   * materialized `GraphEvent`.
-   */
-  generateLocalVersions(
-    localVersions: ReadonlyArray<number>,
-    initialText: string = "",
-    options: GenerateOptions & { readonly eventGraph: EventGraph },
-  ): GeneratedDocument {
-    const graph = options.eventGraph;
-    this.resetState(initialText, options);
-    const order = options.eventOrderLocalVersions ?? localVersions;
-    order.forEach((localVersion, index) => {
-      this.eventOrder.set(localVersion, index);
-      this.eventsByOrder.push(localVersion);
-    });
-    this.eventIndexesComplete = true;
-    return this.runGeneration(
-      localVersions,
-      (index) => graph.operationAtInsertionRank(localVersions[index]!),
-      options,
-      graph,
-    );
-  }
-
   private runGeneration(
     localVersions: ReadonlyArray<number>,
     operationAt: (index: number) => ExternalOperation,
@@ -580,11 +554,6 @@ export class EgWalkerEngine {
         this.graph.idAtLocalVersion(localVersion),
       ),
     );
-  }
-
-  /** @internal The current version as local versions of the replay graph. */
-  getCurrentLocalVersions(): ReadonlyArray<number> {
-    return this.currentVersion;
   }
 
   /** Move the transient prepare view without applying a new event. */

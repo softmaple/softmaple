@@ -7,9 +7,6 @@ import { AgentTable } from "./agent-table";
 /** Agent of an event whose ID is not a canonical `replicaId:sequence`. */
 export const CUSTOM_AGENT = -1;
 
-/** Build the dense offset lookup only once binary search has work to do. */
-const MIN_RUNS_FOR_DENSE_LOOKUP = 64;
-
 /** Canonical ID interval, as the EGW3 run index and replay planners see it. */
 export interface PackedCanonicalIdRun {
   readonly replicaId: string;
@@ -69,8 +66,6 @@ export class EventIdRunIndex {
   private eventCount = 0;
   /** Run index of the previous offset lookup; linear scans hit it again. */
   private offsetRunHint = 0;
-  /** Run index per local version, built for random access during replay. */
-  private runIndexByOffset: Uint32Array | null = null;
 
   constructor(agents: AgentTable = new AgentTable()) {
     this.agents = agents;
@@ -258,7 +253,6 @@ export class EventIdRunIndex {
     }
     this.eventCount = count;
     this.offsetRunHint = 0;
-    this.runIndexByOffset = null;
   }
 
   /** An immutable index over the IDs indexed so far. */
@@ -281,12 +275,6 @@ export class EventIdRunIndex {
     }
     const custom = this.customOffsets.get(id);
     return custom !== undefined && custom < limit ? custom : -1;
-  }
-
-  /** Local version of a custom (verbatim) ID below `limit`, or `-1`. */
-  localVersionOfCustom(id: EventId, limit: number = this.eventCount): number {
-    const offset = this.customOffsets.get(id);
-    return offset !== undefined && offset < limit ? offset : -1;
   }
 
   /** Local version of the canonical ID `(agent, sequence)`, or `-1`. */
@@ -326,11 +314,6 @@ export class EventIdRunIndex {
       : run.startSequence + offset - run.startEventOffset;
   }
 
-  /** Whether the event at `offset` has a custom (verbatim) ID. */
-  isCustomAt(offset: number): boolean {
-    return this.requireRun(offset).custom;
-  }
-
   /** Canonical run holding `offset` among the first `limit`. */
   canonicalRunAt(
     offset: number,
@@ -338,19 +321,6 @@ export class EventIdRunIndex {
   ): PackedCanonicalIdRun | undefined {
     const run = this.runBefore(offset, limit);
     return run === undefined || run.custom ? undefined : run;
-  }
-
-  /**
-   * Local versions after `offset` that hold consecutive sequences of the same
-   * agent, up to `maximum`, stopping at `limit`: the length of the canonical
-   * run through `offset`, measured from it.
-   */
-  canonicalRunLengthFrom(offset: number, limit: number): number {
-    const run = this.runBefore(offset, limit);
-    if (run === undefined || run.custom) {
-      return 0;
-    }
-    return Math.min(run.startEventOffset + run.length, limit) - offset;
   }
 
   /** IDs of the first `limit` events, in local-version order. */
@@ -400,35 +370,6 @@ export class EventIdRunIndex {
       }
     }
     return maximum;
-  }
-
-  /**
-   * Build the offset-to-run table that random access by local version uses.
-   * Replay planners call this before walking events out of order; it is
-   * dropped again by {@link releaseRunLookup} or any truncation.
-   */
-  ensureRunLookup(): void {
-    if (
-      this.runs.length < MIN_RUNS_FOR_DENSE_LOOKUP ||
-      (this.runIndexByOffset !== null &&
-        this.runIndexByOffset.length === this.eventCount)
-    ) {
-      return;
-    }
-    const lookup = new Uint32Array(this.eventCount);
-    for (let runIndex = 0; runIndex < this.runs.length; runIndex++) {
-      const run = this.runs[runIndex]!;
-      lookup.fill(
-        runIndex,
-        run.startEventOffset,
-        run.startEventOffset + run.length,
-      );
-    }
-    this.runIndexByOffset = lookup;
-  }
-
-  releaseRunLookup(): void {
-    this.runIndexByOffset = null;
   }
 
   private appendCanonicalRun(
@@ -504,9 +445,11 @@ export class EventIdRunIndex {
     if (!Number.isSafeInteger(offset) || offset < 0 || offset >= limit) {
       return undefined;
     }
-    const lookup = this.runIndexByOffset;
-    if (lookup !== null && offset < lookup.length) {
-      return this.runs[lookup[offset]!];
+    // Runs tile the offsets in order, so when every run holds one event
+    // (each event from a different agent, or custom IDs) run `offset` is the
+    // one containing `offset`.
+    if (this.runs.length === this.eventCount) {
+      return this.runs[offset];
     }
     const hinted = this.runs[this.offsetRunHint];
     if (hinted !== undefined && containsOffset(hinted, offset)) {
@@ -577,25 +520,8 @@ export class EventIdRunIndexView {
     return this.index.sequenceAt(offset);
   }
 
-  isCustomAt(offset: number): boolean {
-    this.assertOffset(offset);
-    return this.index.isCustomAt(offset);
-  }
-
   canonicalRunAt(offset: number): PackedCanonicalIdRun | undefined {
     return this.index.canonicalRunAt(offset, this.count);
-  }
-
-  canonicalRunLengthFrom(offset: number): number {
-    return this.index.canonicalRunLengthFrom(offset, this.count);
-  }
-
-  ensureRunLookup(): void {
-    this.index.ensureRunLookup();
-  }
-
-  releaseCanonicalRunLookup(): void {
-    this.index.releaseRunLookup();
   }
 
   iterateIds(): IterableIterator<EventId> {

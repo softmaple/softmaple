@@ -68,8 +68,6 @@ describe("EventIdRunIndex.fromRuns", () => {
     });
     expect(index.canonicalRunAt(-1)).toBeUndefined();
     expect(index.canonicalRunAt(8)).toBeUndefined();
-    index.releaseCanonicalRunLookup();
-    expect(index.canonicalRunAt(2)).toBe(index.canonicalRunAt(0));
     expect(index.offsetOf("alice:41")).toBe(1);
     expect(index.offsetOf("legacy-id")).toBe(3);
     expect(index.offsetOf("alice:99")).toBeUndefined();
@@ -244,5 +242,50 @@ describe("lazy exact-linear EGW3 IDs", () => {
     } finally {
       iterateIds.mockRestore();
     }
+  });
+});
+
+describe("EventIdRunIndex validation and bounds", () => {
+  it("rejects invalid counts, overlong runs and unsafe sequences", () => {
+    expect(() => EventIdRunIndex.fromRuns([], -1)).toThrow(
+      "Invalid packed event count -1",
+    );
+    expect(() => EventIdRunIndex.fromRuns([run("a", 0, 0, 3)], 2)).toThrow(
+      "ID run 0 exceeds the event count",
+    );
+    expect(() =>
+      EventIdRunIndex.fromRuns([run("a", Number.MAX_SAFE_INTEGER, 0, 4)], 4),
+    ).toThrow("ID run 0 exceeds the safe sequence range");
+  });
+
+  it("reports sizes and rejects offsets outside the index", () => {
+    const index = EventIdRunIndex.fromRuns(
+      [run("a", 0, 0, 2), run("custom-id", 0, 2, 1, true)],
+      3,
+    );
+    const view = index.view();
+
+    expect(index.count).toBe(3);
+    expect(index.runCount).toBe(2);
+    expect(index.agents.size).toBe(1);
+    expect(() => index.agentAt(3)).toThrow("has no local version 3");
+    expect(() => view.agentAt(-1)).toThrow("has no local version -1");
+    expect(() => index.agents.nameOf(7)).toThrow("Unknown agent 7");
+    expect(index.agents.compare(0, 0)).toBe(0);
+  });
+
+  it("forgets truncated custom runs whose IDs parse canonically", () => {
+    // A hand-written payload may mark a canonical-looking ID as custom.
+    const index = EventIdRunIndex.fromRuns(
+      [run("a", 0, 0, 1), run("b:7", 0, 1, 1, true)],
+      2,
+    );
+    expect(index.maximumSequenceBefore("b", 2)).toBe(7);
+
+    index.truncate(1);
+
+    expect(index.count).toBe(1);
+    expect(index.maximumSequenceBefore("b", 1)).toBeUndefined();
+    expect(index.localVersionOf("b:7")).toBe(-1);
   });
 });

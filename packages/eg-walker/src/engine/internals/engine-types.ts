@@ -155,11 +155,6 @@ export interface GenerateOptions {
    * checkpoint replay.
    */
   readonly eventOrder?: ReadonlyArray<GraphEvent>;
-  /**
-   * {@link eventOrder} as local versions of `eventGraph`, for callers that
-   * already hold a numeric suffix order.
-   */
-  readonly eventOrderLocalVersions?: ReadonlyArray<number>;
   /** Test-only slow oracle; production always uses FugueOrderIndex. */
   readonly integrationMode?: "indexed" | "linear-oracle";
 }

@@ -7,6 +7,9 @@ import type { PackedTailEvents } from "./packed-event-graph-base";
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
 const INITIAL_CAPACITY = 16;
+const EMPTY_UINT8 = new Uint8Array(0);
+const EMPTY_UINT32 = new Uint32Array(0);
+const EMPTY_INT32 = new Int32Array(0);
 const INT32_MAX = 0x7fff_ffff;
 const INT32_MIN = -0x8000_0000;
 const UINT32_MAX = 0xffff_ffff;
@@ -32,21 +35,23 @@ export class TailEventLog implements PackedTailEvents {
   readonly ids: EventIdRunIndex;
   private eventCount = 0;
   private capacity = 0;
-  private types = new Uint8Array(0);
-  private indexes: Uint32Array | Float64Array = new Uint32Array(0);
-  private lengths: Uint32Array | Float64Array = new Uint32Array(0);
-  private timestamps: Int32Array | Float64Array = new Int32Array(0);
-  private insertStarts = new Uint32Array(0);
+  // Columns start as shared empty arrays: `ensureCapacity` replaces them
+  // before any write, so a graph that never appends allocates none.
+  private types = EMPTY_UINT8;
+  private indexes: Uint32Array | Float64Array = EMPTY_UINT32;
+  private lengths: Uint32Array | Float64Array = EMPTY_UINT32;
+  private timestamps: Int32Array | Float64Array = EMPTY_INT32;
+  private insertStarts = EMPTY_UINT32;
   /**
    * `-1` for a root, a sole parent's rank, or `-2 - start` for an event whose
    * parents are the block at `start` in {@link multiParentRanks}.
    */
-  private parents = new Int32Array(0);
+  private parents = EMPTY_INT32;
   /**
    * `-1` for no child, a sole child's rank, or `-2 - list` for the child list
    * at `list` in {@link childLists}.
    */
-  private children = new Int32Array(0);
+  private children = EMPTY_INT32;
   /** Blocks of `[parentCount, maximumRank, ...parentRanks]`. */
   private readonly multiParentRanks: number[] = [];
   private readonly childLists: number[][] = [];

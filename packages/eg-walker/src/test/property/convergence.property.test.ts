@@ -21,6 +21,9 @@ import { shuffleWithSeed } from "./shuffle";
 import { runTrace } from "./trace-runner";
 
 describe("property: convergence under randomized delivery", () => {
+  // Each run replays several shuffled deliveries on fresh replicas; under
+  // coverage instrumentation the default run count needs longer than the
+  // default per-test timeout.
   it("every shuffled delivery order matches the canonical replay text", () => {
     fc.assert(
       fc.property(
@@ -64,5 +67,5 @@ describe("property: convergence under randomized delivery", () => {
       ),
       fcParams(),
     );
-  });
+  }, 15_000);
 });

@@ -79,8 +79,6 @@ export interface PackedEventIdIndex {
   /** Whether any event has a custom (verbatim) ID. */
   hasCustomIds?(): boolean;
   canonicalRunAt?(offset: number): PackedCanonicalIdRun | undefined;
-  ensureRunLookup?(): void;
-  releaseCanonicalRunLookup?(): void;
   iterateIds(): IterableIterator<EventId>;
   maximumSequenceForReplica(replicaId: string): number | undefined;
 }
@@ -440,15 +438,6 @@ export class PackedEventGraphBase {
   /** Release scratch storage once a packed replay has finished. */
   releaseDiffWorkspace(): void {
     this.diffWorkspace = null;
-    this.idIndex.releaseCanonicalRunLookup?.();
-  }
-
-  /**
-   * Prepare random access to agents and sequences by offset, as a replay
-   * that walks events out of order does. Released with the diff workspace.
-   */
-  prepareIdLookup(): void {
-    this.idIndex.ensureRunLookup?.();
   }
 
   idAt(offset: number): EventId | undefined {
@@ -1401,16 +1390,6 @@ class TailExtendedIdIndex implements PackedEventIdIndex {
     return offset < this.base.count
       ? this.base.canonicalIdRunAt(offset)
       : undefined;
-  }
-
-  ensureRunLookup(): void {
-    this.base.prepareIdLookup();
-  }
-
-  releaseCanonicalRunLookup(): void {
-    // The prefix owns the canonical lookup; releasing its scratch state is
-    // what the owning graph does on every mutation anyway.
-    this.base.releaseDiffWorkspace();
   }
 
   *iterateIds(): IterableIterator<EventId> {

@@ -106,8 +106,6 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
   /** Agent of the event at an offset, or `-1` for a non-canonical ID. */
   agentAt(offset: number): number;
   sequenceAt(offset: number): number;
-  /** Prepare random access to agents and sequences by offset. */
-  prepareIdLookup(): void;
   getBranchPreservingOrderOffsets(): Uint32Array;
   buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout;
   eventAt(offset: number): GraphEvent | undefined;
@@ -185,6 +183,12 @@ export class EventGraph {
   /** Insertion ranks of the events with no known children, in the order they
    * became frontier events. */
   private readonly frontier: Set<number> = new Set();
+  /**
+   * {@link getFrontier}'s IDs in frontier order, with their ranks, until the
+   * frontier changes other than by an append (which updates both in place).
+   */
+  private frontierIds: EventId[] | null = null;
+  private frontierIdRanks: number[] = [];
   /** Parent ranks of the event being appended. */
   private readonly parentRankScratch: number[] = [];
   /**
@@ -268,7 +272,7 @@ export class EventGraph {
     this.rankedDiffWorkspace.release();
     this.rankedReplayOrderWorkspace.release();
     this.tailChildrenByPackedParentRank.clear();
-    this.frontier.clear();
+    this.clearFrontier();
     this.metadata = {};
     this.invalidateDerivedCaches();
   }
@@ -304,9 +308,9 @@ export class EventGraph {
           this.packedBase = startingPackedBase;
           this.invalidateDerivedCaches();
         }
-        this.frontier.clear();
+        this.clearFrontier();
         for (const rank of startingFrontier) {
-          this.frontier.add(rank);
+          this.addFrontierRank(rank);
         }
       },
     };
@@ -363,8 +367,8 @@ export class EventGraph {
     this.invalidateDerivedCaches();
     this.linearChain = chain;
     this.packedBase = base;
-    this.frontier.clear();
-    this.frontier.add(base.count - 1);
+    this.clearFrontier();
+    this.addFrontierRank(base.count - 1);
   }
 
   /**
@@ -398,8 +402,8 @@ export class EventGraph {
     this.invalidateDerivedCaches();
     this.linearChain = chain;
     this.packedBase = chain.latest;
-    this.frontier.clear();
-    this.frontier.add(chain.count - 1);
+    this.clearFrontier();
+    this.addFrontierRank(chain.count - 1);
     return range;
   }
 
@@ -466,11 +470,15 @@ export class EventGraph {
         parentRanks,
       );
       const insertionRank = (this.packedBase?.count ?? 0) + tailIndex;
+      const frontierIds = this.frontierIds;
       for (const parentRank of parentRanks) {
         this.appendTailChildRank(parentRank, insertionRank);
-        this.frontier.delete(parentRank);
+        this.deleteFrontierRank(parentRank);
       }
-      this.frontier.add(insertionRank);
+      this.addFrontierRank(insertionRank);
+      if (frontierIds !== null) {
+        this.appendFrontierId(frontierIds, parentRanks, insertionRank, id);
+      }
       this.rememberAppended(id, insertionRank);
     } finally {
       parentRanks.length = 0;
@@ -523,7 +531,7 @@ export class EventGraph {
       const tailIndex = this.tail.count - 1;
       const insertionRank = packedCount + tailIndex;
 
-      this.frontier.delete(insertionRank);
+      this.deleteFrontierRank(insertionRank);
       if (this.tail.childCountAt(tailIndex) !== 0) {
         throw new Error(
           `Event graph rollback found retained child of ${this.tail.idAt(tailIndex)}`,
@@ -537,7 +545,7 @@ export class EventGraph {
           (parentRank >= packedCount ||
             this.packedBase!.childCountAt(parentRank) === 0)
         ) {
-          this.frontier.add(parentRank);
+          this.addFrontierRank(parentRank);
         }
       }
       this.tail.truncate(tailIndex);
@@ -887,11 +895,54 @@ export class EventGraph {
    * Get the frontier version: events with no known children.
    */
   getFrontier(): Set<EventId> {
-    const frontier = new Set<EventId>();
-    for (const rank of this.frontier) {
-      frontier.add(this.requireEventIdAtInsertionRank(rank));
+    if (this.frontierIds === null) {
+      this.frontierIdRanks = Array.from(this.frontier);
+      this.frontierIds = this.frontierIdRanks.map((rank) =>
+        this.requireEventIdAtInsertionRank(rank),
+      );
     }
-    return frontier;
+    return new Set(this.frontierIds);
+  }
+
+  /**
+   * Carry {@link getFrontier}'s cached IDs across one append: drop the
+   * parents and add the new event last, as the rank set itself changed.
+   */
+  private appendFrontierId(
+    previousIds: EventId[],
+    parentRanks: ReadonlyArray<number>,
+    rank: number,
+    id: EventId,
+  ): void {
+    const ranks: number[] = [];
+    const ids: EventId[] = [];
+    const previousRanks = this.frontierIdRanks;
+    for (let index = 0; index < previousRanks.length; index++) {
+      const previousRank = previousRanks[index]!;
+      if (!parentRanks.includes(previousRank)) {
+        ranks.push(previousRank);
+        ids.push(previousIds[index]!);
+      }
+    }
+    ranks.push(rank);
+    ids.push(id);
+    this.frontierIdRanks = ranks;
+    this.frontierIds = ids;
+  }
+
+  private addFrontierRank(rank: number): void {
+    this.frontier.add(rank);
+    this.frontierIds = null;
+  }
+
+  private deleteFrontierRank(rank: number): void {
+    this.frontier.delete(rank);
+    this.frontierIds = null;
+  }
+
+  private clearFrontier(): void {
+    this.frontier.clear();
+    this.frontierIds = null;
   }
 
   /**
@@ -1919,6 +1970,13 @@ export class EventGraph {
   }
 
   private insertionRankOf(id: EventId): number | undefined {
+    // Receive paths look up the parents of events appended moments ago.
+    const recentIds = this.recentIds;
+    for (let slot = 0; slot < recentIds.length; slot++) {
+      if (recentIds[slot] === id) {
+        return this.recentRanks[slot];
+      }
+    }
     const baseRank = this.packedBase?.offsetOf(id);
     if (baseRank !== undefined) {
       return baseRank;

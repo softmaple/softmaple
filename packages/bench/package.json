@@ -8,6 +8,7 @@
     "bench": "vitest bench --run",
     "block-model-bench": "node scripts/run-block-model-bench.mjs",
     "lint": "eslint .",
+    "local-keystroke-memory-bench": "node scripts/run-local-keystroke-memory-bench.mjs",
     "paper-bench": "node scripts/run-paper-bench.mjs",
     "test": "vitest",
     "test:watch": "vitest --watch",

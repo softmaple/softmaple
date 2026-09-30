@@ -13,6 +13,7 @@
     "test:watch": "vitest --watch",
     "typecheck": "tsc --noEmit",
     "replay-bench": "node --expose-gc scripts/run-replay-bench.mjs",
+    "repeated-ingest-bench": "node scripts/run-repeated-ingest-bench.mjs",
     "snapshot-first-edit-bench": "node scripts/run-snapshot-first-edit-bench.mjs"
   },
   "license": "MIT",

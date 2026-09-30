@@ -179,6 +179,42 @@ node scripts/run-snapshot-first-edit-bench.mjs \
   --output /path/to/results
 ```
 
+## Repeated whole-trace ingest
+
+`repeated-ingest-bench` builds causal batches for a whole paper trace and
+applies them to a fresh replica several times in one process. For every
+iteration it records the batch-build time (trace conversion through
+`createCausalEventBatchBuilder`), the apply time (`applyCausalBatch` and the
+final `getText`) and the main-thread GC pause time from `PerformanceObserver`
+`gc` entries, charged to the phase each pause started in. Each iteration
+drops the previous replica and batches first; `--retain-replicas` keeps every
+replica alive instead. The text is checked against the dataset's final text
+oracle outside both timers.
+
+A build that keeps no per-event state beyond a replica holds every iteration
+close to the first. State that outlives a replica, such as a module-level
+collection of every event a builder created, shows up as later iterations
+that build, apply or collect garbage more slowly.
+
+The driver bundles the worker from this checkout and starts a fresh process
+for every implementation and run, alternating the implementation order:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-repeated-ingest-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --datasets S3 --iterations 3 --runs 3 --output /path/to/results
+```
+
+`--apply-batch-events N` builds batches of `N` events instead of one
+whole-trace batch. The summary reports per-iteration medians and each
+iteration's ratio to the first. A full collection of earlier iterations'
+garbage can land in either phase, so apply time is also reported without the
+GC pauses that started in it. `--output` receives `summary.md` and
+`runs.jsonl`, which keeps every sample with its GC pauses split by phase and
+by major and minor collections.
+
 ## Replay optimization A/B workers
 
 `replay-bench` adds full-text-checked threshold, receive API, graph import and

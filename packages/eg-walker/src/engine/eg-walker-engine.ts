@@ -1389,7 +1389,7 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.collectPackedDeletePrepareDelta(plan, offset, rank, -1, deltas);
+          this.collectPackedDeletePrepareDelta(offset, rank, -1, deltas);
         }
       }
     }
@@ -1406,7 +1406,7 @@ export class EgWalkerEngine {
           rank < rangeEnd &&
           !plan.isInsertAtKnownOffset(offset)
         ) {
-          this.collectPackedDeletePrepareDelta(plan, offset, rank, 1, deltas);
+          this.collectPackedDeletePrepareDelta(offset, rank, 1, deltas);
         }
       }
     }
@@ -2271,7 +2271,6 @@ export class EgWalkerEngine {
   }
 
   private collectPackedDeletePrepareDelta(
-    plan: PackedCriticalReplayPlan,
     eventOffset: number,
     orderIndex: number,
     delta: 1 | -1,

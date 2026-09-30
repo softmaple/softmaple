@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   buildPackedEventGraphBase,
-  buildPackedEventGraphBaseFromValidatedIdRuns,
+  buildPackedEventGraphBaseFromIdRunIndex,
 } from "../graph/columnar-codec/packed-decode";
 import { EventIdRunIndex } from "../graph/internals/event-id-run-index";
 import type { PackedEventIdIndex } from "../graph/internals/packed-event-graph-base";
@@ -120,7 +120,7 @@ describe("packed EGW3 validation", () => {
     ]).toEqual([1, 2, 2, undefined, undefined]);
   });
 
-  it("skips redundant ID-index lookups only for validated ID runs", () => {
+  it("decodes run-indexed graphs through the ID index alone", () => {
     const ids = ["a:0", "a:1"];
     const offsetById = new Map(ids.map((id, offset) => [id, offset]));
     const offsetOf = vi.fn((id: string) => offsetById.get(id));
@@ -136,11 +136,15 @@ describe("packed EGW3 validation", () => {
       maximumSequenceForReplica: () => 1,
     };
 
-    buildPackedEventGraphBaseFromValidatedIdRuns({
-      ...twoInsertColumns(),
+    const { ids: _ids, ...columns } = twoInsertColumns();
+    const { base, frontier } = buildPackedEventGraphBaseFromIdRunIndex({
+      ...columns,
       idIndex,
       parentOverrides: [{ eventOffset: 1, parents: ["a:0"] }],
     });
+
+    expect(base.idAt(1)).toBe("a:1");
+    expect([...frontier]).toEqual(["a:1"]);
 
     expect(offsetOf).toHaveBeenCalledTimes(1);
     expect(offsetOf).toHaveBeenCalledWith("a:0");

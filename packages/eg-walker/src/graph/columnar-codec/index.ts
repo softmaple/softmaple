@@ -53,7 +53,7 @@ import {
 import { decodeIds, encodeIdRuns, readIdRuns, writeIdRuns } from "./ids";
 import { EventIdRunIndex } from "../internals/event-id-run-index";
 import {
-  buildPackedEventGraphBaseFromValidatedIdRuns,
+  buildPackedEventGraphBaseFromIdRunIndex,
   buildPackedLinearEventGraphBaseFromIdIndex,
 } from "./packed-decode";
 
@@ -261,8 +261,7 @@ export class ColumnarEventGraphCodec {
             insertedContent,
             timestamps,
           })
-        : buildPackedEventGraphBaseFromValidatedIdRuns({
-            ids: decodeIds(idRuns),
+        : buildPackedEventGraphBaseFromIdRunIndex({
             idIndex,
             operationRuns: partialOperationRuns,
             operationIndexes,

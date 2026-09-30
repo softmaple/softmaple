@@ -171,6 +171,28 @@ export class PackedEventGraphBase {
     return new PackedEventGraphBase(columns, true);
   }
 
+  /**
+   * Pack a graph that has no packed prefix, for one numeric replay: the
+   * columns {@link appendTail} builds, over an empty prefix.
+   */
+  static fromTail(tail: PackedTailEvents): PackedEventGraphBase {
+    const empty = PackedEventGraphBase.create({
+      ids: [],
+      offsetById: new Map(),
+      operationTypes: new Uint8Array(0),
+      operationIndexes: new Uint32Array(0),
+      operationLengths: new Uint32Array(0),
+      timestamps: new Int32Array(0),
+      insertStarts: new Uint32Array(0),
+      insertedContent: "",
+      parentStarts: new Uint32Array(1),
+      parentOffsets: new Uint32Array(0),
+      childStarts: new Uint32Array(1),
+      childOffsets: new Uint32Array(0),
+    });
+    return empty.appendTail(tail);
+  }
+
   private constructor(
     columns: PackedEventGraphColumns,
     trustMaterializedIds: boolean,
@@ -1019,6 +1041,9 @@ export class PackedEventGraphBase {
       }
     }
     const tailParents: number[] = [];
+    const pushTailParent = (parentOffset: number): void => {
+      tailParents.push(parentOffset);
+    };
     for (let tailIndex = 0; tailIndex < tail.count; tailIndex++) {
       const offset = baseCount + tailIndex;
       const { operation, timestamp } = tail.eventAt(tailIndex);
@@ -1039,9 +1064,7 @@ export class PackedEventGraphBase {
         operationTypes[offset] = DELETE_OPERATION;
         tailLengths.push(operation.length);
       }
-      tail.forEachParentOffset(tailIndex, (parentOffset) => {
-        tailParents.push(parentOffset);
-      });
+      tail.forEachParentOffset(tailIndex, pushTailParent);
       parentStarts[offset + 1] = edgeCount + tailParents.length;
     }
 

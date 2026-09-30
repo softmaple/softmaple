@@ -28,6 +28,7 @@ import {
   PackedEventGraphBase,
   type PackedBranchReplayLayout,
   type PackedCanonicalIdRun,
+  type PackedTailEvents,
 } from "./internals/packed-event-graph-base";
 import {
   PackedLinearChain,
@@ -141,8 +142,9 @@ export class EventGraph {
    */
   private linearChain: PackedLinearChain | null = null;
   /**
-   * Transient repack of {@link packedBase} and the mutable tail, built when a
-   * cold replay plans a graph that has both. Dropped on every mutation.
+   * Transient repack of {@link packedBase}, if any, and the mutable tail,
+   * built when a cold replay plans a graph that has a tail. Dropped on every
+   * mutation.
    */
   private repackedBase: PackedEventGraphBase | null = null;
   /**
@@ -772,11 +774,14 @@ export class EventGraph {
   }
 
   /**
-   * @internal Return numeric packed-DAG columns for allocation-light replay.
+   * @internal Return numeric packed-DAG columns for allocation-light replay,
+   * or `null` for an empty graph.
    *
-   * A packed prefix followed by a mutable tail is repacked once for the
-   * caller's replay, so a few appended events never send cold replay back to
-   * the object planner, which materializes every packed event.
+   * Events appended through {@link addEvent} are packed once for the
+   * caller's replay, behind the packed prefix when there is one. A cold
+   * replay therefore always plans over numeric insertion ranks: the object
+   * planner materialized a frozen copy of every event, and kept string-keyed
+   * maps, a slice and two sets per critical section.
    */
   getPackedReplayPlanningView(): PackedReplayPlanningView | null {
     return this.packedReplayBase();
@@ -784,16 +789,22 @@ export class EventGraph {
 
   private packedReplayBase(): PackedEventGraphBase | null {
     const packedBase = this.packedBase;
-    if (packedBase === null || this.tailEventsByInsertionRank.length === 0) {
+    if (this.tailEventsByInsertionRank.length === 0) {
       return packedBase;
     }
-    this.repackedBase ??= packedBase.appendTail({
-      count: this.tailEventsByInsertionRank.length,
-      eventAt: (tailIndex) => this.tailEventsByInsertionRank[tailIndex]!,
-      tailIndexOf: (id) => this.tailIndexById.get(id),
-      forEachParentOffset: (tailIndex, visit) =>
-        this.forEachTailParentInsertionRank(tailIndex, visit),
-    });
+    if (this.repackedBase === null) {
+      const tail: PackedTailEvents = {
+        count: this.tailEventsByInsertionRank.length,
+        eventAt: (tailIndex) => this.tailEventsByInsertionRank[tailIndex]!,
+        tailIndexOf: (id) => this.tailIndexById.get(id),
+        forEachParentOffset: (tailIndex, visit) =>
+          this.forEachTailParentInsertionRank(tailIndex, visit),
+      };
+      this.repackedBase =
+        packedBase === null
+          ? PackedEventGraphBase.fromTail(tail)
+          : packedBase.appendTail(tail);
+    }
     return this.repackedBase;
   }
 

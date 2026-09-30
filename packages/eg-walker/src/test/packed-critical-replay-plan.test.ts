@@ -795,12 +795,15 @@ describe("packed critical-section replay planning", () => {
       initialText,
       EventGraph.fromEvents(events),
     );
-    const objectRangeDeletes = rangeDelete.mock.calls.length;
+    const objectRangeDeletes = rangeDelete.mock.calls.filter(
+      ([, localStart, maxLength]) => localStart === 1 && maxLength === 63,
+    ).length;
     rangeDelete.mockRestore();
 
     expect(packedRangeDeletes).toBe(1);
     expect(eagerBoundaryCalls).toBe(0);
-    expect(objectRangeDeletes).toBe(0);
+    // An object graph is packed for its cold replay, so it batches the run too.
+    expect(objectRangeDeletes).toBe(1);
     expect(packed.getText()).toBe("x".repeat(64));
     expect(packed.getText()).toBe(object.getText());
     expect(packed.getReplayStats().engineRetreats).toBe(
@@ -809,7 +812,7 @@ describe("packed critical-section replay planning", () => {
     expect(packed.getReplayStats().engineAdvances).toBe(
       object.getReplayStats().engineAdvances,
     );
-    expect(packed.getReplayStats().sequenceTreeOperations).toBeLessThan(
+    expect(packed.getReplayStats().sequenceTreeOperations).toBe(
       object.getReplayStats().sequenceTreeOperations,
     );
 
@@ -842,6 +845,12 @@ describe("packed critical-section replay planning", () => {
     const packedTargets = packedEngine.getDeleteTargetRecords();
     expect(materializeBoundaries).toHaveBeenCalled();
     materializeBoundaries.mockRestore();
+    expect(packedEngine.getStats().retreatCount).toBe(
+      objectEngine.getStats().retreatCount,
+    );
+    expect(packedEngine.getStats().sequenceTreeOperations).toBeLessThan(
+      objectEngine.getStats().sequenceTreeOperations,
+    );
     expect(packedEngine.getSequenceRecords()).toEqual(
       objectEngine.getSequenceRecords(),
     );

@@ -65,10 +65,6 @@ import type {
 } from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import {
-  planCriticalReplaySections,
-  type CriticalReplaySection,
-} from "../engine/critical-section-replay-plan";
-import {
   planPackedCriticalReplaySections,
   type PackedCriticalReplayPlan,
 } from "../engine/packed-critical-replay-plan";
@@ -1633,142 +1629,17 @@ export class EgWalkerReplica {
       this.fullReplayLinearGraph(graph);
       return;
     }
+    // Every nonlinear graph has a packed planning view: events added through
+    // addEvent are packed behind the prefix, or on their own, for the replay.
     const packedPlan = planPackedCriticalReplaySections(graph);
-    if (packedPlan !== null) {
-      this.fullReplayPackedGraph(graph, packedPlan);
-      return;
+    if (packedPlan === null) {
+      throw new Error("A nonlinear event graph has no packed replay plan");
     }
-    const sections = planCriticalReplaySections(graph);
-    const graphEventCount = graph.getEventCount();
-    let replayedEventCount = 0;
-    let aggregateStats: EngineStats | null = null;
-    let retainedEngine: EgWalkerEngine | null = null;
-    let retainedBaseCheckpoint: CriticalCheckpoint | null = null;
-    let retainedEventIds: ReadonlyArray<EventId> = [];
-
-    this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
-    this.documentCache = null;
-    this.currentVersion = new Set();
-
-    const retainedCheckpointSectionStart = Math.max(
-      0,
-      sections.length - MAX_RETAINED_CHECKPOINTS,
-    );
-    for (let sectionIndex = 0; sectionIndex < sections.length; ) {
-      const section = sections[sectionIndex]!;
-      if (
-        sectionIndex < retainedCheckpointSectionStart &&
-        isLinearReplaySection(section.events, section.baseFrontier)
-      ) {
-        let sectionEnd = sectionIndex + 1;
-        let groupedEventCount = section.events.length;
-        while (sectionEnd < retainedCheckpointSectionStart) {
-          const candidate = sections[sectionEnd]!;
-          if (
-            !isLinearReplaySection(candidate.events, candidate.baseFrontier)
-          ) {
-            break;
-          }
-          groupedEventCount += candidate.events.length;
-          sectionEnd++;
-        }
-        this.replayCoalescedLinearSections(sections, sectionIndex, sectionEnd);
-        replayedEventCount += groupedEventCount;
-        sectionIndex = sectionEnd;
-        continue;
-      }
-
-      const baseCheckpoint: CriticalCheckpoint = {
-        version: new Set(section.baseFrontier),
-        textBuffer: this.documentBuffer,
-        eventCount: replayedEventCount,
-      };
-
-      if (isLinearReplaySection(section.events, section.baseFrontier)) {
-        this.replayLinearSection(
-          section.events,
-          section.baseFrontier,
-          replayedEventCount,
-          sections.length === 1,
-          graphEventCount,
-        );
-      } else {
-        const engine = new EgWalkerEngine();
-        const generated = engine.generate(section.events, "", {
-          initialVersion: section.baseFrontier,
-          initialTextBuffer: this.documentBuffer,
-          eventGraph: graph,
-          eventOrder: section.events,
-          collectTransformedOperations: false,
-        });
-        this.documentBuffer = generated.textBuffer;
-        this.documentCache = null;
-        this.currentVersion = new Set(section.endFrontier);
-        aggregateStats = mergeEngineStats(aggregateStats, generated.stats);
-
-        const isLastSection = sectionIndex === sections.length - 1;
-        if (
-          isLastSection &&
-          section.endFrontier.size > 1 &&
-          this.canRetainReplayEngineWithinBudget(
-            section.events.length,
-            generated.stats,
-          )
-        ) {
-          retainedEngine = engine;
-          retainedBaseCheckpoint = baseCheckpoint;
-          retainedEventIds = section.events.map(({ id }) => id);
-        }
-      }
-
-      replayedEventCount += section.events.length;
-      if (sectionIndex >= retainedCheckpointSectionStart) {
-        this.criticalCheckpoints.record(
-          section.endFrontier,
-          this.documentBuffer,
-          replayedEventCount,
-          graphEventCount,
-        );
-      }
-      sectionIndex++;
-    }
-
-    this.currentVersion = graph.getFrontier();
-    this.engine = retainedEngine;
-    this.engineStatsOverride =
-      aggregateStats === null
-        ? null
-        : withLiveSequenceRecordCount(
-            aggregateStats,
-            retainedEngine?.getStats().sequenceRecordCount ?? 0,
-          );
-    this.replicaPeakSequenceRecordCount = Math.max(
-      this.replicaPeakSequenceRecordCount,
-      aggregateStats?.peakSequenceRecordCount ?? 0,
-    );
-    if (retainedEngine !== null && retainedBaseCheckpoint !== null) {
-      this.engineRecoveryAnchor = {
-        kind: "checkpoint",
-        checkpoint: retainedBaseCheckpoint,
-        estimatedBytes: 0,
-      };
-      this.setReplayCacheBase(retainedBaseCheckpoint.version, retainedEventIds);
-      this.replayCacheEvents = retainedEventIds.length;
-    } else {
-      this.engineRecoveryAnchor = null;
-      this.setReplayCacheBase(null);
-      this.replayCacheEvents = 0;
-    }
-    this.restoredSequenceRecords = null;
-    this.restoredDeleteTargets = null;
-    this.fullReplayCount++;
-    this.lastReplaySource = REPLAY_SOURCE.FULL;
-    this.refreshReplayCacheMetrics();
-    graph.releaseTraversalCaches();
+    this.fullReplayPackedGraph(graph, packedPlan);
   }
 
   /**
-   * Cold replay for an immutable packed DAG.
+   * Cold replay for a nonlinear graph, over its packed planning view.
    *
    * The compact planner stores only numeric event order, section ends, and a
    * linear bit per cut. Nonlinear events are materialised one section at a
@@ -2216,135 +2087,6 @@ export class EgWalkerReplica {
     if (end > start) {
       this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
     }
-  }
-
-  /** Apply a causally-linear replay section directly to the persistent rope. */
-  private replayLinearSection(
-    events: ReadonlyArray<GraphEvent>,
-    baseVersion: Version,
-    eventCountBeforeSection: number,
-    retainTrailingCheckpoints: boolean,
-    validatedEventCount: number,
-  ): void {
-    const checkpointStart = retainTrailingCheckpoints
-      ? Math.max(0, events.length - MAX_RETAINED_CHECKPOINTS)
-      : events.length;
-    for (const [index, event] of events.entries()) {
-      const operation = this.validateLocalOperation(event.operation);
-      if (operation !== null) {
-        this.applyPlainDocumentOperation(operation);
-      }
-      if (index >= checkpointStart) {
-        this.criticalCheckpoints.record(
-          new Set([event.id]),
-          this.documentBuffer,
-          eventCountBeforeSection + index + 1,
-          validatedEventCount,
-        );
-      }
-    }
-    const last = events[events.length - 1];
-    this.currentVersion =
-      last === undefined ? new Set(baseVersion) : new Set([last.id]);
-  }
-
-  /**
-   * Replay old critical sections as one physical rope batch.
-   *
-   * Only the trailing checkpoint window is observable after a cold replay.
-   * Earlier one-event critical sections can therefore share the same pending
-   * insert/delete accumulator instead of forcing one persistent-rope edit at
-   * every section boundary. Event-relative validation still happens in order.
-   */
-  private replayCoalescedLinearSections(
-    sections: ReadonlyArray<CriticalReplaySection>,
-    startSection: number,
-    endSection: number,
-  ): void {
-    let pendingKind: "insert" | "delete" | null = null;
-    let pendingIndex = 0;
-    let pendingLength = 0;
-    let pendingInsertParts: string[] = [];
-
-    const flush = (): void => {
-      if (pendingKind === "insert") {
-        this.applyPlainDocumentOperation({
-          type: OPERATION_TYPE.INSERT,
-          index: pendingIndex,
-          text:
-            pendingInsertParts.length === 1
-              ? pendingInsertParts[0]!
-              : pendingInsertParts.join(""),
-        });
-      } else if (pendingKind === "delete") {
-        this.applyPlainDocumentOperation({
-          type: OPERATION_TYPE.DELETE,
-          index: pendingIndex,
-          length: pendingLength,
-        });
-      }
-      pendingKind = null;
-      pendingLength = 0;
-      pendingInsertParts = [];
-    };
-
-    for (
-      let sectionIndex = startSection;
-      sectionIndex < endSection;
-      sectionIndex++
-    ) {
-      for (const event of sections[sectionIndex]!.events) {
-        const operation = event.operation;
-        if (operation.type === OPERATION_TYPE.INSERT) {
-          if (operation.text.length === 0) {
-            continue;
-          }
-          if (
-            pendingKind === "insert" &&
-            operation.index === pendingIndex + pendingLength
-          ) {
-            pendingInsertParts.push(operation.text);
-            pendingLength += operation.text.length;
-            continue;
-          }
-
-          flush();
-          this.validateLocalOperation(operation);
-          pendingKind = "insert";
-          pendingIndex = operation.index;
-          pendingLength = operation.text.length;
-          pendingInsertParts = [operation.text];
-          continue;
-        }
-
-        if (operation.length === 0) {
-          continue;
-        }
-        if (pendingKind === "delete" && operation.index === pendingIndex) {
-          const virtualDocumentLength =
-            this.documentBuffer.length - pendingLength;
-          if (operation.index + operation.length > virtualDocumentLength) {
-            throw new Error(
-              `Delete range [${operation.index}, ${operation.index + operation.length}) exceeds document length ${virtualDocumentLength}`,
-            );
-          }
-          const combinedLength = pendingLength + operation.length;
-          this.assertNotMidSurrogate(operation.index + combinedLength);
-          pendingLength = combinedLength;
-          continue;
-        }
-
-        flush();
-        this.validateLocalOperation(operation);
-        pendingKind = "delete";
-        pendingIndex = operation.index;
-        pendingLength = operation.length;
-      }
-    }
-
-    flush();
-    const lastSection = sections[endSection - 1];
-    this.currentVersion = new Set(lastSection?.endFrontier ?? []);
   }
 
   private engineStateForSnapshot(
@@ -3201,31 +2943,6 @@ const requirePackedEventId = (
     throw new Error(`Packed graph is missing event at offset ${offset}`);
   }
   return eventId;
-};
-
-const isLinearReplaySection = (
-  events: ReadonlyArray<GraphEvent>,
-  baseVersion: Version,
-): boolean => {
-  const first = events[0];
-  if (first === undefined) {
-    return true;
-  }
-  if (!versionsEqual(first.parentVersion, baseVersion)) {
-    return false;
-  }
-  let previousId = first.id;
-  for (let index = 1; index < events.length; index++) {
-    const event = events[index]!;
-    if (
-      event.parentVersion.size !== 1 ||
-      !event.parentVersion.has(previousId)
-    ) {
-      return false;
-    }
-    previousId = event.id;
-  }
-  return true;
 };
 
 /**

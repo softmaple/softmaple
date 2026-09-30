@@ -92,6 +92,51 @@ describe("ColumnarEventGraphCodec", () => {
     ).toEqual(["alice:0"]);
   });
 
+  it.each([
+    "1",
+    "alice",
+    "team:custom",
+  ])("keeps custom ID %s separate from a following canonical ID run", (customId) => {
+    const graph = new EventGraph();
+    const ids = [customId, `${customId}:1`, `${customId}:2`];
+    ids.forEach((id, index) => {
+      graph.addEvent({
+        id,
+        parentVersion: new Set(ids.slice(Math.max(0, index - 1), index)),
+        operation: { type: OPERATION_TYPE.INSERT, index, text: "x" },
+        timestamp: index,
+      });
+    });
+
+    const codec = new ColumnarEventGraphCodec();
+    const encoded = codec.encode(graph);
+    const decodedBinary = codec.decodeBinary(codec.encodeBinary(graph));
+    const decodedColumnar = codec.decode(encoded);
+
+    for (const decoded of [decodedBinary, decodedColumnar]) {
+      expect(decoded.getTopologicalOrder()).toEqual(
+        graph.getTopologicalOrder(),
+      );
+      expect(decoded.getFrontier()).toEqual(new Set([`${customId}:2`]));
+    }
+    expect(encoded.idRuns).toEqual([
+      {
+        replicaId: customId,
+        startSequence: 0,
+        startEventOffset: 0,
+        length: 1,
+        custom: true,
+      },
+      {
+        replicaId: customId,
+        startSequence: 1,
+        startEventOffset: 1,
+        length: 2,
+        custom: false,
+      },
+    ]);
+  });
+
   it("decodes alternating columnar operation runs in linear run order", () => {
     const graph = new EventGraph();
     for (let i = 0; i < 800; i++) {

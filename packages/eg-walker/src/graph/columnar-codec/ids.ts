@@ -22,6 +22,7 @@ export const encodeIdRuns = (events: ReadonlyArray<GraphEvent>): IdRun[] => {
     const previous = runs[runs.length - 1];
     const canExtend =
       previous &&
+      !previous.custom &&
       previous.replicaId === parsed.replicaId &&
       previous.startSequence + previous.length === parsed.sequence &&
       previous.startEventOffset + previous.length === eventOffset;

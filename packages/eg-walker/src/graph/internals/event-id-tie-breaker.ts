@@ -1,90 +1,57 @@
 import type { EventId } from "../../types";
-import { canonicalSequenceAfter } from "../event-id";
+import type { AgentTable } from "./agent-table";
 
-const UNPARSED = -2;
-const NON_CANONICAL = -1;
+/** Numeric event IDs of a packed graph, by offset. */
+export interface EventIdTieBreakerView {
+  readonly agents: AgentTable;
+  agentAt(offset: number): number;
+  sequenceAt(offset: number): number;
+  idAt(offset: number): EventId | undefined;
+}
 
 /**
- * Orders events by ID exactly like {@link compareEventIds}, parsing each ID
- * at most once.
+ * Orders events by ID exactly like {@link compareEventIds}, without parsing.
  *
  * Topological orders break ties between events that are ready together.
- * Comparing their IDs with {@link compareEventIds} split both IDs again at
- * every comparison. Here parsed keys live in columns indexed by insertion
- * rank: the canonical `replicaId:sequence` suffix as a number, and the prefix
- * as an index into a table of distinct prefixes. An ID is parsed only the
- * first time its event is compared, so the events of a long causal chain,
- * which are never ready together with another event, are never parsed.
+ * Every canonical `replicaId:sequence` ID is already split into an agent
+ * number and a sequence by the graph's ID index, so two canonical IDs compare
+ * by replica name only when their agents differ and by sequence otherwise.
+ * IDs that are not canonical sort after canonical ones, as raw strings.
  */
 export class EventIdTieBreaker {
-  private readonly prefixIndexes: Int32Array;
-  private readonly sequences: Float64Array;
-  private readonly prefixes: string[] = [];
-  private readonly prefixIndexByPrefix = new Map<string, number>();
+  constructor(private readonly view: EventIdTieBreakerView) {}
 
-  constructor(
-    count: number,
-    private readonly idAt: (rank: number) => EventId,
-  ) {
-    this.prefixIndexes = new Int32Array(count).fill(UNPARSED);
-    this.sequences = new Float64Array(count);
-  }
-
-  /** Compare the events at two ranks; same sign as {@link compareEventIds}. */
+  /** Compare the events at two offsets; same sign as {@link compareEventIds}. */
   compare(left: number, right: number): number {
     if (left === right) {
       return 0;
     }
-    const leftPrefix = this.prefixIndexAt(left);
-    const rightPrefix = this.prefixIndexAt(right);
-    if (leftPrefix !== NON_CANONICAL && rightPrefix !== NON_CANONICAL) {
-      if (leftPrefix !== rightPrefix) {
-        return this.prefixes[leftPrefix]! < this.prefixes[rightPrefix]!
-          ? -1
-          : 1;
+    const view = this.view;
+    const leftAgent = view.agentAt(left);
+    const rightAgent = view.agentAt(right);
+    if (leftAgent >= 0 && rightAgent >= 0) {
+      if (leftAgent !== rightAgent) {
+        return view.agents.compare(leftAgent, rightAgent);
       }
-      const leftSequence = this.sequences[left]!;
-      const rightSequence = this.sequences[right]!;
+      const leftSequence = view.sequenceAt(left);
+      const rightSequence = view.sequenceAt(right);
       if (leftSequence === rightSequence) {
         return 0;
       }
       return leftSequence < rightSequence ? -1 : 1;
     }
     // Canonical IDs sort before custom IDs, which sort as raw strings.
-    if (leftPrefix !== NON_CANONICAL) {
+    if (leftAgent >= 0) {
       return -1;
     }
-    if (rightPrefix !== NON_CANONICAL) {
+    if (rightAgent >= 0) {
       return 1;
     }
-    const leftId = this.idAt(left);
-    const rightId = this.idAt(right);
+    const leftId = view.idAt(left);
+    const rightId = view.idAt(right);
     if (leftId === rightId) {
       return 0;
     }
-    return leftId < rightId ? -1 : 1;
-  }
-
-  private prefixIndexAt(rank: number): number {
-    const cached = this.prefixIndexes[rank]!;
-    if (cached !== UNPARSED) {
-      return cached;
-    }
-    const id = this.idAt(rank);
-    const colonIndex = id.lastIndexOf(":");
-    const sequence = canonicalSequenceAfter(id, colonIndex);
-    let prefixIndex = NON_CANONICAL;
-    if (sequence >= 0) {
-      const prefix = id.slice(0, colonIndex);
-      prefixIndex =
-        this.prefixIndexByPrefix.get(prefix) ?? this.prefixes.length;
-      if (prefixIndex === this.prefixes.length) {
-        this.prefixes.push(prefix);
-        this.prefixIndexByPrefix.set(prefix, prefixIndex);
-      }
-      this.sequences[rank] = sequence;
-    }
-    this.prefixIndexes[rank] = prefixIndex;
-    return prefixIndex;
+    return leftId! < rightId! ? -1 : 1;
   }
 }

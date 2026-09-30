@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { compareEventIds } from "../graph/event-id";
+import { EventIdRunIndex } from "../graph/internals/event-id-run-index";
 import { EventIdTieBreaker } from "../graph/internals/event-id-tie-breaker";
 import type { EventId } from "../types";
 import { fcParams } from "./property/run-config";
@@ -84,8 +85,13 @@ const eventIdArb: fc.Arbitrary<EventId> = fc.string({
   unit: fc.constantFrom("a", "b", ":", "0", "1", "9"),
 });
 
-const tieBreakerOver = (ids: ReadonlyArray<EventId>): EventIdTieBreaker =>
-  new EventIdTieBreaker(ids.length, (rank) => ids[rank]!);
+const tieBreakerOver = (ids: ReadonlyArray<EventId>): EventIdTieBreaker => {
+  const index = new EventIdRunIndex();
+  for (const id of ids) {
+    index.append(id);
+  }
+  return new EventIdTieBreaker(index.view());
+};
 
 const sortRanks = (
   tieBreaker: EventIdTieBreaker,

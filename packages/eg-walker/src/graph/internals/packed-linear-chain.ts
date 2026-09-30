@@ -5,7 +5,8 @@ import type {
   GraphEvent,
   Version,
 } from "../../types";
-import { GrowableIdRunIndex } from "./growable-id-run-index";
+import { AgentTable } from "./agent-table";
+import { EventIdRunIndex } from "./event-id-run-index";
 import {
   PACKED_OPERATION_TYPE,
   PackedEventGraphBase,
@@ -421,9 +422,14 @@ export class PackedLinearChain {
   /** Events after the contiguous prefix, in order. */
   private chunks: OperationColumnStore[] = [];
   private insertedContent = "";
-  private readonly ids = new GrowableIdRunIndex();
+  private readonly ids: EventIdRunIndex;
   private eventCount = 0;
   private base: PackedEventGraphBase | null = null;
+
+  /** @param agents Replica numbering shared with the graph the chain backs. */
+  constructor(agents: AgentTable = new AgentTable()) {
+    this.ids = new EventIdRunIndex(agents);
+  }
 
   get count(): number {
     return this.eventCount;
@@ -672,7 +678,7 @@ export class PackedLinearChainRange {
 
   /** @internal Built by {@link PackedLinearChain.appendEvents}. */
   constructor(
-    private readonly ids: GrowableIdRunIndex,
+    private readonly ids: EventIdRunIndex,
     private readonly stores: ReadonlyArray<OperationColumnStore>,
     private readonly start: number,
     readonly count: number,
@@ -692,7 +698,7 @@ export class PackedLinearChainRange {
   idAt(offset: number): EventId | undefined {
     return offset < 0
       ? undefined
-      : this.ids.idBefore(this.start + offset, this.start + this.count);
+      : this.ids.idAt(this.start + offset, this.start + this.count);
   }
 
   isInsertAt(offset: number): boolean {

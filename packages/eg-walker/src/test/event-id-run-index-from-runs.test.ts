@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerReplica } from "../core/replica";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { LazyIdRunIndex } from "../graph/columnar-codec/lazy-id-run-index";
+import { EventIdRunIndex } from "../graph/internals/event-id-run-index";
 import type { IdRun } from "../graph/columnar-codec/types";
 import { EventGraph } from "../graph/event-graph";
 
@@ -20,9 +20,12 @@ const run = (
   custom,
 });
 
-describe("LazyIdRunIndex", () => {
+const indexRuns = (runs: ReadonlyArray<IdRun>, count: number) =>
+  EventIdRunIndex.fromRuns(runs, count).view();
+
+describe("EventIdRunIndex.fromRuns", () => {
   it("resolves canonical and custom runs without expanding them", () => {
-    const index = new LazyIdRunIndex(
+    const index = indexRuns(
       [
         run("alice", 40, 0, 3),
         run("legacy-id", 0, 3, 1, true),
@@ -74,15 +77,12 @@ describe("LazyIdRunIndex", () => {
     expect(index.maximumSequenceForReplica("alice")).toBe(101);
     expect(index.maximumSequenceForReplica("missing")).toBeUndefined();
 
-    const parseableCustom = new LazyIdRunIndex(
-      [run("alice:500", 0, 0, 1, true)],
-      1,
-    );
+    const parseableCustom = indexRuns([run("alice:500", 0, 0, 1, true)], 1);
     expect(parseableCustom.maximumSequenceForReplica("alice")).toBe(500);
   });
 
   it("reuses the previous lookup's replica without confusing similar IDs", () => {
-    const index = new LazyIdRunIndex(
+    const index = indexRuns(
       [
         run("a:b", 0, 0, 2),
         run("alice", 5, 2, 2),
@@ -115,42 +115,36 @@ describe("LazyIdRunIndex", () => {
   });
 
   it("strictly rejects collisions without building a per-event map", () => {
-    expect(
-      () =>
-        new LazyIdRunIndex(
-          [run("alice", 0, 0, 3), run("bob", 0, 3, 1), run("alice", 2, 4, 2)],
-          6,
-        ),
+    expect(() =>
+      indexRuns(
+        [run("alice", 0, 0, 3), run("bob", 0, 3, 1), run("alice", 2, 4, 2)],
+        6,
+      ),
     ).toThrow("Duplicate event ID in columnar graph: alice:2");
 
-    expect(
-      () =>
-        new LazyIdRunIndex(
-          [run("duplicate", 0, 0, 1, true), run("duplicate", 0, 1, 1, true)],
-          2,
-        ),
+    expect(() =>
+      indexRuns(
+        [run("duplicate", 0, 0, 1, true), run("duplicate", 0, 1, 1, true)],
+        2,
+      ),
     ).toThrow("Duplicate event ID in columnar graph: duplicate");
 
-    expect(
-      () =>
-        new LazyIdRunIndex(
-          [run("alice", 4, 0, 2), run("alice:5", 0, 2, 1, true)],
-          3,
-        ),
+    expect(() =>
+      indexRuns([run("alice", 4, 0, 2), run("alice:5", 0, 2, 1, true)], 3),
     ).toThrow("Duplicate event ID in columnar graph: alice:5");
   });
 
   it("rejects malformed or incomplete run layouts", () => {
-    expect(() => new LazyIdRunIndex([run("alice", 0, 1, 1)], 1)).toThrow(
+    expect(() => indexRuns([run("alice", 0, 1, 1)], 1)).toThrow(
       "Invalid ID run 0",
     );
-    expect(() => new LazyIdRunIndex([run("", 0, 0, 1)], 1)).toThrow(
+    expect(() => indexRuns([run("", 0, 0, 1)], 1)).toThrow(
       "Invalid event ID in run 0",
     );
-    expect(() => new LazyIdRunIndex([run("custom", 0, 0, 2, true)], 2)).toThrow(
+    expect(() => indexRuns([run("custom", 0, 0, 2, true)], 2)).toThrow(
       "Custom id run must have length 1",
     );
-    expect(() => new LazyIdRunIndex([run("alice", 0, 0, 1)], 2)).toThrow(
+    expect(() => indexRuns([run("alice", 0, 0, 1)], 2)).toThrow(
       "ID runs cover 1 events but graph contains 2",
     );
   });

@@ -5,7 +5,23 @@ import {
   buildPackedEventGraphBase,
   buildPackedEventGraphBaseFromValidatedIdRuns,
 } from "../graph/columnar-codec/packed-decode";
+import { EventIdRunIndex } from "../graph/internals/event-id-run-index";
 import type { PackedEventIdIndex } from "../graph/internals/packed-event-graph-base";
+
+/** Agent and sequence accessors of a real run index over `ids`. */
+const numericIdAccessors = (
+  ids: ReadonlyArray<string>,
+): Pick<PackedEventIdIndex, "agents" | "agentAt" | "sequenceAt"> => {
+  const index = new EventIdRunIndex();
+  for (const id of ids) {
+    index.append(id);
+  }
+  return {
+    agents: index.agents,
+    agentAt: (offset) => index.agentAt(offset),
+    sequenceAt: (offset) => index.sequenceAt(offset),
+  };
+};
 
 type PackedColumns = Parameters<typeof buildPackedEventGraphBase>[0];
 
@@ -45,6 +61,7 @@ describe("packed EGW3 validation", () => {
     const offsetById = new Map(ids.map((id, offset) => [id, offset]));
     const lookupCounts = new Map<string, number>();
     const idIndex: PackedEventIdIndex = {
+      ...numericIdAccessors(ids),
       count: ids.length,
       has: (id) => offsetById.has(id),
       offsetOf: (id) => {
@@ -108,6 +125,7 @@ describe("packed EGW3 validation", () => {
     const offsetById = new Map(ids.map((id, offset) => [id, offset]));
     const offsetOf = vi.fn((id: string) => offsetById.get(id));
     const idIndex: PackedEventIdIndex = {
+      ...numericIdAccessors(ids),
       count: ids.length,
       has: (id) => offsetById.has(id),
       offsetOf,
@@ -131,6 +149,7 @@ describe("packed EGW3 validation", () => {
   it("keeps mismatched caller-provided ID indexes strict by default", () => {
     const ids = ["a:0", "a:1"];
     const idIndex: PackedEventIdIndex = {
+      ...numericIdAccessors(ids),
       count: ids.length,
       has: () => true,
       offsetOf: (id) => (id === "a:0" ? 1 : 0),

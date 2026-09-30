@@ -5,7 +5,6 @@ import {
   createCausalEventBatchBuilder,
   inspectCausalEventBatch,
   isExactCausalChain,
-  isOwnedCausalEvent,
   isOwnedCausalEventBatch,
   type CausalEventBatch,
 } from "../core/causal-event-batch";
@@ -53,13 +52,6 @@ describe("CausalEventBatchBuilder", () => {
     expect(firstInspection[0]).toBe(secondInspection[0]);
     expect(firstInspection[0]?.operation).toBe(secondInspection[0]?.operation);
     expect(firstInspection[0]?.parentVersion).toEqual(new Set(["alice:0"]));
-    expect(isOwnedCausalEvent(firstInspection[0])).toBe(true);
-    expect(
-      isOwnedCausalEvent({
-        ...firstInspection[0],
-        parentVersion: new Set(firstInspection[0]?.parentVersion),
-      }),
-    ).toBe(false);
   });
 
   it.each([

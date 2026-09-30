@@ -52,7 +52,6 @@ import {
   type PackedLinearReplayView,
 } from "../graph/event-graph";
 import { LinearEventBatch } from "../graph/internals/packed-linear-chain";
-import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import {
   EgWalkerEngine,
   type DeleteTargetRecord,
@@ -500,15 +499,8 @@ export class EgWalkerReplica {
   createPortableSnapshot(): PortableSnapshot {
     const graph = this.ensureEventGraph();
     try {
-      const events =
-        graph.getLinearReplayOrder() ?? graph.getTopologicalOrder();
-      const metadata = graph.getMetadata();
-      assertPortableSnapshotMetadata(metadata);
-      const encoded = encodeTopologicallyOrderedEventsBinary(
-        events,
-        metadata,
-        Array.from(graph.getFrontier()),
-      );
+      assertPortableSnapshotMetadata(graph.getMetadata());
+      const encoded = graph.encodeTopologicalBinary();
       return registerTrustedPortableSnapshot({
         formatVersion: PORTABLE_SNAPSHOT_FORMAT_VERSION,
         text: this.getText(),

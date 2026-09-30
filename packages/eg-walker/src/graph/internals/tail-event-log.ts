@@ -66,6 +66,11 @@ export class TailEventLog implements PackedTailEvents {
     this.ids = new EventIdRunIndex(agents);
   }
 
+  /** Whether any event is stored verbatim outside the typed columns. */
+  hasIrregularEvents(): boolean {
+    return this.irregular !== null && this.irregular.size > 0;
+  }
+
   get count(): number {
     return this.eventCount;
   }

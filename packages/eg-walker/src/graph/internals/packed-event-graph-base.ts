@@ -501,6 +501,14 @@ export class PackedEventGraphBase {
     throw new Error(`Invalid packed operation type ${String(type)}`);
   }
 
+  /**
+   * Whether some ID is stored verbatim, so its agent and sequence columns
+   * may not spell it. Unknown index shapes answer conservatively.
+   */
+  hasCustomIds(): boolean {
+    return this.idIndex.hasCustomIds?.() ?? true;
+  }
+
   isInsertAt(offset: number): boolean {
     return this.operations().operationTypes[offset] === INSERT_OPERATION;
   }

@@ -46,6 +46,12 @@ import {
   type RankedReplayOrderView,
 } from "./internals/ranked-replay-order";
 import { NO_RANK, TailEventLog } from "./internals/tail-event-log";
+import {
+  encodeTopologicallyOrderedEventsBinary,
+  encodeTopologicalColumnsBinary,
+  type TopologicalColumnSource,
+  type TopologicalEventGraphEncoding,
+} from "./columnar-codec/topological-binary-encoder";
 
 export {
   EventAlreadyExistsError,
@@ -907,6 +913,98 @@ export class EventGraph {
   }
 
   /** @internal Local versions of the frontier events, in frontier order. */
+  /**
+   * Encode the graph as EGW3 in `getLinearReplayOrder() ??
+   * getTopologicalOrder()` order, with the frontier in `getFrontier()` order.
+   *
+   * @internal Snapshot writers call this instead of materializing every
+   * event; the bytes equal {@link encodeTopologicallyOrderedEventsBinary}
+   * over those events. Graphs holding malformed events take that path so
+   * they fail with the same errors.
+   */
+  encodeTopologicalBinary(): TopologicalEventGraphEncoding {
+    const metadata = this.getMetadata();
+    if (this.tail.hasIrregularEvents()) {
+      return encodeTopologicallyOrderedEventsBinary(
+        this.getLinearReplayOrder() ?? this.getTopologicalOrder(),
+        metadata,
+        Array.from(this.getFrontier()),
+      );
+    }
+    const order = this.isExactLinearHistory()
+      ? null
+      : (this.packedReplayBase()?.getTopologicalOrderOffsets() ??
+        new Uint32Array(0));
+    return encodeTopologicalColumnsBinary(
+      this.topologicalColumnSource(),
+      order,
+      metadata,
+      this.getFrontierLocalVersions(),
+    );
+  }
+
+  private topologicalColumnSource(): TopologicalColumnSource {
+    const packed = this.packedBase;
+    const packedCount = packed?.count ?? 0;
+    const tail = this.tail;
+    const packedStringIds = packed?.hasCustomIds() ?? false;
+    return {
+      count: this.getEventCount(),
+      idAt: (rank) => this.idAtLocalVersion(rank),
+      agentAt: (rank) => this.agentAt(rank),
+      agentName: (agent) => this.agents.nameOf(agent),
+      sequenceAt: (rank) => this.sequenceAt(rank),
+      useStringIdAt: (rank) => rank < packedCount && packedStringIds,
+      isInsertAt: (rank) =>
+        rank < packedCount
+          ? packed!.isInsertAt(rank)
+          : tail.isInsertAt(rank - packedCount),
+      operationIndexAt: (rank) =>
+        rank < packedCount
+          ? packed!.operationIndexAt(rank)
+          : tail.operationIndexAt(rank - packedCount),
+      operationLengthAt: (rank) =>
+        rank < packedCount
+          ? packed!.operationLengthAt(rank)
+          : tail.operationLengthAt(rank - packedCount),
+      insertedTextAt: (rank) => {
+        if (rank < packedCount) {
+          const start = packed!.insertStartAt(rank);
+          return packed!.sliceInsertedContent(
+            start,
+            start + packed!.operationLengthAt(rank),
+          );
+        }
+        const tailIndex = rank - packedCount;
+        const start = tail.insertStartAt(tailIndex);
+        return tail.sliceInsertedContent(
+          start,
+          start + tail.operationLengthAt(tailIndex),
+        );
+      },
+      timestampAt: (rank) =>
+        rank < packedCount
+          ? (packed!.timestampAt(rank) ?? Number.NaN)
+          : tail.timestampAt(rank - packedCount),
+      parentCountAt: (rank) =>
+        rank < packedCount
+          ? packed!.parentCountAt(rank)
+          : tail.parentCountAt(rank - packedCount),
+      parentRankAt: (rank, parentIndex) => {
+        if (rank >= packedCount) {
+          return tail.parentRankAt(rank - packedCount, parentIndex);
+        }
+        const parent = packed!.parentOffsetAt(rank, parentIndex);
+        if (parent === undefined) {
+          throw new Error(
+            `Packed event ${rank} is missing parent ${parentIndex}`,
+          );
+        }
+        return parent;
+      },
+    };
+  }
+
   getFrontierLocalVersions(): number[] {
     return Array.from(this.frontier);
   }

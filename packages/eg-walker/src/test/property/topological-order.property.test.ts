@@ -24,6 +24,43 @@ import {
 import { fcParams } from "./run-config";
 
 describe("property: EventGraph topological orders", () => {
+  it.each([
+    0, 1, 2, 3,
+  ])("should order a custom ID matching a replica prefix with %i packed events", (packedCount) => {
+    // Arrange
+    const events: GraphEvent[] = [
+      {
+        id: "0",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+        timestamp: 0,
+      },
+      {
+        id: "0:1",
+        parentVersion: new Set(["0"]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+        timestamp: 1,
+      },
+      {
+        id: "a",
+        parentVersion: new Set(),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+        timestamp: 2,
+      },
+    ];
+    const graph = graphWithPackedPrefix(events, packedCount);
+
+    // Act
+    const kahnOrder = graph.getTopologicalOrder().map(({ id }) => id);
+    const branchOrder = graph
+      .getBranchPreservingTopologicalOrder()
+      .map(({ id }) => id);
+
+    // Assert
+    expect(kahnOrder).toEqual(["0", "0:1", "a"]);
+    expect(branchOrder).toEqual(["a", "0", "0:1"]);
+  });
+
   it("should match the reference Kahn order for every graph shape", () => {
     fc.assert(
       fc.property(eventDagArb, fc.nat(), (events, packedSeed) => {
@@ -97,10 +134,9 @@ describe("property: EventGraph topological orders", () => {
 
 /**
  * Mix inserts of varying text with deletes so every column varies, and
- * rename events to canonical runs of three agents plus custom IDs. A custom
- * ID never equals an agent name here: the columnar codec's run encoder
- * merges such an ID into the following canonical run, which its decoder then
- * rejects, independently of the encoder under test.
+ * rename each group to a custom ID followed by three canonical IDs whose
+ * replica prefix equals that custom ID. This exercises run boundaries and
+ * keeps custom/canonical collisions in the encoder equivalence coverage.
  */
 const withVariedOperations = (
   events: ReadonlyArray<GraphEvent>,
@@ -108,9 +144,9 @@ const withVariedOperations = (
   const renamed = new Map(
     events.map((event, index) => [
       event.id,
-      index % 4 === 3
-        ? `custom-${index}`
-        : `${["a", "b", "c"][index % 3]}:${index >> 1}`,
+      index % 4 === 0
+        ? `agent-${Math.floor(index / 4)}`
+        : `agent-${Math.floor(index / 4)}:${index % 4}`,
     ]),
   );
   const rename = (id: EventId): EventId => renamed.get(id)!;

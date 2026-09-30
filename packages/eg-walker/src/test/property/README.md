@@ -46,6 +46,7 @@ up automatically.
 | [`apply-remote-event-result.property.test.ts`](./apply-remote-event-result.property.test.ts)         | `applyRemoteEvent`'s position operation describes the visible splice from pre-event to post-event text. |
 | [`event-graph-diff.property.test.ts`](./event-graph-diff.property.test.ts)                           | `diffVersions` matches expanded causal-set differences; frontier expansion covers the whole graph.      |
 | [`packed-linear-replay.property.test.ts`](./packed-linear-replay.property.test.ts)                   | Packed exact-linear replay matches ordinary replay for valid shrinkable UTF-16 edit scripts.            |
+| [`replay-packed-linear.property.test.ts`](./replay-packed-linear.property.test.ts)                   | Consecutive windows of a packed chain, long enough for the piece index, replay to the per-edit text, and a window ending in an invalid edit is rejected. |
 | [`packed-critical-replay-plan.property.test.ts`](./packed-critical-replay-plan.property.test.ts)     | Packed numeric critical-section cuts match the general planner for shrinkable causal DAGs.              |
 | [`insertion-suffix-sections.property.test.ts`](./insertion-suffix-sections.property.test.ts)         | Sections after every critical cut match the general planner; rank ranges order as the replay order.     |
 | [`partial-replay-after-cold-load.property.test.ts`](./partial-replay-after-cold-load.property.test.ts) | After a cold load, a peer that diverged at any event and its next edit merge to the replayed text.      |

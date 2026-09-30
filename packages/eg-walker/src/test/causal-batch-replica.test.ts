@@ -5,6 +5,8 @@ import {
   createCausalEventBatchBuilder,
   type CausalEventBatch,
 } from "../core/causal-event-batch";
+import { MAX_RETAINED_CHECKPOINTS } from "../core/internals/critical-checkpoint-store";
+import { MIN_TRANSIENT_CHAIN_EVENTS } from "../core/internals/replay-packed-linear";
 import { EgWalkerReplica } from "../core/replica";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { GraphEvent } from "../types";
@@ -29,6 +31,51 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
       sequenceRecordCount: 0,
     });
     expect(causalRope.nodeAllocations).toBeLessThan(events.length / 2);
+  });
+
+  it("edits the persistent rope only for the checkpoint window of a long chain", () => {
+    // Inserts at the start never coalesce, so each is its own rope edit.
+    const events = Array.from({ length: 1_000 }, (_, index) =>
+      insertEvent(
+        `front:${index}`,
+        index === 0 ? [] : [`front:${index - 1}`],
+        0,
+        String.fromCharCode(0x21 + (index % 94)),
+      ),
+    );
+    const replica = new EgWalkerReplica("causal-front");
+
+    PersistentUtf16Rope.resetInstrumentation();
+    replica.applyCausalBatch(toCausalBatch(events));
+    const rope = PersistentUtf16Rope.getInstrumentation();
+
+    expect(replica.getText()).toBe(insertedText(events).reverse().join(""));
+    expect(rope.joins).toBeLessThanOrEqual(MAX_RETAINED_CHECKPOINTS);
+    expect(replica.getReplayStats().checkpointCount).toBe(
+      MAX_RETAINED_CHECKPOINTS,
+    );
+  });
+
+  it("rolls back a long chain whose checkpoint-free prefix splits a surrogate pair", () => {
+    const splitAt = MIN_TRANSIENT_CHAIN_EVENTS;
+    // Typing after the pair, then an insert inside it, before the window.
+    const events = Array.from(
+      { length: splitAt + 2 * MAX_RETAINED_CHECKPOINTS },
+      (_, index) =>
+        insertEvent(
+          `split:${index}`,
+          index === 0 ? [] : [`split:${index - 1}`],
+          index === 0 ? 0 : index === splitAt ? 1 : index + 1,
+          index === 0 ? "🙂" : "a",
+        ),
+    );
+    const replica = new EgWalkerReplica("causal-long-split");
+    const before = observableState(replica);
+
+    expect(() => replica.applyCausalBatch(toCausalBatch(events))).toThrow(
+      /surrogate halves/,
+    );
+    expect(observableState(replica)).toEqual(before);
   });
 
   it("rejects a coalesced delete that would split a surrogate pair", () => {
@@ -222,6 +269,11 @@ const toCausalBatch = (events: ReadonlyArray<GraphEvent>): CausalEventBatch => {
   }
   return builder.finish();
 };
+
+const insertedText = (events: ReadonlyArray<GraphEvent>): string[] =>
+  events.map((event) =>
+    event.operation.type === OPERATION_TYPE.INSERT ? event.operation.text : "",
+  );
 
 const linearEvents = (count: number): GraphEvent[] =>
   Array.from({ length: count }, (_, index) =>

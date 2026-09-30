@@ -7,7 +7,10 @@
  * - Returns only plain text state
  */
 
-import { replayPackedLinear } from "./internals/replay-packed-linear";
+import {
+  MIN_TRANSIENT_CHAIN_EVENTS,
+  replayPackedLinear,
+} from "./internals/replay-packed-linear";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { REPLAY_SOURCE, type ReplaySource } from "../constants/replay-source";
 import { APPLY_REMOTE_EVENT_STATUS } from "../types";
@@ -171,9 +174,6 @@ const MID_BRIDGE_PRESSURE_BYTES = 16 * 1024 * 1024;
 // independent of total history size. The trailing checkpoint window remains
 // one section per engine so retained recovery semantics do not change.
 const MAX_NONLINEAR_SUPERSECTION_EVENTS = 32_768;
-// A one-shot piece index costs one document rebuild when it is frozen. Below
-// this many events, editing the persistent rope directly is cheaper.
-const MIN_TRANSIENT_CHAIN_EVENTS = 128;
 
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;

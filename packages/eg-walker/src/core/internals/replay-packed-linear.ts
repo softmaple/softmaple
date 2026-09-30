@@ -1,11 +1,60 @@
 import type { PackedLinearReplayView } from "../../graph/event-graph";
 import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
-import { assertCodePointBoundary, assertDocumentIndex } from "../invariants";
+import { TransientUtf16RopeEditor } from "../../text/transient-utf16-rope";
+import {
+  assertCodePointBoundary,
+  assertDocumentIndex,
+  type Utf16DocumentView,
+} from "../invariants";
+
+// A one-shot piece index costs one document rebuild when it is frozen. Below
+// this many events, editing the persistent rope directly is cheaper.
+export const MIN_TRANSIENT_CHAIN_EVENTS = 128;
+
+/** A document a replay edits in place, then reads back as one rope. */
+interface ReplayDocument extends Utf16DocumentView {
+  insert(index: number, text: string): void;
+  delete(index: number, length: number): void;
+  finish(): PersistentUtf16Rope;
+}
+
+/** Edits a persistent rope directly, for a range too short to freeze. */
+class PersistentReplayDocument implements ReplayDocument {
+  constructor(private rope: PersistentUtf16Rope) {}
+
+  get length(): number {
+    return this.rope.length;
+  }
+
+  get hasSurrogateCodeUnits(): boolean {
+    return this.rope.hasSurrogateCodeUnits;
+  }
+
+  codeUnitAt(index: number): number | undefined {
+    return this.rope.codeUnitAt(index);
+  }
+
+  insert(index: number, text: string): void {
+    this.rope = this.rope.insert(index, text);
+  }
+
+  delete(index: number, length: number): void {
+    this.rope = this.rope.delete(index, length);
+  }
+
+  finish(): PersistentUtf16Rope {
+    return this.rope;
+  }
+}
 
 /**
  * Replay events `[startOffset, endOffset)` of a decoded exact chain onto the
  * document at `startOffset`, coalescing edits while validating every
  * operation.
+ *
+ * No version inside the range is observable, so a long range edits a
+ * one-shot piece index and freezes it once instead of copying a leaf and its
+ * path to the root on every edit.
  */
 export const replayPackedLinear = (
   packed: PackedLinearReplayView,
@@ -13,7 +62,10 @@ export const replayPackedLinear = (
   endOffset: number = packed.count,
   startOffset: number = 0,
 ): PersistentUtf16Rope => {
-  let document = initialDocument;
+  const document: ReplayDocument =
+    endOffset - startOffset >= MIN_TRANSIENT_CHAIN_EVENTS
+      ? new TransientUtf16RopeEditor(initialDocument)
+      : new PersistentReplayDocument(initialDocument);
   let pendingKind: "insert" | "delete" | null = null;
   let pendingIndex = 0;
   let pendingLength = 0;
@@ -22,12 +74,12 @@ export const replayPackedLinear = (
 
   const flush = (): void => {
     if (pendingKind === "insert") {
-      document = document.insert(
+      document.insert(
         pendingIndex,
         packed.sliceInsertedContent(pendingContentStart, pendingContentEnd),
       );
     } else if (pendingKind === "delete") {
-      document = document.delete(pendingIndex, pendingLength);
+      document.delete(pendingIndex, pendingLength);
     }
     pendingKind = null;
     pendingLength = 0;
@@ -91,5 +143,5 @@ export const replayPackedLinear = (
   }
 
   flush();
-  return document;
+  return document.finish();
 };

@@ -78,6 +78,30 @@ describe("packed exact-linear replay", () => {
     expect(replica.getReplayStats().checkpointCount).toBe(32);
   });
 
+  it("replays a long history without one persistent rope edit per event", () => {
+    const graph = new EventGraph();
+    const pieces = Array.from({ length: 1_000 }, (_, index) =>
+      String.fromCharCode(0x21 + (index % 94)),
+    );
+    // Inserts at the start never coalesce, so each is its own rope edit.
+    pieces.forEach((piece, offset) =>
+      addLinearEvent(graph, offset, {
+        type: OPERATION_TYPE.INSERT,
+        index: 0,
+        text: piece,
+      }),
+    );
+    const packed = pack(graph);
+
+    PersistentUtf16Rope.resetInstrumentation();
+    const replica = new EgWalkerReplica("restored", "", packed);
+    const instrumentation = PersistentUtf16Rope.getInstrumentation();
+
+    expect(replica.getText()).toBe([...pieces].reverse().join(""));
+    expect(instrumentation.joins).toBeLessThan(pieces.length / 4);
+    expect(replica.getReplayStats().checkpointCount).toBe(32);
+  });
+
   it("preserves repeated same-index insert order", () => {
     const graph = new EventGraph();
     const pieces = Array.from({ length: 64 }, (_, index) =>

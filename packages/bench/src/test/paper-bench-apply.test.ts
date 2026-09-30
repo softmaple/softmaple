@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { applyRemoteEventsInBatches } from "../bench/paper-bench-apply";
+import {
+  applyRemoteEventsInBatches,
+  applyRemoteEventsOneByOne,
+} from "../bench/paper-bench-apply";
 import {
   EgWalkerReplica,
   OPERATION_TYPE,
@@ -46,6 +49,31 @@ describe("applyRemoteEventsInBatches", () => {
       applyRemoteEventsInBatches(replica, branchAndMergeTrace(), batchEvents),
     ).toThrow(/batch size must be positive/);
     expect(replica.exportEventGraph()).toEqual([]);
+  });
+});
+
+describe("applyRemoteEventsOneByOne", () => {
+  it("makes one receive call per event and preserves trace semantics", () => {
+    const events = branchAndMergeTrace();
+    const replica = new EgWalkerReplica("paper-single");
+
+    const applyCalls = applyRemoteEventsOneByOne(replica, events);
+    const reference = referenceState(events);
+
+    expect(applyCalls).toBe(events.length);
+    expect(replica.getPendingRemoteCount()).toBe(0);
+    expect(replica.getText()).toBe(reference.text);
+    expect(sortedFrontier(replica)).toEqual(reference.frontier);
+    expect(canonicalEvents(replica)).toEqual(reference.events);
+  });
+
+  it("rejects an event that the replica does not integrate", () => {
+    const [root, left] = branchAndMergeTrace();
+    const replica = new EgWalkerReplica("paper-single-buffered");
+
+    expect(() => applyRemoteEventsOneByOne(replica, [left!, root!])).toThrow(
+      /event 0 \(left:0\) was buffered, not integrated/,
+    );
   });
 });
 

@@ -129,20 +129,19 @@ const collectStrictDescendants = (
 ): Set<EventId> => {
   const descendants = new Set<EventId>();
   const stack: EventId[] = [];
-  for (const child of graph.iterateChildren(start)) {
-    stack.push(child);
-  }
+  const pushUnvisited = (child: EventId): void => {
+    if (!descendants.has(child)) {
+      stack.push(child);
+    }
+  };
+  graph.forEachChild(start, pushUnvisited);
   while (stack.length > 0) {
     const current = stack.pop()!;
     if (descendants.has(current)) {
       continue;
     }
     descendants.add(current);
-    for (const child of graph.iterateChildren(current)) {
-      if (!descendants.has(child)) {
-        stack.push(child);
-      }
-    }
+    graph.forEachChild(current, pushUnvisited);
   }
   return descendants;
 };

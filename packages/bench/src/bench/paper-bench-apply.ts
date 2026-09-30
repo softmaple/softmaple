@@ -1,4 +1,8 @@
-import type { EgWalkerReplica, GraphEvent } from "@softmaple/eg-walker";
+import {
+  APPLY_REMOTE_EVENT_STATUS,
+  type EgWalkerReplica,
+  type GraphEvent,
+} from "@softmaple/eg-walker";
 import type { PaperBenchmarkApplyBatchEvents } from "./paper-bench-options";
 
 /**
@@ -28,4 +32,23 @@ export const applyRemoteEventsInBatches = (
     applyCalls++;
   }
   return applyCalls;
+};
+
+/**
+ * Apply a converted paper trace one event at a time, the way a live replica
+ * receives a peer's edits. Returns the number of `applyRemoteEvent` calls.
+ */
+export const applyRemoteEventsOneByOne = (
+  replica: Pick<EgWalkerReplica, "applyRemoteEvent">,
+  events: ReadonlyArray<GraphEvent>,
+): number => {
+  for (const [index, event] of events.entries()) {
+    const { status } = replica.applyRemoteEvent(event);
+    if (status !== APPLY_REMOTE_EVENT_STATUS.Integrated) {
+      throw new Error(
+        `paper trace event ${index} (${event.id}) was ${status}, not integrated`,
+      );
+    }
+  }
+  return events.length;
 };

@@ -75,8 +75,19 @@ const diamonds = (layers: number): GraphEvent[] => {
   return events;
 };
 
-const objectText = (events: ReadonlyArray<GraphEvent>): string =>
-  new EgWalkerReplica("oracle", "", EventGraph.fromEvents(events)).getText();
+/**
+ * The text of one object-engine pass over the whole graph. A replica would
+ * pack the graph for its cold replay, the path these tests check.
+ */
+const objectText = (events: ReadonlyArray<GraphEvent>): string => {
+  const graph = EventGraph.fromEvents(events);
+  const eventOrder = graph.getBranchPreservingTopologicalOrder();
+  return new EgWalkerEngine().generate(eventOrder, "", {
+    eventGraph: graph,
+    eventOrder,
+    collectTransformedOperations: false,
+  }).text;
+};
 
 describe("cold replay ladder", () => {
   it("doubles checkpoint depths behind the trailing window", () => {
@@ -300,6 +311,123 @@ describe("packed prefix with a mutable tail", () => {
     } finally {
       materialized.mockRestore();
     }
+  });
+});
+
+describe("object-only graph", () => {
+  const history = [
+    ...diamonds(20),
+    insert("tail:0", ["merge:19"], 0, "x", 100),
+    insert("tail:1", ["merge:12"], 3, "y", 101),
+    insert("tail:2", ["tail:0", "tail:1"], 1, "z", 102),
+  ];
+
+  it("has no planning view while empty", () => {
+    expect(new EventGraph().getPackedReplayPlanningView()).toBeNull();
+  });
+
+  it("packs every event into one numeric planning view", () => {
+    const graph = EventGraph.fromEvents(history);
+    const events = graph.getAllEvents();
+    const view = graph.getPackedReplayPlanningView()!;
+
+    expect(view.count).toBe(events.length);
+    events.forEach((event, offset) => {
+      expect(view.idAt(offset)).toBe(event.id);
+      expect(view.offsetOf(event.id)).toBe(offset);
+      expect(view.eventAt(offset)).toEqual(event);
+      const children = Array.from(
+        { length: view.childCountAt(offset) },
+        (_, index) => view.idAt(view.childOffsetAt(offset, index)!),
+      );
+      expect(new Set(children)).toEqual(graph.getChildren(event.id));
+    });
+
+    const packedPlan = planPackedCriticalReplaySections(graph)!;
+    const objectPlan = planCriticalReplaySections(graph);
+    expect(packedPlan.sectionCount).toBe(objectPlan.length);
+    objectPlan.forEach((section, sectionIndex) => {
+      expect(
+        packedPlan.eventIdsInSectionRange(sectionIndex, sectionIndex + 1),
+      ).toEqual(section.events.map(({ id }) => id));
+    });
+  });
+
+  it("keeps timestamps that a 32-bit column cannot hold", () => {
+    const graph = EventGraph.fromEvents([
+      insert("a:0", [], 0, "a", 1.5),
+      insert("b:0", [], 0, "b", 2 ** 40),
+      insert("c:0", ["a:0", "b:0"], 0, "c", -3),
+    ]);
+    const view = graph.getPackedReplayPlanningView()!;
+
+    expect([0, 1, 2].map((offset) => view.eventAt(offset)?.timestamp)).toEqual([
+      1.5,
+      2 ** 40,
+      -3,
+    ]);
+  });
+
+  it("drops the pack when the graph changes", () => {
+    const graph = EventGraph.fromEvents(history);
+    const before = graph.getPackedReplayPlanningView()!;
+    expect(graph.getPackedReplayPlanningView()).toBe(before);
+
+    const transaction = graph.beginAppendTransaction();
+    graph.addEvent(insert("tail:3", ["tail:2"], 0, "v", 103));
+    const extended = graph.getPackedReplayPlanningView()!;
+    expect(extended.count).toBe(before.count + 1);
+    expect(extended.idAt(before.count)).toBe("tail:3");
+
+    transaction.rollback();
+    const restored = graph.getPackedReplayPlanningView()!;
+    expect(restored.count).toBe(before.count);
+    expect(restored.offsetOf("tail:3")).toBeUndefined();
+  });
+
+  it("cold-replays without the object planner", () => {
+    const graph = EventGraph.fromEvents(history);
+    const expected = objectText(history);
+    const objectOrder = vi.spyOn(
+      EventGraph.prototype,
+      "getBranchPreservingTopologicalOrder",
+    );
+    const packedRange = vi.spyOn(
+      EgWalkerEngine.prototype,
+      "generatePackedSectionRange",
+    );
+
+    try {
+      const replica = new EgWalkerReplica("reader", "", graph);
+
+      expect(replica.getText()).toBe(expected);
+      expect(objectOrder).not.toHaveBeenCalled();
+      expect(packedRange).toHaveBeenCalled();
+      expect(replica.getReplayStats()).toMatchObject({ fullReplays: 1 });
+    } finally {
+      objectOrder.mockRestore();
+      packedRange.mockRestore();
+    }
+  });
+
+  it("replays like the same graph decoded from EGW3", () => {
+    const late = insert("peer:0", ["merge:3"], 0, "!", 2_000);
+    const object = new EgWalkerReplica(
+      "reader",
+      "",
+      EventGraph.fromEvents(history),
+    );
+    const packed = new EgWalkerReplica("reader", "", pack(history));
+
+    expect(object.getText()).toBe(objectText(history));
+    expect(object.getReplayStats()).toEqual(packed.getReplayStats());
+
+    object.applyRemoteEvent(late);
+    packed.applyRemoteEvent(late);
+
+    expect(object.getText()).toBe(objectText([...history, late]));
+    expect(object.getText()).toBe(packed.getText());
+    expect(object.getReplayStats()).toEqual(packed.getReplayStats());
   });
 });
 

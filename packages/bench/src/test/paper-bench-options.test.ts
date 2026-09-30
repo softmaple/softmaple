@@ -14,9 +14,15 @@ describe("parsePaperBenchmarkApplyApi", () => {
     expect(DEFAULT_PAPER_BENCHMARK_APPLY_API).toBe("causal");
     expect(parsePaperBenchmarkApplyApi("causal")).toBe("causal");
     expect(parsePaperBenchmarkApplyApi("detailed")).toBe("detailed");
+    expect(parsePaperBenchmarkApplyApi("single")).toBe("single");
   });
 
-  it.each(["", "remote", "CAUSAL"])("rejects invalid API %j", (value) => {
+  it.each([
+    "",
+    "remote",
+    "CAUSAL",
+    "SINGLE",
+  ])("rejects invalid API %j", (value) => {
     expect(() => parsePaperBenchmarkApplyApi(value)).toThrow(/apply-api/);
   });
 });

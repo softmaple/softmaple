@@ -28,7 +28,10 @@ import {
   type PaperBenchmarkApplyApi,
   type PaperBenchmarkApplyBatchEvents,
 } from "./paper-bench-options";
-import { applyRemoteEventsInBatches } from "./paper-bench-apply";
+import {
+  applyRemoteEventsInBatches,
+  applyRemoteEventsOneByOne,
+} from "./paper-bench-apply";
 import { loadPaperTraceCausalBatches } from "./paper-trace-causal-batches";
 import {
   buildNativePaperPayload,
@@ -48,6 +51,13 @@ const sourcePackageRoot = resolve(
   "../..",
 );
 const DEFAULT_PAPER_ROOT = paperRootFromPackageRoot(sourcePackageRoot);
+
+/**
+ * How an apply lane checked its text: a whole trace against the dataset's
+ * oracle, a bounded prefix against the causal batch path replaying the same
+ * events, or not at all.
+ */
+type AppliedTextOracle = FinalTextOracleKind | "causalBatch" | "none";
 
 type BenchCase = Pick<
   CliOptions,
@@ -106,7 +116,7 @@ interface ApplyBenchResult {
   readonly events: number;
   readonly finalTextLength: number;
   readonly finalTextValidated: boolean;
-  readonly finalTextOracle: FinalTextOracleKind | "none";
+  readonly finalTextOracle: AppliedTextOracle;
   readonly loadConvertMs: number;
   readonly applyMs: number;
   readonly totalMs: number;
@@ -127,7 +137,7 @@ interface ApplyMemoryResult {
   readonly applyBatchEvents: PaperBenchmarkApplyBatchEvents;
   readonly applyApi: PaperBenchmarkApplyApi;
   readonly events: number;
-  readonly finalTextOracle: FinalTextOracleKind | "none";
+  readonly finalTextOracle: AppliedTextOracle;
   /**
    * Heap used after GC once the trace and batches are released, with the
    * replica still alive. It includes the process's own baseline.
@@ -515,12 +525,16 @@ Options:
   --datasets S1,S2   Comma-separated datasets, or "all". Default: S1
   --runs 3           Number of runs per dataset. Default: 1
   --paper-root PATH  Path to egwalker-paper. Default: ${defaultPaperRoot}
-  --max-txns 100     Limit each dataset to the first N txns; skips final text check
-  --max-events 1000  Limit each dataset to the first N converted events; skips final text check
+  --max-txns 100     Limit each dataset to the first N txns; skips final text check,
+                     except that a bounded detailed or single lane is checked
+                     against the causal batch replay of the same events
+  --max-events 1000  Limit each dataset to the first N converted events; as --max-txns
   --granularity MODE Paper benchmarks require operation. Default: operation
   --apply-batch-events N|all
                      Remote receive batch size. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS}
-  --apply-api MODE   Apply-only ingestion API: causal or detailed. Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_API}
+  --apply-api MODE   Apply-only ingestion API: causal (applyCausalBatch), detailed
+                     (applyRemoteEvents), or single (applyRemoteEvent per event;
+                     ignores --apply-batch-events). Default: ${DEFAULT_PAPER_BENCHMARK_APPLY_API}
   --memory           Also measure graph, portable snapshot, and native snapshot heap deltas
                      in a separate --expose-gc process. With --apply-only, measure the
                      heap and array buffers the ingesting replica retains after GC
@@ -634,6 +648,7 @@ const printApplyResult = (result: ApplyBenchResult): void => {
       `finalTextOracle=${result.finalTextOracle}`,
       `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
       `applyMs=${formatNumber(result.applyMs)}`,
+      `applyUsPerEvent=${formatNumber(result.events === 0 ? 0 : (result.applyMs * 1_000) / result.events)}`,
       `totalMs=${formatNumber(result.totalMs)}`,
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
@@ -1104,11 +1119,11 @@ const runApplyDatasetOnce = (
   const text = replica.getText();
   const appliedAt = performance.now();
   // Validation runs after the timed region so digest oracles add no cost.
-  const finalTextOracle = validateFinalText(
+  const finalTextOracle = validateAppliedText(
     paperRoot,
-    benchCase.dataset,
-    prepared.limited,
-    prepared.endContent,
+    benchCase,
+    applyApi,
+    prepared,
     text,
   );
   printProgress(
@@ -1135,7 +1150,7 @@ const runApplyDatasetOnce = (
     patches: prepared.patchCount,
     events: prepared.eventCount,
     finalTextLength: text.length,
-    finalTextValidated: !prepared.limited,
+    finalTextValidated: finalTextOracle !== "none",
     finalTextOracle,
     loadConvertMs: convertedAt - startedAt,
     applyMs: appliedAt - applyStartedAt,
@@ -1185,12 +1200,51 @@ const prepareApplyBench = (
     limited: loaded.limited,
     endContent: loaded.trace.endContent,
     apply: (replica): number =>
-      applyRemoteEventsInBatches(
-        replica,
-        loaded.events,
-        benchCase.applyBatchEvents,
-      ),
+      applyApi === "single"
+        ? applyRemoteEventsOneByOne(replica, loaded.events)
+        : applyRemoteEventsInBatches(
+            replica,
+            loaded.events,
+            benchCase.applyBatchEvents,
+          ),
   };
+};
+
+/**
+ * Check the text an apply lane produced. A bounded prefix has no dataset
+ * oracle, so a receive lane other than the causal one is checked against
+ * the causal batch path replaying the same events.
+ */
+const validateAppliedText = (
+  paperRoot: string,
+  benchCase: BenchCase,
+  applyApi: PaperBenchmarkApplyApi,
+  prepared: PreparedApplyBench,
+  text: string,
+): AppliedTextOracle => {
+  if (!prepared.limited || applyApi === "causal") {
+    return validateFinalText(
+      paperRoot,
+      benchCase.dataset,
+      prepared.limited,
+      prepared.endContent,
+      text,
+    );
+  }
+  const reference = new EgWalkerReplica(
+    `paper-bench-oracle:${benchCase.dataset}`,
+  );
+  prepareApplyBench(
+    paperRoot,
+    { ...benchCase, applyBatchEvents: "all" },
+    "causal",
+  ).apply(reference);
+  if (reference.getText() !== text) {
+    throw new Error(
+      `${benchCase.dataset}: ${applyApi} text differs from the causal batch replay of the same ${prepared.eventCount} events`,
+    );
+  }
+  return "causalBatch";
 };
 
 /**
@@ -1254,7 +1308,7 @@ const ingestForMemory = (
 ): {
   replica: EgWalkerReplica | null;
   readonly events: number;
-  readonly finalTextOracle: FinalTextOracleKind | "none";
+  readonly finalTextOracle: AppliedTextOracle;
 } => {
   const prepared = prepareApplyBench(paperRoot, benchCase, applyApi);
   const replica = new EgWalkerReplica(
@@ -1267,11 +1321,11 @@ const ingestForMemory = (
       `${benchCase.dataset}: ${pending} remote events remain buffered`,
     );
   }
-  const finalTextOracle = validateFinalText(
+  const finalTextOracle = validateAppliedText(
     paperRoot,
-    benchCase.dataset,
-    prepared.limited,
-    prepared.endContent,
+    benchCase,
+    applyApi,
+    prepared,
     replica.getText(),
   );
   return { replica, events: prepared.eventCount, finalTextOracle };

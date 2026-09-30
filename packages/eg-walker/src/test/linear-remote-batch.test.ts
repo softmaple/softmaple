@@ -5,7 +5,9 @@ import {
   createCausalEventBatchBuilder,
   type CausalEventBatch,
 } from "../core/causal-event-batch";
+import { MAX_RETAINED_CHECKPOINTS } from "../core/internals/critical-checkpoint-store";
 import { EgWalkerReplica } from "../core/replica";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import { APPLY_REMOTE_EVENT_STATUS, type GraphEvent } from "../types";
 import { cloneEvent } from "./test-helpers";
 
@@ -119,6 +121,32 @@ describe("applyRemoteEvents on an exact chain", () => {
       fullReplays: 0,
       incrementalApplies: events.length,
     });
+  });
+
+  it("edits the persistent rope only for the checkpoint window of a long chain", () => {
+    // Inserts at the start never coalesce, so each is its own rope edit.
+    const characters = Array.from({ length: 1_000 }, (_, index) =>
+      String.fromCharCode(0x21 + (index % 94)),
+    );
+    const events = characters.map((character, index) =>
+      insertEvent(
+        `a:${index}`,
+        index === 0 ? [] : [`a:${index - 1}`],
+        0,
+        character,
+        index,
+      ),
+    );
+    const replica = new EgWalkerReplica("receiver");
+
+    PersistentUtf16Rope.resetInstrumentation();
+    const result = replica.applyRemoteEvents(events);
+    const rope = PersistentUtf16Rope.getInstrumentation();
+
+    expect(result.results).toHaveLength(events.length);
+    expect(replica.getText()).toBe([...characters].reverse().join(""));
+    expect(packedTailEvents(replica)).toBe(0);
+    expect(rope.joins).toBeLessThanOrEqual(MAX_RETAINED_CHECKPOINTS);
   });
 
   it("keeps appending batches to the packed chain and merges a concurrent edit", () => {

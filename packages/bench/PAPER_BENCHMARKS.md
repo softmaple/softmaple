@@ -251,6 +251,26 @@ of the process prevents persistence object graphs from contaminating raw apply
 time and peak memory. Use the normal or `--native-only` lanes for persistence
 and cold-load measurements.
 
+`--apply-api` selects the receive API: `causal` (`applyCausalBatch`, the
+default), `detailed` (`applyRemoteEvents`), or `single`, one
+`applyRemoteEvent` call per event, the steady-state path of a live replica.
+`single` ignores `--apply-batch-events`. Every apply line reports
+`applyUsPerEvent` next to `applyMs`. To measure steady-state receive latency
+over the first 100k events:
+
+```bash
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
+  --datasets S3,C1,A1 \
+  --runs 3 \
+  --apply-api single \
+  --max-events 100000 \
+  --apply-only
+```
+
+A bounded run has no dataset oracle. A bounded `detailed` or `single` run is
+instead checked, after the timed region, against `applyCausalBatch` replaying
+the same events, and reports `finalTextOracle=causalBatch`.
+
 Add `--memory` to measure what an ingesting replica retains. After each timed
 run, a separate `node --expose-gc` worker applies the same batches untimed,
 validates the text, releases the trace and batches, and prints a
@@ -414,7 +434,8 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
 
 Every unbounded run validates the final text after its timed region closes.
 Result lines report which oracle was used as
-`finalTextOracle=endContent|referenceDigest` (`none` for bounded runs).
+`finalTextOracle=endContent|referenceDigest` (`none` for bounded runs, except
+`causalBatch` for a bounded `detailed` or `single` apply lane; see above).
 
 | Datasets               | Oracle            | Check                                                 |
 | ---------------------- | ----------------- | ----------------------------------------------------- |

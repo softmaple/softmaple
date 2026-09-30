@@ -5,7 +5,12 @@ export const DEFAULT_PAPER_BENCHMARK_APPLY_BATCH_EVENTS = 4_096;
 export const DEFAULT_PAPER_BENCHMARK_APPLY_API = "causal" as const;
 
 export type PaperBenchmarkApplyBatchEvents = number | "all";
-export type PaperBenchmarkApplyApi = "causal" | "detailed";
+/**
+ * `causal` applies `applyCausalBatch` batches, `detailed` applies
+ * `applyRemoteEvents` batches, and `single` calls `applyRemoteEvent` once per
+ * event, the steady-state receive path of a live replica.
+ */
+export type PaperBenchmarkApplyApi = "causal" | "detailed" | "single";
 
 export const parsePaperBenchmarkGranularity = (
   value: string,
@@ -36,10 +41,10 @@ export const parsePaperBenchmarkApplyBatchEvents = (
 export const parsePaperBenchmarkApplyApi = (
   value: string,
 ): PaperBenchmarkApplyApi => {
-  if (value === "causal" || value === "detailed") {
+  if (value === "causal" || value === "detailed" || value === "single") {
     return value;
   }
   throw new Error(
-    `--apply-api must be "causal" or "detailed", got ${JSON.stringify(value)}`,
+    `--apply-api must be "causal", "detailed" or "single", got ${JSON.stringify(value)}`,
   );
 };

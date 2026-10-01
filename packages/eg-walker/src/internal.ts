@@ -50,6 +50,7 @@ export {
 export type {
   CreateNativeSnapshotOptions,
   NativeSnapshotResumeCacheMode,
+  PrepareReplicaOptions,
   RestoreSnapshotOptions,
 } from "./core/replica";
 export {

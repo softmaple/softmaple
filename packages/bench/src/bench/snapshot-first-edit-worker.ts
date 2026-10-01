@@ -4,7 +4,10 @@
  * prepares the fixtures and starts one fresh process per sample.
  *
  * usage: snapshot-first-edit-worker.mjs <eg-walker/dist/index.js> <fixture-dir>
- *          <label> <local|remote|native|concurrent-<depth>>
+ *          <label> <kind>
+ *
+ * See `SnapshotEditKind` for the kinds. A `trusted-` kind reads the
+ * fixture's `<label>.tag`.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -12,8 +15,12 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import {
+  importBenchAuthenticationKey,
+  isPreparedSnapshotEditKind,
+  measurePreparedSnapshotFirstEdit,
   measureSnapshotFirstEdit,
   parseSnapshotEditKind,
+  warmUpPreparedSnapshotFirstEdit,
   warmUpSnapshotFirstEdit,
   type SnapshotFirstEditApi,
   type SnapshotFirstEditManifest,
@@ -52,13 +59,28 @@ const collectGarbage = (): void => {
 };
 
 warmUpSnapshotFirstEdit(api);
-const result = measureSnapshotFirstEdit(
-  api,
-  bytes,
-  manifest,
-  kind,
-  collectGarbage,
-);
+const result = isPreparedSnapshotEditKind(kind)
+  ? await (async () => {
+      await warmUpPreparedSnapshotFirstEdit(api);
+      const authentication =
+        kind.open === "trusted"
+          ? {
+              tag: new Uint8Array(
+                readFileSync(join(resolve(fixtureDirectory), `${label}.tag`)),
+              ),
+              key: await importBenchAuthenticationKey(),
+            }
+          : null;
+      return measurePreparedSnapshotFirstEdit(
+        api,
+        bytes,
+        manifest,
+        kind,
+        authentication,
+        collectGarbage,
+      );
+    })()
+  : measureSnapshotFirstEdit(api, bytes, manifest, kind, collectGarbage);
 process.stdout.write(
   `${JSON.stringify({
     label,

@@ -4,17 +4,22 @@
  * usage: snapshot-first-edit-prepare.mjs --paper-root PATH --dataset S1
  *          --output DIR [--fraction 1] [--depths 10,1000]
  *
- * Writes `<label>.egwp` (EGWP1 bytes) and `<label>.json` (manifest) to DIR and
- * prints the manifest. A full dataset's text is checked against its final
- * text oracle; a prefix is checked by the snapshot encoder's own replay.
+ * Writes `<label>.egwp` (EGWP1 bytes), `<label>.tag` (their authentication
+ * tag under the bench key, for the `trusted` lanes) and `<label>.json`
+ * (manifest) to DIR and prints the manifest. A full dataset's text is checked
+ * against its final text oracle; a prefix is checked by the snapshot
+ * encoder's own replay.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { parseArgs } from "node:util";
 
+import { PortableSnapshotCodec } from "@softmaple/eg-walker";
+
 import { assertFinalText, loadFinalTextOracle } from "./paper-final-text";
 import { loadPaperTrace, parseDatasetList } from "./paper-traces";
+import { importBenchAuthenticationKey } from "./snapshot-first-edit";
 import { buildSnapshotFirstEditFixture } from "./snapshot-first-edit-fixture";
 
 const { values } = parseArgs({
@@ -67,8 +72,16 @@ if (!limited) {
   );
 }
 
+// The bytes left this process's encoder, so authenticating them proves them
+// with one more replay first.
+const tag = await new PortableSnapshotCodec().authenticate(
+  fixture.bytes,
+  await importBenchAuthenticationKey(),
+);
+
 mkdirSync(resolve(output), { recursive: true });
 writeFileSync(join(resolve(output), `${label}.egwp`), fixture.bytes);
+writeFileSync(join(resolve(output), `${label}.tag`), tag);
 writeFileSync(
   join(resolve(output), `${label}.json`),
   `${JSON.stringify(fixture.manifest, null, 2)}\n`,

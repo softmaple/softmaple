@@ -13,6 +13,7 @@ import { crc32 } from "../internals/crc32";
 import { EventIdRunIndex } from "../internals/event-id-run-index";
 import { assertWithinEventLimit } from "../internals/event-limit";
 import { GraphRuns } from "../internals/graph-runs";
+import type { Steps } from "../internals/steps";
 import {
   PACKED_OPERATION_TYPE,
   PackedEventGraphBase,
@@ -52,7 +53,9 @@ interface OperationColumns {
 }
 
 /**
- * Decode an EGW4 payload (see `egw4-format.ts`) into a packed graph.
+ * Decode an EGW4 payload (see `egw4-format.ts`) into a packed graph, in
+ * steps of one or two columns each for a caller that must pause between
+ * them. `bytes` must not change until the generator returns.
  *
  * The checksum is verified before anything else is read, and every column is
  * validated as it is decoded. IDs stay in the run index and parents are
@@ -60,10 +63,10 @@ interface OperationColumns {
  * declaring more than `maxEvents` events is rejected before any per-event
  * column is allocated.
  */
-export const decodeEgw4Graph = (
+export function* decodeEgw4GraphSteps(
   bytes: Uint8Array,
   maxEvents = Number.POSITIVE_INFINITY,
-): EventGraph => {
+): Steps<EventGraph> {
   const reader = new BinaryReader(verifyChecksum(bytes));
   const magic = reader.readByteView(reader.readVarint());
   if (
@@ -83,21 +86,27 @@ export const decodeEgw4Graph = (
   assertWithinEventLimit(count, maxEvents);
   const strings = readStrings(reader);
   const idRuns = readIdRuns(reader, strings, count);
+  yield;
   const overrides = readParentOverrides(reader, count);
+  yield;
   const operationLengths = readLengths(reader, count);
   const operations = readOperations(reader, count, operationLengths);
+  yield;
   const insertedContent = readInsertedContent(
     reader,
     operations,
     operationLengths,
   );
+  yield;
   const timestamps = readTimestamps(reader, count);
   const metadata = readMetadata(reader);
   if (reader.remainingByteLength !== 0) {
     throw new Error("Invalid eg-walker columnar graph: trailing bytes");
   }
+  yield;
 
   const idIndex = EventIdRunIndex.fromRuns(idRuns, count).view();
+  yield;
   const runs =
     overrides.explicit.length === 0
       ? GraphRuns.linear(count)
@@ -107,6 +116,7 @@ export const decodeEgw4Graph = (
           overrides.parentStarts,
           overrides.parents,
         );
+  yield;
   // Only the last event of a run can lack a child.
   const frontier = new Set<EventId>();
   for (let run = 0; run < runs.count; run++) {
@@ -125,7 +135,7 @@ export const decodeEgw4Graph = (
     runs,
   });
   return EventGraph.fromPackedBase(base, frontier, metadata);
-};
+}
 
 /** The payload without its checksum, once the checksum matches. */
 const verifyChecksum = (bytes: Uint8Array): Uint8Array => {

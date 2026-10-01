@@ -113,11 +113,85 @@ console.log(replica.getText()); // "Hello, !"
 const serialized = replica.serialize();
 ```
 
+## Opening a portable snapshot
+
+`EgWalkerReplica.fromPortableSnapshot` returns in a few milliseconds. It
+checks the snapshot header and serves the text, but leaves the event graph
+encoded. Before the replica can apply an edit or a remote event, it has to
+decode the graph and, unless the snapshot is trusted, replay the whole history
+once to prove that the text matches it. That proof costs about as much as a
+cold load of the history: 0.2–3 s on the paper traces. Run it before the user
+can type:
+
+```typescript
+const codec = new PortableSnapshotCodec();
+const replica = EgWalkerReplica.fromPortableSnapshot(
+  codec.decode(bytes),
+  replicaId,
+);
+showReadOnly(replica.getText());
+await replica.prepare();
+enableEditing(); // edits now cost what they cost on a live replica
+```
+
+`prepare()` works in slices of about 8 ms (`sliceMs`) and yields to the host
+between them (`yieldToHost`; by default `scheduler.yield()`, `setImmediate`, a
+`MessageChannel` message or `setTimeout`), so it does not hold up input or
+rendering. Text reads work while it runs. An edit or remote event that arrives
+first does the remaining work synchronously, as it would without `prepare()`,
+and the promise settles with it. A snapshot whose text does not match its
+history makes `prepare()` reject before any local event is created, and the
+replica stays as restored. Pass `signal` to stop preparing, for example when
+the document closes. `isPrepared()` tells whether the work is done.
+
+The proof, and the replay state it leaves, belong to the JavaScript realm that
+ran it. It cannot run in a Worker and be handed to the main thread. To keep it
+off the main thread, host the replica itself in a Worker, where
+`prepare({ sliceMs: Infinity })` prepares in one task, and send it operations.
+
+### Trusted snapshots
+
+A snapshot created from live state in this process, and bytes encoded from
+one, are trusted and skip the proof. To keep that across reloads for
+snapshots the app wrote itself, authenticate the bytes with an HMAC key the app
+holds:
+
+```typescript
+// Once: a non-extractable key, kept with the app's local storage.
+const key = await crypto.subtle.generateKey(
+  { name: "HMAC", hash: "SHA-256" },
+  false,
+  ["sign", "verify"],
+);
+
+// Save.
+const bytes = codec.encode(replica.createPortableSnapshot());
+const tag = await codec.authenticate(bytes, key);
+await store.put(documentId, { bytes, tag });
+
+// Open.
+const saved = await store.get(documentId);
+const restored = EgWalkerReplica.fromPortableSnapshot(
+  await codec.decodeAuthenticated(saved.bytes, saved.tag, key),
+  replicaId,
+);
+await restored.prepare(); // decodes the graph; no proof replay
+```
+
+`authenticate` tags only proven snapshots: it replays bytes it did not encode
+in this process first, and rejects them if their text does not match.
+`decodeAuthenticated` rejects changed bytes, a changed tag, or another key;
+such bytes can still be opened as untrusted with `decode`. Bytes from anywhere
+else, such as a server or another device, stay untrusted and are proven in
+full.
+
 ## Main APIs
 
 Stable surface (`@softmaple/eg-walker`):
 
 - `EgWalkerReplica` / `createEgWalkerReplica`: public index-based editing API.
+- `PortableSnapshotCodec`: EGWP1 bytes for portable snapshots, with optional
+  HMAC authentication for snapshots the app wrote itself.
 - `ReplayWalker`: one-shot graph replay coordinator.
 - `EventGraph`: persistent event DAG.
 - `OPERATION_TYPE` and TypeScript types.

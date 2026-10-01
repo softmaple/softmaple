@@ -4,8 +4,9 @@
  *
  * Graphs are generated in topological order with every shape the format
  * has a special case for: typing, delete-key and backspace runs next to
- * arbitrary edits, empty and non-BMP text, indexes and lengths beyond 32
- * bits, roots after the first event, merges of more than three parents,
+ * arbitrary edits, empty and non-BMP text, indexes and lengths anywhere in
+ * the safe integer range (so consecutive edits can be 2^52 or more apart),
+ * roots after the first event, merges of more than three parents,
  * replica runs that continue or jump, custom IDs and timestamps that step,
  * repeat or jump anywhere in the 51-bit range.
  */
@@ -150,7 +151,7 @@ const TIMESTAMP_LIMIT = 2 ** 50;
 const bigNatArb = (bits: bigint): fc.Arbitrary<number> =>
   fc.bigInt({ min: 0n, max: 2n ** bits }).map(Number);
 
-const indexArb = fc.oneof(fc.nat(), bigNatArb(40n));
+const indexArb = fc.oneof(fc.nat(), bigNatArb(40n), fc.maxSafeNat());
 
 const timestampArb = fc
   .bigInt({ min: -BigInt(TIMESTAMP_LIMIT), max: BigInt(TIMESTAMP_LIMIT) })
@@ -268,14 +269,14 @@ const operationAfter = (
     case "type":
       return {
         type: OPERATION_TYPE.INSERT,
-        index: previousEnd,
+        index: fitIndex(previousEnd, edit.text.length),
         text: edit.text,
       };
     case "delete-key":
       return {
         type: OPERATION_TYPE.DELETE,
         index: previousIndex,
-        length: edit.length,
+        length: fitLength(previousIndex, edit.length),
       };
     case "backspace":
       return {
@@ -286,17 +287,25 @@ const operationAfter = (
     case "insert":
       return {
         type: OPERATION_TYPE.INSERT,
-        index: edit.index,
+        index: fitIndex(edit.index, edit.text.length),
         text: edit.text,
       };
     case "delete":
       return {
         type: OPERATION_TYPE.DELETE,
         index: edit.index,
-        length: edit.length,
+        length: fitLength(edit.index, edit.length),
       };
   }
 };
+
+/** `index`, moved back so an operation of `length` ends in the safe range. */
+const fitIndex = (index: number, length: number): number =>
+  Math.min(index, Number.MAX_SAFE_INTEGER - length);
+
+/** `length`, shortened so an operation at `index` ends in the safe range. */
+const fitLength = (index: number, length: number): number =>
+  Math.min(length, Number.MAX_SAFE_INTEGER - index);
 
 const timestampAfter = (
   timestamp: number | null,

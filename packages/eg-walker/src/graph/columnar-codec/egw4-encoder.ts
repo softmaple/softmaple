@@ -10,6 +10,7 @@ import {
   EGW4_MIN_REPEAT,
   EGW4_SEGMENT,
   EGW4_SPAN,
+  wrapAnchorDelta,
 } from "./egw4-format";
 
 /**
@@ -347,7 +348,7 @@ const writeOperationSpans = (
       }
     }
     writer.writeVarint((end - position) * 4 + kind);
-    writer.writeZigZagVarint(anchor - cursor);
+    writer.writeZigZagVarint(wrapAnchorDelta(anchor, cursor));
     cursor = cursorAfter;
     position = end;
   }

@@ -100,6 +100,28 @@ describe("encodeTopologicallyOrderedEventsBinary", () => {
     );
   });
 
+  it("should write a jump of 2^52 or more the short way around 2^53", () => {
+    // Arrange
+    const events = [event("a:0", [], insert(2 ** 53 - 2, "x"), 0)];
+
+    // Act
+    const { binary } = encodeTopologicallyOrderedEventsBinary(events);
+
+    // Assert
+    expect(hex(binary)).toBe(
+      hex(
+        payload({
+          count: [0x01],
+          idRuns: [0x00, 0x02],
+          lengths: [0x03, 0x01],
+          operations: [0x04, 0x03], // insert at cursor - 2, modulo 2^53
+          content: lz4Text("x"),
+          timestamps: [0x06, 0x00],
+        }),
+      ),
+    );
+  });
+
   it("should reject an operation that ends beyond the safe integer range", () => {
     // Arrange
     const events = [event("a:0", [], remove(Number.MAX_SAFE_INTEGER, 1), 0)];
@@ -164,6 +186,32 @@ describe("ColumnarEventGraphCodec.decodeBinary", () => {
       event("a:1", ["a:0"], remove(2 ** 34, 2 ** 35), 2 ** 45),
       event("a:2", ["a:1"], insert(0, "y"), 0),
     ];
+    const { binary } = encodeTopologicallyOrderedEventsBinary(events);
+
+    // Act
+    const decoded = new ColumnarEventGraphCodec().decodeBinary(binary);
+
+    // Assert
+    expect(eventsOf(decoded)).toEqual(events);
+  });
+
+  it.each<readonly [string, ReadonlyArray<ExternalOperation>]>([
+    [
+      "a backspace anchored 2^52 past the cursor",
+      [remove(1, 2 ** 52), remove(0, 1)],
+    ],
+    [
+      "an insert 2^52 before where the previous insert ended",
+      [insert(2 ** 52 - 1, "0123456789"), insert(0, "x")],
+    ],
+    [
+      "a delete 2^52 past the previous insert",
+      [insert(0, "x"), remove(2 ** 52 + 5, 1)],
+    ],
+    ["a delete at the last safe index", [remove(Number.MAX_SAFE_INTEGER, 0)]],
+  ])("should decode %s", (_name, operations) => {
+    // Arrange
+    const events = chain(operations);
     const { binary } = encodeTopologicallyOrderedEventsBinary(events);
 
     // Act
@@ -407,7 +455,8 @@ describe("ColumnarEventGraphCodec.decodeBinary", () => {
       error: /Operation span at event offset 0 has invalid length 4/,
     },
     {
-      name: "a span anchored before the document",
+      // The anchor wraps to 2^53 - 1, so the first insert ends at 2^53.
+      name: "an insert that ends beyond the safe integer range",
       sections: { operations: [0x0c, 0x01] },
       error: /Invalid operation index at event offset 0/,
     },
@@ -505,6 +554,17 @@ const event = (
   operation,
   timestamp,
 });
+
+/** Events a:0, a:1, … applying `operations`, each the parent of the next. */
+const chain = (operations: ReadonlyArray<ExternalOperation>): GraphEvent[] =>
+  operations.map((operation, index) =>
+    event(
+      `a:${index}`,
+      index === 0 ? [] : [`a:${index - 1}`],
+      operation,
+      index,
+    ),
+  );
 
 /** Events in their topological order, as `GraphEvent`s. */
 const eventsOf = (graph: EventGraph): GraphEvent[] =>

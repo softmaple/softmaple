@@ -27,6 +27,7 @@ import {
   EGW4_MAX_EVENTS,
   EGW4_SEGMENT,
   EGW4_SPAN,
+  unwrapAnchor,
 } from "./egw4-format";
 import { strictMetadata } from "./graph-validation";
 import type { IdRun } from "./types";
@@ -452,10 +453,7 @@ const readOperationSpansInto = (
         `Operation span at event offset ${filled} has invalid length ${length}`,
       );
     }
-    const anchor = cursor + reader.readZigZagVarint();
-    if (!Number.isSafeInteger(anchor) || anchor < 0) {
-      throw new Error(`Invalid operation index at event offset ${filled}`);
-    }
+    const anchor = unwrapAnchor(cursor, reader.readZigZagVarint());
     const end = filled + length;
     if (kind === EGW4_SPAN.INSERT) {
       let index = anchor;

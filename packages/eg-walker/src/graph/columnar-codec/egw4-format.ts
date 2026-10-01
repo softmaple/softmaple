@@ -37,6 +37,9 @@
  *               starts, and the anchor is where the first event ends.
  *             The cursor starts at 0 and moves to where an insert span ended,
  *             to a delete span's anchor, or to a backspace span's last index.
+ *             anchor - cursor is taken modulo 2^53 into -2^52 to 2^52 - 1,
+ *             so its zigzag varint is safe for any two positions up to
+ *             Number.MAX_SAFE_INTEGER.
  * content     bytes: LZ4 frame of the inserted text, as UTF-8, in event order
  * timestamps  delta segments covering N values:
  *               varint count * 4 + mode
@@ -87,3 +90,35 @@ export const EGW4_CHECKSUM_BYTES = 4;
  * every payload they write decodes.
  */
 export const EGW4_MAX_EVENTS = 2 ** 25;
+
+/** Span positions wrap modulo 2^53, the count of non-negative safe integers. */
+const POSITION_MODULUS = 2 ** 53;
+const HALF_POSITION_MODULUS = 2 ** 52;
+
+/**
+ * `anchor - cursor` modulo 2^53, from -2^52 to 2^52 - 1, for two positions
+ * from 0 to `Number.MAX_SAFE_INTEGER`.
+ */
+export const wrapAnchorDelta = (anchor: number, cursor: number): number => {
+  const delta = anchor - cursor;
+  if (delta >= HALF_POSITION_MODULUS) {
+    return delta - POSITION_MODULUS;
+  }
+  if (delta < -HALF_POSITION_MODULUS) {
+    return delta + POSITION_MODULUS;
+  }
+  return delta;
+};
+
+/**
+ * The position from 0 to `Number.MAX_SAFE_INTEGER` that a wrapped `delta`
+ * takes `cursor` to. Every intermediate value stays safe, so it is exact.
+ */
+export const unwrapAnchor = (cursor: number, delta: number): number => {
+  if (delta >= 0) {
+    const headroom = POSITION_MODULUS - cursor;
+    return delta < headroom ? cursor + delta : delta - headroom;
+  }
+  const anchor = cursor + delta;
+  return anchor >= 0 ? anchor : anchor + POSITION_MODULUS;
+};

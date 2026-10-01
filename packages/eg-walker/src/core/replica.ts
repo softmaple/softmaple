@@ -27,6 +27,10 @@ import type {
   SerializedGraphOutput,
 } from "../types";
 import { compareEventIds } from "../graph/event-id";
+import {
+  assertWithinEventLimit,
+  eventLimitOf,
+} from "../graph/internals/event-limit";
 import { MaxHeap } from "../graph/internals/max-heap";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import { TransientUtf16RopeEditor } from "../text/transient-utf16-rope";
@@ -128,6 +132,17 @@ export interface CreateNativeSnapshotOptions {
    * - `"rebuild"`: replay the graph when sequence/delete state is missing.
    */
   readonly resumeCache?: NativeSnapshotResumeCacheMode;
+}
+
+/** Options for restoring a replica from a snapshot. */
+export interface RestoreSnapshotOptions {
+  /**
+   * Most events the snapshot may hold. A snapshot whose header declares
+   * more is rejected before its event graph is decoded, and the graph may
+   * not declare more events than the header. Set it when the snapshot bytes
+   * may be untrusted: a few bytes of graph can declare millions of events.
+   */
+  readonly maxEvents?: number;
 }
 
 // Release large caches at a critical cut, but keep an active concurrent
@@ -492,7 +507,7 @@ export class EgWalkerReplica {
 
   /**
    * Create the paper-style persistence boundary: materialized text plus the
-   * EGW3 event graph and the minimum metadata needed to continue authoring.
+   * EGW4 event graph and the minimum metadata needed to continue authoring.
    * Runtime sequence records, delete targets, checkpoints, and replay caches
    * are deliberately excluded.
    */
@@ -553,7 +568,9 @@ export class EgWalkerReplica {
   static fromNativeSnapshot(
     snapshot: NativeSnapshot,
     replicaId: string = "native-snapshot-replica",
+    options: RestoreSnapshotOptions = {},
   ): EgWalkerReplica {
+    const maxEvents = eventLimitOf(options.maxEvents);
     const graphSource = consumeDecodedNativeSnapshotGraphSource(snapshot);
     const runtimeState = consumeDecodedNativeSnapshotRuntimeState(snapshot);
     let lazyEventGraph: LazyEventGraphSource | undefined;
@@ -564,6 +581,7 @@ export class EgWalkerReplica {
       graphSource === undefined
         ? (() => {
             const fullSnapshot = validateNativeSnapshot(snapshot);
+            assertWithinEventLimit(fullSnapshot.eventCount, maxEvents);
             sequenceRecords = fullSnapshot.sequenceRecords;
             deleteTargets = fullSnapshot.deleteTargets;
             graph = EventGraph.deserialize(fullSnapshot.eventGraph);
@@ -572,6 +590,7 @@ export class EgWalkerReplica {
           })()
         : (() => {
             const header = validateNativeSnapshotHeaderOnly(snapshot);
+            assertWithinEventLimit(header.eventCount, maxEvents);
             lazyEventGraph = (): EventGraph => {
               const graph = graphSource();
               validateGraphMatchesSnapshot(graph, header);
@@ -665,8 +684,11 @@ export class EgWalkerReplica {
   static fromPortableSnapshot(
     snapshot: PortableSnapshot,
     replicaId: string = "portable-snapshot-replica",
+    options: RestoreSnapshotOptions = {},
   ): EgWalkerReplica {
+    const maxEvents = eventLimitOf(options.maxEvents);
     const validated = validatePortableSnapshotHeaderOnly(snapshot);
+    assertWithinEventLimit(validated.eventCount, maxEvents);
     return new EgWalkerReplica(replicaId, validated.initialText, undefined, {
       skipReplay: true,
       restoredText: validated.text,

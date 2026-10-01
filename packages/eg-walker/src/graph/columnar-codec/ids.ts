@@ -1,5 +1,5 @@
 import type { EventId, GraphEvent } from "../../types";
-import { BinaryReader, BinaryWriter } from "../internals/binary-io";
+import type { BinaryReader } from "../internals/binary-io";
 import { parseEventId } from "../event-id";
 import type { IdRun } from "./types";
 
@@ -44,25 +44,10 @@ export const encodeIdRuns = (events: ReadonlyArray<GraphEvent>): IdRun[] => {
 };
 
 /**
- * Id runs are written in topological order, so `startEventOffset` is the
- * prefix sum of run lengths and never needs to be on the wire. The
- * `custom` flag is packed into the low bit of the length-prefix to save a
- * byte per run on the common (non-custom) case. Uses safe-integer
- * arithmetic rather than 32-bit bitwise ops so the encoding stays correct
- * for run lengths up to 2^52.
+ * Read EGW3 ID runs. Runs are in topological order, so `startEventOffset` is
+ * the prefix sum of run lengths and is not on the wire; the `custom` flag is
+ * the low bit of the length varint.
  */
-export const writeIdRuns = (
-  writer: BinaryWriter,
-  runs: ReadonlyArray<IdRun>,
-): void => {
-  writer.writeVarint(runs.length);
-  for (const run of runs) {
-    writer.writeString(run.replicaId);
-    writer.writeVarint(run.startSequence);
-    writer.writeVarint(run.length * 2 + (run.custom ? 1 : 0));
-  }
-};
-
 export const readIdRuns = (reader: BinaryReader): IdRun[] => {
   const length = reader.readVarint();
   const runs: IdRun[] = [];

@@ -13,7 +13,7 @@ export type PackedIntegerColumn = Int32Array | Uint32Array | Float64Array;
  *
  * Callers validate values before reaching this persistence boundary. Returning
  * the original Float64Array for a wide value preserves the full safe-integer
- * EGW3 wire range without an extra allocation.
+ * columnar wire range without an extra allocation.
  */
 export const compactUnsignedIntegerColumn = (
   values: PackedUnsignedIntegerColumn,

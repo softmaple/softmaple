@@ -8,6 +8,7 @@
 export { EventGraph } from "./event-graph";
 export {
   ColumnarEventGraphCodec,
+  type ColumnarDecodeOptions,
   type ColumnarEventGraph,
   type IdRun,
   type OperationRun,

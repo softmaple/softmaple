@@ -306,6 +306,71 @@ describe("EgWalkerReplica native snapshots", () => {
     );
   });
 
+  it("should restore a snapshot within maxEvents and reject a larger one", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const bytes = codec.encode(replica.createNativeSnapshot());
+
+    // Act
+    const restoreWithin = (maxEvents: number) => () =>
+      EgWalkerReplica.fromNativeSnapshot(codec.decode(bytes), "alice", {
+        maxEvents,
+      });
+
+    // Assert
+    expect(restoreWithin(2)().getText()).toBe("AB");
+    expect(restoreWithin(1)).toThrow(
+      "Graph event count 2 exceeds the limit of 1 events",
+    );
+  });
+
+  it("should apply maxEvents to a snapshot that was not decoded from bytes", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const snapshot = replica.createNativeSnapshot();
+
+    // Act
+    const restore = () =>
+      EgWalkerReplica.fromNativeSnapshot(snapshot, "alice", { maxEvents: 1 });
+
+    // Assert
+    expect(restore).toThrow(
+      "Graph event count 2 exceeds the limit of 1 events",
+    );
+  });
+
+  it("should reject a lazy binary snapshot graph with more events than the header", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const snapshot = replica.createNativeSnapshot();
+    const bytes = nativeSnapshotBytes(
+      {
+        formatVersion: snapshot.formatVersion,
+        text: snapshot.text,
+        initialText: snapshot.initialText,
+        currentVersion: snapshot.currentVersion,
+        eventCount: snapshot.eventCount - 1,
+        nextSequenceNumber: snapshot.nextSequenceNumber,
+      },
+      EventGraph.deserialize(snapshot.eventGraph),
+    );
+
+    // Act
+    const decoded = new NativeSnapshotCodec().decode(bytes);
+
+    // Assert
+    expect(() => decoded.eventGraph).toThrow(
+      "Graph event count 2 exceeds the limit of 1 events",
+    );
+  });
+
   it("should persist sequence records for bulk ranked-sequence restore", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
@@ -884,6 +949,23 @@ describe("EgWalkerReplica native snapshots", () => {
     );
   });
 });
+
+/** EGWS1 bytes holding `header` as JSON followed by `graph` as EGW4. */
+const nativeSnapshotBytes = (
+  header: Record<string, unknown>,
+  graph: EventGraph,
+): Uint8Array => {
+  const body = new BinaryWriter();
+  body.writeBytes(new TextEncoder().encode(JSON.stringify(header)));
+  body.writeBytes(new ColumnarEventGraphCodec().encodeBinary(graph));
+  const payload = body.toUint8Array();
+  const bytes = new Uint8Array(
+    NATIVE_SNAPSHOT_FORMAT_VERSION.length + payload.byteLength,
+  );
+  bytes.set(new TextEncoder().encode(NATIVE_SNAPSHOT_FORMAT_VERSION));
+  bytes.set(payload, NATIVE_SNAPSHOT_FORMAT_VERSION.length);
+  return bytes;
+};
 
 const encodeLegacyRuntimeState = (
   sequenceRecords: ReadonlyArray<EngineSequenceRecord>,

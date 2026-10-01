@@ -125,7 +125,7 @@ samples to `runs.jsonl`.
 
 `snapshot-first-edit-bench` opens a paper dataset with
 `EgWalkerReplica.fromPortableSnapshot` and times the first edit, which pays for
-the lazy EGW3 decode and the snapshot's text validation, and the edit after it.
+the lazy graph decode and the snapshot's text validation, and the edit after it.
 Each lane runs in a fresh process, because once one edit has paid for the lazy
 work every later operation measures something else:
 
@@ -134,15 +134,17 @@ work every later operation measures something else:
 | `local`                 | `insert(0, …)`                                                                               | another local insert        |
 | `remote`                | a caught-up peer's insert on the snapshot frontier                                           | the same peer's next insert |
 | `concurrent-<d>`        | a peer's insert whose parent is `d` events before the history end                            | the same peer's next insert |
-| `native`                | cold load of the same EGW3 bytes (`nativeLoadMs`), for comparison                            | —                           |
-| `native-concurrent-<d>` | after a cold load of the decoded EGW3 graph, a peer's insert whose parent is `d` events back | the same peer's next insert |
+| `native`                | cold load of the same graph bytes (`nativeLoadMs`), for comparison                           | —                           |
+| `native-concurrent-<d>` | after a cold load of the decoded graph, a peer's insert whose parent is `d` events back      | the same peer's next insert |
 
 The driver prepares one EGWP1 snapshot per dataset (and prefix) with this
 checkout's eg-walker, outside any timed region, and measures every
 implementation against the same bytes. Every process checks the edited text:
 exactly for `local` and `remote`, and for the concurrent lanes by removing both
 inserted markers and comparing with the snapshot text. The driver also requires
-every implementation to produce the same final text.
+every implementation to produce the same final text. An EGW4 build reads EGW3
+graphs but an EGW3 build cannot read EGW4, so to compare an EGW3 base with an
+EGW4 head, run the driver from the base checkout.
 
 ```bash
 pnpm exec turbo run build --filter=@softmaple/eg-walker

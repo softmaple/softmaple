@@ -32,6 +32,7 @@ export {
 } from "./engine/partial-replay";
 export {
   ColumnarEventGraphCodec,
+  type ColumnarDecodeOptions,
   type ColumnarEventGraph,
   type IdRun,
   type OperationRun,
@@ -49,6 +50,7 @@ export {
 export type {
   CreateNativeSnapshotOptions,
   NativeSnapshotResumeCacheMode,
+  RestoreSnapshotOptions,
 } from "./core/replica";
 export {
   PORTABLE_SNAPSHOT_FORMAT_VERSION,

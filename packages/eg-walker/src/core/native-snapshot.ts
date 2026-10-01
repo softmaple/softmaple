@@ -260,7 +260,10 @@ const createMemoizedGraphSource = (
   return () => {
     graphBytes ??= decodeCompressedSection(sectionBytes);
     if (graph === null) {
-      graph = columnarCodec.decodeBinary(graphBytes);
+      // The header count bounds the graph before its columns are allocated.
+      graph = columnarCodec.decodeBinary(graphBytes, {
+        maxEvents: header.eventCount,
+      });
       validateGraphMatchesHeader(graph, header);
     }
     return graph;

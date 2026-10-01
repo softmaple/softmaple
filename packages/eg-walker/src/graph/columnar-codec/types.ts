@@ -35,6 +35,16 @@ export interface ColumnarEventGraph {
   readonly metadata?: Record<string, unknown>;
 }
 
+/** Options for decoding a columnar graph from bytes. */
+export interface ColumnarDecodeOptions {
+  /**
+   * Most events the payload may declare, checked before any per-event
+   * column is read. Unset, only the format's own limit applies
+   * (`EGW4_MAX_EVENTS` for EGW4). Set it when the bytes may be untrusted.
+   */
+  readonly maxEvents?: number;
+}
+
 /**
  * Partial operation run as read from the binary wire: only `type`,
  * `startEventOffset` (the prefix sum of run lengths), and `length` are

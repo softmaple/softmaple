@@ -1,6 +1,6 @@
 /**
  * First-edit latency after `EgWalkerReplica.fromPortableSnapshot`, or after a
- * cold load of the decoded EGW3 graph, on the paper datasets. Prepares one
+ * cold load of the decoded graph, on the paper datasets. Prepares one
  * EGWP1 snapshot per dataset (and prefix) with this checkout's eg-walker, then
  * measures every lane in a fresh process per sample, alternating
  * implementation order between runs.
@@ -250,7 +250,7 @@ function formatTable(cases, results) {
     { title: "Snapshot decode", kind: null, key: "decodeMs" },
     { title: "Restore (`fromPortableSnapshot`)", kind: null, key: "restoreMs" },
     {
-      title: "Cold load of the same EGW3 (`nativeLoadMs`)",
+      title: "Cold load of the same graph bytes (`nativeLoadMs`)",
       kind: "native",
       key: "nativeLoadMs",
     },

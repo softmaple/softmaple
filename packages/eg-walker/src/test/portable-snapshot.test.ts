@@ -136,7 +136,7 @@ describe("PortableSnapshot", () => {
     expect(restored.exportEventGraph().at(-1)?.id).toBe("alice:1");
   });
 
-  it("answers text reads before lazily decoding the EGW3 graph", () => {
+  it("answers text reads before lazily decoding the columnar graph", () => {
     const source = createConcurrentReplica();
     const codec = new PortableSnapshotCodec();
     const bytes = codec.encode(source.createPortableSnapshot());
@@ -156,6 +156,46 @@ describe("PortableSnapshot", () => {
     } finally {
       decode.mockRestore();
     }
+  });
+
+  it("restores within maxEvents and rejects a larger snapshot before decoding its graph", () => {
+    // Arrange
+    const snapshot = createConcurrentReplica().createPortableSnapshot();
+    const unreadableGraph = { ...snapshot, eventGraph: new Uint8Array([0xff]) };
+    const count = snapshot.eventCount;
+
+    // Act
+    const restored = EgWalkerReplica.fromPortableSnapshot(snapshot, "r", {
+      maxEvents: count,
+    });
+    const restoreOverLimit = () =>
+      EgWalkerReplica.fromPortableSnapshot(unreadableGraph, "r", {
+        maxEvents: count - 1,
+      });
+
+    // Assert
+    expect(restored.exportEventGraph()).toHaveLength(count);
+    expect(restoreOverLimit).toThrow(
+      `Graph event count ${count} exceeds the limit of ${count - 1} events`,
+    );
+  });
+
+  it("rejects a graph that declares more events than the snapshot header", () => {
+    // Arrange
+    const snapshot = createConcurrentReplica().createPortableSnapshot();
+    const count = snapshot.eventCount;
+    const restored = EgWalkerReplica.fromPortableSnapshot({
+      ...snapshot,
+      eventCount: count - 1,
+    });
+
+    // Act
+    const exportGraph = () => restored.exportEventGraph();
+
+    // Assert
+    expect(exportGraph).toThrow(
+      `Graph event count ${count} exceeds the limit of ${count - 1} events`,
+    );
   });
 
   it("detaches lazy graph bytes from the decoded snapshot", () => {
@@ -344,7 +384,7 @@ describe("PortableSnapshot", () => {
     );
   });
 
-  it("excludes all native runtime state from the object and EGW3 graph", () => {
+  it("excludes all native runtime state from the object and columnar graph", () => {
     const source = createConcurrentReplica();
     const snapshot = source.createPortableSnapshot();
     const graph = new ColumnarEventGraphCodec().decodeBinary(
@@ -420,7 +460,7 @@ describe("PortableSnapshot", () => {
     const trailingGraph = new Uint8Array(snapshot.eventGraph.length + 1);
     trailingGraph.set(snapshot.eventGraph);
     expect(encode({ eventGraph: trailingGraph })).toThrow(
-      /columnar graph: trailing bytes/,
+      /columnar graph: checksum mismatch/,
     );
 
     const encoded = codec.encode(snapshot);

@@ -1,6 +1,6 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import type { ExternalOperation, GraphEvent } from "../../types";
-import { BinaryReader, BinaryWriter } from "../internals/binary-io";
+import type { BinaryReader } from "../internals/binary-io";
 import type {
   ColumnarEventGraph,
   OperationRun,
@@ -48,23 +48,10 @@ export const encodeOperationRuns = (
 };
 
 /**
- * Binary form of an operation run is just `(type, length)`. The other
- * fields on the in-memory `OperationRun` (`startIndex`, `startEventOffset`,
- * `textLength`) are all derivable from the other columns and are
- * reconstructed by {@link readOperationRuns} using `operationIndexes` and
- * `operationLengths`.
+ * Read EGW3 operation runs. On the wire a run is just `(type, length)`;
+ * `startEventOffset` is the prefix sum of run lengths, and the EGW3 decoder
+ * takes indexes and lengths from their own columns.
  */
-export const writeOperationRuns = (
-  writer: BinaryWriter,
-  runs: ReadonlyArray<OperationRun>,
-): void => {
-  writer.writeVarint(runs.length);
-  for (const run of runs) {
-    writer.writeVarint(run.type === OPERATION_TYPE.INSERT ? 1 : 2);
-    writer.writeVarint(run.length);
-  }
-};
-
 export const readOperationRuns = (
   reader: BinaryReader,
 ): PartialOperationRun[] => {

@@ -7,7 +7,7 @@ import { AgentTable } from "./agent-table";
 /** Agent of an event whose ID is not a canonical `replicaId:sequence`. */
 export const CUSTOM_AGENT = -1;
 
-/** Canonical ID interval, as the EGW3 run index and replay planners see it. */
+/** Canonical ID interval, as the ID run index and replay planners see it. */
 export interface PackedCanonicalIdRun {
   readonly replicaId: string;
   readonly startSequence: number;
@@ -72,7 +72,7 @@ export class EventIdRunIndex {
   }
 
   /**
-   * Validate and index the ID runs of an EGW3 payload.
+   * Validate and index the ID runs of a columnar (EGW3 or EGW4) payload.
    *
    * Runs must cover `[0, expectedCount)` in order. Duplicate IDs are
    * rejected, including a custom ID that repeats a canonical one.
@@ -295,7 +295,7 @@ export class EventIdRunIndex {
     }
     return run.custom
       ? run.replicaId
-      : `${run.replicaId}:${run.startSequence + offset - run.startEventOffset}`;
+      : `${run.replicaId}:${run.startSequence + (offset - run.startEventOffset)}`;
   }
 
   /**
@@ -311,7 +311,7 @@ export class EventIdRunIndex {
     const run = this.requireRun(offset);
     return run.custom
       ? run.startSequence
-      : run.startSequence + offset - run.startEventOffset;
+      : run.startSequence + (offset - run.startEventOffset);
   }
 
   /** Canonical run holding `offset` among the first `limit`. */
@@ -621,7 +621,7 @@ const canonicalOffset = (
   }
   const run = runs[firstRunAfter(runs, sequence) - 1];
   return run !== undefined && sequence < run.startSequence + run.length
-    ? run.startEventOffset + sequence - run.startSequence
+    ? run.startEventOffset + (sequence - run.startSequence)
     : undefined;
 };
 

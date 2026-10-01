@@ -28,7 +28,7 @@ export interface SnapshotFirstEditFixture {
 }
 
 /**
- * Encode `events` in their given causal order as the snapshot's EGW3 graph.
+ * Encode `events` in their given causal order as the snapshot's graph.
  * The paper traces arrive in editing order, so `depth` counts events back
  * from the end of the recorded history.
  */

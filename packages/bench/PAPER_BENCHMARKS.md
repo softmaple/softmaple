@@ -123,7 +123,7 @@ The closest current APIs are:
 
 The current persistence benchmark records this mode in three forms:
 
-- `nativeDecodeMs` / `nativeLoadMs`: the old EGW3 columnar graph path followed
+- `nativeDecodeMs` / `nativeLoadMs`: the EGW4 columnar graph path followed
   by `new EgWalkerReplica(..., decodedGraph)`, which still replays history.
 - `portableSnapshotEncodeMs` / `portableSnapshotDecodeMs` /
   `portableSnapshotRestoreMs` / `portableSnapshotMaterializeMs`: the `EGWP1`
@@ -245,7 +245,7 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
 ```
 
 `--apply-only` validates the final document and reports conversion, apply,
-replay, and structural-operation metrics, but deliberately skips JSON, EGW3,
+replay, and structural-operation metrics, but deliberately skips JSON, EGW4,
 portable-snapshot, and native-snapshot construction. Keeping those phases out
 of the process prevents persistence object graphs from contaminating raw apply
 time and peak memory. Use the normal or `--native-only` lanes for persistence
@@ -319,8 +319,8 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
 Important output fields:
 
 - `jsonBytes`: JSON `serialize()` payload size.
-- `binaryBytes`: EGW3 columnar graph payload size.
-- `nativeDecodeMs`: EGW3 graph decode time.
+- `binaryBytes`: EGW4 columnar graph payload size.
+- `nativeDecodeMs`: EGW4 graph decode time.
 - `nativeLoadMs`: old graph-backed replica load time, including replay.
 - `portableSnapshotBytes`: `EGWP1` portable payload size.
 - `portableSnapshotEncodeMs` / `portableSnapshotDecodeMs` /

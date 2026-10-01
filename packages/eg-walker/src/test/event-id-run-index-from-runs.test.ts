@@ -24,6 +24,27 @@ const indexRuns = (runs: ReadonlyArray<IdRun>, count: number) =>
   EventIdRunIndex.fromRuns(runs, count).view();
 
 describe("EventIdRunIndex.fromRuns", () => {
+  it("should resolve sequences next to the safe integer limit exactly", () => {
+    // Arrange
+    const sequence = Number.MAX_SAFE_INTEGER - 1;
+    const index = indexRuns(
+      [run("bob", 0, 0, 3), run("alice", sequence, 3, 2)],
+      5,
+    );
+
+    // Act
+    const resolved = [index.idAt(3), index.idAt(4), index.sequenceAt(4)];
+    const offset = index.offsetOf(`alice:${Number.MAX_SAFE_INTEGER}`);
+
+    // Assert
+    expect(resolved).toEqual([
+      `alice:${sequence}`,
+      `alice:${Number.MAX_SAFE_INTEGER}`,
+      Number.MAX_SAFE_INTEGER,
+    ]);
+    expect(offset).toBe(4);
+  });
+
   it("resolves canonical and custom runs without expanding them", () => {
     const index = indexRuns(
       [
@@ -148,7 +169,7 @@ describe("EventIdRunIndex.fromRuns", () => {
   });
 });
 
-describe("lazy exact-linear EGW3 IDs", () => {
+describe("lazy exact-linear EGW4 IDs", () => {
   it("round-trips mixed ID runs and indexes a mutable tail", () => {
     const ids = ["alice:8", "alice:9", "legacy", "bob:3", "alice:20"];
     const source = new EventGraph();

@@ -3,19 +3,38 @@ import type {
   PackedUnsignedIntegerColumn,
 } from "./packed-numeric-columns";
 
-export const BINARY_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x33]); // EGW3
+/** Magic of the EGW3 columnar graph format, which is still decoded. */
+export const EGW3_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x33]); // EGW3
+
+/** Magic of the EGW4 columnar graph format, which every encoder writes. */
+export const EGW4_MAGIC = new Uint8Array([0x45, 0x47, 0x57, 0x34]); // EGW4
 
 const textEncoder = new TextEncoder();
 // `ignoreBOM: true` means "treat a leading UTF-8 BOM as content" in the
 // Encoding API. Inserted text may legitimately begin with U+FEFF, so the
 // persistence codec must not silently discard it.
 const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
+// EGW4 rejects malformed UTF-8 instead of replacing it with U+FFFD: the
+// encoder only ever writes `TextEncoder` output.
+const strictTextDecoder = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+});
 
 export const encodeText = (value: string): Uint8Array =>
   textEncoder.encode(value);
 
 export const decodeText = (bytes: Uint8Array): string =>
   textDecoder.decode(bytes);
+
+/** Decode UTF-8, throwing on a malformed sequence. */
+export const decodeTextStrict = (bytes: Uint8Array): string => {
+  try {
+    return strictTextDecoder.decode(bytes);
+  } catch {
+    throw new Error("Invalid UTF-8 in eg-walker columnar graph");
+  }
+};
 
 export const toUint8Array = (
   bytes: ReadonlyArray<number> | Uint8Array,
@@ -86,9 +105,30 @@ export class BinaryWriter {
 
   writeBytes(bytes: Uint8Array): void {
     this.writeVarint(bytes.length);
+    this.writeRaw(bytes);
+  }
+
+  /** Append bytes without a length prefix. */
+  writeRaw(bytes: Uint8Array): void {
     this.ensureCapacity(this.size + bytes.length);
     this.buffer.set(bytes, this.size);
     this.size += bytes.length;
+  }
+
+  /** Append a uint32 as four little-endian bytes. */
+  writeUint32LE(value: number): void {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
+      throw new Error(`Cannot encode invalid uint32 value ${value}`);
+    }
+    this.writeByte(value & 0xff);
+    this.writeByte((value >>> 8) & 0xff);
+    this.writeByte((value >>> 16) & 0xff);
+    this.writeByte(value >>> 24);
+  }
+
+  /** The bytes written so far, without copying; valid until the next write. */
+  view(): Uint8Array {
+    return this.buffer.subarray(0, this.size);
   }
 
   toUint8Array(): Uint8Array {
@@ -121,6 +161,19 @@ export class BinaryReader {
 
   get remainingByteLength(): number {
     return this.bytes.length - this.offset;
+  }
+
+  /** Offset of the next byte to read. */
+  get position(): number {
+    return this.offset;
+  }
+
+  /** Move back to a position this reader returned earlier. */
+  rewind(position: number): void {
+    if (!Number.isInteger(position) || position < 0 || position > this.offset) {
+      throw new RangeError(`Cannot rewind binary reader to ${position}`);
+    }
+    this.offset = position;
   }
 
   readVarint(): number {

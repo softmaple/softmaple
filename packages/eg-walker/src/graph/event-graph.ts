@@ -963,8 +963,9 @@ export class EventGraph {
 
   /** @internal Local versions of the frontier events, in frontier order. */
   /**
-   * Encode the graph as EGW3 in `getLinearReplayOrder() ??
-   * getTopologicalOrder()` order, with the frontier in `getFrontier()` order.
+   * Encode the graph as EGW4 in `getLinearReplayOrder() ??
+   * getTopologicalOrder()` order, returning the frontier in `getFrontier()`
+   * order.
    *
    * @internal Snapshot writers call this instead of materializing every
    * event; the bytes equal {@link encodeTopologicallyOrderedEventsBinary}

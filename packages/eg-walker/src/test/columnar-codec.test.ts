@@ -172,11 +172,12 @@ describe("ColumnarEventGraphCodec", () => {
       "Unexpected end of binary eg-walker graph",
     );
 
+    // An EGW4 payload ends with a checksum, so an extra byte is corruption.
     const graph = new EventGraph();
     const valid = codec.encodeBinary(graph);
     const trailing = new Uint8Array(valid.length + 1);
     trailing.set(valid);
-    expect(() => codec.decodeBinary(trailing)).toThrow(/trailing bytes/);
+    expect(() => codec.decodeBinary(trailing)).toThrow(/checksum mismatch/);
   });
 
   it("rejects a columnar version that is not the graph frontier", () => {
@@ -250,10 +251,9 @@ describe("ColumnarEventGraphCodec", () => {
       operation: { type: OPERATION_TYPE.INSERT, index: 2, text: "C" },
       timestamp: Number.NaN,
     });
-    // EGW3 zigzag-delta encodes timestamps so negative values are valid; the
-    // varint guard still rejects non-safe integers like NaN/Infinity.
+    // Negative timestamps are valid; non-safe integers like NaN are not.
     expect(() => codec.encodeBinary(graph)).toThrow(
-      "Cannot encode invalid zigzag varint value NaN",
+      "Event replica:2 has an invalid timestamp",
     );
   });
 
@@ -291,7 +291,7 @@ describe("ColumnarEventGraphCodec", () => {
     expect(text).toBe(blocks.join(""));
   });
 
-  it("caps lz4 destination allocation against the declared textLengths sum", () => {
+  it("caps lz4 destination allocation against the declared insert lengths", () => {
     const graph = new EventGraph();
     graph.addEvent({
       id: "bounded:0",
@@ -306,8 +306,8 @@ describe("ColumnarEventGraphCodec", () => {
 
     try {
       codec.decodeBinary(encoded);
-      // 2 UTF-16 code units * 4 + 64 = 72 bytes maxInsertedBytes.
-      expect(decompressSpy).toHaveBeenCalledWith(expect.any(Uint8Array), 72);
+      // 2 UTF-16 code units * 3 UTF-8 bytes + 64 = 70 bytes.
+      expect(decompressSpy).toHaveBeenCalledWith(expect.any(Uint8Array), 70);
     } finally {
       decompressSpy.mockRestore();
     }
@@ -362,7 +362,7 @@ describe("ColumnarEventGraphCodec", () => {
 
   it("rejects binary payloads whose magic prefix is too short", () => {
     const codec = new ColumnarEventGraphCodec();
-    // Length-prefix says 3 bytes of magic, but EGW3 is 4 bytes. Even though
+    // Length-prefix says 3 bytes of magic, but EGW4 is 4 bytes. Even though
     // the bytes that ARE present match, the length must equal the magic.
     expect(() =>
       codec.decodeBinary(new Uint8Array([3, 0x45, 0x47, 0x57])),
@@ -371,12 +371,12 @@ describe("ColumnarEventGraphCodec", () => {
 
   it("rejects binary payloads from older incompatible versions (EGW1, EGW2)", () => {
     const codec = new ColumnarEventGraphCodec();
-    // 4-byte EGW1 prefix; current decoder expects EGW3.
+    // 4-byte EGW1 prefix; the decoder reads only EGW4 and EGW3.
     const egw1Header = new Uint8Array([4, 0x45, 0x47, 0x57, 0x31]);
     expect(() => codec.decodeBinary(egw1Header)).toThrow(
       "Invalid eg-walker columnar graph header",
     );
-    // 4-byte EGW2 prefix; also rejected after the EGW3 layout change.
+    // 4-byte EGW2 prefix; also rejected.
     const egw2Header = new Uint8Array([4, 0x45, 0x47, 0x57, 0x32]);
     expect(() => codec.decodeBinary(egw2Header)).toThrow(
       "Invalid eg-walker columnar graph header",

@@ -12,6 +12,11 @@ export class MaxHeap<T> {
     return this.items.length;
   }
 
+  /** The value {@link pop} would return next, without removing it. */
+  peek(): T | undefined {
+    return this.items[0];
+  }
+
   push(value: T): void {
     this.items.push(value);
     this.siftUp(this.items.length - 1);

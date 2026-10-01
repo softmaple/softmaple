@@ -117,39 +117,6 @@ describe("packed offset transitions", () => {
     ).toEqual(["3-c", "4-d"]);
   });
 
-  it("uses an optional branch-preserving rank without sorting results", () => {
-    const view = pack(events).getPackedReplayPlanningView()!;
-    const rankByOffset = new Uint32Array(view.count);
-    for (let offset = 0; offset < view.count; offset++) {
-      rankByOffset[offset] = offset;
-    }
-    rankByOffset[view.offsetOf("2-b")!] = 1;
-    rankByOffset[view.offsetOf("1-a")!] = 2;
-    rankByOffset[view.offsetOf("4-d")!] = 3;
-    rankByOffset[view.offsetOf("3-c")!] = 4;
-
-    const transition = view.diffVersionToParents(
-      new Set(["1-a", "2-b"]),
-      view.offsetOf("5-target")!,
-      rankByOffset,
-    );
-
-    expect(
-      transitionIds(
-        transition.retreatOffsets,
-        transition.retreatCount,
-        (offset) => view.idAt(offset),
-      ),
-    ).toEqual(["1-a", "2-b"]);
-    expect(
-      transitionIds(
-        transition.advanceOffsets,
-        transition.advanceCount,
-        (offset) => view.idAt(offset),
-      ),
-    ).toEqual(["4-d", "3-c"]);
-  });
-
   it("compresses contiguous local versions without changing scalar order", () => {
     const view = pack(events).getPackedReplayPlanningView()!;
     const targetOffset = view.offsetOf("5-target")!;
@@ -218,73 +185,31 @@ describe("packed offset transitions", () => {
     );
   });
 
-  it("preserves ranked scalar order when adjacent offsets cannot merge", () => {
-    const view = pack(events).getPackedReplayPlanningView()!;
-    const targetOffset = view.offsetOf("5-target")!;
-    const rankByOffset = new Uint32Array(view.count);
-    for (let offset = 0; offset < view.count; offset++) {
-      rankByOffset[offset] = offset;
-    }
-    rankByOffset[view.offsetOf("2-b")!] = 1;
-    rankByOffset[view.offsetOf("1-a")!] = 2;
-    rankByOffset[view.offsetOf("4-d")!] = 3;
-    rankByOffset[view.offsetOf("3-c")!] = 4;
+  it("walks runs and merges adjacent local versions across them", () => {
+    // Two branches of three events each: every branch is one run.
+    const branches = [
+      insert("0-root", [], 0),
+      insert("1-a", ["0-root"], 1),
+      insert("2-a", ["1-a"], 2),
+      insert("3-a", ["2-a"], 3),
+      insert("4-b", ["0-root"], 4),
+      insert("5-b", ["4-b"], 5),
+      insert("6-b", ["5-b"], 6),
+    ];
+    const view = pack(branches).getPackedReplayPlanningView()!;
+    expect(view.runs.count).toBe(3);
 
-    const expected = view.diffVersionToParents(
-      new Set(["1-a", "2-b"]),
-      targetOffset,
-      rankByOffset,
-    );
-    const expectedRetreat = Array.from(
-      expected.retreatOffsets.subarray(0, expected.retreatCount),
-    );
-    const expectedAdvance = Array.from(
-      expected.advanceOffsets.subarray(0, expected.advanceCount),
-    );
-    const transition = view.diffVersionToParentRanges(
-      new Set(["1-a", "2-b"]),
-      targetOffset,
-      rankByOffset,
+    const transition = view.diffOffsetToParentRanges(
+      view.offsetOf("3-a")!,
+      view.offsetOf("6-b")!,
     );
 
-    expect(transition.retreatRangeCount).toBe(2);
-    expect(transition.advanceRangeCount).toBe(2);
+    expect(transition.retreatRangeCount).toBe(1);
+    expect(transition.advanceRangeCount).toBe(1);
     expect(expandRangeTransition(transition)).toEqual({
-      retreat: expectedRetreat,
-      advance: expectedAdvance,
+      retreat: [3, 2, 1],
+      advance: [4, 5],
     });
-  });
-
-  it("resets its reusable workspace after invalid replay ranks", () => {
-    const view = pack(events).getPackedReplayPlanningView()!;
-    const targetOffset = view.offsetOf("5-target")!;
-
-    expect(() =>
-      view.diffVersionToParents(
-        new Set(["1-a"]),
-        targetOffset,
-        new Uint32Array(view.count - 1),
-      ),
-    ).toThrow("does not match event count");
-
-    const transition = view.diffVersionToParents(
-      new Set(["1-a"]),
-      targetOffset,
-    );
-    expect(
-      transitionIds(
-        transition.retreatOffsets,
-        transition.retreatCount,
-        (offset) => view.idAt(offset),
-      ),
-    ).toEqual(["1-a"]);
-    expect(
-      transitionIds(
-        transition.advanceOffsets,
-        transition.advanceCount,
-        (offset) => view.idAt(offset),
-      ),
-    ).toEqual(["3-c", "4-d"]);
   });
 
   it("exposes range transitions through the packed replay plan", () => {

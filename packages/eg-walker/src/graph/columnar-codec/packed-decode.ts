@@ -1,5 +1,6 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import type { EventId } from "../../types";
+import { GraphRuns } from "../internals/graph-runs";
 import {
   PACKED_OPERATION_TYPE,
   PackedEventGraphBase,
@@ -75,14 +76,12 @@ const buildPackedEventGraphBaseInternal = (
       ? (offset: number): EventId => columns.idIndex!.idAt(offset)!
       : (offset: number): EventId => ids[offset]!;
   const operationColumns = buildOperationColumns(columns, count);
-  const {
-    parentStarts,
-    parentOffsets,
-    childStarts,
-    childOffsets,
-    frontier,
-    implicitLinearEdges,
-  } = buildEdges(count, idAt, idLookup, columns.parentOverrides);
+  const { runs, frontier } = buildRuns(
+    count,
+    idAt,
+    idLookup,
+    columns.parentOverrides,
+  );
 
   const commonColumns = {
     operationTypes: operationColumns.operationTypes,
@@ -91,11 +90,7 @@ const buildPackedEventGraphBaseInternal = (
     timestamps: operationColumns.timestamps,
     insertStarts: operationColumns.insertStarts,
     insertedContent: columns.insertedContent,
-    parentStarts,
-    parentOffsets,
-    childStarts,
-    childOffsets,
-    implicitLinearEdges,
+    runs,
   };
   const base =
     columns.idIndex === undefined
@@ -171,11 +166,7 @@ export const buildPackedLinearEventGraphBaseFromIdIndex = (
       timestamps: operationColumns.timestamps,
       insertStarts: operationColumns.insertStarts,
       insertedContent: columns.insertedContent,
-      parentStarts: new Uint32Array(),
-      parentOffsets: new Uint32Array(),
-      childStarts: new Uint32Array(),
-      childOffsets: new Uint32Array(),
-      implicitLinearEdges: true,
+      runs: GraphRuns.linear(count),
     }),
     frontier,
   };
@@ -273,95 +264,53 @@ const buildOperationColumns = (
   };
 };
 
-const buildEdges = (
+/**
+ * Build the graph's runs from its parent overrides. Every event without an
+ * override has the previous event as its only parent, so the work follows
+ * the overrides rather than the event count, and no per-event edge column is
+ * allocated.
+ */
+const buildRuns = (
   count: number,
   idAt: (offset: number) => EventId,
   idIndex: PackedEventOffsetLookup,
   overrides: ReadonlyArray<ParentOverride>,
-): {
-  readonly parentStarts: Uint32Array;
-  readonly parentOffsets: Uint32Array;
-  readonly childStarts: Uint32Array;
-  readonly childOffsets: Uint32Array;
-  readonly frontier: ReadonlySet<EventId>;
-  readonly implicitLinearEdges: boolean;
-} => {
+): { readonly runs: GraphRuns; readonly frontier: ReadonlySet<EventId> } => {
   if (overrides.length === 0) {
     return {
-      parentStarts: new Uint32Array(),
-      parentOffsets: new Uint32Array(),
-      childStarts: new Uint32Array(),
-      childOffsets: new Uint32Array(),
+      runs: GraphRuns.linear(count),
       frontier: count === 0 ? new Set() : new Set([idAt(count - 1)]),
-      implicitLinearEdges: true,
     };
   }
   validateOverrideOffsets(overrides, count);
-  const edgeCount = countPackedEdges(count, overrides);
-  const parentStarts = new Uint32Array(count + 1);
-  const parentOffsets = new Uint32Array(edgeCount);
-  const childCounts = new Uint32Array(count);
-  let overrideCursor = 0;
-  let parentCursor = 0;
-
-  for (let eventOffset = 0; eventOffset < count; eventOffset++) {
-    const override = overrides[overrideCursor];
-    if (override?.eventOffset === eventOffset) {
-      const seen = override.parents.length > 1 ? new Set<EventId>() : undefined;
-      for (const parent of override.parents as ReadonlyArray<unknown>) {
-        const parentOffset = resolveParentOffset(
-          parent,
-          eventOffset,
-          idIndex,
-          seen,
-        );
-        parentOffsets[parentCursor++] = parentOffset;
-        childCounts[parentOffset] = childCounts[parentOffset]! + 1;
-      }
-      overrideCursor++;
-    } else if (eventOffset > 0) {
-      const parentOffset = eventOffset - 1;
-      parentOffsets[parentCursor++] = parentOffset;
-      childCounts[parentOffset] = childCounts[parentOffset]! + 1;
+  countPackedEdges(count, overrides);
+  const explicit = new Uint32Array(overrides.length);
+  const parentStarts = new Uint32Array(overrides.length + 1);
+  const parents: number[] = [];
+  for (const [index, override] of overrides.entries()) {
+    const eventOffset = override.eventOffset;
+    const seen = override.parents.length > 1 ? new Set<EventId>() : undefined;
+    for (const parent of override.parents as ReadonlyArray<unknown>) {
+      parents.push(resolveParentOffset(parent, eventOffset, idIndex, seen));
     }
-    parentStarts[eventOffset + 1] = parentCursor;
+    explicit[index] = eventOffset;
+    parentStarts[index + 1] = parents.length;
   }
-
-  if (parentCursor !== edgeCount) {
-    throw new Error("Packed event graph edge count changed during decode");
-  }
-
-  const childStarts = new Uint32Array(count + 1);
-  const frontier = new Set<EventId>();
-  for (let offset = 0; offset < count; offset++) {
-    childStarts[offset + 1] = childStarts[offset]! + childCounts[offset]!;
-    if (childCounts[offset] === 0) frontier.add(idAt(offset));
-  }
-  const childOffsets = new Uint32Array(edgeCount);
-  // Child counts are dead after the frontier and prefix sums are known. Reuse
-  // the same O(N) typed array as the mutable CSR cursors instead of allocating
-  // a second copy of `childStarts` at peak decode memory.
-  const childCursors = childCounts;
-  childCursors.set(childStarts.subarray(0, count));
-  for (let childOffset = 0; childOffset < count; childOffset++) {
-    const start = parentStarts[childOffset]!;
-    const end = parentStarts[childOffset + 1]!;
-    for (let cursor = start; cursor < end; cursor++) {
-      const parentOffset = parentOffsets[cursor]!;
-      const childCursor = childCursors[parentOffset]!;
-      childOffsets[childCursor] = childOffset;
-      childCursors[parentOffset] = childCursor + 1;
-    }
-  }
-
-  return {
+  const runs = GraphRuns.fromExplicitParents(
+    count,
+    explicit,
     parentStarts,
-    parentOffsets,
-    childStarts,
-    childOffsets,
-    frontier,
-    implicitLinearEdges: false,
-  };
+    parents,
+  );
+
+  // Only the last event of a run can lack a child.
+  const frontier = new Set<EventId>();
+  for (let run = 0; run < runs.count; run++) {
+    if (runs.childCountOf(run) === 0) {
+      frontier.add(idAt(runs.lastOf(run)));
+    }
+  }
+  return { runs, frontier };
 };
 
 const countPackedEdges = (

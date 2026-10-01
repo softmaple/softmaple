@@ -19,6 +19,7 @@ import {
 import { canonicalSequenceAfter } from "./event-id";
 import { AgentTable } from "./internals/agent-table";
 import { CUSTOM_AGENT } from "./internals/event-id-run-index";
+import type { GraphRuns } from "./internals/graph-runs";
 import { deserializeEventGraph } from "./internals/event-graph-serialization";
 import type {
   PackedLocalVersionTransition,
@@ -102,6 +103,8 @@ export interface PackedLinearReplayView {
  * parent Set, and GraphEvent wrapper per persisted event.
  */
 export interface PackedReplayPlanningView extends PackedLinearReplayView {
+  /** The graph's edges as runs of consecutive local versions. */
+  readonly runs: GraphRuns;
   offsetOf(id: EventId): number | undefined;
   /** Agent of the event at an offset, or `-1` for a non-canonical ID. */
   agentAt(offset: number): number;
@@ -116,27 +119,22 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
   diffVersionToParents(
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedOffsetTransition;
   diffVersionToParentRanges(
     currentVersion: ReadonlySet<EventId>,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition;
   diffLocalVersionsToParentRanges(
     currentOffsets: ReadonlyArray<number>,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition;
   diffOffsetToParents(
     currentOffset: number,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedOffsetTransition;
   diffOffsetToParentRanges(
     currentOffset: number,
     targetEventOffset: number,
-    rankByOffset?: Uint32Array,
   ): PackedLocalVersionTransition;
 }
 
@@ -1492,7 +1490,7 @@ export class EventGraph {
       return this.cachedTopologicalOrder;
     }
 
-    // Order insertion ranks over the packed planning view's CSR edges, as
+    // Order insertion ranks over the packed planning view's runs, as
     // cold replay does, instead of string-keyed maps and child generators.
     const ranks = this.packedReplayBase()?.getTopologicalOrderOffsets();
     this.cachedTopologicalOrder = Object.freeze(

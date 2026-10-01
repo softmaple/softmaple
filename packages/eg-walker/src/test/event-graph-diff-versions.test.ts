@@ -3,7 +3,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import type { EventId } from "../types";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
-import { PackedEventGraphBase } from "../graph/internals/packed-event-graph-base";
+import { GraphRuns } from "../graph/internals/graph-runs";
 import { buildLinearHistory } from "./test-helpers";
 
 /**
@@ -799,7 +799,7 @@ describe("diffVersions topological diff", () => {
     ).toEqual(["order-left", "order-right", "order-merge"]);
   });
 
-  it("stops packed CSR traversal at a deep shared-history boundary", () => {
+  it("stops packed run traversal at a deep shared-history boundary", () => {
     const { graph, ids } = buildLinearHistory(20_000, "deep");
     const sharedTip = ids[ids.length - 1]!;
     graph.addEvent({
@@ -815,10 +815,7 @@ describe("diffVersions topological diff", () => {
       operation: { type: OPERATION_TYPE.INSERT, index: 20_000, text: "R" },
     });
     const packed = packGraph(graph);
-    const parentOffsetAt = vi.spyOn(
-      PackedEventGraphBase.prototype,
-      "parentOffsetAt",
-    );
+    const parentOffsetAt = vi.spyOn(GraphRuns.prototype, "parentRunAt");
 
     try {
       expect(

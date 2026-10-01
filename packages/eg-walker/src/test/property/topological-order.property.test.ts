@@ -2,7 +2,7 @@
  * Property: EventGraph orders its events over insertion ranks exactly like
  * the string-keyed implementations it replaced.
  *
- * Both orders now run over the packed planning view's CSR edges with typed
+ * Both orders now run over the packed planning view's runs with typed
  * columns, for an object-only graph, a packed graph and a packed prefix with
  * appended events alike. Event IDs are drawn from a tiny alphabet so that
  * ready events tie on span and path length and fall back to comparing IDs

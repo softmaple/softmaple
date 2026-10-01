@@ -79,6 +79,14 @@ Events are stored in compressed columnar format:
   inside the span derived from the run-length encoded lengths column.
 - Timestamps are delta segments: a first delta plus a constant step, or a
   literal run of deltas.
+- The encoder throws on values the format cannot hold. An operation must end
+  within `Number.MAX_SAFE_INTEGER` (`index + text.length` for an insert,
+  `index + length` for a delete), because span indexes are derived from the
+  previous event's end. The first timestamp and each difference between
+  consecutive timestamps must lie in -2^52 to 2^52 - 1, because they are
+  stored as zigzag deltas (EGW3 had the same limit). Events a replica applies
+  stay far below the first limit: the engine rejects any operation that
+  reaches past its parent document.
 - Inserted content is LZ4-framed UTF-8. The decoder caps the destination
   buffer at 3 bytes per declared UTF-16 code unit plus 64, rejects malformed
   UTF-8 and checks that the decoded length matches the lengths column and

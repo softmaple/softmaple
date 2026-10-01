@@ -539,7 +539,7 @@ Options:
                      in a separate --expose-gc process. With --apply-only, measure the
                      heap and array buffers the ingesting replica retains after GC
   --apply-only       Measure conversion and public batch receive only; skip all persistence work
-  --native-only      Build an EGW3 payload outside the timed lane, then measure
+  --native-only      Build an EGW4 payload outside the timed lane, then measure
                      decode, replica load/replay, and final text materialization
   --plan-phase0      Run the persistence guardrail suite:
                      S1/S2/S3/A1 full, plus C1/C2 bounded 3k and 10k

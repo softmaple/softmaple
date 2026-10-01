@@ -62,26 +62,29 @@ Events are stored in compressed columnar format:
 
 ### Binary Format
 
-- Magic prefix `EGW3` (`0x45 0x47 0x57 0x33`). Older `EGW1` and `EGW2`
-  payloads are not compatible and are rejected at decode — the EGW3 layout
-  drops every derivable column and switches near-monotonic columns to
-  zigzag-delta varints, so it is not a superset of EGW2.
-- `operationRuns` are written as `(type, length)`; `startEventOffset`,
-  `startIndex`, and `textLength` are reconstructed from `operationIndexes`
-  and `operationLengths`.
-- `operationIndexes` and `timestamps` are zigzag-delta varint arrays.
-- `textLengths` is omitted on the wire; the decoder reconstructs it from
-  `operationRuns` (type) and `operationLengths`.
-- `parentOverrides` event offsets are monotonic-delta varints.
-- Each `IdRun` carries an explicit `custom` flag (packed into the low bit
-  of the run-length varint) that distinguishes parsed `replicaId:sequence`
-  IDs from verbatim string IDs. `startEventOffset` is the prefix sum of
-  run lengths and is not on the wire.
-- Inserted content is LZ4-framed. `decodeBinary` enforces a memory cap on
-  the destination buffer (4 UTF-8 bytes per declared UTF-16 code unit plus
-  64-byte slack) and verifies that the decoded string length matches the
-  reconstructed `textLengths` sum, so a tampered payload that truncates or
-  inflates content is rejected.
+- Every encoder writes EGW4 (magic `EGW4`, `0x45 0x47 0x57 0x34`); the full
+  layout is documented in `src/graph/columnar-codec/egw4-format.ts`.
+  `decodeBinary` also reads EGW3, so snapshots written before EGW4 still
+  load and are saved as EGW4 the next time they are encoded. `EGW1` and
+  `EGW2` payloads are rejected.
+- Replica IDs and custom event IDs are written once in a string table; ID
+  runs refer to them by index and store a start sequence only when a
+  replica's sequence jumps.
+- Parents are numbers: an override stores its gap from the previous
+  override, its parent count (packed into the same varint up to 2) and each
+  parent's distance back from the event. Every other event's only parent is
+  the previous event.
+- Edits are spans: a run of typing, of deletes at one index (delete key) or
+  of backspaces is one `(count * 4 + kind, anchor delta)` pair, with indexes
+  inside the span derived from the run-length encoded lengths column.
+- Timestamps are delta segments: a first delta plus a constant step, or a
+  literal run of deltas.
+- Inserted content is LZ4-framed UTF-8. The decoder caps the destination
+  buffer at 3 bytes per declared UTF-16 code unit plus 64, rejects malformed
+  UTF-8 and checks that the decoded length matches the lengths column and
+  that no insert splits a surrogate pair.
+- A CRC-32 of the payload ends it, so a flipped, dropped or extra byte is
+  rejected before anything else is decoded.
 
 ### Known Limitations
 

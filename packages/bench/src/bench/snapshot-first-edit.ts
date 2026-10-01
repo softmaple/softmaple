@@ -1,6 +1,6 @@
 /**
  * First-edit latency after opening a persisted document, either with
- * `EgWalkerReplica.fromPortableSnapshot` or by a cold load of its decoded EGW3
+ * `EgWalkerReplica.fromPortableSnapshot` or by a cold load of its decoded
  * graph.
  *
  * Opening a portable snapshot is lazy: the event graph is decoded and the
@@ -42,7 +42,7 @@ export const SECOND_EDIT_MARKER = "";
  * - `remote`: a caught-up peer sends two events that extend the frontier.
  * - `concurrent`: a peer that diverged `depth` events before the end of the
  *   snapshot's event order sends an event, then a second one on top of it.
- * - `native`: cold load of the snapshot's own EGW3 payload through
+ * - `native`: cold load of the snapshot's own graph payload through
  *   `new EgWalkerReplica(id, initialText, graph)`, the `nativeLoadMs` lane of
  *   `paper-bench --native-only`, measured on the same bytes and process
  *   setup as the edit lanes.
@@ -377,7 +377,7 @@ interface NativeColdLoad {
   readonly heapAfterLoadBytes: number;
 }
 
-/** Decode the snapshot's EGW3 graph and replay it into a fresh replica. */
+/** Decode the snapshot's graph and replay it into a fresh replica. */
 const loadNativeGraph = (
   api: SnapshotFirstEditApi,
   snapshot: PortableSnapshot,

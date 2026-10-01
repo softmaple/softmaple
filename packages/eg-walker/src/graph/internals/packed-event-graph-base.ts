@@ -137,7 +137,8 @@ interface PackedBranchTraversalWorkspace {
 }
 
 /**
- * Immutable, allocation-light storage for an already validated EGW3 prefix.
+ * Immutable, allocation-light storage for an already validated columnar
+ * graph prefix.
  *
  * Public `GraphEvent` objects and parent sets are reconstructed only at an API
  * boundary. Edges are stored as {@link GraphRuns}: runs of consecutive local
@@ -1070,9 +1071,9 @@ export class PackedEventGraphBase {
       tailLengths = lengths;
       tailTimestamps = timestamps;
     }
-    // Children stay in ascending offset order, exactly as the EGW3 decoder
-    // builds them, so branch ordering of the repacked graph matches a fresh
-    // decode.
+    // Children stay in ascending offset order, exactly as the columnar
+    // decoders build them, so branch ordering of the repacked graph matches a
+    // fresh decode.
     const runs = GraphRuns.fromExplicitParents(
       count,
       explicit,

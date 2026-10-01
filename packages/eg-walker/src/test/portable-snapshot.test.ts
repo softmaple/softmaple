@@ -136,7 +136,7 @@ describe("PortableSnapshot", () => {
     expect(restored.exportEventGraph().at(-1)?.id).toBe("alice:1");
   });
 
-  it("answers text reads before lazily decoding the EGW3 graph", () => {
+  it("answers text reads before lazily decoding the columnar graph", () => {
     const source = createConcurrentReplica();
     const codec = new PortableSnapshotCodec();
     const bytes = codec.encode(source.createPortableSnapshot());
@@ -344,7 +344,7 @@ describe("PortableSnapshot", () => {
     );
   });
 
-  it("excludes all native runtime state from the object and EGW3 graph", () => {
+  it("excludes all native runtime state from the object and columnar graph", () => {
     const source = createConcurrentReplica();
     const snapshot = source.createPortableSnapshot();
     const graph = new ColumnarEventGraphCodec().decodeBinary(
@@ -420,7 +420,7 @@ describe("PortableSnapshot", () => {
     const trailingGraph = new Uint8Array(snapshot.eventGraph.length + 1);
     trailingGraph.set(snapshot.eventGraph);
     expect(encode({ eventGraph: trailingGraph })).toThrow(
-      /columnar graph: trailing bytes/,
+      /columnar graph: checksum mismatch/,
     );
 
     const encoded = codec.encode(snapshot);

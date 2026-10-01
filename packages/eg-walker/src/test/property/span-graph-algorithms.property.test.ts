@@ -143,7 +143,7 @@ const longBranchDagArb: fc.Arbitrary<ReadonlyArray<GraphEvent>> = fc
     return events;
   });
 
-/** A decoded EGW3 graph and one repacked from a mutable tail, same order. */
+/** A decoded EGW4 graph and one repacked from a mutable tail, same order. */
 const packedBases = (
   events: ReadonlyArray<GraphEvent>,
 ): PackedEventGraphBase[] => {

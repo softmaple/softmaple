@@ -1,5 +1,5 @@
 import type { EventId, GraphEvent } from "../../types";
-import { BinaryReader, BinaryWriter } from "../internals/binary-io";
+import type { BinaryReader } from "../internals/binary-io";
 import type { ParentOverride } from "./types";
 
 export const encodeParentOverrides = (
@@ -17,25 +17,10 @@ export const encodeParentOverrides = (
   });
 
 /**
- * Parent overrides are emitted in topological order, so `eventOffset` is
- * strictly increasing. We write the delta from the previous offset (the
- * first delta is from `-1`, so it's always non-negative) as an unsigned
- * varint, which is one byte for offsets that are tightly clustered.
+ * Read EGW3 parent overrides. Their `eventOffset`s are strictly increasing,
+ * so each is written as the gap after the previous one (the first after
+ * `-1`), followed by the parent IDs as strings.
  */
-export const writeParentOverrides = (
-  writer: BinaryWriter,
-  overrides: ReadonlyArray<ParentOverride>,
-): void => {
-  writer.writeVarint(overrides.length);
-  let previous = -1;
-  for (const override of overrides) {
-    const delta = override.eventOffset - previous - 1;
-    writer.writeVarint(delta);
-    writer.writeStringArray(override.parents);
-    previous = override.eventOffset;
-  }
-};
-
 export const readParentOverrides = (reader: BinaryReader): ParentOverride[] => {
   const length = reader.readVarint();
   const overrides: ParentOverride[] = [];

@@ -7,12 +7,12 @@
  *
  * The point of these tests is twofold:
  *
- *   1. **Regression guard on the EGW3 wire format.** Each trace asserts a
+ *   1. **Regression guard on the EGW4 wire format.** Each trace asserts a
  *      hard upper bound on the ratio `binaryBytes / jsonBytes`. The bounds
- *      are loose enough to absorb future single-byte-per-event churn but
- *      tight enough that re-introducing one of the redundant columns
- *      (`textLengths`, run `startEventOffset`, absolute timestamps, ...)
- *      would fail at least one assertion.
+ *      absorb LZ4 build-to-build variance but are tight enough that going
+ *      back to a varint per event in any column (indexes, lengths,
+ *      timestamps) or to parents and replica IDs as strings would fail at
+ *      least one assertion.
  *
  *   2. **Coverage of realistic editing traces.** The issue specifically calls
  *      out that the previous performance story was anchored on
@@ -310,25 +310,24 @@ describe("columnar codec size benchmarks (issue #672)", () => {
   };
 
   it("compresses a single-author linear insert trace well below the JSON baseline", () => {
-    // Append-only single-char inserts: every column either delta-encodes to
-    // 1 byte (operationIndexes/timestamps), is a singleton run
-    // (operationRuns/idRuns), or compresses very densely (LZ4 on a
-    // pseudo-random ASCII stream). The JSON form, by contrast, carries the
-    // full ms-since-epoch timestamps and absolute indexes per event.
+    // Append-only single-char inserts: IDs, lengths, operations and
+    // timestamps are each a single run or span, so the payload is almost
+    // only the LZ4-framed pseudo-random text. The JSON form, by contrast,
+    // carries the full ms-since-epoch timestamps and absolute indexes per
+    // event.
     benchmark("linear-1k", buildLinearInsertTrace(1_000), {
-      maxRatio: 0.1,
-      binaryBytesRange: [3_500, 4_500],
+      maxRatio: 0.015,
+      binaryBytesRange: [900, 1_250],
     });
   });
 
   it("compresses a single-author mixed-edit trace well below the JSON baseline", () => {
-    // Mixed insert/delete trace with cursor jitter. operationIndexes deltas
-    // are small (~+/-5) but no longer constant; operationRuns flip between
-    // INSERT and DELETE every few events. Still expected to be well under
-    // half of the JSON size.
+    // Mixed insert/delete trace with cursor jitter: the cursor moves before
+    // almost every edit and lengths vary, so most events start their own
+    // operation span and length literal. Timestamps are still one segment.
     benchmark("editing-2k", buildEditingTrace(2_000), {
-      maxRatio: 0.15,
-      binaryBytesRange: [10_000, 13_000],
+      maxRatio: 0.045,
+      binaryBytesRange: [7_500, 9_500],
     });
   });
 
@@ -340,18 +339,18 @@ describe("columnar codec size benchmarks (issue #672)", () => {
     benchmark(
       "bulk-paste-4k+200-edits",
       buildBulkPasteThenEditTrace(4_096, 200),
-      { maxRatio: 0.25, binaryBytesRange: [4_500, 5_800] },
+      { maxRatio: 0.2, binaryBytesRange: [4_200, 5_400] },
     );
   });
 
   it("compresses a multi-author concurrent-merge trace below the JSON baseline", () => {
-    // Worst case for our format: dense parentOverrides (one per 5 events
-    // for alice+bob+merge triples). The monotonic-delta encoding keeps
-    // override offsets small and idRuns RLE collapses each author's
-    // sequence into one run.
+    // Worst case for our format: dense parent overrides (one per 5 events
+    // for alice+bob+merge triples). Overrides cost a header byte plus a
+    // byte per parent distance, and ID runs name their replica by its
+    // index in the string table.
     benchmark("concurrent-merge-2x500", buildConcurrentMergeTrace(500, 5), {
-      maxRatio: 0.2,
-      binaryBytesRange: [8_000, 10_000],
+      maxRatio: 0.03,
+      binaryBytesRange: [2_400, 3_100],
     });
   });
 
@@ -372,7 +371,7 @@ describe("columnar codec size benchmarks (issue #672)", () => {
       )
       .join("\n");
     console.info(
-      `\nEGW3 binary vs JSON.stringify(serialize()) sizes:\n${summary}\n`,
+      `\nEGW4 binary vs JSON.stringify(serialize()) sizes:\n${summary}\n`,
     );
   });
 });

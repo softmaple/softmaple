@@ -410,7 +410,7 @@ describe("object-only graph", () => {
     }
   });
 
-  it("replays like the same graph decoded from EGW3", () => {
+  it("replays like the same graph decoded from EGW4", () => {
     const late = insert("peer:0", ["merge:3"], 0, "!", 2_000);
     const object = new EgWalkerReplica(
       "reader",

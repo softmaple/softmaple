@@ -54,7 +54,7 @@ interface ProcessMemorySample {
 }
 
 /**
- * Build the native EGW3 payload outside the timed load lane. Paper trace
+ * Build the native EGW4 payload outside the timed load lane. Paper trace
  * conversion already emits events in causal order, so the direct encoder can
  * validate and persist that order without constructing a second graph.
  */
@@ -73,7 +73,7 @@ export const buildNativePaperPayload = (
 
 /**
  * Measure the persistence boundary comparable to native Yjs/Yrs/Automerge
- * payload loading: decode EGW3, restore/replay the replica, then materialize
+ * payload loading: decode EGW4, restore/replay the replica, then materialize
  * its final plain text. Payload generation is deliberately not timed here.
  */
 export const measureNativePaperPayload = (

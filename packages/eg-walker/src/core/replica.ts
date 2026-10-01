@@ -492,7 +492,7 @@ export class EgWalkerReplica {
 
   /**
    * Create the paper-style persistence boundary: materialized text plus the
-   * EGW3 event graph and the minimum metadata needed to continue authoring.
+   * EGW4 event graph and the minimum metadata needed to continue authoring.
    * Runtime sequence records, delete targets, checkpoints, and replay caches
    * are deliberately excluded.
    */

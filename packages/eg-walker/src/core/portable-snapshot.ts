@@ -17,7 +17,10 @@ export interface PortableSnapshot {
   readonly currentVersion: ReadonlyArray<EventId>;
   readonly eventCount: number;
   readonly nextSequenceNumber: number;
-  /** EGW3 columnar event graph; never contains runtime CRDT records. */
+  /**
+   * Columnar event graph: EGW4, or EGW3 in snapshots written before EGW4.
+   * Never contains runtime CRDT records.
+   */
   readonly eventGraph: Uint8Array;
 }
 
@@ -179,7 +182,9 @@ export const validatePortableSnapshotHeaderOnly = (
     );
   }
   if (!(value.eventGraph instanceof Uint8Array)) {
-    throw new Error("Invalid portable snapshot: eventGraph must be EGW3 bytes");
+    throw new Error(
+      "Invalid portable snapshot: eventGraph must be columnar graph bytes",
+    );
   }
 
   const validated: PortableSnapshot = {
@@ -199,7 +204,7 @@ export const validatePortableSnapshotHeaderOnly = (
 };
 
 /**
- * Decode a header-validated snapshot's EGW3 graph and check its event count,
+ * Decode a header-validated snapshot's columnar graph and check its event count,
  * frontier and metadata against the header.
  *
  * The text is not replayed here. It is proven by the sectioned cold replay

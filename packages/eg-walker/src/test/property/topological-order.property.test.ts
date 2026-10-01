@@ -103,7 +103,7 @@ describe("property: EventGraph topological orders", () => {
     );
   });
 
-  it("should encode EGW3 from columns exactly like the event encoder", () => {
+  it("should encode EGW4 from columns exactly like the event encoder", () => {
     fc.assert(
       fc.property(eventDagArb, fc.nat(), (dag, packedSeed) => {
         // Arrange
@@ -191,7 +191,7 @@ const eventDagArb: fc.Arbitrary<ReadonlyArray<GraphEvent>> = fc
   );
 
 /**
- * Store the first `packedCount` events as a decoded EGW3 prefix and append
+ * Store the first `packedCount` events as a decoded EGW4 prefix and append
  * the rest through `addEvent`: 0 gives an object-only graph and
  * `events.length` a packed-only one.
  */

@@ -18,7 +18,7 @@ const event = (
   timestamp,
 });
 
-describe("topological EGW3 binary encoder", () => {
+describe("topological EGW4 binary encoder", () => {
   it("matches the EventGraph codec byte-for-byte for the same wire order", () => {
     const events: GraphEvent[] = [
       event(

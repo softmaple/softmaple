@@ -102,7 +102,7 @@ describe("snapshot first-edit lanes", () => {
     expect(result.secondEditMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("loads the same EGW3 bytes cold for the native lane", () => {
+  it("loads the same graph bytes cold for the native lane", () => {
     const result = measureSnapshotFirstEdit(
       api,
       fixture.bytes,

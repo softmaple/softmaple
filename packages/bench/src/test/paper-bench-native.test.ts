@@ -14,7 +14,7 @@ const testDirectory = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(testDirectory, "../..");
 
 describe("native-only paper benchmark", () => {
-  it("decodes, loads, materializes, and validates an EGW3 payload", () => {
+  it("decodes, loads, materializes, and validates an EGW4 payload", () => {
     const events: GraphEvent[] = [
       {
         id: "alice:0",

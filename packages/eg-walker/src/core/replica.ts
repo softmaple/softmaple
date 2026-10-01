@@ -571,6 +571,10 @@ export class EgWalkerReplica {
     options: RestoreSnapshotOptions = {},
   ): EgWalkerReplica {
     const maxEvents = eventLimitOf(options.maxEvents);
+    // Checked before the decoded sources are consumed or any graph is
+    // decoded, so a retry of a rejected snapshot is rejected the same way.
+    const header = validateNativeSnapshotHeaderOnly(snapshot);
+    assertWithinEventLimit(header.eventCount, maxEvents);
     const graphSource = consumeDecodedNativeSnapshotGraphSource(snapshot);
     const runtimeState = consumeDecodedNativeSnapshotRuntimeState(snapshot);
     let lazyEventGraph: LazyEventGraphSource | undefined;
@@ -581,7 +585,6 @@ export class EgWalkerReplica {
       graphSource === undefined
         ? (() => {
             const fullSnapshot = validateNativeSnapshot(snapshot);
-            assertWithinEventLimit(fullSnapshot.eventCount, maxEvents);
             sequenceRecords = fullSnapshot.sequenceRecords;
             deleteTargets = fullSnapshot.deleteTargets;
             graph = EventGraph.deserialize(fullSnapshot.eventGraph);
@@ -589,8 +592,6 @@ export class EgWalkerReplica {
             return fullSnapshot;
           })()
         : (() => {
-            const header = validateNativeSnapshotHeaderOnly(snapshot);
-            assertWithinEventLimit(header.eventCount, maxEvents);
             lazyEventGraph = (): EventGraph => {
               const graph = graphSource();
               validateGraphMatchesSnapshot(graph, header);

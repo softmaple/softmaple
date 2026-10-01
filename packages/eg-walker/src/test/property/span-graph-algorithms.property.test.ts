@@ -70,6 +70,79 @@ const chainDagArb: fc.Arbitrary<ReadonlyArray<GraphEvent>> = fc
     return events;
   });
 
+/** Exclusive branch length above which groups order by longest path. */
+const MAX_EXCLUSIVE_BRANCH_SPAN = 1_024;
+
+/**
+ * A trunk, then one exclusive branch longer than
+ * {@link MAX_EXCLUSIVE_BRANCH_SPAN} beside short sibling chains that fork
+ * from the trunk or the long branch, and a chain merging some branch tips.
+ * Branch groups holding the long branch order by longest causal path instead
+ * of exclusive span; a merge tail counts toward a sibling's path but not its
+ * exclusive span, so the two orders differ.
+ */
+const longBranchDagArb: fc.Arbitrary<ReadonlyArray<GraphEvent>> = fc
+  .record({
+    trunkLength: fc.integer({ min: 1, max: 4 }),
+    longLength: fc.integer({
+      min: MAX_EXCLUSIVE_BRANCH_SPAN + 1,
+      max: MAX_EXCLUSIVE_BRANCH_SPAN + 40,
+    }),
+    siblings: fc.array(
+      fc.record({
+        length: fc.integer({ min: 1, max: 6 }),
+        forkSeed: fc.nat(),
+        fromLongBranch: fc.boolean(),
+      }),
+      { minLength: 1, maxLength: 4 },
+    ),
+    mergeSeeds: fc.uniqueArray(fc.nat(), { minLength: 0, maxLength: 3 }),
+    mergeTailLength: fc.integer({ min: 1, max: 8 }),
+  })
+  .map(({ trunkLength, longLength, siblings, mergeSeeds, mergeTailLength }) => {
+    const events: GraphEvent[] = [];
+    let sequence = 0;
+    const append = (parents: ReadonlyArray<EventId>): EventId => {
+      const id = `a:${sequence++}`;
+      events.push({
+        id,
+        parentVersion: new Set(parents),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+        timestamp: events.length,
+      });
+      return id;
+    };
+    const appendChain = (
+      parents: ReadonlyArray<EventId>,
+      length: number,
+    ): EventId[] => {
+      const ids = [append(parents)];
+      while (ids.length < length) {
+        ids.push(append([ids.at(-1)!]));
+      }
+      return ids;
+    };
+
+    const trunk = appendChain([], trunkLength);
+    const trunkTip = trunk.at(-1)!;
+    const longBranch = appendChain([trunkTip], longLength);
+    const tips = [longBranch.at(-1)!];
+    for (const sibling of siblings) {
+      const forkFrom = sibling.fromLongBranch
+        ? longBranch[sibling.forkSeed % longBranch.length]!
+        : trunk[sibling.forkSeed % trunk.length]!;
+      tips.push(appendChain([forkFrom], sibling.length).at(-1)!);
+    }
+    const mergeParents = unique(mergeSeeds.map((seed) => seed % tips.length));
+    if (mergeParents.length > 1) {
+      appendChain(
+        mergeParents.map((tip) => tips[tip]!),
+        mergeTailLength,
+      );
+    }
+    return events;
+  });
+
 /** A decoded EGW3 graph and one repacked from a mutable tail, same order. */
 const packedBases = (
   events: ReadonlyArray<GraphEvent>,
@@ -90,36 +163,15 @@ const localVersionsArb = fc.array(fc.nat(), { maxLength: 4 });
 
 describe("property: span-based graph algorithms", () => {
   it("order and plan runs exactly like the per-event traversals", () => {
-    fc.assert(
-      fc.property(chainDagArb, (events) => {
-        for (const base of packedBases(events)) {
-          const reference = new ReferencePackedTraversals(base);
+    fc.assert(fc.property(chainDagArb, assertTraversalsMatch), fcParams());
+  });
 
-          expect(Array.from(base.getTopologicalOrderOffsets())).toEqual(
-            Array.from(reference.getTopologicalOrderOffsets()),
-          );
-          expect(Array.from(base.getBranchPreservingOrderOffsets())).toEqual(
-            Array.from(reference.getBranchPreservingOrderOffsets()),
-          );
-          const layout = base.buildBranchPreservingCriticalReplayLayout();
-          const expected =
-            reference.buildBranchPreservingCriticalReplayLayout();
-          expect(Array.from(layout.eventOrder)).toEqual(
-            Array.from(expected.eventOrder),
-          );
-          expect(Array.from(layout.rankByOffset)).toEqual(
-            Array.from(expected.rankByOffset),
-          );
-          expect(layout.sectionCount).toBe(expected.sectionCount);
-          expect(Array.from(layout.sectionEnds)).toEqual(
-            Array.from(expected.sectionEnds),
-          );
-          expect(Array.from(layout.linearSections)).toEqual(
-            Array.from(expected.linearSections),
-          );
-        }
-      }),
-      fcParams(),
+  it("order branch groups by longest path past the exclusive span limit", () => {
+    // Each graph holds over a thousand events; a few dozen cases reach every
+    // fork and merge position around the long branch.
+    fc.assert(
+      fc.property(longBranchDagArb, assertTraversalsMatch),
+      fcParams({ numRuns: 40 }),
     );
   });
 
@@ -176,6 +228,35 @@ describe("property: span-based graph algorithms", () => {
 });
 
 // Helpers
+
+/** Check every span-based traversal against the per-event reference. */
+const assertTraversalsMatch = (events: ReadonlyArray<GraphEvent>): void => {
+  for (const base of packedBases(events)) {
+    const reference = new ReferencePackedTraversals(base);
+
+    expect(Array.from(base.getTopologicalOrderOffsets())).toEqual(
+      Array.from(reference.getTopologicalOrderOffsets()),
+    );
+    expect(Array.from(base.getBranchPreservingOrderOffsets())).toEqual(
+      Array.from(reference.getBranchPreservingOrderOffsets()),
+    );
+    const layout = base.buildBranchPreservingCriticalReplayLayout();
+    const expected = reference.buildBranchPreservingCriticalReplayLayout();
+    expect(Array.from(layout.eventOrder)).toEqual(
+      Array.from(expected.eventOrder),
+    );
+    expect(Array.from(layout.rankByOffset)).toEqual(
+      Array.from(expected.rankByOffset),
+    );
+    expect(layout.sectionCount).toBe(expected.sectionCount);
+    expect(Array.from(layout.sectionEnds)).toEqual(
+      Array.from(expected.sectionEnds),
+    );
+    expect(Array.from(layout.linearSections)).toEqual(
+      Array.from(expected.linearSections),
+    );
+  }
+};
 
 const unique = (values: ReadonlyArray<number>): number[] =>
   Array.from(new Set(values));

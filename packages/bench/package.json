@@ -7,6 +7,7 @@
   "scripts": {
     "bench": "vitest bench --run",
     "block-model-bench": "node scripts/run-block-model-bench.mjs",
+    "concurrent-burst-bench": "node scripts/run-concurrent-burst-bench.mjs",
     "lint": "eslint .",
     "local-keystroke-memory-bench": "node scripts/run-local-keystroke-memory-bench.mjs",
     "paper-bench": "node scripts/run-paper-bench.mjs",

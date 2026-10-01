@@ -181,6 +181,53 @@ node scripts/run-snapshot-first-edit-bench.mjs \
   --output /path/to/results
 ```
 
+## Concurrent-edit burst
+
+`concurrent-burst-bench` opens a paper dataset and applies a burst of
+`--edits` concurrent inserts from one peer, one `applyRemoteEvent` at a time.
+The peer diverged `d` events before the end of the history, and each insert
+builds on its previous one. The first edit pays for the merge. Every later
+edit is concurrent with the same history, so it stays cheap only while the
+replica keeps the replay cache the first edit built. A replica that releases
+that cache at its byte budget replays the whole divergent interval again on
+every edit.
+
+Each case opens the document one of two ways:
+
+| `--opens`  | Open                                                      | First edit also pays for              |
+| ---------- | --------------------------------------------------------- | ------------------------------------- |
+| `native`   | cold load: decode the graph and replay it into a replica  | —                                     |
+| `portable` | `EgWalkerReplica.fromPortableSnapshot`                    | the lazy graph decode and validation  |
+
+It reuses the snapshot first-edit fixtures. Every process checks the text:
+removing the burst's markers must restore the snapshot text, with each marker
+in front of the one typed before it, and every implementation must produce the
+same final text. For every case and implementation the summary reports:
+
+- the median latency of each edit;
+- the replay path each edit took, and the full replays, partial replays and
+  incremental applies of the whole burst;
+- cache releases: edits that replayed history or started with a cache, and
+  ended without one;
+- the cache kept after the burst, in events and as the replica's estimate;
+- the heap and array buffers after GC, with the replica alive, and the
+  process's peak RSS.
+
+With two implementations, it adds a comparison of edit 1, the slowest of the
+later edits, memory after GC and peak RSS:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-concurrent-burst-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --datasets S1,C1,A1,A2 --opens native,portable --depths 10,1000,10000 \
+  --edits 6 --runs 3 --output /path/to/results
+```
+
+`--reuse-fixtures` keeps the prepared snapshots of an earlier run in the same
+`--output`. `runs.jsonl` keeps every sample with each edit's replay counters.
+
 ## Repeated whole-trace ingest
 
 `repeated-ingest-bench` builds causal batches for a whole paper trace and

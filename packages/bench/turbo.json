@@ -10,6 +10,11 @@
       "cache": false,
       "outputLogs": "full"
     },
+    "concurrent-burst-bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
+    },
     "paper-bench": {
       "dependsOn": ["^build"],
       "cache": false,

@@ -157,11 +157,13 @@ const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
  * legitimately spans a whole document needs one sequence record per code unit,
  * so on merge-heavy histories the base budget can sit *below* the interval's
  * intrinsic floor: the engine is refused, the next event rebuilds the same
- * interval from scratch, and the replica thrashes one full replay per batch
- * while never actually holding less memory. When that happens the budget grows
- * (see {@link EgWalkerReplica.growReplayCacheBudgetAfterThrash}); this ceiling
- * stops the growth so a peer streaming an unboundedly large concurrent
- * interval still releases its cache.
+ * interval, by a full replay or by a partial replay from the newest critical
+ * version before the divergence, and the replica thrashes one replay per
+ * batch while never actually holding less memory. When that happens the
+ * budget grows (see {@link EgWalkerReplica.growReplayCacheBudgetAfterThrash}
+ * and {@link EgWalkerReplica.growReplayCacheBudgetToKeepRebuild}); this
+ * ceiling stops the growth so a peer streaming an unboundedly large
+ * concurrent interval still releases its cache.
  */
 const MAX_REPLAY_CACHE_BUDGET_BYTES = 8 * MAX_REPLAY_CACHE_BYTES;
 const ESTIMATED_REPLAY_RECORD_BYTES = 256;
@@ -2350,6 +2352,19 @@ export class EgWalkerReplica {
   }
 
   /**
+   * Drop a pending budget refusal once an incremental apply re-established
+   * state.
+   *
+   * A refusal only justifies growing the budget when the replica had to
+   * rebuild the cache straight afterwards. An incremental apply absorbed it
+   * instead, so it must not be carried forward and charged to some later,
+   * unrelated replay.
+   */
+  private clearSupersededReplayCacheRefusal(): void {
+    this.releasedCacheAtBudget = false;
+  }
+
+  /**
    * Widen the replay-cache budget when a refusal cost a full rebuild.
    *
    * A release is only worth its price when the state can be rebuilt cheaply.
@@ -2357,18 +2372,6 @@ export class EgWalkerReplica {
    * the replica had to do was replay from scratch, the budget was too small for
    * this history: nothing was saved and a whole-graph replay was paid for.
    */
-  /**
-   * Drop a pending budget refusal once a cheaper path re-established state.
-   *
-   * A refusal only justifies growing the budget when the replica had to rebuild
-   * from scratch straight afterwards. An incremental apply or a partial replay
-   * from a checkpoint absorbed it instead, so it must not be carried forward
-   * and charged to some later, unrelated full replay.
-   */
-  private clearSupersededReplayCacheRefusal(): void {
-    this.releasedCacheAtBudget = false;
-  }
-
   private growReplayCacheBudgetAfterThrash(): void {
     if (!this.releasedCacheAtBudget) {
       return;
@@ -2377,6 +2380,42 @@ export class EgWalkerReplica {
     this.replayCacheBudgetBytes = Math.min(
       this.replayCacheBudgetBytes * 2,
       MAX_REPLAY_CACHE_BUDGET_BYTES,
+    );
+  }
+
+  /**
+   * Widen the budget so the cache a partial replay just built is kept, when
+   * releasing it would only make the next event rebuild it.
+   *
+   * The replay started its engine at the newest critical version before the
+   * divergence. While the frontier still has more than one head, the
+   * divergence is open and the next event on the concurrent branch needs the
+   * same interval. Releasing an over-budget cache then saves memory only
+   * until that event and pays the whole replay again. That is the thrash a
+   * full replay after a refusal detects, and it is treated the same way when
+   * this replay rebuilt a refused cache. A rebuild of more than
+   * {@link REPLAY_CACHE_CRITICAL_RELEASE_EVENTS} events is that costly from
+   * its first refusal, so it does not wait to be paid twice. A smaller cache
+   * is cheap to rebuild and is still released the first time.
+   *
+   * The budget grows in one step to fit the estimate, bounded by
+   * {@link MAX_REPLAY_CACHE_BUDGET_BYTES}; a cache above the ceiling is still
+   * released.
+   */
+  private growReplayCacheBudgetToKeepRebuild(
+    rebuildsRefusedCache: boolean,
+  ): void {
+    if (
+      this.replayCacheBytes <= this.replayCacheBudgetBytes ||
+      this.currentVersion.size <= 1 ||
+      (!rebuildsRefusedCache &&
+        this.replayCacheEvents <= REPLAY_CACHE_CRITICAL_RELEASE_EVENTS)
+    ) {
+      return;
+    }
+    this.replayCacheBudgetBytes = replayCacheBudgetToFit(
+      this.replayCacheBudgetBytes,
+      this.replayCacheBytes,
     );
   }
 
@@ -2445,7 +2484,11 @@ export class EgWalkerReplica {
    */
   private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
     const graph = this.ensureEventGraph();
-    this.clearSupersededReplayCacheRefusal();
+    // A refusal still pending means this replay rebuilds a cache that was
+    // refused at the budget. Settle it here: the end of this replay either
+    // keeps the rebuilt cache or records a new refusal.
+    const rebuildsRefusedCache = this.releasedCacheAtBudget;
+    this.releasedCacheAtBudget = false;
     this.captureEnginePeakBeforeSwap();
     const frontier = graph.getFrontier();
     const sections = graph.planInsertionSuffixSections(
@@ -2550,6 +2593,7 @@ export class EgWalkerReplica {
     this.partialReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
     this.refreshReplayCacheMetrics();
+    this.growReplayCacheBudgetToKeepRebuild(rebuildsRefusedCache);
     this.evictReplayCacheIfNeeded();
   }
 
@@ -3069,6 +3113,20 @@ const canRetainReplayEngine = (
     stats.sequenceRecordCount * ESTIMATED_REPLAY_RECORD_BYTES +
     eventCount * ESTIMATED_DELETE_TARGET_BYTES <=
   budgetBytes;
+
+/**
+ * `budget` doubled as many times as a cache of `estimatedBytes` needs, at
+ * most {@link MAX_REPLAY_CACHE_BUDGET_BYTES}. The budget stays a power-of-two
+ * multiple of {@link MAX_REPLAY_CACHE_BYTES}, so the result is what repeated
+ * thrash would reach one doubling at a time.
+ */
+const replayCacheBudgetToFit = (
+  budget: number,
+  estimatedBytes: number,
+): number =>
+  budget >= estimatedBytes || budget >= MAX_REPLAY_CACHE_BUDGET_BYTES
+    ? Math.min(budget, MAX_REPLAY_CACHE_BUDGET_BYTES)
+    : replayCacheBudgetToFit(budget * 2, estimatedBytes);
 
 const mergeEngineStats = (
   aggregate: EngineStats | null,

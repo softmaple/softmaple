@@ -137,10 +137,17 @@ export interface SnapshotFirstEditResult {
 export const sha256Hex = (text: string): string =>
   createHash("sha256").update(text).digest("hex");
 
+/** A small persisted history for warming up, and its divergence depths. */
+export interface WarmUpSnapshot {
+  readonly bytes: Uint8Array;
+  readonly manifest: SnapshotFirstEditManifest;
+  readonly depths: ReadonlyArray<number>;
+}
+
 /**
- * Exercise every edit lane on a small history built by the implementation
- * under test, so the measured lanes do not include first-call compilation of
- * the code they share with every other document.
+ * Build a small history with the implementation under test and encode it as
+ * a portable snapshot, so a warm-up opens it the way a measured lane opens a
+ * paper dataset.
  *
  * One author types while a second one occasionally inserts concurrently, so
  * the history has both chains and short nonlinear sections. As in the paper
@@ -149,10 +156,9 @@ export const sha256Hex = (text: string): string =>
  * Divergences at a shallow and a deep point reach both a recent checkpoint
  * and an older one with sections of either kind in between.
  */
-export const warmUpSnapshotFirstEdit = (
-  api: SnapshotFirstEditApi,
-  iterations: number = 2,
-): void => {
+export const buildWarmUpSnapshot = (
+  api: Pick<SnapshotFirstEditApi, "EgWalkerReplica" | "PortableSnapshotCodec">,
+): WarmUpSnapshot => {
   const historyLength = 1_024;
   const author = new api.EgWalkerReplica("bench-warmup-a");
   const peer = new api.EgWalkerReplica("bench-warmup-b");
@@ -203,6 +209,19 @@ export const warmUpSnapshotFirstEdit = (
       depths.map((depth) => [String(depth), ids[ids.length - 1 - depth]!]),
     ),
   };
+  return { bytes, manifest, depths };
+};
+
+/**
+ * Exercise every edit lane on the {@link buildWarmUpSnapshot} history, so
+ * the measured lanes do not include first-call compilation of the code they
+ * share with every other document.
+ */
+export const warmUpSnapshotFirstEdit = (
+  api: SnapshotFirstEditApi,
+  iterations: number = 2,
+): void => {
+  const { bytes, manifest, depths } = buildWarmUpSnapshot(api);
   for (let iteration = 0; iteration < iterations; iteration++) {
     for (const kind of [
       { type: "local" },

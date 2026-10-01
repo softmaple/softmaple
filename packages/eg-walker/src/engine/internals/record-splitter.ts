@@ -14,6 +14,7 @@ import {
 } from "./event-item-index";
 import { OriginLeftIndex } from "./origin-left-index";
 import type { RecordContent } from "./record-content";
+import { shiftExternalItemIds } from "./sequence-records";
 
 interface RecordSplitterDeps {
   readonly sequence: IndexedSequence<AugmentedCRDTItem>;
@@ -30,8 +31,8 @@ interface RecordSplitterDeps {
 }
 
 /**
- * On-demand split of run-length records (placeholders and typed-run
- * leaves) when concurrent inserts or deletes anchor inside them.
+ * On-demand split of run-length records (placeholders, typed-run leaves and
+ * insert runs) when concurrent inserts or deletes anchor inside them.
  *
  * The splitter owns no state of its own; it mutates the sequence and
  * cross-reference indices wired in via {@link RecordSplitterDeps}.
@@ -49,13 +50,16 @@ export class RecordSplitter {
    * sandwiched between the two halves should be inserted. Single-character
    * records and offset-0 calls are no-ops.
    *
-   * Two record shapes carry multi-character content and can be split:
+   * Three record shapes carry multi-character content and can be split:
    *
    * - **Placeholder:** right gets a fresh placeholder serial; both halves
    *   stay anonymous placeholder records.
    * - **Typed-run record:** right continues the run's agent with its start
    *   sequence advanced by `offsetInRecord` and is registered as one numeric
    *   range, so retreat / advance resolve either half logarithmically.
+   * - **Insert-run record:** right keeps the insert event and starts at the
+   *   code-unit offset advanced by `offsetInRecord`; it joins the event's
+   *   item entry, so retreat / advance toggle every fragment.
    */
   splitRecordAt(position: number, offsetInRecord: number): number {
     const { sequence } = this.deps;
@@ -113,6 +117,8 @@ export class RecordSplitter {
     deleteTargets.extendMembership(left.id, right.id);
     if (left.run) {
       this.deps.eventItems.registerRunItem(right);
+    } else if (left.agent !== PLACEHOLDER_AGENT) {
+      this.deps.eventItems.addSplitFragment(left.id, right.id);
     }
     this.deps.onRecordSplit?.(left, right);
     return right;
@@ -123,9 +129,8 @@ export class RecordSplitter {
    * at `offsetInRecord` become an isolated record that the caller can mark
    * as deleted. Returns that middle record. Surrounding prefix/suffix halves
    * remain undeleted so future events can still reference the original
-   * region. Used for placeholder, typed-run, and multi-character paste
-   * records alike — the {@link splitRecordAt} dispatch picks the right
-   * shape for each side.
+   * region. Used for placeholder, typed-run, and insert-run records alike —
+   * {@link buildSplitRightHalf} picks the right shape for each side.
    */
   splitRecordForDelete(
     candidate: AugmentedCRDTItem,
@@ -163,9 +168,10 @@ export class RecordSplitter {
       return eventItemIds;
     }
     if (typeof eventItemIds !== "number" && eventItemIds.length > 1) {
-      // Multi-character INSERT events stay one record per code unit, each with
-      // its own key and `run === false`. The retreat / advance loop already
-      // toggles every slice in order; no isolation is needed.
+      // The fragments of a split insert-run record (or the per-code-unit
+      // records of a restored insert) each hold only this event's code
+      // units. The retreat / advance loop toggles every one; no isolation is
+      // needed.
       return eventItemIds;
     }
     const itemId =
@@ -180,8 +186,8 @@ export class RecordSplitter {
       );
     }
     if (!record.run || record.content.length === 1) {
-      // Placeholder or per-code-unit paste record, or a one-code-unit run
-      // that is already the exact slice.
+      // Insert-run record, which holds only this event's code units, or a
+      // one-code-unit run that is already the exact slice.
       return eventItemIds;
     }
     if (events.agentAt(localVersion) !== record.agent) {
@@ -367,6 +373,30 @@ export class RecordSplitter {
         prepareState: left.prepareState,
         run: true,
       };
+    }
+
+    if (left.agent !== PLACEHOLDER_AGENT) {
+      // Insert run: the right half's first code unit followed the left
+      // half's last one in its event, so the left half is its chain
+      // boundary, exactly as for a typed-run split.
+      const right: AugmentedCRDTItem = {
+        id,
+        agent: left.agent,
+        sequence: left.sequence,
+        offset: left.offset + offsetInRecord,
+        content: rightContent,
+        originLeft: left.id,
+        originRight: left.originRight,
+        everDeleted: left.everDeleted,
+        prepareState: left.prepareState,
+        run: false,
+      };
+      return left.external === undefined
+        ? right
+        : {
+            ...right,
+            external: shiftExternalItemIds(left.external, offsetInRecord),
+          };
     }
 
     const leftPlaceholder = left.placeholder;

@@ -21,8 +21,10 @@ interface RunItemNode {
 /**
  * Event -> CRDT item lookup used by retreat / advance.
  *
- * Normal multi-character insert events keep direct entries, keyed by the
- * event's local version, because one event can own multiple CRDT items.
+ * Insert events that are not part of a typed run keep direct entries, keyed
+ * by the event's local version. A multi-character insert starts as one
+ * insert-run record, and every split of that record adds its right half to
+ * the same entry, so one event can own multiple CRDT items.
  * Coalesced typed-run records are cheaper: a record spans a contiguous
  * `(agent, sequence)` range, so replay and snapshot restore register the
  * range once instead of one entry per character event. Each agent's ranges
@@ -31,6 +33,12 @@ interface RunItemNode {
  */
 export class EventItemIndex {
   private readonly direct = new Map<number, StoredEventItems>();
+  /**
+   * Owning event of each insert-run record that can still be split: one
+   * holding more than one code unit when it was registered, or a split's
+   * right half.
+   */
+  private readonly fragmentOwners = new Map<ItemKey, number>();
   private runRootsByAgent: Array<RunItemNode | undefined> = [];
   private runNodesByItem = new WeakMap<AugmentedCRDTItem, RunItemNode>();
 
@@ -38,6 +46,7 @@ export class EventItemIndex {
 
   clear(): void {
     this.direct.clear();
+    this.fragmentOwners.clear();
     this.runRootsByAgent = [];
     this.runNodesByItem = new WeakMap<AugmentedCRDTItem, RunItemNode>();
   }
@@ -62,6 +71,37 @@ export class EventItemIndex {
       return;
     }
     this.direct.set(localVersion, [items, itemId]);
+  }
+
+  /**
+   * Register the single insert-run record of a multi-character insert. A
+   * later split adds its right half to the same entry through
+   * {@link addSplitFragment}.
+   */
+  setInsertRun(localVersion: number, itemId: ItemKey): void {
+    this.direct.set(localVersion, itemId);
+    this.fragmentOwners.set(itemId, localVersion);
+  }
+
+  /** Add a restored insert-run record that holds more than one code unit. */
+  addInsertRun(localVersion: number, itemId: ItemKey): void {
+    this.add(localVersion, itemId);
+    this.fragmentOwners.set(itemId, localVersion);
+  }
+
+  /**
+   * Register `right`, split off insert-run record `left`, under the event
+   * that owns `left`. A record the index does not own stays unregistered:
+   * it belongs to an event outside the replay graph, which no retreat or
+   * advance names.
+   */
+  addSplitFragment(left: ItemKey, right: ItemKey): void {
+    const localVersion = this.fragmentOwners.get(left);
+    if (localVersion === undefined) {
+      return;
+    }
+    this.add(localVersion, right);
+    this.fragmentOwners.set(right, localVersion);
   }
 
   /**

@@ -1,7 +1,7 @@
 import type { ExternalOperation } from "../../types";
 import type { IndexedSequence } from "../indexed-sequence";
 import { DeleteTargetIndex } from "./delete-target-index";
-import { PLACEHOLDER_AGENT, type AugmentedCRDTItem } from "./engine-types";
+import type { AugmentedCRDTItem } from "./engine-types";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
 import { coalesceDeleteRuns } from "./text-utils";
@@ -190,14 +190,11 @@ export const applyDelete = (
         continue;
       }
 
-      // Multi-character records (placeholders and typed-run leaves coalesced
-      // by Section 3.4) are split on demand so the deleted slice is its own
-      // record. Single-character records and per-code-unit paste fragments
-      // skip the split entirely and are marked in place.
-      const isMultiCharRecord =
-        (candidate.agent === PLACEHOLDER_AGENT || candidate.run) &&
-        candidate.content.length > 1;
-      if (isMultiCharRecord) {
+      // Multi-character records (placeholders, typed-run leaves and insert
+      // runs, coalesced by Section 3.4) are split on demand so the deleted
+      // slice is its own record. Single-character records skip the split
+      // entirely and are marked in place.
+      if (candidate.content.length > 1) {
         const availableInRecord =
           candidate.content.length - landing.offsetInRecord;
         const toDelete = Math.min(remaining, availableInRecord);

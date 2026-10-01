@@ -1802,7 +1802,7 @@ export class EgWalkerEngine {
             placeholder.start + landing.offsetInRecord,
             placeholder.end,
           )
-        : candidate.run !== null &&
+        : candidate.run &&
             typeof candidate.content === "string" &&
             candidate.prepareState === 1
           ? candidate.content.length - landing.offsetInRecord
@@ -2072,7 +2072,12 @@ export class EgWalkerEngine {
       // An item of an event outside the graph cannot be reached by a replay
       // transition, which only names graph events.
       const localVersion = this.graph.localVersionOf(eventId);
-      if (localVersion >= 0) {
+      if (localVersion < 0) {
+        return;
+      }
+      if (item.content.length > 1) {
+        this.eventItems.addInsertRun(localVersion, item.id);
+      } else {
         this.eventItems.add(localVersion, item.id);
       }
     }

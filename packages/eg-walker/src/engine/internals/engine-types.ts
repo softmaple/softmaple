@@ -33,7 +33,7 @@ export const PLACEHOLDER_AGENT = -2;
  * `__placeholder__:${serial}`) is formatted only at snapshot and recovery
  * boundaries.
  *
- * A record can take two coalesced shapes (or be a single-event item):
+ * A record takes one of three run-length shapes:
  *
  * - **Placeholder** (`agent === PLACEHOLDER_AGENT`, `run === false`):
  *   contiguous run of pre-checkpoint / initial-text content, split on
@@ -43,10 +43,17 @@ export const PLACEHOLDER_AGENT = -2;
  *   single-character INSERT events of `agent`, starting at `sequence`
  *   (Section 3.4 "smaller" lever). Splits move whole-event slices to new
  *   records that start at the later sequence.
+ * - **Insert-run record** (any other agent, `run === false`): code units
+ *   `offset .. offset + content.length` of one INSERT event. An insert is
+ *   integrated as a single record; the code unit at offset `k` keeps the ID
+ *   `(event, k)`, so a split only moves the right half's `offset`. Splits
+ *   happen where a concurrent insert or delete lands, and every fragment
+ *   stays registered under its event for retreat / advance.
  *
- * Multi-character INSERT events stay one record per code unit (each with
- * `run === false` and its `offset`); we do not coalesce them, since the
- * per-code-unit IDs already serve as anchors for concurrent siblings.
+ * Typed-run and insert-run records compress a chain of per-code-unit CRDT
+ * items in which each code unit's left origin is the one before it. A split
+ * restores the chain boundary by giving the right half the left half as its
+ * left origin.
  *
  * `content` is mutable to support in-place run extension and splits without
  * invalidating the `WeakMap` location index in `IndexedSequence`. Ordinary
@@ -103,9 +110,10 @@ export interface EngineStats {
    *
    * The paper's "Smaller" lever (Section 3.4) is run-length leaves — a
    * single record covering many code units instead of one record per code
-   * unit. Initial document text and pre-checkpoint placeholders are stored
-   * as run-length records; concurrent inserts and deletes split records on
-   * demand. Tracking the count lets tests prove the coalescing happened
+   * unit. Initial document text, pre-checkpoint placeholders, typed runs and
+   * multi-character inserts are stored as run-length records; concurrent
+   * inserts and deletes split records on demand. Tracking the count lets
+   * tests prove the coalescing happened
    * and lets memory regressions surface as a quantitative jump rather than
    * a slowdown.
    */

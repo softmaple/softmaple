@@ -53,13 +53,14 @@ up automatically.
 | [`packed-delete-target-index.property.test.ts`](./packed-delete-target-index.property.test.ts)       | Out-of-order packed delete keys materialize in stable replay order.                                     |
 | [`deferred-text-materialization.property.test.ts`](./deferred-text-materialization.property.test.ts) | Deferred cold replay produces the same text and transient records as eager replay.                      |
 | [`linear-remote-batch.property.test.ts`](./linear-remote-batch.property.test.ts) | Exact chains split into batches match single-event delivery in results, text and graph, then merge a concurrent edit. |
+| [`paste-typing-equivalence.property.test.ts`](./paste-typing-equivalence.property.test.ts) | Pasting each insert as one event and typing it one scalar per event produce identical documents under random concurrent edits, live and after a cold load. |
 
 ## Shared helpers
 
 | File                                   | Purpose                                                                                                                                                                                       |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`arbitraries.ts`](./arbitraries.ts)   | Shared `fast-check` arbitraries (replica ids, BMP/surrogate-biased text, edit instructions, multi-replica `TraceParams`, explicit DAGs).                                                      |
-| [`trace-runner.ts`](./trace-runner.ts) | Drives a fleet of `EgWalkerReplica` instances through a `TraceParams` script, returns the deduplicated event list, canonical replay text, per-replica final text, and the applied-edit count. |
+| [`trace-runner.ts`](./trace-runner.ts) | Drives a fleet of `EgWalkerReplica` instances through a `TraceParams` script, returns the deduplicated event list, canonical replay text, per-replica final text, and the applied-edit count. `typeInserts` types each insert one scalar per event instead of pasting it. |
 | [`run-config.ts`](./run-config.ts)     | Centralises the `numRuns` knob and the `EG_WALKER_PROPERTY_RUNS` override.                                                                                                                    |
 | [`utf16.ts`](./utf16.ts)               | UTF-16 well-formedness predicate for the surrogate test.                                                                                                                                      |
 

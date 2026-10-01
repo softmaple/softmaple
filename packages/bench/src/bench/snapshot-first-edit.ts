@@ -4,13 +4,14 @@
  * graph.
  *
  * Opening a portable snapshot is lazy: the event graph is decoded and the
- * snapshot text is validated by the first operation that needs history. A
- * cold load replays the history up front and keeps only the checkpoints it
- * recorded on the way, so a peer that diverged far back can still force a
- * long replay. This module times the first operation and the one after it for
- * one edit kind. Each kind must run in a fresh process, because once the first
- * edit has paid for the lazy work every later operation measures something
- * else.
+ * snapshot text is validated by `replica.prepare()` or, without it, by the
+ * first operation that needs history. A cold load replays the history up
+ * front and keeps only the checkpoints it recorded on the way, so a peer that
+ * diverged far back can still force a long replay. This module times the
+ * first operation and the one after it for one edit kind, and the
+ * preparation before them for a kind that prepares. Each kind must run in a
+ * fresh process, because once the restore work is paid for every later
+ * operation measures something else.
  *
  * The module only imports eg-walker types. The implementation under test is
  * passed in, so one harness can measure a base and a head build.
@@ -38,6 +39,27 @@ export const FIRST_EDIT_MARKER = "";
 export const SECOND_EDIT_MARKER = "";
 
 /**
+ * How a `local`, `remote` or `concurrent` lane opens the snapshot before its
+ * first edit. Without one, the replica is lazy: the first operation that
+ * needs the history decodes and proves it.
+ *
+ * - `prepared`: `await replica.prepare()`, time-sliced with its default
+ *   slice length.
+ * - `prepared-whole`: `await replica.prepare({ sliceMs: Infinity })`, in one
+ *   task, as a replica hosted in a Worker would.
+ * - `trusted`: the bytes are read with `decodeAuthenticated` and the
+ *   fixture's tag, then `await replica.prepare()` decodes the history
+ *   without replaying it.
+ */
+export type SnapshotOpenMode = "prepared" | "prepared-whole" | "trusted";
+
+const OPEN_MODES: ReadonlyArray<SnapshotOpenMode> = [
+  "prepared-whole",
+  "prepared",
+  "trusted",
+];
+
+/**
  * - `local`: two local inserts.
  * - `remote`: a caught-up peer sends two events that extend the frontier.
  * - `concurrent`: a peer that diverged `depth` events before the end of the
@@ -49,37 +71,90 @@ export const SECOND_EDIT_MARKER = "";
  * - `native-concurrent`: the same cold load, then the `concurrent` lane's two
  *   inserts. The load is not part of the first edit, so the first edit is
  *   only the merge of a peer that diverged `depth` events back.
+ *
+ * A `local`, `remote` or `concurrent` lane named with an
+ * {@link SnapshotOpenMode} prefix, such as `prepared-local`, opens the
+ * snapshot that way.
  */
 export type SnapshotEditKind =
-  | { readonly type: "local" }
-  | { readonly type: "remote" }
-  | { readonly type: "concurrent"; readonly depth: number }
+  | { readonly type: "local"; readonly open?: SnapshotOpenMode }
+  | { readonly type: "remote"; readonly open?: SnapshotOpenMode }
+  | {
+      readonly type: "concurrent";
+      readonly depth: number;
+      readonly open?: SnapshotOpenMode;
+    }
   | { readonly type: "native" }
   | { readonly type: "native-concurrent"; readonly depth: number };
 
+/** A lane that opens its snapshot with {@link SnapshotOpenMode}. */
+export type PreparedSnapshotEditKind = Extract<
+  SnapshotEditKind,
+  { readonly open?: SnapshotOpenMode }
+> & { readonly open: SnapshotOpenMode };
+
 export const parseSnapshotEditKind = (value: string): SnapshotEditKind => {
-  if (value === "local" || value === "remote" || value === "native") {
-    return { type: value };
+  const open = OPEN_MODES.find((mode) => value.startsWith(`${mode}-`));
+  const lane = open === undefined ? value : value.slice(open.length + 1);
+  const opened = <T extends SnapshotEditKind>(kind: T): T =>
+    open === undefined ? kind : { ...kind, open };
+  if (lane === "local" || lane === "remote") {
+    return opened({ type: lane });
   }
-  const match = /^(native-)?concurrent-(\d+)$/.exec(value);
-  if (match !== null) {
+  if (lane === "native" && open === undefined) {
+    return { type: lane };
+  }
+  const match = /^(native-)?concurrent-(\d+)$/.exec(lane);
+  if (match !== null && (match[1] === undefined || open === undefined)) {
     const depth = Number(match[2]);
     if (Number.isSafeInteger(depth) && depth >= 0) {
-      return {
-        type: match[1] === undefined ? "concurrent" : "native-concurrent",
-        depth,
-      };
+      return match[1] === undefined
+        ? opened({ type: "concurrent", depth })
+        : { type: "native-concurrent", depth };
     }
   }
   throw new Error(
-    `Unknown snapshot edit kind ${JSON.stringify(value)}; expected local, remote, native, concurrent-<depth>, or native-concurrent-<depth>`,
+    `Unknown snapshot edit kind ${JSON.stringify(value)}; expected local, remote, native, concurrent-<depth>, or native-concurrent-<depth>, the first three optionally prefixed with prepared-, prepared-whole- or trusted-`,
   );
 };
 
-export const formatSnapshotEditKind = (kind: SnapshotEditKind): string =>
-  kind.type === "concurrent" || kind.type === "native-concurrent"
-    ? `${kind.type}-${kind.depth}`
-    : kind.type;
+export const formatSnapshotEditKind = (kind: SnapshotEditKind): string => {
+  const lane =
+    kind.type === "concurrent" || kind.type === "native-concurrent"
+      ? `${kind.type}-${kind.depth}`
+      : kind.type;
+  return "open" in kind && kind.open !== undefined
+    ? `${kind.open}-${lane}`
+    : lane;
+};
+
+export const isPreparedSnapshotEditKind = (
+  kind: SnapshotEditKind,
+): kind is PreparedSnapshotEditKind =>
+  "open" in kind && kind.open !== undefined;
+
+/**
+ * The key the `trusted` lanes authenticate their fixtures with. The bench
+ * only authenticates bytes it prepared itself, so the key is no secret.
+ */
+const BENCH_AUTHENTICATION_KEY = new TextEncoder().encode(
+  "softmaple snapshot-first-edit bench authentication key",
+);
+
+export const importBenchAuthenticationKey = (): Promise<CryptoKey> =>
+  crypto.subtle.importKey(
+    "raw",
+    BENCH_AUTHENTICATION_KEY,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+
+/** A fixture's authentication tag and the key it verifies under. */
+export interface SnapshotAuthentication {
+  readonly tag: Uint8Array;
+  readonly key: CryptoKey;
+}
 
 /** Metadata stored next to a prepared snapshot; never part of timing. */
 export interface SnapshotFirstEditManifest {
@@ -116,6 +191,19 @@ export interface SnapshotFirstEditResult {
   readonly kind: string;
   readonly decodeMs: number;
   readonly restoreMs: number;
+  /** `await replica.prepare()`; 0 for a lane that does not prepare. */
+  readonly prepareMs: number;
+  /** Synchronous runs of preparation work; 0 without `prepare()`. */
+  readonly prepareSlices: number;
+  /** The longest of those runs: the longest task preparation added. */
+  readonly prepareLongestSliceMs: number;
+  /**
+   * From the snapshot bytes to a replica whose next edit does no restore
+   * work: decode and restore, then `prepare()` or, for a lane that does not
+   * prepare, the first edit, which does that work. For a cold load, the
+   * decode and the load.
+   */
+  readonly readyToEditMs: number;
   readonly firstEditMs: number;
   readonly secondEditMs: number;
   readonly nativeDecodeMs: number;
@@ -249,6 +337,11 @@ export const measureSnapshotFirstEdit = (
   kind: SnapshotEditKind,
   collectGarbage: () => void = () => undefined,
 ): SnapshotFirstEditResult => {
+  if (isPreparedSnapshotEditKind(kind)) {
+    throw new Error(
+      `${formatSnapshotEditKind(kind)} prepares before its first edit; use measurePreparedSnapshotFirstEdit`,
+    );
+  }
   const codec = new api.PortableSnapshotCodec();
   const persisted = bytes.slice();
 
@@ -300,6 +393,10 @@ export const measureSnapshotFirstEdit = (
     kind: formatSnapshotEditKind(kind),
     decodeMs,
     restoreMs,
+    prepareMs: 0,
+    prepareSlices: 0,
+    prepareLongestSliceMs: 0,
+    readyToEditMs: decodeMs + restoreMs + firstEditMs,
     firstEditMs,
     secondEditMs,
     nativeDecodeMs: 0,
@@ -314,6 +411,156 @@ export const measureSnapshotFirstEdit = (
     heapAfterOpenBytes: null,
     heapAfterGcBytes,
   };
+};
+
+/**
+ * Time decode, restore, `prepare()` and two edits of one kind, then validate
+ * the text, for a lane that prepares before its first edit. `trusted` lanes
+ * read the bytes with `decodeAuthenticated`, so they need `authentication`.
+ * `bytes` is copied before decode, as in {@link measureSnapshotFirstEdit}.
+ */
+export const measurePreparedSnapshotFirstEdit = async (
+  api: SnapshotFirstEditApi,
+  bytes: Uint8Array,
+  manifest: SnapshotFirstEditManifest,
+  kind: PreparedSnapshotEditKind,
+  authentication: SnapshotAuthentication | null,
+  collectGarbage: () => void = () => undefined,
+): Promise<SnapshotFirstEditResult> => {
+  const codec = new api.PortableSnapshotCodec();
+  const persisted = bytes.slice();
+  if (kind.open === "trusted" && authentication === null) {
+    throw new Error(`${manifest.label}: the trusted lanes need a tag`);
+  }
+
+  collectGarbage();
+  let startedAt = performance.now();
+  const snapshot =
+    kind.open === "trusted"
+      ? await codec.decodeAuthenticated(
+          persisted,
+          authentication!.tag,
+          authentication!.key,
+        )
+      : codec.decode(persisted);
+  const decodeMs = performance.now() - startedAt;
+  assertSnapshotMatchesManifest(snapshot, manifest);
+
+  collectGarbage();
+  startedAt = performance.now();
+  const replica = api.EgWalkerReplica.fromPortableSnapshot(
+    snapshot,
+    "bench-local",
+  );
+  const restoreMs = performance.now() - startedAt;
+
+  // Each slice runs from a resume, or the call, to the next yield.
+  let sliceStartedAt = 0;
+  let prepareSlices = 0;
+  let prepareLongestSliceMs = 0;
+  const endSlice = (): void => {
+    prepareSlices++;
+    prepareLongestSliceMs = Math.max(
+      prepareLongestSliceMs,
+      performance.now() - sliceStartedAt,
+    );
+  };
+  const yieldToHost = (): Promise<void> => {
+    endSlice();
+    return new Promise((resolve) => {
+      setImmediate(() => {
+        sliceStartedAt = performance.now();
+        resolve();
+      });
+    });
+  };
+  startedAt = performance.now();
+  sliceStartedAt = startedAt;
+  await replica.prepare(
+    kind.open === "prepared-whole"
+      ? { sliceMs: Number.POSITIVE_INFINITY, yieldToHost }
+      : { yieldToHost },
+  );
+  endSlice();
+  const prepareMs = performance.now() - startedAt;
+  if (!replica.isPrepared()) {
+    throw new Error(`${manifest.label}: prepare() did not prepare the replica`);
+  }
+
+  const [first, second] = buildEdits(kind, manifest);
+  startedAt = performance.now();
+  first(replica);
+  const firstEditMs = performance.now() - startedAt;
+  const statsAfterFirstEdit = pickReplayStats(replica.getReplayStats());
+
+  startedAt = performance.now();
+  second(replica);
+  const secondEditMs = performance.now() - startedAt;
+  const statsAfterSecondEdit = pickReplayStats(replica.getReplayStats());
+
+  const text = replica.getText();
+  assertEditedText(text, snapshot.text, kind);
+  collectGarbage();
+  const heapAfterGcBytes = process.memoryUsage().heapUsed;
+
+  return {
+    kind: formatSnapshotEditKind(kind),
+    decodeMs,
+    restoreMs,
+    prepareMs,
+    prepareSlices,
+    prepareLongestSliceMs,
+    readyToEditMs: decodeMs + restoreMs + prepareMs,
+    firstEditMs,
+    secondEditMs,
+    nativeDecodeMs: 0,
+    nativeLoadMs: 0,
+    nativeMaterializeMs: 0,
+    finalTextLength: text.length,
+    finalTextSha256: sha256Hex(text),
+    finalTextValidated: true,
+    statsAfterOpen: null,
+    statsAfterFirstEdit,
+    statsAfterSecondEdit,
+    heapAfterOpenBytes: null,
+    heapAfterGcBytes,
+  };
+};
+
+/**
+ * {@link warmUpSnapshotFirstEdit} for the lanes that prepare. Run it only in
+ * a process that measures one of them, so a lazy lane's warm-up stays the
+ * same in every build.
+ */
+export const warmUpPreparedSnapshotFirstEdit = async (
+  api: SnapshotFirstEditApi,
+  iterations: number = 2,
+): Promise<void> => {
+  const { bytes, manifest, depths } = buildWarmUpSnapshot(api);
+  const key = await importBenchAuthenticationKey();
+  const authentication = {
+    tag: await new api.PortableSnapshotCodec().authenticate(bytes, key),
+    key,
+  };
+  for (let iteration = 0; iteration < iterations; iteration++) {
+    for (const open of OPEN_MODES) {
+      for (const kind of [
+        { type: "local", open },
+        { type: "remote", open },
+        ...depths.map(
+          (depth) => ({ type: "concurrent", depth, open }) as const,
+        ),
+      ] as const) {
+        await measurePreparedSnapshotFirstEdit(
+          api,
+          bytes,
+          manifest,
+          kind,
+          authentication,
+        );
+      }
+    }
+  }
 };
 
 type Edit = (replica: InstanceType<EgWalkerModule["EgWalkerReplica"]>) => void;
@@ -454,6 +701,10 @@ const measureNativeLoad = (
     kind: "native",
     decodeMs,
     restoreMs: 0,
+    prepareMs: 0,
+    prepareSlices: 0,
+    prepareLongestSliceMs: 0,
+    readyToEditMs: decodeMs + loaded.nativeDecodeMs + loaded.nativeLoadMs,
     firstEditMs: 0,
     secondEditMs: 0,
     nativeDecodeMs: loaded.nativeDecodeMs,
@@ -509,6 +760,10 @@ const measureNativeConcurrentEdit = (
     kind: formatSnapshotEditKind(kind),
     decodeMs,
     restoreMs: 0,
+    prepareMs: 0,
+    prepareSlices: 0,
+    prepareLongestSliceMs: 0,
+    readyToEditMs: decodeMs + loaded.nativeDecodeMs + loaded.nativeLoadMs,
     firstEditMs,
     secondEditMs,
     nativeDecodeMs: loaded.nativeDecodeMs,

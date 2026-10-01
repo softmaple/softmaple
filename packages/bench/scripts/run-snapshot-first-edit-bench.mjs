@@ -12,7 +12,10 @@
  *   [--runs 3] [--paper-root PATH] [--output DIR] [--reuse-fixtures]
  *
  * `--kinds` also accepts `native-concurrent-<depth>`: cold load, then one
- * concurrent remote edit at that depth.
+ * concurrent remote edit at that depth. `local`, `remote` and
+ * `concurrent-<depth>` take a `prepared-`, `prepared-whole-` or `trusted-`
+ * prefix, which opens the snapshot with `replica.prepare()` before the first
+ * edit; those lanes need a build that has it.
  */
 import assert from "node:assert/strict";
 import console from "node:console";
@@ -76,7 +79,7 @@ const kinds = values.kinds.split(",").map((value) => value.trim());
 const depths = [
   ...new Set(
     kinds.flatMap((kind) => {
-      const match = /^(?:native-)?concurrent-(\d+)$/.exec(kind);
+      const match = /(?:^|-)concurrent-(\d+)$/.exec(kind);
       return match === null ? [] : [Number(match[1])];
     }),
   ),
@@ -169,7 +172,7 @@ try {
             `${JSON.stringify(result)}\n`,
           );
           console.error(
-            `END ${name} decode=${result.decodeMs.toFixed(1)} restore=${result.restoreMs.toFixed(1)} first=${result.firstEditMs.toFixed(1)} second=${result.secondEditMs.toFixed(3)} nativeLoad=${result.nativeLoadMs.toFixed(1)}`,
+            `END ${name} decode=${result.decodeMs.toFixed(1)} restore=${result.restoreMs.toFixed(1)} prepare=${result.prepareMs.toFixed(1)} longestSlice=${result.prepareLongestSliceMs.toFixed(1)} ready=${result.readyToEditMs.toFixed(1)} first=${result.firstEditMs.toFixed(3)} second=${result.secondEditMs.toFixed(3)} nativeLoad=${result.nativeLoadMs.toFixed(1)}`,
           );
         }
       }
@@ -205,6 +208,7 @@ function prepareFixture(dataset, fraction) {
     values["reuse-fixtures"] &&
     cached !== undefined &&
     existsSync(join(fixtures, `${cached}.egwp`)) &&
+    existsSync(join(fixtures, `${cached}.tag`)) &&
     depths.every((depth) =>
       Object.hasOwn(
         JSON.parse(readFileSync(join(fixtures, `${cached}.json`), "utf8"))
@@ -269,6 +273,38 @@ function formatTable(cases, results) {
     ...kinds
       .filter((kind) => kind !== "native")
       .flatMap((kind) => [
+        ...(openOf(kind) === "trusted"
+          ? [
+              {
+                title: `Authenticated decode (\`decodeAuthenticated\`): ${describeKind(kind)}`,
+                kind,
+                key: "decodeMs",
+              },
+            ]
+          : []),
+        ...(openOf(kind) === null
+          ? []
+          : [
+              {
+                title: `Prepare (\`prepare()\`): ${describeKind(kind)}`,
+                kind,
+                key: "prepareMs",
+              },
+              {
+                title: `Longest task while preparing: ${describeKind(kind)}`,
+                kind,
+                key: "prepareLongestSliceMs",
+              },
+            ]),
+        ...(kind.startsWith("native-")
+          ? []
+          : [
+              {
+                title: `Ready to edit: ${describeKind(kind)}`,
+                kind,
+                key: "readyToEditMs",
+              },
+            ]),
         {
           title: `First edit: ${describeKind(kind)}`,
           kind,
@@ -307,10 +343,7 @@ function formatTable(cases, results) {
   for (const { label } of cases) {
     for (const lane of lanes) {
       if (lane.kind !== null && !kinds.includes(lane.kind)) continue;
-      if (
-        lane.kind === null &&
-        !kinds.some((kind) => kind !== "native" && !kind.startsWith("native-"))
-      ) {
+      if (lane.kind === null && !kinds.some(opensLikeRestore)) {
         continue;
       }
       const medians = names.map((name) =>
@@ -321,8 +354,7 @@ function formatTable(cases, results) {
                 result.implementation === name &&
                 result.label === label &&
                 (lane.kind === null
-                  ? result.kind !== "native" &&
-                    !result.kind.startsWith("native-")
+                  ? opensLikeRestore(result.kind)
                   : result.kind === lane.kind),
             )
             .map((result) => valueAt(result, lane.key)),
@@ -341,13 +373,39 @@ function formatTable(cases, results) {
   return [header, divider, ...rows].join("\n");
 }
 
+/** `prepared`, `prepared-whole`, `trusted`, or `null` for a lazy lane. */
+function openOf(kind) {
+  const match = /^(prepared-whole|prepared|trusted)-/.exec(kind);
+  return match === null ? null : match[1];
+}
+
+/**
+ * Lanes whose decode and restore are the plain `decode` and
+ * `fromPortableSnapshot`: every snapshot lane but the authenticated ones.
+ */
+function opensLikeRestore(kind) {
+  return (
+    kind !== "native" &&
+    !kind.startsWith("native-") &&
+    openOf(kind) !== "trusted"
+  );
+}
+
 function describeKind(kind) {
-  if (kind === "local") return "local";
-  if (kind === "remote") return "remote, linear";
-  const match = /^(native-)?concurrent-(\d+)$/.exec(kind);
+  const open = openOf(kind);
+  const lane = open === null ? kind : kind.slice(open.length + 1);
+  const opened = {
+    prepared: ", after `prepare()`",
+    "prepared-whole": ", after `prepare({ sliceMs: Infinity })`",
+    trusted: ", authenticated, after `prepare()`",
+  };
+  const suffix = open === null ? "" : opened[open];
+  if (lane === "local") return `local${suffix}`;
+  if (lane === "remote") return `remote, linear${suffix}`;
+  const match = /^(native-)?concurrent-(\d+)$/.exec(lane);
   const depth = Number(match[2]).toLocaleString("en-US");
   return match[1] === undefined
-    ? `remote, concurrent at depth ${depth}`
+    ? `remote, concurrent at depth ${depth}${suffix}`
     : `remote, concurrent at depth ${depth}, after a cold load`;
 }
 

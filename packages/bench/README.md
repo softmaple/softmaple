@@ -137,6 +137,24 @@ work every later operation measures something else:
 | `native`                | cold load of the same graph bytes (`nativeLoadMs`), for comparison                           | —                           |
 | `native-concurrent-<d>` | after a cold load of the decoded graph, a peer's insert whose parent is `d` events back      | the same peer's next insert |
 
+A `local`, `remote` or `concurrent-<d>` lane with one of these prefixes
+prepares the replica before its first edit, so the first edit no longer pays
+for the restore work. These lanes need a build that has
+`EgWalkerReplica.prepare()`:
+
+| Prefix            | Before the first edit                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `prepared-`       | `await replica.prepare()`, time-sliced with its default slice length                                                      |
+| `prepared-whole-` | `await replica.prepare({ sliceMs: Infinity })`, in one task, as in a Worker                                               |
+| `trusted-`        | the bytes are read with `decodeAuthenticated` and the fixture's tag, then `await replica.prepare()` only decodes the graph |
+
+For every snapshot lane the summary reports the time from the bytes to a
+replica that is ready to edit: decode, restore, and `prepare()` or, without
+it, the first edit. The prepared lanes also report `prepare()` itself and the
+longest task it ran between two yields to the event loop. The fixture step
+writes each snapshot's authentication tag next to it, under a fixed bench
+key.
+
 The driver prepares one EGWP1 snapshot per dataset (and prefix) with this
 checkout's eg-walker, outside any timed region, and measures every
 implementation against the same bytes. Every process checks the edited text:

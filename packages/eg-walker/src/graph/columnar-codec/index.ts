@@ -9,6 +9,7 @@ import { OPERATION_TYPE } from "../../constants/operation-types";
 import { EventGraph } from "../event-graph";
 import { BinaryReader, EGW3_MAGIC, EGW4_MAGIC } from "../internals/binary-io";
 import { eventLimitOf } from "../internals/event-limit";
+import { runSteps, type Steps } from "../internals/steps";
 import type { GraphEvent, SerializedGraphOutput } from "../../types";
 import {
   operationLength,
@@ -23,7 +24,7 @@ import { decodeOperations, encodeOperationRuns } from "./operations";
 import { decodeParents, encodeParentOverrides } from "./parents";
 import { decodeIds, encodeIdRuns } from "./ids";
 import { decodeEgw3Graph } from "./egw3-decoder";
-import { decodeEgw4Graph } from "./egw4-decoder";
+import { decodeEgw4GraphSteps } from "./egw4-decoder";
 import {
   sameEventIds,
   strictEventIdSet,
@@ -127,11 +128,23 @@ export class ColumnarEventGraphCodec {
     bytes: Uint8Array,
     options: ColumnarDecodeOptions = {},
   ): EventGraph {
+    return runSteps(this.decodeBinarySteps(bytes, options));
+  }
+
+  /**
+   * {@link decodeBinary} in steps, for a caller that must pause between
+   * them: one or two columns of an EGW4 payload per step, an EGW3 payload in
+   * one. `bytes` must not change until the generator returns.
+   */
+  *decodeBinarySteps(
+    bytes: Uint8Array,
+    options: ColumnarDecodeOptions = {},
+  ): Steps<EventGraph> {
     const maxEvents = eventLimitOf(options.maxEvents);
     const reader = new BinaryReader(bytes);
     const magic = reader.readByteView(reader.readVarint());
     if (hasMagic(magic, EGW4_MAGIC)) {
-      return decodeEgw4Graph(bytes, maxEvents);
+      return yield* decodeEgw4GraphSteps(bytes, maxEvents);
     }
     if (hasMagic(magic, EGW3_MAGIC)) {
       return decodeEgw3Graph(reader, maxEvents);

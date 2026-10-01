@@ -12,10 +12,15 @@ import { ColumnarEventGraphCodec } from "@softmaple/eg-walker/internal";
 import {
   assertEditedText,
   FIRST_EDIT_MARKER,
+  importBenchAuthenticationKey,
+  isPreparedSnapshotEditKind,
+  measurePreparedSnapshotFirstEdit,
   measureSnapshotFirstEdit,
   parseSnapshotEditKind,
   SECOND_EDIT_MARKER,
+  warmUpPreparedSnapshotFirstEdit,
   warmUpSnapshotFirstEdit,
+  type PreparedSnapshotEditKind,
 } from "../bench/snapshot-first-edit";
 import { buildSnapshotFirstEditFixture } from "../bench/snapshot-first-edit-fixture";
 
@@ -201,7 +206,109 @@ describe("snapshot first-edit lanes", () => {
     ).toThrow(/differs from the snapshot/);
   });
 
+  const preparedKind = (kind: string): PreparedSnapshotEditKind => {
+    const parsed = parseSnapshotEditKind(kind);
+    if (!isPreparedSnapshotEditKind(parsed)) {
+      throw new Error(`${kind} does not prepare`);
+    }
+    return parsed;
+  };
+
+  it.each([
+    "prepared-local",
+    "prepared-remote",
+    "prepared-concurrent-12",
+    "prepared-whole-local",
+    "prepared-whole-concurrent-0",
+  ])("prepares, then times and validates the %s lane", async (kind) => {
+    const result = await measurePreparedSnapshotFirstEdit(
+      api,
+      fixture.bytes,
+      fixture.manifest,
+      preparedKind(kind),
+      null,
+    );
+
+    expect(result).toMatchObject({
+      kind,
+      finalTextLength: fixture.text.length + 2,
+      finalTextValidated: true,
+    });
+    // The proof ran in prepare(), before the first edit.
+    expect(result.statsAfterFirstEdit?.snapshotValidationReplays).toBe(1);
+    expect(result.prepareSlices).toBeGreaterThanOrEqual(1);
+    expect(result.prepareLongestSliceMs).toBeLessThanOrEqual(
+      result.prepareMs + 1,
+    );
+    expect(result.readyToEditMs).toBeGreaterThanOrEqual(result.prepareMs);
+  });
+
+  it("opens an authenticated snapshot without a validation replay", async () => {
+    const key = await importBenchAuthenticationKey();
+    const tag = await new PortableSnapshotCodec().authenticate(
+      fixture.bytes,
+      key,
+    );
+
+    const result = await measurePreparedSnapshotFirstEdit(
+      api,
+      fixture.bytes,
+      fixture.manifest,
+      preparedKind("trusted-concurrent-12"),
+      { tag, key },
+    );
+
+    expect(result).toMatchObject({
+      kind: "trusted-concurrent-12",
+      finalTextLength: fixture.text.length + 2,
+      finalTextValidated: true,
+    });
+    expect(result.statsAfterFirstEdit?.snapshotValidationReplays).toBe(0);
+    await expect(
+      measurePreparedSnapshotFirstEdit(
+        api,
+        fixture.bytes,
+        fixture.manifest,
+        preparedKind("trusted-local"),
+        null,
+      ),
+    ).rejects.toThrow(/need a tag/);
+  });
+
+  it("keeps the lazy lanes and the preparing lanes apart", async () => {
+    expect(() =>
+      measureSnapshotFirstEdit(
+        api,
+        fixture.bytes,
+        fixture.manifest,
+        parseSnapshotEditKind("prepared-local"),
+      ),
+    ).toThrow(/use measurePreparedSnapshotFirstEdit/);
+    await expect(warmUpPreparedSnapshotFirstEdit(api, 1)).resolves.toBe(
+      undefined,
+    );
+  });
+
   it("parses lane names", () => {
+    expect(parseSnapshotEditKind("prepared-local")).toEqual({
+      type: "local",
+      open: "prepared",
+    });
+    expect(parseSnapshotEditKind("prepared-whole-concurrent-10")).toEqual({
+      type: "concurrent",
+      depth: 10,
+      open: "prepared-whole",
+    });
+    expect(parseSnapshotEditKind("trusted-remote")).toEqual({
+      type: "remote",
+      open: "trusted",
+    });
+    expect(() => parseSnapshotEditKind("prepared-native")).toThrow(
+      /Unknown snapshot edit kind/,
+    );
+    expect(() => parseSnapshotEditKind("trusted-native-concurrent-10")).toThrow(
+      /Unknown snapshot edit kind/,
+    );
     expect(parseSnapshotEditKind("concurrent-1000")).toEqual({
       type: "concurrent",
       depth: 1000,

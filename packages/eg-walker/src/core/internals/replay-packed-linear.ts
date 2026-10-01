@@ -62,86 +62,138 @@ export const replayPackedLinear = (
   endOffset: number = packed.count,
   startOffset: number = 0,
 ): PersistentUtf16Rope => {
-  const document: ReplayDocument =
-    endOffset - startOffset >= MIN_TRANSIENT_CHAIN_EVENTS
-      ? new TransientUtf16RopeEditor(initialDocument)
-      : new PersistentReplayDocument(initialDocument);
-  let pendingKind: "insert" | "delete" | null = null;
-  let pendingIndex = 0;
-  let pendingLength = 0;
-  let pendingContentStart = 0;
-  let pendingContentEnd = 0;
+  const replay = new PackedLinearReplay(
+    packed,
+    initialDocument,
+    endOffset,
+    startOffset,
+  );
+  replay.advance(Number.POSITIVE_INFINITY);
+  return replay.finish();
+};
 
-  const flush = (): void => {
-    if (pendingKind === "insert") {
-      document.insert(
-        pendingIndex,
-        packed.sliceInsertedContent(pendingContentStart, pendingContentEnd),
-      );
-    } else if (pendingKind === "delete") {
-      document.delete(pendingIndex, pendingLength);
-    }
-    pendingKind = null;
-    pendingLength = 0;
-  };
+/**
+ * {@link replayPackedLinear} for a caller that must pause between events.
+ *
+ * {@link advance} replays a bounded number of events and keeps the pending
+ * coalesced edit and the piece index open, so a range replayed in several
+ * calls makes exactly the edits one call would.
+ */
+export class PackedLinearReplay {
+  private readonly document: ReplayDocument;
+  private offset: number;
+  private pendingKind: "insert" | "delete" | null = null;
+  private pendingIndex = 0;
+  private pendingLength = 0;
+  private pendingContentStart = 0;
+  private pendingContentEnd = 0;
 
-  for (let offset = startOffset; offset < endOffset; offset++) {
-    const length = packed.operationLengthAt(offset);
-    if (length === 0) {
-      continue;
-    }
-    const index = packed.operationIndexAt(offset);
+  constructor(
+    private readonly packed: PackedLinearReplayView,
+    initialDocument: PersistentUtf16Rope,
+    private readonly endOffset: number,
+    startOffset: number,
+  ) {
+    this.document =
+      endOffset - startOffset >= MIN_TRANSIENT_CHAIN_EVENTS
+        ? new TransientUtf16RopeEditor(initialDocument)
+        : new PersistentReplayDocument(initialDocument);
+    this.offset = startOffset;
+  }
 
-    if (packed.isInsertAt(offset)) {
-      const contentStart = packed.insertStartAt(offset);
-      if (
-        pendingKind === "insert" &&
-        index === pendingIndex + pendingLength &&
-        contentStart === pendingContentEnd
-      ) {
-        pendingLength += length;
-        pendingContentEnd += length;
+  /** Whether every event of the range has been replayed. */
+  get done(): boolean {
+    return this.offset >= this.endOffset;
+  }
+
+  /** Replay up to `maxEvents` more events of the range. */
+  advance(maxEvents: number): void {
+    const packed = this.packed;
+    const document = this.document;
+    const endOffset = Math.min(this.endOffset, this.offset + maxEvents);
+    for (let offset = this.offset; offset < endOffset; offset++) {
+      const length = packed.operationLengthAt(offset);
+      if (length === 0) {
+        continue;
+      }
+      const index = packed.operationIndexAt(offset);
+
+      if (packed.isInsertAt(offset)) {
+        const contentStart = packed.insertStartAt(offset);
+        if (
+          this.pendingKind === "insert" &&
+          index === this.pendingIndex + this.pendingLength &&
+          contentStart === this.pendingContentEnd
+        ) {
+          this.pendingLength += length;
+          this.pendingContentEnd += length;
+          continue;
+        }
+
+        this.flush();
+        assertDocumentIndex(index, true, document);
+        assertCodePointBoundary(index, document);
+        this.pendingKind = "insert";
+        this.pendingIndex = index;
+        this.pendingLength = length;
+        this.pendingContentStart = contentStart;
+        this.pendingContentEnd = contentStart + length;
         continue;
       }
 
-      flush();
-      assertDocumentIndex(index, true, document);
-      assertCodePointBoundary(index, document);
-      pendingKind = "insert";
-      pendingIndex = index;
-      pendingLength = length;
-      pendingContentStart = contentStart;
-      pendingContentEnd = contentStart + length;
-      continue;
-    }
+      if (this.pendingKind === "delete" && index === this.pendingIndex) {
+        const virtualDocumentLength = document.length - this.pendingLength;
+        if (index + length > virtualDocumentLength) {
+          throw new Error(
+            `Delete range [${index}, ${index + length}) exceeds document length ${virtualDocumentLength}`,
+          );
+        }
+        const combinedLength = this.pendingLength + length;
+        assertCodePointBoundary(index + combinedLength, document);
+        this.pendingLength = combinedLength;
+        continue;
+      }
 
-    if (pendingKind === "delete" && index === pendingIndex) {
-      const virtualDocumentLength = document.length - pendingLength;
-      if (index + length > virtualDocumentLength) {
+      this.flush();
+      assertDocumentIndex(index, false, document);
+      assertCodePointBoundary(index, document);
+      if (index + length > document.length) {
         throw new Error(
-          `Delete range [${index}, ${index + length}) exceeds document length ${virtualDocumentLength}`,
+          `Delete range [${index}, ${index + length}) exceeds document length ${document.length}`,
         );
       }
-      const combinedLength = pendingLength + length;
-      assertCodePointBoundary(index + combinedLength, document);
-      pendingLength = combinedLength;
-      continue;
+      assertCodePointBoundary(index + length, document);
+      this.pendingKind = "delete";
+      this.pendingIndex = index;
+      this.pendingLength = length;
     }
-
-    flush();
-    assertDocumentIndex(index, false, document);
-    assertCodePointBoundary(index, document);
-    if (index + length > document.length) {
-      throw new Error(
-        `Delete range [${index}, ${index + length}) exceeds document length ${document.length}`,
-      );
-    }
-    assertCodePointBoundary(index + length, document);
-    pendingKind = "delete";
-    pendingIndex = index;
-    pendingLength = length;
+    this.offset = Math.max(this.offset, endOffset);
   }
 
-  flush();
-  return document.finish();
-};
+  /** Apply the pending edit and freeze the document; the range must be done. */
+  finish(): PersistentUtf16Rope {
+    if (!this.done) {
+      throw new Error(
+        `Packed linear replay finished at offset ${this.offset} before ${this.endOffset}`,
+      );
+    }
+    this.flush();
+    return this.document.finish();
+  }
+
+  private flush(): void {
+    if (this.pendingKind === "insert") {
+      this.document.insert(
+        this.pendingIndex,
+        this.packed.sliceInsertedContent(
+          this.pendingContentStart,
+          this.pendingContentEnd,
+        ),
+      );
+    } else if (this.pendingKind === "delete") {
+      this.document.delete(this.pendingIndex, this.pendingLength);
+    }
+    this.pendingKind = null;
+    this.pendingLength = 0;
+  }
+}

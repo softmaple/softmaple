@@ -13,12 +13,31 @@ import { TransientUtf16RopeEditor } from "../text/transient-utf16-rope";
 import type { EventId, GraphEvent } from "../types";
 
 interface PackedLinearReplayHarness {
-  replayCoalescedPackedLinearSections(
+  replayCoalescedPackedLinearSectionsSteps(
     plan: PackedCriticalReplayPlan,
     startSection: number,
     endSection: number,
-  ): void;
+    chunkEvents: number,
+  ): Generator<void, void, void>;
 }
+
+/** Replay every section of `plan` in chunks of `chunkEvents` events. */
+const replayCoalesced = (
+  replica: EgWalkerReplica,
+  plan: PackedCriticalReplayPlan,
+  chunkEvents: number,
+): void => {
+  const harness = replica as unknown as PackedLinearReplayHarness;
+  const steps = harness.replayCoalescedPackedLinearSectionsSteps(
+    plan,
+    0,
+    plan.sectionCount,
+    chunkEvents,
+  );
+  while (steps.next().done !== true) {
+    // Each step is one chunk.
+  }
+};
 
 const pack = (events: ReadonlyArray<GraphEvent>): EventGraph => {
   const codec = new ColumnarEventGraphCodec();
@@ -105,11 +124,10 @@ describe("transient packed linear replay", () => {
     ]);
     const plan = planPackedCriticalReplaySections(graph)!;
     const replica = new EgWalkerReplica("transient-surrogate", "🙂");
-    const harness = replica as unknown as PackedLinearReplayHarness;
     const finish = vi.spyOn(TransientUtf16RopeEditor.prototype, "finish");
 
     expect(() =>
-      harness.replayCoalescedPackedLinearSections(plan, 0, plan.sectionCount),
+      replayCoalesced(replica, plan, Number.POSITIVE_INFINITY),
     ).toThrow(/between surrogate halves/);
     expect(finish).not.toHaveBeenCalled();
     expect(replica.getText()).toBe("🙂");
@@ -117,7 +135,10 @@ describe("transient packed linear replay", () => {
     finish.mockRestore();
   });
 
-  it("commits a valid UTF-16 series only at its persistent boundary", () => {
+  it.each([
+    Number.POSITIVE_INFINITY,
+    1,
+  ])("commits a valid UTF-16 series only at its persistent boundary, in chunks of %s events", (chunkEvents) => {
     const graph = pack([
       {
         id: "append",
@@ -134,9 +155,8 @@ describe("transient packed linear replay", () => {
     ]);
     const plan = planPackedCriticalReplaySections(graph)!;
     const replica = new EgWalkerReplica("transient-valid-surrogate", "🙂");
-    const harness = replica as unknown as PackedLinearReplayHarness;
 
-    harness.replayCoalescedPackedLinearSections(plan, 0, plan.sectionCount);
+    replayCoalesced(replica, plan, chunkEvents);
 
     expect(replica.getText()).toBe("x");
   });

@@ -46,6 +46,7 @@ import {
   RankedReplayOrderWorkspace,
   type RankedReplayOrderView,
 } from "./internals/ranked-replay-order";
+import type { Steps } from "./internals/steps";
 import { NO_RANK, TailEventLog } from "./internals/tail-event-log";
 import {
   encodeTopologicallyOrderedEventsBinary,
@@ -111,6 +112,9 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
   sequenceAt(offset: number): number;
   getBranchPreservingOrderOffsets(): Uint32Array;
   buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout;
+  buildBranchPreservingCriticalReplayLayoutSteps(
+    runsPerStep: number,
+  ): Steps<PackedBranchReplayLayout>;
   eventAt(offset: number): GraphEvent | undefined;
   parentCountAt(offset: number): number;
   parentOffsetAt(offset: number, parentIndex: number): number | undefined;

@@ -8,6 +8,7 @@ import type {
   PackedLocalVersionTransition,
   PackedOffsetTransition,
 } from "../graph/internals/packed-diff-versions";
+import { runSteps, type Steps } from "../graph/internals/steps";
 
 /**
  * Critical-section cuts over a packed graph without per-section objects.
@@ -417,12 +418,25 @@ export class PackedCriticalReplayPlan {
  */
 export const planPackedCriticalReplaySections = (
   source: EventGraph,
-): PackedCriticalReplayPlan | null => {
+): PackedCriticalReplayPlan | null =>
+  runSteps(
+    planPackedCriticalReplaySectionsSteps(source, Number.POSITIVE_INFINITY),
+  );
+
+/**
+ * {@link planPackedCriticalReplaySections} in steps of `runsPerStep` graph
+ * runs, for a caller that must pause between them.
+ */
+export function* planPackedCriticalReplaySectionsSteps(
+  source: EventGraph,
+  runsPerStep: number,
+): Steps<PackedCriticalReplayPlan | null> {
   const graph = source.getPackedReplayPlanningView();
   if (graph === null) {
     return null;
   }
-  const layout = graph.buildBranchPreservingCriticalReplayLayout();
+  const layout =
+    yield* graph.buildBranchPreservingCriticalReplayLayoutSteps(runsPerStep);
 
   return new PackedCriticalReplayPlan(
     graph,
@@ -433,4 +447,4 @@ export const planPackedCriticalReplaySections = (
     layout.sectionCount,
     layout.runCount,
   );
-};
+}

@@ -5,6 +5,7 @@ import {
   BinaryWriter,
   encodeText,
 } from "../graph/internals/binary-io";
+import type { Steps } from "../graph/internals/steps";
 import type { EventId } from "../types";
 import { assertWellFormedUtf16 } from "./invariants";
 
@@ -142,6 +143,100 @@ export const registerTrustedPortableSnapshot = (
   return snapshot;
 };
 
+/**
+ * Prefix of every authenticated message, so a tag over EGWP1 bytes is never
+ * a valid tag for anything else an application authenticates with the same
+ * key, and the other way round.
+ */
+const AUTHENTICATION_CONTEXT = encodeText(
+  "softmaple eg-walker EGWP1 snapshot authentication v1\u0000",
+);
+
+/**
+ * @internal HMAC-SHA-256 tag over EGWP1 bytes. Bytes this process encoded
+ * from a validated snapshot are tagged as they are. Any other bytes are
+ * decoded and passed to `validateUntrusted`, which must prove their graph
+ * and text, so a tag is only ever made for a snapshot that was proven.
+ */
+export const authenticatePortableSnapshot = async (
+  bytes: Uint8Array,
+  key: CryptoKey,
+  validateUntrusted: (snapshot: PortableSnapshot) => PortableSnapshot,
+): Promise<Uint8Array> => {
+  const subtle = requireSubtleCrypto();
+  assertAuthenticationKey(key);
+  // Everything below reads this private copy, so the caller cannot change
+  // the bytes between the proof and the tag.
+  const message = authenticatedMessage(bytes);
+  const snapshot = decodePortableSnapshot(
+    message.subarray(AUTHENTICATION_CONTEXT.length),
+  );
+  const proof = trustedEncodedBytes.get(bytes);
+  if (proof === undefined || !snapshotMatchesProof(snapshot, proof)) {
+    validateUntrusted(snapshot);
+  }
+  return new Uint8Array(await subtle.sign("HMAC", key, message));
+};
+
+/**
+ * @internal Decode EGWP1 bytes whose HMAC-SHA-256 `tag` verifies under
+ * `key`, and trust the snapshot: a replica restores it without replaying
+ * its history to prove the text.
+ */
+export const decodeAuthenticatedPortableSnapshot = async (
+  bytes: Uint8Array,
+  tag: Uint8Array,
+  key: CryptoKey,
+): Promise<PortableSnapshot> => {
+  const subtle = requireSubtleCrypto();
+  assertAuthenticationKey(key);
+  if (!(tag instanceof Uint8Array)) {
+    throw new TypeError(
+      "Invalid portable snapshot: authentication tag must be a Uint8Array",
+    );
+  }
+  const message = authenticatedMessage(bytes);
+  if (!(await subtle.verify("HMAC", key, tag.slice(), message))) {
+    throw new Error(
+      "Invalid portable snapshot: authentication tag does not match",
+    );
+  }
+  return registerTrustedPortableSnapshot(
+    decodePortableSnapshot(message.subarray(AUTHENTICATION_CONTEXT.length)),
+  );
+};
+
+const authenticatedMessage = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
+  if (!(bytes instanceof Uint8Array)) {
+    throw new TypeError("Invalid portable snapshot: expected EGWP1 bytes");
+  }
+  const message = new Uint8Array(AUTHENTICATION_CONTEXT.length + bytes.length);
+  message.set(AUTHENTICATION_CONTEXT, 0);
+  message.set(bytes, AUTHENTICATION_CONTEXT.length);
+  return message;
+};
+
+const requireSubtleCrypto = (): SubtleCrypto => {
+  const subtle = (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto
+    ?.subtle;
+  if (subtle === undefined) {
+    throw new Error(
+      "Portable snapshot authentication needs Web Crypto (crypto.subtle), which this runtime does not provide",
+    );
+  }
+  return subtle;
+};
+
+const assertAuthenticationKey = (key: CryptoKey): void => {
+  const algorithm = (key as { algorithm?: Partial<HmacKeyAlgorithm> } | null)
+    ?.algorithm;
+  if (algorithm?.name !== "HMAC" || algorithm.hash?.name !== "SHA-256") {
+    throw new TypeError(
+      "Portable snapshot authentication needs an HMAC SHA-256 CryptoKey",
+    );
+  }
+};
+
 export const validatePortableSnapshotHeaderOnly = (
   snapshot: PortableSnapshot,
 ): PortableSnapshot => {
@@ -214,12 +309,34 @@ export const validatePortableSnapshotHeaderOnly = (
  */
 export const decodePortableSnapshotGraph = (
   snapshot: PortableSnapshot,
-): EventGraph => {
-  // A graph declaring more events than the header is rejected before its
-  // columns are allocated, so the header count bounds what a restore decodes.
-  const graph = codec.decodeBinary(snapshot.eventGraph, {
+): EventGraph =>
+  checkDecodedGraph(
+    // A graph declaring more events than the header is rejected before its
+    // columns are allocated, so the header count bounds what a restore
+    // decodes.
+    codec.decodeBinary(snapshot.eventGraph, {
+      maxEvents: snapshot.eventCount,
+    }),
+    snapshot,
+  );
+
+/**
+ * {@link decodePortableSnapshotGraph} in steps, for a caller that must
+ * pause between them.
+ */
+export function* decodePortableSnapshotGraphSteps(
+  snapshot: PortableSnapshot,
+): Steps<EventGraph> {
+  const graph = yield* codec.decodeBinarySteps(snapshot.eventGraph, {
     maxEvents: snapshot.eventCount,
   });
+  return checkDecodedGraph(graph, snapshot);
+}
+
+const checkDecodedGraph = (
+  graph: EventGraph,
+  snapshot: PortableSnapshot,
+): EventGraph => {
   try {
     if (graph.getEventCount() !== snapshot.eventCount) {
       throw new Error("Invalid portable snapshot: event count mismatch");
@@ -239,6 +356,12 @@ export const createPortableSnapshotGraphSource =
   (snapshot: PortableSnapshot): (() => EventGraph) =>
   () =>
     decodePortableSnapshotGraph(snapshot);
+
+/** {@link createPortableSnapshotGraphSource} for a caller that decodes in steps. */
+export const createPortableSnapshotGraphSteps =
+  (snapshot: PortableSnapshot): (() => Steps<EventGraph>) =>
+  () =>
+    decodePortableSnapshotGraphSteps(snapshot);
 
 /**
  * Whether restoring `snapshot` must replay its graph to prove its text.

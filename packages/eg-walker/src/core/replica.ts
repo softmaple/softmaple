@@ -9,6 +9,7 @@
 
 import {
   MIN_TRANSIENT_CHAIN_EVENTS,
+  PackedLinearReplay,
   replayPackedLinear,
 } from "./internals/replay-packed-linear";
 import { OPERATION_TYPE } from "../constants/operation-types";
@@ -32,6 +33,7 @@ import {
   eventLimitOf,
 } from "../graph/internals/event-limit";
 import { MaxHeap } from "../graph/internals/max-heap";
+import { runSteps, type Steps } from "../graph/internals/steps";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import { TransientUtf16RopeEditor } from "../text/transient-utf16-rope";
 import {
@@ -68,7 +70,7 @@ import type {
 } from "../engine/sequence-records";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import {
-  planPackedCriticalReplaySections,
+  planPackedCriticalReplaySectionsSteps,
   type PackedCriticalReplayPlan,
 } from "../engine/packed-critical-replay-plan";
 import { PartialReplayManager } from "../engine/partial-replay";
@@ -101,6 +103,7 @@ import {
   assertPortableSnapshotMetadata,
   assertPortableSnapshotText,
   createPortableSnapshotGraphSource,
+  createPortableSnapshotGraphSteps,
   PORTABLE_SNAPSHOT_FORMAT_VERSION,
   portableSnapshotRequiresTextValidation,
   registerTrustedPortableSnapshot,
@@ -145,6 +148,35 @@ export interface RestoreSnapshotOptions {
   readonly maxEvents?: number;
 }
 
+/** Options for {@link EgWalkerReplica.prepare}. */
+export interface PrepareReplicaOptions {
+  /**
+   * Longest run of preparation work, in milliseconds, before control goes
+   * back to the host through {@link yieldToHost}. Work is checked against the
+   * deadline between bounded steps, so a slice can overrun by one step. A
+   * step is usually well under a millisecond; one very large edit, or one
+   * column of a large graph's decode, takes longer. Defaults to 8.
+   * `Infinity` prepares in one task, for a replica hosted in a Worker.
+   */
+  readonly sliceMs?: number;
+  /**
+   * Called between slices. Preparation continues when the returned promise
+   * resolves. Defaults to `scheduler.yield()` where the host has it, then
+   * `setImmediate`, then a `MessageChannel` message, then `setTimeout(0)`.
+   */
+  readonly yieldToHost?: () => Promise<void>;
+  /**
+   * Abandons the preparation between two slices and rejects with the
+   * signal's reason. The replica stays as restored: the next call to
+   * {@link EgWalkerReplica.prepare}, or the first operation that needs the
+   * history, starts again.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/** Default {@link PrepareReplicaOptions.sliceMs}. */
+const DEFAULT_PREPARE_SLICE_MS = 8;
+
 // Release large caches at a critical cut, but keep an active concurrent
 // interval warm until its estimated byte budget is exhausted.
 const REPLAY_CACHE_CRITICAL_RELEASE_EVENTS = 4_096;
@@ -187,12 +219,44 @@ const MID_BRIDGE_PRESSURE_BYTES = 16 * 1024 * 1024;
 // one section per engine so retained recovery semantics do not change.
 const MAX_NONLINEAR_SUPERSECTION_EVENTS = 32_768;
 
+/**
+ * Step sizes of a history preparation, by kind of work. A time-sliced
+ * preparation checks its deadline after every step, so a step should be a
+ * small part of a slice. On the paper traces an engine event costs about
+ * 3–5 µs, rarely 100 µs, a linear event under 1 µs, and a planner run well
+ * under 1 µs.
+ */
+interface ReplayChunking {
+  /** Whether a lazy graph is decoded in steps of one or two columns. */
+  readonly decodeInSteps: boolean;
+  readonly planningRuns: number;
+  readonly engineEvents: number;
+  readonly linearEvents: number;
+}
+
+/** Work that nothing pauses runs in as few steps as possible. */
+const UNCHUNKED_REPLAY: ReplayChunking = {
+  decodeInSteps: false,
+  planningRuns: Number.POSITIVE_INFINITY,
+  engineEvents: Number.POSITIVE_INFINITY,
+  linearEvents: Number.POSITIVE_INFINITY,
+};
+
+const SLICED_REPLAY: ReplayChunking = {
+  decodeInSteps: true,
+  planningRuns: 8_192,
+  engineEvents: 128,
+  linearEvents: 2_048,
+};
+
 interface ReplicaConstructorOptions {
   readonly skipReplay?: boolean;
   readonly restoredText?: string;
   readonly currentVersion?: Version;
   readonly nextSequenceNumber?: number;
   readonly lazyEventGraph?: LazyEventGraphSource;
+  /** The lazy graph decoded in steps, for a time-sliced preparation. */
+  readonly lazyEventGraphSteps?: () => Steps<EventGraph>;
   /**
    * Text the lazy graph must replay to. The replay that proves it becomes
    * this replica's replay state instead of being thrown away.
@@ -203,6 +267,32 @@ interface ReplicaConstructorOptions {
   readonly restoredDeleteTargets?: ReadonlyArray<DeleteTargetRecord>;
   readonly restoredEngine?: EgWalkerEngine;
   readonly restoredCheckpoints?: ReadonlyArray<CriticalCheckpointSnapshot>;
+}
+
+/**
+ * A lazily restored history being decoded and, when its text needs proof,
+ * replayed, ahead of its first use. See {@link EgWalkerReplica.prepare}.
+ */
+interface HistoryPreparation {
+  /** The remaining work, as bounded steps. */
+  readonly steps: Steps<PreparedHistory>;
+  /** Settled once the job is adopted, fails, or is abandoned. */
+  outcome: PreparationOutcome | null;
+  /** The pending `prepare()` result, while a slice driver runs this job. */
+  promise: Promise<void> | null;
+}
+
+type PreparationOutcome =
+  | { readonly kind: "adopted" }
+  | { readonly kind: "failed"; readonly error: unknown };
+
+interface PreparedHistory {
+  readonly graph: EventGraph;
+  /** The replay that proved the restored text, if it needed proof. */
+  readonly validation: {
+    readonly replica: EgWalkerReplica;
+    readonly linear: boolean;
+  } | null;
 }
 
 interface RemoteBatchCandidate {
@@ -278,7 +368,10 @@ export class EgWalkerReplica {
   private readonly initialText: string;
   private eventGraph: EventGraph | null = null;
   private lazyEventGraph: LazyEventGraphSource | null = null;
+  private lazyEventGraphSteps: (() => Steps<EventGraph>) | null = null;
   private lazyEventGraphText: string | null = null;
+  /** The lazy history's preparation, while one is in progress. */
+  private preparation: HistoryPreparation | null = null;
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
@@ -349,6 +442,10 @@ export class EgWalkerReplica {
     this.eventGraph =
       eventGraph ?? (options.lazyEventGraph ? null : new EventGraph());
     this.lazyEventGraph = options.lazyEventGraph ?? null;
+    this.lazyEventGraphSteps =
+      this.lazyEventGraph === null
+        ? null
+        : (options.lazyEventGraphSteps ?? null);
     this.lazyEventGraphText =
       this.lazyEventGraph === null
         ? null
@@ -678,11 +775,18 @@ export class EgWalkerReplica {
   /**
    * Restore from the portable paper-style snapshot, which carries no replay
    * state. Restoring only checks the header: reads of the text need no
-   * history. The first operation that needs the event graph decodes it and,
-   * unless the snapshot came from live state in this process, replays it
-   * once to prove the text, the same sectioned replay a cold load runs. That
-   * replay's checkpoints and any engine it retains become this replica's
-   * replay state, so a divergent first edit does not replay history again.
+   * history. The history is decoded and, unless the snapshot is trusted,
+   * replayed once to prove the text, the same sectioned replay a cold load
+   * runs. That replay's checkpoints and any engine it retains become this
+   * replica's replay state, so a divergent first edit does not replay
+   * history again.
+   *
+   * The decode and the proof run in {@link prepare}, or else inside the
+   * first operation that needs the history. Call `prepare()` before enabling
+   * edits so a keystroke does not wait for them. A snapshot is trusted when
+   * it came from live state in this process, through bytes this process
+   * encoded, or through
+   * {@link PortableSnapshotCodec.decodeAuthenticated}.
    */
   static fromPortableSnapshot(
     snapshot: PortableSnapshot,
@@ -698,11 +802,69 @@ export class EgWalkerReplica {
       currentVersion: new Set(validated.currentVersion),
       nextSequenceNumber: validated.nextSequenceNumber,
       lazyEventGraph: createPortableSnapshotGraphSource(validated),
+      lazyEventGraphSteps: createPortableSnapshotGraphSteps(validated),
       lazyEventGraphText: portableSnapshotRequiresTextValidation(validated)
         ? validated.text
         : undefined,
       deferLocalReplay: true,
     });
+  }
+
+  /**
+   * Whether this replica's history is decoded and, for a snapshot that
+   * needed it, proven, so that the next edit or remote event does no
+   * restore work. A replica restored with
+   * {@link fromPortableSnapshot}, or lazily with {@link fromNativeSnapshot},
+   * is not prepared until {@link prepare} or its first operation that needs
+   * the history; every other replica is.
+   */
+  isPrepared(): boolean {
+    return this.eventGraph !== null;
+  }
+
+  /**
+   * Decode and prove the restored history now, in slices that yield to the
+   * host, so the first keystroke after it does not wait for that work.
+   * Resolves once {@link isPrepared} is true, at once if it already is.
+   *
+   * Reads of the text work throughout. A snapshot whose text does not match
+   * its history rejects, before any local event is created; the replica
+   * then stays as restored, and the next attempt proves it again. An
+   * operation that needs the history while preparation is running finishes
+   * the remaining work synchronously, and this promise settles with it.
+   * Calls made while one preparation runs share it and its options.
+   *
+   * The proof and the replay state it leaves live in this JavaScript realm.
+   * To keep the replay off a page's main thread, host the replica itself in
+   * a Worker; state prepared in one realm cannot be moved to another.
+   */
+  prepare(options: PrepareReplicaOptions = {}): Promise<void> {
+    if (this.eventGraph !== null) {
+      return Promise.resolve();
+    }
+    const running = this.preparation;
+    if (running?.promise) {
+      return running.promise;
+    }
+    let sliceMs: number;
+    let yieldToHost: () => Promise<void>;
+    try {
+      sliceMs = prepareSliceMsOf(options.sliceMs);
+      yieldToHost = options.yieldToHost ?? yieldToHostDefault;
+      if (typeof yieldToHost !== "function") {
+        throw new TypeError("prepare() yieldToHost must be a function");
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const preparation = running ?? this.beginHistoryPreparation(SLICED_REPLAY);
+    preparation.promise = this.drivePreparation(
+      preparation,
+      sliceMs,
+      yieldToHost,
+      options.signal,
+    );
+    return preparation.promise;
   }
 
   /**
@@ -1333,51 +1495,218 @@ export class EgWalkerReplica {
   }
 
   private ensureEventGraph(): EventGraph {
-    if (!this.eventGraph) {
-      const source = this.lazyEventGraph;
-      if (!source) {
-        throw new Error("Replica event graph is unavailable");
-      }
-      const graph = source();
-      graph.validateStoredEvents(assertRemoteEventWellFormed);
-      if (this.lazyEventGraphText !== null) {
-        this.adoptValidationReplay(graph, this.lazyEventGraphText);
-        this.lazyEventGraphText = null;
-      }
-      this.eventGraph = graph;
-      this.lazyEventGraph = null;
-      this.remoteEvents = this.createRemoteEventBuffer(graph);
+    if (this.eventGraph !== null) {
+      return this.eventGraph;
     }
-    return this.eventGraph;
+    // Finish a preparation in progress, or run a whole one now.
+    const preparation =
+      this.preparation ?? this.beginHistoryPreparation(UNCHUNKED_REPLAY);
+    let prepared: PreparedHistory;
+    try {
+      prepared = runSteps(preparation.steps);
+    } catch (error) {
+      this.abandonHistoryPreparation(preparation, error);
+      throw error;
+    }
+    return this.adoptPreparedHistory(preparation, prepared);
+  }
+
+  private beginHistoryPreparation(
+    chunking: ReplayChunking,
+  ): HistoryPreparation {
+    const source = this.lazyEventGraph;
+    if (source === null) {
+      throw new Error("Replica event graph is unavailable");
+    }
+    const preparation: HistoryPreparation = {
+      steps: this.prepareHistorySteps(
+        source,
+        chunking.decodeInSteps ? this.lazyEventGraphSteps : null,
+        this.lazyEventGraphText,
+        chunking,
+      ),
+      outcome: null,
+      promise: null,
+    };
+    this.preparation = preparation;
+    return preparation;
   }
 
   /**
-   * Prove that a lazily loaded graph replays to the restored text with the
-   * same sectioned cold replay a decoded graph gets, and keep that replay's
-   * text, checkpoints and retained engine. Any failure puts the replica back
-   * in its lazy state, so the next access validates again.
+   * Decode the lazy graph, in steps when `decodeSteps` is given, and, when
+   * `expectedText` is given, prove that it replays to that text with the
+   * same sectioned cold replay a decoded graph gets. The replay runs on a
+   * detached replica, so this one keeps its restored state, and answers
+   * reads with it, until the proof succeeds.
    */
-  private adoptValidationReplay(graph: EventGraph, expectedText: string): void {
-    const lazyState = this.captureRemoteBatchSnapshot();
-    const linear = graph.isExactLinearHistory();
-    this.eventGraph = graph;
-    try {
-      this.fullReplay();
-      assertPortableSnapshotText(this.getText(), expectedText);
-    } catch (error) {
-      this.eventGraph = null;
-      this.restoreRemoteBatchSnapshot(lazyState, graph);
-      throw error;
+  private *prepareHistorySteps(
+    decode: LazyEventGraphSource,
+    decodeSteps: (() => Steps<EventGraph>) | null,
+    expectedText: string | null,
+    chunking: ReplayChunking,
+  ): Steps<PreparedHistory> {
+    const graph = decodeSteps === null ? decode() : yield* decodeSteps();
+    graph.validateStoredEvents(assertRemoteEventWellFormed);
+    if (expectedText === null) {
+      return { graph, validation: null };
     }
-    // Validation is counted apart from live replays.
-    this.fullReplayCount = lazyState.fullReplayCount;
-    this.lastReplaySource = lazyState.lastReplaySource;
-    this.snapshotValidationStats = {
-      replays: this.snapshotValidationStats.replays + 1,
-      events: this.snapshotValidationStats.events + graph.getEventCount(),
-      linearReplays:
-        this.snapshotValidationStats.linearReplays + (linear ? 1 : 0),
-    };
+    yield;
+    const linear = graph.isExactLinearHistory();
+    const validator = EgWalkerReplica.forValidationReplay(
+      this.replicaId,
+      this.initialText,
+      graph,
+    );
+    yield* validator.fullReplaySteps(chunking);
+    assertPortableSnapshotText(validator.getText(), expectedText);
+    return { graph, validation: { replica: validator, linear } };
+  }
+
+  /**
+   * Run `preparation` in slices of at most `sliceMs`, yielding to the host
+   * between them, until it is adopted or fails.
+   */
+  private async drivePreparation(
+    preparation: HistoryPreparation,
+    sliceMs: number,
+    yieldToHost: () => Promise<void>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    while (true) {
+      // An operation that needed the history may have finished the job.
+      const outcome = preparation.outcome;
+      if (outcome !== null) {
+        if (outcome.kind === "failed") {
+          throw outcome.error;
+        }
+        return;
+      }
+      if (signal?.aborted === true) {
+        this.abandonHistoryPreparation(preparation, signal.reason);
+        throw signal.reason;
+      }
+      const deadline = monotonicNow() + sliceMs;
+      let step: IteratorResult<void, PreparedHistory>;
+      try {
+        do {
+          step = preparation.steps.next();
+        } while (step.done !== true && monotonicNow() < deadline);
+      } catch (error) {
+        this.abandonHistoryPreparation(preparation, error);
+        throw error;
+      }
+      if (step.done === true) {
+        this.adoptPreparedHistory(preparation, step.value);
+        return;
+      }
+      try {
+        await yieldToHost();
+      } catch (error) {
+        this.abandonHistoryPreparation(preparation, error);
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Drop a preparation that failed or was abandoned. The replica keeps its
+   * restored state and lazy source, so the next attempt starts over.
+   */
+  private abandonHistoryPreparation(
+    preparation: HistoryPreparation,
+    error: unknown,
+  ): void {
+    if (preparation.outcome === null) {
+      preparation.outcome = { kind: "failed", error };
+    }
+    if (this.preparation === preparation) {
+      this.preparation = null;
+    }
+    preparation.steps.return(undefined as never);
+  }
+
+  private adoptPreparedHistory(
+    preparation: HistoryPreparation,
+    prepared: PreparedHistory,
+  ): EventGraph {
+    const { graph, validation } = prepared;
+    if (validation !== null) {
+      this.adoptValidationReplay(validation.replica);
+      this.snapshotValidationStats = {
+        replays: this.snapshotValidationStats.replays + 1,
+        events: this.snapshotValidationStats.events + graph.getEventCount(),
+        linearReplays:
+          this.snapshotValidationStats.linearReplays +
+          (validation.linear ? 1 : 0),
+      };
+    }
+    this.eventGraph = graph;
+    this.lazyEventGraph = null;
+    this.lazyEventGraphSteps = null;
+    this.lazyEventGraphText = null;
+    this.remoteEvents = this.createRemoteEventBuffer(graph);
+    preparation.outcome = { kind: "adopted" };
+    if (this.preparation === preparation) {
+      this.preparation = null;
+    }
+    return graph;
+  }
+
+  /**
+   * Take over the text, checkpoints and retained engine of a validation
+   * replay: the state the same cold replay would have left on this replica.
+   * A replica waiting for its history has no replay state of its own, and
+   * the validation replay is counted apart from live replays.
+   */
+  private adoptValidationReplay(validator: EgWalkerReplica): void {
+    this.documentBuffer = validator.documentBuffer;
+    this.documentCache = validator.documentCache;
+    this.currentVersion = validator.currentVersion;
+    this.engine = validator.engine;
+    this.engineStatsOverride = validator.engineStatsOverride;
+    this.engineRecoveryAnchor = validator.engineRecoveryAnchor;
+    this.replicaPeakSequenceRecordCount = Math.max(
+      this.replicaPeakSequenceRecordCount,
+      validator.replicaPeakSequenceRecordCount,
+    );
+    this.replayCacheBaseVersion = validator.replayCacheBaseVersion;
+    this.replayCacheCoveredEventIds = validator.replayCacheCoveredEventIds;
+    this.replayCacheEvents = validator.replayCacheEvents;
+    this.replayCacheBytes = validator.replayCacheBytes;
+    this.replayCacheBudgetBytes = validator.replayCacheBudgetBytes;
+    this.releasedCacheAtBudget = validator.releasedCacheAtBudget;
+    this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
+    const counters = this.criticalCheckpoints.snapshotForTransaction();
+    this.criticalCheckpoints.restoreTransaction({
+      checkpoints:
+        validator.criticalCheckpoints.snapshotForTransaction().checkpoints,
+      hits: counters.hits,
+      misses: counters.misses,
+    });
+  }
+
+  /**
+   * A replica that only runs the cold replay proving a restored text. It
+   * starts empty and never records a checkpoint for text it has not
+   * replayed.
+   */
+  private static forValidationReplay(
+    replicaId: string,
+    initialText: string,
+    graph: EventGraph,
+  ): EgWalkerReplica {
+    // A lazy source keeps the constructor from touching the graph; the replay
+    // that follows is the only thing that reads it.
+    const validator = new EgWalkerReplica(replicaId, initialText, undefined, {
+      skipReplay: true,
+      currentVersion: new Set(),
+      nextSequenceNumber: 0,
+      lazyEventGraph: () => graph,
+    });
+    validator.eventGraph = graph;
+    validator.lazyEventGraph = null;
+    return validator;
   }
 
   private ensureRemoteEvents(): RemoteEventBuffer {
@@ -1638,6 +1967,16 @@ export class EgWalkerReplica {
   }
 
   private fullReplay(): void {
+    runSteps(this.fullReplaySteps(UNCHUNKED_REPLAY));
+  }
+
+  /**
+   * The cold replay as a sequence of steps. {@link fullReplay} runs them back
+   * to back. A time-sliced preparation pauses between them, so each step is
+   * one bounded unit of work: a chunk of `chunking` events, a section, or the
+   * planning pass. The steps leave the same state whatever the chunk sizes.
+   */
+  private *fullReplaySteps(chunking: ReplayChunking): Steps<void> {
     const graph = this.ensureEventGraph();
     // A rebuild from scratch is exactly the cost a released cache was supposed
     // to avoid. Widen the budget before this replay picks its retention so the
@@ -1645,16 +1984,20 @@ export class EgWalkerReplica {
     this.growReplayCacheBudgetAfterThrash();
     this.captureEnginePeakBeforeSwap();
     if (graph.isExactLinearHistory()) {
-      this.fullReplayLinearGraph(graph);
+      yield* this.fullReplayLinearGraphSteps(graph, chunking);
       return;
     }
     // Every nonlinear graph has a packed planning view: events added through
     // addEvent are packed behind the prefix, or on their own, for the replay.
-    const packedPlan = planPackedCriticalReplaySections(graph);
+    const packedPlan = yield* planPackedCriticalReplaySectionsSteps(
+      graph,
+      chunking.planningRuns,
+    );
     if (packedPlan === null) {
       throw new Error("A nonlinear event graph has no packed replay plan");
     }
-    this.fullReplayPackedGraph(graph, packedPlan);
+    yield;
+    yield* this.fullReplayPackedGraphSteps(graph, packedPlan, chunking);
   }
 
   /**
@@ -1666,10 +2009,11 @@ export class EgWalkerReplica {
    * packed operation columns. This avoids retaining the full GraphEvent
    * order plus hundreds of thousands of section slices and frontier Sets.
    */
-  private fullReplayPackedGraph(
+  private *fullReplayPackedGraphSteps(
     graph: EventGraph,
     plan: PackedCriticalReplayPlan,
-  ): void {
+    chunking: ReplayChunking,
+  ): Steps<void> {
     let replayedEventCount = 0;
     let aggregateStats: EngineStats | null = null;
     let retainedEngine: EgWalkerEngine | null = null;
@@ -1720,14 +2064,16 @@ export class EgWalkerReplica {
         ) {
           sectionEnd++;
         }
-        this.replayCoalescedPackedLinearSections(
+        yield* this.replayCoalescedPackedLinearSectionsSteps(
           plan,
           sectionIndex,
           sectionEnd,
+          chunking.linearEvents,
         );
         replayedEventCount = plan.sectionEndAt(sectionEnd - 1);
         recordLadderCheckpoint(sectionEnd);
         sectionIndex = sectionEnd;
+        yield;
         continue;
       }
 
@@ -1754,11 +2100,12 @@ export class EgWalkerReplica {
       };
 
       if (plan.isLinearSection(sectionIndex)) {
-        this.replayPackedPlanLinearSection(
+        yield* this.replayPackedPlanLinearSectionSteps(
           plan,
           sectionIndex,
           replayedEventCount,
           plan.sectionCount === 1,
+          chunking.linearEvents,
         );
       } else {
         const endVersion = plan.advanceFrontierRange(
@@ -1767,14 +2114,24 @@ export class EgWalkerReplica {
           sectionEnd,
         );
         const engine = new EgWalkerEngine();
-        const generated = engine.generatePackedSectionRange(
-          plan,
-          sectionIndex,
-          sectionEnd,
-          graph,
-          baseVersion,
-          this.documentBuffer,
-        );
+        const generated = Number.isFinite(chunking.engineEvents)
+          ? yield* engine.generatePackedSectionRangeSteps(
+              plan,
+              sectionIndex,
+              sectionEnd,
+              graph,
+              baseVersion,
+              this.documentBuffer,
+              chunking.engineEvents,
+            )
+          : engine.generatePackedSectionRange(
+              plan,
+              sectionIndex,
+              sectionEnd,
+              graph,
+              baseVersion,
+              this.documentBuffer,
+            );
         this.documentBuffer = generated.textBuffer;
         this.documentCache = null;
         this.currentVersion = endVersion;
@@ -1814,6 +2171,7 @@ export class EgWalkerReplica {
         recordLadderCheckpoint(sectionEnd);
       }
       sectionIndex = sectionEnd;
+      yield;
     }
 
     if (replayedEventCount !== plan.eventCount) {
@@ -1861,7 +2219,10 @@ export class EgWalkerReplica {
    * streaming it prevents cold load from retaining one GraphEvent, operation,
    * and parent Set per historical event merely to apply each value once.
    */
-  private fullReplayLinearGraph(graph: EventGraph): void {
+  private *fullReplayLinearGraphSteps(
+    graph: EventGraph,
+    chunking: ReplayChunking,
+  ): Steps<void> {
     const eventCount = graph.getEventCount();
     const checkpointStart = Math.max(0, eventCount - MAX_RETAINED_CHECKPOINTS);
     const ladder = coldReplayLadderEventCounts(eventCount, checkpointStart);
@@ -1874,6 +2235,7 @@ export class EgWalkerReplica {
     const packed = graph.getPackedLinearReplayView();
     if (packed === null) {
       let ladderCursor = 0;
+      let eventsSinceStep = 0;
       for (const event of graph.iterateEventsInInsertionOrder()) {
         const operation = this.validateLocalOperation(event.operation);
         if (operation !== null) {
@@ -1892,10 +2254,19 @@ export class EgWalkerReplica {
             eventCount,
           );
         }
+        if (++eventsSinceStep >= chunking.linearEvents) {
+          eventsSinceStep = 0;
+          yield;
+        }
       }
     } else {
       for (const cut of ladder) {
-        this.replayPackedLinearRange(packed, replayedEventCount, cut);
+        yield* this.replayPackedLinearRangeSteps(
+          packed,
+          replayedEventCount,
+          cut,
+          chunking.linearEvents,
+        );
         replayedEventCount = cut;
         this.criticalCheckpoints.record(
           new Set([requirePackedEventId(packed, cut - 1)]),
@@ -1903,8 +2274,14 @@ export class EgWalkerReplica {
           replayedEventCount,
           eventCount,
         );
+        yield;
       }
-      this.replayPackedLinearRange(packed, replayedEventCount, checkpointStart);
+      yield* this.replayPackedLinearRangeSteps(
+        packed,
+        replayedEventCount,
+        checkpointStart,
+        chunking.linearEvents,
+      );
       replayedEventCount = checkpointStart;
       for (let offset = checkpointStart; offset < packed.count; offset++) {
         const operation = this.validateLocalOperation(
@@ -1961,20 +2338,79 @@ export class EgWalkerReplica {
     this.documentCache = null;
   }
 
-  /** Apply one compact-plan linear section without reconstructing parents. */
-  private replayPackedPlanLinearSection(
+  /**
+   * {@link replayPackedLinearRange} in steps of `chunkEvents` events over
+   * one open piece index.
+   */
+  private *replayPackedLinearRangeSteps(
+    packed: PackedLinearReplayView,
+    startOffset: number,
+    endOffset: number,
+    chunkEvents: number,
+  ): Steps<void> {
+    const replay = new PackedLinearReplay(
+      packed,
+      this.documentBuffer,
+      endOffset,
+      startOffset,
+    );
+    replay.advance(chunkEvents);
+    while (!replay.done) {
+      yield;
+      replay.advance(chunkEvents);
+    }
+    this.documentBuffer = replay.finish();
+    this.documentCache = null;
+  }
+
+  /**
+   * Apply one compact-plan linear section without reconstructing parents, in
+   * steps of `chunkEvents` events.
+   */
+  private *replayPackedPlanLinearSectionSteps(
     plan: PackedCriticalReplayPlan,
     sectionIndex: number,
     eventCountBeforeSection: number,
     retainTrailingCheckpoints: boolean,
-  ): void {
+    chunkEvents: number,
+  ): Steps<void> {
     const start = plan.sectionStartAt(sectionIndex);
     const end = plan.sectionEndAt(sectionIndex);
     const checkpointStart = retainTrailingCheckpoints
       ? Math.max(start, end - MAX_RETAINED_CHECKPOINTS)
       : end;
 
-    for (let orderIndex = start; orderIndex < end; orderIndex++) {
+    for (let chunkStart = start; chunkStart < end; ) {
+      const chunkEnd = Math.min(end, chunkStart + chunkEvents);
+      this.replayPackedPlanLinearRange(
+        plan,
+        chunkStart,
+        chunkEnd,
+        start,
+        checkpointStart,
+        eventCountBeforeSection,
+      );
+      chunkStart = chunkEnd;
+      if (chunkStart < end) {
+        yield;
+      }
+    }
+
+    if (end > start) {
+      this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
+    }
+  }
+
+  /** Events `[chunkStart, chunkEnd)` of a linear section starting at `start`. */
+  private replayPackedPlanLinearRange(
+    plan: PackedCriticalReplayPlan,
+    chunkStart: number,
+    chunkEnd: number,
+    start: number,
+    checkpointStart: number,
+    eventCountBeforeSection: number,
+  ): void {
+    for (let orderIndex = chunkStart; orderIndex < chunkEnd; orderIndex++) {
       const operation = this.validateLocalOperation(
         plan.operationAt(orderIndex),
       );
@@ -1990,48 +2426,60 @@ export class EgWalkerReplica {
         );
       }
     }
+  }
 
+  /**
+   * Coalesce old linear packed sections while streaming raw operation
+   * columns. No GraphEvent, parent Set, or per-section array is created.
+   * Steps are chunks of `chunkEvents` events over one open piece index.
+   */
+  private *replayCoalescedPackedLinearSectionsSteps(
+    plan: PackedCriticalReplayPlan,
+    startSection: number,
+    endSection: number,
+    chunkEvents: number,
+  ): Steps<void> {
+    // These sections precede the retained checkpoint window, so no
+    // intermediate persistent root is observable. Apply their splices to a
+    // one-shot piece index and freeze once at the section-range boundary.
+    const replay: CoalescedLinearReplay = {
+      editor: new TransientUtf16RopeEditor(this.documentBuffer),
+      pendingKind: null,
+      pendingIndex: 0,
+      pendingLength: 0,
+      pendingInsertParts: [],
+    };
+
+    const start = plan.sectionStartAt(startSection);
+    const end = plan.sectionEndAt(endSection - 1);
+    for (let chunkStart = start; chunkStart < end; ) {
+      const chunkEnd = Math.min(end, chunkStart + chunkEvents);
+      this.replayCoalescedPackedLinearRange(plan, replay, chunkStart, chunkEnd);
+      chunkStart = chunkEnd;
+      if (chunkStart < end) {
+        yield;
+      }
+    }
+
+    flushCoalescedLinearReplay(replay);
+    this.documentBuffer = replay.editor.finish();
+    this.documentCache = null;
     if (end > start) {
       this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
     }
   }
 
   /**
-   * Coalesce old linear packed sections while streaming raw operation
-   * columns. No GraphEvent, parent Set, or per-section array is created.
+   * Events `[start, end)` of a coalesced linear replay. The pending edit stays
+   * open across calls, so chunks coalesce exactly as one call would.
    */
-  private replayCoalescedPackedLinearSections(
+  private replayCoalescedPackedLinearRange(
     plan: PackedCriticalReplayPlan,
-    startSection: number,
-    endSection: number,
+    replay: CoalescedLinearReplay,
+    start: number,
+    end: number,
   ): void {
-    // These sections precede the retained checkpoint window, so no
-    // intermediate persistent root is observable. Apply their splices to a
-    // one-shot piece index and freeze once at the section-range boundary.
-    const editor = new TransientUtf16RopeEditor(this.documentBuffer);
-    let pendingKind: "insert" | "delete" | null = null;
-    let pendingIndex = 0;
-    let pendingLength = 0;
-    let pendingInsertParts: string[] = [];
-
-    const flush = (): void => {
-      if (pendingKind === "insert") {
-        editor.insert(
-          pendingIndex,
-          pendingInsertParts.length === 1
-            ? pendingInsertParts[0]!
-            : pendingInsertParts.join(""),
-        );
-      } else if (pendingKind === "delete") {
-        editor.delete(pendingIndex, pendingLength);
-      }
-      pendingKind = null;
-      pendingLength = 0;
-      pendingInsertParts = [];
-    };
-
-    const start = plan.sectionStartAt(startSection);
-    const end = plan.sectionEndAt(endSection - 1);
+    const editor = replay.editor;
     for (let orderIndex = start; orderIndex < end; orderIndex++) {
       const operationIndex = plan.operationIndexAt(orderIndex);
       const operationLength = plan.operationLengthAt(orderIndex);
@@ -2046,15 +2494,15 @@ export class EgWalkerReplica {
           contentStart + operationLength,
         );
         if (
-          pendingKind === "insert" &&
-          operationIndex === pendingIndex + pendingLength
+          replay.pendingKind === "insert" &&
+          operationIndex === replay.pendingIndex + replay.pendingLength
         ) {
-          pendingInsertParts.push(content);
-          pendingLength += operationLength;
+          replay.pendingInsertParts.push(content);
+          replay.pendingLength += operationLength;
           continue;
         }
 
-        flush();
+        flushCoalescedLinearReplay(replay);
         this.validateLocalOperation(
           {
             type: OPERATION_TYPE.INSERT,
@@ -2063,30 +2511,33 @@ export class EgWalkerReplica {
           },
           editor,
         );
-        pendingKind = "insert";
-        pendingIndex = operationIndex;
-        pendingLength = operationLength;
-        pendingInsertParts = [content];
+        replay.pendingKind = "insert";
+        replay.pendingIndex = operationIndex;
+        replay.pendingLength = operationLength;
+        replay.pendingInsertParts = [content];
         continue;
       }
 
       if (operationLength === 0) {
         continue;
       }
-      if (pendingKind === "delete" && operationIndex === pendingIndex) {
-        const virtualDocumentLength = editor.length - pendingLength;
+      if (
+        replay.pendingKind === "delete" &&
+        operationIndex === replay.pendingIndex
+      ) {
+        const virtualDocumentLength = editor.length - replay.pendingLength;
         if (operationIndex + operationLength > virtualDocumentLength) {
           throw new Error(
             `Delete range [${operationIndex}, ${operationIndex + operationLength}) exceeds document length ${virtualDocumentLength}`,
           );
         }
-        const combinedLength = pendingLength + operationLength;
+        const combinedLength = replay.pendingLength + operationLength;
         this.assertNotMidSurrogate(operationIndex + combinedLength, editor);
-        pendingLength = combinedLength;
+        replay.pendingLength = combinedLength;
         continue;
       }
 
-      flush();
+      flushCoalescedLinearReplay(replay);
       this.validateLocalOperation(
         {
           type: OPERATION_TYPE.DELETE,
@@ -2095,16 +2546,9 @@ export class EgWalkerReplica {
         },
         editor,
       );
-      pendingKind = "delete";
-      pendingIndex = operationIndex;
-      pendingLength = operationLength;
-    }
-
-    flush();
-    this.documentBuffer = editor.finish();
-    this.documentCache = null;
-    if (end > start) {
-      this.currentVersion = new Set([plan.eventIdAt(end - 1)]);
+      replay.pendingKind = "delete";
+      replay.pendingIndex = operationIndex;
+      replay.pendingLength = operationLength;
     }
   }
 
@@ -3163,6 +3607,86 @@ const withLiveSequenceRecordCount = (
   stats: EngineStats,
   sequenceRecordCount: number,
 ): EngineStats => ({ ...stats, sequenceRecordCount });
+
+/** Scheduling hooks a host may provide; all optional. */
+interface HostScheduling {
+  readonly scheduler?: { readonly yield?: () => Promise<void> };
+  readonly setImmediate?: (callback: () => void) => unknown;
+  readonly MessageChannel?: typeof MessageChannel;
+  readonly performance?: { readonly now?: () => number };
+}
+
+const host = globalThis as HostScheduling;
+
+const monotonicNow = (): number => host.performance?.now?.() ?? Date.now();
+
+/** The default {@link PrepareReplicaOptions.yieldToHost}. */
+const yieldToHostDefault = (): Promise<void> => {
+  const scheduler = host.scheduler;
+  if (typeof scheduler?.yield === "function") {
+    return scheduler.yield();
+  }
+  const setImmediate = host.setImmediate;
+  if (typeof setImmediate === "function") {
+    return new Promise((resolve) => {
+      setImmediate(() => resolve());
+    });
+  }
+  const Channel = host.MessageChannel;
+  if (typeof Channel === "function") {
+    return new Promise((resolve) => {
+      const channel = new Channel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        resolve();
+      };
+      channel.port2.postMessage(null);
+    });
+  }
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+};
+
+const prepareSliceMsOf = (sliceMs: number | undefined): number => {
+  if (sliceMs === undefined) {
+    return DEFAULT_PREPARE_SLICE_MS;
+  }
+  if (typeof sliceMs !== "number" || Number.isNaN(sliceMs) || sliceMs < 0) {
+    throw new RangeError(
+      `prepare() sliceMs must be a non-negative number, got ${String(sliceMs)}`,
+    );
+  }
+  return sliceMs;
+};
+
+/**
+ * Open state of a coalesced linear replay: the piece index and the edit
+ * still being extended. See `replayCoalescedPackedLinearSectionsSteps`.
+ */
+interface CoalescedLinearReplay {
+  readonly editor: TransientUtf16RopeEditor;
+  pendingKind: "insert" | "delete" | null;
+  pendingIndex: number;
+  pendingLength: number;
+  pendingInsertParts: string[];
+}
+
+const flushCoalescedLinearReplay = (replay: CoalescedLinearReplay): void => {
+  if (replay.pendingKind === "insert") {
+    replay.editor.insert(
+      replay.pendingIndex,
+      replay.pendingInsertParts.length === 1
+        ? replay.pendingInsertParts[0]!
+        : replay.pendingInsertParts.join(""),
+    );
+  } else if (replay.pendingKind === "delete") {
+    replay.editor.delete(replay.pendingIndex, replay.pendingLength);
+  }
+  replay.pendingKind = null;
+  replay.pendingLength = 0;
+  replay.pendingInsertParts = [];
+};
 
 const recordsUsePlainIndexes = (
   records: ReadonlyArray<EngineSequenceRecord>,

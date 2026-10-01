@@ -3,6 +3,7 @@ import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
 import type { LocalVersionTransition } from "../graph/internals/ranked-diff-versions";
+import { runSteps, type Steps } from "../graph/internals/steps";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
   containsUtf16SurrogateCodeUnit,
@@ -99,6 +100,13 @@ export interface EngineRecoveryState {
 // Once the divergent suffix is large enough, avoiding its per-event effect
 // rank lookup and rope edit dominates the shallow final rope rebuild.
 const DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS = 64;
+
+/** Where a chunked packed range replay resumes. */
+interface PackedRangeCursor {
+  orderIndex: number;
+  /** Offset of the last replayed event, or `null` before the first one. */
+  currentOffset: number | null;
+}
 
 /** Whether two versions given as local versions hold the same events. */
 const localVersionsEqual = (
@@ -290,6 +298,42 @@ export class EgWalkerEngine {
     initialVersion: ReadonlySet<EventId>,
     initialTextBuffer: PersistentUtf16Rope,
   ): GeneratedDocument {
+    return runSteps(
+      this.generatePackedSectionRangeSteps(
+        plan,
+        startSectionIndex,
+        endSectionIndex,
+        graph,
+        initialVersion,
+        initialTextBuffer,
+        Number.POSITIVE_INFINITY,
+      ),
+    );
+  }
+
+  /**
+   * {@link generatePackedSectionRange} in steps, for a caller that must pause
+   * between them. The generator yields after each chunk of about
+   * `chunkEvents` events and returns the generated document. A chunk ends
+   * only between the events the unchunked loop visits, and a run of typed
+   * events can carry it past `chunkEvents`, so the replayed state does not
+   * depend on the chunk size. The engine must not be used for anything else
+   * until the generator returns.
+   */
+  *generatePackedSectionRangeSteps(
+    plan: PackedCriticalReplayPlan,
+    startSectionIndex: number,
+    endSectionIndex: number,
+    graph: EventGraph,
+    initialVersion: ReadonlySet<EventId>,
+    initialTextBuffer: PersistentUtf16Rope,
+    chunkEvents: number,
+  ): Steps<GeneratedDocument> {
+    if (!(chunkEvents >= 1)) {
+      throw new RangeError(
+        `Packed replay chunk size must be at least one event, got ${chunkEvents}`,
+      );
+    }
     const startOrderIndex = plan.sectionStartAt(startSectionIndex);
     const endOrderIndex = plan.sectionEndAt(endSectionIndex - 1);
     const eventCount = endOrderIndex - startOrderIndex;
@@ -311,9 +355,46 @@ export class EgWalkerEngine {
       this.enableSegmentedPlaceholder();
     }
 
-    let currentOffset: number | null = null;
-    let orderIndex = startOrderIndex;
-    while (orderIndex < endOrderIndex) {
+    const cursor: PackedRangeCursor = {
+      orderIndex: startOrderIndex,
+      currentOffset: null,
+    };
+    while (true) {
+      this.replayPackedOrderRange(
+        plan,
+        cursor,
+        startOrderIndex,
+        endOrderIndex,
+        Math.min(endOrderIndex, cursor.orderIndex + chunkEvents),
+      );
+      if (cursor.orderIndex >= endOrderIndex) {
+        break;
+      }
+      yield;
+    }
+
+    if (cursor.currentOffset !== null) {
+      this.currentVersion = [cursor.currentOffset];
+    }
+    return this.finishGeneration(undefined);
+  }
+
+  /**
+   * Replay packed events from `cursor.orderIndex` until it reaches
+   * `chunkEndOrderIndex`. A run extension stops only at `endOrderIndex`, the
+   * end of the whole range, so splitting a range into chunks replays exactly
+   * the events, in the order, that one call over the range would.
+   */
+  private replayPackedOrderRange(
+    plan: PackedCriticalReplayPlan,
+    cursor: PackedRangeCursor,
+    startOrderIndex: number,
+    endOrderIndex: number,
+    chunkEndOrderIndex: number,
+  ): void {
+    let currentOffset = cursor.currentOffset;
+    let orderIndex = cursor.orderIndex;
+    while (orderIndex < chunkEndOrderIndex) {
       const eventOffset = plan.eventOffsetAt(orderIndex);
       currentOffset = this.processPackedEvent(
         plan,
@@ -347,11 +428,8 @@ export class EgWalkerEngine {
         currentOffset = plan.eventOffsetAt(orderIndex - 1);
       }
     }
-
-    if (currentOffset !== null) {
-      this.currentVersion = [currentOffset];
-    }
-    return this.finishGeneration(undefined);
+    cursor.orderIndex = orderIndex;
+    cursor.currentOffset = currentOffset;
   }
 
   /** Build only the bounded ID rank needed if this packed engine is retained. */

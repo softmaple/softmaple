@@ -8,6 +8,7 @@ import {
 } from "./event-id-run-index";
 import { GraphRuns } from "./graph-runs";
 import { MaxHeap } from "./max-heap";
+import { runSteps, type Steps } from "./steps";
 import type { TailOperationColumns } from "./tail-event-log";
 import {
   type PackedIntegerColumn,
@@ -708,6 +709,20 @@ export class PackedEventGraphBase {
    * frontier only while the run is being emitted.
    */
   buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout {
+    return runSteps(
+      this.buildBranchPreservingCriticalReplayLayoutSteps(
+        Number.POSITIVE_INFINITY,
+      ),
+    );
+  }
+
+  /**
+   * {@link buildBranchPreservingCriticalReplayLayout} in steps of
+   * `runsPerStep` runs, for a caller that must pause between them.
+   */
+  *buildBranchPreservingCriticalReplayLayoutSteps(
+    runsPerStep: number,
+  ): Steps<PackedBranchReplayLayout> {
     const eventCount = this.count;
     if (eventCount === 0) {
       const empty = new Uint32Array();
@@ -739,6 +754,7 @@ export class PackedEventGraphBase {
     const runs = this.runs;
     const { remainingParents, roots, sortBranchGroup } =
       this.createBranchTraversalWorkspace();
+    yield;
 
     const stack: number[] = [];
     for (let index = roots.length - 1; index >= 0; index--) {
@@ -754,6 +770,7 @@ export class PackedEventGraphBase {
     /** Ready runs whose first event has a run's last event as a parent. */
     const readyParentCoverage = new Uint32Array(runs.count);
     const newlyReady: number[] = [];
+    let runsSinceStep = 0;
 
     let readyCount = roots.length;
     let frontierSize = 0;
@@ -890,6 +907,10 @@ export class PackedEventGraphBase {
       }
       for (let index = newlyReady.length - 1; index >= 0; index--) {
         stack.push(newlyReady[index]!);
+      }
+      if (++runsSinceStep >= runsPerStep) {
+        runsSinceStep = 0;
+        yield;
       }
     }
 

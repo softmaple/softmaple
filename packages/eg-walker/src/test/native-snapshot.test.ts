@@ -327,6 +327,36 @@ describe("EgWalkerReplica native snapshots", () => {
     );
   });
 
+  it("should reject an oversized snapshot again on retry without decoding its graph", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    replica.insert(1, "B");
+    const codec = new NativeSnapshotCodec();
+    const decoded = codec.decode(codec.encode(replica.createNativeSnapshot()));
+    const decodeGraph = vi
+      .spyOn(ColumnarEventGraphCodec.prototype, "decodeBinary")
+      .mockImplementation(() => {
+        throw new Error("graph decoded");
+      });
+
+    // Act
+    const restore = () =>
+      EgWalkerReplica.fromNativeSnapshot(decoded, "alice", { maxEvents: 1 });
+
+    // Assert
+    try {
+      expect(restore).toThrow(
+        "Graph event count 2 exceeds the limit of 1 events",
+      );
+      expect(restore).toThrow(
+        "Graph event count 2 exceeds the limit of 1 events",
+      );
+    } finally {
+      decodeGraph.mockRestore();
+    }
+  });
+
   it("should apply maxEvents to a snapshot that was not decoded from bytes", () => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");

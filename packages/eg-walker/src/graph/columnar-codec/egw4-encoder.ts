@@ -6,6 +6,7 @@ import { BinaryWriter, EGW4_MAGIC, encodeText } from "../internals/binary-io";
 import { crc32 } from "../internals/crc32";
 import {
   EGW4_MANY_PARENTS,
+  EGW4_MAX_EVENTS,
   EGW4_MIN_REPEAT,
   EGW4_SEGMENT,
   EGW4_SPAN,
@@ -171,6 +172,11 @@ export class Egw4IdRuns {
 /** Encode validated columns as an EGW4 payload. */
 export const encodeEgw4 = (input: Egw4EncodeInput): Uint8Array => {
   const { columns } = input;
+  if (columns.count > EGW4_MAX_EVENTS) {
+    throw new Error(
+      `Graph has ${columns.count} events but EGW4 holds at most ${EGW4_MAX_EVENTS}`,
+    );
+  }
   if (input.ids.eventCount !== columns.count) {
     throw new Error(
       `ID runs cover ${input.ids.eventCount} events but the graph has ${columns.count}`,

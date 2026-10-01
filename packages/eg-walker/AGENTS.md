@@ -85,6 +85,9 @@ Events are stored in compressed columnar format:
   that no insert splits a surrogate pair.
 - A CRC-32 of the payload ends it, so a flipped, dropped or extra byte is
   rejected before anything else is decoded.
+- A payload holds at most `EGW4_MAX_EVENTS` (2^25) events. Runs let a few
+  bytes declare many events, so the decoder rejects a larger count before
+  allocating any per-event column, and encoders refuse larger graphs.
 
 ### Known Limitations
 

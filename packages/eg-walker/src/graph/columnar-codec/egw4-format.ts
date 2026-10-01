@@ -8,7 +8,7 @@
  *
  * ```text
  * magic       varint 4, then "EGW4"
- * eventCount  varint N
+ * eventCount  varint N, at most EGW4_MAX_EVENTS
  * strings     varint count, then each string as varint UTF-8 length + bytes:
  *             every replica ID and custom event ID, written once
  * idRuns      runs covering the N events in order:
@@ -78,3 +78,12 @@ export const EGW4_MIN_REPEAT = 3;
 
 /** Bytes of the trailing CRC-32. */
 export const EGW4_CHECKSUM_BYTES = 4;
+
+/**
+ * Most events an EGW4 payload holds (33,554,432, 14 times the largest paper
+ * trace). Runs let a few bytes declare many events, and decoding allocates
+ * about 17 bytes of columns per declared event, so the limit bounds what any
+ * payload can make the decoder allocate. Encoders refuse larger graphs, so
+ * every payload they write decodes.
+ */
+export const EGW4_MAX_EVENTS = 2 ** 25;

@@ -23,6 +23,7 @@ import type {
 import {
   EGW4_CHECKSUM_BYTES,
   EGW4_MANY_PARENTS,
+  EGW4_MAX_EVENTS,
   EGW4_SEGMENT,
   EGW4_SPAN,
 } from "./egw4-format";
@@ -66,8 +67,11 @@ export const decodeEgw4Graph = (bytes: Uint8Array): EventGraph => {
   }
 
   const count = reader.readVarint();
-  if (count > UINT32_MAX) {
-    throw new Error(`Graph event count ${count} exceeds the packed range`);
+  // Checked before any per-event column is allocated.
+  if (count > EGW4_MAX_EVENTS) {
+    throw new Error(
+      `Graph event count ${count} exceeds the EGW4 limit of ${EGW4_MAX_EVENTS} events`,
+    );
   }
   const strings = readStrings(reader);
   const idRuns = readIdRuns(reader, strings, count);

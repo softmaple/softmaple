@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import {
+  encodeEgw4,
+  Egw4IdRuns,
+  type Egw4EncodeColumns,
+} from "../graph/columnar-codec/egw4-encoder";
+import { EGW4_MAX_EVENTS } from "../graph/columnar-codec/egw4-format";
 import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import { BinaryWriter } from "../graph/internals/binary-io";
 import { crc32 } from "../graph/internals/crc32";
@@ -104,6 +110,28 @@ describe("encodeTopologicallyOrderedEventsBinary", () => {
     // Assert
     expect(encode).toThrow(
       "Event a:0 operation ends beyond the safe integer range",
+    );
+  });
+});
+
+describe("encodeEgw4", () => {
+  it("should refuse a graph with more events than EGW4 holds", () => {
+    // Arrange
+    const count = EGW4_MAX_EVENTS + 1;
+    const input = {
+      columns: unreadColumns(count),
+      ids: new Egw4IdRuns(),
+      overrideCount: 0,
+      insertedText: "",
+      metadata: {},
+    };
+
+    // Act
+    const encode = () => encodeEgw4(input);
+
+    // Assert
+    expect(encode).toThrow(
+      "Graph has 33554433 events but EGW4 holds at most 33554432",
     );
   });
 });
@@ -210,9 +238,10 @@ describe("ColumnarEventGraphCodec.decodeBinary", () => {
     readonly error: RegExp;
   }>([
     {
-      name: "an event count beyond 32 bits",
-      sections: { count: varint(2 ** 32) },
-      error: /exceeds the packed range/,
+      name: "an event count beyond the EGW4 limit",
+      sections: { count: varint(EGW4_MAX_EVENTS + 1) },
+      error:
+        /Graph event count 33554433 exceeds the EGW4 limit of 33554432 events/,
     },
     {
       name: "more strings than bytes",
@@ -425,6 +454,23 @@ const eventsOf = (graph: EventGraph): GraphEvent[] =>
     operation: decoded.operation,
     timestamp: decoded.timestamp,
   }));
+
+/** Columns of `count` events that fail the test if the encoder reads them. */
+const unreadColumns = (count: number): Egw4EncodeColumns => {
+  const unread = (): never => {
+    throw new Error("The encoder read a column");
+  };
+  return {
+    count,
+    isInsertAt: unread,
+    operationIndexAt: unread,
+    operationLengthAt: unread,
+    timestampAt: unread,
+    hasDefaultParentsAt: unread,
+    parentCountAt: unread,
+    parentPositionAt: unread,
+  };
+};
 
 const hex = (bytes: ArrayLike<number>): string =>
   Buffer.from(Array.from(bytes)).toString("hex");

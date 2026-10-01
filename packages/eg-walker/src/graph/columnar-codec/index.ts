@@ -8,10 +8,12 @@
 import { OPERATION_TYPE } from "../../constants/operation-types";
 import { EventGraph } from "../event-graph";
 import { BinaryReader, EGW3_MAGIC, EGW4_MAGIC } from "../internals/binary-io";
+import { eventLimitOf } from "../internals/event-limit";
 import type { GraphEvent, SerializedGraphOutput } from "../../types";
 import {
   operationLength,
   operationTextLength,
+  type ColumnarDecodeOptions,
   type ColumnarEventGraph,
   type IdRun,
   type OperationRun,
@@ -29,7 +31,13 @@ import {
 } from "./graph-validation";
 import { encodeTopologicallyOrderedEventsBinary } from "./topological-binary-encoder";
 
-export type { ColumnarEventGraph, IdRun, OperationRun, ParentOverride };
+export type {
+  ColumnarDecodeOptions,
+  ColumnarEventGraph,
+  IdRun,
+  OperationRun,
+  ParentOverride,
+};
 
 export class ColumnarEventGraphCodec {
   encode(graph: EventGraph): ColumnarEventGraph {
@@ -108,15 +116,25 @@ export class ColumnarEventGraphCodec {
     ).binary;
   }
 
-  /** Decode an EGW4 payload, or an EGW3 payload written before EGW4. */
-  decodeBinary(bytes: Uint8Array): EventGraph {
+  /**
+   * Decode an EGW4 payload, or an EGW3 payload written before EGW4.
+   *
+   * A few bytes of EGW4 can declare millions of events, each of which the
+   * decoded graph keeps in its columns, so pass `maxEvents` when the bytes
+   * may be untrusted.
+   */
+  decodeBinary(
+    bytes: Uint8Array,
+    options: ColumnarDecodeOptions = {},
+  ): EventGraph {
+    const maxEvents = eventLimitOf(options.maxEvents);
     const reader = new BinaryReader(bytes);
     const magic = reader.readByteView(reader.readVarint());
     if (hasMagic(magic, EGW4_MAGIC)) {
-      return decodeEgw4Graph(bytes);
+      return decodeEgw4Graph(bytes, maxEvents);
     }
     if (hasMagic(magic, EGW3_MAGIC)) {
-      return decodeEgw3Graph(reader);
+      return decodeEgw3Graph(reader, maxEvents);
     }
     throw new Error("Invalid eg-walker columnar graph header");
   }

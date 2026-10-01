@@ -12,6 +12,7 @@ export {
   createEgWalkerReplica,
   type CreateNativeSnapshotOptions,
   type NativeSnapshotResumeCacheMode,
+  type RestoreSnapshotOptions,
 } from "./core/replica";
 export {
   createCausalEventBatchBuilder,

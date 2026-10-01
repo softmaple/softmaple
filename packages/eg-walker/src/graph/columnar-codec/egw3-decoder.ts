@@ -19,6 +19,7 @@ import { OPERATION_TYPE } from "../../constants/operation-types";
 import { EventGraph } from "../event-graph";
 import { BinaryReader, decodeText, toUint8Array } from "../internals/binary-io";
 import { EventIdRunIndex } from "../internals/event-id-run-index";
+import { assertWithinEventLimit } from "../internals/event-limit";
 import {
   buildPackedEventGraphBaseFromIdRunIndex,
   buildPackedLinearEventGraphBaseFromIdIndex,
@@ -32,15 +33,20 @@ import {
   strictMetadata,
 } from "./graph-validation";
 
-/** Decode an EGW3 payload from a reader positioned after its magic. */
-export const decodeEgw3Graph = (reader: BinaryReader): EventGraph => {
+/**
+ * Decode an EGW3 payload from a reader positioned after its magic. A payload
+ * with more than `maxEvents` events is rejected before any per-event column
+ * is read.
+ */
+export const decodeEgw3Graph = (
+  reader: BinaryReader,
+  maxEvents = Number.POSITIVE_INFINITY,
+): EventGraph => {
   const version = reader.readStringArray();
   const partialOperationRuns = readOperationRuns(reader);
-  const operationIndexes = reader.readZigZagDeltaPackedUnsignedArray();
-  const operationLengths = reader.readVarintPackedUnsignedArray();
 
-  // Validate before consuming these arrays so the packed decode never sees
-  // undefined values from a short column.
+  // Validate before consuming the per-event columns so the packed decode
+  // never sees undefined values from a short column.
   let operationRunsTotal = 0;
   for (const [runIndex, run] of partialOperationRuns.entries()) {
     if (!Number.isSafeInteger(run.length) || run.length <= 0) {
@@ -53,6 +59,9 @@ export const decodeEgw3Graph = (reader: BinaryReader): EventGraph => {
       throw new Error("Operation runs exceed safe event count");
     }
   }
+  assertWithinEventLimit(operationRunsTotal, maxEvents);
+  const operationIndexes = reader.readZigZagDeltaPackedUnsignedArray();
+  const operationLengths = reader.readVarintPackedUnsignedArray();
   if (operationIndexes.length !== operationRunsTotal) {
     throw new Error(
       `Column length mismatch: operationIndexes has ${operationIndexes.length} entries but operationRuns implies ${operationRunsTotal} events`,

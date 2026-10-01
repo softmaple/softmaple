@@ -11,6 +11,7 @@ import {
 } from "../internals/binary-io";
 import { crc32 } from "../internals/crc32";
 import { EventIdRunIndex } from "../internals/event-id-run-index";
+import { assertWithinEventLimit } from "../internals/event-limit";
 import { GraphRuns } from "../internals/graph-runs";
 import {
   PACKED_OPERATION_TYPE,
@@ -54,9 +55,14 @@ interface OperationColumns {
  *
  * The checksum is verified before anything else is read, and every column is
  * validated as it is decoded. IDs stay in the run index and parents are
- * offsets, so no per-event ID string or edge object is built.
+ * offsets, so no per-event ID string or edge object is built. A payload
+ * declaring more than `maxEvents` events is rejected before any per-event
+ * column is allocated.
  */
-export const decodeEgw4Graph = (bytes: Uint8Array): EventGraph => {
+export const decodeEgw4Graph = (
+  bytes: Uint8Array,
+  maxEvents = Number.POSITIVE_INFINITY,
+): EventGraph => {
   const reader = new BinaryReader(verifyChecksum(bytes));
   const magic = reader.readByteView(reader.readVarint());
   if (
@@ -73,6 +79,7 @@ export const decodeEgw4Graph = (bytes: Uint8Array): EventGraph => {
       `Graph event count ${count} exceeds the EGW4 limit of ${EGW4_MAX_EVENTS} events`,
     );
   }
+  assertWithinEventLimit(count, maxEvents);
   const strings = readStrings(reader);
   const idRuns = readIdRuns(reader, strings, count);
   const overrides = readParentOverrides(reader, count);

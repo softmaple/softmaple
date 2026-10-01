@@ -133,6 +133,22 @@ describe("EGW3 compatibility", () => {
     );
   });
 
+  it("decodes an EGW3 graph only within maxEvents", () => {
+    // Arrange
+    const bytes = bytesOf(EGW3_CONCURRENT_GRAPH.base64);
+    const count = EGW3_CONCURRENT_GRAPH.events.length;
+
+    // Act
+    const decodeWithin = (maxEvents: number) => () =>
+      codec.decodeBinary(bytes, { maxEvents });
+
+    // Assert
+    expect(decodeWithin(count)().getEventCount()).toBe(count);
+    expect(decodeWithin(count - 1)).toThrow(
+      `Graph event count ${count} exceeds the limit of ${count - 1} events`,
+    );
+  });
+
   it("rejects truncated EGW3 payloads and trailing bytes", () => {
     // Arrange
     const bytes = bytesOf(EGW3_CONCURRENT_GRAPH.base64);

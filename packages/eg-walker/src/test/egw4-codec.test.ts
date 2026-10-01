@@ -173,6 +173,39 @@ describe("ColumnarEventGraphCodec.decodeBinary", () => {
     expect(eventsOf(decoded)).toEqual(events);
   });
 
+  it("should decode a graph of exactly maxEvents events", () => {
+    // Arrange
+    const events = [
+      event("a:0", [], insert(0, "h"), 1),
+      event("a:1", ["a:0"], insert(1, "i"), 2),
+    ];
+    const { binary } = encodeTopologicallyOrderedEventsBinary(events);
+
+    // Act
+    const decoded = new ColumnarEventGraphCodec().decodeBinary(binary, {
+      maxEvents: 2,
+    });
+
+    // Assert
+    expect(eventsOf(decoded)).toEqual(events);
+  });
+
+  it("should reject a graph of more than maxEvents events", () => {
+    // Arrange
+    const events = [
+      event("a:0", [], insert(0, "h"), 1),
+      event("a:1", ["a:0"], insert(1, "i"), 2),
+    ];
+    const { binary } = encodeTopologicallyOrderedEventsBinary(events);
+
+    // Act
+    const decode = () =>
+      new ColumnarEventGraphCodec().decodeBinary(binary, { maxEvents: 1 });
+
+    // Assert
+    expect(decode).toThrow(/Graph event count 2 exceeds the limit of 1 events/);
+  });
+
   it("should cap the LZ4 destination by what the frame can expand to", () => {
     // Arrange
     const content = lz4Text("x");
@@ -230,6 +263,33 @@ describe("ColumnarEventGraphCodec.decodeBinary", () => {
         new ColumnarEventGraphCodec().decodeBinary(truncated),
       ).toThrow();
     }
+  });
+
+  it("should check maxEvents before reading any per-event column", () => {
+    // Arrange
+    // The default sections describe 3 events, so reading them as 2^24 fails.
+    const bytes = payload({ count: varint(2 ** 24) });
+
+    // Act
+    const decode = () =>
+      new ColumnarEventGraphCodec().decodeBinary(bytes, { maxEvents: 1_000 });
+
+    // Assert
+    expect(decode).toThrow(
+      /Graph event count 16777216 exceeds the limit of 1000 events/,
+    );
+  });
+
+  it.each([-1, 1.5, Number.NaN])("should reject maxEvents %s", (maxEvents) => {
+    // Arrange
+    const bytes = payload({});
+
+    // Act
+    const decode = () =>
+      new ColumnarEventGraphCodec().decodeBinary(bytes, { maxEvents });
+
+    // Assert
+    expect(decode).toThrow(/maxEvents must be a non-negative integer/);
   });
 
   it.each<{

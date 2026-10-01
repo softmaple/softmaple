@@ -88,6 +88,13 @@ Events are stored in compressed columnar format:
 - A payload holds at most `EGW4_MAX_EVENTS` (2^25) events. Runs let a few
   bytes declare many events, so the decoder rejects a larger count before
   allocating any per-event column, and encoders refuse larger graphs.
+- A decoded graph keeps about 17 bytes per event (21 when indexes exceed 32
+  bits), so a payload of a few KB can expand to tens of MB. Callers decoding
+  untrusted bytes pass `maxEvents` to `decodeBinary`,
+  `EgWalkerReplica.fromPortableSnapshot` or `fromNativeSnapshot`; a larger
+  count is rejected before any per-event column is allocated. Snapshot
+  restores also reject a graph that declares more events than the snapshot
+  header.
 
 ### Known Limitations
 

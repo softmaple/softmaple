@@ -215,7 +215,11 @@ export const validatePortableSnapshotHeaderOnly = (
 export const decodePortableSnapshotGraph = (
   snapshot: PortableSnapshot,
 ): EventGraph => {
-  const graph = codec.decodeBinary(snapshot.eventGraph);
+  // A graph declaring more events than the header is rejected before its
+  // columns are allocated, so the header count bounds what a restore decodes.
+  const graph = codec.decodeBinary(snapshot.eventGraph, {
+    maxEvents: snapshot.eventCount,
+  });
   try {
     if (graph.getEventCount() !== snapshot.eventCount) {
       throw new Error("Invalid portable snapshot: event count mismatch");

@@ -1,6 +1,6 @@
 /**
- * Property: the EGW4 columnar codec loses nothing and accepts no damaged
- * payload.
+ * Property: the EGW4 columnar codec loses nothing, accepts no damaged
+ * payload and decodes no graph larger than the caller's `maxEvents`.
  *
  * Graphs are generated in topological order with every shape the format
  * has a special case for: typing, delete-key and backspace runs next to
@@ -40,6 +40,50 @@ describe("property: EGW4 columnar codec", () => {
         expect(JSON.stringify(decoded.getMetadata())).toBe(
           JSON.stringify(metadata),
         );
+      }),
+      fcParams(),
+    );
+  });
+
+  it("should decode every graph whose event count is within maxEvents", () => {
+    fc.assert(
+      fc.property(graphArb, fc.nat(), ({ events, metadata }, headroom) => {
+        // Arrange
+        const { binary } = encodeTopologicallyOrderedEventsBinary(
+          events,
+          metadata,
+        );
+        const maxEvents = events.length + headroom;
+
+        // Act
+        const decoded = new ColumnarEventGraphCodec().decodeBinary(binary, {
+          maxEvents,
+        });
+
+        // Assert
+        expect(decoded.getEventCount()).toBe(events.length);
+      }),
+      fcParams(),
+    );
+  });
+
+  it("should reject every graph with more events than maxEvents", () => {
+    fc.assert(
+      fc.property(graphArb, fc.nat(), ({ events, metadata }, limitSeed) => {
+        // Arrange
+        fc.pre(events.length > 0);
+        const { binary } = encodeTopologicallyOrderedEventsBinary(
+          events,
+          metadata,
+        );
+        const maxEvents = limitSeed % events.length;
+
+        // Act
+        const decode = () =>
+          new ColumnarEventGraphCodec().decodeBinary(binary, { maxEvents });
+
+        // Assert
+        expect(decode).toThrow(/exceeds the limit of/);
       }),
       fcParams(),
     );

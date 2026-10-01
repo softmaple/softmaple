@@ -235,6 +235,37 @@ node scripts/run-local-keystroke-memory-bench.mjs \
 `--output` receives `summary.md` and `runs.jsonl`; each invocation replaces
 both files.
 
+## Concurrent paste merge
+
+`paste-concurrent-bench` measures a large paste that lands in the same replay
+section as a concurrent edit. Two replicas share a `--base-length`-character
+typed document. One pastes `--sizes` characters into the middle in a single
+insert while the other types one character before it, and then each replica
+merges the other's event with `applyRemoteEvents`. Both merges replay the
+paste and the keystroke in one nonlinear critical section. For each side the
+summary reports:
+
+- the merge time;
+- the replay engine's `getReplayStats().sequenceRecordCount` and
+  `peakSequenceRecordCount` after the merge;
+- the JS heap and array buffers the merge retains after full collections.
+
+Each sample runs in a fresh `--expose-gc` process: `--warmup` untimed rounds
+of the whole scenario, then one measured round. Every round checks both
+replicas' text against the expected document outside the timers. The driver
+alternates the implementation order between runs and prints per-side medians:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-paste-concurrent-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --sizes 10000,100000 --runs 3 --output /path/to/results
+```
+
+`--output` receives `summary.md` and `runs.jsonl`; each invocation replaces
+both files.
+
 ## Replay optimization A/B workers
 
 `replay-bench` adds full-text-checked threshold, receive API, graph import and

@@ -88,10 +88,12 @@ on top of the current state. The fast path is taken on:
 
 For inserts, `applyInsert` additionally skips the YATA integration scan
 when the destination range strictly between `originLeft` and `originRight`
-is empty (the dominant case under a non-conflicting run), and batches
-multi-character inserts at sequential positions because every code unit
-after the first is chained off a brand-new id that no existing item can
-reference. Concurrent or divergent events still fall back to the full
+is empty (the dominant case under a non-conflicting run), and integrates a
+multi-character insert as one insert-run record: every code unit after the
+first is chained off the previous code unit of the same brand-new event,
+which no existing item can reference, so only the first code unit needs an
+integration position. The record splits where a later insert or delete
+lands. Concurrent or divergent events still fall back to the full
 prepare/effect replay path; both paths produce identical output.
 
 Stats exposed on `GeneratedDocument.stats.nonConflictingRunCount` and

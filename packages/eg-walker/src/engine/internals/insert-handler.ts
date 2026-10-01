@@ -246,24 +246,25 @@ export const applyInsert = (
     }
   }
 
-  const insertedIds: ItemKey[] | null = insertedText.length === 1 ? null : [];
-  let left = originLeft;
-  const itemAgent = canonical ? agent : CUSTOM_EVENT_AGENT;
-  const itemSequence = canonical ? eventSequence : localVersion;
-
-  // First code unit: pay the full integration scan if the conflict region
-  // isn't empty. Single-character INSERTs from a canonical
+  // The whole insert becomes one record with the origins of its first code
+  // unit, so the integration scan runs once, and only when the conflict
+  // region isn't empty. Single-character INSERTs from a canonical
   // `replicaId:sequence` author seed a typed-run record so that later
   // contiguous events from the same author can extend it in-place (the
-  // coalescing branch above). Multi-character INSERTs and IDs that don't
-  // parse keep `run = null` and behave like the pre-coalescing engine.
+  // coalescing branch above). A multi-character INSERT becomes an insert-run
+  // record standing for the chain of per-code-unit items in which each code
+  // unit's left origin is the one before it. No existing record can name a
+  // code unit of a brand-new event, so that chain always lands contiguously.
+  // A later insert or delete inside the run splits it there (RecordSplitter)
+  // instead of every code unit costing an item, B-tree slots and a Fugue node
+  // up front.
   const firstItem: AugmentedCRDTItem = {
     id: items.nextKey(),
-    agent: itemAgent,
-    sequence: itemSequence,
+    agent: canonical ? agent : CUSTOM_EVENT_AGENT,
+    sequence: canonical ? eventSequence : localVersion,
     offset: 0,
-    content: insertedText[0] ?? "",
-    originLeft: left,
+    content: insertedText,
+    originLeft,
     originRight,
     everDeleted: false,
     prepareState: 1,
@@ -319,63 +320,17 @@ export const applyInsert = (
   }
   items.add(firstItem);
   originLeftIndex.track(firstItem.id, firstItem.originLeft);
-  insertedIds?.push(firstItem.id);
-  left = firstItem.id;
-  let tailItem = firstItem;
-
-  // Multi-character inserts: every subsequent item is chained off the
-  // previous item via `originLeft`. No record that existed before this
-  // event can reference that brand-new id, so the YATA scan for chars
-  // 1..N terminates on its first iteration and the integration position
-  // is unconditionally `previous + 1`. We bypass the scan and place them
-  // immediately after the previous object instead of paying numeric rank
-  // lookups or `findIntegrationPosition` setup per character. The items stay
-  // `run = null` because
-  // typed-run coalescing operates on single-character events from
-  // contiguous sequence numbers, not on the per-code-unit fragments of
-  // one multi-character INSERT.
-  for (let offset = 1; offset < insertedText.length; offset++) {
-    const item: AugmentedCRDTItem = {
-      id: items.nextKey(),
-      agent: itemAgent,
-      sequence: itemSequence,
-      offset,
-      content: insertedText[offset] ?? "",
-      originLeft: left,
-      originRight,
-      everDeleted: false,
-      prepareState: 1,
-      run: false,
-    };
-    const indexedIntegrated =
-      useOracle || fugueOrder.integrateAtKnownPosition(item);
-    if (!indexedIntegrated) {
-      throw new Error(
-        `Fugue order index unavailable for event ${localVersion}`,
-      );
-    }
-    if (!sequence.insertAfter(tailItem, item)) {
-      throw new Error(`Insert tail unavailable for event ${localVersion}`);
-    }
-    items.add(item);
-    originLeftIndex.track(item.id, item.originLeft);
-    insertedIds?.push(item.id);
-    left = item.id;
-    tailItem = item;
-  }
 
   if (tailResult !== undefined) {
-    tailResult.item = tailItem;
+    tailResult.item = firstItem;
   }
 
-  if (insertedIds === null) {
-    if (!firstItem.run) {
-      eventItems.setOne(localVersion, firstItem.id);
-    } else {
-      eventItems.registerRunItem(firstItem);
-    }
+  if (firstItem.run) {
+    eventItems.registerRunItem(firstItem);
+  } else if (insertedText.length === 1) {
+    eventItems.setOne(localVersion, firstItem.id);
   } else {
-    eventItems.set(localVersion, insertedIds);
+    eventItems.setInsertRun(localVersion, firstItem.id);
   }
 
   // Cold replay callers only need the final document. The sequence already

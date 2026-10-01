@@ -530,8 +530,8 @@ describe("Section 3.4 non-conflicting-run fast path", () => {
     );
     expect(
       batchedEngine.getSequenceRecords().map(({ content }) => content),
-    ).toEqual(["ab", "\ud83d", "\ude42", "cd", "X", "ef"]);
-    expect(batched.stats.sequenceRecordCount).toBe(6);
+    ).toEqual(["ab", "🙂", "cd", "X", "ef"]);
+    expect(batched.stats.sequenceRecordCount).toBe(5);
   });
 
   it("returns the post-event document from incremental applyEvent calls", () => {

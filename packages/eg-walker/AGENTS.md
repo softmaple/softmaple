@@ -85,13 +85,15 @@ Events are stored in compressed columnar format:
 
 ### Known Limitations
 
-- The CRDT layer stores one item per UTF-16 code unit, so a code point
-  represented as a surrogate pair (e.g. emoji) is materialised as two
-  CRDT items. The public API rejects insert/delete indexes that fall
-  between the two halves so concurrent edits cannot produce lone
-  surrogates; users must align operations to code-point boundaries.
-- Multi-character inserts are stored as a sequence of per-character
-  events under a single insert event.
+- The CRDT layer addresses one item per UTF-16 code unit, `(event, offset)`,
+  so a code point represented as a surrogate pair (e.g. emoji) is two CRDT
+  items even when one run record stores both. The public API rejects
+  insert/delete indexes that fall between the two halves so concurrent
+  edits cannot produce lone surrogates; users must align operations to
+  code-point boundaries.
+- A multi-character insert is a single insert event, and replay stores it
+  as one insert-run record that splits only where a later insert or delete
+  lands.
 - Remote events with unknown parents are buffered by `EgWalkerReplica` and
   flushed once their causal predecessors arrive; direct `EventGraph.addEvent`
   callers still need to deliver in causal order (or use `EventGraph.deserialize`

@@ -233,6 +233,27 @@ export class ItemIdCodec {
   }
 }
 
+/**
+ * Verbatim IDs of the code unit `delta` places after the one `external`
+ * names. Only an ID of the form `${eventId}:${offset}` names a code unit, so
+ * a record restored under any other ID cannot be split.
+ */
+export const shiftExternalItemIds = (
+  external: ExternalItemIds,
+  delta: number,
+): ExternalItemIds => {
+  const offset = offsetSuffix(external.id, external.eventId);
+  if (offset < 0) {
+    throw new Error(
+      `Record ${external.id} does not name a code unit of event ${external.eventId}`,
+    );
+  }
+  return {
+    id: `${external.eventId}:${offset + delta}`,
+    eventId: external.eventId,
+  };
+};
+
 /** The `k` of an item ID `${eventId}:${k}`, or `-1`. */
 const offsetSuffix = (itemId: EventId, eventId: EventId): number => {
   if (

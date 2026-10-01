@@ -17,6 +17,15 @@ import type { EventId, GraphEvent } from "../../types";
 import { cloneEvent } from "../test-helpers";
 import type { EditInstruction, TraceParams } from "./arbitraries";
 
+export interface TraceOptions {
+  /**
+   * Type each insert instruction one Unicode scalar per event instead of
+   * pasting it as one event. Syncs still happen only between instructions,
+   * so every other replica sees either none or all of the typed text.
+   */
+  readonly typeInserts?: boolean;
+}
+
 export interface TraceResult {
   readonly events: ReadonlyArray<GraphEvent>;
   readonly canonicalText: string;
@@ -56,6 +65,7 @@ const snapPastSurrogate = (text: string, index: number): number => {
 const applyEdit = (
   replica: EgWalkerReplica,
   edit: EditInstruction,
+  typeInserts: boolean,
 ): boolean => {
   const text = replica.getText();
   if (edit.kind === "insert") {
@@ -64,7 +74,15 @@ const applyEdit = (
     }
     const rawIndex = Math.floor(edit.offsetSeed * (text.length + 1));
     const index = snapPastSurrogate(text, rawIndex);
-    replica.insert(index, edit.text);
+    if (!typeInserts) {
+      replica.insert(index, edit.text);
+      return true;
+    }
+    let cursor = index;
+    for (const scalar of edit.text) {
+      replica.insert(cursor, scalar);
+      cursor += scalar.length;
+    }
     return true;
   }
   if (text.length === 0) {
@@ -135,8 +153,12 @@ export const canonicalReplay = (
   return replica.getText();
 };
 
-export const runTrace = (params: TraceParams): TraceResult => {
+export const runTrace = (
+  params: TraceParams,
+  options: TraceOptions = {},
+): TraceResult => {
   const { initialText, scripts, syncEveryN } = params;
+  const typeInserts = options.typeInserts ?? false;
   const sims = scripts.map(({ replicaId }) => ({
     id: replicaId,
     replica: new EgWalkerReplica(replicaId, initialText),
@@ -162,7 +184,7 @@ export const runTrace = (params: TraceParams): TraceResult => {
       if (step >= edits.length) {
         continue;
       }
-      if (applyEdit(sims[r]!.replica, edits[step]!)) {
+      if (applyEdit(sims[r]!.replica, edits[step]!, typeInserts)) {
         appliedEdits++;
       }
       stepCounter++;

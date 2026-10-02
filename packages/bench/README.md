@@ -351,6 +351,38 @@ node scripts/run-paste-concurrent-bench.mjs \
 `--output` receives `summary.md` and `runs.jsonl`; each invocation replaces
 both files.
 
+## Wide-frontier receive
+
+`wide-frontier-bench` measures receiving many concurrent edits at once, as
+when many peers come back online with independent edits. `--events` replicas
+each insert one letter at index 0 with no parents, so the receiver's frontier
+grows to one event per replica. A fresh replica receives them one
+`applyRemoteEvent` call at a time (`single`) or as one `applyRemoteEvents`
+batch (`batch`); only the receive is timed. For each event count and API the
+summary reports:
+
+- the receive time and the time per event;
+- the time per event divided by the time per event at the smallest
+  `--events`, which stays near 1 while receiving is linear in the frontier
+  width.
+
+Each sample runs in a fresh process: one untimed round of `--warmup-events`
+events, then the measured round. Outside the timer, every round checks that
+the frontier holds every event and that the text has every inserted letter,
+and the driver requires every implementation and API to produce the same text
+for a given event count. It alternates the implementation order between runs:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-wide-frontier-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --events 1000,2000,4000,8000,16000 --runs 3 --output /path/to/results
+```
+
+`--apis single` or `--apis batch` runs one API. `--output` receives
+`summary.md` and `runs.jsonl`; each invocation replaces both files.
+
 ## Replay optimization A/B workers
 
 `replay-bench` adds full-text-checked threshold, receive API, graph import and

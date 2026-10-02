@@ -103,6 +103,7 @@ describe("RemoteEventBuffer transactions", () => {
 const createBuffer = (): RemoteEventBuffer =>
   new RemoteEventBuffer({
     graph: new EventGraph(),
+    extendsCurrentVersion: () => false,
     advanceWithEvent: () => ({ operation: null, exact: true }),
   });
 

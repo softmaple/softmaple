@@ -45,6 +45,11 @@
       "dependsOn": ["^build"],
       "cache": false,
       "outputLogs": "full"
+    },
+    "wide-frontier-bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
     }
   }
 }

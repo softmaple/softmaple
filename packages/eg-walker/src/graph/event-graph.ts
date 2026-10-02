@@ -11,6 +11,7 @@ import type {
   GraphEvent,
   SerializedGraphInput,
   SerializedGraphOutput,
+  Version,
 } from "../types";
 import {
   EventAlreadyExistsError,
@@ -182,17 +183,30 @@ export class EventGraph {
     number,
     TailChildInsertionRanks
   > = new Map();
-  /** Insertion ranks of the events with no known children, in the order they
-   * became frontier events. */
-  private readonly frontier: Set<number> = new Set();
   /**
-   * {@link getFrontier}'s IDs in frontier order, with their ranks, until the
-   * frontier changes other than by an append (which updates both in place).
+   * Insertion ranks of the events with no known children, each mapped to
+   * when it became a frontier event. Iteration follows that order.
    */
-  private frontierIds: EventId[] | null = null;
-  private frontierIdRanks: number[] = [];
+  private readonly frontier: Map<number, number> = new Map();
+  private frontierEntryCount = 0;
+  /**
+   * The frontier's IDs in frontier order. Built on first use, then updated
+   * in place with every frontier change and never replaced, so
+   * {@link getFrontierView} can hand out the set itself.
+   */
+  private frontierIds: Set<EventId> | null = null;
+  /**
+   * Frontier changes made while an append transaction is open, as pairs:
+   * `(rank, -1)` for a rank that joined the frontier, `(rank, entry)` for a
+   * rank that left it. Rollback undoes them instead of restoring a copy of
+   * the whole frontier taken when the transaction began.
+   */
+  private readonly frontierJournal: number[] = [];
+  private openAppendTransactions = 0;
   /** Parent ranks of the event being appended. */
   private readonly parentRankScratch: number[] = [];
+  /** The caller's ID of each parent in {@link parentRankScratch}. */
+  private readonly parentIdScratch: EventId[] = [];
   /**
    * IDs and ranks of the last few events appended. An appended event's
    * parents are nearly always among them, so resolving a parent is usually a
@@ -274,7 +288,11 @@ export class EventGraph {
     this.rankedDiffWorkspace.release();
     this.rankedReplayOrderWorkspace.release();
     this.tailChildrenByPackedParentRank.clear();
-    this.clearFrontier();
+    // The events are gone, so their IDs cannot be resolved for the journal;
+    // an open transaction cannot be rolled back across a clear anyway.
+    this.frontier.clear();
+    this.frontierIds?.clear();
+    this.frontierJournal.length = 0;
     this.metadata = {};
     this.invalidateDerivedCaches();
   }
@@ -285,20 +303,28 @@ export class EventGraph {
    */
   beginAppendTransaction(): EventGraphAppendTransaction {
     const startingEventCount = this.tail.count;
-    const startingFrontier = Array.from(this.frontier);
+    const startingJournalLength = this.frontierJournal.length;
     const startingPackedBase = this.packedBase;
     const startingLinearChain = this.linearChain;
     const startingLinearChainMark = startingLinearChain?.mark() ?? null;
     let active = true;
+    this.openAppendTransactions++;
     return {
       commit: (): void => {
+        if (!active) {
+          return;
+        }
         active = false;
+        this.closeAppendTransaction();
       },
       rollback: (): void => {
         if (!active) {
           return;
         }
         active = false;
+        // Undo the frontier while every appended event can still name its ID.
+        this.undoFrontierChanges(startingJournalLength);
+        this.closeAppendTransaction();
         // Tail ranks follow the packed prefix, so unwind the tail first.
         this.rollbackAppendedEvents(startingEventCount);
         if (this.packedBase !== startingPackedBase) {
@@ -310,12 +336,58 @@ export class EventGraph {
           this.packedBase = startingPackedBase;
           this.invalidateDerivedCaches();
         }
-        this.clearFrontier();
-        for (const rank of startingFrontier) {
-          this.addFrontierRank(rank);
-        }
       },
     };
+  }
+
+  private closeAppendTransaction(): void {
+    this.openAppendTransactions--;
+    if (this.openAppendTransactions === 0) {
+      this.frontierJournal.length = 0;
+    }
+  }
+
+  /**
+   * Undo the frontier changes journaled after `journalLength`, newest first.
+   * A rank that left the frontier comes back at its old place: the frontier
+   * is put back in entry order, which only a failed append pays for.
+   */
+  private undoFrontierChanges(journalLength: number): void {
+    const journal = this.frontierJournal;
+    let restoredRank = false;
+    for (let index = journal.length - 2; index >= journalLength; index -= 2) {
+      const rank = journal[index]!;
+      const entry = journal[index + 1]!;
+      if (entry < 0) {
+        this.frontier.delete(rank);
+        this.frontierIds?.delete(this.requireEventIdAtInsertionRank(rank));
+      } else {
+        this.frontier.set(rank, entry);
+        this.frontierIds?.add(this.requireEventIdAtInsertionRank(rank));
+        restoredRank = true;
+      }
+    }
+    journal.length = journalLength;
+    if (restoredRank) {
+      this.reorderFrontierByEntry();
+    }
+  }
+
+  private reorderFrontierByEntry(): void {
+    const entries = Array.from(this.frontier).sort(
+      (left, right) => left[1] - right[1],
+    );
+    this.frontier.clear();
+    for (const [rank, entry] of entries) {
+      this.frontier.set(rank, entry);
+    }
+    const ids = this.frontierIds;
+    if (ids !== null) {
+      ids.clear();
+      for (const [rank] of entries) {
+        ids.add(this.requireEventIdAtInsertionRank(rank));
+      }
+    }
   }
 
   /**
@@ -450,9 +522,12 @@ export class EventGraph {
       Object.getPrototypeOf(parentVersion) === Set.prototype
         ? parentVersion
         : Array.from(parentVersion);
-    const parentRanks =
-      parentIds === parentVersion ? this.parentRankScratch : [];
+    const inPlace = parentIds === parentVersion;
+    const parentRanks = inPlace ? this.parentRankScratch : [];
+    // Kept so a parent leaving the frontier need not have its ID formatted.
+    const parentIdList = inPlace ? this.parentIdScratch : [];
     parentRanks.length = 0;
+    parentIdList.length = 0;
     try {
       for (const parentId of parentIds) {
         const parentRank = this.parentRankOf(parentId);
@@ -461,6 +536,7 @@ export class EventGraph {
         }
         if (!parentRanks.includes(parentRank)) {
           parentRanks.push(parentRank);
+          parentIdList.push(parentId);
         }
       }
       const tailIndex = this.tail.append(
@@ -472,18 +548,16 @@ export class EventGraph {
         parentRanks,
       );
       const insertionRank = (this.packedBase?.count ?? 0) + tailIndex;
-      const frontierIds = this.frontierIds;
-      for (const parentRank of parentRanks) {
+      for (let index = 0; index < parentRanks.length; index++) {
+        const parentRank = parentRanks[index]!;
         this.appendTailChildRank(parentRank, insertionRank);
-        this.deleteFrontierRank(parentRank);
+        this.deleteFrontierRank(parentRank, parentIdList[index]);
       }
-      this.addFrontierRank(insertionRank);
-      if (frontierIds !== null) {
-        this.appendFrontierId(frontierIds, parentRanks, insertionRank, id);
-      }
+      this.addFrontierRank(insertionRank, id);
       this.rememberAppended(id, insertionRank);
     } finally {
       parentRanks.length = 0;
+      parentIdList.length = 0;
     }
     this.invalidateDerivedCaches();
   }
@@ -533,7 +607,6 @@ export class EventGraph {
       const tailIndex = this.tail.count - 1;
       const insertionRank = packedCount + tailIndex;
 
-      this.deleteFrontierRank(insertionRank);
       if (this.tail.childCountAt(tailIndex) !== 0) {
         throw new Error(
           `Event graph rollback found retained child of ${this.tail.idAt(tailIndex)}`,
@@ -541,14 +614,10 @@ export class EventGraph {
       }
       const parentCount = this.tail.parentCountAt(tailIndex);
       for (let parentIndex = 0; parentIndex < parentCount; parentIndex++) {
-        const parentRank = this.tail.parentRankAt(tailIndex, parentIndex);
-        if (
-          this.removeLastTailChildRank(parentRank, insertionRank) &&
-          (parentRank >= packedCount ||
-            this.packedBase!.childCountAt(parentRank) === 0)
-        ) {
-          this.addFrontierRank(parentRank);
-        }
+        this.removeLastTailChildRank(
+          this.tail.parentRankAt(tailIndex, parentIndex),
+          insertionRank,
+        );
       }
       this.tail.truncate(tailIndex);
     }
@@ -897,54 +966,73 @@ export class EventGraph {
    * Get the frontier version: events with no known children.
    */
   getFrontier(): Set<EventId> {
-    if (this.frontierIds === null) {
-      this.frontierIdRanks = Array.from(this.frontier);
-      this.frontierIds = this.frontierIdRanks.map((rank) =>
-        this.requireEventIdAtInsertionRank(rank),
-      );
-    }
-    return new Set(this.frontierIds);
+    return new Set(this.frontierIdSet());
   }
 
   /**
-   * Carry {@link getFrontier}'s cached IDs across one append: drop the
-   * parents and add the new event last, as the rank set itself changed.
+   * The frontier version itself rather than a copy, in {@link getFrontier}
+   * order.
+   *
+   * @internal The set is read-only and live: every later change to the graph
+   * changes it in place. A caller that needs the frontier as of now after the
+   * graph changes again must copy it. Reading it costs nothing per call, so
+   * receive paths can track the frontier without copying it per event.
    */
-  private appendFrontierId(
-    previousIds: EventId[],
-    parentRanks: ReadonlyArray<number>,
-    rank: number,
-    id: EventId,
-  ): void {
-    const ranks: number[] = [];
-    const ids: EventId[] = [];
-    const previousRanks = this.frontierIdRanks;
-    for (let index = 0; index < previousRanks.length; index++) {
-      const previousRank = previousRanks[index]!;
-      if (!parentRanks.includes(previousRank)) {
-        ranks.push(previousRank);
-        ids.push(previousIds[index]!);
+  getFrontierView(): Version {
+    return this.frontierIdSet();
+  }
+
+  /** Number of frontier events, without formatting their IDs. */
+  getFrontierSize(): number {
+    return this.frontier.size;
+  }
+
+  private frontierIdSet(): Set<EventId> {
+    if (this.frontierIds === null) {
+      this.frontierIds = new Set();
+      for (const rank of this.frontier.keys()) {
+        this.frontierIds.add(this.requireEventIdAtInsertionRank(rank));
       }
     }
-    ranks.push(rank);
-    ids.push(id);
-    this.frontierIdRanks = ranks;
-    this.frontierIds = ids;
+    return this.frontierIds;
   }
 
-  private addFrontierRank(rank: number): void {
-    this.frontier.add(rank);
-    this.frontierIds = null;
+  /** `id`, when given, is the event's ID, so it need not be formatted. */
+  private addFrontierRank(rank: number, id?: EventId): void {
+    this.frontier.set(rank, this.frontierEntryCount++);
+    if (this.openAppendTransactions !== 0) {
+      this.frontierJournal.push(rank, -1);
+    }
+    this.frontierIds?.add(id ?? this.requireEventIdAtInsertionRank(rank));
   }
 
-  private deleteFrontierRank(rank: number): void {
+  /**
+   * `id`, when given, is an ID the caller resolved to `rank`. It is tried
+   * first, so the stored ID is formatted only if the two differ.
+   */
+  private deleteFrontierRank(rank: number, id?: EventId): void {
+    const entry = this.frontier.get(rank);
+    if (entry === undefined) {
+      return;
+    }
     this.frontier.delete(rank);
-    this.frontierIds = null;
+    if (this.openAppendTransactions !== 0) {
+      this.frontierJournal.push(rank, entry);
+    }
+    const ids = this.frontierIds;
+    if (ids !== null && (id === undefined || !ids.delete(id))) {
+      ids.delete(this.requireEventIdAtInsertionRank(rank));
+    }
   }
 
   private clearFrontier(): void {
+    if (this.openAppendTransactions !== 0) {
+      for (const [rank, entry] of this.frontier) {
+        this.frontierJournal.push(rank, entry);
+      }
+    }
     this.frontier.clear();
-    this.frontierIds = null;
+    this.frontierIds?.clear();
   }
 
   /**
@@ -1060,7 +1148,7 @@ export class EventGraph {
   }
 
   getFrontierLocalVersions(): number[] {
-    return Array.from(this.frontier);
+    return Array.from(this.frontier.keys());
   }
 
   /**
@@ -1703,7 +1791,7 @@ export class EventGraph {
       if (offset === undefined) {
         throw new Error(`Packed graph frontier contains unknown event ${id}`);
       }
-      graph.frontier.add(offset);
+      graph.addFrontierRank(offset);
     }
     graph.packedBase = base;
     graph.metadata = { ...metadata };

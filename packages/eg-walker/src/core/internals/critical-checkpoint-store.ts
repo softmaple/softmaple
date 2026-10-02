@@ -152,15 +152,16 @@ export class CriticalCheckpointStore {
     graph: EventGraph,
     document: string | PersistentUtf16Rope,
   ): void {
-    const frontier = graph.getFrontier();
-    if (frontier.size !== 1) {
+    // Check the width before reading the IDs: a wide frontier is never a
+    // checkpoint, and formatting it would cost O(width) per received event.
+    if (graph.getFrontierSize() !== 1) {
       return;
     }
     // A finite DAG with exactly one frontier has every event causally before
     // that frontier. The singleton frontier is therefore critical by
     // definition, so avoid the analyzer's full ancestor expansion on the
     // sequential hot path.
-    this.record(frontier, document, graph.getEventCount());
+    this.record(graph.getFrontierView(), document, graph.getEventCount());
   }
 
   /**

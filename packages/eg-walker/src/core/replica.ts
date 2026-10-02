@@ -373,6 +373,12 @@ export class EgWalkerReplica {
   private lazyEventGraphText: string | null = null;
   /** The lazy history's preparation, while one is in progress. */
   private preparation: HistoryPreparation | null = null;
+  /**
+   * The version the document text is at. It is often the graph's live
+   * frontier view ({@link EventGraph.getFrontierView}), which follows every
+   * later append, so a reader that needs this version after the graph changes
+   * must copy it first.
+   */
   private currentVersion: Version = new Set();
   private nextSequenceNumber = 0;
   private engine: EgWalkerEngine | null = null;
@@ -457,7 +463,7 @@ export class EgWalkerReplica {
     this.currentVersion =
       options.currentVersion !== undefined
         ? new Set(options.currentVersion)
-        : this.ensureEventGraph().getFrontier();
+        : this.ensureEventGraph().getFrontierView();
     if (this.engine !== null) {
       // Native resume state is guaranteed only for forward continuation from
       // its captured frontier. A divergent suffix falls back to a retained
@@ -895,7 +901,9 @@ export class EgWalkerReplica {
     const event: GraphEvent = {
       id: this.generateEventId(),
       operation: validatedOperation,
-      parentVersion: this.currentVersion,
+      // The current version can be the graph's live frontier, which this
+      // append changes; the event keeps the parents it was created with.
+      parentVersion: new Set(this.currentVersion),
       timestamp: Date.now(),
     };
 
@@ -919,7 +927,7 @@ export class EgWalkerReplica {
 
     // Local edits don't expose the engine's transformed operation; the caller
     // already knows what they typed. Discard the helper's return.
-    this.advanceWithEvent(event);
+    this.advanceWithEvent(event, true);
     return event;
   }
 
@@ -952,12 +960,16 @@ export class EgWalkerReplica {
       return this.applyRemoteEvents([cloned]).results[0]!;
     }
 
+    const extendsCurrentVersion = versionsEqual(
+      cloned.parentVersion,
+      this.currentVersion,
+    );
     const snapshot = this.captureRemoteBatchSnapshot();
     const transaction = graph.beginAppendTransaction();
     this.replayCacheCoverageJournal = [];
     try {
       graph.addEvent(cloned);
-      const effect = this.advanceWithEvent(cloned);
+      const effect = this.advanceWithEvent(cloned, extendsCurrentVersion);
       transaction.commit();
       return {
         status: APPLY_REMOTE_EVENT_STATUS.Integrated,
@@ -1244,7 +1256,7 @@ export class EgWalkerReplica {
     this.documentCache = null;
     this.replayCacheEvents += events.length;
     this.refreshReplayCacheMetrics();
-    this.currentVersion = graph.getFrontier();
+    this.currentVersion = graph.getFrontierView();
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
     this.incrementalApplyCount += events.length;
@@ -1732,7 +1744,10 @@ export class EgWalkerReplica {
   private createRemoteEventBuffer(graph: EventGraph): RemoteEventBuffer {
     return new RemoteEventBuffer({
       graph,
-      advanceWithEvent: (event) => this.advanceWithEvent(event),
+      extendsCurrentVersion: (event) =>
+        versionsEqual(event.parentVersion, this.currentVersion),
+      advanceWithEvent: (event, extendsCurrentVersion) =>
+        this.advanceWithEvent(event, extendsCurrentVersion),
     });
   }
 
@@ -1810,7 +1825,7 @@ export class EgWalkerReplica {
       restoredEngine = this.partialReplayer.replayFromCheckpoint(
         graph,
         anchor.checkpoint,
-        snapshot.currentVersion,
+        this.currentVersion,
         { collectTransformedOperations: false },
       ).engine;
     } else {
@@ -2190,7 +2205,7 @@ export class EgWalkerReplica {
     if (replayedEventCount !== plan.eventCount) {
       throw new Error("Packed replay plan did not apply every graph event");
     }
-    this.currentVersion = graph.getFrontier();
+    this.currentVersion = graph.getFrontierView();
     this.engine = retainedEngine;
     this.engineStatsOverride =
       aggregateStats === null
@@ -2316,7 +2331,7 @@ export class EgWalkerReplica {
     if (replayedEventCount !== eventCount) {
       throw new Error("Event graph changed during linear replay");
     }
-    this.currentVersion = graph.getFrontier();
+    this.currentVersion = graph.getFrontierView();
     this.engine = null;
     this.engineStatsOverride = null;
     this.engineRecoveryAnchor = null;
@@ -2574,7 +2589,7 @@ export class EgWalkerReplica {
   } {
     if (
       this.engine &&
-      versionsEqual(this.engine.getCurrentVersion(), graph.getFrontier())
+      versionsEqual(this.engine.getCurrentVersion(), graph.getFrontierView())
     ) {
       return {
         sequenceRecords: this.engine.getSequenceRecords(),
@@ -2656,8 +2671,16 @@ export class EgWalkerReplica {
    * multiple events and there is no single insert/delete on the
    * pre-event document that captures the visible effect of this one
    * event. See {@link ApplyRemoteEventResult} for the contract.
+   *
+   * `extendsCurrentVersion` says whether the event's parents were exactly
+   * {@link currentVersion} before the caller appended it. The caller checks
+   * that before the append, because the current version can be the graph's
+   * live frontier, which the append changes.
    */
-  private advanceWithEvent(event: GraphEvent): RemoteIntegrationEffect {
+  private advanceWithEvent(
+    event: GraphEvent,
+    extendsCurrentVersion: boolean,
+  ): RemoteIntegrationEffect {
     this.engineStatsOverride = null;
     const graph = this.ensureEventGraph();
     // Restored runtime records describe exactly the frontier captured by their
@@ -2669,15 +2692,12 @@ export class EgWalkerReplica {
 
     // Paper fast path: a causal extension is already expressed in indexes of
     // the current plain document, so no CRDT replay state is needed at all.
-    if (
-      !this.engine &&
-      versionsEqual(event.parentVersion, this.currentVersion)
-    ) {
+    if (!this.engine && extendsCurrentVersion) {
       const operation = this.validateLocalOperation(event.operation);
       if (operation !== null) {
         this.applyPlainDocumentOperation(operation);
       }
-      this.currentVersion = graph.getFrontier();
+      this.currentVersion = graph.getFrontierView();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.clearSupersededReplayCacheRefusal();
@@ -2693,7 +2713,7 @@ export class EgWalkerReplica {
       this.markReplayCacheCovered(event.id);
       this.documentBuffer = applied.textBuffer;
       this.documentCache = null;
-      this.currentVersion = graph.getFrontier();
+      this.currentVersion = graph.getFrontierView();
       this.incrementalApplyCount++;
       this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
       this.replayCacheEvents++;
@@ -2947,7 +2967,7 @@ export class EgWalkerReplica {
     const rebuildsRefusedCache = this.releasedCacheAtBudget;
     this.releasedCacheAtBudget = false;
     this.captureEnginePeakBeforeSwap();
-    const frontier = graph.getFrontier();
+    const frontier = graph.getFrontierView();
     const sections = graph.planInsertionSuffixSections(
       checkpoint.eventCount,
       checkpoint.version,

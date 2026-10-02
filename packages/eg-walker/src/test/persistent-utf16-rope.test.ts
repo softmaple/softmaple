@@ -74,6 +74,25 @@ describe("PersistentUtf16Rope", () => {
     expect(edited.toString()).toBe(`x!${text.slice(1)}`);
   });
 
+  it("keeps the neighbours of deleted whole leaves by identity", () => {
+    // Arrange
+    const original = PersistentUtf16Rope.from(
+      "x".repeat(UTF16_ROPE_TARGET_LEAF * 8),
+    );
+    const leaves = original.getLeafIdentities();
+
+    // Act
+    const edited = original.delete(
+      UTF16_ROPE_TARGET_LEAF,
+      UTF16_ROPE_TARGET_LEAF * 2,
+    );
+
+    // Assert
+    expect(
+      edited.getLeafIdentities().map((candidate) => leaves.indexOf(candidate)),
+    ).toEqual([0, 3, 4, 5, 6, 7]);
+  });
+
   it("assembles structural slices without flattening shared leaves", () => {
     const text = "x".repeat(UTF16_ROPE_TARGET_LEAF * 8);
     const original = PersistentUtf16Rope.from(text);
@@ -224,4 +243,142 @@ describe("PersistentUtf16Rope", () => {
       { numRuns: 1_000 },
     );
   });
+
+  // The property above stays within one or two leaves. These start from
+  // documents with two branch levels and apply edits large enough to split,
+  // merge and delete whole leaves and branches.
+  it("matches JavaScript strings and UTF-16 metadata when edits span branches", () => {
+    fc.assert(
+      fc.property(multiLevelScriptArb, ({ initial, edits }) => {
+        // Arrange
+        let expected = initial;
+        let rope = PersistentUtf16Rope.from(initial);
+
+        for (const edit of edits) {
+          // Act
+          const resolved = resolveEdit(edit, expected.length);
+          expected = editString(expected, resolved);
+          rope = editRope(rope, resolved);
+
+          // Assert
+          expect(rope.toString()).toBe(expected);
+          expect(rope.hasSurrogateCodeUnits).toBe(
+            /[\ud800-\udfff]/.test(expected),
+          );
+          expect(rope.hasSurrogatePairs).toBe(
+            /[\ud800-\udbff][\udc00-\udfff]/.test(expected),
+          );
+        }
+      }),
+      { numRuns: MULTI_LEVEL_RUNS },
+    );
+  });
+
+  it("keeps fan-out and leaf sizes within bounds when edits span branches", () => {
+    fc.assert(
+      fc.property(multiLevelScriptArb, ({ initial, edits }) => {
+        // Arrange
+        let length = initial.length;
+        let rope = PersistentUtf16Rope.from(initial);
+
+        for (const edit of edits) {
+          // Act
+          const resolved = resolveEdit(edit, length);
+          rope = editRope(rope, resolved);
+          length = rope.length;
+
+          // Assert
+          const leaves = rope.getLeafLengths();
+          expect(rope.getMaxBranchWidth()).toBeLessThanOrEqual(
+            UTF16_ROPE_BRANCH_FACTOR,
+          );
+          expect(Math.max(0, ...leaves)).toBeLessThanOrEqual(
+            UTF16_ROPE_MAX_LEAF,
+          );
+          if (leaves.length > 1) {
+            expect(Math.min(...leaves)).toBeGreaterThanOrEqual(
+              UTF16_ROPE_MIN_LEAF,
+            );
+          }
+        }
+      }),
+      { numRuns: MULTI_LEVEL_RUNS },
+    );
+  });
 });
+
+// Helpers
+
+/** Each case flattens ropes of up to a few hundred thousand code units. */
+const MULTI_LEVEL_RUNS = 200;
+
+type RopeEdit =
+  | { readonly kind: "insert"; readonly seed: number; readonly text: string }
+  | { readonly kind: "delete"; readonly seed: number; readonly length: number };
+
+type ResolvedEdit =
+  | { readonly kind: "insert"; readonly index: number; readonly text: string }
+  | {
+      readonly kind: "delete";
+      readonly index: number;
+      readonly length: number;
+    };
+
+// Leaves hold 1,024 to 2,048 code units and a branch up to 32 children, so a
+// document past 65,536 code units starts with two branch levels. Text is one
+// repeated unit; "a😀" puts surrogate pairs at both parities, so leaf seams
+// and edit boundaries split pairs.
+const textRunArb = (length: fc.Arbitrary<number>): fc.Arbitrary<string> =>
+  fc
+    .tuple(fc.constantFrom("x", "😀", "a😀"), length)
+    .map(([unit, codeUnits]) =>
+      unit.repeat(Math.ceil(codeUnits / unit.length)).slice(0, codeUnits),
+    );
+
+/** Keystroke-sized edits half the time, otherwise edits up to `large`. */
+const editSizeArb = (large: number): fc.Arbitrary<number> =>
+  fc.oneof(fc.integer({ min: 1, max: 3 }), fc.integer({ min: 1, max: large }));
+
+const ropeEditArb: fc.Arbitrary<RopeEdit> = fc.oneof(
+  fc.record({
+    kind: fc.constant("insert" as const),
+    seed: fc.nat(),
+    text: textRunArb(editSizeArb(40_000)),
+  }),
+  fc.record({
+    kind: fc.constant("delete" as const),
+    seed: fc.nat(),
+    length: editSizeArb(80_000),
+  }),
+);
+
+const multiLevelScriptArb = fc.record({
+  initial: textRunArb(fc.nat({ max: 200_000 })),
+  edits: fc.array(ropeEditArb, { minLength: 1 }),
+});
+
+function resolveEdit(edit: RopeEdit, textLength: number): ResolvedEdit {
+  const index = edit.seed % (textLength + 1);
+  return edit.kind === "insert"
+    ? { kind: "insert", index, text: edit.text }
+    : {
+        kind: "delete",
+        index,
+        length: Math.min(edit.length, textLength - index),
+      };
+}
+
+function editString(text: string, edit: ResolvedEdit): string {
+  return edit.kind === "insert"
+    ? `${text.slice(0, edit.index)}${edit.text}${text.slice(edit.index)}`
+    : `${text.slice(0, edit.index)}${text.slice(edit.index + edit.length)}`;
+}
+
+function editRope(
+  rope: PersistentUtf16Rope,
+  edit: ResolvedEdit,
+): PersistentUtf16Rope {
+  return edit.kind === "insert"
+    ? rope.insert(edit.index, edit.text)
+    : rope.delete(edit.index, edit.length);
+}

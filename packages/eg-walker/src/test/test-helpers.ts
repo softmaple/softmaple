@@ -6,6 +6,7 @@ import type { Version, EventId, GraphEvent } from "../types";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { EgWalkerReplica } from "../core/replica";
+import type { AugmentedCRDTItem } from "../engine/internals/engine-types";
 
 /**
  * Deterministic Linear Congruential Generator. Returns a function that
@@ -25,6 +26,32 @@ export const createPrng = (seed: number): (() => number) => {
     return state / 0x1_0000_0000;
   };
 };
+
+/** `fields` as a new item that an `IndexedSequence` can hold. */
+export const unindexed = <T extends object>(
+  fields: T,
+): T & { sequenceLeaf: null } => ({ ...fields, sequenceLeaf: null });
+
+type CRDTItemIndexFields =
+  | "placeholder"
+  | "external"
+  | "sequenceLeaf"
+  | "runNode";
+
+/**
+ * A new engine item from its record fields; `placeholder` and `external`
+ * default to `undefined` and no index holds the item yet.
+ */
+export const crdtItem = (
+  fields: Omit<AugmentedCRDTItem, CRDTItemIndexFields> &
+    Partial<Pick<AugmentedCRDTItem, "placeholder" | "external">>,
+): AugmentedCRDTItem => ({
+  ...fields,
+  placeholder: fields.placeholder,
+  external: fields.external,
+  sequenceLeaf: null,
+  runNode: null,
+});
 
 /**
  * Deep-clone a `GraphEvent` so tests that re-deliver events across

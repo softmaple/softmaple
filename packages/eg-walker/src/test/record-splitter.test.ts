@@ -9,13 +9,18 @@ import {
 import { EventItemIndex } from "../engine/internals/event-item-index";
 import { OriginLeftIndex } from "../engine/internals/origin-left-index";
 import { RecordSplitter } from "../engine/internals/record-splitter";
+import {
+  itemsFromRecords,
+  type EngineSequenceRecord,
+} from "../engine/internals/sequence-records";
+import { crdtItem } from "./test-helpers";
 
 describe("RecordSplitter canonical typed-run spans", () => {
   it("resolves and isolates a numeric event span without formatting IDs", () => {
     // Local version `n` is the canonical event `replica:n`; 99 is custom.
     const REPLICA = 0;
     const CUSTOM = 99;
-    const item: AugmentedCRDTItem = {
+    const item = crdtItem({
       id: 1,
       agent: REPLICA,
       sequence: 0,
@@ -26,7 +31,7 @@ describe("RecordSplitter canonical typed-run spans", () => {
       everDeleted: false,
       prepareState: 1,
       run: true,
-    };
+    });
     const sequence = new IndexedSequence<AugmentedCRDTItem>(
       (candidate) => candidate.content.length,
       (candidate) => candidate.content.length,
@@ -71,4 +76,92 @@ describe("RecordSplitter canonical typed-run spans", () => {
     expect(splitter.isolateRunSpanForEvents(CUSTOM, 2)).toBeNull();
     expect(splitter.isolateRunSpanForEvents(4, 2)?.content).toBe("ef");
   });
+});
+
+describe("RecordSplitter split halves", () => {
+  it("lays out every right half with the fields of every other item, in order", () => {
+    // Arrange
+    const records = [
+      sequenceRecord("alice:0:0", "alice:0", {
+        replicaId: "alice",
+        startSequence: 0,
+      }),
+      sequenceRecord("paste:0", "paste", null),
+      sequenceRecord("__placeholder__:0", "__placeholder__", null),
+    ];
+    const restored = itemsFromRecords(records);
+    const sequence = new IndexedSequence<AugmentedCRDTItem>(
+      (candidate) => candidate.content.length,
+      (candidate) => candidate.content.length,
+      restored,
+    );
+    const items = new ItemTable();
+    restored.forEach((item) => items.add(item));
+    const events = { agentAt: () => -1, sequenceAt: () => 0 };
+    const eventItems = new EventItemIndex(events);
+    eventItems.registerRunItem(restored[0]!);
+    const splitter = new RecordSplitter({
+      sequence,
+      items,
+      events,
+      eventItems,
+      originLeftIndex: new OriginLeftIndex(),
+      deleteTargets: new DeleteTargetIndex(),
+      nextPlaceholderSerial: () => 1,
+    });
+
+    // Act: split the placeholder, the insert run and the typed run.
+    for (const position of [2, 1, 0]) {
+      splitter.splitRecordAt(position, 2);
+    }
+
+    // Assert
+    const halves = sequence.toArray();
+    expect(halves.map((item) => item.content)).toEqual([
+      "ab",
+      "cd",
+      "ab",
+      "cd",
+      "ab",
+      "cd",
+    ]);
+    expect(halves.map((item) => Object.keys(item))).toEqual(
+      halves.map(() => ITEM_FIELDS),
+    );
+  });
+});
+
+// Helpers
+
+/** Every `AugmentedCRDTItem` field, in the order each creation site uses. */
+const ITEM_FIELDS = [
+  "id",
+  "agent",
+  "sequence",
+  "offset",
+  "content",
+  "originLeft",
+  "originRight",
+  "everDeleted",
+  "prepareState",
+  "run",
+  "placeholder",
+  "external",
+  "sequenceLeaf",
+  "runNode",
+];
+
+const sequenceRecord = (
+  id: string,
+  eventId: string,
+  run: EngineSequenceRecord["run"],
+): EngineSequenceRecord => ({
+  id,
+  eventId,
+  content: "abcd",
+  originLeft: null,
+  originRight: null,
+  everDeleted: false,
+  prepareState: 1,
+  run,
 });

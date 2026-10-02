@@ -1,12 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { IndexedSequence } from "../engine/indexed-sequence";
-import { createPrng } from "./test-helpers";
+import {
+  IndexedSequence,
+  type IndexedSequenceItem,
+} from "../engine/indexed-sequence";
+import { createPrng, unindexed } from "./test-helpers";
 
-interface SequenceModelItem {
+interface SequenceModelItem extends IndexedSequenceItem<SequenceModelItem> {
   readonly id: string;
   prepare: number;
   effect: number;
 }
+
+const modelItem = (
+  id: string,
+  prepare: number,
+  effect: number,
+): SequenceModelItem => unindexed({ id, prepare, effect });
+
+/** A copy of `item` that no sequence holds, for a second sequence. */
+const detachedCopy = (item: SequenceModelItem): SequenceModelItem =>
+  modelItem(item.id, item.prepare, item.effect);
+
+const ids = (items: ReadonlyArray<SequenceModelItem>): string[] =>
+  items.map((item) => item.id);
+
+const prepareOf = (item: SequenceModelItem): number => item.prepare;
+const effectOf = (item: SequenceModelItem): number => item.effect;
 
 const visiblePositions = (
   items: ReadonlyArray<SequenceModelItem>,
@@ -20,10 +39,10 @@ const visiblePositions = (
 describe("IndexedSequence", () => {
   it("maps prepare/effect indexes through the ranked B-tree sequence", () => {
     const items = [
-      { id: "a", prepare: 1, effect: 1 },
-      { id: "b", prepare: 0, effect: 1 },
-      { id: "c", prepare: 1, effect: 0 },
-      { id: "d", prepare: 1, effect: 1 },
+      modelItem("a", 1, 1),
+      modelItem("b", 0, 1),
+      modelItem("c", 1, 0),
+      modelItem("d", 1, 1),
     ];
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
@@ -38,9 +57,7 @@ describe("IndexedSequence", () => {
     expect(sequence.prepareIndexAfter(items[0]!)).toBe(1);
     expect(sequence.prepareIndexAfter(items[1]!)).toBe(1);
     expect(sequence.prepareIndexAfter(items[2]!)).toBe(2);
-    expect(
-      sequence.prepareIndexAfter({ id: "missing", prepare: 1, effect: 1 }),
-    ).toBe(-1);
+    expect(sequence.prepareIndexAfter(modelItem("missing", 1, 1))).toBe(-1);
 
     items[1]!.prepare = 1;
     items[2]!.effect = 1;
@@ -53,11 +70,11 @@ describe("IndexedSequence", () => {
   });
 
   it("distinguishes visible code-unit lookups from insertion boundaries across hidden gaps", () => {
-    const item = {
+    const item = unindexed({
       id: "a-hidden-b-visible-c",
       visibleOffsets: [0, 2],
       length: 3,
-    };
+    });
     const sequence = new IndexedSequence(
       (candidate: typeof item) => candidate.visibleOffsets.length,
       (candidate: typeof item) => candidate.length,
@@ -97,9 +114,9 @@ describe("IndexedSequence", () => {
 
   it("indexes zero-width delete anchors independently of prepare visibility", () => {
     const items = [
-      { id: "retreated", state: 0, effect: 1 },
-      { id: "deleted", state: 2, effect: 0 },
-      { id: "visible", state: 1, effect: 1 },
+      unindexed({ id: "retreated", state: 0, effect: 1 }),
+      unindexed({ id: "deleted", state: 2, effect: 0 }),
+      unindexed({ id: "visible", state: 1, effect: 1 }),
     ];
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => (item.state === 1 ? 1 : 0),
@@ -119,9 +136,9 @@ describe("IndexedSequence", () => {
 
   it("distinguishes out-of-range lookups from structural errors via tryPrepareIndexToPositionAndOffset", () => {
     const items = [
-      { id: "a", prepare: 1, effect: 1 },
-      { id: "b", prepare: 0, effect: 1 },
-      { id: "c", prepare: 1, effect: 0 },
+      modelItem("a", 1, 1),
+      modelItem("b", 0, 1),
+      modelItem("c", 1, 0),
     ];
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
@@ -155,8 +172,8 @@ describe("IndexedSequence", () => {
   });
 
   it("drops stale item locations when resetting from records", () => {
-    const original = { id: "old", prepare: 1, effect: 1 };
-    const replacement = { id: "new", prepare: 1, effect: 1 };
+    const original = modelItem("old", 1, 1);
+    const replacement = modelItem("new", 1, 1);
     const sequence = new IndexedSequence(
       (item: SequenceModelItem) => item.prepare,
       (item: SequenceModelItem) => item.effect,
@@ -173,11 +190,13 @@ describe("IndexedSequence", () => {
   });
 
   it("keeps ranked B-tree indexes correct across leaf and internal splits", () => {
-    const items = Array.from({ length: 2_200 }, (_, index) => ({
-      id: `item-${index}`,
-      prepare: index % 3 === 0 ? 0 : 1,
-      effect: index % 5 === 0 ? 0 : 1,
-    }));
+    const items = Array.from({ length: 2_200 }, (_, index) =>
+      modelItem(
+        `item-${index}`,
+        index % 3 === 0 ? 0 : 1,
+        index % 5 === 0 ? 0 : 1,
+      ),
+    );
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
       (item: (typeof items)[number]) => item.effect,
@@ -224,11 +243,7 @@ describe("IndexedSequence", () => {
     const oracle: SequenceModelItem[] = [];
 
     for (let index = 0; index < 2_000; index++) {
-      const value = {
-        id: `ordered-${index}`,
-        prepare: 1,
-        effect: 1,
-      };
+      const value = modelItem(`ordered-${index}`, 1, 1);
       const position = (index * 17) % (oracle.length + 1);
       sequence.insert(position, value);
       oracle.splice(position, 0, value);
@@ -248,32 +263,32 @@ describe("IndexedSequence", () => {
     sequence.resetFromRecords(restored);
     expect(sequence.compareOrder(restored[0]!, restored.at(-1)!)).toBe(-1);
     expect(() =>
-      sequence.compareOrder(restored[0]!, {
-        id: "missing",
-        prepare: 1,
-        effect: 1,
-      }),
+      sequence.compareOrder(restored[0]!, modelItem("missing", 1, 1)),
     ).toThrow(/unavailable/);
 
+    const copies = restored.map(detachedCopy);
     const untracked = new IndexedSequence(
       (item: SequenceModelItem) => item.prepare,
       (item: SequenceModelItem) => item.effect,
-      restored,
+      copies,
     );
-    expect(() => untracked.compareOrder(restored[0]!, restored[1]!)).toThrow(
+    expect(() => untracked.compareOrder(copies[0]!, copies[1]!)).toThrow(
       /tracking is disabled/,
     );
   });
 
   it("bulk-builds the same ranked indexes as incremental insertion", () => {
-    const items = Array.from({ length: 5_000 }, (_, index) => ({
-      id: `bulk-built-${index}`,
-      prepare: index % 4 === 0 ? 0 : 1,
-      effect: index % 7 === 0 ? 0 : 1,
-    }));
-    const prepareWeight = (item: (typeof items)[number]): number =>
-      item.prepare;
-    const effectWeight = (item: (typeof items)[number]): number => item.effect;
+    // An item belongs to one sequence, so each sequence holds its own copy.
+    const items = Array.from({ length: 5_000 }, (_, index) =>
+      modelItem(
+        `bulk-built-${index}`,
+        index % 4 === 0 ? 0 : 1,
+        index % 7 === 0 ? 0 : 1,
+      ),
+    );
+    const copies = items.map(detachedCopy);
+    const prepareWeight = (item: SequenceModelItem): number => item.prepare;
+    const effectWeight = (item: SequenceModelItem): number => item.effect;
     const bulk = IndexedSequence.fromRecords(
       items,
       prepareWeight,
@@ -281,14 +296,15 @@ describe("IndexedSequence", () => {
     );
     const incremental = new IndexedSequence(prepareWeight, effectWeight);
 
-    for (const item of items) {
+    for (const item of copies) {
       incremental.push(item);
     }
 
     for (const index of [0, 63, 64, 511, 2_047, 4_999]) {
-      expect(bulk.at(index)).toBe(incremental.at(index));
+      expect(bulk.at(index)).toBe(items[index]);
+      expect(incremental.at(index)).toBe(copies[index]);
       expect(bulk.positionOf(items[index]!)).toBe(
-        incremental.positionOf(items[index]!),
+        incremental.positionOf(copies[index]!),
       );
     }
     for (const prepareIndex of [0, 128, 1_024, 3_000]) {
@@ -302,15 +318,17 @@ describe("IndexedSequence", () => {
       );
     }
 
-    const inserted = { id: "after-bulk-insert", prepare: 1, effect: 1 };
+    const inserted = modelItem("after-bulk-insert", 1, 1);
     bulk.insert(2_500, inserted);
-    incremental.insert(2_500, inserted);
-    items[2_600]!.prepare = 1;
-    items[2_600]!.effect = 0;
+    incremental.insert(2_500, detachedCopy(inserted));
+    for (const updated of [items[2_600]!, copies[2_600]!]) {
+      updated.prepare = 1;
+      updated.effect = 0;
+    }
     bulk.updateItem(items[2_600]!);
-    incremental.updateItem(items[2_600]!);
+    incremental.updateItem(copies[2_600]!);
 
-    expect(bulk.toArray()).toEqual(incremental.toArray());
+    expect(ids(bulk.toArray())).toEqual(ids(incremental.toArray()));
     expect(bulk.positionOf(inserted)).toBe(2_500);
     expect(bulk.prepareIndexToPosition(1_900, false)).toBe(
       incremental.prepareIndexToPosition(1_900, false),
@@ -321,16 +339,17 @@ describe("IndexedSequence", () => {
   });
 
   it("inserts a contiguous run with one ranked-tree lookup", () => {
-    const initial = Array.from({ length: 63 }, (_, index) => ({
-      id: `initial-${index}`,
-      prepare: index % 3 === 0 ? 0 : 1,
-      effect: index % 5 === 0 ? 0 : 1,
-    }));
-    const inserted = Array.from({ length: 3 }, (_, index) => ({
-      id: `inserted-${index}`,
-      prepare: 1,
-      effect: index % 2,
-    }));
+    const initial = Array.from({ length: 63 }, (_, index) =>
+      modelItem(
+        `initial-${index}`,
+        index % 3 === 0 ? 0 : 1,
+        index % 5 === 0 ? 0 : 1,
+      ),
+    );
+    const inserted = Array.from({ length: 3 }, (_, index) =>
+      modelItem(`inserted-${index}`, 1, index % 2),
+    );
+    const scalarInserted = inserted.map(detachedCopy);
     const bulk = new IndexedSequence(
       (item: SequenceModelItem) => item.prepare,
       (item: SequenceModelItem) => item.effect,
@@ -339,17 +358,19 @@ describe("IndexedSequence", () => {
     const scalar = new IndexedSequence(
       (item: SequenceModelItem) => item.prepare,
       (item: SequenceModelItem) => item.effect,
-      initial,
+      initial.map(detachedCopy),
     );
 
     bulk.insertMany(31, inserted);
-    for (const [offset, item] of inserted.entries()) {
+    for (const [offset, item] of scalarInserted.entries()) {
       scalar.insert(31 + offset, item);
     }
 
-    expect(bulk.toArray()).toEqual(scalar.toArray());
-    for (const item of inserted) {
-      expect(bulk.positionOf(item)).toBe(scalar.positionOf(item));
+    expect(ids(bulk.toArray())).toEqual(ids(scalar.toArray()));
+    for (const [index, item] of inserted.entries()) {
+      expect(bulk.positionOf(item)).toBe(
+        scalar.positionOf(scalarInserted[index]!),
+      );
     }
     expect(bulk.prepareLength).toBe(scalar.prepareLength);
     expect(bulk.effectIndexBeforePosition(50)).toBe(
@@ -369,11 +390,11 @@ describe("IndexedSequence", () => {
     );
 
     for (let step = 0; step < 1_000; step++) {
-      const item: SequenceModelItem = {
-        id: `item-${step}`,
-        prepare: random() < 0.7 ? 1 : 0,
-        effect: random() < 0.8 ? 1 : 0,
-      };
+      const item = modelItem(
+        `item-${step}`,
+        random() < 0.7 ? 1 : 0,
+        random() < 0.8 ? 1 : 0,
+      );
       const index = Math.floor(random() * (model.length + 1));
       model.splice(index, 0, item);
       sequence.insert(index, item);
@@ -409,10 +430,7 @@ describe("IndexedSequence", () => {
   });
 
   it("covers ranked B-tree boundary behavior and bulk weight refresh", () => {
-    const items = [
-      { id: "a", prepare: 1, effect: 0 },
-      { id: "b", prepare: 0, effect: 1 },
-    ];
+    const items = [modelItem("a", 1, 0), modelItem("b", 0, 1)];
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
       (item: (typeof items)[number]) => item.effect,
@@ -424,9 +442,7 @@ describe("IndexedSequence", () => {
     expect(sequence.slice(1)).toEqual([items[1]]);
     expect(sequence.indexOf((item) => item.id === "b")).toBe(1);
     expect(sequence.indexOf((item) => item.id === "missing")).toBe(-1);
-    expect(sequence.positionOf({ id: "external", prepare: 1, effect: 1 })).toBe(
-      -1,
-    );
+    expect(sequence.positionOf(modelItem("external", 1, 1))).toBe(-1);
     expect(sequence.nextPrepareVisiblePosition(-1)).toBeNull();
     expect(sequence.nextPrepareVisiblePosition(3)).toBeNull();
     expect(sequence.prepareIndexToPosition(1, true)).toBe(2);
@@ -465,11 +481,9 @@ describe("IndexedSequence", () => {
   });
 
   it("refreshes ranked B-tree weights across internal nodes", () => {
-    const items = Array.from({ length: 140 }, (_, index) => ({
-      id: `bulk-${index}`,
-      prepare: 1,
-      effect: 1,
-    }));
+    const items = Array.from({ length: 140 }, (_, index) =>
+      modelItem(`bulk-${index}`, 1, 1),
+    );
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
       (item: (typeof items)[number]) => item.effect,
@@ -484,5 +498,75 @@ describe("IndexedSequence", () => {
 
     expect(sequence.prepareIndexToPosition(0, false)).toBe(139);
     expect(sequence.effectIndexBeforePosition(140)).toBe(1);
+  });
+
+  it("holds an item in at most one live sequence", () => {
+    // Arrange
+    const shared = modelItem("shared", 1, 1);
+    const otherItem = modelItem("other", 1, 1);
+    const owner = new IndexedSequence(prepareOf, effectOf, [shared]);
+    const other = new IndexedSequence(
+      prepareOf,
+      effectOf,
+      [otherItem],
+      undefined,
+      true,
+    );
+
+    // Act
+    const attempts = [
+      () => other.insert(0, shared),
+      () => other.insertMany(0, [shared]),
+      () => other.insertAfter(otherItem, shared),
+      () => other.updateAndInsertAfter(otherItem, shared),
+      () => new IndexedSequence(prepareOf, effectOf, [shared]),
+      () => owner.insert(1, shared),
+    ];
+
+    // Assert
+    for (const attempt of attempts) {
+      expect(attempt).toThrow(/already belongs to a sequence/);
+    }
+    expect(ids(owner.toArray())).toEqual(["shared"]);
+    expect(ids(other.toArray())).toEqual(["other"]);
+    expect(other.positionOf(shared)).toBe(-1);
+    expect(owner.positionOf(shared)).toBe(0);
+  });
+
+  it("releases its items when cleared", () => {
+    // Arrange
+    const item = modelItem("moved", 1, 1);
+    const first = new IndexedSequence(prepareOf, effectOf, [item]);
+    const second = new IndexedSequence(prepareOf, effectOf);
+
+    // Act
+    first.clear();
+    second.insert(0, item);
+
+    // Assert
+    expect(first.positionOf(item)).toBe(-1);
+    expect(second.positionOf(item)).toBe(0);
+    expect(second.prepareLength).toBe(1);
+  });
+
+  it("stays empty and usable after rejecting its first item", () => {
+    // Arrange
+    const held = modelItem("held", 1, 1);
+    const holder = new IndexedSequence(prepareOf, effectOf, [held]);
+    const empty = new IndexedSequence(prepareOf, effectOf);
+    const fresh = modelItem("fresh", 1, 1);
+
+    // Act
+    const rejectedInsert = () => empty.insert(0, held);
+    const rejectedInsertMany = () => empty.insertMany(0, [held]);
+
+    // Assert
+    expect(rejectedInsert).toThrow(/already belongs to a sequence/);
+    expect(rejectedInsertMany).toThrow(/already belongs to a sequence/);
+    expect(empty.length).toBe(0);
+    expect(empty.toArray()).toEqual([]);
+    expect(holder.positionOf(held)).toBe(0);
+    empty.insert(0, fresh);
+    expect(empty.positionOf(fresh)).toBe(0);
   });
 });

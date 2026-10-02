@@ -1,19 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { IndexedSequence } from "../engine/indexed-sequence";
+import {
+  IndexedSequence,
+  type IndexedSequenceItem,
+} from "../engine/indexed-sequence";
+import { unindexed } from "./test-helpers";
 
-interface WeightedItem {
+interface WeightedItem extends IndexedSequenceItem<WeightedItem> {
   readonly id: string;
   readonly prepare: number;
   readonly effect: number;
 }
 
+const weightedItem = (
+  id: string,
+  prepare: number,
+  effect: number,
+): WeightedItem => unindexed({ id, prepare, effect });
+
 const createItems = (count: number): WeightedItem[] =>
-  Array.from({ length: count }, (_, index) => ({
-    id: `item-${index}`,
-    prepare: index % 5 === 0 ? 0 : 1,
-    effect: index % 4,
-  }));
+  Array.from({ length: count }, (_, index) =>
+    weightedItem(`item-${index}`, index % 5 === 0 ? 0 : 1, index % 4),
+  );
 
 const createSequence = (
   items: ReadonlyArray<WeightedItem>,
@@ -26,12 +34,14 @@ const createSequence = (
 
 describe("IndexedSequence object-anchored hot paths", () => {
   it("finds weighted neighbours in one aggregate-guided traversal", () => {
-    const items = Array.from({ length: 2_200 }, (_, index) => ({
-      id: `sparse-${index}`,
-      prepare: index === 7 || index === 1_101 || index === 2_199 ? 1 : 0,
-      effect: 1,
-      anchor: index === 23 || index === 1_337 ? 1 : 0,
-    }));
+    const items = Array.from({ length: 2_200 }, (_, index) =>
+      unindexed({
+        id: `sparse-${index}`,
+        prepare: index === 7 || index === 1_101 || index === 2_199 ? 1 : 0,
+        effect: 1,
+        anchor: index === 23 || index === 1_337 ? 1 : 0,
+      }),
+    );
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
       (item) => item.effect,
@@ -64,9 +74,7 @@ describe("IndexedSequence object-anchored hot paths", () => {
         .reduce((sum, candidate) => sum + candidate.effect, 0);
       expect(sequence.effectIndexOf(item)).toBe(expected);
     }
-    expect(
-      sequence.effectIndexOf({ id: "missing", prepare: 1, effect: 1 }),
-    ).toBe(-1);
+    expect(sequence.effectIndexOf(weightedItem("missing", 1, 1))).toBe(-1);
   });
 
   it("inserts before and after an object without a second ranked lookup", () => {
@@ -75,14 +83,13 @@ describe("IndexedSequence object-anchored hot paths", () => {
     const anchored = createSequence(anchoredItems);
     const ranked = createSequence(rankedItems);
     const targetIndex = 1_337;
-    const before = createItems(2).map((item, index) => ({
-      ...item,
-      id: `before-${index}`,
-    }));
-    const after = createItems(2).map((item, index) => ({
-      ...item,
-      id: `after-${index}`,
-    }));
+    // An item belongs to one sequence, so each sequence inserts its own run.
+    const run = (prefix: string): WeightedItem[] =>
+      createItems(2).map((item, index) =>
+        weightedItem(`${prefix}-${index}`, item.prepare, item.effect),
+      );
+    const before = run("before");
+    const after = run("after");
 
     anchored.restoreStructuralOperationCount(0);
     expect(anchored.insertManyBefore(anchoredItems[targetIndex]!, before)).toBe(
@@ -95,8 +102,8 @@ describe("IndexedSequence object-anchored hot paths", () => {
 
     ranked.restoreStructuralOperationCount(0);
     const target = rankedItems[targetIndex]!;
-    ranked.insertMany(ranked.positionOf(target), before);
-    ranked.insertMany(ranked.positionOf(target) + 1, after);
+    ranked.insertMany(ranked.positionOf(target), run("before"));
+    ranked.insertMany(ranked.positionOf(target) + 1, run("after"));
     const rankedOperations = ranked.getStructuralOperationCount();
 
     expect(anchored.toArray().map(({ id }) => id)).toEqual(
@@ -104,18 +111,15 @@ describe("IndexedSequence object-anchored hot paths", () => {
     );
     expect(anchoredOperations).toBeLessThan(rankedOperations);
     expect(
-      anchored.insertManyBefore(
-        { id: "missing", prepare: 1, effect: 1 },
-        before,
-      ),
+      anchored.insertManyBefore(weightedItem("missing", 1, 1), run("unused")),
     ).toBe(false);
   });
 
   it("updates a split anchor and inserts its continuation with one aggregate walk", () => {
     const items = [
-      { id: "left", prepare: 1, effect: 2, anchor: 1 },
-      { id: "split", prepare: 3, effect: 4, anchor: 1 },
-      { id: "right", prepare: 2, effect: 1, anchor: 1 },
+      unindexed({ id: "left", prepare: 1, effect: 2, anchor: 1 }),
+      unindexed({ id: "split", prepare: 3, effect: 4, anchor: 1 }),
+      unindexed({ id: "right", prepare: 2, effect: 1, anchor: 1 }),
     ];
     const sequence = new IndexedSequence(
       (item: (typeof items)[number]) => item.prepare,
@@ -124,12 +128,12 @@ describe("IndexedSequence object-anchored hot paths", () => {
       (item) => item.anchor,
       true,
     );
-    const continuation = {
+    const continuation = unindexed({
       id: "continuation",
       prepare: 4,
       effect: 5,
       anchor: 2,
-    };
+    });
 
     // The old values remain in the leaf caches until the fused operation, so
     // the aggregate delta must account for both the mutation and insertion.
@@ -156,8 +160,8 @@ describe("IndexedSequence object-anchored hot paths", () => {
     expect(sequence.updateAndInsertAfter(items[0]!, continuation)).toBe(false);
     expect(
       sequence.updateAndInsertAfter(
-        { id: "missing", prepare: 1, effect: 1, anchor: 1 },
-        { id: "unused", prepare: 1, effect: 1, anchor: 1 },
+        unindexed({ id: "missing", prepare: 1, effect: 1, anchor: 1 }),
+        unindexed({ id: "unused", prepare: 1, effect: 1, anchor: 1 }),
       ),
     ).toBe(false);
     expect(sequence.toArray()).toEqual(beforeRejectedInsert);
@@ -172,11 +176,7 @@ describe("IndexedSequence object-anchored hot paths", () => {
       undefined,
       true,
     );
-    const inserted: WeightedItem = {
-      id: "object-anchored",
-      prepare: 2,
-      effect: 3,
-    };
+    const inserted = weightedItem("object-anchored", 2, 3);
 
     sequence.restoreStructuralOperationCount(0);
     expect(sequence.insertAfter(items[31]!, inserted)).toBe(true);
@@ -188,8 +188,8 @@ describe("IndexedSequence object-anchored hot paths", () => {
     expect(sequence.insertAfter(items[31]!, inserted)).toBe(false);
     expect(
       sequence.insertAfter(
-        { id: "missing", prepare: 1, effect: 1 },
-        { id: "unused", prepare: 1, effect: 1 },
+        weightedItem("missing", 1, 1),
+        weightedItem("unused", 1, 1),
       ),
     ).toBe(false);
   });
@@ -252,11 +252,7 @@ describe("IndexedSequence object-anchored hot paths", () => {
 
   it("rejects reentrant mutations and releases reusable scratch state", () => {
     const items = createItems(96);
-    const missing: WeightedItem = {
-      id: "missing",
-      prepare: 7,
-      effect: 11,
-    };
+    const missing = weightedItem("missing", 7, 11);
     let sequence: IndexedSequence<WeightedItem> | undefined;
     let nestedAction: "update" | "clear" | null = null;
     sequence = new IndexedSequence<WeightedItem>(
@@ -315,11 +311,7 @@ describe("IndexedSequence object-anchored hot paths", () => {
       undefined,
       true,
     );
-    const continuation: WeightedItem = {
-      id: "boundary-continuation",
-      prepare: 2,
-      effect: 3,
-    };
+    const continuation = weightedItem("boundary-continuation", 2, 3);
     const oldPrepareLength = sequence.prepareLength;
     const oldEffectLength = sequence.effectIndexBeforePosition(sequence.length);
 
@@ -347,11 +339,7 @@ describe("IndexedSequence object-anchored hot paths", () => {
     expect(sequence.areAdjacent(items[30]!, items[32]!)).toBe(false);
     expect(sequence.areAdjacent(items[31]!, items[31]!)).toBe(false);
     expect(
-      sequence.areAdjacent(items[31]!, {
-        id: "missing",
-        prepare: 1,
-        effect: 1,
-      }),
+      sequence.areAdjacent(items[31]!, weightedItem("missing", 1, 1)),
     ).toBe(false);
     expect(sequence.getStructuralOperationCount()).toBe(
       operationsBeforeAdjacencyChecks,

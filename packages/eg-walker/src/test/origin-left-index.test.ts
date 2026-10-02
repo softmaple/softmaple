@@ -4,22 +4,21 @@ import type {
   ItemKey,
 } from "../engine/internals/engine-types";
 import { OriginLeftIndex } from "../engine/internals/origin-left-index";
+import { crdtItem } from "./test-helpers";
 
-const makeItem = (
-  id: ItemKey,
-  originLeft: ItemKey | null,
-): AugmentedCRDTItem => ({
-  id,
-  agent: 0,
-  sequence: id,
-  offset: 0,
-  content: "x",
-  originLeft,
-  originRight: null,
-  everDeleted: false,
-  prepareState: 1,
-  run: false,
-});
+const makeItem = (id: ItemKey, originLeft: ItemKey | null): AugmentedCRDTItem =>
+  crdtItem({
+    id,
+    agent: 0,
+    sequence: id,
+    offset: 0,
+    content: "x",
+    originLeft,
+    originRight: null,
+    everDeleted: false,
+    prepareState: 1,
+    run: false,
+  });
 
 const itemLookup =
   (...items: AugmentedCRDTItem[]) =>

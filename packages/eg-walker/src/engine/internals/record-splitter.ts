@@ -372,6 +372,10 @@ export class RecordSplitter {
         everDeleted: left.everDeleted,
         prepareState: left.prepareState,
         run: true,
+        placeholder: undefined,
+        external: undefined,
+        sequenceLeaf: null,
+        runNode: null,
       };
     }
 
@@ -379,7 +383,7 @@ export class RecordSplitter {
       // Insert run: the right half's first code unit followed the left
       // half's last one in its event, so the left half is its chain
       // boundary, exactly as for a typed-run split.
-      const right: AugmentedCRDTItem = {
+      return {
         id,
         agent: left.agent,
         sequence: left.sequence,
@@ -390,13 +394,14 @@ export class RecordSplitter {
         everDeleted: left.everDeleted,
         prepareState: left.prepareState,
         run: false,
+        placeholder: undefined,
+        external:
+          left.external === undefined
+            ? undefined
+            : shiftExternalItemIds(left.external, offsetInRecord),
+        sequenceLeaf: null,
+        runNode: null,
       };
-      return left.external === undefined
-        ? right
-        : {
-            ...right,
-            external: shiftExternalItemIds(left.external, offsetInRecord),
-          };
     }
 
     const leftPlaceholder = left.placeholder;
@@ -424,6 +429,9 @@ export class RecordSplitter {
         prepareState: 1,
         run: false,
         placeholder: rightPlaceholder,
+        external: undefined,
+        sequenceLeaf: null,
+        runNode: null,
       };
       rightPlaceholder.attachOwner(right);
       return right;
@@ -440,6 +448,10 @@ export class RecordSplitter {
       everDeleted: left.everDeleted,
       prepareState: left.prepareState,
       run: false,
+      placeholder: undefined,
+      external: undefined,
+      sequenceLeaf: null,
+      runNode: null,
     };
   }
 }

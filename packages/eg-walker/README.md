@@ -206,7 +206,9 @@ Internal replay primitives (`@softmaple/eg-walker/internal`, not covered by semv
 - `ColumnarEventGraphCodec`: run-length encoded columns with varints and LZ4-compressed inserted content.
 - `CriticalVersionAnalyzer`: critical checkpoint detection.
 - `PartialReplayManager`: replay from checkpoint text/version.
-- `IndexedSequence`: ranked B-tree backing the engine.
+- `IndexedSequence`: ranked B-tree backing the engine. Its items carry the
+  leaf that holds them (`IndexedSequenceItem`), so an item belongs to at most
+  one live sequence at a time.
 
 ## Development
 

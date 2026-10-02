@@ -2206,6 +2206,10 @@ export class EgWalkerEngine {
       everDeleted: false,
       prepareState: 1,
       run: false,
+      placeholder: undefined,
+      external: undefined,
+      sequenceLeaf: null,
+      runNode: null,
     };
     if (!this.fugueOrder.integrateAtKnownPosition(placeholder)) {
       throw new Error("Fugue order index unavailable for initial text");

@@ -1,6 +1,8 @@
 import type { EventGraph } from "../../graph/event-graph";
 import type { PersistentUtf16Rope } from "../../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent } from "../../types";
+import type { RunItemNode } from "./event-item-index";
+import type { IndexedSequenceItem, LeafNode } from "./indexed-sequence-node";
 import type { RecordContent } from "./record-content";
 import type { PlaceholderPhysicalSlice } from "./segmented-placeholder";
 
@@ -56,11 +58,18 @@ export const PLACEHOLDER_AGENT = -2;
  * left origin.
  *
  * `content` is mutable to support in-place run extension and splits without
- * invalidating the `WeakMap` location index in `IndexedSequence`. Ordinary
- * and typed-run records use strings; checkpoint placeholders use immutable
- * rope views that split without materializing the retained document.
+ * moving the record in `IndexedSequence`. Ordinary and typed-run records use
+ * strings; checkpoint placeholders use immutable rope views that split
+ * without materializing the retained document.
+ *
+ * The engine's indexes keep their per-item state in fields of the item
+ * instead of side tables keyed by it: `sequenceLeaf` belongs to
+ * `IndexedSequence` and `runNode` to `EventItemIndex`. Every creation site
+ * declares every field below, in order, so that all items share one hidden
+ * class. A new item starts with `sequenceLeaf: null` and `runNode: null`.
  */
-export interface AugmentedCRDTItem {
+export interface AugmentedCRDTItem
+  extends IndexedSequenceItem<AugmentedCRDTItem> {
   readonly id: ItemKey;
   readonly agent: number;
   readonly sequence: number;
@@ -71,13 +80,17 @@ export interface AugmentedCRDTItem {
   everDeleted: boolean;
   prepareState: number;
   readonly run: boolean;
-  /** Deferred checkpoint state; absent from ordinary and serialized records. */
-  placeholder?: PlaceholderPhysicalSlice<AugmentedCRDTItem>;
+  /** Deferred checkpoint state; `undefined` for ordinary records. */
+  placeholder: PlaceholderPhysicalSlice<AugmentedCRDTItem> | undefined;
   /**
    * Verbatim string IDs of an item restored from a record whose IDs do not
    * follow the `${eventId}:${offset}` scheme, so it round-trips unchanged.
    */
-  readonly external?: ExternalItemIds;
+  readonly external: ExternalItemIds | undefined;
+  /** Leaf of the `IndexedSequence` that holds the item, or `null`. */
+  sequenceLeaf: LeafNode<AugmentedCRDTItem> | null;
+  /** Typed-run range node of the `EventItemIndex` that registered it. */
+  runNode: RunItemNode | null;
 }
 
 export interface ExternalItemIds {

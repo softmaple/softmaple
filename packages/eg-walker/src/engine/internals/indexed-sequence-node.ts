@@ -3,7 +3,39 @@ import type { OrderMaintenanceItem } from "./order-maintenance-list";
 export const LEAF_CAPACITY = 32;
 export const BRANCH_FACTOR = 32;
 
+/**
+ * Weights a leaf stores per item, interleaved in {@link LeafNode.weights}:
+ * prepare at `offset * WEIGHT_STRIDE + PREPARE_WEIGHT`, then effect, then
+ * anchor.
+ */
+export const WEIGHT_STRIDE = 3;
+export const PREPARE_WEIGHT = 0;
+export const EFFECT_WEIGHT = 1;
+export const ANCHOR_WEIGHT = 2;
+
 export type IndexedNode<T extends object> = LeafNode<T> | InternalNode<T>;
+
+/**
+ * One tree built by an {@link IndexedSequence}. Clearing the sequence retires
+ * its tree, so an item whose leaf names a retired tree is no longer held by
+ * any sequence.
+ */
+export interface SequenceTree {
+  live: boolean;
+}
+
+/**
+ * Where an {@link IndexedSequence} keeps an item's location: on the item, in
+ * place of a side table keyed by it.
+ *
+ * Only the sequence that holds the item reads or writes the field, so an
+ * item belongs to at most one live sequence at a time. Items start with
+ * `sequenceLeaf: null`.
+ */
+export interface IndexedSequenceItem<T extends object> {
+  /** Leaf of the sequence that holds the item, or `null`. */
+  sequenceLeaf: LeafNode<T> | null;
+}
 
 interface NodeBase<T extends object> {
   parent: InternalNode<T> | null;
@@ -26,10 +58,10 @@ export interface LeafNode<T extends object>
   extends NodeBase<T>,
     OrderMaintenanceItem {
   readonly kind: "leaf";
+  readonly tree: SequenceTree;
   readonly items: T[];
-  readonly prepareWeights: number[];
-  readonly effectWeights: number[];
-  readonly anchorWeights: number[];
+  /** {@link WEIGHT_STRIDE} cached weights per item, in item order. */
+  readonly weights: number[];
 }
 
 export interface InternalNode<T extends object> extends NodeBase<T> {
@@ -37,23 +69,17 @@ export interface InternalNode<T extends object> extends NodeBase<T> {
   readonly children: IndexedNode<T>[];
 }
 
-export interface ItemLocation<T extends object> {
-  leaf: LeafNode<T>;
-  // Cached offset of the item within `leaf.items`. Maintained by every splice
-  // on `leaf.items` so {@link IndexedSequence.positionOf} and
-  // {@link IndexedSequence.updateItem} can skip the O(leaf capacity)
-  // `Array.indexOf` scan.
-  offsetInLeaf: number;
-}
-
-export const createLeaf = <T extends object>(): LeafNode<T> => ({
+export const createLeaf = <T extends object>(
+  tree: SequenceTree,
+  items: T[] = [],
+  weights: number[] = [],
+): LeafNode<T> => ({
   kind: "leaf",
   parent: null,
   childIndex: 0,
-  items: [],
-  prepareWeights: [],
-  effectWeights: [],
-  anchorWeights: [],
+  tree,
+  items,
+  weights,
   orderLabel: 0,
   orderPrevious: null,
   orderNext: null,

@@ -44,7 +44,15 @@ interface PendingQueueBefore {
 
 interface RemoteEventBufferDeps {
   readonly graph: EventGraph;
-  readonly advanceWithEvent: (event: GraphEvent) => RemoteIntegrationEffect;
+  /**
+   * Whether an event's parents are exactly the replica's current version.
+   * Asked before the event is appended, since the append can change it.
+   */
+  readonly extendsCurrentVersion: (event: GraphEvent) => boolean;
+  readonly advanceWithEvent: (
+    event: GraphEvent,
+    extendsCurrentVersion: boolean,
+  ) => RemoteIntegrationEffect;
 }
 
 const BUFFERED_RESULT = {
@@ -144,6 +152,7 @@ export class RemoteEventBuffer {
   private integrateReadyEvent(
     event: GraphEvent,
   ): RemoteIntegrationEffect | null {
+    const extendsCurrentVersion = this.deps.extendsCurrentVersion(event);
     try {
       this.deps.graph.addEvent(event);
     } catch (error) {
@@ -155,7 +164,7 @@ export class RemoteEventBuffer {
       }
       throw error;
     }
-    return this.deps.advanceWithEvent(event);
+    return this.deps.advanceWithEvent(event, extendsCurrentVersion);
   }
 
   private findMissingParent(event: GraphEvent): EventId | null {

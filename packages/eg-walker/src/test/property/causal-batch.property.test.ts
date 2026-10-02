@@ -44,38 +44,47 @@ describe("property: strict causal batches", () => {
     );
   });
 
-  it("should always match one whole batch when the trace arrives in consecutive batches", () => {
-    fc.assert(
-      fc.property(
-        traceParamsArb({}),
-        fc.array(fc.nat()),
-        (params, cutSeeds) => {
-          // Arrange
-          const events = EventGraph.fromEvents(
-            runTrace(params).events,
-          ).getTopologicalOrder();
-          const ends = batchEnds(cutSeeds, events.length);
-          const batched = new EgWalkerReplica("batched", params.initialText);
+  it(
+    "should always match one whole batch when the trace arrives in consecutive batches",
+    {
+      // Each run also replays every batch's prefix as one batch; under
+      // coverage instrumentation the default run count needs longer than the
+      // default per-test timeout.
+      timeout: 60_000,
+    },
+    () => {
+      fc.assert(
+        fc.property(
+          traceParamsArb({}),
+          fc.array(fc.nat()),
+          (params, cutSeeds) => {
+            // Arrange
+            const events = EventGraph.fromEvents(
+              runTrace(params).events,
+            ).getTopologicalOrder();
+            const ends = batchEnds(cutSeeds, events.length);
+            const batched = new EgWalkerReplica("batched", params.initialText);
 
-          // Act
-          const texts = ends.map((end, index) => {
-            batched.applyCausalBatch(
-              toCausalBatch(events.slice(ends[index - 1] ?? 0, end)),
+            // Act
+            const texts = ends.map((end, index) => {
+              batched.applyCausalBatch(
+                toCausalBatch(events.slice(ends[index - 1] ?? 0, end)),
+              );
+              return batched.getText();
+            });
+
+            // Assert
+            expect(texts).toEqual(
+              ends.map((end) =>
+                wholeBatchText(params.initialText, events.slice(0, end)),
+              ),
             );
-            return batched.getText();
-          });
-
-          // Assert
-          expect(texts).toEqual(
-            ends.map((end) =>
-              wholeBatchText(params.initialText, events.slice(0, end)),
-            ),
-          );
-        },
-      ),
-      fcParams(),
-    );
-  });
+          },
+        ),
+        fcParams(),
+      );
+    },
+  );
 });
 
 // Helpers

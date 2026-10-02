@@ -8,6 +8,7 @@ import type {
   PackedLocalVersionTransition,
   PackedOffsetTransition,
 } from "../graph/internals/packed-diff-versions";
+import type { PackedKeystrokeRun } from "../graph/internals/packed-event-graph-base";
 import { runSteps, type Steps } from "../graph/internals/steps";
 
 /** {@link PackedCriticalReplayPlan.orderIndexOfKnownOffset} of an event outside the plan. */
@@ -326,6 +327,33 @@ export class PackedCriticalReplayPlan {
   /** @internal `offset` must originate from this plan or one of its diffs. */
   isInsertAtKnownOffset(offset: number): boolean {
     return this.graph.isInsertAt(offset - this.offsetBase);
+  }
+
+  /**
+   * @internal Describe the run of one author's one-character inserts that
+   * starts at `offset`, walked by `direction` towards `limit` (exclusive):
+   * see {@link PackedReplayPlanningView.keystrokeRunAt}. `run.limit` is an
+   * offset of this plan. Both offsets must originate from this plan or one
+   * of its diffs; `limit` may be one past either end of a diff range.
+   */
+  keystrokeRunAtKnownOffset(
+    offset: number,
+    limit: number,
+    direction: 1 | -1,
+    run: PackedKeystrokeRun,
+  ): boolean {
+    if (
+      !this.graph.keystrokeRunAt(
+        offset - this.offsetBase,
+        limit - this.offsetBase,
+        direction,
+        run,
+      )
+    ) {
+      return false;
+    }
+    run.limit += this.offsetBase;
+    return true;
   }
 
   /** @internal `targetEventOffset` must originate from this plan. */

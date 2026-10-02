@@ -743,6 +743,84 @@ describe("DeleteTargetIndex", () => {
     });
   });
 
+  describe("soleItemTargetOf", () => {
+    it("should return the item a one-target delete recorded", () => {
+      // Arrange
+      const index = new DeleteTargetIndex();
+      index.recordOne(id("delete-one"), id("item-one"));
+
+      // Act
+      const item = index.soleItemTargetOf(id("delete-one"));
+
+      // Assert
+      expect(item).toBe(id("item-one"));
+    });
+
+    it("should return zero unless the only target is an item", () => {
+      // Arrange
+      const state = new SegmentedPlaceholderState<AugmentedCRDTItem>(
+        8,
+        "placeholder:0",
+        () => "placeholder:1",
+      );
+      const index = new DeleteTargetIndex();
+      index.record(id("delete-two"), [id("item-a"), id("item-b")]);
+      index.record(id("delete-none"), []);
+      index.recordPlaceholderRange(id("delete-placeholder"), state, 1, 3);
+      index.recordRunEvent(id("delete-lazy"), AUTHOR, 7);
+
+      // Act
+      const items = [
+        "delete-two",
+        "delete-none",
+        "delete-placeholder",
+        "delete-lazy",
+        "delete-missing",
+      ].map((name) => index.soleItemTargetOf(id(name)));
+
+      // Assert
+      expect(items).toEqual([0, 0, 0, 0, 0]);
+    });
+
+    it("should follow a split that extends membership and a lazy target that materializes", () => {
+      // Arrange
+      const index = new DeleteTargetIndex();
+      index.recordOne(id("delete-split"), id("item-left"));
+      index.recordRunEvent(id("delete-lazy"), AUTHOR, 7);
+
+      // Act
+      index.extendMembership(id("item-left"), id("item-right"));
+      index.materializeRunEventTargetsOf(id("delete-lazy"), () =>
+        id("author:7"),
+      );
+
+      // Assert
+      expect(index.soleItemTargetOf(id("delete-split"))).toBe(0);
+      expect(index.soleItemTargetOf(id("delete-lazy"))).toBe(id("author:7"));
+    });
+
+    it("should read packed deletes by replay order", () => {
+      // Arrange
+      const index = new DeleteTargetIndex();
+      index.configurePackedOrderRange(20, 24);
+      index.recordPackedRunEvent(21, AUTHOR, 9);
+      const group = index.beginRecord();
+      index.appendItem(group, id("item-packed"));
+      index.commitPackedRecord(22, group);
+
+      // Act
+      const items = [20, 21, 22].map((orderIndex) =>
+        index.soleItemTargetOfPackedOrder(orderIndex),
+      );
+
+      // Assert
+      expect(items).toEqual([0, 0, id("item-packed")]);
+      expect(() => index.soleItemTargetOfPackedOrder(24)).toThrow(
+        "Invalid packed delete order index 24",
+      );
+    });
+  });
+
   describe("clear", () => {
     it("drops both the forward and reverse indices", () => {
       const index = new DeleteTargetIndex();

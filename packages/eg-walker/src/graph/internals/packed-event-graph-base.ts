@@ -59,6 +59,19 @@ type PackedEventGraphCommonColumns = (
 export type { PackedCanonicalIdRun } from "./event-id-run-index";
 
 /**
+ * One author's run of one-character inserts with consecutive sequences, as
+ * {@link PackedEventGraphBase.keystrokeRunAt} describes it.
+ */
+export interface PackedKeystrokeRun {
+  /** Agent of the run's events. */
+  agent: number;
+  /** Sequence of the event the walk started at. */
+  sequence: number;
+  /** First offset past the run in the walk's direction. */
+  limit: number;
+}
+
+/**
  * Event IDs of a packed graph by offset (local version).
  *
  * Replicas are numbered by the shared {@link agents} table. `agentAt`
@@ -473,6 +486,84 @@ export class PackedEventGraphBase {
 
   isInsertAt(offset: number): boolean {
     return this.operations().operationTypes[offset] === INSERT_OPERATION;
+  }
+
+  /**
+   * Describe the run of one author's keystrokes that the event at `offset`
+   * starts: walking from `offset` by `direction` towards `limit`, exclusive,
+   * the events that are one-character inserts by the same author, each with
+   * the next sequence in the walk's direction. Fills `run` and returns
+   * `true`, or returns `false` when the event at `offset` is not a
+   * one-character insert with a canonical ID.
+   *
+   * Inside one canonical ID run the author is the same and the sequences
+   * are consecutive, so the walk reads only the operation columns there,
+   * and one ID lookup gives the author and the sequence.
+   */
+  keystrokeRunAt(
+    offset: number,
+    limit: number,
+    direction: 1 | -1,
+    run: PackedKeystrokeRun,
+  ): boolean {
+    const { operationTypes, operationLengths } = this.operations();
+    if (
+      operationTypes[offset] !== INSERT_OPERATION ||
+      operationLengths[offset] !== 1
+    ) {
+      return false;
+    }
+    const idRun = this.idIndex.canonicalRunAt?.(offset);
+    if (idRun === undefined) {
+      return this.keystrokeRunById(offset, limit, direction, run);
+    }
+    const runLimit =
+      direction === 1
+        ? Math.min(limit, idRun.startEventOffset + idRun.length)
+        : Math.max(limit, idRun.startEventOffset - 1);
+    let scan = offset + direction;
+    while (
+      scan !== runLimit &&
+      operationTypes[scan] === INSERT_OPERATION &&
+      operationLengths[scan] === 1
+    ) {
+      scan += direction;
+    }
+    run.agent = idRun.agent;
+    run.sequence = idRun.startSequence + (offset - idRun.startEventOffset);
+    run.limit = scan;
+    return true;
+  }
+
+  /** {@link keystrokeRunAt} for an index without ID runs: event by event. */
+  private keystrokeRunById(
+    offset: number,
+    limit: number,
+    direction: 1 | -1,
+    run: PackedKeystrokeRun,
+  ): boolean {
+    const agent = this.idIndex.agentAt(offset);
+    if (agent < 0) {
+      return false;
+    }
+    const { operationTypes, operationLengths } = this.operations();
+    const firstSequence = this.idIndex.sequenceAt(offset);
+    let sequence = firstSequence;
+    let scan = offset + direction;
+    while (
+      scan !== limit &&
+      operationTypes[scan] === INSERT_OPERATION &&
+      operationLengths[scan] === 1 &&
+      this.idIndex.agentAt(scan) === agent &&
+      this.idIndex.sequenceAt(scan) === sequence + direction
+    ) {
+      sequence += direction;
+      scan += direction;
+    }
+    run.agent = agent;
+    run.sequence = firstSequence;
+    run.limit = scan;
+    return true;
   }
 
   operationIndexAt(offset: number): number {

@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
-import { EventGraph } from "../graph/event-graph";
+import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
+import {
+  EventGraph,
+  type PackedReplayPlanningView,
+} from "../graph/event-graph";
+import type { PackedKeystrokeRun } from "../graph/internals/packed-event-graph-base";
+import type { GraphEvent } from "../types";
 
 const buildBranchingGraph = (): EventGraph => {
   const graph = new EventGraph();
@@ -138,3 +144,159 @@ describe("packed event graph", () => {
     expect(graph.isExactLinearHistory()).toBe(true);
   });
 });
+
+describe("PackedEventGraphBase.keystrokeRunAt", () => {
+  it("should read ID runs from a decoded graph and IDs one by one from an added one", () => {
+    // Arrange
+    const decoded = decodedKeystrokeView();
+    const added = addedKeystrokeView();
+
+    // Act
+    const decodedRun = decoded.canonicalIdRunAt?.(decoded.offsetOf("a:1")!);
+    const addedRun = added.canonicalIdRunAt?.(added.offsetOf("a:1")!);
+
+    // Assert
+    expect(decodedRun).toMatchObject({ startSequence: 0, length: 3 });
+    expect(addedRun).toBeUndefined();
+  });
+
+  it.each([
+    ["ID runs of a decoded graph", decodedKeystrokeView],
+    ["per-event IDs of an added graph", addedKeystrokeView],
+  ])("should find an author's run of one-character inserts from %s", (_, buildView) => {
+    // Arrange
+    const view = buildView();
+    const offsetOf = (id: string): number => view.offsetOf(id)!;
+
+    // Act
+    const forward = keystrokeRunOf(view, "a:0", view.count, 1);
+    const backward = keystrokeRunOf(view, "a:2", -1, -1);
+    const bounded = keystrokeRunOf(view, "a:1", offsetOf("a:2"), 1);
+
+    // Assert
+    expect(forward).toEqual({
+      agent: view.agentAt(offsetOf("a:0")),
+      sequence: 0,
+      limit: offsetOf("b:0"),
+    });
+    expect(backward).toEqual({ ...forward, sequence: 2, limit: -1 });
+    expect(bounded).toEqual({
+      ...forward,
+      sequence: 1,
+      limit: offsetOf("a:2"),
+    });
+  });
+
+  it.each([
+    ["ID runs of a decoded graph", decodedKeystrokeView],
+    ["per-event IDs of an added graph", addedKeystrokeView],
+  ])("should end a run at another author, a delete, a longer insert or a sequence gap from %s", (_, buildView) => {
+    // Arrange
+    const view = buildView();
+    const offsetOf = (id: string): number => view.offsetOf(id)!;
+
+    // Act
+    const otherAuthor = keystrokeRunOf(view, "b:0", view.count, 1);
+    const beforeDelete = keystrokeRunOf(view, "a:3", view.count, 1);
+    const afterOtherAuthor = keystrokeRunOf(view, "a:3", -1, -1);
+    const afterLongerInsert = keystrokeRunOf(view, "a:7", -1, -1);
+    const beforeSequenceGap = keystrokeRunOf(view, "a:6", view.count, 1);
+
+    // Assert
+    expect(otherAuthor).toMatchObject({ sequence: 0, limit: offsetOf("a:3") });
+    expect(otherAuthor!.agent).not.toBe(view.agentAt(offsetOf("a:0")));
+    expect(beforeDelete).toMatchObject({ sequence: 3, limit: offsetOf("a:4") });
+    expect(afterOtherAuthor).toMatchObject({ limit: offsetOf("b:0") });
+    expect(afterLongerInsert).toMatchObject({
+      sequence: 7,
+      limit: offsetOf("a:5"),
+    });
+    expect(beforeSequenceGap).toMatchObject({ limit: offsetOf("a:9") });
+  });
+
+  it.each([
+    ["ID runs of a decoded graph", decodedKeystrokeView],
+    ["per-event IDs of an added graph", addedKeystrokeView],
+  ])("should report no run from a delete, a longer insert or a custom ID from %s", (_, buildView) => {
+    // Arrange
+    const view = buildView();
+
+    // Act
+    const runs = ["a:4", "a:5", "custom"].map((id) =>
+      keystrokeRunOf(view, id, view.count, 1),
+    );
+
+    // Assert
+    expect(runs).toEqual([null, null, null]);
+  });
+});
+
+// Helpers
+
+/**
+ * Author `a` types three keystrokes and author `b` one concurrently with
+ * `a`'s fourth. `a` then deletes, pastes two characters, types two more
+ * keystrokes and, after a gap in its sequence, one more; an event with a
+ * custom ID follows.
+ */
+const keystrokeEvents = (): GraphEvent[] => {
+  const insert = (
+    id: string,
+    parents: ReadonlyArray<string>,
+    text: string,
+  ): GraphEvent => ({
+    id,
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text },
+    parentVersion: new Set(parents),
+    timestamp: 0,
+  });
+  return [
+    insert("a:0", [], "x"),
+    insert("a:1", ["a:0"], "y"),
+    insert("a:2", ["a:1"], "z"),
+    insert("b:0", ["a:2"], "q"),
+    insert("a:3", ["a:2"], "w"),
+    {
+      id: "a:4",
+      operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 1 },
+      parentVersion: new Set(["a:3"]),
+      timestamp: 0,
+    },
+    insert("a:5", ["a:4"], "ab"),
+    insert("a:6", ["a:5", "b:0"], "c"),
+    insert("a:7", ["a:6"], "d"),
+    insert("a:9", ["a:7"], "f"),
+    insert("custom", ["a:9"], "e"),
+  ];
+};
+
+/** The events added in order, so local versions follow the list. */
+const addedKeystrokeGraph = (): EventGraph => {
+  const graph = new EventGraph();
+  for (const event of keystrokeEvents()) {
+    graph.addEvent(event);
+  }
+  return graph;
+};
+
+/** The events encoded in list order, so the decoded offsets follow it. */
+const decodedKeystrokeView = (): PackedReplayPlanningView => {
+  const { binary } = encodeTopologicallyOrderedEventsBinary(keystrokeEvents());
+  const graph = new ColumnarEventGraphCodec().decodeBinary(binary);
+  return graph.getPackedReplayPlanningView()!;
+};
+
+const addedKeystrokeView = (): PackedReplayPlanningView =>
+  addedKeystrokeGraph().getPackedReplayPlanningView()!;
+
+const keystrokeRunOf = (
+  view: PackedReplayPlanningView,
+  id: string,
+  limit: number,
+  direction: 1 | -1,
+): PackedKeystrokeRun | null => {
+  const run: PackedKeystrokeRun = { agent: -1, sequence: -1, limit: -1 };
+  return view.keystrokeRunAt(view.offsetOf(id)!, limit, direction, run)
+    ? run
+    : null;
+};

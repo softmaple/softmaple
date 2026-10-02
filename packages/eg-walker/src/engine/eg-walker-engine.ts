@@ -2,6 +2,7 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
+import type { PackedKeystrokeRun } from "../graph/internals/packed-event-graph-base";
 import { runSteps, type Steps } from "../graph/internals/steps";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
@@ -38,7 +39,6 @@ import {
   type ItemKey,
 } from "./internals/engine-types";
 import { EngineEventSet } from "./internals/engine-event-set";
-import { PrepareDeltaBuffer } from "./internals/prepare-delta-buffer";
 import { EventItemIndex } from "./internals/event-item-index";
 import { FugueOrderIndex } from "./internals/fugue-order-index";
 import {
@@ -231,7 +231,6 @@ export class EgWalkerEngine {
   private packedInsertTail: AugmentedCRDTItem | null = null;
   private packedInsertNextPrepareIndex = -1;
   private readonly packedInsertTailResult: InsertTailResult = { item: null };
-  private readonly prepareDeltas = new PrepareDeltaBuffer();
   /**
    * A placeholder prepare adjustment collected over delete targets with
    * adjacent ranges; see {@link collectPlaceholderPrepareRange}.
@@ -1304,15 +1303,12 @@ export class EgWalkerEngine {
 
   /**
    * Move the prepare view from the current version to `target`, given as
-   * local versions, as typed-run spans.
+   * local versions.
    *
-   * The diff walks causal chains and returns ranges of local versions, and
-   * the transition consumes them range by range the way a packed replay does:
-   * scalar retreat/advance used to split a coalesced run once per event and
-   * update the ranked sequence after every split. Resolve participating
-   * delete targets first, isolate only run-span boundaries, accumulate all
-   * prepare deltas, and refresh ranked weights once. Only events this engine
-   * replays take part; the rest of the graph is in every version it visits.
+   * The diff walks causal chains and returns ranges of local versions; the
+   * transition walks them span by span, as a packed replay does (see
+   * {@link applyPackedPrepareTransition}). Only events this engine replays
+   * take part; the rest of the graph is in every version it visits.
    */
   private transitionObjectPrepareView(target: ReadonlyArray<number>): void {
     this.ensureEventIndexes();
@@ -1320,103 +1316,85 @@ export class EgWalkerEngine {
       this.currentVersion,
       target,
     );
-    const deltas = this.prepareDeltas;
-    deltas.clear();
-    this.pendingPlaceholderState = null;
-
-    if (this.deleteTargets.hasRunEventTargets()) {
-      // Lazy scalar delete targets may still share one typed-run record. Split
-      // the targets taking part before insert spans add pending deltas, as a
-      // packed transition does.
+    this.beginPrepareTransition();
+    try {
       for (let range = 0; range < transition.retreatRangeCount; range++) {
-        const start = transition.retreatStarts[range]!;
-        for (
-          let localVersion = transition.retreatEnds[range]! - 1;
-          localVersion >= start;
-          localVersion--
-        ) {
-          this.materializeRunDeleteTargetsOfEvent(localVersion);
-        }
+        this.retreatCount += this.toggleObjectRange(
+          transition.retreatStarts[range]!,
+          transition.retreatEnds[range]!,
+          -1,
+        );
       }
       for (let range = 0; range < transition.advanceRangeCount; range++) {
-        const end = transition.advanceEnds[range]!;
-        for (
-          let localVersion = transition.advanceStarts[range]!;
-          localVersion < end;
-          localVersion++
-        ) {
-          this.materializeRunDeleteTargetsOfEvent(localVersion);
-        }
+        this.advanceCount += this.toggleObjectRange(
+          transition.advanceStarts[range]!,
+          transition.advanceEnds[range]!,
+          1,
+        );
       }
+      this.flushPlaceholderPrepareRange();
+    } finally {
+      this.sequence.endWeightBatch();
     }
-
-    let retreated = 0;
-    let advanced = 0;
-    for (let range = 0; range < transition.retreatRangeCount; range++) {
-      retreated += this.collectObjectInsertPrepareRange(
-        transition.retreatStarts[range]!,
-        transition.retreatEnds[range]!,
-        -1,
-        deltas,
-      );
-    }
-    for (let range = 0; range < transition.advanceRangeCount; range++) {
-      advanced += this.collectObjectInsertPrepareRange(
-        transition.advanceStarts[range]!,
-        transition.advanceEnds[range]!,
-        1,
-        deltas,
-      );
-    }
-
-    const events = this.eventOrder;
-    const graph = this.graph;
-    for (let range = 0; range < transition.retreatRangeCount; range++) {
-      const start = transition.retreatStarts[range]!;
-      for (
-        let localVersion = transition.retreatEnds[range]! - 1;
-        localVersion >= start;
-        localVersion--
-      ) {
-        if (
-          events.has(localVersion) &&
-          !graph.isInsertAtLocalVersion(localVersion)
-        ) {
-          this.collectDeletePrepareDelta(localVersion, -1, deltas);
-        }
-      }
-    }
-    for (let range = 0; range < transition.advanceRangeCount; range++) {
-      const end = transition.advanceEnds[range]!;
-      for (
-        let localVersion = transition.advanceStarts[range]!;
-        localVersion < end;
-        localVersion++
-      ) {
-        if (
-          events.has(localVersion) &&
-          !graph.isInsertAtLocalVersion(localVersion)
-        ) {
-          this.collectDeletePrepareDelta(localVersion, 1, deltas);
-        }
-      }
-    }
-
-    this.applyCollectedPrepareDeltas(deltas);
-    this.retreatCount += retreated;
-    this.advanceCount += advanced;
   }
 
-  private materializeRunDeleteTargetsOfEvent(localVersion: number): void {
-    if (
-      this.eventOrder.has(localVersion) &&
-      !this.graph.isInsertAtLocalVersion(localVersion)
-    ) {
-      this.deleteTargets.materializeRunEventTargetsOf(
-        localVersion,
-        this.resolveRunDeleteTargetItemId,
+  /**
+   * Retreat (`delta` -1) or advance (+1) the events of one transition range
+   * of local versions, as {@link togglePackedRange} does over packed
+   * offsets, and return how many of this engine's events, inserts and
+   * deletes, the range holds.
+   */
+  private toggleObjectRange(start: number, end: number, delta: 1 | -1): number {
+    const events = this.eventOrder;
+    const graph = this.graph;
+    let engineEvents = 0;
+    let localVersion = delta === 1 ? start : end - 1;
+    while (delta === 1 ? localVersion < end : localVersion >= start) {
+      if (!events.has(localVersion)) {
+        localVersion += delta;
+        continue;
+      }
+      engineEvents++;
+      if (!graph.isInsertAtLocalVersion(localVersion)) {
+        this.toggleObjectDeleteTargets(localVersion, delta);
+        localVersion += delta;
+        continue;
+      }
+
+      const agent =
+        graph.operationLengthAtLocalVersion(localVersion) === 1
+          ? graph.agentAt(localVersion)
+          : CUSTOM_EVENT_AGENT;
+      if (agent < 0) {
+        this.toggleInsertEvent(localVersion, delta);
+        localVersion += delta;
+        continue;
+      }
+      const sequence = graph.sequenceAt(localVersion);
+      let length = 1;
+      let scan = localVersion + delta;
+      while (
+        (delta === 1 ? scan < end : scan >= start) &&
+        events.has(scan) &&
+        graph.isInsertAtLocalVersion(scan) &&
+        graph.operationLengthAtLocalVersion(scan) === 1 &&
+        graph.agentAt(scan) === agent &&
+        graph.sequenceAt(scan) === sequence + length * delta
+      ) {
+        length++;
+        scan += delta;
+      }
+      this.toggleCanonicalInsertSpan(
+        delta === 1 ? localVersion : scan + 1,
+        length,
+        delta,
+        agent,
+        delta === 1 ? sequence : sequence - length + 1,
       );
+      engineEvents += length - 1;
+      localVersion = scan;
     }
+    return engineEvents;
   }
 
   private readonly resolveRunDeleteTargetItemId = (
@@ -1425,364 +1403,196 @@ export class EgWalkerEngine {
   ): ItemKey => this.resolveRunDeleteTargetItem(agent, sequence).id;
 
   /**
-   * Collect the inserts of one transition range of local versions and
-   * return how many of this engine's events, inserts and deletes, the range
-   * holds. Adjacent canonical scalar inserts are grouped by author sequence,
-   * then consumed one existing typed-run fragment at a time, as
-   * {@link collectPackedInsertPrepareRange} does over packed offsets.
+   * Move a packed replay's prepare view to the parents of its next event,
+   * one span of the version diff at a time.
+   *
+   * The diff is ranges of local versions. Each range is walked once, from
+   * its end for a retreat and from its start for an advance, and each event
+   * is handled where the walk meets it:
+   *
+   * - An author's consecutive one-character inserts are one span. The run
+   *   index finds the record of the span's first event, and the records of
+   *   the rest usually follow it in the sequence, since each keystroke
+   *   landed after the one before; each record is toggled once.
+   * - A delete toggles the records and placeholder ranges it recorded, after
+   *   isolating a target recorded lazily inside a typed run. Consecutive
+   *   deletes usually target neighbouring records, and adjacent placeholder
+   *   ranges are adjusted as one.
+   *
+   * A toggle changes the prepare state at once and refreshes the record's
+   * weights in one {@link IndexedSequence} weight batch for the whole
+   * transition, so every touched leaf and ancestor is updated once. A record
+   * that a later span or delete target splits hands its toggled state to
+   * both halves, so splits and toggles may come in any order; deletes are
+   * still visited in the diff's order, which fixes the order of placeholder
+   * adjustments and so the placeholder segment IDs they allocate.
    */
-  private collectObjectInsertPrepareRange(
-    start: number,
-    end: number,
-    direction: 1 | -1,
-    deltas: PrepareDeltaBuffer,
-  ): number {
-    const events = this.eventOrder;
-    const graph = this.graph;
-    const isScalarInsert = (localVersion: number): boolean =>
-      graph.isInsertAtLocalVersion(localVersion) &&
-      graph.operationLengthAtLocalVersion(localVersion) === 1;
-    let engineEvents = 0;
-    let localVersion = direction === 1 ? start : end - 1;
-    while (direction === 1 ? localVersion < end : localVersion >= start) {
-      if (!events.has(localVersion)) {
-        localVersion += direction;
-        continue;
-      }
-      engineEvents++;
-      if (!graph.isInsertAtLocalVersion(localVersion)) {
-        localVersion += direction;
-        continue;
-      }
-
-      const agent = isScalarInsert(localVersion)
-        ? graph.agentAt(localVersion)
-        : CUSTOM_EVENT_AGENT;
-      let groupLength = 1;
-      let groupTail = localVersion;
-      let scan = localVersion + direction;
-      if (agent >= 0) {
-        let expectedSequence = graph.sequenceAt(localVersion) + direction;
-        while (direction === 1 ? scan < end : scan >= start) {
-          if (
-            !events.has(scan) ||
-            !isScalarInsert(scan) ||
-            graph.agentAt(scan) !== agent ||
-            graph.sequenceAt(scan) !== expectedSequence
-          ) {
-            break;
-          }
-          groupLength++;
-          groupTail = scan;
-          expectedSequence += direction;
-          scan += direction;
-        }
-        const first = direction === 1 ? localVersion : groupTail;
-        this.collectPackedInsertPrepareSpan(
-          first,
-          groupLength,
-          direction,
-          deltas,
-          agent,
-          graph.sequenceAt(first),
-        );
-      } else {
-        this.collectInsertPrepareDelta(localVersion, direction, deltas);
-      }
-      engineEvents += groupLength - 1;
-      localVersion = scan;
-    }
-    return engineEvents;
-  }
-
   private applyPackedPrepareTransition(
     plan: PackedCriticalReplayPlan,
     transition: PackedLocalVersionTransition,
     rangeStart: number,
     rangeEnd: number,
   ): void {
-    const deltas = this.prepareDeltas;
-    deltas.clear();
+    this.beginPrepareTransition();
+    try {
+      for (let range = 0; range < transition.retreatRangeCount; range++) {
+        this.retreatCount += this.togglePackedRange(
+          plan,
+          transition.retreatStarts[range]!,
+          transition.retreatEnds[range]!,
+          -1,
+          rangeStart,
+          rangeEnd,
+        );
+      }
+      for (let range = 0; range < transition.advanceRangeCount; range++) {
+        this.advanceCount += this.togglePackedRange(
+          plan,
+          transition.advanceStarts[range]!,
+          transition.advanceEnds[range]!,
+          1,
+          rangeStart,
+          rangeEnd,
+        );
+      }
+      this.flushPlaceholderPrepareRange();
+    } finally {
+      this.sequence.endWeightBatch();
+    }
+  }
+
+  /** Scratch result of {@link PackedCriticalReplayPlan.keystrokeRunAtKnownOffset}. */
+  private readonly keystrokeRun: PackedKeystrokeRun = {
+    agent: 0,
+    sequence: 0,
+    limit: 0,
+  };
+
+  /** Open a transition's weight batch; see {@link applyPackedPrepareTransition}. */
+  private beginPrepareTransition(): void {
     this.pendingPlaceholderState = null;
-
-    // Lazy scalar delete targets may still share one typed-run record. Split
-    // targets participating in this transition before insert spans add
-    // pending deltas: splitting afterwards would leave new right halves out
-    // of the delta map and toggle only part of an insert range.
-    this.materializePackedTransitionRunDeleteTargets(
-      plan,
-      transition,
-      rangeStart,
-      rangeEnd,
-    );
-
-    // Split every affected insert slice before resolving delete targets. A
-    // split extends existing delete membership to both halves; resolving
-    // deletes afterwards therefore observes the final record boundaries and
-    // lets all prepare-state changes commute inside this transition.
-    for (let range = 0; range < transition.retreatRangeCount; range++) {
-      this.collectPackedInsertPrepareRange(
-        plan,
-        transition.retreatStarts[range]!,
-        transition.retreatEnds[range]!,
-        -1,
-        rangeStart,
-        rangeEnd,
-        deltas,
-      );
-    }
-    for (let range = 0; range < transition.advanceRangeCount; range++) {
-      this.collectPackedInsertPrepareRange(
-        plan,
-        transition.advanceStarts[range]!,
-        transition.advanceEnds[range]!,
-        1,
-        rangeStart,
-        rangeEnd,
-        deltas,
-      );
-    }
-
-    for (let range = 0; range < transition.retreatRangeCount; range++) {
-      const start = transition.retreatStarts[range]!;
-      for (
-        let offset = transition.retreatEnds[range]! - 1;
-        offset >= start;
-        offset--
-      ) {
-        const rank = plan.orderIndexOfKnownOffset(offset);
-        if (
-          rank >= rangeStart &&
-          rank < rangeEnd &&
-          !plan.isInsertAtKnownOffset(offset)
-        ) {
-          this.collectPackedDeletePrepareDelta(offset, rank, -1, deltas);
-        }
-      }
-    }
-    for (let range = 0; range < transition.advanceRangeCount; range++) {
-      const end = transition.advanceEnds[range]!;
-      for (
-        let offset = transition.advanceStarts[range]!;
-        offset < end;
-        offset++
-      ) {
-        const rank = plan.orderIndexOfKnownOffset(offset);
-        if (
-          rank >= rangeStart &&
-          rank < rangeEnd &&
-          !plan.isInsertAtKnownOffset(offset)
-        ) {
-          this.collectPackedDeletePrepareDelta(offset, rank, 1, deltas);
-        }
-      }
-    }
-
-    this.applyCollectedPrepareDeltas(deltas);
-  }
-
-  private applyCollectedPrepareDeltas(deltas: PrepareDeltaBuffer): void {
-    this.flushPlaceholderPrepareRange(deltas);
-    const items = deltas.entryItems();
-    if (items.length === 1) {
-      const item = items[0]!;
-      item.prepareState += deltas.deltaOf(item);
-      this.sequence.updateItem(item);
-    } else if (items.length > 1) {
-      for (const item of items) {
-        item.prepareState += deltas.deltaOf(item);
-      }
-      this.sequence.updateItems(items);
-    }
-    deltas.clear();
-  }
-
-  private materializePackedTransitionRunDeleteTargets(
-    plan: PackedCriticalReplayPlan,
-    transition: PackedLocalVersionTransition,
-    rangeStart: number,
-    rangeEnd: number,
-  ): void {
-    if (!this.deleteTargets.hasRunEventTargets()) {
-      return;
-    }
-    const resolveItemId = (agent: number, sequence: number): ItemKey =>
-      this.resolveRunDeleteTargetItem(agent, sequence).id;
-    for (let range = 0; range < transition.retreatRangeCount; range++) {
-      const start = transition.retreatStarts[range]!;
-      for (
-        let offset = transition.retreatEnds[range]! - 1;
-        offset >= start;
-        offset--
-      ) {
-        const rank = plan.orderIndexOfKnownOffset(offset);
-        if (
-          rank >= rangeStart &&
-          rank < rangeEnd &&
-          !plan.isInsertAtKnownOffset(offset)
-        ) {
-          if (this.deleteTargets.firstTargetOfPackedOrder(rank) !== 0) {
-            this.deleteTargets.materializeRunEventTargetsOfPackedOrder(
-              rank,
-              resolveItemId,
-            );
-          } else {
-            this.deleteTargets.materializeRunEventTargetsOf(
-              offset,
-              resolveItemId,
-            );
-          }
-        }
-      }
-    }
-    for (let range = 0; range < transition.advanceRangeCount; range++) {
-      const end = transition.advanceEnds[range]!;
-      for (
-        let offset = transition.advanceStarts[range]!;
-        offset < end;
-        offset++
-      ) {
-        const rank = plan.orderIndexOfKnownOffset(offset);
-        if (
-          rank >= rangeStart &&
-          rank < rangeEnd &&
-          !plan.isInsertAtKnownOffset(offset)
-        ) {
-          if (this.deleteTargets.firstTargetOfPackedOrder(rank) !== 0) {
-            this.deleteTargets.materializeRunEventTargetsOfPackedOrder(
-              rank,
-              resolveItemId,
-            );
-          } else {
-            this.deleteTargets.materializeRunEventTargetsOf(
-              offset,
-              resolveItemId,
-            );
-          }
-        }
-      }
-    }
-    this.samplePeakSequenceRecordCount();
+    this.sequence.beginWeightBatch();
   }
 
   /**
-   * Collect one packed transition range while preserving its scalar event
-   * counters. Adjacent canonical scalar inserts are first grouped by author
-   * sequence, then consumed one existing typed-run fragment at a time. This
-   * keeps record splitting proportional to actual run boundaries rather than
-   * the number of events in the version diff.
+   * Retreat (`delta` -1) or advance (+1) the events of one packed transition
+   * range whose replay order falls in `[rangeStart, rangeEnd)`, and return
+   * how many such events, inserts and deletes, the range holds.
    */
-  private collectPackedInsertPrepareRange(
+  private togglePackedRange(
     plan: PackedCriticalReplayPlan,
     startOffset: number,
     endOffset: number,
-    direction: 1 | -1,
+    delta: 1 | -1,
     rangeStart: number,
     rangeEnd: number,
-    deltas: PrepareDeltaBuffer,
-  ): void {
-    let offset = direction === 1 ? startOffset : endOffset - 1;
-    while (direction === 1 ? offset < endOffset : offset >= startOffset) {
+  ): number {
+    let engineEvents = 0;
+    let offset = delta === 1 ? startOffset : endOffset - 1;
+    while (delta === 1 ? offset < endOffset : offset >= startOffset) {
       const rank = plan.orderIndexOfKnownOffset(offset);
       if (rank < rangeStart || rank >= rangeEnd) {
-        offset += direction;
+        offset += delta;
         continue;
       }
-
+      engineEvents++;
       if (!plan.isInsertAtKnownOffset(offset)) {
-        if (direction === 1) {
-          this.advanceCount++;
-        } else {
-          this.retreatCount++;
-        }
-        offset += direction;
+        this.togglePackedDeleteTargets(offset, rank, delta);
+        offset += delta;
         continue;
       }
 
-      const agent =
-        plan.operationLengthAtKnownOffset(offset) === 1
-          ? plan.agentAtKnownOffset(offset)
-          : CUSTOM_EVENT_AGENT;
-      let groupLength = 1;
-      let groupTailOffset = offset;
-      let scanOffset = offset + direction;
-      if (agent >= 0) {
-        let expectedSequence = plan.sequenceAtKnownOffset(offset) + direction;
-        while (
-          direction === 1 ? scanOffset < endOffset : scanOffset >= startOffset
-        ) {
-          const scanRank = plan.orderIndexOfKnownOffset(scanOffset);
-          if (
-            scanRank < rangeStart ||
-            scanRank >= rangeEnd ||
-            !plan.isInsertAtKnownOffset(scanOffset) ||
-            plan.operationLengthAtKnownOffset(scanOffset) !== 1 ||
-            plan.agentAtKnownOffset(scanOffset) !== agent ||
-            plan.sequenceAtKnownOffset(scanOffset) !== expectedSequence
-          ) {
-            break;
-          }
-          groupLength++;
-          groupTailOffset = scanOffset;
-          expectedSequence += direction;
-          scanOffset += direction;
+      const keystrokes = this.keystrokeRun;
+      if (
+        !plan.keystrokeRunAtKnownOffset(
+          offset,
+          delta === 1 ? endOffset : startOffset - 1,
+          delta,
+          keystrokes,
+        )
+      ) {
+        this.toggleInsertEvent(offset, delta);
+        offset += delta;
+        continue;
+      }
+      const { agent, sequence, limit } = keystrokes;
+      let length = 1;
+      let scan = offset + delta;
+      while (scan !== limit) {
+        const scanRank = plan.orderIndexOfKnownOffset(scan);
+        if (scanRank < rangeStart || scanRank >= rangeEnd) {
+          break;
         }
+        length++;
+        scan += delta;
       }
-
-      const firstOffset = direction === 1 ? offset : groupTailOffset;
-      if (agent >= 0) {
-        this.collectPackedInsertPrepareSpan(
-          firstOffset,
-          groupLength,
-          direction,
-          deltas,
-          agent,
-          plan.sequenceAtKnownOffset(firstOffset),
-        );
-      } else {
-        this.collectInsertPrepareDelta(offset, direction, deltas);
-      }
-      if (direction === 1) {
-        this.advanceCount += groupLength;
-      } else {
-        this.retreatCount += groupLength;
-      }
-      offset = scanOffset;
+      this.toggleCanonicalInsertSpan(
+        delta === 1 ? offset : scan + 1,
+        length,
+        delta,
+        agent,
+        delta === 1 ? sequence : sequence - length + 1,
+      );
+      engineEvents += length - 1;
+      offset = scan;
     }
+    return engineEvents;
   }
 
-  /** Consume one ascending canonical event span by current run fragments. */
-  private collectPackedInsertPrepareSpan(
-    firstOffset: number,
+  /**
+   * Toggle the records of the canonical one-character inserts `(agent,
+   * firstSequence)` onwards, `eventCount` of them, whose events start at
+   * local version `firstLocalVersion`.
+   *
+   * The run index finds the record of the first event and isolates as much
+   * of the span as that record holds. The records after it are normally the
+   * next ones in the sequence: an author's next keystroke lands after the
+   * previous one, and its record follows unless a concurrent insert landed
+   * in between. A next record that starts at the next sequence and ends
+   * inside the span is the one the run index would return, so it is taken
+   * without a lookup; any other record falls back to the run index, which
+   * splits a record that reaches past the span.
+   */
+  private toggleCanonicalInsertSpan(
+    firstLocalVersion: number,
     eventCount: number,
     delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
     agent: number,
     firstSequence: number,
   ): void {
     let consumed = 0;
+    let item: AugmentedCRDTItem | null = null;
     while (consumed < eventCount) {
-      const item = this.recordSplitter.isolateRunSpanForCanonicalEvents(
-        agent,
-        firstSequence + consumed,
-        eventCount - consumed,
-      );
+      const sequence = firstSequence + consumed;
+      const remaining = eventCount - consumed;
+      const next: AugmentedCRDTItem | undefined =
+        item === null ? undefined : this.sequence.itemAfter(item);
+      item =
+        next !== undefined &&
+        next.run &&
+        next.agent === agent &&
+        next.sequence === sequence &&
+        typeof next.content === "string" &&
+        next.content.length <= remaining
+          ? next
+          : this.recordSplitter.isolateRunSpanForCanonicalEvents(
+              agent,
+              sequence,
+              remaining,
+            );
       if (item === null) {
-        this.collectInsertPrepareDelta(firstOffset + consumed, delta, deltas);
+        this.toggleInsertEvent(firstLocalVersion + consumed, delta);
         consumed++;
         continue;
       }
 
       const isolatedEventCount = item.content.length;
-      if (
-        isolatedEventCount <= 0 ||
-        isolatedEventCount > eventCount - consumed
-      ) {
+      if (isolatedEventCount <= 0 || isolatedEventCount > remaining) {
         throw new Error(
-          `Invalid typed-run transition span at ${this.eventLabel(firstOffset + consumed)}`,
+          `Invalid typed-run transition span at ${this.eventLabel(firstLocalVersion + consumed)}`,
         );
       }
-      this.collectPrepareDeltaForItem(item, delta, deltas);
+      this.togglePrepareState(item, delta);
       consumed += isolatedEventCount;
     }
   }
@@ -2181,7 +1991,6 @@ export class EgWalkerEngine {
     this.packedInsertTail = null;
     this.packedInsertNextPrepareIndex = -1;
     this.packedInsertTailResult.item = null;
-    this.prepareDeltas.clear();
     this.placeholderCounter = 0;
 
     if (this.resultingText.length === 0) {
@@ -2422,66 +2231,96 @@ export class EgWalkerEngine {
     }
   }
 
-  private collectInsertPrepareDelta(
-    localVersion: number,
-    delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
-  ): void {
+  /**
+   * Add `delta` to an item's prepare state and refresh its weights in the
+   * transition's weight batch.
+   */
+  private togglePrepareState(item: AugmentedCRDTItem, delta: 1 | -1): void {
+    item.prepareState += delta;
+    this.sequence.refreshInBatch(item);
+  }
+
+  /** Toggle every record of an insert event that is not a typed-run span. */
+  private toggleInsertEvent(localVersion: number, delta: 1 | -1): void {
     const eventItems =
       this.recordSplitter.isolateRunSliceForEvent(localVersion);
     if (typeof eventItems === "number") {
-      this.collectItemPrepareDelta(eventItems, delta, deltas);
+      this.togglePrepareState(this.requireItem(eventItems), delta);
       return;
     }
     for (const itemId of eventItems ?? []) {
-      this.collectItemPrepareDelta(itemId, delta, deltas);
+      this.togglePrepareState(this.requireItem(itemId), delta);
     }
   }
 
-  private collectDeletePrepareDelta(
-    localVersion: number,
+  /**
+   * Toggle the targets of the packed delete at `offset`. They are keyed by
+   * its replay order, `rank`, until the engine is retained, and by its local
+   * version after that. A typed-run target recorded lazily is isolated first.
+   */
+  private togglePackedDeleteTargets(
+    offset: number,
+    rank: number,
     delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
   ): void {
-    this.collectDeletePrepareTargets(
-      this.deleteTargets.firstTargetOf(localVersion),
-      delta,
-      deltas,
-    );
-  }
-
-  private collectPackedDeletePrepareDelta(
-    eventOffset: number,
-    orderIndex: number,
-    delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
-  ): void {
-    const packedTarget =
-      this.deleteTargets.firstTargetOfPackedOrder(orderIndex);
-    if (packedTarget !== 0) {
-      this.collectDeletePrepareTargets(packedTarget, delta, deltas);
+    const deleteTargets = this.deleteTargets;
+    const soleItem = deleteTargets.soleItemTargetOfPackedOrder(rank);
+    if (soleItem !== 0) {
+      this.togglePrepareState(this.requireItem(soleItem), delta);
       return;
     }
-    this.collectDeletePrepareDelta(eventOffset, delta, deltas);
+    let firstTarget = deleteTargets.firstTargetOfPackedOrder(rank);
+    if (firstTarget !== 0) {
+      if (deleteTargets.hasRunEventTargets()) {
+        deleteTargets.materializeRunEventTargetsOfPackedOrder(
+          rank,
+          this.resolveRunDeleteTargetItemId,
+        );
+      }
+    } else {
+      if (deleteTargets.hasRunEventTargets()) {
+        deleteTargets.materializeRunEventTargetsOf(
+          offset,
+          this.resolveRunDeleteTargetItemId,
+        );
+      }
+      firstTarget = deleteTargets.firstTargetOf(offset);
+    }
+    this.toggleDeleteTargets(firstTarget, delta);
   }
 
-  private collectDeletePrepareTargets(
-    firstTarget: number,
-    delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
-  ): void {
+  /**
+   * Toggle the targets of the delete at `localVersion`, isolating a target
+   * recorded lazily inside a typed run first.
+   */
+  private toggleObjectDeleteTargets(localVersion: number, delta: 1 | -1): void {
+    const deleteTargets = this.deleteTargets;
+    const soleItem = deleteTargets.soleItemTargetOf(localVersion);
+    if (soleItem !== 0) {
+      this.togglePrepareState(this.requireItem(soleItem), delta);
+      return;
+    }
+    if (deleteTargets.hasRunEventTargets()) {
+      deleteTargets.materializeRunEventTargetsOf(
+        localVersion,
+        this.resolveRunDeleteTargetItemId,
+      );
+    }
+    this.toggleDeleteTargets(deleteTargets.firstTargetOf(localVersion), delta);
+  }
+
+  private toggleDeleteTargets(firstTarget: number, delta: 1 | -1): void {
     let target = firstTarget;
     while (target !== 0) {
       const kind = this.deleteTargets.kindOf(target);
       if (kind === DELETE_TARGET_KIND.ITEM) {
-        this.collectItemPrepareDelta(
-          this.deleteTargets.itemIdOf(target),
+        this.togglePrepareState(
+          this.requireItem(this.deleteTargets.itemIdOf(target)),
           delta,
-          deltas,
         );
       } else if (kind === DELETE_TARGET_KIND.RUN_EVENT) {
         throw new Error(
-          `Packed transition did not materialize typed-run target ${this.deleteTargets.runEventAgentOf(target)}:${this.deleteTargets.runEventSequenceOf(target)}`,
+          `Transition did not materialize typed-run target ${this.deleteTargets.runEventAgentOf(target)}:${this.deleteTargets.runEventSequenceOf(target)}`,
         );
       } else {
         this.collectPlaceholderPrepareRange(
@@ -2489,7 +2328,6 @@ export class EgWalkerEngine {
           this.deleteTargets.placeholderStartOf(target),
           this.deleteTargets.placeholderEndOf(target),
           delta,
-          deltas,
         );
       }
       target = this.deleteTargets.nextTarget(target);
@@ -2513,7 +2351,6 @@ export class EgWalkerEngine {
     start: number,
     end: number,
     delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
   ): void {
     if (
       this.pendingPlaceholderState === state &&
@@ -2528,14 +2365,14 @@ export class EgWalkerEngine {
         return;
       }
     }
-    this.flushPlaceholderPrepareRange(deltas);
+    this.flushPlaceholderPrepareRange();
     this.pendingPlaceholderState = state;
     this.pendingPlaceholderStart = start;
     this.pendingPlaceholderEnd = end;
     this.pendingPlaceholderDelta = delta;
   }
 
-  private flushPlaceholderPrepareRange(deltas: PrepareDeltaBuffer): void {
+  private flushPlaceholderPrepareRange(): void {
     const state = this.pendingPlaceholderState;
     if (state === null) {
       return;
@@ -2548,11 +2385,10 @@ export class EgWalkerEngine {
     )) {
       const item = slice.owner;
       if (item !== null) {
-        // The segmented state already absorbed the delta. A zero entry
-        // keeps the physical slice in the one batched ranked-weight
-        // refresh without applying the same prepare delta to its scalar
-        // compatibility fields.
-        deltas.touch(item);
+        // The segmented state already absorbed the delta, and the physical
+        // slice's cached lengths are its owner's weights: refresh them
+        // without touching the owner's scalar compatibility fields.
+        this.sequence.refreshInBatch(item);
       }
     }
   }
@@ -2578,22 +2414,6 @@ export class EgWalkerEngine {
     }
     this.samplePeakSequenceRecordCount();
     return item;
-  }
-
-  private collectItemPrepareDelta(
-    itemId: ItemKey,
-    delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
-  ): void {
-    this.collectPrepareDeltaForItem(this.requireItem(itemId), delta, deltas);
-  }
-
-  private collectPrepareDeltaForItem(
-    item: AugmentedCRDTItem,
-    delta: 1 | -1,
-    deltas: PrepareDeltaBuffer,
-  ): void {
-    deltas.add(item, delta);
   }
 
   private itemToEffectIndex(target: AugmentedCRDTItem): number {

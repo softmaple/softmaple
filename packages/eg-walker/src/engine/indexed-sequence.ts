@@ -75,8 +75,16 @@ export class IndexedSequence<T extends IndexedSequenceItem<T>> {
   private structuralOperationCount = 0;
   private weightUpdateGeneration = 0;
   private weightUpdateActive = false;
+  /** Leaves whose weights changed in the open batch; see {@link beginWeightBatch}. */
   private readonly weightUpdateLevelA: IndexedNode<T>[] = [];
   private readonly weightUpdateLevelB: IndexedNode<T>[] = [];
+  /**
+   * Where the last item {@link refreshInBatch} or {@link itemAfter} located
+   * sits: its leaf and its offset in that leaf, as of that call. A later
+   * edit can move the item, so readers check the slot before trusting it.
+   */
+  private locatedLeaf: LeafNode<T> | null = null;
+  private locatedOffset = 0;
 
   /**
    * Build a ranked sequence from an already ordered record list in linear time.
@@ -343,6 +351,8 @@ export class IndexedSequence<T extends IndexedSequenceItem<T>> {
     this.weightUpdateGeneration = 0;
     this.weightUpdateLevelA.length = 0;
     this.weightUpdateLevelB.length = 0;
+    // Drop the reference so the retired tree can be collected.
+    this.locatedLeaf = null;
     this.structuralOperationCount = 0;
   }
 
@@ -478,13 +488,140 @@ export class IndexedSequence<T extends IndexedSequenceItem<T>> {
    * internal node instead of once per event.
    */
   updateItems(items: Iterable<T>): void {
+    this.beginWeightBatch();
+    try {
+      for (const item of items) {
+        this.refreshInBatch(item);
+      }
+    } finally {
+      this.endWeightBatch();
+    }
+  }
+
+  /**
+   * Open a weight batch: a run of in-place item changes, such as the prepare
+   * states one retreat/advance transition toggles, refreshed with
+   * {@link refreshInBatch} and closed by {@link endWeightBatch}.
+   *
+   * A batch writes each item's new weights into its leaf at once, but leaves
+   * the ancestors' sums alone: every touched leaf keeps one pending delta,
+   * and {@link endWeightBatch} walks the pending deltas up level by level,
+   * so each ancestor changes once however many of its items changed. Until
+   * then, queries that read ancestor sums see the sums from before the
+   * batch.
+   *
+   * Inserts and record splits may run inside a batch. They update the
+   * ancestors at once, and a leaf that splits keeps its pending delta: the
+   * moved items' cached weights, already refreshed, leave with them, and
+   * the delta restores what the leaf's sum lacks for every refreshed item,
+   * moved or not, so the sums still add up once the batch ends.
+   */
+  beginWeightBatch(): void {
     if (this.weightUpdateActive) {
       throw new Error("Cannot update IndexedSequence reentrantly");
     }
-
     this.weightUpdateActive = true;
+    this.nextWeightUpdateGeneration();
+  }
+
+  /**
+   * Refresh the cached weights of an item whose weight inputs changed, inside
+   * the open batch. An item no live sequence holds is skipped, and refreshing
+   * an item twice is harmless: the second refresh finds nothing to change.
+   *
+   * Consecutive refreshes usually touch neighbours, such as the records of
+   * one author's keystrokes, so the item is first looked for next to the one
+   * located last, which avoids scanning its leaf.
+   */
+  refreshInBatch(item: T): void {
+    if (!this.weightUpdateActive) {
+      throw new Error("IndexedSequence weight batch is not open");
+    }
+    this.structuralOperationCount++;
+    const leaf = this.leafOf(item);
+    if (leaf === null) {
+      return;
+    }
+
+    const weights = leaf.weights;
+    const base = this.locateInLeaf(leaf, item) * WEIGHT_STRIDE;
+    const oldPrepare = weights[base + PREPARE_WEIGHT] ?? 0;
+    const oldEffect = weights[base + EFFECT_WEIGHT] ?? 0;
+    const oldAnchor = weights[base + ANCHOR_WEIGHT] ?? 0;
+    const newPrepare = this.prepareWeight(item);
+    const newEffect = this.effectWeight(item);
+    const newAnchor = this.anchorWeight(item);
+    const prepareDelta = newPrepare - oldPrepare;
+    const effectDelta = newEffect - oldEffect;
+    const anchorDelta = newAnchor - oldAnchor;
+    if (prepareDelta === 0 && effectDelta === 0 && anchorDelta === 0) {
+      return;
+    }
+
+    weights[base + PREPARE_WEIGHT] = newPrepare;
+    weights[base + EFFECT_WEIGHT] = newEffect;
+    weights[base + ANCHOR_WEIGHT] = newAnchor;
+    addPendingNodeWeightDelta(
+      this.weightUpdateLevelA,
+      leaf,
+      this.weightUpdateGeneration,
+      prepareDelta,
+      effectDelta,
+      anchorDelta,
+    );
+  }
+
+  /**
+   * Close the open batch: add the pending deltas to every touched leaf and
+   * ancestor, once per node. Callers close a batch in a `finally`, so that a
+   * failed batch still leaves consistent sums for the items it refreshed.
+   */
+  endWeightBatch(): void {
+    if (!this.weightUpdateActive) {
+      throw new Error("IndexedSequence weight batch is not open");
+    }
+    const generation = this.weightUpdateGeneration;
+    let current = this.weightUpdateLevelA;
+    let next = this.weightUpdateLevelB;
     try {
-      this.updateItemsWithScratch(items);
+      if (current.length === 1) {
+        // One touched leaf, as in most small transitions: walk its pending
+        // delta straight up instead of through the level lists.
+        const leaf = current[0]!;
+        this.propagateDelta(
+          leaf,
+          0,
+          leaf.pendingPrepareDelta,
+          leaf.pendingEffectDelta,
+          leaf.pendingAnchorDelta,
+        );
+        current.length = 0;
+      }
+      while (current.length > 0) {
+        for (const node of current) {
+          this.structuralOperationCount++;
+          const prepareDelta = node.pendingPrepareDelta;
+          const effectDelta = node.pendingEffectDelta;
+          const anchorDelta = node.pendingAnchorDelta;
+          node.prepareSum += prepareDelta;
+          node.effectSum += effectDelta;
+          node.anchorSum += anchorDelta;
+          if (node.parent !== null) {
+            addPendingNodeWeightDelta(
+              next,
+              node.parent,
+              generation,
+              prepareDelta,
+              effectDelta,
+              anchorDelta,
+            );
+          }
+        }
+        current.length = 0;
+        const completed = current;
+        current = next;
+        next = completed;
+      }
     } finally {
       this.weightUpdateLevelA.length = 0;
       this.weightUpdateLevelB.length = 0;
@@ -492,70 +629,33 @@ export class IndexedSequence<T extends IndexedSequenceItem<T>> {
     }
   }
 
-  private updateItemsWithScratch(items: Iterable<T>): void {
-    const generation = this.nextWeightUpdateGeneration();
-    let current = this.weightUpdateLevelA;
-    let next = this.weightUpdateLevelB;
-    for (const item of items) {
-      this.structuralOperationCount++;
-      const leaf = this.leafOf(item);
-      if (leaf === null) {
-        continue;
-      }
-
-      const weights = leaf.weights;
-      const base = this.offsetInLeaf(leaf, item) * WEIGHT_STRIDE;
-      const oldPrepare = weights[base + PREPARE_WEIGHT] ?? 0;
-      const oldEffect = weights[base + EFFECT_WEIGHT] ?? 0;
-      const oldAnchor = weights[base + ANCHOR_WEIGHT] ?? 0;
-      const newPrepare = this.prepareWeight(item);
-      const newEffect = this.effectWeight(item);
-      const newAnchor = this.anchorWeight(item);
-      const prepareDelta = newPrepare - oldPrepare;
-      const effectDelta = newEffect - oldEffect;
-      const anchorDelta = newAnchor - oldAnchor;
-      if (prepareDelta === 0 && effectDelta === 0 && anchorDelta === 0) {
-        continue;
-      }
-
-      weights[base + PREPARE_WEIGHT] = newPrepare;
-      weights[base + EFFECT_WEIGHT] = newEffect;
-      weights[base + ANCHOR_WEIGHT] = newAnchor;
-      addPendingNodeWeightDelta(
-        current,
-        leaf,
-        generation,
-        prepareDelta,
-        effectDelta,
-        anchorDelta,
-      );
+  /**
+   * The item after `item` in sequence order, or `undefined` when `item` is
+   * the last one or no live sequence holds it. The returned item becomes the
+   * item located last.
+   *
+   * O(1) when `item` is the one {@link refreshInBatch} or `itemAfter`
+   * located last, which is how a caller walks a run of neighbours, refreshing
+   * each in turn; otherwise a scan of `item`'s leaf.
+   */
+  itemAfter(item: T): T | undefined {
+    const leaf = this.leafOf(item);
+    if (leaf === null) {
+      return undefined;
     }
-
-    while (current.length > 0) {
-      for (const node of current) {
-        this.structuralOperationCount++;
-        const prepareDelta = node.pendingPrepareDelta;
-        const effectDelta = node.pendingEffectDelta;
-        const anchorDelta = node.pendingAnchorDelta;
-        node.prepareSum += prepareDelta;
-        node.effectSum += effectDelta;
-        node.anchorSum += anchorDelta;
-        if (node.parent !== null) {
-          addPendingNodeWeightDelta(
-            next,
-            node.parent,
-            generation,
-            prepareDelta,
-            effectDelta,
-            anchorDelta,
-          );
-        }
-      }
-      current.length = 0;
-      const completed = current;
-      current = next;
-      next = completed;
+    const offset = this.locateInLeaf(leaf, item) + 1;
+    const next = leaf.items[offset];
+    if (next !== undefined) {
+      this.locatedOffset = offset;
+      return next;
     }
+    const nextLeaf = this.leafAfter(leaf);
+    if (nextLeaf === null) {
+      return undefined;
+    }
+    this.locatedLeaf = nextLeaf;
+    this.locatedOffset = 0;
+    return nextLeaf.items[0];
   }
 
   private nextWeightUpdateGeneration(): number {
@@ -995,6 +1095,57 @@ export class IndexedSequence<T extends IndexedSequenceItem<T>> {
       }
     }
     throw new Error("IndexedSequence item is missing from its leaf");
+  }
+
+  /**
+   * {@link offsetInLeaf}, trying the slot of the item located last and the
+   * slots next to it before scanning, and the ends of a different leaf,
+   * where a walk across leaves arrives. The result becomes the item located
+   * last.
+   */
+  private locateInLeaf(leaf: LeafNode<T>, item: T): number {
+    const items = leaf.items;
+    let offset = -1;
+    if (leaf === this.locatedLeaf) {
+      const located = this.locatedOffset;
+      if (items[located] === item) {
+        offset = located;
+      } else if (items[located + 1] === item) {
+        offset = located + 1;
+      } else if (located > 0 && items[located - 1] === item) {
+        offset = located - 1;
+      }
+    } else if (items[0] === item) {
+      offset = 0;
+    } else if (items[items.length - 1] === item) {
+      offset = items.length - 1;
+    }
+    if (offset < 0) {
+      offset = this.offsetInLeaf(leaf, item);
+    }
+    this.locatedLeaf = leaf;
+    this.locatedOffset = offset;
+    return offset;
+  }
+
+  /** The leaf after `leaf` in sequence order, or `null` for the last one. */
+  private leafAfter(leaf: LeafNode<T>): LeafNode<T> | null {
+    let node: IndexedNode<T> = leaf;
+    while (node.parent !== null) {
+      this.structuralOperationCount++;
+      const sibling: IndexedNode<T> | undefined =
+        node.parent.children[node.childIndex + 1];
+      if (sibling !== undefined) {
+        let descendant: IndexedNode<T> = sibling;
+        while (descendant.kind === "internal") {
+          this.structuralOperationCount++;
+          descendant = descendant.children[0]!;
+        }
+        return descendant;
+      }
+      node = node.parent;
+    }
+    return null;
   }
 
   /** Reject an item that a live sequence, this one or another, still holds. */

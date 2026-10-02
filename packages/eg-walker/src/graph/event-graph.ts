@@ -30,6 +30,7 @@ import {
   PackedEventGraphBase,
   type PackedBranchReplayLayout,
   type PackedCanonicalIdRun,
+  type PackedKeystrokeRun,
   type PackedTailEvents,
 } from "./internals/packed-event-graph-base";
 import {
@@ -112,6 +113,17 @@ export interface PackedReplayPlanningView extends PackedLinearReplayView {
   /** Agent of the event at an offset, or `-1` for a non-canonical ID. */
   agentAt(offset: number): number;
   sequenceAt(offset: number): number;
+  /**
+   * Describe the run of one author's one-character inserts with consecutive
+   * sequences that starts at `offset`, walked by `direction` towards
+   * `limit`. See {@link PackedEventGraphBase.keystrokeRunAt}.
+   */
+  keystrokeRunAt(
+    offset: number,
+    limit: number,
+    direction: 1 | -1,
+    run: PackedKeystrokeRun,
+  ): boolean;
   getBranchPreservingOrderOffsets(): Uint32Array;
   buildBranchPreservingCriticalReplayLayout(): PackedBranchReplayLayout;
   buildBranchPreservingCriticalReplayLayoutSteps(

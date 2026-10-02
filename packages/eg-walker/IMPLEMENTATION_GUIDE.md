@@ -41,7 +41,7 @@ src/
 | 3.3 Prepare/effect versions | `engine/eg-walker-engine.ts`, `engine/internals/yata-integration.ts`                                             |
 | 3.4 Index mapping           | `engine/indexed-sequence.ts`, `engine/internals/record-splitter.ts`, `engine/internals/pending-insert-buffer.ts` |
 | 3.5 Critical versions       | `engine/critical-version.ts`                                                                                     |
-| 3.6 Partial replay          | `engine/partial-replay.ts`                                                                                       |
+| 3.6 Partial replay          | `core/replica.ts`, `graph/internals/packed-suffix-view.ts`, `engine/partial-replay.ts`                           |
 | 3.8 Event graph storage     | `graph/columnar-codec.ts`                                                                                        |
 
 ## Runtime Model

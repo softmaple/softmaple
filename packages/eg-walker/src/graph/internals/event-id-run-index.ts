@@ -10,6 +10,8 @@ export const CUSTOM_AGENT = -1;
 /** Canonical ID interval, as the ID run index and replay planners see it. */
 export interface PackedCanonicalIdRun {
   readonly replicaId: string;
+  /** Number of {@link replicaId} in the index's agent table. */
+  readonly agent: number;
   readonly startSequence: number;
   readonly startEventOffset: number;
   readonly length: number;
@@ -28,7 +30,6 @@ export interface PackedCanonicalIdRun {
 interface EventIdRun extends PackedCanonicalIdRun {
   length: number;
   readonly custom: boolean;
-  readonly agent: number;
   /**
    * First sequence of the agent's next run while this run can still grow.
    * Only the newest run grows, so the bound keeps growth from reaching a

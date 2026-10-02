@@ -1,13 +1,14 @@
 /**
  * Property: an `IndexedSequence` agrees with an array of the same items
- * under any mix of ranked inserts, object-anchored inserts, record splits
- * and weight updates. Every item resolves to its array position, neighbours
- * and order follow the array, and every prepare, effect and anchor rank is
- * a prefix sum of the array's weights.
+ * under any mix of ranked inserts, object-anchored inserts, record splits,
+ * weight updates and weight batches. Every item resolves to its array
+ * position, neighbours and order follow the array, and every prepare, effect
+ * and anchor rank is a prefix sum of the array's weights.
  *
  * Items keep their leaf on themselves and leaves shift their slots in place,
  * so this pins down object-anchored lookups across inserts in front of an
- * item and across leaf splits.
+ * item and across leaf splits, including splits inside an open weight batch,
+ * whose ancestors catch up only when the batch closes.
  */
 
 import fc from "fast-check";
@@ -109,7 +110,23 @@ type Operation =
         readonly target: number;
         readonly weights: Weights;
       }>;
-    };
+    }
+  | { readonly kind: "batch"; readonly steps: ReadonlyArray<BatchStep> };
+
+/** A step inside one open weight batch. */
+type BatchStep =
+  | {
+      readonly kind: "refresh";
+      readonly target: number;
+      readonly weights: Weights;
+    }
+  | {
+      readonly kind: "split";
+      readonly anchor: number;
+      readonly anchorWeights: Weights;
+      readonly weights: Weights;
+    }
+  | { readonly kind: "next"; readonly target: number };
 
 const weightsArb: fc.Arbitrary<Weights> = fc.record({
   prepare: fc.nat(),
@@ -153,6 +170,25 @@ const operationArb: fc.Arbitrary<Operation> = fc.oneof(
   fc.record({
     kind: fc.constant("updateMany" as const),
     updates: fc.array(fc.record({ target: fc.nat(), weights: weightsArb })),
+  }),
+  fc.record({
+    kind: fc.constant("batch" as const),
+    steps: fc.array(
+      fc.oneof(
+        fc.record({
+          kind: fc.constant("refresh" as const),
+          target: fc.nat(),
+          weights: weightsArb,
+        }),
+        fc.record({
+          kind: fc.constant("split" as const),
+          anchor: fc.nat(),
+          anchorWeights: weightsArb,
+          weights: weightsArb,
+        }),
+        fc.record({ kind: fc.constant("next" as const), target: fc.nat() }),
+      ),
+    ),
   }),
 );
 
@@ -250,7 +286,45 @@ const applyOperation = (
       sequence.updateItems(targets);
       return;
     }
+    case "batch": {
+      sequence.beginWeightBatch();
+      try {
+        for (const step of operation.steps) {
+          applyBatchStep(sequence, model, step, items);
+        }
+      } finally {
+        sequence.endWeightBatch();
+      }
+      return;
+    }
     default:
+      return;
+  }
+};
+
+/** Apply one step of an open weight batch to the sequence and `model`. */
+const applyBatchStep = (
+  sequence: IndexedSequence<ModelItem>,
+  model: ModelItem[],
+  step: BatchStep,
+  items: ItemFactory,
+): void => {
+  const at = step.kind === "split" ? step.anchor : step.target;
+  const target = model[at % model.length]!;
+  switch (step.kind) {
+    case "refresh":
+      setWeights(target, step.weights);
+      sequence.refreshInBatch(target);
+      return;
+    case "split": {
+      const item = items.create(step.weights);
+      setWeights(target, step.anchorWeights);
+      expect(sequence.updateAndInsertAfter(target, item)).toBe(true);
+      model.splice(model.indexOf(target) + 1, 0, item);
+      return;
+    }
+    case "next":
+      expect(sequence.itemAfter(target)).toBe(model[model.indexOf(target) + 1]);
       return;
   }
 };
@@ -280,6 +354,9 @@ const expectSequenceMatchesModel = (
   );
   expect(model.map((item) => sequence.isLast(item))).toEqual(
     positions.map((position) => position === model.length - 1),
+  );
+  expect(model.map((item) => sequence.itemAfter(item))).toEqual(
+    positions.map((position) => model[position + 1]),
   );
   if (maintainOrder) {
     const pairs = positions.slice(1).map((position) => ({

@@ -1025,7 +1025,7 @@ describe("packed critical-section replay planning", () => {
     );
   });
 
-  it("materializes lazy delete targets before collecting insert transition deltas", () => {
+  it("toggles lazy delete targets and the insert spans that share their record in one transition", () => {
     const events: GraphEvent[] = [];
     let parent: EventId | null = null;
     for (let sequence = 0; sequence < 8; sequence++) {

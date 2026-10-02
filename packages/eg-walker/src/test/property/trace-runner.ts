@@ -24,6 +24,11 @@ export interface TraceOptions {
    * so every other replica sees either none or all of the typed text.
    */
   readonly typeInserts?: boolean;
+  /**
+   * Delete each delete instruction one Unicode scalar per event at the same
+   * index, as the delete key does, instead of as one event.
+   */
+  readonly typeDeletes?: boolean;
 }
 
 export interface TraceResult {
@@ -66,6 +71,7 @@ const applyEdit = (
   replica: EgWalkerReplica,
   edit: EditInstruction,
   typeInserts: boolean,
+  typeDeletes: boolean,
 ): boolean => {
   const text = replica.getText();
   if (edit.kind === "insert") {
@@ -100,7 +106,13 @@ const applyEdit = (
   if (length <= 0) {
     return false;
   }
-  replica.delete(start, length);
+  if (!typeDeletes) {
+    replica.delete(start, length);
+    return true;
+  }
+  for (const scalar of text.slice(start, start + length)) {
+    replica.delete(start, scalar.length);
+  }
   return true;
 };
 
@@ -159,6 +171,7 @@ export const runTrace = (
 ): TraceResult => {
   const { initialText, scripts, syncEveryN } = params;
   const typeInserts = options.typeInserts ?? false;
+  const typeDeletes = options.typeDeletes ?? false;
   const sims = scripts.map(({ replicaId }) => ({
     id: replicaId,
     replica: new EgWalkerReplica(replicaId, initialText),
@@ -184,7 +197,7 @@ export const runTrace = (
       if (step >= edits.length) {
         continue;
       }
-      if (applyEdit(sims[r]!.replica, edits[step]!, typeInserts)) {
+      if (applyEdit(sims[r]!.replica, edits[step]!, typeInserts, typeDeletes)) {
         appliedEdits++;
       }
       stepCounter++;

@@ -397,6 +397,31 @@ export class DeleteTargetIndex {
       : (this.groupHeads[group] ?? EMPTY_HANDLE);
   }
 
+  /**
+   * The item a delete event targeted, when that item is its only target;
+   * otherwise zero, which no item key is. A one-character delete records
+   * one item, so a transition reads it without walking the target list.
+   */
+  soleItemTargetOf(deleteEvent: number): ItemKey {
+    const group = this.groups.get(deleteEvent);
+    return group === undefined ? 0 : this.soleItemTargetInGroup(group);
+  }
+
+  /** {@link soleItemTargetOf} for a packed delete replay order index. */
+  soleItemTargetOfPackedOrder(orderIndex: number): ItemKey {
+    const group = this.packedGroupAtOrder(orderIndex);
+    return group === EMPTY_HANDLE ? 0 : this.soleItemTargetInGroup(group);
+  }
+
+  private soleItemTargetInGroup(group: DeleteTargetGroupHandle): ItemKey {
+    const target = this.groupHeads[group] ?? EMPTY_HANDLE;
+    return target !== EMPTY_HANDLE &&
+      this.targetKinds[target] === DELETE_TARGET_KIND.ITEM &&
+      this.targetNext[target] === EMPTY_HANDLE
+      ? (this.targetItemIds[target] ?? 0)
+      : 0;
+  }
+
   nextTarget(target: DeleteTargetHandle): DeleteTargetHandle {
     this.assertTargetHandle(target);
     return this.targetNext[target] ?? EMPTY_HANDLE;

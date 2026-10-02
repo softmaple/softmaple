@@ -346,3 +346,227 @@ describe("IndexedSequence object-anchored hot paths", () => {
     );
   });
 });
+
+describe("IndexedSequence.refreshInBatch", () => {
+  it("should leave exact sums when a leaf and then its parent split inside the batch", () => {
+    // Arrange
+    // 1,100 records bulk-load into 34 full leaves and one partial leaf; the
+    // first internal node holds 32 full leaves.
+    const items = Array.from({ length: 1_100 }, (_, index) =>
+      mutableItem(`record-${index}`, index % 3 === 0 ? 0 : 1, index % 2),
+    );
+    const sequence = new IndexedSequence<MutableWeightedItem>(
+      (item) => item.prepare,
+      (item) => item.effect,
+      items,
+      undefined,
+      true,
+    );
+    const refresh = (index: number, prepare: number): void => {
+      items[index]!.prepare = prepare;
+      sequence.refreshInBatch(items[index]!);
+    };
+
+    // Act
+    sequence.beginWeightBatch();
+    refresh(3, 4);
+    refresh(643, 2);
+    refresh(1_090, 5);
+    // Overfills the first leaf, whose new sibling overfills the first
+    // internal node: record 30 moves to a new leaf and record 643's leaf to
+    // a new internal node, both with deltas still pending.
+    sequence.updateAndInsertAfter(items[31]!, mutableItem("inserted", 3, 1));
+    refresh(30, 2);
+    refresh(3, 0);
+    sequence.endWeightBatch();
+
+    // Assert
+    expect(recountedSums(sequence)).toEqual(sumsOf(sequence.toArray()));
+  });
+
+  it("should keep the sums of the items refreshed before a weight callback throws", () => {
+    // Arrange
+    const items = Array.from({ length: 64 }, (_, index) =>
+      mutableItem(`record-${index}`, 1, 1),
+    );
+    let unavailable: MutableWeightedItem | null = null;
+    const sequence = new IndexedSequence<MutableWeightedItem>(
+      (item) => {
+        if (item === unavailable) {
+          throw new Error("weight unavailable");
+        }
+        return item.prepare;
+      },
+      (item) => item.effect,
+      items,
+      undefined,
+      true,
+    );
+    items[5]!.prepare = 3;
+    items[40]!.prepare = 3;
+    unavailable = items[40]!;
+
+    // Act
+    sequence.beginWeightBatch();
+    let failure: unknown;
+    try {
+      sequence.refreshInBatch(items[5]!);
+      sequence.refreshInBatch(items[40]!);
+    } catch (error) {
+      failure = error;
+    } finally {
+      sequence.endWeightBatch();
+    }
+
+    // Assert
+    expect(failure).toEqual(new Error("weight unavailable"));
+    expect(sequence.prepareLength).toBe(64 + 2);
+    expect(sequence.prepareIndexToPosition(5 + 2, false)).toBe(5);
+  });
+
+  it("should reject a nested batch and a refresh or close outside one", () => {
+    // Arrange
+    const items = createItems(8);
+    const sequence = createSequence(items);
+
+    // Act
+    sequence.beginWeightBatch();
+    const nested = (): void => sequence.beginWeightBatch();
+    const nestedUpdate = (): void => sequence.updateItems([items[0]!]);
+    const nestedFailures = [nested, nestedUpdate].map(captureError);
+    sequence.endWeightBatch();
+
+    // Assert
+    expect(nestedFailures.map((error) => error?.message)).toEqual([
+      "Cannot update IndexedSequence reentrantly",
+      "Cannot update IndexedSequence reentrantly",
+    ]);
+    expect(() => sequence.endWeightBatch()).toThrow(
+      "IndexedSequence weight batch is not open",
+    );
+    expect(() => sequence.refreshInBatch(items[0]!)).toThrow(
+      "IndexedSequence weight batch is not open",
+    );
+  });
+});
+
+describe("IndexedSequence.itemAfter", () => {
+  it("should walk every item in order across leaf boundaries", () => {
+    // Arrange
+    const items = createItems(100);
+    const sequence = createSequence(items);
+
+    // Act
+    const walked = [items[0]!];
+    for (
+      let next = sequence.itemAfter(items[0]!);
+      next !== undefined;
+      next = sequence.itemAfter(next)
+    ) {
+      walked.push(next);
+    }
+
+    // Assert
+    expect(walked).toEqual(items);
+  });
+
+  it("should return undefined after the last item and for an item it does not hold", () => {
+    // Arrange
+    const items = createItems(40);
+    const sequence = createSequence(items);
+
+    // Act
+    const afterLast = sequence.itemAfter(items[39]!);
+    const afterMissing = sequence.itemAfter(weightedItem("missing", 1, 1));
+
+    // Assert
+    expect(afterLast).toBeUndefined();
+    expect(afterMissing).toBeUndefined();
+  });
+
+  it("should find the next item after an insert shifts the item located last", () => {
+    // Arrange
+    const items = createItems(20);
+    const sequence = createSequence(items);
+    expect(sequence.itemAfter(items[10]!)).toBe(items[11]);
+    const inserted = weightedItem("inserted", 1, 1);
+
+    // Act
+    sequence.insertAfter(items[5]!, inserted);
+
+    // Assert
+    expect(sequence.itemAfter(items[10]!)).toBe(items[11]);
+    expect(sequence.itemAfter(items[5]!)).toBe(inserted);
+    expect(sequence.itemAfter(inserted)).toBe(items[6]);
+  });
+});
+
+// Helpers
+
+interface MutableWeightedItem extends IndexedSequenceItem<MutableWeightedItem> {
+  readonly id: string;
+  prepare: number;
+  effect: number;
+}
+
+const mutableItem = (
+  id: string,
+  prepare: number,
+  effect: number,
+): MutableWeightedItem => unindexed({ id, prepare, effect });
+
+interface Sums {
+  readonly prepareLength: number;
+  /** Effect width before each position, and after the last. */
+  readonly effectBefore: ReadonlyArray<number>;
+  /** Position of the first prepare-visible unit of each visible item. */
+  readonly firstVisiblePositions: ReadonlyArray<number>;
+}
+
+/** The sums an exact tree reports for `items`, from a plain recount. */
+const sumsOf = (items: ReadonlyArray<MutableWeightedItem>): Sums => {
+  const effectBefore = [0];
+  const firstVisiblePositions: number[] = [];
+  let prepareLength = 0;
+  items.forEach((item, position) => {
+    effectBefore.push(effectBefore[position]! + item.effect);
+    if (item.prepare > 0) {
+      firstVisiblePositions.push(position);
+    }
+    prepareLength += item.prepare;
+  });
+  return { prepareLength, effectBefore, firstVisiblePositions };
+};
+
+/** The same sums as the sequence's ranked queries report them. */
+const recountedSums = (
+  sequence: IndexedSequence<MutableWeightedItem>,
+): Sums => {
+  const items = sequence.toArray();
+  const firstVisiblePositions: number[] = [];
+  let prepareBefore = 0;
+  for (const item of items) {
+    if (item.prepare > 0) {
+      firstVisiblePositions.push(
+        sequence.prepareIndexToPosition(prepareBefore, false),
+      );
+    }
+    prepareBefore += item.prepare;
+  }
+  return {
+    prepareLength: sequence.prepareLength,
+    effectBefore: Array.from({ length: items.length + 1 }, (_, position) =>
+      sequence.effectIndexBeforePosition(position),
+    ),
+    firstVisiblePositions,
+  };
+};
+
+const captureError = (action: () => void): Error | undefined => {
+  try {
+    action();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+};

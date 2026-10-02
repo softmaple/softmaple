@@ -65,7 +65,11 @@ minimal persistent-state model. `createNativeSnapshot()` defaults to reusing
 only resume state that is already available, so taking a snapshot never causes
 an implicit full-history replay. Pass `{ resumeCache: "none" }` to exclude the
 complete extension (including checkpoints), or `{ resumeCache: "rebuild" }`
-to explicitly rebuild missing sequence/delete state.
+to explicitly rebuild missing sequence/delete state. The snapshot holds the
+live graph encoded once as EGW4; its `eventGraph` objects are decoded only
+when read, and `NativeSnapshotCodec.encode` writes those bytes without
+rebuilding the graph while the snapshot is unchanged. A snapshot built or
+edited outside the replica has its `eventGraph` rebuilt and checked first.
 
 ### Paper compatibility boundary
 

@@ -14,6 +14,7 @@ import {
   type EngineSequenceRecord,
 } from "../engine/internals/sequence-records";
 import { crdtItem } from "./test-helpers";
+import { measureArrayScanWork } from "./array-scan-work";
 
 describe("RecordSplitter canonical typed-run spans", () => {
   it("resolves and isolates a numeric event span without formatting IDs", () => {
@@ -79,6 +80,102 @@ describe("RecordSplitter canonical typed-run spans", () => {
 });
 
 describe("RecordSplitter split halves", () => {
+  it.each([
+    false,
+    true,
+  ])("moves a large right-boundary fanout with linear array work (typed run: %s)", (run) => {
+    const count = 10_000;
+    const items = new ItemTable();
+    const anchor = crdtItem({
+      id: items.nextKey(),
+      agent: 0,
+      sequence: 0,
+      offset: 0,
+      content: "abcdef",
+      originLeft: null,
+      originRight: null,
+      everDeleted: false,
+      prepareState: 1,
+      run,
+    });
+    items.add(anchor);
+    const siblings = Array.from({ length: count }, (_, offset) => {
+      const item = crdtItem({
+        id: items.nextKey(),
+        agent: offset + 1,
+        sequence: 0,
+        offset: 0,
+        content: "x",
+        originLeft: anchor.id,
+        originRight: null,
+        everDeleted: false,
+        prepareState: 1,
+        run: false,
+      });
+      items.add(item);
+      return item;
+    });
+    const originLeftIndex = new OriginLeftIndex();
+    const trackWork = measureArrayScanWork(() => {
+      for (const item of siblings) {
+        originLeftIndex.track(item.id, item.originLeft);
+      }
+    });
+    const sequence = new IndexedSequence<AugmentedCRDTItem>(
+      (item) => item.content.length,
+      (item) => item.content.length,
+      [anchor, ...siblings],
+    );
+    const events = { agentAt: () => 0, sequenceAt: () => 0 };
+    const eventItems = new EventItemIndex(events);
+    if (run) {
+      eventItems.registerRunItem(anchor);
+    } else {
+      eventItems.setInsertRun(0, anchor.id);
+    }
+    const splitter = new RecordSplitter({
+      sequence,
+      items,
+      events,
+      eventItems,
+      originLeftIndex,
+      deleteTargets: new DeleteTargetIndex(),
+      nextPlaceholderSerial: () => 0,
+    });
+
+    const splitWork = measureArrayScanWork(() => {
+      splitter.splitRecordAt(0, 2);
+      splitter.splitRecordAt(1, 2);
+    });
+
+    expect(trackWork).toBeLessThan(count * 8);
+    expect(splitWork).toBeLessThan(count * 16);
+    const middle = sequence.at(1)!;
+    const right = sequence.at(2)!;
+    expect([anchor.content, middle.content, right.content]).toEqual([
+      "ab",
+      "cd",
+      "ef",
+    ]);
+    expect(middle.originLeft).toBe(anchor.id);
+    expect(right.originLeft).toBe(middle.id);
+    expect(siblings.every((item) => item.originLeft === right.id)).toBe(true);
+    expect(
+      sequence
+        .toArray()
+        .map((item) => item.content)
+        .join(""),
+    ).toBe(`abcdef${"x".repeat(count)}`);
+    // Revisit the moved bucket to expose lost or duplicate memberships,
+    // even if the first two splits happened to leave the text unchanged.
+    const visited: number[] = [];
+    originLeftIndex.rewriteReferences(right.id, items.nextKey(), (id) => {
+      visited.push(id);
+      return items.at(id);
+    });
+    expect(visited).toEqual(siblings.map((item) => item.id));
+  });
+
   it("lays out every right half with the fields of every other item, in order", () => {
     // Arrange
     const records = [

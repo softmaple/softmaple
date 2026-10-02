@@ -25,6 +25,12 @@ export class OriginLeftIndex {
     this.refs = [];
   }
 
+  /**
+   * Register a newly allocated record once per index lifetime, in amortized
+   * O(1). Inserts and split halves have fresh keys; snapshot restore clears
+   * the index before registering each restored record. Later origin changes
+   * must go through rewriteReferences, not another call to track.
+   */
   track(itemId: ItemKey, originLeft: ItemKey | null): void {
     if (originLeft === null) {
       return;
@@ -40,9 +46,7 @@ export class OriginLeftIndex {
       }
       return;
     }
-    if (!refs.includes(itemId)) {
-      refs.push(itemId);
-    }
+    refs.push(itemId);
   }
 
   has(itemId: ItemKey): boolean {
@@ -50,6 +54,7 @@ export class OriginLeftIndex {
     return refs !== undefined && (typeof refs === "number" || refs.length > 0);
   }
 
+  /** Move k references in O(k) amortized work, preserving existing targets. */
   rewriteReferences(
     oldOriginLeft: ItemKey,
     newOriginLeft: ItemKey,
@@ -66,7 +71,7 @@ export class OriginLeftIndex {
         ? []
         : typeof merged === "number"
           ? [merged]
-          : merged.slice();
+          : merged;
     const moved = typeof refs === "number" ? [refs] : refs;
     for (const itemId of moved) {
       const item = itemAt(itemId);
@@ -74,9 +79,10 @@ export class OriginLeftIndex {
         continue;
       }
       item.originLeft = newOriginLeft;
-      if (!next.includes(itemId)) {
-        next.push(itemId);
-      }
+      // Each record is registered once and has one left origin, so the
+      // moved and existing target references are disjoint. The arrays are
+      // private to this index: append without scanning or copying the target.
+      next.push(itemId);
     }
     if (next.length === 1) {
       this.refs[newOriginLeft] = next[0]!;

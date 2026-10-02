@@ -5,6 +5,7 @@ import { CriticalCheckpointStore } from "../core/internals/critical-checkpoint-s
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
+import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { EventId, GraphEvent } from "../types";
 
 const insertEvent = (
@@ -89,10 +90,9 @@ describe("CriticalCheckpointStore incremental validation", () => {
     const validateSuffix = vi.spyOn(graph, "isInsertionSuffixDominatedBy");
 
     expect(checkpoints.pickFor(graph)).toBeNull();
-    expect(
-      checkpoints.snapshotForTransaction().checkpoints[0]?.criticalityValidation
-        ?.invalid,
-    ).toBe(true);
+    // A cut that stopped being critical never becomes critical again, so the
+    // rejected checkpoint is dropped rather than kept and checked again.
+    expect(checkpoints.count).toBe(0);
 
     appendLinearSuffix(graph, "merge:0", 3, 128);
     expect(checkpoints.pickFor(graph)).toBeNull();
@@ -214,13 +214,7 @@ describe("CriticalCheckpointStore incremental validation", () => {
     ]);
 
     expect(checkpoints.pickFor(graph)).toBeNull();
-    expect(
-      checkpoints.snapshotForTransaction().checkpoints[0]
-        ?.criticalityValidation,
-    ).toMatchObject({
-      invalid: true,
-      requiresFullValidation: true,
-    });
+    expect(checkpoints.count).toBe(0);
   });
 
   it("starts planner-proven checkpoints at the validated graph cursor", () => {
@@ -237,3 +231,88 @@ describe("CriticalCheckpointStore incremental validation", () => {
     expect(validateSuffix).toHaveBeenCalledWith(new Set(["alice:31"]), 32, 256);
   });
 });
+
+describe("CriticalCheckpointStore.recordReplayBase", () => {
+  it("should insert the base between older and newer checkpoints", () => {
+    // Arrange
+    const graph = new EventGraph();
+    graph.addEvent(insertEvent("alice:0", new Set(), 0));
+    appendLinearSuffix(graph, "alice:0", 1, 9);
+    const checkpoints = new CriticalCheckpointStore(
+      new CriticalVersionAnalyzer(),
+    );
+    checkpoints.record(new Set(["alice:1"]), "xx", 2);
+    checkpoints.record(new Set(["alice:7"]), "x".repeat(8), 8);
+
+    // Act
+    checkpoints.recordReplayBase(
+      new Set(["alice:4"]),
+      PersistentUtf16Rope.from("x".repeat(5)),
+      5,
+      graph.getEventCount(),
+    );
+
+    // Assert
+    expect(eventCounts(checkpoints)).toEqual([2, 5, 8]);
+  });
+
+  it("should not record a cut twice", () => {
+    // Arrange
+    const graph = new EventGraph();
+    graph.addEvent(insertEvent("alice:0", new Set(), 0));
+    appendLinearSuffix(graph, "alice:0", 1, 9);
+    const checkpoints = new CriticalCheckpointStore(
+      new CriticalVersionAnalyzer(),
+    );
+    checkpoints.record(new Set(["alice:4"]), "x".repeat(5), 5);
+
+    // Act
+    checkpoints.recordReplayBase(
+      new Set(["alice:4"]),
+      PersistentUtf16Rope.from("x".repeat(5)),
+      5,
+      graph.getEventCount(),
+    );
+
+    // Assert
+    expect(eventCounts(checkpoints)).toEqual([5]);
+  });
+
+  it("should serve a later divergence after the base from the base", () => {
+    // Arrange
+    const graph = new EventGraph();
+    graph.addEvent(insertEvent("alice:0", new Set(), 0));
+    appendLinearSuffix(graph, "alice:0", 1, 9);
+    const checkpoints = new CriticalCheckpointStore(
+      new CriticalVersionAnalyzer(),
+    );
+    checkpoints.record(new Set(["alice:1"]), "xx", 2);
+    checkpoints.record(new Set(["alice:9"]), "x".repeat(10), 10);
+    // Bob's edit is concurrent with alice:7 onwards, so the newest critical
+    // cut before it is alice:6, newer than the checkpoint a replay starts at.
+    graph.addEvent(insertEvent("bob:0", new Set(["alice:6"]), 7));
+    checkpoints.pickFor(graph);
+    checkpoints.recordReplayBase(
+      new Set(["alice:6"]),
+      PersistentUtf16Rope.from("x".repeat(7)),
+      7,
+      graph.getEventCount(),
+    );
+    graph.addEvent(insertEvent("carol:0", new Set(["alice:8"]), 9));
+
+    // Act
+    const checkpoint = checkpoints.pickFor(graph);
+
+    // Assert
+    expect(checkpoint?.eventCount).toBe(7);
+  });
+});
+
+// Helpers
+
+const eventCounts = (
+  checkpoints: CriticalCheckpointStore,
+): ReadonlyArray<number> =>
+  checkpoints
+    .snapshotForTransaction()
+    .checkpoints.map((checkpoint) => checkpoint.eventCount);

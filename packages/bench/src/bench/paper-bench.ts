@@ -30,6 +30,9 @@ import {
 } from "./paper-bench-options";
 import {
   applyRemoteEventsInBatches,
+  type ApplyCallLatency,
+  summarizeApplyCallLatency,
+  timeApplyRemoteEvents,
   applyRemoteEventsOneByOne,
 } from "./paper-bench-apply";
 import { loadPaperTraceCausalBatches } from "./paper-trace-causal-batches";
@@ -119,6 +122,8 @@ interface ApplyBenchResult {
   readonly finalTextOracle: AppliedTextOracle;
   readonly loadConvertMs: number;
   readonly applyMs: number;
+  /** Latency of each receive call; `null` for the single-event lane. */
+  readonly callLatency: ApplyCallLatency | null;
   readonly totalMs: number;
   readonly fullReplays: number;
   readonly partialReplays: number;
@@ -213,13 +218,20 @@ interface PreparedNativeBench {
   readonly graphEncodeMs: number;
 }
 
+interface AppliedTrace {
+  /** Receive API calls made. */
+  readonly calls: number;
+  /** Time each batch call took; empty for the single-event lane. */
+  readonly callMs: ReadonlyArray<number>;
+}
+
 interface PreparedApplyBench {
   readonly txnCount: number;
   readonly patchCount: number;
   readonly eventCount: number;
   readonly limited: boolean;
   readonly endContent: string;
-  apply(replica: EgWalkerReplica): number;
+  apply(replica: EgWalkerReplica): AppliedTrace;
 }
 
 interface BenchResult {
@@ -649,6 +661,9 @@ const printApplyResult = (result: ApplyBenchResult): void => {
       `loadConvertMs=${formatNumber(result.loadConvertMs)}`,
       `applyMs=${formatNumber(result.applyMs)}`,
       `applyUsPerEvent=${formatNumber(result.events === 0 ? 0 : (result.applyMs * 1_000) / result.events)}`,
+      `batchP50Ms=${formatLatency(result.callLatency?.p50Ms)}`,
+      `batchP95Ms=${formatLatency(result.callLatency?.p95Ms)}`,
+      `batchMaxMs=${formatLatency(result.callLatency?.maxMs)}`,
       `totalMs=${formatNumber(result.totalMs)}`,
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
@@ -1102,9 +1117,9 @@ const runApplyDatasetOnce = (
   const replica = new EgWalkerReplica(
     `paper-bench:${benchCase.dataset}:${run}:${applyApi}`,
   );
-  let applyCalls: number;
+  let applied: AppliedTrace;
   try {
-    applyCalls = prepared.apply(replica);
+    applied = prepared.apply(replica);
   } catch (error) {
     throw new Error(
       `${benchCase.dataset}: ${applyApi} apply failed with batch size ${benchCase.applyBatchEvents}: ${error instanceof Error ? error.message : String(error)}`,
@@ -1132,7 +1147,7 @@ const runApplyDatasetOnce = (
     run,
     startedAt,
     prepared.eventCount,
-    applyCalls,
+    applied.calls,
   );
   const stats = replica.getReplayStats();
 
@@ -1145,7 +1160,7 @@ const runApplyDatasetOnce = (
     granularity: benchCase.granularity,
     applyBatchEvents: benchCase.applyBatchEvents,
     applyApi,
-    applyCalls,
+    applyCalls: applied.calls,
     txns: prepared.txnCount,
     patches: prepared.patchCount,
     events: prepared.eventCount,
@@ -1154,6 +1169,7 @@ const runApplyDatasetOnce = (
     finalTextOracle,
     loadConvertMs: convertedAt - startedAt,
     applyMs: appliedAt - applyStartedAt,
+    callLatency: summarizeApplyCallLatency(applied.callMs),
     totalMs: appliedAt - startedAt,
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
@@ -1183,11 +1199,14 @@ const prepareApplyBench = (
       eventCount: loaded.eventCount,
       limited: loaded.limited,
       endContent: loaded.trace.endContent,
-      apply: (replica): number => {
+      apply: (replica): AppliedTrace => {
+        const callMs: number[] = [];
         for (const batch of loaded.batches) {
+          const startedAt = performance.now();
           replica.applyCausalBatch(batch);
+          callMs.push(performance.now() - startedAt);
         }
-        return loaded.batchCount;
+        return { calls: loaded.batchCount, callMs };
       },
     };
   }
@@ -1199,14 +1218,23 @@ const prepareApplyBench = (
     eventCount: loaded.events.length,
     limited: loaded.limited,
     endContent: loaded.trace.endContent,
-    apply: (replica): number =>
-      applyApi === "single"
-        ? applyRemoteEventsOneByOne(replica, loaded.events)
-        : applyRemoteEventsInBatches(
-            replica,
-            loaded.events,
-            benchCase.applyBatchEvents,
-          ),
+    apply: (replica): AppliedTrace => {
+      // Timing every single-event call would add two clock reads per event
+      // to the lane it measures.
+      if (applyApi === "single") {
+        return {
+          calls: applyRemoteEventsOneByOne(replica, loaded.events),
+          callMs: [],
+        };
+      }
+      const callMs: number[] = [];
+      const calls = applyRemoteEventsInBatches(
+        timeApplyRemoteEvents(replica, callMs),
+        loaded.events,
+        benchCase.applyBatchEvents,
+      );
+      return { calls, callMs };
+    },
   };
 };
 
@@ -1791,10 +1819,41 @@ const printApplySummaries = (
         `meanEventsPerSecond=${formatNumber(
           (first.events * 1_000) / mean(applyTimes),
         )}`,
+        `medianBatchP50Ms=${formatLatency(
+          medianLatency(datasetResults, (latency) => latency.p50Ms),
+        )}`,
+        `medianBatchP95Ms=${formatLatency(
+          medianLatency(datasetResults, (latency) => latency.p95Ms),
+        )}`,
+        `medianBatchMaxMs=${formatLatency(
+          medianLatency(datasetResults, (latency) => latency.maxMs),
+        )}`,
       ].join(" "),
     );
   }
 };
+
+/** Median of one latency percentile over the runs that timed their calls. */
+const medianLatency = (
+  results: ReadonlyArray<ApplyBenchResult>,
+  percentile: (latency: ApplyCallLatency) => number,
+): number | undefined => {
+  const values = results
+    .flatMap((result) =>
+      result.callLatency === null ? [] : [percentile(result.callLatency)],
+    )
+    .sort((left, right) => left - right);
+  if (values.length === 0) {
+    return undefined;
+  }
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 === 1
+    ? values[middle]
+    : (values[middle - 1]! + values[middle]!) / 2;
+};
+
+const formatLatency = (ms: number | undefined): string =>
+  ms === undefined ? "none" : formatNumber(ms);
 
 const printSummaries = (results: ReadonlyArray<BenchResult>): void => {
   for (const label of new Set(results.map((result) => result.label))) {

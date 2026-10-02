@@ -34,6 +34,50 @@ export const applyRemoteEventsInBatches = (
   return applyCalls;
 };
 
+/** Nearest-rank percentiles of the time each receive call took. */
+export interface ApplyCallLatency {
+  readonly p50Ms: number;
+  readonly p95Ms: number;
+  readonly maxMs: number;
+}
+
+/**
+ * Summarize per-call receive times, or return `null` for a lane that does
+ * not time its calls. Percentiles are nearest-rank: the p95 of 20 calls is
+ * the 19th fastest.
+ */
+export const summarizeApplyCallLatency = (
+  callMs: ReadonlyArray<number>,
+): ApplyCallLatency | null => {
+  if (callMs.length === 0) {
+    return null;
+  }
+  const sorted = [...callMs].sort((left, right) => left - right);
+  const nearestRank = (fraction: number): number =>
+    sorted[Math.max(0, Math.ceil(fraction * sorted.length) - 1)]!;
+  return {
+    p50Ms: nearestRank(0.5),
+    p95Ms: nearestRank(0.95),
+    maxMs: sorted[sorted.length - 1]!,
+  };
+};
+
+/**
+ * Wrap a receiver so each `applyRemoteEvents` call appends its duration to
+ * `callMs`.
+ */
+export const timeApplyRemoteEvents = (
+  replica: Pick<EgWalkerReplica, "applyRemoteEvents">,
+  callMs: number[],
+): Pick<EgWalkerReplica, "applyRemoteEvents"> => ({
+  applyRemoteEvents: (events) => {
+    const startedAt = performance.now();
+    const result = replica.applyRemoteEvents(events);
+    callMs.push(performance.now() - startedAt);
+    return result;
+  },
+});
+
 /**
  * Apply a converted paper trace one event at a time, the way a live replica
  * receives a peer's edits. Returns the number of `applyRemoteEvent` calls.

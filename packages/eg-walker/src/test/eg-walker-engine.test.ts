@@ -743,25 +743,39 @@ describe("EgWalkerEngine", () => {
         timestamp: id.charCodeAt(0),
       });
     }
+    // Retreat ranges expand downwards, advance ranges upwards, in order.
+    const expand = (
+      transition: ReturnType<EventGraph["getLocalVersionRangeTransition"]>,
+    ) => {
+      const retreat: number[] = [];
+      for (let range = 0; range < transition.retreatRangeCount; range++) {
+        for (
+          let localVersion = transition.retreatEnds[range]! - 1;
+          localVersion >= transition.retreatStarts[range]!;
+          localVersion--
+        ) {
+          retreat.push(localVersion);
+        }
+      }
+      const advance: number[] = [];
+      for (let range = 0; range < transition.advanceRangeCount; range++) {
+        for (
+          let localVersion = transition.advanceStarts[range]!;
+          localVersion < transition.advanceEnds[range]!;
+          localVersion++
+        ) {
+          advance.push(localVersion);
+        }
+      }
+      return { retreat, advance };
+    };
 
-    const engine = new EgWalkerEngine();
-    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.graph = graph;
     // Local versions follow insertion order: a = 0, b = 1, c = 2.
-    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.eventOrder.set(0, 0);
-    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.eventOrder.set(1, 1);
-    // @ts-expect-error - Exercise private ordering helper for coverage of multi-event diff sorting.
-    engine.eventOrder.set(2, 2);
-
-    // @ts-expect-error - Private method coverage for deterministic retreat/advance ordering.
-    expect(engine.diffVersions([1, 2], [0])).toEqual({
+    expect(expand(graph.getLocalVersionRangeTransition([1, 2], [0]))).toEqual({
       retreat: [2, 1],
       advance: [0],
     });
-    // @ts-expect-error - Private method coverage for deterministic retreat/advance ordering.
-    expect(engine.diffVersions([2], [0, 1])).toEqual({
+    expect(expand(graph.getLocalVersionRangeTransition([2], [0, 1]))).toEqual({
       retreat: [2],
       advance: [0, 1],
     });
